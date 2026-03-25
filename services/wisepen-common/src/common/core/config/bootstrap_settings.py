@@ -28,7 +28,7 @@ class BootstrapSettings(BaseSettings):
     NACOS_PASSWORD: Optional[str] = None
 
     model_config = SettingsConfigDict(
-        env_file=find_dotenv(),
+        env_file=find_dotenv(usecwd=True),
         env_file_encoding="utf-8",
         extra="ignore",
     )
