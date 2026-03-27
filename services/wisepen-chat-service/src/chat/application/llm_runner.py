@@ -1,9 +1,15 @@
 import asyncio
 import json
+import uuid
 from dataclasses import dataclass
 from typing import Dict, List, Any
-from common.logger import log_fail, log_error, log_event
 
+from chat.api.v1.vercel_formats import (
+    step_start, step_finish, text_start, text_delta, text_end,
+    tool_input_start, tool_input_delta, tool_input_available, tool_output_available,
+)
+
+from common.logger import log_fail, log_error, log_event
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces import LLMProvider
@@ -43,7 +49,13 @@ class LLMRunner:
         tool_context: Dict[str, Any] = {"session_id": session_id, "user_id": user_id}
 
         for iteration in range(settings.AGENT_MAX_ITERATIONS):
-            # 消费 delta 流：content 即时 yield；tool_calls 按 index 分槽累积
+            # 步骤开始
+            yield step_start()
+
+            # 文本开始
+            text_id = f"txt_{uuid.uuid4().hex}"
+            yield text_start(id=text_id)
+
             accumulators: Dict[int, _ToolCallAccumulator] = {}
             finish_reason: str = "stop"
             assistant_content: str = ""
@@ -63,7 +75,8 @@ class LLMRunner:
                     # 普通文本内容：直接 yield，保证 TTFT
                     if delta.content:
                         assistant_content += delta.content
-                        yield delta.content
+                        # 文本增量
+                        yield text_delta(delta=delta.content, id=text_id)
 
                     # tool_calls delta：按 index 分槽累积碎片
                     if delta.tool_calls:
@@ -72,20 +85,31 @@ class LLMRunner:
                             if idx not in accumulators:
                                 accumulators[idx] = _ToolCallAccumulator()
                             acc = accumulators[idx]
+
                             if tc_delta.id:
                                 acc.id = tc_delta.id
+
                             if tc_delta.function:
                                 if tc_delta.function.name:
                                     acc.name += tc_delta.function.name
+                                    # 工具调用开始
+                                    yield tool_input_start(tool_name=tc_delta.function.name, tool_call_id=acc.id)
                                 if tc_delta.function.arguments:
                                     acc.arguments += tc_delta.function.arguments
+                                    # 工具调用参数增量
+                                    yield tool_input_delta(input_text_delta=tc_delta.function.arguments, tool_call_id=acc.id)
             except ServiceException:
                 raise  # 已经是业务异常，直接向上传播
             except Exception as e:
                 raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"流式推理失败 (iter={iteration}): {e}")
 
+            # 文本结束
+            yield text_end(id=text_id)
+
             # finish_reason == "stop"：推理完成，退出循环
             if finish_reason != "tool_calls" or not accumulators:
+                # 推理完成
+                yield step_finish()
                 break
 
             # finish_reason == "tool_calls"：并行执行所有工具，追加结果继续推理
@@ -99,6 +123,10 @@ class LLMRunner:
                     log_fail("tool_call arguments 解析", "JSON 格式非法，降级为空 dict", name=acc.name)
                     args = {}
                 parsed_tool_calls.append({"id": acc.id, "name": acc.name, "args": args})
+
+            # 工具调用参数完整
+            for tc in parsed_tool_calls:
+                yield tool_input_available(tool_name=tc["name"], input=tc["args"], tool_call_id=tc["id"])
 
             assistant_msg = ChatMessage(
                 session_id=session_id,
@@ -131,6 +159,8 @@ class LLMRunner:
                     log_fail("工具调用", result, name=tc["name"], session=session_id)
                 else:
                     safe_result = result  # type: ignore[assignment]
+                # 工具调用结果
+                yield tool_output_available(output=safe_result, tool_call_id=tc["id"])
 
                 tool_msg = ChatMessage(
                     session_id=session_id,
@@ -140,11 +170,18 @@ class LLMRunner:
                     content=safe_result
                 )
                 messages.append(tool_msg)
+            # 一个循环结束
+            yield step_finish()
         else:
             # 循环正常耗尽（未被 break），说明超出最大迭代次数
             warn = f"Agent 推理超出最大迭代次数（{settings.AGENT_MAX_ITERATIONS}），未能生成最终答案"
             log_fail("工具调用", warn, session=session_id)
-            yield f"\n[System Error]: {warn}"
+            text_id = f"txt_{uuid.uuid4().hex}"
+            yield text_start(id=text_id)
+            yield text_delta(delta=warn, id=text_id)
+            yield text_end(id=text_id)
+            yield step_finish()
+
 
     async def _invoke_tool(self, name: str, context: Dict[str, Any], args: Dict[str, Any]) -> str:
         """查找并执行工具，工具未注册时返回降级文本而非向上抛出。"""
