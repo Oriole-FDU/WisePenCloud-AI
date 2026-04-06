@@ -1,0 +1,16 @@
+[project]
+name = "wisepen-common"
+version = "0.1.0"
+description = "WisePen Common Library for Python Microservices"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Jiazheng Sun", email = "jzsun24@m.fudan.edu.cn" }
+]
+dependencies = [
+    "fastapi",
+    "starlette",
+    "pydantic",
+    "loguru",
+    "aiokafka",
+]
