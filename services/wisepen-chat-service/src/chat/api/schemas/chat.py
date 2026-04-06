@@ -13,4 +13,6 @@ class ChatRequest(BaseModel):
     # 前端可显式传入以覆盖（"请求 > 配置" 优先级链的请求层）
     model: Optional[str] = Field(default=None, description="指定使用的模型，不传则使用服务端默认配置")
 
-    model_config = {"extra": "forbid"}
+    selected_text: Optional[str] = Field(default=None, description="用户选择的原文")
+
+    model_config = {"extra": "ignore"}

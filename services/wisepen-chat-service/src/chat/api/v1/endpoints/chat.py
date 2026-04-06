@@ -1,11 +1,14 @@
-import json
-import time
+import asyncio
 import uuid
-from fastapi import APIRouter, Depends, BackgroundTasks
+
+from fastapi import APIRouter, Depends, BackgroundTasks, Body, HTTPException
 from fastapi.responses import StreamingResponse
 from dependency_injector.wiring import inject, Provide
 
+from chat.api.v1.vercel_formats import message_start, message_finish, stream_abort, stream_end, error
+
 from common.security import require_login
+from common.logger import log_event, log_error
 from chat.api.schemas.chat import ChatRequest
 from chat.application.chat_orchestrator import ChatOrchestrator
 from chat.container import Container
@@ -15,39 +18,28 @@ from chat.domain.repositories import SessionRepository
 router = APIRouter()
 
 
-async def _sse_generator(chat_gen, model_name: str):
-    """将 orchestrator 的 AsyncGenerator 包装为 OpenAI chat.completion.chunk 兼容的 SSE 格式。"""
-    completion_id = f"chatcmpl-{uuid.uuid4().hex}"
-    created = int(time.time())
+async def _vercel_generator(chat_gen, model_name: str):
+    """将 orchestrator 的 AsyncGenerator 包装成 vercel ai sdk 格式"""
+    try:
+        message_id = f"msg_{uuid.uuid4().hex}"
+        yield message_start(message_id)
 
-    async for chunk in chat_gen:
-        payload = json.dumps({
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": model_name,
-            "choices": [{
-                "index": 0,
-                "delta": {"content": chunk},
-                "finish_reason": None,
-            }],
-        }, ensure_ascii=False)
-        yield f"data: {payload}\n\n"
+        async for event in chat_gen:
+            yield event
 
-    # 最终帧：delta 为空对象，finish_reason 标记为 stop
-    final_payload = json.dumps({
-        "id": completion_id,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model_name,
-        "choices": [{
-            "index": 0,
-            "delta": {},
-            "finish_reason": "stop",
-        }],
-    }, ensure_ascii=False)
-    yield f"data: {final_payload}\n\n"
-    yield "data: [DONE]\n\n"
+        yield message_finish()
+        yield stream_end()
+
+    except asyncio.CancelledError:
+        log_event("用户取消请求")
+        yield stream_abort(reason="user_cancelled")
+        yield stream_end()
+        raise
+
+    except Exception as e:
+        log_error("流生成", e)
+        yield error(error_text=str(e))
+        yield stream_end()
 
 
 @router.post("/completions")
@@ -60,28 +52,38 @@ async def chat_completions(
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
     """
-    POST /v1/chat/completions
-    接收用户 Query -> 编排三级记忆 RAG 流程 -> 返回标准 SSE 流
-    user_id 从网关透传的 X-User-Id Header 中读取（由 SecurityHeaderMiddleware 解析注入）
+    请求格式:
+       {
+         "session_id": "xxx",
+         "query": "你好",
+         "model": "gpt-4o"
+         "selected_text": "xxx"
+       }
     """
-    # 鉴权
-    await session_repo.get_by_id_and_user(req.session_id, user_id)
-
     resolved_model = req.model or settings.DEFAULT_MODEL
+    
+    if not req.query:
+        raise HTTPException(status_code=400, detail="缺少查询内容")
+    
+    if not req.session_id:
+        raise HTTPException(status_code=400, detail="缺少 session_id")
+
+    await session_repo.get_by_id_and_user(req.session_id, user_id)
 
     chat_gen = service.handle_chat(
         user_id=user_id,
         session_id=req.session_id,
         user_query=req.query,
         background_tasks=background_tasks,
-        model_name=resolved_model,  # 请求层可覆盖，None 则降级到 settings.DEFAULT_MODEL
+        model_name=resolved_model,
+        selected_text=req.selected_text
     )
 
     return StreamingResponse(
-        _sse_generator(chat_gen, resolved_model),  # type: ignore[arg-type]
+        _vercel_generator(chat_gen, resolved_model),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲，确保实时推送
+            "X-Accel-Buffering": "no",
         },
     )

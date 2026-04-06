@@ -1,6 +1,7 @@
 import os
 import yaml
 import asyncio
+from typing import List
 from pydantic import BaseModel
 
 from chat.core.config.bootstrap_settings import bootstrap_settings
@@ -23,8 +24,18 @@ class AppSettings(BaseModel):
     LLM_BASE_URL: str
     LLM_API_KEY: str
 
+    MODEL_LIST: List[str]
+
+    STANDARD_MODELS: List[str]
+    ADVANCED_MODELS: List[str]
+
     DEFAULT_MODEL: str = "gpt-4o"
 
+    # Kafka 配置
+    KAFKA_BOOTSTRAP_SERVERS: str = "wisepen-dev-server:9094"
+    KAFKA_TOPIC: str = "wisepen-user-token-calc-group-topic"
+    KAFKA_HEADER_TYPE_ID: str = "com.oriole.wisepen.user.domain.entity.TokenCalculateMessage"
+    
     # Memory 使用的模型
     MEMORY_LLM_MODEL: str = "gpt-4o"
     MEMORY_EMBEDDING_MODEL: str = "text-embedding-3-large"

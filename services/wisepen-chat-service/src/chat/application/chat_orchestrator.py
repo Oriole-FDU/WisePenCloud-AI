@@ -1,6 +1,6 @@
 from typing import Optional
 from fastapi import BackgroundTasks
-from common.logger import log_error
+from common.logger import log_error, log_ok
 
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
@@ -12,6 +12,7 @@ from chat.application.context_manager import ContextManager
 from chat.application.llm_runner import LLMRunner
 from chat.application.chat_post_processor import ChatPostProcessor
 from chat.application.tools.registry import ToolRegistry
+from common.kafka.producer import KafkaProducerClient
 
 
 class ChatOrchestrator:
@@ -28,6 +29,7 @@ class ChatOrchestrator:
             message_repo: MessageRepository,
             hot_context_repo: HotContextRepository,
             tool_registry: ToolRegistry,
+            kafka_producer: KafkaProducerClient
     ):
         self._memory = memory
         self._ctx = ContextManager(
@@ -36,7 +38,8 @@ class ChatOrchestrator:
         self._runner = LLMRunner(llm=llm, tool_registry=tool_registry)
         self._post_processor = ChatPostProcessor(
             llm=llm, memory=memory,
-            message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo
+            message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo,
+            kafka_producer=kafka_producer
         )
 
     # -------------------------------------------------------------------------
@@ -49,8 +52,12 @@ class ChatOrchestrator:
             user_query: str,
             background_tasks: BackgroundTasks,
             model_name: Optional[str] = None,
+            selected_text: Optional[str] = None,
     ):
         resolved_model = model_name or settings.DEFAULT_MODEL
+
+        if selected_text is not None:
+            user_query = f"用户选中的内容:\n{selected_text}, 用户的问题:\n{user_query}"
 
         # [Retrieval - 短期记忆] 从 Redis 读取最近对话, 如果 Redis 缓存失效（Cache Miss），会自动从 MongoDB 回填最近的 N 条历史 （可配置），确保对话连贯性。
         recent_messages = await self._ctx.get_or_repopulate_hot_context(session_id)
