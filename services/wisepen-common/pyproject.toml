@@ -8,8 +8,9 @@ authors = [
     { name = "Jiazheng Sun", email = "jzsun24@m.fudan.edu.cn" }
 ]
 dependencies = [
-    "fastapi",    # 鉴权 Middleware 中需要用到 Request 和 Response
-    "starlette",  # FastAPI 的底层，BaseHTTPMiddleware 依赖它
-    "pydantic",    # 预留给未来 Common 包里可能需要的通用 DTO/VO 模型
+    "fastapi",
+    "starlette",
+    "pydantic",
     "loguru",
+    "aiokafka",
 ]

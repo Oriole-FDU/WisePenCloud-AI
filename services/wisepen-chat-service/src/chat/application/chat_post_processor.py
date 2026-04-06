@@ -1,5 +1,7 @@
 from typing import List, Optional
 from datetime import datetime, timezone
+import uuid
+
 from common.logger import log_error
 
 from chat.core.config.app_settings import settings
@@ -7,11 +9,13 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
+from chat.api.v1.endpoints.model import get_model_type
+from common.kafka.producer import KafkaProducerClient
 
 
 class ChatPostProcessor:
     """
-    负责对话完成后的全部写入操作：Token 回填、Redis 追加、MongoDB 持久化归档、Memory 长期记忆摄入、摘要压缩
+    负责对话完成后的全部写入操作: Token 回填、Redis 追加、MongoDB 持久化归档、Memory 长期记忆摄入、摘要压缩、token计费
     """
 
     def __init__(
@@ -21,12 +25,14 @@ class ChatPostProcessor:
         message_repo: MessageRepository,
         session_repo: SessionRepository,
         hot_context_repo: HotContextRepository,
+        kafka_producer: KafkaProducerClient,
     ):
         self.llm = llm
         self.memory = memory
         self.session_repo = session_repo
         self.message_repo = message_repo
         self.hot_context_repo = hot_context_repo
+        self.kafka_producer = kafka_producer
 
     async def _fill_token_counts(self, messages: List[ChatMessage], model_name: str) -> None:
         """批量计算 token_count"""
@@ -40,14 +46,47 @@ class ChatPostProcessor:
                 except Exception:
                     msg.token_count = len(msg.content) // 4  # 降级为 4 字符 1 token
 
+    async def _send_token_billing(
+        self,
+        user_id: str,
+        model_name: str,
+        messages: List[ChatMessage],
+        group_id: Optional[str] = None,
+    ) -> None:
+        """
+        发送 token 计费消息到 Kafka
+        """
+        usage_tokens = sum(msg.token_count for msg in messages)
+        if usage_tokens == 0:
+            return
+
+        user_id = int(user_id)
+        trace_id = uuid.uuid4().int
+        model_type = get_model_type(model_name)
+        group_id = int(group_id) if group_id is not None else None
+
+        value = {
+            "userId": user_id,
+            "groupId": group_id,
+            "usageTokens": usage_tokens,
+            "traceId": trace_id,
+            "modelType": model_type,
+            "requestTime": datetime.now(timezone.utc).isoformat(),
+        }
+
+        await self.kafka_producer.send(topic=settings.KAFKA_TOPIC, value=value,
+                headers=[("__TypeId__", settings.KAFKA_HEADER_TYPE_ID.encode())],
+            )
+
     async def persist_all(
         self,
         user_id: str,
         session_id: str,
         model_name: str,
         new_messages: List[ChatMessage],
+        group_id: Optional[str] = None,
     ) -> None:
-        """后台统一处理所有存储逻辑：Redis 追加 → MongoDB 落盘 → Memory 摄入 → 摘要压缩（如有必要）"""
+        """后台统一处理所有存储逻辑: Redis 追加 → MongoDB 落盘 → Memory 摄入 → 摘要压缩（如有必要）"""
         await self._fill_token_counts(new_messages, model_name) # 写库前一次性计算 token_count，后续 Redis 序列化和 MongoDB 落盘都会携带该值
 
         # Redis 追加
@@ -70,6 +109,14 @@ class ChatPostProcessor:
             await self.memory.add_interaction(user_id=user_id, messages=new_messages)
         except Exception as e:
             log_error("长期记忆写入", e, user=user_id)
+
+        # 发出 token 计费
+        await self._send_token_billing(user_id=user_id, 
+                                        model_name=model_name, 
+                                        messages=new_messages, 
+                                        group_id=group_id)
+
+
 
     async def summarize_and_compress(
         self,
