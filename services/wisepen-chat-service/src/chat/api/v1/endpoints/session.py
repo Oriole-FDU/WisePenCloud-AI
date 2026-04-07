@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from dependency_injector.wiring import inject, Provide
 from pydantic import BaseModel, Field
 from typing import List, Optional, Any, Dict
+from datetime import datetime
 
 from common.security import require_login
 from common.core.domain import R, PageResult
@@ -19,6 +20,12 @@ router = APIRouter()
 class CreateSessionRequest(BaseModel):
     title: Optional[str] = Field(default="New Chat", description="会话标题")
 
+class RenameSessionRequest(BaseModel):
+    new_title: Optional[str] = Field(default=None, description="新会话标题")
+
+class PinSessionRequest(BaseModel):
+    set_pin: bool = Field(default=False, description="是否置顶")
+
 
 class SessionResponse(BaseModel):
     id: str
@@ -26,6 +33,8 @@ class SessionResponse(BaseModel):
     title: str
     created_at: str
     updated_at: str
+    is_pinned: bool = False
+    pinned_at: Optional[datetime] = None
 
     @classmethod
     def from_entity(cls, session: ChatSession) -> "SessionResponse":
@@ -35,6 +44,8 @@ class SessionResponse(BaseModel):
             title=session.title,
             created_at=session.created_at.isoformat(),
             updated_at=session.updated_at.isoformat(),
+            is_pinned=session.is_pinned,
+            pinned_at=session.pinned_at.isoformat() if session.pinned_at else None,
         )
 
 
@@ -121,3 +132,26 @@ async def get_session_messages(
         items=[MessageResponse.from_entity(m) for m in messages],
         total=total, page=page, size=size,
     ))
+
+
+@router.post("/{session_id}/rename", response_model=R[SessionResponse], status_code=200)
+@inject
+async def rename_session(
+        session_id: str,
+        req: RenameSessionRequest,
+        user_id: str = Depends(require_login),
+        session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    session = await session_repo.rename(session_id, user_id, req.new_title or "New Chat")
+    return R.success(data=SessionResponse.from_entity(session))
+
+@router.post("/{session_id}/pin", response_model=R[SessionResponse], status_code=200)
+@inject
+async def pin_session(
+        session_id: str,
+        req: PinSessionRequest,
+        user_id: str = Depends(require_login),
+        session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    session = await session_repo.set_pin(session_id, user_id, req.set_pin)
+    return R.success(data=SessionResponse.from_entity(session))
