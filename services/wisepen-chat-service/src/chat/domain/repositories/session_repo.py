@@ -26,3 +26,9 @@ class SessionRepository(ABC):
     @abstractmethod
     async def delete(self, session_id: str, user_id: str) -> None: pass
 
+    @abstractmethod
+    async def rename(self, session_id: str, user_id: str, new_title: str) -> ChatSession: pass
+
+    @abstractmethod
+    async def set_pin(self, session_id: str, user_id: str, is_pinned: bool) -> ChatSession: pass
+

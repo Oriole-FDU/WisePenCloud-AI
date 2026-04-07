@@ -6,10 +6,8 @@ from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 from chat.core.config.app_settings import settings
 
-# 遥测关闭
 litellm.telemetry = False
 
-# verbose / suppress_debug_info 跟随 LOG_LEVEL：非 DEBUG 时完全静默
 _is_debug = settings.LOG_LEVEL.upper() == "DEBUG"
 litellm.set_verbose = _is_debug
 litellm.suppress_debug_info = not _is_debug
@@ -22,8 +20,8 @@ class LiteLLMAdapter(LLMProvider):
     """
 
     def __init__(self):
-        litellm.api_base = settings.LLM_BASE_URL
-        litellm.api_key = settings.LLM_API_KEY
+        self._api_base = settings.LLM_BASE_URL
+        self._api_key = settings.LLM_API_KEY
 
     def _convert_messages(self, messages: List[ChatMessage]) -> List[Dict[str, str]]:
         formatted = []
@@ -41,6 +39,13 @@ class LiteLLMAdapter(LLMProvider):
 
         return formatted
 
+    def _format_model_for_litellm(self, model_name: str) -> str:
+        # litellm 需要通过根据前缀解析模型输出
+        if "/" in model_name:
+            # 已经有前缀
+            return model_name
+        return f"openai/{model_name}"
+
     async def chat_completion(
             self,
             messages: List[ChatMessage],
@@ -49,13 +54,16 @@ class LiteLLMAdapter(LLMProvider):
             tools: Optional[List[Dict[str, Any]]] = None
     ) -> Any:
         formatted_msgs = self._convert_messages(messages)
+        litellm_model = self._format_model_for_litellm(model_name)
         try:
             response = await litellm.acompletion(
-                model=model_name,
+                model=litellm_model,
                 messages=formatted_msgs,
-                stream=False,  # 明确关闭流式
+                stream=False,
                 temperature=temperature,
-                drop_params=True
+                drop_params=True,
+                api_base=self._api_base,
+                api_key=self._api_key,
             )
             return response.choices[0].message
         except litellm.ContextWindowExceededError:
@@ -72,15 +80,18 @@ class LiteLLMAdapter(LLMProvider):
     ) -> AsyncGenerator[str, None]:
 
         formatted_msgs = self._convert_messages(messages)
+        litellm_model = self._format_model_for_litellm(model_name)
 
         try:
             response = await litellm.acompletion(
-                model=model_name,
+                model=litellm_model,
                 messages=formatted_msgs,
                 stream=True,
                 temperature=temperature,
                 tools=tools,
-                drop_params=True
+                drop_params=True,
+                api_base=self._api_base,
+                api_key=self._api_key,
             )
             async for chunk in response:
                 yield chunk
@@ -91,11 +102,7 @@ class LiteLLMAdapter(LLMProvider):
             raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Provider Error: {e}")
 
     async def count_tokens(self, text: str, model_name: str = "gpt-4o") -> int:
-        """
-        利用 LiteLLM 自带的 tokenizer，非常准确
-        """
         try:
             return litellm.token_counter(model=model_name, text=text)
         except:
-            # 降级策略
             return len(text)
