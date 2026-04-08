@@ -70,7 +70,7 @@ async def get_session_messages(
     ))
 
 
-@router.post("/{session_id}/rename", response_model=R[SessionResponse], status_code=200)
+@router.post("/renameSession", response_model=R[SessionResponse], status_code=200)
 @inject
 async def rename_session(
         session_id: str,
@@ -81,7 +81,7 @@ async def rename_session(
     session = await session_repo.rename(session_id, user_id, req.new_title or "New Chat")
     return R.success(data=SessionResponse.from_entity(session))
 
-@router.post("/{session_id}/pin", response_model=R[SessionResponse], status_code=200)
+@router.post("/pinSession", response_model=R[SessionResponse], status_code=200)
 @inject
 async def pin_session(
         session_id: str,
@@ -89,5 +89,5 @@ async def pin_session(
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
-    session = await session_repo.set_pin(session_id, user_id, req.set_pin)
+    session = await session_repo.pin(session_id, user_id, req.set_pin)
     return R.success(data=SessionResponse.from_entity(session))

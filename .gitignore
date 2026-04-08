@@ -50,3 +50,7 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# ── 特殊忽略 (临时) ─────────────────────────────────────────────────────────
+services/wisepen-chat-service/src/chat/bootstrap/
+mock-frontend/
+

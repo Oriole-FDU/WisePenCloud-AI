@@ -30,5 +30,5 @@ class SessionRepository(ABC):
     async def rename(self, session_id: str, user_id: str, new_title: str) -> ChatSession: pass
 
     @abstractmethod
-    async def set_pin(self, session_id: str, user_id: str, is_pinned: bool) -> ChatSession: pass
+    async def pin(self, session_id: str, user_id: str, is_pinned: bool) -> ChatSession: pass
 

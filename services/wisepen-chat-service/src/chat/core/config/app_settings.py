@@ -24,9 +24,6 @@ class AppSettings(BaseModel):
     LLM_BASE_URL: str
     LLM_API_KEY: str
 
-    STANDARD_MODELS: List[str]
-    ADVANCED_MODELS: List[str]
-
     DEFAULT_MODEL: str = "gpt-4o"
 
     # Kafka 配置

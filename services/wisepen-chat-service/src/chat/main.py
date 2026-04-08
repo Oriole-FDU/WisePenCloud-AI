@@ -19,8 +19,10 @@ from common.web.exception_handlers import setup_global_exception_handlers
 from chat.container import container  # noqa: F401 — 触发 dependency_injector wiring，不可删除
 from chat.core.config.app_settings import settings
 from chat.api.router import api_router
-from chat.api.endpoints import chat as chat_endpoints, memory as memory_endpoints, session as session_endpoints, \
-    model as model_endpoints
+from chat.api.endpoints import chat as chat_endpoints
+from chat.api.endpoints import session as session_endpoints
+from chat.api.endpoints import memory as memory_endpoints
+from chat.api.endpoints import model as model_endpoints
 from chat.domain.entities import ChatSession, ChatMessage
 
 
@@ -46,7 +48,7 @@ async def lifespan(app: FastAPI):
         await nacos_client_manager.register_instance()
     except Exception as e:
         log_error("Nacos 服务注册", e)
-
+    
     # 启动 Kafka Producer
     kafka_producer = container.kafka_producer()
     await kafka_producer.start()

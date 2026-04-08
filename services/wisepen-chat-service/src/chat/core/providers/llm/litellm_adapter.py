@@ -23,7 +23,7 @@ class LiteLLMAdapter(LLMProvider):
         self._api_base = settings.LLM_BASE_URL
         self._api_key = settings.LLM_API_KEY
 
-    def _convert_messages(self, messages: List[ChatMessage]) -> List[Dict[str, str]]:
+    def _convert_messages(self, messages: List[ChatMessage]) -> List[Dict[str, Any]]:
         formatted = []
         for msg in messages:
             payload = {"role": msg.role.value, "content": msg.content}

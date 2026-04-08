@@ -1,19 +1,19 @@
 import asyncio
 import uuid
 
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, Body, HTTPException
 from fastapi.responses import StreamingResponse
 from dependency_injector.wiring import inject, Provide
 
-from chat.api.schemas.chat import ChatRequest
-from chat.api.vercel_formats import *
-from chat.application.chat_orchestrator import ChatOrchestrator
-from chat.core.config.app_settings import settings
-from chat.domain.repositories import SessionRepository
-from chat.container import Container
+from chat.api.vercel_formats import message_finish, stream_abort, error
 
 from common.security import require_login
 from common.logger import log_event, log_error
+from chat.api.schemas.chat import ChatRequest
+from chat.application.chat_orchestrator import ChatOrchestrator
+from chat.container import Container
+from chat.core.config.app_settings import settings
+from chat.domain.repositories import SessionRepository
 
 router = APIRouter()
 
@@ -28,18 +28,15 @@ async def _vercel_generator(chat_gen, model_name: str):
             yield event
 
         yield message_finish()
-        yield stream_end()
 
     except asyncio.CancelledError:
         log_event("用户取消请求")
         yield stream_abort(reason="user_cancelled")
-        yield stream_end()
         raise
 
     except Exception as e:
         log_error("流生成", e)
         yield error(error_text=str(e))
-        yield stream_end()
 
 
 @router.post("/completions")
@@ -57,7 +54,11 @@ async def chat_completions(
          "session_id": "xxx",
          "query": "你好",
          "model": "gpt-4o"
-         "selected_text": "xxx"
+         "states": [{
+            "key": "selected_text",
+            "value": "xxx",
+            "disabled": false}
+         ]
        }
     """
     resolved_model = req.model or settings.DEFAULT_MODEL
@@ -76,7 +77,7 @@ async def chat_completions(
         user_query=req.query,
         background_tasks=background_tasks,
         model_name=resolved_model,
-        selected_text=req.selected_text
+        states=req.states
     )
 
     return StreamingResponse(
@@ -85,5 +86,6 @@ async def chat_completions(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            "x-vercel-ai-ui-message-stream": "v1",
         },
     )

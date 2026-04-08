@@ -20,7 +20,7 @@ async def list_memories(
     user_id: str = Depends(require_login),
     memory: MemoryProvider = Depends(Provide[Container.memory_provider]),
 ):
-    """GET /v1/memories — 返回当前用户的全部长期记忆条目，供记忆管理面板展示。"""
+    """GET /chat/memories — 返回当前用户的全部长期记忆条目，供记忆管理面板展示。"""
     try:
         items = await memory.get_all(user_id=user_id)
     except Exception as e:
@@ -42,7 +42,7 @@ async def delete_memory(
     user_id: str = Depends(require_login),
     memory: MemoryProvider = Depends(Provide[Container.memory_provider]),
 ):
-    """DELETE /v1/memories/{memory_id} — 删除单条长期记忆，用于用户主动纠错（幻觉修正）场景。"""
+    """DELETE /chat/memories/{memory_id} — 删除单条长期记忆，用于用户主动纠错（幻觉修正）场景。"""
     try:
         await memory.delete_memory(memory_id=memory_id, user_id=user_id)
     except PermissionError:
@@ -58,7 +58,7 @@ async def delete_all_memories(
     user_id: str = Depends(require_login),
     memory: MemoryProvider = Depends(Provide[Container.memory_provider]),
 ):
-    """DELETE /v1/memories — 清空当前用户的全部长期记忆，满足 GDPR 等隐私合规注销需求。"""
+    """DELETE /chat/memories — 清空当前用户的全部长期记忆，满足 GDPR 等隐私合规注销需求。"""
     try:
         await memory.delete_all_for_user(user_id=user_id)
     except Exception as e:
