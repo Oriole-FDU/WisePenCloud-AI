@@ -42,8 +42,13 @@ class Mem0Adapter(MemoryProvider):
                 "provider": "qdrant",
                 "config": {
                     "collection_name": "wisepen_memories",
+<<<<<<< HEAD
                     "host": settings.QDRANT_HOST,
                     "port": settings.QDRANT_PORT,
+=======
+                    "url": f"http://{settings.QDRANT_HOST}:{settings.QDRANT_PORT}",
+                    "api_key": settings.QDRANT_PASSWORD,
+>>>>>>> 1474d01 (fix:修正计费信息获取逻辑，修复 mem0 及 prompt 优化)
                 },
             },
         }
@@ -105,6 +110,7 @@ class Mem0Adapter(MemoryProvider):
         ]
 
         def _sync_add():
+<<<<<<< HEAD
             client = self._get_client()
             if client is None:
                 log_fail("长期记忆写入", "Mem0 客户端未成功初始化，跳过写入")
@@ -112,6 +118,10 @@ class Mem0Adapter(MemoryProvider):
             
             try:
                 client.add(formatted_msgs, user_id=user_id)
+=======
+            try:
+                self.client.add(formatted_msgs, user_id=user_id)
+>>>>>>> 1474d01 (fix:修正计费信息获取逻辑，修复 mem0 及 prompt 优化)
             except Exception as e:
                 log_fail("长期记忆写入异常", e, user=user_id)
 

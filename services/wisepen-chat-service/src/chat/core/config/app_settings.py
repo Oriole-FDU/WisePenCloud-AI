@@ -51,6 +51,7 @@ class AppSettings(BaseModel):
     # Qdrant (Mem0 长期语义记忆向量存储)
     QDRANT_HOST: str
     QDRANT_PORT: int = 6333
+    QDRANT_PASSWORD: str
 
     # Token 动态滑动窗口 + 双水位压缩配置
     # 模型上下文窗口总大小（token 数），默认对齐 gpt-4o 的 128k 上下文 128000

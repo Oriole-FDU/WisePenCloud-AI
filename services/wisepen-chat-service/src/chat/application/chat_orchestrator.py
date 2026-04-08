@@ -15,18 +15,23 @@ from chat.application.tools.registry import ToolRegistry
 from common.kafka.producer import KafkaProducerClient
 
 
-SELECTED_TEXT_TEMPLATE = """【选中内容】
+SELECTED_TEXT_TEMPLATE = """You are an expert analytical assistant. The user has selected a specific snippet of text and asked a question about it.
+
+<selected_text>
 {selected_text}
+</selected_text>
 
-【用户问题】
+<user_query>
 {user_query}
+</user_query>
 
-【回答要求】
-1. 结合上下文理解选中的内容，不要断章取义
-2. 优先基于选中文本回答，必要时引用上下文辅助
-3. 如果信息仍不足，可以补充你的知识，但标注「补充」
-4. 引用选中文本时标注「原文」，引用上下文时标注「上下文」
-5. 如果选中内容与问题无关，先指出这一点"""
+<system_constraints>
+1. GROUNDING: Your response MUST be primarily grounded in the `<selected_text>`.
+2. RELEVANCE CHECK: If the `<selected_text>` is completely irrelevant to the `<user_query>`, explicitly state this first before proceeding.
+3. SUPPLEMENTAL KNOWLEDGE: Use your internal knowledge ONLY if the `<selected_text>` lacks necessary context. If you do, explicitly label that part as [Supplemental Knowledge].
+4. EFFICIENCY: Do not repeat the user's query. Answer directly and concisely.
+5. CITATION: When directly referencing the text, attribute it as [Original].
+</system_constraints>"""
 
 class ChatOrchestrator:
     """
