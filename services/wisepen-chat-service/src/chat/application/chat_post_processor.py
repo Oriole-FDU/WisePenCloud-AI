@@ -2,6 +2,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import uuid
 
+from chat.domain.entities.model import get_model_type
 from common.logger import log_error
 
 from chat.core.config.app_settings import settings
@@ -9,7 +10,6 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
-from chat.api.v1.endpoints.model import get_model_type
 from common.kafka.producer import KafkaProducerClient
 
 

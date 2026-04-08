@@ -3,9 +3,6 @@ from enum import IntEnum
 from beanie import Document
 from pydantic import Field, BaseModel
 
-from chat.core.config.app_settings import settings
-
-
 # =============================================================================
 # Enums
 # =============================================================================
@@ -58,17 +55,6 @@ def get_model_name(model_id: str) -> str:
     return base_name
 
 
-def get_model_type(model_id: str) -> ModelType:
-    """
-    根据配置判断模型类型
-    """
-    if model_id in settings.STANDARD_MODELS:
-        return ModelType.STANDARD_MODEL
-    elif model_id in settings.ADVANCED_MODELS:
-        return ModelType.ADVANCED_MODEL
-    return ModelType.UNKNOWN_MODEL
-
-
 # =============================================================================
 # Documents
 # =============================================================================
@@ -78,16 +64,13 @@ class ModelConfig(Document):
     模型配置（存入 MongoDB）
     """
     id: str = Field(..., description="统一模型ID")
+    type: ModelType = Field(..., description="模型类型")
     providers: List[ProviderMap] = Field(default_factory=list, description="供应商映射列表")
     is_active: bool = Field(default=True, description="是否启用")
 
     @property
     def name(self) -> str:
         return get_model_name(self.id)
-    
-    @property
-    def type(self) -> ModelType:
-        return get_model_type(self.id)
     
     @property
     def ratio(self) -> int:

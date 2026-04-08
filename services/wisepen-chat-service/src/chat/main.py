@@ -18,11 +18,11 @@ from common.web.exception_handlers import setup_global_exception_handlers
 
 from chat.container import container  # noqa: F401 — 触发 dependency_injector wiring，不可删除
 from chat.core.config.app_settings import settings
-from chat.api.v1.router import api_router
-from chat.api.v1.endpoints import chat as chat_endpoints
-from chat.api.v1.endpoints import session as session_endpoints
-from chat.api.v1.endpoints import memory as memory_endpoints
-from chat.api.v1.endpoints import model as model_endpoints
+from chat.api.router import api_router
+from chat.api.endpoints import chat as chat_endpoints
+from chat.api.endpoints import session as session_endpoints
+from chat.api.endpoints import memory as memory_endpoints
+from chat.api.endpoints import model as model_endpoints
 from chat.domain.entities import ChatSession, ChatMessage
 
 
@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
         await nacos_client_manager.register_instance()
     except Exception as e:
         log_error("Nacos 服务注册", e)
-
+    
     # 启动 Kafka Producer
     kafka_producer = container.kafka_producer()
     await kafka_producer.start()
@@ -89,7 +89,7 @@ app.add_middleware(SecurityHeaderMiddleware, from_source_secret=settings.FROM_SO
 setup_global_exception_handlers(app, is_dev=settings.DEV)
 
 # 挂载业务路由
-app.include_router(api_router, prefix="/v1")
+app.include_router(api_router, prefix="/chat")
 
 if __name__ == "__main__":
     uvicorn.run(
