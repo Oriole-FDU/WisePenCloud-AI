@@ -8,7 +8,7 @@ from chat.api.vercel_formats import (
     text_delta, reasoning_delta, tool_call, tool_call_result, step_start, step_finish, source
 )
 
-from common.logger import log_fail, log_error, log_event
+from common.logger import log_fail
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces import LLMProvider
