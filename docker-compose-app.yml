@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  chat-service:
+    image: ${DOCKER_REGISTRY}/wisepencloud-chat:${APP_VERSION}
+    container_name: wisepen-chat-service
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+      - NACOS_SERVER_ADDR=nacos:8848
+      - NACOS_NAMESPACE_ID=
+      - NACOS_GROUP=DEFAULT_GROUP
+      - NACOS_DATA_ID=wisepen-chat-service-prod.yaml
+      - NACOS_USERNAME=${NACOS_USERNAME}
+      - NACOS_PASSWORD=${NACOS_PASSWORD}
+      - SERVICE_HOST=0.0.0.0
+      - SERVICE_PORT=9200
+      - DEV=false
+      - LOG_LEVEL=INFO
+    volumes:
+      - ../logs/chat:/logs
+    networks:
+      - cloud-net
+
+networks:
+  cloud-net:
+    external: true
+    name: cloud-infra_cloud-net
