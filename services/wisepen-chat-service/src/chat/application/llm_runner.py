@@ -22,9 +22,11 @@ from chat.application.tools.registry import ToolRegistry
 
 @dataclass(frozen=True)
 class StreamEvent:
-    """LLMRunner yield 的结构化事件：sse 发给客户端，content 仅在文本增量时携带纯文本用于持久化"""
+    """LLMRunner yield 的结构化事件：sse 发给客户端，content/reasoning 携带纯文本供 orchestrator 持久化"""
     sse: str
     content: str = ""
+    reasoning: str = ""
+    new_step: bool = False
 
 
 @dataclass
@@ -64,7 +66,7 @@ class LLMRunner:
 
         for iteration in range(settings.AGENT_MAX_ITERATIONS):
             # 每次循环开始代表一个 agent_step
-            yield StreamEvent(sse=step_start())
+            yield StreamEvent(sse=step_start(), new_step=True)
 
             text_id = f"txt_{uuid.uuid4().hex}"
             reasoning_id = f"rsn_{uuid.uuid4().hex}"
@@ -72,6 +74,7 @@ class LLMRunner:
             accumulators: Dict[int, _ToolCallAccumulator] = {}
             finish_reason: str = "stop"
             assistant_content: str = ""
+            assistant_reasoning: str = ""
 
             text_started = False
             reasoning_started = False
@@ -94,7 +97,8 @@ class LLMRunner:
                         if not reasoning_started:
                             yield StreamEvent(sse=reasoning_start(id=reasoning_id))
                             reasoning_started = True
-                        yield StreamEvent(sse=reasoning_delta(delta=delta.reasoning_content, id=reasoning_id))
+                        assistant_reasoning += delta.reasoning_content
+                        yield StreamEvent(sse=reasoning_delta(delta=delta.reasoning_content, id=reasoning_id), reasoning=delta.reasoning_content)
 
                     # 普通文本内容：直接 yield，保证 TTFT
                     if delta.content:
@@ -157,6 +161,7 @@ class LLMRunner:
                 role=Role.ASSISTANT,
                 model_id=model_id,
                 content=assistant_content or None,
+                reasoning_content=assistant_reasoning or None,
                 tool_calls=[
                     {
                         "id": tc["id"],

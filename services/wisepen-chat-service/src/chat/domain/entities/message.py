@@ -20,6 +20,7 @@ class ChatMessage(Document):
     role: Role
     model_id: Optional[int] = None  # 生成该消息所用的模型 ID，仅 assistant 消息必填
     content: Optional[str] = None   # 大模型在返回 tool_calls 时 content 经常为 None
+    reasoning_content: Optional[str] = None  # 大模型的推理/思考内容（DeepSeek R1 等）
     search_tokens: Optional[str] = None # 专门用于规避 MongoDB 中文分词缺陷的隐藏字段
 
     token_count: Optional[int] = None # 消息内容对应的 Token 数，随消息创建时一次性计算并持久化

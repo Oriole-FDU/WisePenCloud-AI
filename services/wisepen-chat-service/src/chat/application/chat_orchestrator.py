@@ -85,8 +85,15 @@ class ChatOrchestrator:
         # 记录进入 Agent 循环前的列表长度
         original_msg_count = len(messages_for_llm)
 
+        # 在流式推理之前构造 user_msg，确保 created_at 早于所有中间消息
+        user_msg = ChatMessage(
+            session_id=session_id, role=Role.USER, content=user_query,
+            metadata={"states": states} if states else {},
+        )
+
         # [Generation] 流式推理，使用解析后的供应商模型名和凭证
         full_response_content = ""
+        full_reasoning_content = ""
         try:
             async for event in self._runner.stream_chat_with_tool_calling(
                 messages_for_llm, session_id, user_id,
@@ -95,8 +102,10 @@ class ChatOrchestrator:
                 api_base=resolved.api_base_url,
                 api_key=resolved.api_key,
             ):
-                # event.content 仅在文本增量时非空，其他协议事件为 ""
+                if event.new_step:
+                    full_reasoning_content = ""
                 full_response_content += event.content
+                full_reasoning_content += event.reasoning
                 yield event.sse
         except ServiceException as e:
             log_error("LLM 流式推理", e, session=session_id)
@@ -110,11 +119,11 @@ class ChatOrchestrator:
         #   - _post_processor.persist_all：将新消息写入 Redis 和 MongoDB；将新对话摄入 Memory 长期记忆
         #   - _post_processor.summarize_and_compress；调用轻量级模型生成并更新会话的全局摘要
         if background_tasks is not None:
-            user_msg = ChatMessage(
-                session_id=session_id, role=Role.USER, content=user_query,
-                metadata={"states": states} if states else {},
+            assistant_msg = ChatMessage(
+                session_id=session_id, role=Role.ASSISTANT, content=full_response_content,
+                reasoning_content=full_reasoning_content or None,
+                model_id=model_id,
             )
-            assistant_msg = ChatMessage(session_id=session_id, role=Role.ASSISTANT, content=full_response_content, model_id=model_id)
 
             messages_to_persist = [user_msg] + intermediate_messages + [assistant_msg]
 
