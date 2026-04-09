@@ -7,7 +7,7 @@ from typing import Dict, List, Any, Optional
 from chat.api.vercel_formats import (
     text_start, text_delta, text_end,
     reasoning_start, reasoning_delta, reasoning_end,
-    tool_input_start, tool_input_available, tool_output_available,
+    tool_input_start, tool_input_available, tool_input_delta, tool_output_available,
     step_start, step_finish,
 )
 
@@ -124,6 +124,10 @@ class LLMRunner:
                                     acc.name += tc_delta.function.name
                                 if tc_delta.function.arguments:
                                     acc.arguments += tc_delta.function.arguments
+                                    yield StreamEvent(sse=tool_input_delta(
+                                        tool_call_id=acc.id,
+                                        input_text_delta=tc_delta.function.arguments
+                                    ))
             except ServiceException:
                 raise  # 已经是业务异常，直接向上传播
             except Exception as e:

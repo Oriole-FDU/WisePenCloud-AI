@@ -68,6 +68,10 @@ def tool_input_start(tool_call_id: str, tool_name: str) -> str:
     return _sse({"type": "tool-input-start", "toolCallId": tool_call_id, "toolName": tool_name})
 
 
+def tool_input_delta(tool_call_id: str, input_text_delta: str) -> str:
+    return _sse({"type": "tool-input-delta", "toolCallId": tool_call_id, "inputTextDelta": input_text_delta})
+
+
 def tool_input_available(tool_call_id: str, tool_name: str, input: Dict) -> str:
     return _sse({"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": input})
 
@@ -94,6 +98,26 @@ def step_finish() -> str:
 
 def source_url(source_id: str, url: str) -> str:
     return _sse({"type": "source-url", "sourceId": source_id, "url": url})
+
+
+def source_document(source_id: str, media_type: str, title: str) -> str:
+    return _sse({"type": "source-document", "sourceId": source_id, "mediaType": media_type, "title": title})
+
+
+# =============================================================================
+# 文件
+# =============================================================================
+
+def file(url: str, media_type: str) -> str:
+    return _sse({"type": "file", "url": url, "mediaType": media_type})
+
+
+# =============================================================================
+# 自定义数据
+# =============================================================================
+
+def custom_data(data_type: str, data: Dict) -> str:
+    return _sse({"type": f"data-{data_type}", "data": data})
 
 
 # =============================================================================
