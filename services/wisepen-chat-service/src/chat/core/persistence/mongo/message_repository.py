@@ -6,8 +6,6 @@ from chat.domain.repositories import MessageRepository
 from chat.domain.entities import ChatMessage, Role
 
 
-# role 白名单：user + assistant（含 tool_calls）；TOOL 结果消息过滤掉
-_PAGE_ROLES = [Role.USER, Role.ASSISTANT]
 
 
 class MongoMessageRepository(MessageRepository):
@@ -35,11 +33,11 @@ class MongoMessageRepository(MessageRepository):
         size: int,
     ) -> Tuple[List[ChatMessage], int]:
         """
-        分页拉取会话消息，过滤掉 system / tool 结果消息，仅保留 user 和 assistant（含 tool_calls）。
+        分页拉取会话消息，过滤掉 system / tool 结果消息，仅保留 user 和 assistant（含 tool_calls）
         """
         conditions = [
             ChatMessage.session_id == session_id,
-            {"role": {"$in": [r.value for r in _PAGE_ROLES]}},
+            {"role": {"$in": [r.value for r in [Role.USER, Role.ASSISTANT]]}},
         ]
         query = ChatMessage.find(*conditions)
         total = await query.count()

@@ -5,7 +5,10 @@ from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
 
 from chat.api.vercel_formats import (
-    text_delta, reasoning_delta, tool_call, tool_call_result, step_start, step_finish, source
+    text_start, text_delta, text_end,
+    reasoning_start, reasoning_delta, reasoning_end,
+    tool_input_start, tool_input_available, tool_output_available,
+    step_start, step_finish,
 )
 
 from common.logger import log_fail
@@ -15,6 +18,13 @@ from chat.domain.interfaces import LLMProvider
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 from chat.application.tools.registry import ToolRegistry
+
+
+@dataclass(frozen=True)
+class StreamEvent:
+    """LLMRunner yield 的结构化事件：sse 发给客户端，content 仅在文本增量时携带纯文本用于持久化"""
+    sse: str
+    content: str = ""
 
 
 @dataclass
@@ -44,20 +54,26 @@ class LLMRunner:
         api_key: Optional[str] = None,
     ):
         """
-        ReAct while 循环主入口：全程 stream=True，delta.content 直接 yield 保证 TTFT；delta.tool_calls 按 index 分槽累积，流结束后并行执行所有 tool_calls；若超出 MAX_ITERATIONS 输出警告后退出
+        ReAct while 循环主入口：全程 stream=True，delta.content 直接 yield 保证 TTFT；
+        delta.tool_calls 按 index 分槽累积，流结束后并行执行所有 tool_calls；
+        若超出 MAX_ITERATIONS 输出警告后退出
         """
         # 安全上下文，由系统注入
         tool_context: Dict[str, Any] = {"session_id": session_id, "user_id": user_id}
 
         for iteration in range(settings.AGENT_MAX_ITERATIONS):
             # 每次循环开始代表一个 agent_step
-            yield step_start(message_id=f'msg_{uuid.uuid4().hex}')
+            yield StreamEvent(sse=step_start())
 
             text_id = f"txt_{uuid.uuid4().hex}"
+            reasoning_id = f"rsn_{uuid.uuid4().hex}"
 
             accumulators: Dict[int, _ToolCallAccumulator] = {}
             finish_reason: str = "stop"
             assistant_content: str = ""
+
+            text_started = False
+            reasoning_started = False
 
             try:
                 # 发起流式推理，附带注册表中所有工具的 schema
@@ -74,13 +90,22 @@ class LLMRunner:
                     delta = choice.delta
 
                     if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
-                        yield reasoning_delta(delta=delta.reasoning_content, id=text_id)
+                        if not reasoning_started:
+                            yield StreamEvent(sse=reasoning_start(id=reasoning_id))
+                            reasoning_started = True
+                        yield StreamEvent(sse=reasoning_delta(delta=delta.reasoning_content, id=reasoning_id))
 
                     # 普通文本内容：直接 yield，保证 TTFT
                     if delta.content:
+                        if not text_started:
+                            if reasoning_started:
+                                yield StreamEvent(sse=reasoning_end(id=reasoning_id))
+                                reasoning_started = False
+                            yield StreamEvent(sse=text_start(id=text_id))
+                            text_started = True
                         assistant_content += delta.content
-                        # 文本增量
-                        yield text_delta(delta=delta.content, id=text_id)
+                        # 文本增量：content 携带纯文本供 orchestrator 持久化
+                        yield StreamEvent(sse=text_delta(delta=delta.content, id=text_id), content=delta.content)
 
                     # tool_calls delta：按 index 分槽累积碎片
                     if delta.tool_calls:
@@ -103,11 +128,15 @@ class LLMRunner:
             except Exception as e:
                 raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"流式推理失败 (iter={iteration}): {e}")
 
+            if reasoning_started:
+                yield StreamEvent(sse=reasoning_end(id=reasoning_id))
+            if text_started:
+                yield StreamEvent(sse=text_end(id=text_id))
 
             # finish_reason == "stop"：推理完成，退出循环
             if finish_reason != "tool_calls" or not accumulators:
                 # 推理完成
-                yield step_finish()
+                yield StreamEvent(sse=step_finish())
                 break
 
             # finish_reason == "tool_calls"：并行执行所有工具，追加结果继续推理
@@ -137,9 +166,10 @@ class LLMRunner:
             )
             messages.append(assistant_msg)
 
-            # 输出完整的 tool_call
+            # 输出工具调用（两阶段：input-start + input-available）
             for tc in parsed_tool_calls:
-                yield tool_call(tool_call_id=tc["id"], tool_name=tc["name"], args=tc["args"])
+                yield StreamEvent(sse=tool_input_start(tool_call_id=tc["id"], tool_name=tc["name"]))
+                yield StreamEvent(sse=tool_input_available(tool_call_id=tc["id"], tool_name=tc["name"], input=tc["args"]))
 
             # 并行执行所有工具，return_exceptions=True 确保单工具失败不中断整轮
             raw_results = await asyncio.gather(
@@ -162,7 +192,7 @@ class LLMRunner:
                 # yield source()
 
                 # 输出工具调用结果
-                yield tool_call_result(tool_call_id=tc["id"], result=safe_result)
+                yield StreamEvent(sse=tool_output_available(tool_call_id=tc["id"], output=safe_result))
 
                 tool_msg = ChatMessage(
                     session_id=session_id,
@@ -172,13 +202,17 @@ class LLMRunner:
                     content=safe_result
                 )
                 messages.append(tool_msg)
+
+            yield StreamEvent(sse=step_finish())
         else:
             # 循环正常耗尽（未被 break），说明超出最大迭代次数
             warn = f"Agent 推理超出最大迭代次数（{settings.AGENT_MAX_ITERATIONS}），未能生成最终答案"
             log_fail("工具调用", warn, session=session_id)
             text_id = f"txt_{uuid.uuid4().hex}"
-            yield text_delta(delta=warn, id=text_id)
-            yield step_finish(finish_reason='iteration_exceeded')
+            yield StreamEvent(sse=text_start(id=text_id))
+            yield StreamEvent(sse=text_delta(delta=warn, id=text_id), content=warn)
+            yield StreamEvent(sse=text_end(id=text_id))
+            yield StreamEvent(sse=step_finish())
 
 
     async def _invoke_tool(self, name: str, context: Dict[str, Any], args: Dict[str, Any]) -> str:

@@ -1,11 +1,13 @@
 import asyncio
 import uuid
 
-from fastapi import APIRouter, Depends, BackgroundTasks, Body, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 from dependency_injector.wiring import inject, Provide
 
-from chat.api.vercel_formats import message_finish, stream_abort, error
+from chat.api.vercel_formats import (
+    message_start, message_finish, stream_done, abort, error,
+)
 
 from common.security import require_login
 from common.logger import log_event, log_error
@@ -19,21 +21,27 @@ router = APIRouter()
 
 
 async def _vercel_generator(chat_gen, model_name: str):
-    """将 orchestrator 的 AsyncGenerator 包装成 vercel ai sdk 格式"""
+    """将 orchestrator 的 AsyncGenerator 包装成 AI SDK 6.x SSE 格式"""
+    message_id = f"msg_{uuid.uuid4().hex}"
     try:
+        yield message_start(message_id)
+
         async for event in chat_gen:
             yield event
 
         yield message_finish()
+        yield stream_done()
 
     except asyncio.CancelledError:
         log_event("用户取消请求")
-        yield stream_abort(reason="user_cancelled")
+        yield abort(reason="user_cancelled")
+        yield stream_done()
         raise
 
     except Exception as e:
         log_error("流生成", e)
         yield error(error_text=str(e))
+        yield stream_done()
 
 
 @router.post("/completions")
@@ -59,10 +67,10 @@ async def chat_completions(
        }
     """
     resolved_model_id = req.model or settings.DEFAULT_MODEL
-    
+
     if not req.query:
         raise HTTPException(status_code=400, detail="缺少查询内容")
-    
+
     if not req.session_id:
         raise HTTPException(status_code=400, detail="缺少 session_id")
 

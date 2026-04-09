@@ -109,14 +109,15 @@ class ChatOrchestrator:
         # [Generation] 流式推理，使用解析后的供应商模型名和凭证
         full_response_content = ""
         try:
-            async for chunk in self._runner.stream_chat_with_tool_calling(
+            async for event in self._runner.stream_chat_with_tool_calling(
                 messages_for_llm, session_id, user_id,
                 model_name=resolved.provider_model_name,
                 api_base=resolved.api_base_url,
                 api_key=resolved.api_key,
             ):
-                full_response_content += chunk
-                yield chunk
+                # event.content 仅在文本增量时非空，其他协议事件为 ""
+                full_response_content += event.content
+                yield event.sse
         except ServiceException as e:
             log_error("LLM 流式推理", e, session=session_id)
             yield f"\n[System Error]: {e.msg}"
