@@ -42,22 +42,19 @@ class Mem0Adapter(MemoryProvider):
                 "provider": "qdrant",
                 "config": {
                     "collection_name": "wisepen_memories",
-                    "host": settings.QDRANT_HOST,
-                    "port": settings.QDRANT_PORT,
+                    "url": f"http://{settings.QDRANT_HOST}:{settings.QDRANT_PORT}",
+                    "api_key": settings.QDRANT_PASSWORD,
                 },
             },
         }
-        self._client = None
-
-    def _get_client(self) -> Optional[Memory]:
-        if self._client is None:
-            log_debug("Lazy initializing Mem0 Client")
-            try:
-                self._client = Memory.from_config(self._config)
-            except Exception as e:
-                log_fail("初始化 Mem0 Client", e)
-                return None
-        return self._client
+        
+        try:
+            log_debug("Initializing Mem0 Client...")
+            self.client = Memory.from_config(self._config)
+            log_debug("Mem0 Client initialized successfully.")
+        except Exception as e:
+            log_fail("Mem0 客户端初始化失败", e)
+            raise e
 
     async def search(
             self,
@@ -68,11 +65,7 @@ class Mem0Adapter(MemoryProvider):
     ) -> List[str]:
 
         def _sync_search():
-            client = self._get_client()
-            if client is None:
-                return []
-            
-            raw_results = client.search(query, user_id=user_id, limit=limit)
+            raw_results = self.client.search(query, user_id=user_id, limit=limit)
             log_debug(f"Raw Results from Mem0", query=query, user_id=user_id, raw_results=raw_results)
 
             # 兼容 Mem0 返回字典 {"results": [...]} 或直接返回列表的情况
@@ -105,13 +98,8 @@ class Mem0Adapter(MemoryProvider):
         ]
 
         def _sync_add():
-            client = self._get_client()
-            if client is None:
-                log_fail("长期记忆写入", "Mem0 客户端未成功初始化，跳过写入")
-                return
-            
             try:
-                client.add(formatted_msgs, user_id=user_id)
+                self.client.add(formatted_msgs, user_id=user_id)
             except Exception as e:
                 log_fail("长期记忆写入异常", e, user=user_id)
 

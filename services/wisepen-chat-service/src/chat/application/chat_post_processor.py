@@ -7,6 +7,7 @@ from common.logger import log_error
 
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
+from chat.domain.entities.model import ModelConfig, ModelType
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
@@ -60,10 +61,9 @@ class ChatPostProcessor:
         if usage_tokens == 0:
             return
 
-        user_id = int(user_id)
-        trace_id = uuid.uuid4().int
-        model_type = get_model_type(model_name)
-        group_id = int(group_id) if group_id is not None else None
+         # 异步从数据库查询模型类型，如果在数据库查不到，降级为未知模型
+        model_config = await ModelConfig.find_one(ModelConfig.id == model_name)
+        model_type = model_config.type.value if model_config else ModelType.UNKNOWN_MODEL.value
 
         value = {
             "userId": user_id,
