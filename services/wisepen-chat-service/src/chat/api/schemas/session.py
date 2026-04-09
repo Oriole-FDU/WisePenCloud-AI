@@ -40,6 +40,7 @@ class MessageResponse(BaseModel):
     """
     id: str
     role: str
+    model_id: Optional[int] = None
     content: Optional[str]
     tool_calls: Optional[List[Dict[str, Any]]]
     created_at: str
@@ -49,6 +50,7 @@ class MessageResponse(BaseModel):
         return cls(
             id=str(msg.id) if msg.id else "",
             role=msg.role.value,
+            model_id=msg.model_id,
             content=msg.content,
             tool_calls=msg.tool_calls,
             created_at=msg.created_at.isoformat(),

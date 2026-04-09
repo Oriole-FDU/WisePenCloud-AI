@@ -112,6 +112,7 @@ class ChatOrchestrator:
             async for event in self._runner.stream_chat_with_tool_calling(
                 messages_for_llm, session_id, user_id,
                 model_name=resolved.provider_model_name,
+                model_id=model_id,
                 api_base=resolved.api_base_url,
                 api_key=resolved.api_key,
             ):
@@ -131,7 +132,7 @@ class ChatOrchestrator:
         #   - _post_processor.summarize_and_compress；调用轻量级模型生成并更新会话的全局摘要
         if background_tasks is not None:
             user_msg = ChatMessage(session_id=session_id, role=Role.USER, content=full_query)
-            assistant_msg = ChatMessage(session_id=session_id, role=Role.ASSISTANT, content=full_response_content)
+            assistant_msg = ChatMessage(session_id=session_id, role=Role.ASSISTANT, content=full_response_content, model_id=model_id)
 
             messages_to_persist = [user_msg] + intermediate_messages + [assistant_msg]
 

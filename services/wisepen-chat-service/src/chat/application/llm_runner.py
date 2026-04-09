@@ -50,6 +50,7 @@ class LLMRunner:
         session_id: str,
         user_id: str,
         model_name: str,
+        model_id: Optional[int] = None,
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
     ):
@@ -154,6 +155,7 @@ class LLMRunner:
             assistant_msg = ChatMessage(
                 session_id=session_id,
                 role=Role.ASSISTANT,
+                model_id=model_id,
                 content=assistant_content or None,
                 tool_calls=[
                     {
