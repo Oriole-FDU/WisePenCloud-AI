@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any
 
-from chat.domain.entities import ChatSession, ChatMessage
+from chat.domain.entities import ChatSession
 
 
 class CreateSessionRequest(BaseModel):
@@ -32,26 +32,22 @@ class SessionResponse(BaseModel):
         )
 
 
-class MessageResponse(BaseModel):
+class UIMessagePartResponse(BaseModel):
+    """Vercel AI SDK 6.x UIMessage 的单个 part"""
+    type: str
+    text: Optional[str] = None
+    state: Optional[str] = None
+    toolCallId: Optional[str] = None
+    input: Optional[Any] = None
+    output: Optional[Any] = None
+
+
+class UIMessageResponse(BaseModel):
     """
-    会话消息条目响应。
-    - user / assistant 消息：完整返回 content 和 tool_calls。
-    - TOOL role（工具调用结果）：在仓储层已过滤，不会出现在此处。
+    Vercel AI SDK 6.x UIMessage 格式，用于 initialMessages。
+    所有内容（文本、推理、工具调用）均在 parts 数组中按顺序排列。
     """
     id: str
     role: str
-    model_id: Optional[int] = None
-    content: Optional[str]
-    tool_calls: Optional[List[Dict[str, Any]]]
-    created_at: str
-
-    @classmethod
-    def from_entity(cls, msg: ChatMessage) -> "MessageResponse":
-        return cls(
-            id=str(msg.id) if msg.id else "",
-            role=msg.role.value,
-            model_id=msg.model_id,
-            content=msg.content,
-            tool_calls=msg.tool_calls,
-            created_at=msg.created_at.isoformat(),
-        )
+    parts: List[UIMessagePartResponse]
+    createdAt: Optional[str] = None

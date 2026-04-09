@@ -20,15 +20,17 @@ class MessageRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_page_by_session(
+    async def get_page_for_ui(
         self,
         session_id: str,
         page: int,
         size: int,
     ) -> Tuple[List[ChatMessage], int]:
         """
-        分页拉取会话消息，仅返回 user / assistant / tool_calls 类消息，过滤 system 和 tool 结果。
-        按 created_at 正序排列，返回 (当页列表, 总数)。
+        按对话回合分页拉取消息，以 user 消息为回合锚点。
+        page=1 返回最新的 `size` 个回合，页码递增返回更早的回合。
+        每个回合包含 1 条 user 消息及其后续的 assistant + tool 消息。
+        返回 (本页原始消息按时间正序, 总回合数)。
         """
         pass
 

@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends, Query
 from dependency_injector.wiring import inject, Provide
 
-from chat.api.schemas.session import SessionResponse, CreateSessionRequest, MessageResponse, RenameSessionRequest, \
-    PinSessionRequest
+from chat.api.schemas.session import (
+    SessionResponse, CreateSessionRequest, RenameSessionRequest,
+    PinSessionRequest, UIMessageResponse,
+)
+from chat.api.converters import convert_to_ui_messages
 from chat.domain.entities import ChatSession
 from chat.domain.repositories import SessionRepository, MessageRepository
 from chat.container import Container
@@ -50,23 +53,24 @@ async def delete_session(
     return R.success()
 
 
-@router.get("/listHistoryMessages", response_model=R[PageResult[MessageResponse]])
+@router.get("/listHistoryMessages", response_model=R[PageResult[UIMessageResponse]])
 @inject
 async def get_session_messages(
         session_id: str,
-        page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
-        size: int = Query(default=20, ge=1, le=100, description="每页条数"),
+        page: int = Query(default=1, ge=1, description="页码，从 1 开始（page=1 为最新回合）"),
+        size: int = Query(default=20, ge=1, le=100, description="每页回合数"),
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
         message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
 ):
-    # 鉴权
     await session_repo.get_by_id_and_user(session_id, user_id)
 
-    messages, total = await message_repo.get_page_by_session(session_id, page=page, size=size)
+    page_messages, total_turns = await message_repo.get_page_for_ui(session_id, page=page, size=size)
+    ui_messages = convert_to_ui_messages(page_messages)
+
     return R.success(data=PageResult.of(
-        items=[MessageResponse.from_entity(m) for m in messages],
-        total=total, page=page, size=size,
+        items=ui_messages,
+        total=total_turns, page=page, size=size,
     ))
 
 
