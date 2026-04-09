@@ -10,7 +10,7 @@ class ChatRequest(BaseModel):
 
     query: str = Field(..., description="用户问题")
 
-    model: Optional[str] = Field(default=None, description="模型名称")
+    model: Optional[int] = Field(default=None, description="模型ID")
 
     states: Optional[List[Dict[str, Any]]] = Field(default=None, description="上下文状态列表")
 

@@ -6,6 +6,7 @@ from chat.core.config.app_settings import settings
 
 from chat.core.providers import LiteLLMAdapter, Mem0Adapter
 from chat.core.persistence import MongoSessionRepository, MongoMessageRepository, RedisHotContext
+from chat.application.model_resolver import ModelResolver
 from chat.application.chat_orchestrator import ChatOrchestrator
 from chat.application.tools import ToolRegistry, SearchHistoricalMessagesTool
 from common.kafka.producer import KafkaProducerClient
@@ -48,11 +49,14 @@ class Container(containers.DeclarativeContainer):
         tool_providers=tool_providers,
     )
 
+    model_resolver = providers.Singleton(ModelResolver)
+
     # Application 层组件
     chat_service = providers.Factory(
         ChatOrchestrator,
         llm=llm_provider,
         memory=memory_provider,
+        model_resolver=model_resolver,
         session_repo=session_repo,
         message_repo=message_repo,
         hot_context_repo=hot_context_repo,

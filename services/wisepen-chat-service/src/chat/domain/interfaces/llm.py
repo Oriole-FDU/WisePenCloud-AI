@@ -11,7 +11,9 @@ class LLMProvider(ABC):
             messages: List[ChatMessage],
             model_name: str,
             temperature: float = 0.7,
-            tools: Optional[List[Dict[str, Any]]] = None
+            tools: Optional[List[Dict[str, Any]]] = None,
+            api_base: Optional[str] = None,
+            api_key: Optional[str] = None,
     ) -> Any:
         pass
 
@@ -21,7 +23,9 @@ class LLMProvider(ABC):
             messages: List[ChatMessage],
             model_name: str,
             temperature: float = 0.7,
-            tools: Optional[List[Dict[str, Any]]] = None
+            tools: Optional[List[Dict[str, Any]]] = None,
+            api_base: Optional[str] = None,
+            api_key: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         yield  # type: ignore[misc]
 

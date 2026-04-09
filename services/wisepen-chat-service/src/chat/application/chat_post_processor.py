@@ -2,12 +2,11 @@ from typing import List, Optional
 from datetime import datetime, timezone
 import uuid
 
-from chat.domain.entities.model import get_model_type
 from common.logger import log_error
 
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
-from chat.domain.entities.model import ModelConfig, ModelType
+from chat.domain.entities.model import Model, ModelType
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
@@ -50,7 +49,7 @@ class ChatPostProcessor:
     async def _send_token_billing(
         self,
         user_id: str,
-        model_name: str,
+        model_id: int,
         messages: List[ChatMessage],
         group_id: Optional[str] = None,
     ) -> None:
@@ -61,14 +60,17 @@ class ChatPostProcessor:
         if usage_tokens == 0:
             return
 
-         # 异步从数据库查询模型类型，如果在数据库查不到，降级为未知模型
-        model_config = await ModelConfig.find_one(ModelConfig.id == model_name)
-        model_type = model_config.type.value if model_config else ModelType.UNKNOWN_MODEL.value
+        model = await Model.find_one(Model.id == model_id)
+        model_type = model.type.value if model else ModelType.UNKNOWN_MODEL.value
+        billing_ratio = model.billing_ratio if model else 1
+
+        trace_id = uuid.uuid4().hex
 
         value = {
             "userId": user_id,
             "groupId": group_id,
             "usageTokens": usage_tokens,
+            "billingRatio": billing_ratio,
             "traceId": trace_id,
             "modelType": model_type,
             "requestTime": datetime.now(timezone.utc).isoformat(),
@@ -82,12 +84,13 @@ class ChatPostProcessor:
         self,
         user_id: str,
         session_id: str,
-        model_name: str,
+        model_id: int,
+        provider_model_name: str,
         new_messages: List[ChatMessage],
         group_id: Optional[str] = None,
     ) -> None:
         """后台统一处理所有存储逻辑: Redis 追加 → MongoDB 落盘 → Memory 摄入 → 摘要压缩（如有必要）"""
-        await self._fill_token_counts(new_messages, model_name) # 写库前一次性计算 token_count，后续 Redis 序列化和 MongoDB 落盘都会携带该值
+        await self._fill_token_counts(new_messages, provider_model_name)
 
         # Redis 追加
         try:
@@ -112,7 +115,7 @@ class ChatPostProcessor:
 
         # 发出 token 计费
         await self._send_token_billing(user_id=user_id, 
-                                        model_name=model_name, 
+                                        model_id=model_id, 
                                         messages=new_messages, 
                                         group_id=group_id)
 

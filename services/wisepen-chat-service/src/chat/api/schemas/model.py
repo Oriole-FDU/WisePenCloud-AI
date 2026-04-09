@@ -1,7 +1,7 @@
 from typing import List
 from pydantic import BaseModel, Field
 
-from chat.domain.entities import ModelType, ProviderMap
+from chat.domain.entities import ModelType
 
 
 # =============================================================================
@@ -10,11 +10,13 @@ from chat.domain.entities import ModelType, ProviderMap
 
 class ModelInfo(BaseModel):
     """API 响应：模型信息 DTO"""
-    id: str
+    id: int
     name: str
+    vendor: str
     type: ModelType
-    providers: List[ProviderMap]
     ratio: int
+    support_thinking: bool
+    support_vision: bool
     is_default: bool
 
 

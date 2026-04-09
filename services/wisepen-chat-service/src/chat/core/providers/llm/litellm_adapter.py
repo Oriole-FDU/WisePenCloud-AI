@@ -15,13 +15,13 @@ litellm.suppress_debug_info = not _is_debug
 
 class LiteLLMAdapter(LLMProvider):
     """
-    使用 LiteLLM 库直接在进程内进行模型路由和调用，
-    统一经由 settings.LLM_BASE_URL 网关转发。
+    使用 LiteLLM 库直接在进程内进行模型路由和调用。
+    api_base / api_key 可在每次调用时动态指定，未指定时降级到全局 settings。
     """
 
     def __init__(self):
-        self._api_base = settings.LLM_BASE_URL
-        self._api_key = settings.LLM_API_KEY
+        self._default_api_base = settings.LLM_BASE_URL
+        self._default_api_key = settings.LLM_API_KEY
 
     def _convert_messages(self, messages: List[ChatMessage]) -> List[Dict[str, Any]]:
         formatted = []
@@ -40,9 +40,7 @@ class LiteLLMAdapter(LLMProvider):
         return formatted
 
     def _format_model_for_litellm(self, model_name: str) -> str:
-        # litellm 需要通过根据前缀解析模型输出
         if "/" in model_name:
-            # 已经有前缀
             return model_name
         return f"openai/{model_name}"
 
@@ -51,7 +49,9 @@ class LiteLLMAdapter(LLMProvider):
             messages: List[ChatMessage],
             model_name: str,
             temperature: float = 0.7,
-            tools: Optional[List[Dict[str, Any]]] = None
+            tools: Optional[List[Dict[str, Any]]] = None,
+            api_base: Optional[str] = None,
+            api_key: Optional[str] = None,
     ) -> Any:
         formatted_msgs = self._convert_messages(messages)
         litellm_model = self._format_model_for_litellm(model_name)
@@ -62,8 +62,8 @@ class LiteLLMAdapter(LLMProvider):
                 stream=False,
                 temperature=temperature,
                 drop_params=True,
-                api_base=self._api_base,
-                api_key=self._api_key,
+                api_base=api_base or self._default_api_base,
+                api_key=api_key or self._default_api_key,
             )
             return response.choices[0].message
         except litellm.ContextWindowExceededError:
@@ -76,7 +76,9 @@ class LiteLLMAdapter(LLMProvider):
             messages: List[ChatMessage],
             model_name: str,
             temperature: float = 0.7,
-            tools: Optional[List[Dict[str, Any]]] = None
+            tools: Optional[List[Dict[str, Any]]] = None,
+            api_base: Optional[str] = None,
+            api_key: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
 
         formatted_msgs = self._convert_messages(messages)
@@ -90,8 +92,8 @@ class LiteLLMAdapter(LLMProvider):
                 temperature=temperature,
                 tools=tools,
                 drop_params=True,
-                api_base=self._api_base,
-                api_key=self._api_key,
+                api_base=api_base or self._default_api_base,
+                api_key=api_key or self._default_api_key,
             )
             async for chunk in response:
                 yield chunk

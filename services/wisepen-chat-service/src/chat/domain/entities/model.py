@@ -1,16 +1,6 @@
-from typing import List
 from enum import IntEnum
 from beanie import Document
-from pydantic import Field, BaseModel
-
-# =============================================================================
-# Enums
-# =============================================================================
-
-class ProviderId(IntEnum):
-    ZHIZENGZENG = 1
-    APIYI = 2
-    MODELSCOPE = 3
+from pydantic import Field
 
 
 class ModelType(IntEnum):
@@ -18,63 +8,20 @@ class ModelType(IntEnum):
     ADVANCED_MODEL = 2
     UNKNOWN_MODEL = 3
 
-    @property
-    def ratio(self) -> int:
-        return {1: 1, 2: 10, 3: 1}[self.value]
 
-
-# =============================================================================
-# BaseModel
-# =============================================================================
-
-class ProviderMap(BaseModel):
-    """
-    嵌入文档：供应商映射
-    记录统一模型ID与供应商实际模型ID的对应关系
-    """
-    provider_id: ProviderId = Field(..., description="供应商ID")
-    model_id: str = Field(..., description="供应商实际模型ID")
-
-
-# =============================================================================
-# Helper Functions
-# =============================================================================
-
-def get_model_name(model_id: str) -> str:
-    """
-    格式化模型名称
-    e.g. gpt-4o-mini -> GPT-4o Mini
-    """
-    base_name = ' '.join(word.capitalize() for word in model_id.split('-'))
-    if model_id.startswith('gpt'):
-        return base_name.replace('Gpt', 'GPT').replace(' ', '-', 1)
-    if model_id.startswith('deepseek'):
-        return base_name.replace('Deepseek', 'DeepSeek')
-    if model_id.startswith('glm'):
-        return base_name.replace('Glm', 'GLM')
-    return base_name
-
-
-# =============================================================================
-# Documents
-# =============================================================================
-
-class ModelConfig(Document):
+class Model(Document):
     """
     模型配置（存入 MongoDB）
+    仅包含前端可见的模型元信息，不含供应商细节
     """
-    id: str = Field(..., description="统一模型ID")
+    id: int = Field(..., description="模型序号ID")
+    display_name: str = Field(..., description="展示名称（如 GPT-4o）")
+    vendor: str = Field(..., description="模型厂商（如 OpenAI、Google、DeepSeek）")
     type: ModelType = Field(..., description="模型类型")
-    providers: List[ProviderMap] = Field(default_factory=list, description="供应商映射列表")
+    billing_ratio: int = Field(default=1, description="计费倍率")
+    support_thinking: bool = Field(default=False, description="是否支持深度思考")
+    support_vision: bool = Field(default=False, description="是否具备视觉能力")
     is_active: bool = Field(default=True, description="是否启用")
 
-    @property
-    def name(self) -> str:
-        return get_model_name(self.id)
-    
-    @property
-    def ratio(self) -> int:
-        return self.type.ratio
-    
     class Settings:
-        name = "wisepen_model_configs"
+        name = "wisepen_models"

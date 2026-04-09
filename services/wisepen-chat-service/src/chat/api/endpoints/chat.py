@@ -53,7 +53,7 @@ async def chat_completions(
        {
          "session_id": "xxx",
          "query": "你好",
-         "model": "gpt-4o"
+         "model": 1,
          "states": [{
             "key": "selected_text",
             "value": "xxx",
@@ -61,7 +61,7 @@ async def chat_completions(
          ]
        }
     """
-    resolved_model = req.model or settings.DEFAULT_MODEL
+    resolved_model_id = req.model or settings.DEFAULT_MODEL
     
     if not req.query:
         raise HTTPException(status_code=400, detail="缺少查询内容")
@@ -76,12 +76,12 @@ async def chat_completions(
         session_id=req.session_id,
         user_query=req.query,
         background_tasks=background_tasks,
-        model_name=resolved_model,
+        model_id=resolved_model_id,
         states=req.states
     )
 
     return StreamingResponse(
-        _vercel_generator(chat_gen, resolved_model),
+        _vercel_generator(chat_gen, str(resolved_model_id)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

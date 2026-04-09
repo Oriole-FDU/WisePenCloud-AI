@@ -2,7 +2,7 @@ import asyncio
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from chat.api.vercel_formats import (
     text_delta, reasoning_delta, tool_call, tool_call_result, step_start, step_finish, source
@@ -40,6 +40,8 @@ class LLMRunner:
         session_id: str,
         user_id: str,
         model_name: str,
+        api_base: Optional[str] = None,
+        api_key: Optional[str] = None,
     ):
         """
         ReAct while 循环主入口：全程 stream=True，delta.content 直接 yield 保证 TTFT；delta.tool_calls 按 index 分槽累积，流结束后并行执行所有 tool_calls；若超出 MAX_ITERATIONS 输出警告后退出
@@ -63,6 +65,8 @@ class LLMRunner:
                     messages=messages,
                     model_name=model_name,
                     tools=self._registry.schemas() or None,
+                    api_base=api_base,
+                    api_key=api_key,
                 ):
                     # LiteLLMAdapter 的 stream_chat_completion yield 的是原始 chunk 对象
                     choice = chunk.choices[0]

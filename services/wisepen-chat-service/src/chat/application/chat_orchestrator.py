@@ -11,6 +11,7 @@ from common.core.exceptions import ServiceException
 from chat.application.context_manager import ContextManager
 from chat.application.llm_runner import LLMRunner
 from chat.application.chat_post_processor import ChatPostProcessor
+from chat.application.model_resolver import ModelResolver
 from chat.application.tools.registry import ToolRegistry
 from common.kafka.producer import KafkaProducerClient
 
@@ -43,6 +44,7 @@ class ChatOrchestrator:
             self,
             llm: LLMProvider,
             memory: MemoryProvider,
+            model_resolver: ModelResolver,
             session_repo: SessionRepository,
             message_repo: MessageRepository,
             hot_context_repo: HotContextRepository,
@@ -50,6 +52,7 @@ class ChatOrchestrator:
             kafka_producer: KafkaProducerClient
     ):
         self._memory = memory
+        self._model_resolver = model_resolver
         self._ctx = ContextManager(
             message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo
         )
@@ -69,10 +72,13 @@ class ChatOrchestrator:
             session_id: str,
             user_query: str,
             background_tasks: BackgroundTasks,
-            model_name: Optional[str] = None,
+            model_id: Optional[int] = None,
             states: Optional[List[Dict[str, Any]]] = None,
     ):
-        resolved_model = model_name or settings.DEFAULT_MODEL
+        model_id = model_id or settings.DEFAULT_MODEL
+
+        # [Model Resolve] 通过映射表查找首选供应商，获取实际模型名和 API 凭证
+        resolved = await self._model_resolver.resolve(model_id)
 
         selected_text = self._extract_selected_text(states)
 
@@ -100,10 +106,15 @@ class ChatOrchestrator:
         # 记录进入 Agent 循环前的列表长度
         original_msg_count = len(messages_for_llm)
 
-        # [Generation] 流式推理
+        # [Generation] 流式推理，使用解析后的供应商模型名和凭证
         full_response_content = ""
         try:
-            async for chunk in self._runner.stream_chat_with_tool_calling(messages_for_llm, session_id, user_id, resolved_model):
+            async for chunk in self._runner.stream_chat_with_tool_calling(
+                messages_for_llm, session_id, user_id,
+                model_name=resolved.provider_model_name,
+                api_base=resolved.api_base_url,
+                api_key=resolved.api_key,
+            ):
                 full_response_content += chunk
                 yield chunk
         except ServiceException as e:
@@ -125,7 +136,8 @@ class ChatOrchestrator:
 
             background_tasks.add_task(
                 self._post_processor.persist_all,
-                user_id, session_id, resolved_model,
+                user_id, session_id, model_id,
+                resolved.provider_model_name,
                 messages_to_persist
             )
             if needs_compression:

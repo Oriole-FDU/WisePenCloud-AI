@@ -20,11 +20,11 @@ class AppSettings(BaseModel):
     DEV: bool
     LOG_LEVEL: str
 
-    # LLM 网关配置
+    # LLM 默认网关配置（作为 fallback，主对话链路已从 Provider 表动态获取）
     LLM_BASE_URL: str
     LLM_API_KEY: str
 
-    DEFAULT_MODEL: str = "gpt-4o"
+    DEFAULT_MODEL: int = 1
 
     # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str = "wisepen-dev-server:9094"
