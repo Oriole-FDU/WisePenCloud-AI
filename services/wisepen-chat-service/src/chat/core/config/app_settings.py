@@ -26,6 +26,7 @@ class AppSettings(BaseModel):
 
     DEFAULT_MODEL: int = 1
 
+
     # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str = "wisepen-dev-server:9094"
     KAFKA_TOPIC: str = "wisepen-user-token-calc-group-topic"

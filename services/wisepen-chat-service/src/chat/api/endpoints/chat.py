@@ -21,9 +21,6 @@ router = APIRouter()
 async def _vercel_generator(chat_gen, model_name: str):
     """将 orchestrator 的 AsyncGenerator 包装成 vercel ai sdk 格式"""
     try:
-        message_id = f"msg_{uuid.uuid4().hex}"
-        yield message_start(message_id)
-
         async for event in chat_gen:
             yield event
 

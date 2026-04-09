@@ -13,9 +13,7 @@ class SecurityHeaderMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # 校验防绕过 Token (X-From-Source)
         request_source = request.headers.get(SecurityConstants.HEADER_FROM_SOURCE)
-        print(self.from_source_secret)
         if request_source != self.from_source_secret:
-            print(request_source)
             return Response(status_code=404, content="Not Found")
 
         # 提取并设置安全上下文

@@ -14,7 +14,7 @@ class BootstrapSettings(BaseSettings):
     APP_NAME: str = "WisePen Service"
     SERVICE_NAME: str = "wisepen-service"
     SERVICE_HOST: str = "127.0.0.1"
-    SERVICE_PORT: int = 8000
+    SERVICE_PORT: int = 9200
 
     # 运行模式与日志
     DEV: bool = False
