@@ -42,8 +42,8 @@ async def _vercel_generator(chat_gen, model_name: str):
 
     except Exception as e:
         log_error("流生成", e)
-        yield StreamEvent(error(error_text=str(e)))
-        yield StreamEvent(stream_done())
+        yield StreamEvent(sse=error(error_text=str(e)))
+        yield StreamEvent(sse=stream_done())
 
 
 @router.post("/completions")
