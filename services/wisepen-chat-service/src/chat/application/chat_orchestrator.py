@@ -16,24 +16,6 @@ from chat.application.tools.registry import ToolRegistry
 from common.kafka.producer import KafkaProducerClient
 
 
-SELECTED_TEXT_TEMPLATE = """You are an expert analytical assistant. The user has selected a specific snippet of text and asked a question about it.
-
-<selected_text>
-{selected_text}
-</selected_text>
-
-<user_query>
-{user_query}
-</user_query>
-
-<system_constraints>
-1. GROUNDING: Your response MUST be primarily grounded in the `<selected_text>`.
-2. RELEVANCE CHECK: If the `<selected_text>` is completely irrelevant to the `<user_query>`, explicitly state this first before proceeding.
-3. SUPPLEMENTAL KNOWLEDGE: Use your internal knowledge ONLY if the `<selected_text>` lacks necessary context. If you do, explicitly label that part as [Supplemental Knowledge].
-4. EFFICIENCY: Do not repeat the user's query. Answer directly and concisely.
-5. CITATION: When directly referencing the text, attribute it as [Original].
-</system_constraints>"""
-
 class ChatOrchestrator:
     """
     Chat编排器：负责编排聊天流程中的各个环节，包含上下文管理、LLM ReAct、记忆更新等。
@@ -80,16 +62,12 @@ class ChatOrchestrator:
         # [Model Resolve] 通过映射表查找首选供应商，获取实际模型名和 API 凭证
         resolved = await self._model_resolver.resolve(model_id)
 
-        selected_text = self._extract_selected_text(states)
-
-        full_query = SELECTED_TEXT_TEMPLATE.format(selected_text=selected_text, user_query=user_query) if selected_text else user_query
-
         # [Retrieval - 短期记忆] 从 Redis 读取最近对话, 如果 Redis 缓存失效（Cache Miss），会自动从 MongoDB 回填最近的 N 条历史 （可配置），确保对话连贯性。
         recent_messages = await self._ctx.get_or_repopulate_hot_context(session_id)
 
         # [Retrieval - 长期记忆] 从 Memory 按相似度阈值召回跨会话事实 (此处实现是Mem0)
         relevant_facts = await self._memory.search(
-            user_id=user_id, query=full_query, limit=10,
+            user_id=user_id, query=user_query, limit=10,
             score_threshold=0.6,  # 低质量召回直接丢弃，防止噪声污染上下文
         )
 
@@ -98,9 +76,10 @@ class ChatOrchestrator:
         # [Token Window] 从后往前累加 Token，超过高水位时将 messages_compress_candidates 压缩为会话的历史摘要（本轮结束时）
         messages_keep, messages_compress_candidates, needs_compression = await self._ctx.build_context_window(recent_messages)
 
-        # [Context Construction] 将系统提示词、Mem0 检索到的事实、会话的历史摘要以及窗口内的明细消息组装成 LLM 所需的格式
+        # [Context Construction] 将系统提示词、Mem0 检索到的事实、会话的历史摘要、前端上下文以及窗口内的明细消息组装成 LLM 所需的格式
         messages_for_llm = self._ctx.assemble_prompt(
-            session_id, full_query, messages_keep+messages_compress_candidates, relevant_facts, session_summary
+            session_id, user_query, messages_keep+messages_compress_candidates, relevant_facts, session_summary,
+            states=states,
         )
 
         # 记录进入 Agent 循环前的列表长度
@@ -131,7 +110,10 @@ class ChatOrchestrator:
         #   - _post_processor.persist_all：将新消息写入 Redis 和 MongoDB；将新对话摄入 Memory 长期记忆
         #   - _post_processor.summarize_and_compress；调用轻量级模型生成并更新会话的全局摘要
         if background_tasks is not None:
-            user_msg = ChatMessage(session_id=session_id, role=Role.USER, content=full_query)
+            user_msg = ChatMessage(
+                session_id=session_id, role=Role.USER, content=user_query,
+                metadata={"states": states} if states else {},
+            )
             assistant_msg = ChatMessage(session_id=session_id, role=Role.ASSISTANT, content=full_response_content, model_id=model_id)
 
             messages_to_persist = [user_msg] + intermediate_messages + [assistant_msg]
@@ -154,10 +136,3 @@ class ChatOrchestrator:
                     messages_compress_candidates,
                     session_summary
                 )
-    def _extract_selected_text(self, states: Optional[List[Dict[str, Any]]]) -> Optional[str]:
-        if states is None:
-            return None
-        for state in states:
-            if state.get('key') == 'selected_text' and not state.get('disabled', False):
-                return state.get('value')
-        return None

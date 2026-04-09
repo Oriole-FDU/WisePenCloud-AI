@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from common.logger import log_fail, log_error
 
 from chat.core.config.app_settings import settings
@@ -96,6 +96,7 @@ class ContextManager:
         windowed_messages: List[ChatMessage],
         relevant_facts: List[str],
         session_summary: Optional[str],
+        states: Optional[List[Dict[str, Any]]] = None,
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表。"""
         system_prompt = """
@@ -132,6 +133,17 @@ class ContextManager:
 
         # 经过滑动窗口裁剪后的近期对话明细
         messages.extend(windowed_messages)
+
+        # 前端上下文注入：作为独立 SYSTEM 消息插入在历史消息和用户问题之间
+        active_states = [s for s in (states or []) if not s.get("disabled", False) and s.get("value")]
+        if active_states:
+            ctx_lines = [f'<context key="{s["key"]}">\n{s["value"]}\n</context>' for s in active_states]
+            messages.append(ChatMessage(
+                session_id=session_id,
+                role=Role.SYSTEM,
+                content="[Frontend Context]\n" + "\n".join(ctx_lines),
+            ))
+
         # 用户最新输入的问题
         messages.append(ChatMessage(session_id=session_id, role=Role.USER, content=user_query))
         return messages
