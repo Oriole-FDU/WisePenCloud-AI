@@ -121,6 +121,40 @@ class ChatPostProcessor:
 
 
 
+    async def auto_generate_title(self, session_id: str, user_id: str, user_query: str) -> None:
+        """首轮对话后自动为 'New Chat' 会话生成简洁标题"""
+        try:
+            session = await self.session_repo.get_by_id(session_id)
+            if session.title != "New Chat":
+                return
+
+            prompt = [
+                ChatMessage(
+                    session_id=session_id,
+                    role=Role.SYSTEM,
+                    content="You are a conversation title generator. Generate a concise conversation title based on the user's query."
+                    "Requirements: Maximum 20 words, no punctuation, no quotation marks, and output the title text directly."
+                ),
+                ChatMessage(
+                    session_id=session_id,
+                    role=Role.USER,
+                    content=user_query,
+                )
+            ]
+
+            response = await self.llm.chat_completion(
+                model_name=settings.SUMMARY_MODEL,
+                messages=prompt,
+                temperature=0.5,
+            )
+            new_title = (response.content or "").strip().strip('"\'""''')
+            if not new_title:
+                return
+
+            await self.session_repo.rename(session_id, user_id, new_title)
+        except Exception as e:
+            log_error("自动生成标题", e, session=session_id)
+
     async def summarize_and_compress(
         self,
         session_id: str,

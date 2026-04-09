@@ -141,6 +141,10 @@ class ChatOrchestrator:
                 resolved.provider_model_name,
                 messages_to_persist
             )
+            background_tasks.add_task(
+                self._post_processor.auto_generate_title,
+                session_id, user_id, user_query
+            )
             if needs_compression:
                 background_tasks.add_task(
                     self._post_processor.summarize_and_compress,
