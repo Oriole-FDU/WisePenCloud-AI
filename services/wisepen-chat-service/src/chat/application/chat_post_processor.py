@@ -34,7 +34,7 @@ class ChatPostProcessor:
         self.hot_context_repo = hot_context_repo
         self.kafka_producer = kafka_producer
 
-    async def _fill_token_counts(self, messages: List[ChatMessage], model_name: str) -> None:
+    async def _fill_token_counts(self, messages: List[ChatMessage], provider_model_name: str) -> None:
         """批量计算 token_count"""
         for msg in messages:
             if msg.content is None:
@@ -42,7 +42,7 @@ class ChatPostProcessor:
             if msg.token_count is None:
                 try:
                     # 调用 llm.count_tokens 计算
-                    msg.token_count = await self.llm.count_tokens(msg.content, model_name)
+                    msg.token_count = await self.llm.count_tokens(msg.content, provider_model_name)
                 except Exception:
                     msg.token_count = len(msg.content) // 4  # 降级为 4 字符 1 token
 
@@ -72,13 +72,12 @@ class ChatPostProcessor:
             "usageTokens": usage_tokens,
             "billingRatio": billing_ratio,
             "traceId": trace_id,
+            "modelName": model.display_name,
             "modelType": model_type,
             "requestTime": datetime.now(timezone.utc).isoformat(),
         }
 
-        await self.kafka_producer.send(topic=settings.KAFKA_TOPIC, value=value,
-                headers=[("__TypeId__", settings.KAFKA_HEADER_TYPE_ID.encode())],
-            )
+        await self.kafka_producer.send(topic=settings.KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value)
 
     async def persist_all(
         self,
@@ -115,7 +114,7 @@ class ChatPostProcessor:
 
         # 发出 token 计费
         await self._send_token_billing(user_id=user_id, 
-                                        model_id=model_id, 
+                                        model_id=model_id,
                                         messages=new_messages, 
                                         group_id=group_id)
 

@@ -29,8 +29,7 @@ class AppSettings(BaseModel):
 
     # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str = "wisepen-dev-server:9094"
-    KAFKA_TOPIC: str = "wisepen-user-token-calc-group-topic"
-    KAFKA_HEADER_TYPE_ID: str = "com.oriole.wisepen.user.domain.entity.TokenCalculateMessage"
+    KAFKA_TOKEN_CONSUMPTION_TOPIC: str = "wisepen-user-token-consumption-topic"
     
     # Memory 使用的模型
     MEMORY_LLM_MODEL: str = "gpt-4o"
