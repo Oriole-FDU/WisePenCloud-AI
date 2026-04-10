@@ -1,6 +1,7 @@
 import os
 import yaml
 import asyncio
+import threading
 from typing import List
 from pydantic import BaseModel
 
@@ -71,10 +72,29 @@ class AppSettings(BaseModel):
     TOOL_RESULT_MAX_CHARS: int = 4000
 
 
+def _run_async(coro):
+    """在新线程的独立事件循环中执行协程，兼容 uvicorn 启动时已有运行中事件循环的场景。"""
+    result, exc = None, None
+
+    def _target():
+        nonlocal result, exc
+        try:
+            result = asyncio.run(coro)
+        except Exception as e:
+            exc = e
+
+    t = threading.Thread(target=_target)
+    t.start()
+    t.join()
+    if exc:
+        raise exc
+    return result
+
+
 def load_settings() -> AppSettings:
     try:
         log_event("从 Nacos 拉取核心业务配置")
-        raw_yaml = asyncio.run(nacos_client_manager.pull_config())
+        raw_yaml = _run_async(nacos_client_manager.pull_config())
         config_dict = yaml.safe_load(raw_yaml) if raw_yaml else {}
         full_config = {**bootstrap_settings.model_dump(), **config_dict}
         return AppSettings(**full_config)
