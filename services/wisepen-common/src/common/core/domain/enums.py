@@ -1,5 +1,8 @@
 from enum import Enum
 from typing import Optional
+from common.core.utils import auto_enum
+
+
 
 class IErrorCode(Enum):
     @property
@@ -15,6 +18,8 @@ class ResultCode(IErrorCode):
     SYSTEM_ERROR = (500, "系统内部错误")
     PARAM_ERROR = (400, "参数验证失败")
 
+
+@auto_enum("code", "desc")
 class IdentityType(Enum):
     STUDENT = (1, "STUDENT")
     TEACHER = (2, "TEACHER")
@@ -24,32 +29,13 @@ class IdentityType(Enum):
         self.code = code
         self.desc = desc
 
-    @classmethod
-    def get_by_code(cls, code: Optional[int]) -> Optional["IdentityType"]:
-        if code is None:
-            return None
-        for member in cls:
-            if member.code == code:
-                return member
-        return None
 
-
+@auto_enum("code", "desc")
 class GroupRoleType(Enum):
     OWNER = (0, "OWNER")
     ADMIN = (1, "ADMIN")
     MEMBER = (2, "MEMBER")
     NOT_MEMBER = (-1, "NOT_MEMBER")
 
-    def __init__(self, code: int, desc: str):
-        self.code = code
-        self.desc = desc
 
-    @classmethod
-    def get_by_code(cls, code: Optional[int]) -> Optional["GroupRoleType"]:
-        if code is None:
-            return None
-        for member in cls:
-            if member.code == code:
-                return member
-        return None
 

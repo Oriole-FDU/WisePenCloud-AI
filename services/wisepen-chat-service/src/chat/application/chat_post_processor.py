@@ -77,7 +77,12 @@ class ChatPostProcessor:
             "requestTime": datetime.now(timezone.utc).isoformat(),
         }
 
-        await self.kafka_producer.send(topic=settings.KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value)
+        ok = await self.kafka_producer.send(topic=settings.KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value)
+
+        if not ok:
+            log_error("Token计费消息发送", user_id=user_id, trace_id=trace_id, usage_tokens=usage_tokens)
+        else:
+            log_ok("Token 计费消息发送", user_id=user_id, trace_id=trace_id, usage_tokens=usage_tokens)
 
     async def persist_all(
         self,

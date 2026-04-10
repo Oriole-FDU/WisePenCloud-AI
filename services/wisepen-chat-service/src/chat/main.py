@@ -62,7 +62,6 @@ async def lifespan(app: FastAPI):
     log_event(f"{settings.APP_NAME} 关闭")
     
     # 关闭 Kafka Producer
-    kafka_producer = container.kafka_producer()
     await kafka_producer.stop()
     
     try:

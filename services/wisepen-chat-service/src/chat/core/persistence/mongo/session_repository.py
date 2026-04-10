@@ -50,30 +50,22 @@ class MongoSessionRepository(SessionRepository):
             await session.save()
 
     async def delete(self, session_id: str, user_id: str) -> None:
-        session = await self._safe_get_session(session_id, user_id)
+        session = await self.get_by_id_and_user(session_id, user_id)
         await session.delete()
 
     async def rename(self, session_id: str, user_id: str, new_title: str) -> ChatSession:
-        session = await self._safe_get_session(session_id, user_id)
+        session = await self.get_by_id_and_user(session_id, user_id)
         session.title = new_title
         session.updated_at = datetime.now(timezone.utc)
         await session.save()
         return session
 
     async def pin(self, session_id: str, user_id: str, is_pinned: bool) -> ChatSession:
-        session = await self._safe_get_session(session_id, user_id)
+        session = await self.get_by_id_and_user(session_id, user_id)
         session.is_pinned = is_pinned
         session.pinned_at = datetime.now(timezone.utc) if is_pinned else None   # 取消置顶时，置顶时间设为 None
         session.updated_at = datetime.now(timezone.utc)
         await session.save()
         return session
 
-    async def _safe_get_session(self, session_id: str, user_id: str) -> ChatSession:
-        """安全获取会话，查不到（不存在或不属于该用户）统一抛 SESSION_NOT_FOUND，防止枚举他人 session_id。"""
-        session = await ChatSession.find_one(
-            ChatSession.id == PydanticObjectId(session_id),
-            ChatSession.user_id == user_id,
-        )
-        if session is None:
-            raise ServiceException(ChatErrorCode.SESSION_NOT_FOUND)
-        return session
+
