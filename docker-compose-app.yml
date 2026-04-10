@@ -7,6 +7,8 @@ services:
     restart: always
     environment:
       - TZ=Asia/Shanghai
+      - APP_NAME=WisePen Chat Service
+      - SERVICE_NAME=wisepen-chat-service
       - NACOS_SERVER_ADDR=nacos:8848
       - NACOS_NAMESPACE_ID=
       - NACOS_GROUP=DEFAULT_GROUP
