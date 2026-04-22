@@ -9,7 +9,13 @@ from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository
 from common.core.exceptions import ServiceException
 from chat.application.context_manager import ContextManager
-from chat.application.llm_runner import LLMRunner
+from chat.application.llm_runner import (
+    LLMRunner,
+    StepStartEvent,
+    TextDeltaEvent,
+    ReasoningDeltaEvent,
+)
+from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_post_processor import ChatPostProcessor
 from chat.application.model_resolver import ModelResolver
 from chat.application.tools.registry import ToolRegistry
@@ -102,11 +108,15 @@ class ChatOrchestrator:
                 api_base=resolved.api_base_url,
                 api_key=resolved.api_key,
             ):
-                if event.new_step:
+                # Runner 只产出领域事件；这里按需累加纯文本，并把事件翻译为 Vercel SSE 字符串
+                if isinstance(event, StepStartEvent):
                     full_reasoning_content = ""
-                full_response_content += event.content
-                full_reasoning_content += event.reasoning
-                yield event.sse
+                    full_response_content = ""
+                elif isinstance(event, TextDeltaEvent):
+                    full_response_content += event.delta
+                elif isinstance(event, ReasoningDeltaEvent):
+                    full_reasoning_content += event.delta
+                yield to_vercel_sse(event)
         except ServiceException as e:
             log_error("LLM 流式推理", e, session=session_id)
             yield f"\n[System Error]: {e.msg}"
