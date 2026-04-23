@@ -10,7 +10,7 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces import LLMProvider
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
-from chat.application.tools.tool_registry import ToolRegistry
+from chat.application.tools.tool_scope import ToolScope
 
 
 # =============================================================================
@@ -215,9 +215,8 @@ class QueryLoopRuntime:
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
     """
 
-    def __init__(self, llm: LLMProvider, tool_registry: ToolRegistry) -> None:
+    def __init__(self, llm: LLMProvider) -> None:
         self.llm = llm
-        self._tool_registry = tool_registry
 
     """
     ReAct 循环主入口 (QueryLoop)
@@ -225,20 +224,17 @@ class QueryLoopRuntime:
     async def stream_chat_with_tool_calling(
         self,
         messages: List[ChatMessage],
+        tool_scope: ToolScope,
         session_id: str,
-        user_id: str,
         model_name: str,
         model_id: Optional[int] = None,
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
     ) -> AsyncIterator[StreamEvent]:
-        # 构造安全上下文
-        tool_context: Dict[str, Any] = {"session_id": session_id, "user_id": user_id}
-
         # 进入多轮循环
         for iteration in range(settings.AGENT_MAX_ITERATIONS):
             terminal: Optional[_StepTerminal] = None
-            # 把当前 messages、模型参数 和 tool_context 委派给 _run_single_step()
+            # 把当前 messages、模型参数 和 tool_scope 委派给 _run_single_step()
             # 然后异步消费它的产出
             async for item in self._run_single_step(
                 messages=messages,
@@ -248,7 +244,7 @@ class QueryLoopRuntime:
                 api_base=api_base,
                 api_key=api_key,
                 iteration=iteration,
-                tool_context=tool_context,
+                tool_scope=tool_scope,
             ):
                 # 如果拿到的是 _StepTerminal 就存到 terminal；否则直接 yield
                 if isinstance(item, _StepTerminal):
@@ -278,7 +274,7 @@ class QueryLoopRuntime:
         api_base: Optional[str],
         api_key: Optional[str],
         iteration: int,
-        tool_context: Dict[str, Any],
+        tool_scope: ToolScope,
     ) -> AsyncIterator[Union[StreamEvent, _StepTerminal]]:
         # 发 step 开始事件
         yield StepStartEvent()
@@ -290,13 +286,15 @@ class QueryLoopRuntime:
 
         finish_reason: str = "stop"
 
+        # schema 已由 ToolScope 在构造期固化，这里零决策直读
+        tool_schemas = tool_scope.schemas()
+
         try:
             # 调用模型流式接口
-            # 把当前注册表中的工具 schema 作为 tools= 传进去
             async for chunk in self.llm.stream_chat_completion(
                 messages=messages,
                 model_name=model_name,
-                tools=self._tool_registry.schemas() or None,
+                tools=tool_schemas or None,
                 api_base=api_base,
                 api_key=api_key,
             ):
@@ -329,8 +327,8 @@ class QueryLoopRuntime:
         # 解析工具调用
         parsed_tool_calls = self._parse_tool_calls(delta_interpreter.accumulators)
 
-        # 构造 assistant 的 tool_calls 消息（OpenAI 协议要求）
-        # 放入 new_messages，由 QueryLoopRuntime 外层统一 extend 进 messages
+        # 构造 assistant 的 tool_calls 消息(OpenAI 协议要求)
+        # 放入 new_messages,由 QueryLoopRuntime 外层统一 extend 进 messages
         assistant_msg = ChatMessage(
             session_id=session_id,
             role=Role.ASSISTANT,
@@ -345,6 +343,7 @@ class QueryLoopRuntime:
                 }
                 for tool_call in parsed_tool_calls
             ],
+            ephemeral=false,
         )
         new_messages: List[ChatMessage] = [assistant_msg]
 
@@ -357,7 +356,9 @@ class QueryLoopRuntime:
 
         # 并发执行，收集 output 事件与 tool 消息
         output_events, tool_messages = await self._run_tools(
-            parsed=parsed_tool_calls, context=tool_context, session_id=session_id
+            parsed_tool_calls=parsed_tool_calls,
+            tool_scope=tool_scope,
+            session_id=session_id,
         )
         for ev in output_events:
             yield ev
@@ -366,7 +367,6 @@ class QueryLoopRuntime:
         # 结束本轮并继续下一轮模型推理（因为调用工具）
         yield StepFinishEvent()
         yield _StepTerminal(should_continue=True, new_messages=new_messages)
-
 
     @staticmethod
     def _parse_tool_calls(
@@ -391,24 +391,32 @@ class QueryLoopRuntime:
     async def _run_tools(
         self,
         parsed_tool_calls: List[_ParsedToolCall],
-        context: Dict[str, Any],
+        tool_scope: ToolScope,
         session_id: str,
+        ephemeral_flags: List[bool],
     ) -> Tuple[List[StreamEvent], List[ChatMessage]]:
         """
         并行执行所有工具。
-        返回 tool_output_available 事件列表（按 parsed 顺序）和对应的 Role.TOOL 消息列表（按 parsed 顺序）
+        返回 tool_output_available 事件列表（按 parsed 顺序）和对应的 Role.TOOL 消息列表（按 parsed 顺序）。
+        每条 TOOL 消息独立按对应 tool 的 is_ephemeral_output 打 ephemeral 标，
+        让 Finalizer 在 per-message 粒度上决定是否 redact，避免混合轮次里 skill 正文通过"整轮保守落盘"漏进 durable 历史
         """
 
         # 并发执行所有工具，return_exceptions=True 保证单工具失败不中断整轮
         raw_results = await asyncio.gather(
-            *[self._invoke_tool(tool_call.name, context, tool_call.args) for tool_call in parsed_tool_calls],
+            *[self._invoke_tool(tc.name, tool_scope, tc.args) for tc in parsed_tool_calls],
             return_exceptions=True,
         )
+
+        # 查出每个 tool call 对应 tool 的 is_ephemeral_output
+        ephemeral_flags: List[bool] = [
+            tool_scope.is_ephemeral(tool_call.name) for tool_call in parsed_tool_calls
+        ]
 
         # 遍历结果做异常降级
         events: List[StreamEvent] = []
         tool_messages: List[ChatMessage] = []
-        for tool_call, result in zip(parsed_tool_calls, raw_results):
+        for tool_call, result, is_ephemeral in zip(parsed_tool_calls, raw_results, ephemeral_flags):
             # 如果某个结果是 Exception，转成字符串形式的 [Tool Execution Error]: ... 并记录日志，否则原样使用。
             # 防止原生 Exception 对象序列化进 API 请求导致异常
             if isinstance(result, Exception):
@@ -427,20 +435,23 @@ class QueryLoopRuntime:
                     tool_call_id=tool_call.id,
                     name=tool_call.name,
                     content=safe_result,
+                    ephemeral=is_ephemeral,
                 )
             )
         return events, tool_messages
 
     async def _invoke_tool(
-        self, name: str, context: Dict[str, Any], args: Dict[str, Any]
+        self,
+        name: str,
+        tool_scope: ToolScope,
+        args: Dict[str, Any],
     ) -> str:
-        """查找并执行工具，工具未注册时返回降级文本而非向上抛出。"""
-        try:
-            tool = self._tool_registry.get(name)
-        except KeyError:
-            log_fail("工具调用", "未注册的工具", name=name)
+        """按 tool_scope 视图查工具并执行；未在视图内（被 deny 掉或未注册）时降级文本"""
+        tool = tool_scope.get(name)
+        if tool is None:
+            log_fail("工具调用", "工具不在本轮 scope 视图内或未注册", name=name)
             return f"[Tool Execution Error] Unknown tool: '{name}'."
-        return await tool.execute(context=context, **args)
+        return await tool.execute(context=tool_scope.context, **args)
 
     async def _emit_exhausted_warning(
         self, session_id: str

@@ -79,6 +79,33 @@ class ChatTurnFinalizer:
 
         await self.kafka_producer.send(topic=settings.KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value)
 
+    @staticmethod
+    def _redact_ephemeral(new_messages: List[ChatMessage]) -> List[ChatMessage]:
+        """
+        Per-message 粒度的 ephemeral 处理，须在任何持久化动作之前调用一次
+        - ASSISTANT 消息标 ephemeral=True：整条丢弃。
+        - TOOL 消息标 ephemeral=True：保留消息结构（tool_call_id / name 齐全）但 content 置换为占位符。
+        
+        以确保 SKILL 中 SKILL.md / asset 正文不会进入 durable 历史，后续回合也不会从 Redis / Mongo 读回污染上下文
+        """
+        redacted: List[ChatMessage] = []
+        for msg in new_messages:
+            if not msg.ephemeral:
+                redacted.append(msg)
+                continue
+            if msg.role == Role.ASSISTANT:
+                continue  # 整条丢弃
+            if msg.role == Role.TOOL:
+                msg.content = (
+                    f"[Redacted: ephemeral tool '{msg.name or 'unknown'}' scaffolding output]"
+                )
+                redacted.append(msg)
+                continue
+            # 其他 role 不该被标 ephemeral；保守保留并去 ephemeral 标记
+            msg.ephemeral = False
+            redacted.append(msg)
+        return redacted
+
     async def persist_all(
         self,
         user_id: str,
@@ -88,34 +115,37 @@ class ChatTurnFinalizer:
         new_messages: List[ChatMessage],
         group_id: Optional[str] = None,
     ) -> None:
-        """后台统一处理所有存储逻辑: Redis 追加 → MongoDB 落盘 → Memory 摄入 → 摘要压缩（如有必要）"""
-        await self._fill_token_counts(new_messages, provider_model_name)
+        """后台统一处理所有存储逻辑: ephemeral 裁剪 → Redis 追加 → MongoDB 落盘 → Memory 摄入 → Token 计费"""
+        # 先裁剪 ephemeral，下游所有持久化都看这份结果
+        persistable = self._redact_ephemeral(new_messages)
+
+        await self._fill_token_counts(persistable, provider_model_name)
 
         # Redis 追加
         try:
-            await self.hot_context_repo.append_messages(session_id, new_messages)
+            await self.hot_context_repo.append_messages(session_id, persistable)
         except Exception as e:
             log_error("Redis 上下文追加", e, session=session_id)
 
         # MongoDB 落盘
         try:
-            for msg in new_messages:
+            for msg in persistable:
                 if msg.content: msg.build_search_tokens() # 构建搜索向量 (缓解中文分词问题)
 
-            await self.message_repo.save_many(new_messages)
+            await self.message_repo.save_many(persistable)
         except Exception as e:
             log_error("MongoDB 消息归档", e, session=session_id)
 
         # Memory 摄入
         try:
-            await self.memory.add_interaction(user_id=user_id, messages=new_messages)
+            await self.memory.add_interaction(user_id=user_id, messages=persistable)
         except Exception as e:
             log_error("长期记忆写入", e, user=user_id)
 
         # 发出 token 计费
-        await self._send_token_billing(user_id=user_id, 
+        await self._send_token_billing(user_id=user_id,
                                         model_id=model_id,
-                                        messages=new_messages, 
+                                        messages=persistable,
                                         group_id=group_id)
 
 

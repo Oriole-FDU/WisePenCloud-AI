@@ -71,6 +71,20 @@ class AppSettings(BaseModel):
     # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
     TOOL_RESULT_MAX_CHARS: int = 4000
 
+    # Skill 子系统配置（chat-service 作为只读消费方）
+
+    # [临时]Bundle 内的资产（references/templates/...）生产形态在 OSS
+    # [临时]本地 cache 目录用于开发期 fixture 或 OSS 预拉缓存；LocalFSSkillAssetLoader 只读取此路径
+    SKILL_ASSETS_CACHE_DIR: str = "dev_fixtures/skill_bundles"
+
+    # Matcher 每轮给 LLM 暴露的 skill 候选上限（受控披露，防 LLM 误加载）
+    SKILL_MATCH_TOP_K: int = 2
+
+    # Skill 元数据缓存 TTL（秒）。用户/Java 端发布的新 Skill 最坏需等 TTL 才被当前副本感知
+    # 过小会增加 Mongo 读压力；过大会让新 Skill 生效滞后
+    # 未来接 Kafka 事件驱动刷新后可放大此值作为兜底轮询
+    SKILL_CACHE_TTL_SECONDS: int = 30
+
 
 def _run_async(coro):
     """在新线程的独立事件循环中执行协程，兼容 uvicorn 启动时已有运行中事件循环的场景。"""
