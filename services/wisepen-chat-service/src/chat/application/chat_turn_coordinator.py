@@ -30,7 +30,7 @@ _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
 
 class ChatTurnCoordinator:
     """
-    Chat编排器：负责编排聊天流程中的各个环节，包含上下文管理、LLM ReAct、记忆更新等。
+    Chat协调器：负责编排聊天流程中的各个环节，包含上下文管理、LLM ReAct、记忆更新等。
     公共入口 handle_chat 方法实现了从接收用户输入到生成响应的完整流程，支持异步流式输出和后置处理任务
     """
 

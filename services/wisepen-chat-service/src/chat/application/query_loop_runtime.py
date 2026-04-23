@@ -343,7 +343,7 @@ class QueryLoopRuntime:
                 }
                 for tool_call in parsed_tool_calls
             ],
-            ephemeral=false,
+            ephemeral=False,
         )
         new_messages: List[ChatMessage] = [assistant_msg]
 
@@ -392,8 +392,7 @@ class QueryLoopRuntime:
         self,
         parsed_tool_calls: List[_ParsedToolCall],
         tool_scope: ToolScope,
-        session_id: str,
-        ephemeral_flags: List[bool],
+        session_id: str
     ) -> Tuple[List[StreamEvent], List[ChatMessage]]:
         """
         并行执行所有工具。
