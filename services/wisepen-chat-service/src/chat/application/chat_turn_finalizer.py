@@ -13,7 +13,7 @@ from chat.domain.repositories import MessageRepository, HotContextRepository, Se
 from common.kafka.producer import KafkaProducerClient
 
 
-class ChatPostProcessor:
+class ChatTurnFinalizer:
     """
     负责对话完成后的全部写入操作: Token 回填、Redis 追加、MongoDB 持久化归档、Memory 长期记忆摄入、摘要压缩、token计费
     """

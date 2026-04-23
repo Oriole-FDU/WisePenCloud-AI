@@ -6,7 +6,7 @@ from chat.domain.entities import ChatMessage, Role, ChatSession
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
 
 
-class ContextManager:
+class ChatContextAssembler:
     """负责短期上下文的全生命周期管理：Redis 热缓存读取与降级回填、上下文裁剪、Prompt 组装"""
 
     def __init__(

@@ -32,7 +32,7 @@ class BaseTool(ABC):
         """
         执行工具逻辑。
         :param context: 系统强注入的安全上下文（session_id、user_id 等），
-                        绝不由 LLM 生成，由 LLMRunner 在调度时直接写入，防止越权。
+                        绝不由 LLM 生成，由 QueryLoopRuntime 在调度时直接写入，防止越权。
         :param kwargs:  LLM 从对话中提取的纯业务参数（keyword、时间范围等）。
         """
         pass

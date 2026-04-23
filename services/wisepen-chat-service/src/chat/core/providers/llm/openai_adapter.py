@@ -89,7 +89,7 @@ class OpenAIAdapter(LLMProvider):
             response_stream = await self.client.chat.completions.create(**kwargs)
             async for chunk in response_stream:
                 # 原封不动地将 OpenAI 的 chunk yield 出去，
-                # LLMRunner 中的 delta.content 和 delta.tool_calls 解析完全兼容
+                # QueryLoopRuntime 中的 delta.content 和 delta.tool_calls 解析完全兼容
                 yield chunk
 
         except BadRequestError as e:

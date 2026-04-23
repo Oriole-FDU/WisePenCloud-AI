@@ -12,7 +12,7 @@ from chat.api.vercel_formats import (
 from common.security import require_login
 from common.logger import log_event, log_error
 from chat.api.schemas.chat import ChatRequest
-from chat.application.chat_orchestrator import ChatOrchestrator
+from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.container import Container
 from chat.core.config.app_settings import settings
 from chat.domain.repositories import SessionRepository
@@ -21,7 +21,7 @@ router = APIRouter()
 
 
 async def _vercel_generator(chat_gen, model_name: str):
-    """将 orchestrator 的 AsyncGenerator 包装成 AI SDK 6.x SSE 格式"""
+    """将 coordinator 的 AsyncGenerator 包装成 AI SDK 6.x SSE 格式"""
     message_id = f"msg_{uuid.uuid4().hex}"
     try:
         yield message_start(message_id)
@@ -50,7 +50,7 @@ async def chat_completions(
         req: ChatRequest,
         background_tasks: BackgroundTasks,
         user_id: str = Depends(require_login),
-        service: ChatOrchestrator = Depends(Provide[Container.chat_service]),
+        coordinator: ChatTurnCoordinator = Depends(Provide[Container.chat_turn_coordinator]),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
     """
@@ -76,7 +76,7 @@ async def chat_completions(
 
     await session_repo.get_by_id_and_user(req.session_id, user_id)
 
-    chat_gen = service.handle_chat(
+    chat_gen = coordinator.handle_chat(
         user_id=user_id,
         session_id=req.session_id,
         user_query=req.query,

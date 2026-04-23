@@ -10,22 +10,22 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces import LLMProvider
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
-from chat.application.tools.registry import ToolRegistry
+from chat.application.tools.tool_registry import ToolRegistry
 
 
 # =============================================================================
-# Runner 领域事件
+# QueryLoopRuntime 领域事件
 # =============================================================================
 
 @dataclass(frozen=True)
 class StreamEvent:
-    """Runner 产出的领域事件基类。"""
+    """QueryLoopRuntime 产出的领域事件基类。"""
     pass
 
 
 @dataclass(frozen=True)
 class StepStartEvent(StreamEvent):
-    """一个 agent step 开始。orchestrator 借此重置 reasoning 累加缓冲。"""
+    """一个 agent step 开始。coordinator 借此重置 reasoning 累加缓冲。"""
     pass
 
 
@@ -43,7 +43,7 @@ class TextStartEvent(StreamEvent):
 
 @dataclass(frozen=True)
 class TextDeltaEvent(StreamEvent):
-    """普通文本增量。delta 为纯文本，供 orchestrator 累加进最终回答以用于持久化。"""
+    """普通文本增量。delta 为纯文本，供 coordinator 累加进最终回答以用于持久化。"""
     text_id: str
     delta: str
 
@@ -62,7 +62,7 @@ class ReasoningStartEvent(StreamEvent):
 
 @dataclass(frozen=True)
 class ReasoningDeltaEvent(StreamEvent):
-    """推理/思考增量。delta 为纯文本，供 orchestrator 累加进 reasoning 内容。"""
+    """推理/思考增量。delta 为纯文本，供 coordinator 累加进 reasoning 内容。"""
     reasoning_id: str
     delta: str
 
@@ -117,7 +117,7 @@ class _ParsedToolCall:
 
 @dataclass(frozen=True)
 class _StepTerminal:
-    """_run_single_step 的终端控制信号，固定为 async generator 的最后一项，由Runner 外层识别并分流
+    """_run_single_step 的终端控制信号，固定为 async generator 的最后一项，由 QueryLoopRuntime 外层识别并分流
     - should_continue: 本轮 finish_reason == 'tool_calls' 且有 tool accumulator 时为 True
     - new_messages:    本轮要追加到会话的 assistant (+tool) 消息；可能为空列表
     """
@@ -207,17 +207,17 @@ class _StepDeltaInterpreter:
 
 
 # =============================================================================
-# LLMRunner
+# QueryLoopRuntime
 # =============================================================================
 
-class LLMRunner:
+class QueryLoopRuntime:
     """
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
     """
 
     def __init__(self, llm: LLMProvider, tool_registry: ToolRegistry) -> None:
         self.llm = llm
-        self._registry = tool_registry
+        self._tool_registry = tool_registry
 
     """
     ReAct 循环主入口 (QueryLoop)
@@ -296,7 +296,7 @@ class LLMRunner:
             async for chunk in self.llm.stream_chat_completion(
                 messages=messages,
                 model_name=model_name,
-                tools=self._registry.schemas() or None,
+                tools=self._tool_registry.schemas() or None,
                 api_base=api_base,
                 api_key=api_key,
             ):
@@ -330,7 +330,7 @@ class LLMRunner:
         parsed_tool_calls = self._parse_tool_calls(delta_interpreter.accumulators)
 
         # 构造 assistant 的 tool_calls 消息（OpenAI 协议要求）
-        # 放入 new_messages，由 Runner 外层统一 extend 进 messages
+        # 放入 new_messages，由 QueryLoopRuntime 外层统一 extend 进 messages
         assistant_msg = ChatMessage(
             session_id=session_id,
             role=Role.ASSISTANT,
@@ -436,7 +436,7 @@ class LLMRunner:
     ) -> str:
         """查找并执行工具，工具未注册时返回降级文本而非向上抛出。"""
         try:
-            tool = self._registry.get(name)
+            tool = self._tool_registry.get(name)
         except KeyError:
             log_fail("工具调用", "未注册的工具", name=name)
             return f"[Tool Execution Error] Unknown tool: '{name}'."

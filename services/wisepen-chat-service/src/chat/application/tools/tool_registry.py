@@ -4,7 +4,7 @@ from chat.domain.interfaces.tool import BaseTool
 
 class ToolRegistry:
     """
-    工具注册表：维护 name → BaseTool 的映射，供 LLMRunner 动态查询和调度。
+    工具注册表：维护 name → BaseTool 的映射，供 QueryLoopRuntime 动态查询和调度。
     实例由 DI 容器统一管理，不同 Agent 角色可注入不同工具集。
     """
 
