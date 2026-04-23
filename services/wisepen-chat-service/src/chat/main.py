@@ -53,10 +53,7 @@ async def lifespan(app: FastAPI):
     kafka_producer = container.kafka_producer()
     await kafka_producer.start()
 
-    # Skill 子系统：启动 cache refresher
-    # - 内部先 eager trigger() 完成首刷（作为"周期刷新的第 0 次"）
-    # - 再挂起 TTL 循环，保证 Java/用户侧发布的新 Skill 能在 TTL 内被当前副本感知
-    # - 所有失败由 matcher.warmup / refresher.trigger 内部 catch，不阻止服务启动
+    # 启动 Skill cache refresher
     skill_cache_refresher = container.skill_cache_refresher()
     await skill_cache_refresher.start()
 
@@ -68,9 +65,7 @@ async def lifespan(app: FastAPI):
     # --- 关闭阶段 ---
     log_event(f"{settings.APP_NAME} 关闭")
 
-    # 先停 Skill cache refresher，回收后台 TTL task。
-    # 顺序在 kafka_producer.stop() 之前：refresher 的 trigger() 只读 Mongo，
-    # 不依赖 kafka，但统一保证"下游依赖最后关"的关闭纪律
+    # 关闭 Skill cache refresher
     skill_cache_refresher = container.skill_cache_refresher()
     await skill_cache_refresher.stop()
 

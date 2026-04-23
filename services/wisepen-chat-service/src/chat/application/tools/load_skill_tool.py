@@ -48,8 +48,7 @@ class LoadSkillTool(BaseTool):
 
     @property
     def reserved(self) -> bool:
-        # 系统保留：只有 skill 命中时由 Coordinator 以 extras 注入，
-        # 不应被用户级 deny 屏蔽（否则整个 Skill 能力对用户下线）
+        # 系统保留，不应被用户级 deny 屏蔽
         return True
 
     async def execute(self, context: Dict[str, Any], **kwargs) -> str:

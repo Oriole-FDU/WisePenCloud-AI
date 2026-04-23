@@ -20,12 +20,7 @@ class SkillAssetMeta(BaseModel):
 
 class Skill(Document):
     """
-    已发布的 Skill 快照（chat-service 视角）。
-
-    命名边界：collection 名保留 `wisepen_published_skill` 作为跨服务 schema 契约
-    （Java wisepen-skill-service 可能同时维护 draft / review / published 多个表），
-    而 Python 类名只取 `Skill` —— 因为在 chat-service 的 bounded context 里
-    只看得到"已发布"这一种形态，冠词 `Published` 属于噪声。
+    已发布的 Skill 快照
     """
 
     # MongoDB _id 直接用 skill_id（slug，机器标识），全链路只用这一个值
@@ -57,10 +52,6 @@ class Skill(Document):
 class SkillMeta:
     """
     Matcher / Coordinator 用的轻量元信息快照。
-
-    故意不从 Skill 继承：Skill 是 Beanie Document（带 ODM / IO / 可变），
-    SkillMeta 是 frozen dataclass（纯值对象、进程内 cache 用）。
-    两者字段的重叠是刻意设计的"投影边界"，由 repository 的显式 mapper 承担。
     """
     skill_id: str
     display_name: str

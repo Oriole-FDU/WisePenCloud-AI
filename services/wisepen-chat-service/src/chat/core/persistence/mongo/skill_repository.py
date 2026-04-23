@@ -6,10 +6,7 @@ from chat.domain.repositories import SkillRepository
 
 class MongoSkillRepository(SkillRepository):
     """
-    SkillRepository 的 MongoDB (Beanie) 只读实现。
-
-    Mongo 里的 wisepen_published_skill collection 由 Java wisepen-skill-service 写；
-    本类只做 read view，不提供任何写入方法。
+    SkillRepository 的 MongoDB (Beanie) 只读实现
     """
 
     async def list_enabled_meta(self) -> List[SkillMeta]:
