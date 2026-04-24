@@ -3,13 +3,15 @@ from abc import ABC, abstractmethod
 
 class SkillAssetLoader(ABC):
     """
-    Skill 附件（references / templates / examples ...）的只读懒加载接口
+    Skill 附件的只读懒加载接口
     """
 
     @abstractmethod
-    async def load_asset(self, skill_id: str, version: str, path: str) -> str:
-        """
-        返回指定 asset 的 UTF-8 文本正文
-        文件不存在或路径非法时抛异常，由上层转降级文本
-        """
+    async def load_by_object_key(self, object_key: str) -> bytes:
+        """按 OSS object_key 加载资产原始字节"""
+        ...
+
+    @abstractmethod
+    async def load_asset(self, skill_id: str, version: str, path: str) -> bytes:
+        """兼容保留：按 skill_id + version + 相对 path 加载资产原始字节"""
         ...

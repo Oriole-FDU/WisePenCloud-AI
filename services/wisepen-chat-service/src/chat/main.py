@@ -57,6 +57,14 @@ async def lifespan(app: FastAPI):
     skill_cache_refresher = container.skill_cache_refresher()
     await skill_cache_refresher.start()
 
+    # 启动 Skill 资产加载器
+    skill_asset_loader = container.skill_asset_loader()
+    if getattr(skill_asset_loader, "start", None) is not None:
+        try:
+            await skill_asset_loader.start()
+        except Exception as e:
+            log_error("SkillAssetLoader 启动", e)
+
     log_event(f"{settings.APP_NAME} 就绪", port=settings.SERVICE_PORT)
 
     # --- 运行阶段 ---
@@ -72,7 +80,23 @@ async def lifespan(app: FastAPI):
     # 关闭 Kafka Producer
     kafka_producer = container.kafka_producer()
     await kafka_producer.stop()
-    
+
+    # 关闭 Skill 资产加载器
+    skill_asset_loader = container.skill_asset_loader()
+    if getattr(skill_asset_loader, "stop", None) is not None:
+        try:
+            await skill_asset_loader.stop()
+        except Exception as e:
+            log_error("SkillAssetLoader 关闭", e)
+    try:
+        await container.rpc_client().aclose()
+    except Exception as e:
+        log_error("RpcClient 关闭", e)
+    try:
+        await container.service_discovery().close()
+    except Exception as e:
+        log_error("ServiceDiscovery 关闭", e)
+
     try:
         await nacos_client_manager.deregister_instance()
     except Exception as e:
@@ -102,8 +126,9 @@ app.include_router(api_router, prefix="/chat")
 if __name__ == "__main__":
     uvicorn.run(
         "chat.main:app",
-        host=settings.SERVICE_HOST,
-        port=settings.SERVICE_PORT,
-        reload=settings.DEV,
+        host=bootstrap_settings.SERVICE_HOST,
+        port=bootstrap_settings.SERVICE_PORT,
+        reload=False,
+        workers=1,
         env_file="./.env"
     )

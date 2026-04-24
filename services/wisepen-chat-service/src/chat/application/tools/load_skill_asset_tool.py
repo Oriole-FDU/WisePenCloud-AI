@@ -13,8 +13,6 @@ class LoadSkillAssetTool(BaseTool):
     按 skill_id + 相对路径懒加载 Skill Bundle 内的某个资产（reference / template / 示例等）
     skill_id 必须在 tool_context['allowed_skill_ids']（本轮 matcher 命中的白名单）中，否则拒绝加载，防止 LLM 幻觉
     该 path 必须出现在 Skill.assets_manifest 中（白名单），否则拒绝加载，防止 LLM 幻觉导致越权访问
-
-    SkillAssetLoader 暂用 LocalFSSkillAssetLoader，应迭代为 OssSkillAssetLoader
     """
 
     def __init__(
@@ -93,8 +91,8 @@ class LoadSkillAssetTool(BaseTool):
             return f"[Tool Error] Skill '{skill_id}' not found."
 
         # Manifest 白名单校验：path 必须是 publish 时冻结在 assets_manifest 里的那些
-        manifest_paths = {asset.path for asset in skill.assets_manifest}
-        if path not in manifest_paths:
+        path_to_object_key = {asset.path: asset.object_key for asset in skill.assets_manifest}
+        if path not in path_to_object_key:
             log_fail(
                 "load_skill_asset path 校验",
                 "path 不在 assets_manifest 中",
@@ -103,16 +101,54 @@ class LoadSkillAssetTool(BaseTool):
             )
             return (
                 f"[Tool Error] Asset path '{path}' is not declared in the assets manifest of skill '{skill_id}'. "
-                f"Available: {sorted(manifest_paths) or 'none'}."
+                f"Available: {sorted(path_to_object_key.keys()) or 'none'}."
+            )
+        object_key = path_to_object_key[path]
+        if not object_key:
+            # 发布侧理论上必填 object_key，出现空值说明数据异常，走降级
+            log_fail(
+                "load_skill_asset object_key 缺失",
+                "assets_manifest 条目 object_key 为空",
+                skill_id=skill_id,
+                path=path,
+            )
+            return (
+                f"[Tool Error] Asset '{path}' of skill '{skill_id}' has no object_key registered; "
+                f"please contact the skill publisher."
             )
 
         try:
-            content = await self._skill_asset_loader.load_asset(
-                skill_id=skill_id, version=skill.version, path=path
-            )
+            raw = await self._skill_asset_loader.load_by_object_key(object_key)
         except Exception as e:
-            log_error("load_skill_asset 读取", e, skill_id=skill_id, version=skill.version, path=path)
+            log_error(
+                "load_skill_asset 读取",
+                e,
+                skill_id=skill_id,
+                version=skill.version,
+                path=path,
+                object_key=object_key,
+            )
             return f"[Tool Error] Failed to read asset: {type(e).__name__}: {e}"
+
+        # Loader 返回 bytes：资产可能是文本（.md / .py / .json）也可能是二进制（.png / .pdf / .wasm ...）
+        # 在给 LLM 的边界上做 UTF-8 严格解码，拒绝不可文本化的二进制资产
+        try:
+            content = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            log_fail(
+                "load_skill_asset 解码",
+                "资产非 UTF-8 文本，无法直接返回给 LLM",
+                skill_id=skill_id,
+                version=skill.version,
+                path=path,
+                object_key=object_key,
+                bytes=len(raw),
+            )
+            return (
+                f"[Tool Error] Asset '{path}' of skill '{skill_id}' appears to be a binary blob "
+                f"({len(raw)} bytes) and cannot be shown as text. "
+                f"If you need to reference it, ask the user to describe or preview the asset instead."
+            )
 
         # 字符截断，防止超长资产撑爆上下文水位
         if len(content) > settings.TOOL_RESULT_MAX_CHARS:

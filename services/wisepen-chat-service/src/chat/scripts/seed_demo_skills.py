@@ -18,8 +18,10 @@
     2. 读取 SKILL.md（含 YAML frontmatter）解析出 metadata
     3. 把除 SKILL.md 以外的文件登记成 assets_manifest
     4. upsert 进 wisepen_published_skill collection
-    5. asset 正文不拷贝 — dev 下 LocalFSSkillAssetLoader 直接读 SKILL_ASSETS_CACHE_DIR
-       （默认就是同一份 dev_fixtures/skill_bundles），因此无需额外搬运
+    5. 为每个 asset 及 SKILL.md 写入与 Java 发布侧一致的 OSS object_key 约定：
+       skills/<skill_id>/<version>/<相对路径>；正文不拷贝进 Mongo
+    6. DEV 运行期 LocalFSSkillAssetLoader 先从 SKILL_ASSETS_CACHE_DIR 读盘，未命中回退 OSS；
+       生产形态（DEV=False）由 Java 上传对象后 chat 经 file-storage 预签名读取并落本地磁盘缓存
 """
 
 from __future__ import annotations
@@ -35,7 +37,6 @@ from pymongo import AsyncMongoClient
 
 from common.logger import log_error, log_event
 
-from chat.core.config.app_settings import settings
 from chat.domain.entities.skill import Skill, SkillAssetMeta
 
 
@@ -46,6 +47,11 @@ _KIND_BY_FIRST_SEGMENT = {
     "scripts": "script",
     "examples": "example",
 }
+
+
+def _object_key(skill_id: str, version: str, rel_path: str) -> str:
+    """与 Java wisepen-skill-service 发布侧约定一致：skills/<skill_id>/<version>/<path>"""
+    return f"skills/{skill_id}/{version}/{rel_path}"
 
 
 def _split_frontmatter(text: str) -> Tuple[dict, str]:
@@ -71,8 +77,8 @@ def _split_frontmatter(text: str) -> Tuple[dict, str]:
     return meta, body
 
 
-def _scan_assets(version_dir: Path) -> List[SkillAssetMeta]:
-    """扫描 bundle 目录下 SKILL.md 以外的文件，生成 assets manifest（POSIX 相对路径）。"""
+def _scan_assets(version_dir: Path, skill_id: str, version: str) -> List[SkillAssetMeta]:
+    """扫描 bundle 目录下 SKILL.md 以外的文件，生成 assets manifest（POSIX 相对路径 + object_key）。"""
     assets: List[SkillAssetMeta] = []
     for p in sorted(version_dir.rglob("*")):
         if not p.is_file():
@@ -85,6 +91,7 @@ def _scan_assets(version_dir: Path) -> List[SkillAssetMeta]:
         assets.append(
             SkillAssetMeta(
                 path=rel,
+                object_key=_object_key(skill_id, version, rel),
                 kind=kind,
                 description="(dev fixture, no description)",
                 size_bytes=p.stat().st_size,
@@ -127,7 +134,8 @@ async def _seed_one_bundle(version_dir: Path, skill_id: str, version: str) -> No
             declared_version=declared_version,
         )
 
-    assets_manifest = _scan_assets(version_dir)
+    assets_manifest = _scan_assets(version_dir, skill_id=skill_id, version=version)
+    skill_md_object_key = _object_key(skill_id, version, "SKILL.md")
 
     existing = await Skill.find_one(Skill.skill_id == skill_id)
     now = datetime.now(timezone.utc)
@@ -138,6 +146,7 @@ async def _seed_one_bundle(version_dir: Path, skill_id: str, version: str) -> No
             description=description,
             triggers=[str(t) for t in triggers],
             skill_md=skill_md_full,
+            skill_md_object_key=skill_md_object_key,
             assets_manifest=assets_manifest,
             version=version,
             enabled=enabled,
@@ -151,6 +160,7 @@ async def _seed_one_bundle(version_dir: Path, skill_id: str, version: str) -> No
         existing.description = description
         existing.triggers = [str(t) for t in triggers]
         existing.skill_md = skill_md_full
+        existing.skill_md_object_key = skill_md_object_key
         existing.assets_manifest = assets_manifest
         existing.version = version
         existing.enabled = enabled
@@ -160,7 +170,7 @@ async def _seed_one_bundle(version_dir: Path, skill_id: str, version: str) -> No
 
 
 async def _main() -> None:
-    root = Path(settings.SKILL_ASSETS_CACHE_DIR).resolve()
+    root = Path("dev_fixtures/skill_bundles").resolve()
     if not root.is_dir():
         log_error(
             "seed_demo_skills: SKILL_ASSETS_CACHE_DIR 不存在，退出",
@@ -169,9 +179,9 @@ async def _main() -> None:
         )
         return
 
-    mongo_client = AsyncMongoClient(settings.MONGODB_URL)
+    mongo_client = AsyncMongoClient("mongodb://root:root@wisepen-dev-server:27017/")
     await init_beanie(
-        database=mongo_client[settings.MONGODB_DB_NAME],
+        database=mongo_client["wisepen_chat"],
         document_models=[Skill],
     )
 

@@ -91,7 +91,7 @@ class ChatTurnCoordinator:
         # [Token Window] 从后往前累加 Token，超过高水位时将 messages_compress_candidates 压缩为会话的历史摘要（本轮结束时）
         messages_keep, messages_compress_candidates, needs_compression = await self._context_assembler.build_context_window(recent_messages)
 
-        tool_context = {
+        tool_context: dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
         } 

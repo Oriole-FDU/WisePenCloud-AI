@@ -141,7 +141,7 @@ class RpcClient:
                 if last_code == _R_SUCCESS_CODE:
                     return body.get("data")
 
-                # 业务错误：不做跨实例重试，直接抛
+                # 业务错误不做跨实例重试
                 break
 
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
