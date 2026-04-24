@@ -13,4 +13,6 @@ dependencies = [
     "pydantic",
     "loguru",
     "aiokafka",
+    "httpx",
+    "nacos-sdk-python",
 ]

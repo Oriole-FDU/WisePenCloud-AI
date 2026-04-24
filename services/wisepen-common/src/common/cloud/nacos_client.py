@@ -44,7 +44,7 @@ class NacosClientManager:
             self._config_client = await NacosConfigService.create_config_service(self._build_client_config())
         return self._config_client
 
-    async def _get_naming_client(self) -> NacosNamingService:
+    async def get_naming_client(self) -> NacosNamingService:
         if self._naming_client is None:
             self._naming_client = await NacosNamingService.create_naming_service(self._build_client_config())
         return self._naming_client
@@ -69,7 +69,7 @@ class NacosClientManager:
 
     async def register_instance(self) -> None:
         """向 Nacos 注册当前服务实例。"""
-        client = await self._get_naming_client()
+        client = await self.get_naming_client()
         host = self._resolve_host()
         try:
             await client.register_instance(
@@ -93,7 +93,7 @@ class NacosClientManager:
 
     async def deregister_instance(self) -> None:
         """从 Nacos 注销当前服务实例（优雅关闭）。"""
-        client = await self._get_naming_client()
+        client = await self.get_naming_client()
         host = self._resolve_host()
         try:
             await client.deregister_instance(
