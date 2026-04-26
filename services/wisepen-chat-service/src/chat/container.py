@@ -28,6 +28,7 @@ from chat.application.tools import (
     SearchHistoricalMessagesTool,
     LoadSkillTool,
     LoadSkillAssetTool,
+    WebSearchTool,
 )
 from common.clients.file_storage import FileStorageClient
 from common.cloud.nacos_client import nacos_client_manager
@@ -133,11 +134,16 @@ class Container(containers.DeclarativeContainer):
         skill_repo=skill_repo,
         skill_asset_loader=skill_asset_loader,
     )
+    # WebSearchTool
+    web_search_tool = providers.Singleton(
+        WebSearchTool,
+    )
 
     tool_providers = providers.List(
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
+        web_search_tool,
     )
 
     tool_registry = providers.Singleton(
