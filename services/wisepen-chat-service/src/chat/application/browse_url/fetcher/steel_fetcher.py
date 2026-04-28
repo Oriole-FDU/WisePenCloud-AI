@@ -18,7 +18,9 @@ class SteelFetcher:
         """利用 Steel 抓取指定 URL 的页面内容"""
         try:
             response = await self._client.scrape(url=url, format=["markdown"])
-            return response.markdown or response.content or response.text
+            if response.content and hasattr(response.content, 'markdown'):
+                return response.content.markdown
+            return None
         except Exception as e:
             log_fail("Steel 浏览器抓取", e, url=url)
             return None

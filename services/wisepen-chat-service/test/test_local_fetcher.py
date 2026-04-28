@@ -27,6 +27,5 @@ async def fetch_and_print(url: str):
 
 
 if __name__ == "__main__":
-    # 论文 HTML 版本
     test_url = "https://www.bilibili.com/video/BV1GJ411x7h7"
     asyncio.run(fetch_and_print(test_url))
