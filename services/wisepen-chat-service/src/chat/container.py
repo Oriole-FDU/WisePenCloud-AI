@@ -29,6 +29,7 @@ from chat.application.tools import (
     LoadSkillTool,
     LoadSkillAssetTool,
     WebSearchTool,
+    BrowseUrlTool,
 )
 from common.clients.file_storage import FileStorageClient
 from common.cloud.nacos_client import nacos_client_manager
@@ -138,12 +139,17 @@ class Container(containers.DeclarativeContainer):
     web_search_tool = providers.Singleton(
         WebSearchTool,
     )
+    # BrowseUrlTool
+    browse_url_tool = providers.Singleton(
+        BrowseUrlTool,
+    )
 
     tool_providers = providers.List(
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
         web_search_tool,
+        browse_url_tool,
     )
 
     tool_registry = providers.Singleton(

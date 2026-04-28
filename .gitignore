@@ -50,7 +50,12 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# ── Node.js ───────────────────────────────────────────────────────────────────
+node_modules/
+
 # ── 特殊忽略 (临时) ─────────────────────────────────────────────────────────
 services/wisepen-chat-service/src/chat/bootstrap/
 mock-frontend/
+uv.lock
+*-dev.yaml
 

@@ -23,4 +23,9 @@ dependencies = [
     "jieba",
     "zeroentropy",
     "wisepen-common",
+    "tavily-python",
+    "httpx",
+    "steel-sdk",
+    "readability-lxml",
+    "markdownify"
 ]

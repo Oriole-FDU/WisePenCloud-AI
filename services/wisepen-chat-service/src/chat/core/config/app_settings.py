@@ -58,7 +58,10 @@ class AppSettings(BaseModel):
     QDRANT_PASSWORD: str
 
     # Web Search 工具配置
-    TAVILY_API_KEY: str
+    TAVILY_API_KEY: str = "dummy_key"
+
+    # Browse URL 工具配置
+    STEEL_BASE_URL: str = "http://localhost:3000"
 
     # Token 动态滑动窗口 + 双水位压缩配置
     # 模型上下文窗口总大小（token 数），默认对齐 gpt-4o 的 128k 上下文 128000
@@ -90,7 +93,14 @@ class AppSettings(BaseModel):
         return (SERVICE_ROOT / path).resolve()
 
     # OSS 资产本地磁盘缓存目录（运行期管理，GC 自动清理）
-    SKILL_OSS_CACHE_DIR: str = "/var/skill_oss_cache"
+    SKILL_OSS_CACHE_DIR: str = "dev_fixtures/skill_oss_cache"
+    @property
+    def skill_oss_cache_path(self) -> Path:
+        path = Path(self.SKILL_OSS_CACHE_DIR)
+        if path.is_absolute():
+            return path
+        return (SERVICE_ROOT / path).resolve()
+        
     # 缓存文件 TTL：mtime 距今超过该秒数 → GC 清理（默认 6 小时）
     SKILL_OSS_CACHE_TTL_SECONDS: int = 6 * 3600
     # GC 扫描周期（秒）

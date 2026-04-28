@@ -4,6 +4,7 @@ from .search_history_tool import SearchHistoricalMessagesTool
 from .load_skill_tool import LoadSkillTool
 from .load_skill_asset_tool import LoadSkillAssetTool
 from .web_search_tool import WebSearchTool
+from .browse_url_tool import BrowseUrlTool
 
 __all__ = [
     "ToolRegistry",
@@ -12,5 +13,6 @@ __all__ = [
     "LoadSkillTool",
     "LoadSkillAssetTool",
     "WebSearchTool",
+    "BrowseUrlTool",
 ]
 
