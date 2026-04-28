@@ -16,7 +16,7 @@ API_BASE_URL = "http://localhost:8000"
 FROM_SOURCE_SECRET = "APISIX-wX0iR6tY"
 USER_ID = "123"
 TIMEOUT = 120.0
-PAPER_URL = "https://arxiv.org/abs/2310.06825"
+PAPER_URL = "https://www.bilibili.com/video/BV1GJ411x7h7"
 
 COMMON_HEADERS = {
     "Content-Type": "application/json",
@@ -55,7 +55,7 @@ async def main():
 
         chat_data = {
             "session_id": session_id,
-            "query": f"请帮我抓取这篇论文的内容：{PAPER_URL}",
+            "query": f"请帮我抓取这个网页的内容：{PAPER_URL}",
             "model": 1,
         }
 

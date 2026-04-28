@@ -17,10 +17,11 @@ class SmartFetcher:
         - markdown: 已是干净的 Markdown，直接返回
     """
 
-    def __init__(self, steel_base_url: str):
+    def __init__(self, steel_base_url: str, min_content_length: int = 400):
         self._static_fetcher = StaticFetcher()
         self._steel_fetcher = SteelFetcher(steel_base_url=steel_base_url)
         self._local_script_fetcher = LocalScriptFetcher()
+        self._min_content_length = min_content_length
 
         self._whole_chain: List[Tuple] = [
             (self._static_fetcher, "html"),
@@ -65,8 +66,14 @@ class SmartFetcher:
                 try:
                     clean_content = extract_main_content(content)
                     result = convert_to_markdown(clean_content)
+
+                    if len(result.strip()) < self._min_content_length:
+                        log_fail("网页抓取", f"清洗后内容过短（{len(result.strip())} 字符），触发降级", url=url, fetcher=fetcher_name, mode=mode)
+                        continue
+
                     log_ok("网页抓取", url=url, fetcher=fetcher_name, mode=mode)
                     return result
+                    
                 except Exception as e:
                     log_fail("HTML 清洗", e, url=url, fetcher=fetcher_name, fallback="返回原文")
                     return content.strip()

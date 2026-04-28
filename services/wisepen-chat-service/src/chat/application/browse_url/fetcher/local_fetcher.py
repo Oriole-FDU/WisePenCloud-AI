@@ -21,19 +21,23 @@ SCRIPT_PATH = ROOT_DIR / "scripts" / "local_web_fetcher.js"
 
 
 class LocalScriptFetcher:
-    def __init__(self, timeout: float = 120.0, md_length_threshold: int = 100):
+    def __init__(self, timeout: float = 120.0, min_content_length: int = 50):
         if not SCRIPT_PATH.is_file():
             log_error("本地脚本初始化", f"未找到 JS 脚本: {SCRIPT_PATH}")
             raise FileNotFoundError(f"未找到 JS 脚本: {SCRIPT_PATH}")
 
-        node_path = shutil.which("node") or shutil.which("node.exe")
-        if not node_path:
-            log_error("本地脚本初始化", "未检测到 Node.js 运行环境，请确认 Node.js 已安装并加入 PATH")
-            raise FileNotFoundError("未检测到 Node.js 运行环境，请确认 Node.js 已安装并加入 PATH")
+        node_path = (
+            shutil.which("node")
+            or shutil.which("node.exe")
+            or r"c:\Users\12732\.trae-cn\sdks\versions\node\current\node.exe"
+        )
+        if not Path(node_path).is_file():
+            log_error("本地脚本初始化", f"未找到 Node.js: {node_path}")
+            raise FileNotFoundError(f"未找到 Node.js: {node_path}")
 
         self._node_path = node_path
         self._timeout = timeout
-        self._md_length_threshold = md_length_threshold
+        self._min_content_length = min_content_length
 
         log_ok("本地脚本初始化", node_path=self._node_path, timeout=self._timeout)
 
@@ -49,17 +53,18 @@ class LocalScriptFetcher:
                 limit=10 * 1024 * 1024,
             )
 
-            stdout, _ = await asyncio.wait_for(
+            stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
                 timeout=self._timeout,
             )
 
             if process.returncode != 0:
-                log_fail("本地脚本执行", f"退出码 {process.returncode}", url=url)
+                err_msg = stderr.decode("utf-8", errors="replace").strip()[:500] if stderr else ""
+                log_fail("本地脚本执行", f"退出码 {process.returncode}: {err_msg}", url=url)
                 return None
 
             markdown = stdout.decode("utf-8").strip()
-            if len(markdown) <= self._md_length_threshold:
+            if len(markdown) <= self._min_content_length:
                 log_fail("本地脚本执行", f"抓取内容过短（{len(markdown)} 字符），已丢弃", url=url)
                 return None
 
