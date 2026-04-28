@@ -26,14 +26,10 @@ class LocalScriptFetcher:
             log_error("本地脚本初始化", f"未找到 JS 脚本: {SCRIPT_PATH}")
             raise FileNotFoundError(f"未找到 JS 脚本: {SCRIPT_PATH}")
 
-        node_path = (
-            shutil.which("node")
-            or shutil.which("node.exe")
-            or r"c:\Users\12732\.trae-cn\sdks\versions\node\current\node.exe"
-        )
-        if not Path(node_path).is_file():
-            log_error("本地脚本初始化", f"未找到 Node.js: {node_path}")
-            raise FileNotFoundError(f"未找到 Node.js: {node_path}")
+        node_path = shutil.which("node") or shutil.which("node.exe")
+        if not node_path:
+            log_error("本地脚本初始化", "未检测到 Node.js 运行环境，请确认 Node.js 已安装并加入 PATH")
+            raise FileNotFoundError("未检测到 Node.js 运行环境，请确认 Node.js 已安装并加入 PATH")
 
         self._node_path = node_path
         self._timeout = timeout
