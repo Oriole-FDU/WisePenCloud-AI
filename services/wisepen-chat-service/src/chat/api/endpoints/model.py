@@ -26,7 +26,7 @@ async def get_models():
             ratio=model.billing_ratio,
             support_thinking=model.support_thinking,
             support_vision=model.support_vision,
-            is_default=(model.id == settings.DEFAULT_MODEL),
+            is_default=(model.id == settings.DEFAULT_MODEL_ID),
         )
         if model.type == ModelType.STANDARD_MODEL:
             standard_models.append(model_info)

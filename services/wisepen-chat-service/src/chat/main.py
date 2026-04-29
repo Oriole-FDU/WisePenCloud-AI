@@ -26,14 +26,19 @@ from chat.api.endpoints import model as model_endpoints
 from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill
 
 
-os.environ["no_proxy"] = "localhost,127.0.0.1,wisepen-dev-server"
-os.environ["NO_PROXY"] = "localhost,127.0.0.1,wisepen-dev-server"
+# 避免 HTTP 代理拦截内部中间件请求。
+no_proxy = ",".join(filter(None, [
+    os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "",
+    "localhost, 127.0.0.1"
+]))
+os.environ["no_proxy"] = no_proxy
+os.environ["NO_PROXY"] = no_proxy
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 应用生命周期
     # --- 启动阶段 ---
-    log_event(f"{settings.APP_NAME} 启动")
+    log_event(f"{bootstrap_settings.APP_NAME} 启动")
 
     # 初始化 Beanie
     mongo_client = AsyncMongoClient(settings.MONGODB_URL)
@@ -65,13 +70,13 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             log_error("SkillAssetLoader 启动", e)
 
-    log_event(f"{settings.APP_NAME} 就绪", port=settings.SERVICE_PORT)
+    log_event(f"{bootstrap_settings.APP_NAME} 就绪", port=bootstrap_settings.SERVICE_PORT)
 
     # --- 运行阶段 ---
     yield
 
     # --- 关闭阶段 ---
-    log_event(f"{settings.APP_NAME} 关闭")
+    log_event(f"{bootstrap_settings.APP_NAME} 关闭")
 
     # 关闭 Skill cache refresher
     skill_cache_refresher = container.skill_cache_refresher()
@@ -103,7 +108,7 @@ async def lifespan(app: FastAPI):
         log_error("Nacos 服务注销", e)
 
 container.wire(modules=[chat_endpoints, session_endpoints, memory_endpoints, model_endpoints])  # 注入依赖到路由模块
-app = FastAPI(title=settings.APP_NAME, lifespan=lifespan, docs_url="/docs")
+app = FastAPI(title=bootstrap_settings.APP_NAME, lifespan=lifespan, docs_url="/docs")
 
 # CORS 中间件
 app.add_middleware(
@@ -118,7 +123,7 @@ app.add_middleware(
 app.add_middleware(SecurityHeaderMiddleware, from_source_secret=settings.FROM_SOURCE_SECRET)
 
 # 注册全局异常处理器：ServiceException / PermissionException / RequestValidationError 统一转为 R 格式
-setup_global_exception_handlers(app, is_dev=settings.DEV)
+setup_global_exception_handlers(app, is_dev=bootstrap_settings.IS_DEV)
 
 # 挂载业务路由
 app.include_router(api_router, prefix="/chat")
@@ -130,5 +135,4 @@ if __name__ == "__main__":
         port=bootstrap_settings.SERVICE_PORT,
         reload=False,
         workers=1,
-        env_file="./.env"
     )

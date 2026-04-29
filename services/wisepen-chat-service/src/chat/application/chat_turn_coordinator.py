@@ -72,7 +72,7 @@ class ChatTurnCoordinator:
             model_id: Optional[int] = None,
             states: Optional[List[Dict[str, Any]]] = None,
     ):
-        model_id = model_id or settings.DEFAULT_MODEL
+        model_id = model_id or settings.DEFAULT_MODEL_ID
 
         # [Model Resolve] 通过映射表查找首选供应商，获取实际模型名和 API 凭证
         resolved = await self._model_resolver.resolve(model_id)

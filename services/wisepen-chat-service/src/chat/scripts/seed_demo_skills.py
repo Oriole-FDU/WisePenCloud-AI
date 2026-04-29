@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple
@@ -170,16 +171,22 @@ async def _seed_one_bundle(version_dir: Path, skill_id: str, version: str) -> No
 
 
 async def _main() -> None:
-    root = Path("dev_fixtures/skill_bundles").resolve()
+    default_root = (
+        Path(__file__).resolve().parents[3] / "dev_fixtures" / "skill_bundles"
+    )
+    root = Path(os.environ.get("SKILL_ASSETS_CACHE_PATH", str(default_root))).resolve()
     if not root.is_dir():
         log_error(
-            "seed_demo_skills: SKILL_ASSETS_CACHE_DIR 不存在，退出",
+            "seed_demo_skills: SKILL_ASSETS_CACHE_PATH 不存在，退出",
             FileNotFoundError(str(root)),
             path=str(root),
         )
         return
 
-    mongo_client = AsyncMongoClient("mongodb://root:root@wisepen-dev-server:27017/")
+    mongo_url = os.environ.get(
+        "SEED_MONGO_URL", "mongodb://root:root@localhost:27017/"
+    )
+    mongo_client = AsyncMongoClient(mongo_url)
     await init_beanie(
         database=mongo_client["wisepen_chat"],
         document_models=[Skill],

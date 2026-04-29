@@ -1,4 +1,12 @@
 from common.core.config.bootstrap_settings import BootstrapSettings
 
-# 本服务实例化，从当前目录就近的 .env 文件读取配置
-bootstrap_settings = BootstrapSettings()
+
+class ChatBootstrapSettings(BootstrapSettings):
+    """
+    wisepen-chat-service 引导配置
+    """
+
+    APP_NAME: str = "WisePen Chat Service"
+    SERVICE_NAME: str = "wisepen-chat-service"
+
+bootstrap_settings = ChatBootstrapSettings()

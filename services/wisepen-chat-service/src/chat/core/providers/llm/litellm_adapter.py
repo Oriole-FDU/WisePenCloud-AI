@@ -5,10 +5,11 @@ from chat.domain.interfaces import LLMProvider
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 from chat.core.config.app_settings import settings
+from chat.core.config.bootstrap_settings import bootstrap_settings
 
 litellm.telemetry = False
 
-_is_debug = settings.LOG_LEVEL.upper() == "DEBUG"
+_is_debug = bootstrap_settings.LOG_LEVEL.upper() == "DEBUG"
 litellm.set_verbose = _is_debug
 litellm.suppress_debug_info = not _is_debug
 

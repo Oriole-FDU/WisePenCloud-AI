@@ -58,7 +58,13 @@ class NacosClientManager:
         ))
 
     def _resolve_host(self) -> str:
-        """若 SERVICE_HOST 为回环地址，尝试自动获取本机内网 IP。"""
+        """注册到 Nacos 时使用的 IP
+        优先级 NACOS_REGISTER_IP ＞ SERVICE_HOST（非回环地址） ＞ socket.gethostname 兜底
+        """
+
+        if bootstrap_settings.NACOS_REGISTER_IP:
+            return bootstrap_settings.NACOS_REGISTER_IP
+
         host = bootstrap_settings.SERVICE_HOST
         if host in ("127.0.0.1", "localhost", "0.0.0.0"):
             try:
@@ -115,12 +121,12 @@ class NacosClientManager:
         try:
             # 注册监听器，当 Nacos 上的配置文件发生变化时，触发回调
             await client.add_config_watcher(
-                data_id=bootstrap_settings.NACOS_DATA_ID,
+                data_id=bootstrap_settings.data_id,
                 group=bootstrap_settings.NACOS_GROUP,
                 cb=callback
             )
-            log_ok("Nacos 配置热更新监听", data_id=bootstrap_settings.NACOS_DATA_ID)
+            log_ok("Nacos 配置热更新监听", data_id=bootstrap_settings.data_id)
         except Exception as e:
-            log_error("Nacos 配置热更新监听", e, data_id=bootstrap_settings.NACOS_DATA_ID)
+            log_error("Nacos 配置热更新监听", e, data_id=bootstrap_settings.data_id)
 
 nacos_client_manager = NacosClientManager()

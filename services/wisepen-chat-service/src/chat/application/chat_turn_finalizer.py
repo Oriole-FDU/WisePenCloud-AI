@@ -175,6 +175,8 @@ class ChatTurnFinalizer:
                 model_name=settings.SUMMARY_MODEL,
                 messages=prompt,
                 temperature=0.5,
+                api_base=settings.LLM_BASE_URL,
+                api_key=settings.LLM_API_KEY,
             )
             new_title = (response.content or "").strip().strip('"\'""''')
             if not new_title:
@@ -234,6 +236,8 @@ class ChatTurnFinalizer:
                 model_name=settings.SUMMARY_MODEL,
                 messages=summarize_prompt,
                 temperature=0.3,  # 低温，保证摘要稳定性
+                api_base=settings.LLM_BASE_URL,
+                api_key=settings.LLM_API_KEY,
             )
             new_summary = message_response.content or ""
         except Exception as e:
