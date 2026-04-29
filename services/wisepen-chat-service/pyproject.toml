@@ -27,5 +27,9 @@ dependencies = [
     "httpx",
     "steel-sdk",
     "readability-lxml",
-    "markdownify"
+    "markdownify",
+    "playwright"
 ]
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"

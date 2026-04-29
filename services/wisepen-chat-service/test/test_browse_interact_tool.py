@@ -16,7 +16,8 @@ API_BASE_URL = "http://localhost:8000"
 FROM_SOURCE_SECRET = "APISIX-wX0iR6tY"
 USER_ID = "123"
 TIMEOUT = 120.0
-PAPER_URL = "https://item.taobao.com/item.htm?id=678901234567"
+
+TARGET_URL = "https://www.bilibili.com"
 
 COMMON_HEADERS = {
     "Content-Type": "application/json",
@@ -27,7 +28,6 @@ COMMON_HEADERS = {
 
 async def main():
     async with AsyncClient(timeout=TIMEOUT) as client:
-        # Step 1: 创建会话
         print("\n" + "=" * 60)
         print("Step 1: Creating session...")
         print("=" * 60)
@@ -35,7 +35,7 @@ async def main():
         create_response = await client.post(
             f"{API_BASE_URL}/chat/session/createSession",
             headers=COMMON_HEADERS,
-            json={"title": "Test Browse URL"},
+            json={"title": "Test Browse Interact"},
         )
 
         print(f"Status: {create_response.status_code}")
@@ -48,14 +48,17 @@ async def main():
             print(f"Error: {create_response.text}")
             return
 
-        # Step 2: 发送请求让 AI 使用 browse_url 工具
         print("\n" + "=" * 60)
-        print("Step 2: Sending chat message...")
+        print("Step 2: Sending chat message (browse_interact task)...")
         print("=" * 60)
 
         chat_data = {
             "session_id": session_id,
-            "query": f"请帮我抓取这个网页的内容：{PAPER_URL}",
+            "query": (
+                "请用 browse_interact 在 B站搜索 '复旦大学'。"
+                "推荐使用 snapshot+click_ref+fill_ref 流程，效率高。"
+                "规则：每次只做一步操作，第二步起必须传 browser_session_id。"
+            ),
             "model": 1,
         }
 
@@ -95,13 +98,23 @@ async def main():
                             event_type = data.get("type", "")
 
                             if event_type == "tool-input-start":
-                                print(f"\n🔧 [TOOL CALL] {data.get('toolName')} (id={data.get('toolCallId')})")
+                                tool_name = data.get("toolName", "")
+                                if tool_name == "browse_interact":
+                                    print(f"\n [BROWSE_INTERACT CALLED] id={data.get('toolCallId')}")
+                                else:
+                                    print(f"\n [TOOL CALL] {tool_name} (id={data.get('toolCallId')})")
                             elif event_type == "tool-input-available":
-                                print(f"   [TOOL INPUT] {json.dumps(data.get('input', {}), ensure_ascii=False)}")
+                                print(f"   [INPUT] {json.dumps(data.get('input', {}), ensure_ascii=False)}")
                             elif event_type == "tool-output-available":
                                 output = data.get("output", "")
-                                preview = str(output)[:300]
-                                print(f"   [TOOL OUTPUT] {preview}{'...' if len(str(output)) > 300 else ''}")
+                                output_str = str(output)
+                                # 如果有 screenshot，提取 base64 长度
+                                has_screenshot = "screenshot" in output_str and len(output_str) > 200
+                                if has_screenshot:
+                                    print(f"   [OUTPUT] success, screenshot_base64_len={len(json.loads(output_str).get('screenshot',''))}")
+                                else:
+                                    preview = output_str[:500]
+                                    print(f"   [OUTPUT] {preview}{'...' if len(output_str) > 500 else ''}")
                             elif event_type == "text-delta" and data.get("delta"):
                                 full_response_text += data["delta"]
                                 print(data["delta"], end="", flush=True)
@@ -123,7 +136,8 @@ async def main():
             print(f"\n... (truncated, total {len(full_response_text)} chars)")
 
         print(f"\nTotal events: {len(all_events)}")
-        print(f"Event types: {[e.get('type') for e in all_events]}")
+        tool_calls = [e for e in all_events if e.get("type") == "tool-input-start"]
+        print(f"Tool calls: {[(e.get('toolName'), e.get('toolCallId')) for e in tool_calls]}")
         print("\n" + "=" * 60)
         print("Test completed!")
         print("=" * 60)
