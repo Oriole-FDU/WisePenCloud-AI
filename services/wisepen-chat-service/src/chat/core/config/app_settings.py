@@ -36,7 +36,7 @@ class AppSettings(BaseModel):
 
     # 安全配置
     # 与 APISIX 网关约定的请求来源 token
-    FROM_SOURCE_SECRET: str
+    FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
 
     # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str

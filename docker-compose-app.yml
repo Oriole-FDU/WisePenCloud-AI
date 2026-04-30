@@ -7,21 +7,23 @@ services:
     restart: always
     environment:
       - TZ=Asia/Shanghai
+      - PROFILE=prod
       - NACOS_SERVER_ADDR=nacos:8848
       - NACOS_NAMESPACE_ID=
       - NACOS_GROUP=DEFAULT_GROUP
       - NACOS_USERNAME=${NACOS_USERNAME}
       - NACOS_PASSWORD=${NACOS_PASSWORD}
-      - PROFILE=prod
       - SERVICE_HOST=0.0.0.0
       - SERVICE_PORT=9200
       - LOG_LEVEL=INFO
     volumes:
       - ../logs/chat:/logs
     networks:
-      - cloud-net
+      wisepen-net:
+        aliases:
+          - chat-service
 
 networks:
-  cloud-net:
+  wisepen-net:
     external: true
-    name: cloud-infra_cloud-net
+    name: wisepen-net

@@ -1,0 +1,20 @@
+version: '3.8'
+
+# 旧版本中间件兼容层
+# 在 host 上已经存在 cloud-infra_cloud-net（老中间件依赖的网络）时
+# 由部署脚本/Jenkinsfile 检测后追加 -f docker-compose-app.legacy-net.yml
+# 让微服务能同时通过 wisepen-net（新） 和 cloud-infra_cloud-net（老） 找到中间件
+
+# 老中间件全部下线后，本文件可以与部署脚本、Jenkins file中的探测分支一并删除
+
+services:
+  chat-service:
+    networks:
+      cloud-infra_cloud-net:
+        aliases:
+          - chat-service
+
+networks:
+  cloud-infra_cloud-net:
+    external: true
+    name: cloud-infra_cloud-net

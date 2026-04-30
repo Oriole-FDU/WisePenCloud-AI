@@ -55,7 +55,17 @@ pipeline {
                     export NACOS_USERNAME=\${NACOS_USER}
                     export NACOS_PASSWORD=\${NACOS_PWD}
 
-                    docker-compose -f ${COMPOSE_FILE_PATH} up -d --remove-orphans
+                    # 网络兼容
+                    # 检测到遗留 cloud-infra_cloud-net 时叠加 legacy-net overlay
+                    # 老中间件全部下线后，本脚本可以与docker-compose-app.legacy-net.yml文件、部署脚本中的探测分支一并删除
+                    docker network create wisepen-net 2>/dev/null || true
+                    COMPOSE_FILES="-f ${COMPOSE_FILE_PATH}"
+                    if docker network inspect cloud-infra_cloud-net >/dev/null 2>&1; then
+                        echo "检测到遗留网络 cloud-infra_cloud-net，叠加 docker-compose-app.legacy-net.yml"
+                        COMPOSE_FILES="\$COMPOSE_FILES -f docker-compose-app.legacy-net.yml"
+                    fi
+
+                    docker-compose \$COMPOSE_FILES up -d --remove-orphans
                     """
                 }
             }
