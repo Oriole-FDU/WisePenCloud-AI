@@ -29,8 +29,10 @@ from chat.application.tools import (
     LoadSkillTool,
     LoadSkillAssetTool,
     WebSearchTool,
-    BrowseUrlTool,
+    WebFetchTool,
+    BrowseInteractTool,
 )
+from chat.application.browser_data_detector import resolve_user_data_dir
 from common.clients.file_storage import FileStorageClient
 from common.cloud.nacos_client import nacos_client_manager
 from common.cloud.service_discovery import ServiceDiscovery
@@ -139,9 +141,13 @@ class Container(containers.DeclarativeContainer):
     web_search_tool = providers.Singleton(
         WebSearchTool,
     )
-    # BrowseUrlTool
-    browse_url_tool = providers.Singleton(
-        BrowseUrlTool,
+    # WebFetchTool
+    web_fetch_tool = providers.Singleton(
+        WebFetchTool,
+    )
+    # BrowseInteractTool
+    browse_interact_tool = providers.Singleton(
+        BrowseInteractTool,
     )
 
     tool_providers = providers.List(
@@ -149,7 +155,8 @@ class Container(containers.DeclarativeContainer):
         load_skill_tool,
         load_skill_asset_tool,
         web_search_tool,
-        browse_url_tool,
+        web_fetch_tool,
+        browse_interact_tool,
     )
 
     tool_registry = providers.Singleton(

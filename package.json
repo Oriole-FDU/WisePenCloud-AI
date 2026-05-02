@@ -1,14 +1,12 @@
 {
   "name": "wisepen-fetcher",
   "version": "1.0.0",
-  "description": "Web page fetcher using Playwright",
+  "description": "Web page fetcher using rebrowser-playwright",
   "dependencies": {
-    "playwright": "^1.48.0",
-    "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "turndown": "^7.2.0"
+    "rebrowser-playwright": "^1.52.0",
+    "turndown": "^7.2.4"
   },
   "scripts": {
-    "postinstall": "npx playwright install chromium"
+    "postinstall": "npx playwright-core install chromium"
   }
 }

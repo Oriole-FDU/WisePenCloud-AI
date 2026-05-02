@@ -30,7 +30,6 @@ class AppSettings(BaseModel):
 
     DEFAULT_MODEL: int = 1
 
-
     # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str = "wisepen-dev-server:9094"
     KAFKA_TOKEN_CONSUMPTION_TOPIC: str = "wisepen-user-token-consumption-topic"
@@ -65,7 +64,7 @@ class AppSettings(BaseModel):
 
     # Token 动态滑动窗口 + 双水位压缩配置
     # 模型上下文窗口总大小（token 数），默认对齐 gpt-4o 的 128k 上下文 128000
-    CTX_TOKEN_LIMIT: int = 900
+    CTX_TOKEN_LIMIT: int = 32000
     # 高水位线（触发阈值）：上下文累计 Token 达到此比例时触发摘要压缩
     CTX_HIGH_WATERMARK_RATIO: float = 0.8
     # 低水位线（安全退役线）：切分时按 Token 保留此比例以内的最新明细
@@ -76,7 +75,7 @@ class AppSettings(BaseModel):
 
     # Agentic ReAct 循环配置
     # ReAct 最大推理迭代次数，防止工具调用产生无限循环
-    AGENT_MAX_ITERATIONS: int = 5
+    AGENT_MAX_ITERATIONS: int = 15
     # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
     TOOL_RESULT_MAX_CHARS: int = 4000
 

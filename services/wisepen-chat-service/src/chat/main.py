@@ -7,6 +7,7 @@ setup_logging_intercept(bootstrap_settings.LOG_LEVEL)
 import os
 import uvicorn
 from contextlib import asynccontextmanager
+from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import AsyncMongoClient
@@ -24,6 +25,7 @@ from chat.api.endpoints import session as session_endpoints
 from chat.api.endpoints import memory as memory_endpoints
 from chat.api.endpoints import model as model_endpoints
 from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill
+from chat.application.bootstrap import setup_browser_data_dir
 
 
 os.environ["no_proxy"] = "localhost,127.0.0.1,wisepen-dev-server"
@@ -34,6 +36,9 @@ async def lifespan(app: FastAPI):
     # 应用生命周期
     # --- 启动阶段 ---
     log_event(f"{settings.APP_NAME} 启动")
+    
+    # 可插拔组件初始化
+    setup_browser_data_dir(container)
 
     # 初始化 Beanie
     mongo_client = AsyncMongoClient(settings.MONGODB_URL)

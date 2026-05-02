@@ -59,3 +59,6 @@ mock-frontend/
 uv.lock
 *-dev.yaml
 
+# ── 测试文件 (本地保留，不提交) ─────────────────────────────────────────────
+services/wisepen-chat-service/test/
+
