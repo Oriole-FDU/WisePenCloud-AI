@@ -19,7 +19,7 @@ class TextCodeAttachmentParser(AttachmentParser):
     _SUPPORTED_EXTENSIONS = _TEXT_EXTENSIONS | _CODE_EXTENSIONS
     _SUMMARY_LIMIT = 120
     _EXCERPT_LIMIT = 300
-    _PREFERRED_ENCODINGS = ("utf-8-sig", "utf-16", "gb18030", "big5", "latin-1")
+    _PREFERRED_ENCODINGS = ("utf-8-sig", "utf-16", "gb18030", "big5")
 
     def __init__(self, file_storage_client: FileStorageClient):
         self._file_storage_client = file_storage_client

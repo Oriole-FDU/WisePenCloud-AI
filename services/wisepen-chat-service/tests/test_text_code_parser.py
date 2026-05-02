@@ -83,6 +83,20 @@ class TextCodeAttachmentParserTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("\u202e", result.extracted_text)
         self.assertNotIn("\x00", result.extracted_text)
 
+    async def test_parse_falls_back_to_utf8_replace_when_no_preferred_codec_matches(self):
+        payload = b"\x80abc"
+        with patch.object(
+            self.parser._http,
+            "get",
+            new=AsyncMock(return_value=SimpleNamespace(
+                content=payload,
+                raise_for_status=lambda: None,
+            )),
+        ):
+            result = await self.parser.parse("obj", "demo.txt", "txt")
+
+        self.assertEqual(result.extracted_text, "\ufffdabc")
+
 
 if __name__ == "__main__":
     unittest.main()
