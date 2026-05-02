@@ -37,6 +37,13 @@ class AppSettings(BaseModel):
     # 安全配置
     # 与 APISIX 网关约定的请求来源 token
     FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
+    
+    ATTACHMENT_OFFICE_CONVERTER_COMMAND: str = "soffice"
+    ATTACHMENT_OFFICE_CONVERTER_TIMEOUT_SECONDS: int = 120
+
+    # 上传附件是否启用安全审核（文件头校验 + 有害关键词扫描）
+    ATTACHMENT_AUDIT_ENABLED: bool = True
+
 
     # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str

@@ -40,11 +40,12 @@ class ChatTurnFinalizer:
             if msg.content is None:
                 msg.token_count = 0
             if msg.token_count is None:
+                text_content = msg.get_text_content()
                 try:
                     # 调用 llm.count_tokens 计算
-                    msg.token_count = await self.llm.count_tokens(msg.content, provider_model_name)
+                    msg.token_count = await self.llm.count_tokens(text_content, provider_model_name)
                 except Exception:
-                    msg.token_count = len(msg.content) // 4  # 降级为 4 字符 1 token
+                    msg.token_count = len(text_content) // 4  # 降级为 4 字符 1 token
 
     async def _send_token_billing(
         self,
@@ -130,7 +131,8 @@ class ChatTurnFinalizer:
         # MongoDB 落盘
         try:
             for msg in persistable:
-                if msg.content: msg.build_search_tokens() # 构建搜索向量 (缓解中文分词问题)
+                if msg.get_text_content():
+                    msg.build_search_tokens() # 构建搜索向量 (缓解中文分词问题)
 
             await self.message_repo.save_many(persistable)
         except Exception as e:
@@ -198,7 +200,7 @@ class ChatTurnFinalizer:
         """
         # 构建摘要输入，将 existing_summary（上一轮摘要，如有）作为前缀，拼接 messages_compress_candidates 明细，让轻量模型生成覆盖范围更广的全局摘要
         oldest_text = "\n".join(
-            [f"{m.role.value}: {m.content}" for m in messages_compress_candidates]
+            [f"{m.role.value}: {m.get_text_content()}" for m in messages_compress_candidates]
         )
         user_content_parts = []
         if existing_summary:

@@ -59,6 +59,11 @@ async def chat_completions(
          "session_id": "xxx",
          "query": "你好",
          "model": 1,
+         "attachment_refs": [{
+            "attachment_id": "att_1",
+            "enabled": true,
+            "context_mode": "SUMMARY"
+         }],
          "states": [{
             "key": "selected_text",
             "value": "xxx",
@@ -67,9 +72,6 @@ async def chat_completions(
        }
     """
     resolved_model_id = req.model or settings.DEFAULT_MODEL_ID
-
-    if not req.query:
-        raise HTTPException(status_code=400, detail="缺少查询内容")
 
     if not req.session_id:
         raise HTTPException(status_code=400, detail="缺少 session_id")
@@ -82,7 +84,8 @@ async def chat_completions(
         user_query=req.query,
         background_tasks=background_tasks,
         model_id=resolved_model_id,
-        states=req.states
+        states=req.states,
+        attachment_refs=req.attachment_refs,
     )
 
     return StreamingResponse(

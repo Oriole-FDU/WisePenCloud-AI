@@ -8,17 +8,24 @@ from v2.nacos import NacosNamingService
 from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings
 from chat.core.providers import (
+    CompositeDocumentAttachmentParser,
+    LegacyOfficeAttachmentParser,
+    SimpleAttachmentAuditor,
+    SimpleDocumentAttachmentParser,
+    TextCodeAttachmentParser,
     LiteLLMAdapter,
     Mem0Adapter,
     LocalFSSkillAssetLoader,
     OssSkillAssetLoader,
 )
 from chat.core.persistence import (
+    MongoAttachmentRepository,
     MongoSessionRepository,
     MongoMessageRepository,
     MongoSkillRepository,
     RedisHotContext,
 )
+from chat.application.attachment_service import AttachmentService
 from chat.application.model_resolver import ModelResolver
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.skill_matcher import KeywordSkillMatcher
@@ -29,7 +36,7 @@ from chat.application.tools import (
     LoadSkillTool,
     LoadSkillAssetTool,
 )
-from common.clients.file_storage import FileStorageClient
+from common.clients import DocumentServiceClient, FileStorageClient, ResourceServiceClient
 from common.cloud.nacos_client import nacos_client_manager
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
@@ -54,6 +61,7 @@ class Container(containers.DeclarativeContainer):
     llm_provider = providers.Singleton(LiteLLMAdapter)
     memory_provider = providers.Singleton(Mem0Adapter)
 
+    attachment_repo = providers.Singleton(MongoAttachmentRepository)
     session_repo = providers.Singleton(MongoSessionRepository)
     message_repo = providers.Singleton(MongoMessageRepository)
     hot_context_repo = providers.Singleton(RedisHotContext)
@@ -74,9 +82,49 @@ class Container(containers.DeclarativeContainer):
         retries=settings.RPC_DEFAULT_RETRIES,
         default_strategy=settings.RPC_LB_STRATEGY,
     )
+    # 文件存储服务
     file_storage_client = providers.Singleton(
         FileStorageClient,
         rpc=rpc_client,
+    )
+    # 文档库服务
+    document_service_client = providers.Singleton(
+        DocumentServiceClient,
+        rpc=rpc_client,
+    )
+
+    # 资源标签服务
+    resource_service_client = providers.Singleton(
+        ResourceServiceClient,
+        rpc=rpc_client,
+    )
+
+    # 附件安全审核器
+    attachment_auditor = providers.Singleton(
+        SimpleAttachmentAuditor,
+        file_storage_client=file_storage_client,
+        enabled=settings.ATTACHMENT_AUDIT_ENABLED,
+    )
+    # 附件文档解析器：按格式分发到子解析器
+    simple_attachment_parser = providers.Singleton(
+        SimpleDocumentAttachmentParser,
+        file_storage_client=file_storage_client,
+    )
+    text_code_attachment_parser = providers.Singleton(
+        TextCodeAttachmentParser,
+        file_storage_client=file_storage_client,
+    )
+    legacy_office_attachment_parser = providers.Singleton(
+        LegacyOfficeAttachmentParser,
+        file_storage_client=file_storage_client,
+        converter_command=settings.ATTACHMENT_OFFICE_CONVERTER_COMMAND,
+        converter_timeout_seconds=settings.ATTACHMENT_OFFICE_CONVERTER_TIMEOUT_SECONDS,
+    )
+    attachment_parser = providers.Singleton(
+        CompositeDocumentAttachmentParser,
+        simple_parser=simple_attachment_parser,
+        legacy_office_parser=legacy_office_attachment_parser,
+        text_code_parser=text_code_attachment_parser,
     )
 
     # Skill 子系统：
@@ -146,6 +194,16 @@ class Container(containers.DeclarativeContainer):
     )
 
     model_resolver = providers.Singleton(ModelResolver)
+    attachment_service = providers.Factory(
+        AttachmentService,
+        attachment_repo=attachment_repo,
+        session_repo=session_repo,
+        attachment_parser=attachment_parser,
+        attachment_auditor=attachment_auditor,
+        file_storage_client=file_storage_client,
+        document_service_client=document_service_client,
+        resource_service_client=resource_service_client,
+    )
 
     # Application 层组件
     chat_turn_coordinator = providers.Factory(
@@ -159,6 +217,7 @@ class Container(containers.DeclarativeContainer):
         tool_registry=tool_registry,
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
+        attachment_service=attachment_service,
     )
 
 

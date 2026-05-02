@@ -17,6 +17,7 @@ dependencies = [
     "mem0ai",
     "openai",
     "beanie",
+    "pypdf",
     "redis[asyncio]",
     "nacos-sdk-python",
     "pyyaml",

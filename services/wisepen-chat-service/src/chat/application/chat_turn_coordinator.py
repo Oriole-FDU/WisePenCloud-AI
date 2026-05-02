@@ -1,9 +1,12 @@
 from typing import Optional, List, Dict, Any
 from fastapi import BackgroundTasks
-from common.logger import log_error, log_ok
+from common.logger import log_error
 
+from chat.application.attachment_service import AttachmentService
+from chat.api.schemas.chat import AttachmentRefRequest
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
+from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository
@@ -45,6 +48,7 @@ class ChatTurnCoordinator:
             tool_registry: ToolRegistry,
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
+            attachment_service: AttachmentService,
     ):
         self._memory = memory
         self._model_resolver = model_resolver
@@ -59,6 +63,7 @@ class ChatTurnCoordinator:
             kafka_producer=kafka_producer
         )
         self._skill_matcher = skill_matcher
+        self._attachment_service = attachment_service
 
     # -------------------------------------------------------------------------
     # 公共入口
@@ -71,8 +76,24 @@ class ChatTurnCoordinator:
             background_tasks: BackgroundTasks,
             model_id: Optional[int] = None,
             states: Optional[List[Dict[str, Any]]] = None,
+            attachment_refs: Optional[List[AttachmentRefRequest]] = None,
     ):
         model_id = model_id or settings.DEFAULT_MODEL_ID
+
+        effective_user_query = (user_query or "").strip()
+        user_content, attachment_states, accepted_attachment_ids, accepted_image_attachment_ids, ignored_attachment_ids = (
+            await self._attachment_service.build_chat_attachment_inputs(
+                session_id=session_id,
+                user_id=user_id,
+                attachment_refs=attachment_refs,
+                user_query=effective_user_query,
+                model_id=model_id,
+            )
+        )
+        merged_states = list(states or []) + attachment_states
+        if not (user_query or "").strip() and not accepted_attachment_ids:
+            raise ServiceException(ChatErrorCode.CHAT_EMPTY_INPUT)
+        effective_user_query = effective_user_query or "请结合已引用附件内容回答。"
 
         # [Model Resolve] 通过映射表查找首选供应商，获取实际模型名和 API 凭证
         resolved = await self._model_resolver.resolve(model_id)
@@ -82,7 +103,7 @@ class ChatTurnCoordinator:
 
         # [Retrieval - 长期记忆] 从 Memory 按相似度阈值召回跨会话事实 (此处实现是Mem0)
         relevant_facts = await self._memory.search(
-            user_id=user_id, query=user_query, limit=10,
+            user_id=user_id, query=effective_user_query, limit=10,
             score_threshold=0.6,  # 低质量召回直接丢弃，防止噪声污染上下文
         )
 
@@ -90,6 +111,12 @@ class ChatTurnCoordinator:
         session_summary = await self._context_assembler.get_session_summary(session_id)
         # [Token Window] 从后往前累加 Token，超过高水位时将 messages_compress_candidates 压缩为会话的历史摘要（本轮结束时）
         messages_keep, messages_compress_candidates, needs_compression = await self._context_assembler.build_context_window(recent_messages)
+        model_supports_vision = await self._attachment_service.is_model_vision_enabled(model_id)
+        hydrated_window_messages = await self._attachment_service.hydrate_multimodal_history(
+            messages_keep + messages_compress_candidates,
+            user_id=user_id,
+            enable_images=model_supports_vision,
+        )
 
         tool_context: dict[str, Any] = {
             "session_id": session_id,
@@ -97,7 +124,7 @@ class ChatTurnCoordinator:
         } 
 
         # [Skill Match] 预筛当前 query 可能相关的 Skill，命中才暴露 schema + 注入 Available Skills
-        candidate_skills = self._skill_matcher.match(user_query)
+        candidate_skills = self._skill_matcher.match(effective_user_query)
         expose_tool_name_set = None
         if candidate_skills:
             # 解禁 Registry 里默认隐藏的 skill 脚手架工具（reserved=True）
@@ -119,9 +146,10 @@ class ChatTurnCoordinator:
 
         # [Context Construction] 将系统提示词、Mem0 检索到的事实、会话的历史摘要、前端上下文以及窗口内的明细消息组装成 LLM 所需的格式
         messages_for_llm = self._context_assembler.assemble_prompt(
-            session_id, user_query, messages_keep+messages_compress_candidates, relevant_facts, session_summary,
-            states=states,
+            session_id, effective_user_query, hydrated_window_messages, relevant_facts, session_summary,
+            states=merged_states,
             candidate_skills=candidate_skills or None,
+            user_content=user_content,
         )
 
         # 记录进入 Agent 循环前的列表长度
@@ -129,8 +157,14 @@ class ChatTurnCoordinator:
 
         # 在流式推理之前构造 user_msg，确保 created_at 早于所有中间消息
         user_msg = ChatMessage(
-            session_id=session_id, role=Role.USER, content=user_query,
-            metadata={"states": states} if states else {},
+            session_id=session_id, role=Role.USER, content=effective_user_query,
+            metadata={
+                "states": merged_states,
+                "attachment_refs": [ref.model_dump() for ref in (attachment_refs or [])],
+                "accepted_attachment_ids": accepted_attachment_ids,
+                "accepted_image_attachment_ids": accepted_image_attachment_ids,
+                "ignored_attachment_ids": ignored_attachment_ids,
+            },
         )
 
         # [Generation] 流式推理，使用解析后的供应商模型名和凭证
@@ -183,7 +217,7 @@ class ChatTurnCoordinator:
             )
             background_tasks.add_task(
                 self._turn_finalizer.auto_generate_title,
-                session_id, user_id, user_query
+                session_id, user_id, effective_user_query
             )
             if needs_compression:
                 background_tasks.add_task(

@@ -19,7 +19,7 @@ class ChatMessage(Document):
     session_id: str
     role: Role
     model_id: Optional[int] = None  # 生成该消息所用的模型 ID，仅 assistant 消息必填
-    content: Optional[str] = None   # 大模型在返回 tool_calls 时 content 经常为 None
+    content: Optional[Any] = None   # 支持纯文本或多模态 content block
     reasoning_content: Optional[str] = None  # 大模型的推理/思考内容（DeepSeek R1 等）
     search_tokens: Optional[str] = None # 专门用于规避 MongoDB 中文分词缺陷的隐藏字段
 
@@ -59,7 +59,24 @@ class ChatMessage(Document):
         使用搜索引擎模式的分词（cut_for_search），最大化召回率。
         例如："软件工程架构" -> "软件 工程 软件工程 架构"
         """
-        if self.content:
+        text_content = self.get_text_content()
+        if text_content:
             # 过滤掉单字和标点符号，用空格拼接
-            words = jieba.cut_for_search(self.content)
+            words = jieba.cut_for_search(text_content)
             self.search_tokens = " ".join([w for w in words if len(w.strip()) > 1])
+
+    def get_text_content(self) -> str:
+        """提取可用于检索、摘要、计费的纯文本内容"""
+        if self.content is None:
+            return ""
+        if isinstance(self.content, str):
+            return self.content
+        if isinstance(self.content, list):
+            parts: List[str] = []
+            for item in self.content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "text" and item.get("text"):
+                    parts.append(str(item["text"]))
+            return "\n".join(parts).strip()
+        return str(self.content)

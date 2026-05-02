@@ -19,11 +19,12 @@ from common.web.exception_handlers import setup_global_exception_handlers
 from chat.container import container  # noqa: F401 — 触发 dependency_injector wiring，不可删除
 from chat.core.config.app_settings import settings
 from chat.api.router import api_router
+from chat.api.endpoints import attachment as attachment_endpoints
 from chat.api.endpoints import chat as chat_endpoints
 from chat.api.endpoints import session as session_endpoints
 from chat.api.endpoints import memory as memory_endpoints
 from chat.api.endpoints import model as model_endpoints
-from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill
+from chat.domain.entities import ChatAttachment, ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill
 
 
 # 避免 HTTP 代理拦截内部中间件请求。
@@ -44,7 +45,7 @@ async def lifespan(app: FastAPI):
     mongo_client = AsyncMongoClient(settings.MONGODB_URL)
     await init_beanie(
         database=mongo_client[settings.MONGODB_DB_NAME],
-        document_models=[ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill],
+        document_models=[ChatAttachment, ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill],
     )
     log_event("Beanie 初始化", db=settings.MONGODB_DB_NAME)
 
@@ -107,7 +108,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log_error("Nacos 服务注销", e)
 
-container.wire(modules=[chat_endpoints, session_endpoints, memory_endpoints, model_endpoints])  # 注入依赖到路由模块
+container.wire(modules=[attachment_endpoints, chat_endpoints, session_endpoints, memory_endpoints, model_endpoints])  # 注入依赖到路由模块
 app = FastAPI(title=bootstrap_settings.APP_NAME, lifespan=lifespan, docs_url="/docs")
 
 # CORS 中间件

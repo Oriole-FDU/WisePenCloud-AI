@@ -99,6 +99,7 @@ class ChatContextAssembler:
         session_summary: Optional[str],
         states: Optional[List[Dict[str, Any]]] = None,
         candidate_skills: Optional[List[SkillMeta]] = None,
+        user_content: Optional[Any] = None,
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表。"""
         system_prompt = """
@@ -172,6 +173,9 @@ class ChatContextAssembler:
             ))
 
         # 用户最新输入的问题
-        messages.append(ChatMessage(session_id=session_id, role=Role.USER, content=user_query))
+        messages.append(ChatMessage(
+            session_id=session_id,
+            role=Role.USER,
+            content=user_content if user_content is not None else user_query,
+        ))
         return messages
-
