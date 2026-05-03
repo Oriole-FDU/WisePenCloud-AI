@@ -2,7 +2,8 @@ import os
 import yaml
 import asyncio
 import threading
-from typing import List
+from pathlib import Path
+from typing import Literal
 from pydantic import BaseModel
 
 from chat.core.config.bootstrap_settings import bootstrap_settings
@@ -11,6 +12,8 @@ from common.logger import log_event, log_error
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_FILE_PATH = os.path.join(BASE_DIR, ".env")
+
+SERVICE_ROOT = Path(__file__).resolve().parents[4]
 
 # 全量应用配置, 必须由Nacos提供，漏配启动报错
 class AppSettings(BaseModel):
@@ -26,7 +29,6 @@ class AppSettings(BaseModel):
     LLM_API_KEY: str
 
     DEFAULT_MODEL: int = 1
-
 
     # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str = "wisepen-dev-server:9094"
@@ -54,9 +56,15 @@ class AppSettings(BaseModel):
     QDRANT_PORT: int = 6333
     QDRANT_PASSWORD: str
 
+    # Web Search 工具配置
+    TAVILY_API_KEY: str = "dummy_key"
+
+    # Browse URL 工具配置
+    STEEL_BASE_URL: str = "http://localhost:3000"
+
     # Token 动态滑动窗口 + 双水位压缩配置
     # 模型上下文窗口总大小（token 数），默认对齐 gpt-4o 的 128k 上下文 128000
-    CTX_TOKEN_LIMIT: int = 900
+    CTX_TOKEN_LIMIT: int = 32000
     # 高水位线（触发阈值）：上下文累计 Token 达到此比例时触发摘要压缩
     CTX_HIGH_WATERMARK_RATIO: float = 0.8
     # 低水位线（安全退役线）：切分时按 Token 保留此比例以内的最新明细
@@ -67,10 +75,53 @@ class AppSettings(BaseModel):
 
     # Agentic ReAct 循环配置
     # ReAct 最大推理迭代次数，防止工具调用产生无限循环
-    AGENT_MAX_ITERATIONS: int = 5
+    AGENT_MAX_ITERATIONS: int = 15
     # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
     TOOL_RESULT_MAX_CHARS: int = 4000
 
+    # Skill 子系统配置（chat-service 作为只读消费方）
+
+    # 开发期 fixture 根目录：DEV=True 时 LocalFS 加载器先在这里找资产，找不到才回退 OSS
+    # 生产形态（DEV=False）完全不读这个目录，直接走 OssSkillAssetLoader
+    SKILL_ASSETS_CACHE_DIR: str = "dev_fixtures/skill_bundles"
+    @property
+    def skill_assets_cache_path(self) -> Path:
+        path = Path(self.SKILL_ASSETS_CACHE_DIR)
+        if path.is_absolute():
+            return path
+        return (SERVICE_ROOT / path).resolve()
+
+    # OSS 资产本地磁盘缓存目录（运行期管理，GC 自动清理）
+    SKILL_OSS_CACHE_DIR: str = "dev_fixtures/skill_oss_cache"
+    @property
+    def skill_oss_cache_path(self) -> Path:
+        path = Path(self.SKILL_OSS_CACHE_DIR)
+        if path.is_absolute():
+            return path
+        return (SERVICE_ROOT / path).resolve()
+        
+    # 缓存文件 TTL：mtime 距今超过该秒数 → GC 清理（默认 6 小时）
+    SKILL_OSS_CACHE_TTL_SECONDS: int = 6 * 3600
+    # GC 扫描周期（秒）
+    SKILL_OSS_CACHE_GC_INTERVAL_SECONDS: int = 30 * 60
+
+    # Matcher 每轮给 LLM 暴露的 skill 候选上限（受控披露，防 LLM 误加载）
+    SKILL_MATCH_TOP_K: int = 2
+
+    # Skill 元数据缓存 TTL（秒）。用户/Java 端发布的新 Skill 最坏需等 TTL 才被当前副本感知
+    # 过小会增加 Mongo 读压力；过大会让新 Skill 生效滞后
+    # 未来接 Kafka 事件驱动刷新后可放大此值作为兜底轮询
+    SKILL_CACHE_TTL_SECONDS: int = 30
+
+    # ---- 内部 RPC / 服务发现（wisepen-common 基建） ----
+    # Nacos 服务发现客户端侧负载均衡策略：weighted_random | round_robin | random
+    RPC_LB_STRATEGY: Literal["weighted_random", "round_robin", "random"] = "weighted_random"
+    # 单次请求超时（秒）
+    RPC_DEFAULT_TIMEOUT: float = 5.0
+    # 单次调用最多额外重试次数（故障转移跨实例）；真实请求次数 = retries + 1
+    RPC_DEFAULT_RETRIES: int = 2
+    # ServiceDiscovery 本地缓存兜底 TTL（秒），即便订阅通道断连也会周期性强制 list
+    SERVICE_DISCOVERY_CACHE_TTL_SECONDS: float = 30.0
 
 def _run_async(coro):
     """在新线程的独立事件循环中执行协程，兼容 uvicorn 启动时已有运行中事件循环的场景。"""
