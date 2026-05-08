@@ -23,4 +23,17 @@ dependencies = [
     "jieba",
     "zeroentropy",
     "wisepen-common",
+    "tavily-python",
+    "httpx",
+    "steel-sdk",
+    "readability-lxml",
+    "markdownify",
+    "playwright",
+    "pdfplumber",
+    "python-docx",
+    "openpyxl",
+    "python-pptx"
 ]
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
