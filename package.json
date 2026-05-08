@@ -1,0 +1,12 @@
+{
+  "name": "wisepen-fetcher",
+  "version": "1.0.0",
+  "description": "Web page fetcher using rebrowser-playwright",
+  "dependencies": {
+    "rebrowser-playwright": "^1.52.0",
+    "turndown": "^7.2.4"
+  },
+  "scripts": {
+    "postinstall": "npx playwright-core install chromium"
+  }
+}
