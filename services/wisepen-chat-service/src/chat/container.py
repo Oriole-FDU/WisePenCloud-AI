@@ -28,6 +28,9 @@ from chat.application.tools import (
     SearchHistoricalMessagesTool,
     LoadSkillTool,
     LoadSkillAssetTool,
+    WebSearchTool,
+    WebFetchTool,
+    BrowseInteractTool,
 )
 from common.clients.file_storage import FileStorageClient
 from common.cloud.nacos_client import nacos_client_manager
@@ -86,16 +89,16 @@ class Container(containers.DeclarativeContainer):
     oss_skill_asset_loader = providers.Singleton(
         OssSkillAssetLoader,
         file_storage_client=file_storage_client,
-        cache_dir=settings.SKILL_OSS_CACHE_DIR,
+        cache_dir=settings.skill_oss_cache_path,
         cache_ttl_seconds=settings.SKILL_OSS_CACHE_TTL_SECONDS,
         gc_interval_seconds=settings.SKILL_OSS_CACHE_GC_INTERVAL_SECONDS,
     )
-    # 开发态（profile=dev）使用 LocalFSSkillAssetLoader
-    # 生产态（profile=prod）使用 OssSkillAssetLoader
-    if bootstrap_settings.IS_DEV:
+    # 开发态使用 LocalFSSkillAssetLoader
+    # 线上态使用 OssSkillAssetLoader
+    if settings.DEV:
         skill_asset_loader = providers.Singleton(
             LocalFSSkillAssetLoader,
-            root_dir=str(settings.SKILL_ASSETS_CACHE_PATH),
+            root_dir=str(settings.skill_assets_cache_path),
             oss_fallback=oss_skill_asset_loader,
         )
     else:
@@ -133,11 +136,27 @@ class Container(containers.DeclarativeContainer):
         skill_repo=skill_repo,
         skill_asset_loader=skill_asset_loader,
     )
+    # WebSearchTool
+    web_search_tool = providers.Singleton(
+        WebSearchTool,
+    )
+    # WebFetchTool
+    web_fetch_tool = providers.Singleton(
+        WebFetchTool,
+    )
+
+    # BrowserInteractTool
+    browse_interact_tool = providers.Singleton(
+        BrowseInteractTool,
+    )
 
     tool_providers = providers.List(
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
+        web_search_tool,
+        web_fetch_tool,
+        browse_interact_tool,
     )
 
     tool_registry = providers.Singleton(
