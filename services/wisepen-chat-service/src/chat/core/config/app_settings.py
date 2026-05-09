@@ -64,7 +64,7 @@ class AppSettings(BaseModel):
 
     # Token 动态滑动窗口 + 双水位压缩配置
     # 模型上下文窗口总大小（token 数），默认对齐 gpt-4o 的 128k 上下文 128000
-    CTX_TOKEN_LIMIT: int = 32000
+    CTX_TOKEN_LIMIT: int = 128000
     # 高水位线（触发阈值）：上下文累计 Token 达到此比例时触发摘要压缩
     CTX_HIGH_WATERMARK_RATIO: float = 0.8
     # 低水位线（安全退役线）：切分时按 Token 保留此比例以内的最新明细

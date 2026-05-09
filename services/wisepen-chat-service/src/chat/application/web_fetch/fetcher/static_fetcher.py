@@ -4,8 +4,11 @@ from urllib.parse import urlparse
 
 from common.logger import log_ok, log_fail, log_error
 
+__all__ = [
+    "StaticFetcher",
+]
 
-_SUPPORTED_DOC_MIME_TYPES: Set[str] = {
+SUPPORTED_DOC_MIME_TYPES: Set[str] = {
     "application/pdf",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -15,14 +18,14 @@ _SUPPORTED_DOC_MIME_TYPES: Set[str] = {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
 
-_TEXT_FRIENDLY_MIME_TYPES: Set[str] = {
+TEXT_FRIENDLY_MIME_TYPES: Set[str] = {
     "application/json",
     "application/xml",
     "application/javascript",
     "application/x-javascript",
 }
 
-_SUPPORTED_DOC_EXTENSIONS: Tuple[str, ...] = (
+SUPPORTED_DOC_EXTENSIONS: Tuple[str, ...] = (
     ".pdf",
     ".doc",
     ".docx",
@@ -32,7 +35,7 @@ _SUPPORTED_DOC_EXTENSIONS: Tuple[str, ...] = (
     ".pptx",
 )
 
-_TEXT_FRIENDLY_EXTENSIONS: Tuple[str, ...] = (
+TEXT_FRIENDLY_EXTENSIONS: Tuple[str, ...] = (
     ".txt",
     ".md",
     ".json",
@@ -40,8 +43,8 @@ _TEXT_FRIENDLY_EXTENSIONS: Tuple[str, ...] = (
     ".csv",
 )
 
-_MAX_RESPONSE_BYTES = 50 * 1024 * 1024
-_READ_CHUNK_SIZE = 64 * 1024
+MAX_RESPONSE_BYTES = 50 * 1024 * 1024
+READ_CHUNK_SIZE = 64 * 1024
 
 
 class StaticFetcher:
@@ -51,7 +54,7 @@ class StaticFetcher:
         self,
         timeout: float = 10.0,
         max_retries: int = 3,
-        max_response_bytes: int = _MAX_RESPONSE_BYTES,
+        max_response_bytes: int = MAX_RESPONSE_BYTES,
     ):
         self._timeout = timeout
         self._max_retries = max_retries
@@ -133,7 +136,7 @@ class StaticFetcher:
             return True
 
         if media_type == "application/octet-stream":
-            return path.endswith(_SUPPORTED_DOC_EXTENSIONS) or path.endswith(_TEXT_FRIENDLY_EXTENSIONS)
+            return path.endswith(SUPPORTED_DOC_EXTENSIONS) or path.endswith(TEXT_FRIENDLY_EXTENSIONS)
 
         if self._is_text_like(media_type, path):
             return True
@@ -163,7 +166,7 @@ class StaticFetcher:
         chunks = []
         total_size = 0
 
-        async for chunk in response.aiter_bytes(chunk_size=_READ_CHUNK_SIZE):
+        async for chunk in response.aiter_bytes(chunk_size=READ_CHUNK_SIZE):
             total_size += len(chunk)
 
             if total_size > self._max_response_bytes:
@@ -207,19 +210,19 @@ class StaticFetcher:
         if media_type.startswith("text/"):
             return True
 
-        if media_type in _TEXT_FRIENDLY_MIME_TYPES:
+        if media_type in TEXT_FRIENDLY_MIME_TYPES:
             return True
 
         if media_type.endswith("+json") or media_type.endswith("+xml"):
             return True
 
-        if path.endswith(_TEXT_FRIENDLY_EXTENSIONS):
+        if path.endswith(TEXT_FRIENDLY_EXTENSIONS):
             return True
 
         return False
 
     def _is_document_like(self, media_type: str, path: str) -> bool:
-        return media_type in _SUPPORTED_DOC_MIME_TYPES or path.endswith(_SUPPORTED_DOC_EXTENSIONS)
+        return media_type in SUPPORTED_DOC_MIME_TYPES or path.endswith(SUPPORTED_DOC_EXTENSIONS)
 
     def _is_text_response(self, media_type: str, path: str, content: bytes) -> bool:
         if self._is_text_like(media_type, path):

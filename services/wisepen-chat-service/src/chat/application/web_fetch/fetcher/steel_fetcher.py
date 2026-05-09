@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import steel
 from steel import AsyncSteel
 
 from common.logger import log_fail, log_ok
+
+__all__ = [
+    "SteelFetcher",
+    "SteelFetcherConfig",
+]
 
 
 @dataclass(frozen=True)
@@ -16,20 +21,12 @@ class SteelFetcherConfig:
     max_retries: int = 2
     use_proxy: bool = False
     delay_ms: float = 0.0
-    region: Optional[dict[str, Any]] = None
+    region: Optional[Dict[str, Any]] = None
     strip_output: bool = True
 
 
 class SteelFetcher:
-    """通过 Steel API 的 scrape 接口获取页面 Markdown 内容。
-
-    职责边界：
-    - 负责调用 Steel scrape；
-    - 负责 SDK client 生命周期；
-    - 负责 Steel 异常分类日志；
-    - 不做内容质量判断，不做反爬关键词过滤；
-    - 内容过滤交给 FetchCoordinator / ContentProcessor。
-    """
+    """通过 Steel API 的 scrape 接口获取页面 Markdown 内容"""
 
     def __init__(self, config: SteelFetcherConfig):
         self._config = config
@@ -49,7 +46,7 @@ class SteelFetcher:
 
     async def fetch(self, url: str) -> Optional[str]:
         try:
-            kwargs: dict[str, Any] = {
+            kwargs: Dict[str, Any] = {
                 "url": url,
                 "format": ["markdown"],
                 "use_proxy": self._config.use_proxy,
@@ -70,7 +67,7 @@ class SteelFetcher:
 
             if self._config.strip_output:
                 markdown = markdown.strip()
-                
+
             if not markdown:
                 log_fail("Steel 浏览器抓取", "markdown 内容为空", url=url)
                 return None

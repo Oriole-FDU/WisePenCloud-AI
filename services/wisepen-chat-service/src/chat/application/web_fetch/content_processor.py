@@ -11,13 +11,17 @@ from readability import Document
 
 from common.logger import log_ok, log_fail
 
+__all__ = [
+    "ContentProcessor",
+    "DocumentParser",
+]
 
-_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
-_MAX_ZIP_UNCOMPRESSED_SIZE = 200 * 1024 * 1024
-_ANTI_CRAWL_SCAN_CHARS = 20000
+MAX_ZIP_UNCOMPRESSED_SIZE = 200 * 1024 * 1024
+ANTI_CRAWL_SCAN_CHARS = 20000
 
-_ANTI_CRAWL_KEYWORDS = (
+ANTI_CRAWL_KEYWORDS = (
     "just a moment",
     "please enable javascript",
     "please enable js",
@@ -30,12 +34,12 @@ _ANTI_CRAWL_KEYWORDS = (
 )
 
 
-def _looks_like_anti_crawl(text: str) -> bool:
-    lower = text[:_ANTI_CRAWL_SCAN_CHARS].lower()
-    return any(kw in lower for kw in _ANTI_CRAWL_KEYWORDS)
+def looks_like_anti_crawl(text: str) -> bool:
+    lower = text[:ANTI_CRAWL_SCAN_CHARS].lower()
+    return any(kw in lower for kw in ANTI_CRAWL_KEYWORDS)
 
 
-def _normalize_text(text: str) -> str:
+def normalize_text(text: str) -> str:
     lines = [
         line.rstrip()
         for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
@@ -84,9 +88,9 @@ class DocumentParser:
             log_fail("文档清洗", "文本提取返回空")
             return None
 
-        cleaned = _normalize_text(text)
+        cleaned = normalize_text(text)
 
-        if _looks_like_anti_crawl(cleaned):
+        if looks_like_anti_crawl(cleaned):
             log_fail("文档清洗", "提取文本疑似反爬/错误页面，触发降级")
             return None
 
@@ -104,7 +108,7 @@ class DocumentParser:
         if data[:5] == b"%PDF-":
             return "pdf"
 
-        if data[:8] == _OLE_MAGIC:
+        if data[:8] == OLE_MAGIC:
             log_fail("文档解析", "OLE 复合文档(旧版 .doc/.xls/.ppt)，暂不支持")
             return None
 
@@ -113,10 +117,10 @@ class DocumentParser:
                 infos = zf.infolist()
                 uncompressed_size = sum(info.file_size for info in infos)
 
-                if uncompressed_size > _MAX_ZIP_UNCOMPRESSED_SIZE:
+                if uncompressed_size > MAX_ZIP_UNCOMPRESSED_SIZE:
                     log_fail(
                         "文档解析",
-                        f"ZIP 解压后体积过大({uncompressed_size}字节)，上限{_MAX_ZIP_UNCOMPRESSED_SIZE}字节",
+                        f"ZIP 解压后体积过大({uncompressed_size}字节)，上限{MAX_ZIP_UNCOMPRESSED_SIZE}字节",
                     )
                     return None
 
@@ -204,18 +208,22 @@ class DocumentParser:
             parts: List[str] = []
 
             for sheet in wb:
-                sheet_parts: List[str] = []
+                sheet_rows: List[str] = []
 
                 for row in sheet.iter_rows(values_only=True):
                     cells = [str(cell) if cell is not None else "" for cell in row]
                     line = "\t".join(cells).strip()
 
                     if line:
-                        sheet_parts.append(line)
+                        sheet_rows.append(line)
 
-                if sheet_parts:
-                    parts.append(f"Sheet: {sheet.title}")
-                    parts.extend(sheet_parts)
+                if sheet_rows:
+                    parts.append(f"## Sheet: {sheet.title}")
+                    parts.append("")
+                    parts.append("```tsv")
+                    parts.extend(sheet_rows)
+                    parts.append("```")
+                    parts.append("")
 
             result = "\n".join(parts).strip()
 
@@ -238,12 +246,20 @@ class DocumentParser:
             prs = Presentation(BytesIO(data))
             parts: List[str] = []
 
-            for slide in prs.slides:
+            for index, slide in enumerate(prs.slides, 1):
+                slide_parts: List[str] = []
+
                 for shape in slide.shapes:
                     if shape.has_text_frame:
                         text = shape.text.strip()
                         if text:
-                            parts.append(text)
+                            slide_parts.append(text)
+
+                if slide_parts:
+                    parts.append(f"## Slide {index}")
+                    parts.append("")
+                    parts.extend(slide_parts)
+                    parts.append("")
 
             result = "\n".join(parts).strip()
 
@@ -284,7 +300,7 @@ class ContentProcessor:
         if not stripped:
             return None
 
-        if _looks_like_anti_crawl(stripped):
+        if looks_like_anti_crawl(stripped):
             log_fail("内容检测", "疑似反爬/错误页面，触发降级")
             return None
 
@@ -298,9 +314,9 @@ class ContentProcessor:
         try:
             clean_content = self._extract_main_content(html)
             markdown = self._convert_to_markdown(clean_content)
-            result = _normalize_text(markdown)
+            result = normalize_text(markdown)
 
-            if _looks_like_anti_crawl(result):
+            if looks_like_anti_crawl(result):
                 log_fail("HTML 清洗", "清洗后疑似反爬/错误页面，触发降级")
                 return None
 
@@ -315,7 +331,7 @@ class ContentProcessor:
 
         except Exception as e:
             log_fail("HTML 清洗", e, fallback="返回未清洗原文，可能含 HTML 标签")
-            fallback = _normalize_text(html)
+            fallback = normalize_text(html)
 
             if len(fallback) < self._min_content_length:
                 return None
@@ -323,7 +339,7 @@ class ContentProcessor:
             return fallback
 
     def _process_plain_text(self, text: str) -> Optional[str]:
-        normalized = _normalize_text(text)
+        normalized = normalize_text(text)
 
         if len(normalized) < self._min_content_length:
             log_fail(
@@ -332,7 +348,7 @@ class ContentProcessor:
             )
             return None
 
-        if _looks_like_anti_crawl(normalized):
+        if looks_like_anti_crawl(normalized):
             log_fail("纯文本检测", "疑似反爬/错误页面，触发降级")
             return None
 

@@ -5,36 +5,19 @@ from typing import Optional
 
 from common.logger import log_ok, log_fail, log_error
 
+__all__ = [
+    "LocalScriptFetcher",
+]
 
-_MAX_DIR_TRAVERSAL = 10
-_MAX_SUBPROCESS_BUFFER = 10 * 1024 * 1024
-_MAX_ERROR_SNIPPET = 500
+MAX_SUBPROCESS_BUFFER = 10 * 1024 * 1024
+MAX_ERROR_SNIPPET = 500
 
-
-def _find_root_dir() -> Path:
-    """向上查找包含 scripts/local_web_fetcher.js 的最近父目录"""
-    current = Path(__file__).resolve().parent
-
-    for _ in range(_MAX_DIR_TRAVERSAL):
-        if (current / "scripts" / "local_web_fetcher.js").exists():
-            return current
-
-        if current.parent == current:
-            break
-
-        current = current.parent
-
-    raise FileNotFoundError("找不到项目根目录（包含 scripts/local_web_fetcher.js）")
+SCRIPT_PATH = Path(__file__).resolve().parent.parent / "local_web_fetcher.js"
 
 
-ROOT_DIR = _find_root_dir()
-SCRIPT_PATH = ROOT_DIR / "scripts" / "local_web_fetcher.js"
-
-
-async def _kill_process(process: asyncio.subprocess.Process) -> None:
+async def kill_process(process: asyncio.subprocess.Process) -> None:
     if process.returncode is not None:
         return
-
     process.kill()
 
     try:
@@ -70,7 +53,7 @@ class LocalScriptFetcher:
                 url,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                limit=_MAX_SUBPROCESS_BUFFER,
+                limit=MAX_SUBPROCESS_BUFFER,
             )
 
             stdout, stderr = await asyncio.wait_for(
@@ -80,7 +63,7 @@ class LocalScriptFetcher:
 
             if process.returncode != 0:
                 err_msg = (
-                    stderr.decode("utf-8", errors="replace").strip()[:_MAX_ERROR_SNIPPET]
+                    stderr.decode("utf-8", errors="replace").strip()[:MAX_ERROR_SNIPPET]
                     if stderr
                     else ""
                 )
@@ -99,7 +82,7 @@ class LocalScriptFetcher:
             log_fail("本地脚本执行", f"超时 {self._timeout}s", url=url)
 
             if process:
-                await _kill_process(process)
+                await kill_process(process)
 
             return None
 
@@ -107,6 +90,6 @@ class LocalScriptFetcher:
             log_error("本地脚本执行", e, url=url)
 
             if process:
-                await _kill_process(process)
+                await kill_process(process)
 
             return None
