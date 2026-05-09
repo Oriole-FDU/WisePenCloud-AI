@@ -6,7 +6,7 @@ BrowseInteractTool 端到端测试
 
 复杂用例：
 1. 打开维基百科英语首页，获取页面快照并总结内容。
-2. 打开 GitHub trending 页面，获取快照并总结前 5 项目。
+2. 打开 GitHub 页面，输入邮箱和密码并登录。
 
 使用方式:
     uv run python test/test_browse_interact_e2e.py
