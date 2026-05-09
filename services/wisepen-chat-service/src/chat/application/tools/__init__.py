@@ -3,6 +3,8 @@ from .tool_scope import ToolScope
 from .search_history_tool import SearchHistoricalMessagesTool
 from .load_skill_tool import LoadSkillTool
 from .load_skill_asset_tool import LoadSkillAssetTool
+from .web_search_tool import WebSearchTool
+from .web_fetch_tool import WebFetchTool
 
 __all__ = [
     "ToolRegistry",
@@ -10,5 +12,6 @@ __all__ = [
     "SearchHistoricalMessagesTool",
     "LoadSkillTool",
     "LoadSkillAssetTool",
+    "WebSearchTool",
+    "WebFetchTool",
 ]
-
