@@ -1,7 +1,28 @@
+import time
+from collections import OrderedDict
 from typing import Optional, List, Tuple
-from chat.application.web_fetch.fetcher import StaticFetcher, SteelFetcher, LocalScriptFetcher
+from urllib.parse import urlparse
+
+from chat.application.web_fetch.fetcher import StaticFetcher, SteelFetcher, SteelFetcherConfig, LocalScriptFetcher
 from chat.application.web_fetch.content_processor import ContentProcessor
 from common.logger import log_ok, log_fail
+
+__all__ = [
+    "FetchCoordinator",
+]
+
+CACHE_TTL_SECONDS = 10 * 60
+CACHE_MAX_ITEMS = 128
+
+DOCUMENT_EXTENSIONS = (
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+)
 
 
 class FetchCoordinator:
@@ -23,13 +44,25 @@ class FetchCoordinator:
         last_resort_min_length: int = 50,
         static_timeout: float = 15.0,
         browser_timeout: float = 60.0,
+        cache_ttl_seconds: int = CACHE_TTL_SECONDS,
+        cache_max_items: int = CACHE_MAX_ITEMS,
     ):
         self._min_content_length = min_content_length
         self._last_resort_min_length = last_resort_min_length
+        self._cache_ttl_seconds = cache_ttl_seconds
+        self._cache_max_items = cache_max_items
+        self._cache: OrderedDict[tuple[str, bool], tuple[float, str]] = OrderedDict()
+
         self._static_fetcher = StaticFetcher(timeout=static_timeout)
-        self._steel_fetcher = SteelFetcher(steel_base_url=steel_base_url, timeout=browser_timeout)
+        self._steel_fetcher = SteelFetcher(
+            SteelFetcherConfig(base_url=steel_base_url, timeout=browser_timeout)
+        )
         self._local_script_fetcher = LocalScriptFetcher(timeout=browser_timeout)
-        self._processor = ContentProcessor(min_content_length=min_content_length)
+
+        self._processor = ContentProcessor(
+            min_content_length=min_content_length,
+            document_min_content_length=last_resort_min_length,
+        )
 
         self._lightweight_chain: List[Tuple] = [
             (self._static_fetcher, "raw"),
@@ -52,7 +85,29 @@ class FetchCoordinator:
         Returns:
             转换后的 Markdown 内容；全部失败则返回 None
         """
-        chain = self._browser_chain if force_browser else self._lightweight_chain
+        url = url.strip()
+        effective_force_browser = force_browser
+
+        if force_browser and is_document_url(url):
+            log_ok(
+                "网页抓取文档 URL 忽略 force_browser，优先使用静态链路",
+                url=url,
+                force_browser=force_browser,
+            )
+            effective_force_browser = False
+
+        cached = self._get_cached(url, effective_force_browser)
+        if cached is not None:
+            log_ok(
+                "网页抓取缓存命中",
+                url=url,
+                force_browser=effective_force_browser,
+                length=len(cached),
+            )
+            return cached
+
+        chain = self._browser_chain if effective_force_browser else self._lightweight_chain
+        failure_reasons: list[str] = []
 
         for i, (fetcher, content_type) in enumerate(chain):
             fetcher_name = fetcher.__class__.__name__
@@ -62,27 +117,104 @@ class FetchCoordinator:
             try:
                 content = await fetcher.fetch(url)
             except Exception as e:
-                log_fail("网页抓取", e, url=url, fetcher=fetcher_name)
+                failure_reasons.append(f"{fetcher_name}: exception={e.__class__.__name__}")
+                log_fail(
+                    "网页抓取",
+                    e,
+                    url=url,
+                    fetcher=fetcher_name,
+                )
                 continue
 
             if not content:
-                log_fail("网页抓取", "抓取内容为空", url=url, fetcher=fetcher_name)
+                failure_reasons.append(f"{fetcher_name}: empty content")
+                log_fail(
+                    "网页抓取",
+                    "抓取内容为空",
+                    url=url,
+                    fetcher=fetcher_name,
+                )
                 continue
 
             if content_type == "markdown":
-                if len(content.strip()) < min_length:
-                    log_fail("网页抓取", "内容过短，触发降级", url=url, fetcher=fetcher_name)
+                markdown = str(content).strip()
+
+                if len(markdown) < min_length:
+                    failure_reasons.append(
+                        f"{fetcher_name}: too short length={len(markdown)} min={min_length}"
+                    )
+                    log_fail(
+                        "网页抓取",
+                        f"内容过短({len(markdown)}字符)，阈值{min_length}，触发降级",
+                        url=url,
+                        fetcher=fetcher_name,
+                    )
                     continue
-                log_ok("网页抓取", url=url, fetcher=fetcher_name)
-                return content.strip()
+
+                log_ok(
+                    "网页抓取",
+                    url=url,
+                    fetcher=fetcher_name,
+                    length=len(markdown),
+                )
+                self._set_cached(url, effective_force_browser, markdown)
+                return markdown
 
             result = self._processor.process(content)
             if result is None:
-                log_fail("网页抓取", "内容处理失败，触发降级", url=url, fetcher=fetcher_name)
+                failure_reasons.append(f"{fetcher_name}: processor failed")
+                log_fail(
+                    "网页抓取",
+                    "内容处理失败，触发降级",
+                    url=url,
+                    fetcher=fetcher_name,
+                )
                 continue
 
-            log_ok("网页抓取", url=url, fetcher=fetcher_name)
+            log_ok(
+                "网页抓取",
+                url=url,
+                fetcher=fetcher_name,
+                length=len(result),
+            )
+            self._set_cached(url, effective_force_browser, result)
             return result
 
-        log_fail("网页抓取", "所有抓取器均失败", url=url)
+        log_fail(
+            "网页抓取",
+            "所有抓取器均失败",
+            url=url,
+            force_browser=effective_force_browser,
+            reasons=" | ".join(failure_reasons[-5:]),
+        )
         return None
+
+    def _get_cached(self, url: str, force_browser: bool) -> Optional[str]:
+        key = (url, force_browser)
+        item = self._cache.get(key)
+
+        if item is None:
+            return None
+
+        created_at, markdown = item
+        age = time.monotonic() - created_at
+
+        if age > self._cache_ttl_seconds:
+            self._cache.pop(key, None)
+            return None
+
+        self._cache.move_to_end(key)
+        return markdown
+
+    def _set_cached(self, url: str, force_browser: bool, markdown: str) -> None:
+        key = (url, force_browser)
+        self._cache[key] = (time.monotonic(), markdown)
+        self._cache.move_to_end(key)
+
+        while len(self._cache) > self._cache_max_items:
+            self._cache.popitem(last=False)
+
+
+def is_document_url(url: str) -> bool:
+    path = urlparse(url).path.lower()
+    return path.endswith(DOCUMENT_EXTENSIONS)
