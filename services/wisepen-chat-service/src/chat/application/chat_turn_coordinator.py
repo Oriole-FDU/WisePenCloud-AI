@@ -113,6 +113,7 @@ class ChatTurnCoordinator:
 
         # [Skill Match] 预筛当前 query 可能相关的 Skill，命中才暴露 schema + 注入 Available Skills
         candidate_skills = self._skill_matcher.match(user_query)
+        print(candidate_skills)
         expose_tool_name_set = None
         if candidate_skills:
             # 解禁 Registry 里默认隐藏的 skill 脚手架工具（reserved=True）

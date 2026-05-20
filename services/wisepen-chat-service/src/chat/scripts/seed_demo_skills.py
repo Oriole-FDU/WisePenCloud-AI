@@ -186,9 +186,10 @@ async def _main() -> None:
     mongo_url = os.environ.get(
         "SEED_MONGO_URL", "mongodb://root:root@localhost:27017/"
     )
+    mongo_db_name = os.environ.get("SEED_MONGO_DB_NAME", "wisepen_chat")
     mongo_client = AsyncMongoClient(mongo_url)
     await init_beanie(
-        database=mongo_client["wisepen_chat"],
+        database=mongo_client[mongo_db_name],
         document_models=[Skill],
     )
 
@@ -200,7 +201,7 @@ async def _main() -> None:
             await _seed_one_bundle(version_dir, skill_id=skill_id, version=version)
             seeded += 1
 
-    log_event("seed_demo_skills: 完成", bundles=seeded, root=str(root))
+    log_event("seed_demo_skills: 完成", bundles=seeded, root=str(root), db=mongo_db_name)
 
 
 if __name__ == "__main__":
