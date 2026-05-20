@@ -30,7 +30,7 @@ class Skill(Document):
     description: str = Field(..., description="一句话说明本 Skill 的场景与目的")
     triggers: List[str] = Field(default_factory=list, description="关键词列表，供 KeywordSkillMatcher 大小写无关 substring 匹配")
 
-    skill_md: str = Field(..., description="发布时 SKILL.md 正文快照（含 frontmatter 去掉 --- 后的 body）")
+    skill_md: str = Field(..., description="发布时 SKILL.md 完整正文快照（含 frontmatter）")
     skill_md_object_key: str = Field(..., description="SKILL.md 在 OSS 的权威副本 object_key")
     assets_manifest: List[SkillAssetMeta] = Field(default_factory=list, description="附件清单，LLM 看得到的只有这一层")
 

@@ -2,7 +2,8 @@ from typing import Any, Dict
 
 from common.logger import log_error, log_fail
 
-from chat.domain.interfaces.tool import BaseTool
+from chat.application.skill_prompt_builder import SkillPromptBuilder
+from chat.domain.interfaces.tool import BaseTool, ToolExecutionResult
 from chat.domain.repositories import SkillRepository
 
 
@@ -78,22 +79,25 @@ class LoadSkillTool(BaseTool):
         if skill is None:
             return f"[Tool Error] Skill '{skill_id}' not found."
 
-        # 拼接 header + SKILL.md + assets manifest 摘要
+        # 拼接强约束 prompt + assets manifest 摘要。
+        # 完整 SKILL.md 作为本轮临时 SYSTEM 注入，不再作为 TOOL 正文返回。
         lines = [
-            f"[Loaded Skill] id={skill.skill_id} version={skill.version}",
-            f"[Display Name] {skill.display_name}",
-            "",
-            "===== SKILL.md BEGIN =====",
-            skill.skill_md.rstrip(),
-            "===== SKILL.md END =====",
+            SkillPromptBuilder.build_loaded_skill_prompt(skill),
         ]
 
         if skill.assets_manifest:
             lines.append("")
-            lines.append("[Assets Manifest] (use load_skill_asset to open any of these)")
+            lines.append(
+                "[Assets Manifest] Use load_skill_asset only if the loaded SKILL.md explicitly requires supporting assets."
+            )
             for asset in skill.assets_manifest:
                 lines.append(
-                    f"- path={asset.path} kind={asset.kind} size={asset.size_bytes} — {asset.description}"
+                    f"- path={asset.path} kind={asset.kind} size={asset.size_bytes} - {asset.description}"
                 )
 
-        return "\n".join(lines)
+        ack = f"[Skill loaded: {skill.skill_id} version={skill.version}]"
+        return ToolExecutionResult(
+            tool_content=ack,
+            system_injection="\n".join(lines),
+            frontend_output=ack,
+        )

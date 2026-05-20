@@ -1,6 +1,18 @@
 # src/chat/domain/interfaces/tool.py
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from dataclasses import dataclass
+from typing import Dict, Any, Optional, Union
+
+
+@dataclass(frozen=True)
+class ToolExecutionResult:
+    """
+    Structured tool result used when a tool needs to separate protocol-facing
+    tool content from control-plane system instructions.
+    """
+    tool_content: str
+    system_injection: Optional[str] = None
+    frontend_output: Optional[Any] = None
 
 
 class BaseTool(ABC):
@@ -49,7 +61,7 @@ class BaseTool(ABC):
         }
 
     @abstractmethod
-    async def execute(self, context: Dict[str, Any], **kwargs) -> str:
+    async def execute(self, context: Dict[str, Any], **kwargs) -> Union[str, ToolExecutionResult]:
         """
         执行工具逻辑。
         :param context: 系统强注入的安全上下文（session_id、user_id 等），

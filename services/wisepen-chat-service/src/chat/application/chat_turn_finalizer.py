@@ -96,7 +96,9 @@ class ChatTurnFinalizer:
         """
         Per-message 粒度的 ephemeral 处理，须在任何持久化动作之前调用一次
         - ASSISTANT 消息标 ephemeral=True：整条丢弃。
-        - TOOL 消息标 ephemeral=True：保留消息结构（tool_call_id / name 齐全）但 content 置换为占位符。
+        - SYSTEM 消息标 ephemeral=True：整条丢弃，避免临时控制指令进入 durable 历史。
+        - TOOL 消息标 ephemeral=True：默认保留消息结构（tool_call_id / name 齐全）但 content 置换为占位符。
+          若工具显式标记 preserve_ephemeral_content=True，则保留短 ack。
         
         以确保 SKILL 中 SKILL.md / asset 正文不会进入 durable 历史，后续回合也不会从 Redis / Mongo 读回污染上下文
         """
@@ -107,7 +109,12 @@ class ChatTurnFinalizer:
                 continue
             if msg.role == Role.ASSISTANT:
                 continue  # 整条丢弃
+            if msg.role == Role.SYSTEM:
+                continue  # 临时 SYSTEM 注入只服务当前 turn，不进入持久历史
             if msg.role == Role.TOOL:
+                if msg.metadata.get("preserve_ephemeral_content"):
+                    redacted.append(msg)
+                    continue
                 msg.content = (
                     f"[Redacted: ephemeral tool '{msg.name or 'unknown'}' scaffolding output]"
                 )
