@@ -103,7 +103,7 @@ class Container(containers.DeclarativeContainer):
         )
     else:
         skill_asset_loader = oss_skill_asset_loader
-    # KeywordSkillMatcher
+    # Skill metadata cache：保留历史类名，当前不再做关键词匹配
     skill_matcher = providers.Singleton(
         KeywordSkillMatcher,
         skill_repo=skill_repo,

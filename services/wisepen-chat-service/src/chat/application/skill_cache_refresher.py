@@ -8,7 +8,7 @@ from chat.application.skill_matcher import SkillMatcher
 
 class SkillCacheRefresher:
     """
-    Skill matcher 缓存的刷新调度器
+    Skill metadata 缓存的刷新调度器
     在启动阶段触发一次 eager warmup（作为"周期刷新的第 0 次"）
     之后每 ttl_seconds 调一次 matcher.warmup()，使得用户发布的 Skill 变化能在 TTL 内被当前副本感知
     """

@@ -8,10 +8,10 @@ from typing import Dict, Any, Optional, Union
 class ToolExecutionResult:
     """
     Structured tool result used when a tool needs to separate protocol-facing
-    tool content from control-plane system instructions.
+    tool content from turn-local control-plane instructions.
     """
     tool_content: str
-    system_injection: Optional[str] = None
+    user_injection: Optional[str] = None
     frontend_output: Optional[Any] = None
 
 
