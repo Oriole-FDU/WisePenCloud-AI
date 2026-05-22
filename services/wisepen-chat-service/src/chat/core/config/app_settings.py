@@ -89,7 +89,9 @@ class AppSettings(BaseModel):
     SKILL_OSS_CACHE_TTL_SECONDS: int = 6 * 3600
     # GC 扫描周期（秒）
     SKILL_OSS_CACHE_GC_INTERVAL_SECONDS: int = 30 * 60
-    # Matcher 每轮给 LLM 暴露的 skill 候选上限（受控披露，防 LLM 误加载）
+    # 每轮给 LLM 暴露的可用 Skill metadata 上限（只含 skill_id/display_name/description，不含 SKILL.md 正文）
+    SKILL_DISCOVERY_MAX_COUNT: int = 20
+    # 旧关键词 matcher 的候选上限；保留字段兼容现有 Nacos 配置，当前主链路不再使用字符串匹配。
     SKILL_MATCH_TOP_K: int = 2
     # Skill 元数据缓存 TTL（秒）。用户/Java 端发布的新 Skill 最坏需等 TTL 才被当前副本感知。
     # 过小会增加 Mongo 读压力；过大会让新 Skill 生效滞后。

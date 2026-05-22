@@ -291,12 +291,10 @@ class QueryLoopRuntime:
 
         # schema 已由 ToolScope 在构造期固化，这里零决策直读
         tool_schemas = tool_scope.schemas()
-        provider_messages = self._messages_for_provider(messages)
-
         try:
             # 调用模型流式接口
             async for chunk in self.llm.stream_chat_completion(
-                messages=provider_messages,
+                messages=messages,
                 model_name=model_name,
                 tools=tool_schemas or None,
                 api_base=api_base,
@@ -373,53 +371,6 @@ class QueryLoopRuntime:
         yield _StepTerminal(should_continue=True, new_messages=new_messages)
 
     @staticmethod
-    def _messages_for_provider(messages: List[ChatMessage]) -> List[ChatMessage]:
-        """
-        Build a provider-facing view of the current transcript.
-
-        Ephemeral SYSTEM messages are control-plane injections produced during
-        the current agent loop (for example loaded SKILL.md). Coalesce them
-        into the first provider-facing SYSTEM message so providers that only
-        honor one system prompt still receive the loaded skill instructions,
-        while leaving assistant(tool_calls) -> tool(...) pairs adjacent.
-        """
-        system_injections = [
-            m for m in messages if m.role == Role.SYSTEM and m.ephemeral
-        ]
-        if not system_injections:
-            return messages
-
-        remaining = [
-            m for m in messages if not (m.role == Role.SYSTEM and m.ephemeral)
-        ]
-        injection_content = "\n\n".join(
-            m.content for m in system_injections if m.content
-        )
-        if not injection_content:
-            return remaining
-
-        if remaining and remaining[0].role == Role.SYSTEM:
-            first_system = remaining[0]
-            copy_fn = getattr(first_system, "model_copy", None)
-            merged_system = (
-                copy_fn(deep=False)
-                if copy_fn is not None
-                else first_system.copy(deep=False)
-            )
-            merged_system.content = "\n\n".join(
-                part for part in (first_system.content, injection_content) if part
-            )
-            return [merged_system] + remaining[1:]
-
-        return [
-            ChatMessage(
-                session_id=system_injections[0].session_id,
-                role=Role.SYSTEM,
-                content=injection_content,
-            )
-        ] + remaining
-
-    @staticmethod
     def _coerce_tool_result(result: Any) -> ToolExecutionResult:
         if isinstance(result, ToolExecutionResult):
             return result
@@ -454,7 +405,7 @@ class QueryLoopRuntime:
         """
         并行执行所有工具。
         返回 tool_output_available 事件列表（按 parsed 顺序）和本轮新增消息。
-        新增消息通常是 Role.TOOL；结构化工具结果也可以附带 ephemeral Role.SYSTEM 注入。
+        新增消息通常是 Role.TOOL；结构化工具结果也可以附带 ephemeral Role.USER 注入。
         每条 TOOL 消息独立按对应 tool 的 is_ephemeral_output 打 ephemeral 标，
         让 Finalizer 在 per-message 粒度上决定是否 redact，避免混合轮次里 skill 正文通过"整轮保守落盘"漏进 durable 历史
         """
@@ -473,6 +424,7 @@ class QueryLoopRuntime:
         # 遍历结果做异常降级
         events: List[StreamEvent] = []
         tool_messages: List[ChatMessage] = []
+        injection_messages: List[ChatMessage] = []
         for tool_call, result, is_ephemeral in zip(parsed_tool_calls, raw_results, ephemeral_flags):
             # 如果某个结果是 Exception，转成字符串形式的 [Tool Execution Error]: ... 并记录日志，否则原样使用。
             # 防止原生 Exception 对象序列化进 API 请求导致异常
@@ -501,20 +453,20 @@ class QueryLoopRuntime:
                     content=tool_result.tool_content,
                     metadata={
                         "preserve_ephemeral_content": True
-                    } if tool_result.system_injection else {},
+                    } if tool_result.user_injection else {},
                     ephemeral=is_ephemeral,
                 )
             )
-            if tool_result.system_injection:
-                tool_messages.append(
+            if tool_result.user_injection:
+                injection_messages.append(
                     ChatMessage(
                         session_id=session_id,
-                        role=Role.SYSTEM,
-                        content=tool_result.system_injection,
+                        role=Role.USER,
+                        content=tool_result.user_injection,
                         ephemeral=True,
                     )
                 )
-        return events, tool_messages
+        return events, tool_messages + injection_messages
 
     async def _invoke_tool(
         self,

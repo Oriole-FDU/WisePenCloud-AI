@@ -107,10 +107,10 @@ class ChatTurnFinalizer:
             if not msg.ephemeral:
                 redacted.append(msg)
                 continue
-            if msg.role == Role.ASSISTANT:
-                continue  # 整条丢弃
             if msg.role == Role.SYSTEM:
                 continue  # 临时 SYSTEM 注入只服务当前 turn，不进入持久历史
+            if msg.role == Role.USER:
+                continue
             if msg.role == Role.TOOL:
                 if msg.metadata.get("preserve_ephemeral_content"):
                     redacted.append(msg)

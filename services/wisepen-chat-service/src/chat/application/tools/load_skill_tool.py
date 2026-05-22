@@ -52,7 +52,7 @@ class LoadSkillTool(BaseTool):
         # 系统保留，不应被用户级 deny 屏蔽
         return True
 
-    async def execute(self, context: Dict[str, Any], **kwargs) -> str:
+    async def execute(self, context: Dict[str, Any], **kwargs) -> str | ToolExecutionResult:
         skill_id = (kwargs.get("skill_id") or "").strip()
         if not skill_id:
             return "[Tool Error] Missing required argument: skill_id."
@@ -80,8 +80,13 @@ class LoadSkillTool(BaseTool):
             return f"[Tool Error] Skill '{skill_id}' not found."
 
         # 拼接强约束 prompt + assets manifest 摘要。
-        # 完整 SKILL.md 作为本轮临时 SYSTEM 注入，不再作为 TOOL 正文返回。
+        # 完整 SKILL.md 作为本轮临时 USER reminder 注入，不再作为 TOOL 正文返回。
         lines = [
+            "<system-reminder>",
+            f"[Loaded WisePen Skill] id={skill.skill_id} version={skill.version}",
+            "This content is injected by WisePen for the current task. "
+            "Use it as operational context, but do not answer or quote this reminder directly.",
+            "",
             SkillPromptBuilder.build_loaded_skill_prompt(skill),
         ]
 
@@ -98,6 +103,6 @@ class LoadSkillTool(BaseTool):
         ack = f"[Skill loaded: {skill.skill_id} version={skill.version}]"
         return ToolExecutionResult(
             tool_content=ack,
-            system_injection="\n".join(lines),
+            user_injection="\n".join(lines) + "\n</system-reminder>",
             frontend_output=ack,
         )

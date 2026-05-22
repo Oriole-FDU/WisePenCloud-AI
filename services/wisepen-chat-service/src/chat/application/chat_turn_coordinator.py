@@ -24,7 +24,7 @@ from common.kafka.producer import KafkaProducerClient
 
 
 # Skill 脚手架工具的名字集合：Registry 内部它们 reserved=True 默认隐藏
-# 只有 skill 命中时 Coordinator 把本集合作为 `expose` 传入 derive()，从而解禁 schema
+# 只有存在可用 skill 时 Coordinator 把本集合作为 `expose` 传入 derive()，从而解禁 schema
 _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
 
 
@@ -111,17 +111,17 @@ class ChatTurnCoordinator:
             "user_id": user_id,
         } 
 
-        # [Skill Match] 预筛当前 query 可能相关的 Skill，命中才暴露 schema + 注入 Available Skills
-        candidate_skills = self._skill_matcher.match(user_query)
-        print(candidate_skills)
+        # [Skill Discovery] 注入当前会话可用 Skill 的轻量 metadata，由 LLM 决定是否调用 load_skill。
+        # 不再用字符串 triggers 预筛，避免关键词未命中导致 Skill 无法被模型看见。
+        available_skills = self._skill_matcher.match(user_query)
         expose_tool_name_set = None
-        if candidate_skills:
+        if available_skills:
             # 解禁 Registry 里默认隐藏的 skill 脚手架工具（reserved=True）
             expose_tool_name_set = set(_SKILL_TOOL_NAMES)
-            tool_context["allowed_skill_ids"] = [s.skill_id for s in candidate_skills]
+            tool_context["allowed_skill_ids"] = [s.skill_id for s in available_skills]
 
         # [Tool Scope] 派生本请求的工具视图快照
-        # expose_tool_name_set 仅在 skill 命中时解禁 load_skill 系列，未命中时它们保持隐藏
+        # expose_tool_name_set 仅在存在可用 skill 时解禁 load_skill 系列，否则它们保持隐藏
         # runtime_discovered_tools 预留给"运行时动态发现的工具"（如 Skill bundle 自带 tools），暂时留空
         # allow_tool_name_set/deny_tool_name_set 预留给未来"用户级工具偏好"接入，暂时留空
         tool_scope = self._tool_registry.derive(
@@ -137,7 +137,7 @@ class ChatTurnCoordinator:
         messages_for_llm = self._context_assembler.assemble_prompt(
             session_id, user_query, messages_keep+messages_compress_candidates, relevant_facts, session_summary,
             states=states,
-            candidate_skills=candidate_skills or None,
+            available_skills=available_skills or None,
         )
 
         # 记录进入 Agent 循环前的列表长度
