@@ -20,7 +20,6 @@ from chat.core.persistence import (
     MongoModelRepository,
     MongoProviderRepository,
     MongoChatAttachmentRepository,
-    MongoChatAttachmentRepository,
     RedisHotContext,
 )
 from chat.application.attachment_service import AttachmentService
