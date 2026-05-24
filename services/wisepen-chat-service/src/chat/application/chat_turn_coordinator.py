@@ -3,7 +3,6 @@ from beanie import PydanticObjectId
 from fastapi import BackgroundTasks
 from common.logger import log_error
 
-from chat.application.attachment_service import AttachmentService
 from chat.api.schemas.chat import AttachmentRefRequest
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
@@ -49,7 +48,6 @@ class ChatTurnCoordinator:
             tool_registry: ToolRegistry,
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
-            attachment_service: AttachmentService,
     ):
         self._memory = memory
         self._model_repo = model_repo
@@ -65,7 +63,6 @@ class ChatTurnCoordinator:
             kafka_producer=kafka_producer
         )
         self._skill_matcher = skill_matcher
-        self._attachment_service = attachment_service
 
     # -------------------------------------------------------------------------
     # 公共入口
@@ -80,6 +77,7 @@ class ChatTurnCoordinator:
             provider_id: Optional[PydanticObjectId] = None,
             states: Optional[List[Dict[str, Any]]] = None,
             attachment_refs: Optional[List[AttachmentRefRequest]] = None,
+            attachments_meta: Optional[List[Dict[str, Any]]] = None,
     ):
         # [Model Resolve] 通过仓储解析模型、映射、供应商和 API 凭证
         resolved = await self._model_repo.resolve_model_for_chat(
@@ -143,7 +141,7 @@ class ChatTurnCoordinator:
             session_id, effective_user_query, hydrated_window_messages, relevant_facts, session_summary,
             states=merged_states,
             candidate_skills=candidate_skills or None,
-            user_content=user_content,
+            attachments_meta=attachments_meta,
         )
 
         # 记录进入 Agent 循环前的列表长度
@@ -155,9 +153,6 @@ class ChatTurnCoordinator:
             metadata={
                 "states": merged_states,
                 "attachment_refs": [ref.model_dump() for ref in (attachment_refs or [])],
-                "accepted_attachment_ids": accepted_attachment_ids,
-                "accepted_image_attachment_ids": accepted_image_attachment_ids,
-                "ignored_attachment_ids": ignored_attachment_ids,
             },
         )
 

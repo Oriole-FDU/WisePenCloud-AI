@@ -96,6 +96,7 @@ class ChatContextAssembler:
         states: Optional[List[Dict[str, Any]]] = None,
         candidate_skills: Optional[List[SkillMeta]] = None,
         user_content: Optional[Any] = None,
+        attachments_meta: Optional[List[Dict[str, Any]]] = None,
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表。"""
         system_prompt = """
@@ -166,6 +167,37 @@ class ChatContextAssembler:
                 session_id=session_id,
                 role=Role.SYSTEM,
                 content="[Frontend Context]\n" + "\n".join(ctx_lines),
+            ))
+
+        # 会话附件元数据注入：告知 LLM 当前会话有哪些可用附件及其 object_key
+        if attachments_meta:
+            meta_lines = []
+            for a in attachments_meta:
+                size_kb = int(a.get("file_size", 0)) // 1024
+                meta_lines.append(
+                    f"- object_key=\"{a.get('object_key', '')}\" "
+                    f"filename=\"{a.get('original_name', '')}\" "
+                    f"type=\"{a.get('extension', '')}\" "
+                    f"size={size_kb}KB "
+                    f"mime=\"{a.get('mime_type', 'unknown')}\""
+                )
+            attachments_block = (
+                "[Session Attachments]\n"
+                "The following files have been uploaded by the user in the current session. "
+                "You can read the content of any attachment using the appropriate tool:\n"
+                "- `read_text_attachment` for text/code files (.txt .md .py .js .json .csv etc.)\n"
+                "- `read_pdf_attachment` for PDF files (.pdf)\n"
+                "- `read_word_attachment` for Word documents (.docx / .doc)\n"
+                "- `read_ppt_attachment` for PowerPoint slides (.pptx / .ppt)\n"
+                "- `read_excel_attachment` for Excel spreadsheets (.xlsx / .xls)\n"
+                "Call the matching tool with the object_key of the file you want to read. "
+                "Only call when the user explicitly asks about a file's content.\n\n"
+                + "\n".join(meta_lines)
+            )
+            messages.append(ChatMessage(
+                session_id=session_id,
+                role=Role.SYSTEM,
+                content=attachments_block,
             ))
 
         # 用户最新输入的问题

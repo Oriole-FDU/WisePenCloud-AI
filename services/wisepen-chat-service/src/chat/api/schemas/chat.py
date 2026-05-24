@@ -1,17 +1,12 @@
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
-from chat.domain.entities import AttachmentContextMode
 
 
 class AttachmentRefRequest(BaseModel):
-    """聊天请求里的附件引用"""
+    """AI tool call 使用的附件引用"""
 
-    attachment_id: str = Field(..., description="附件 ID")
-    enabled: bool = Field(default=True, description="是否参与本轮")
-    context_mode: AttachmentContextMode = Field(
-        default=AttachmentContextMode.SUMMARY,
-        description="附件上下文注入模式",
-    )
+    object_key: str = Field(..., description="OSS 对象键")
+    filename: str = Field(default="", description="文件名")
 
 
 class ChatRequest(BaseModel):

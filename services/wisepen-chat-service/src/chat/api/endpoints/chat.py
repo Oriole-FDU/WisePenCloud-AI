@@ -13,6 +13,7 @@ from chat.api.vercel_formats import (
 from common.security import require_login
 from common.logger import log_event, log_error
 from chat.api.schemas.chat import ChatRequest
+from chat.application.attachment_service import AttachmentService
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.container import Container
 from chat.core.config.app_settings import settings
@@ -53,6 +54,7 @@ async def chat_completions(
         user_id: str = Depends(require_login),
         coordinator: ChatTurnCoordinator = Depends(Provide[Container.chat_turn_coordinator]),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+        attachment_service: AttachmentService = Depends(Provide[Container.attachment_service]),
 ):
     """
     请求格式:
@@ -65,7 +67,12 @@ async def chat_completions(
             "key": "selected_text",
             "value": "xxx",
             "disabled": false}
-         ]
+         ],
+         "attachment_refs": [{
+            "object_key": "xxx",
+            "filename": "xxx"}
+         ],
+        "attachments_meta": []
        }
     """
     if not req.query:
@@ -79,14 +86,52 @@ async def chat_completions(
 
     await session_repo.get_session_for_user(req.session_id, user_id)
 
+    resolved_refs = await attachment_service.resolve_session_attachments(req.session_id)
+    effective_refs = req.attachment_refs or resolved_refs
+
+    # 获取完整附件元数据用于注入 LLM 上下文
+    session_attachments = await attachment_service.get_session_attachments_meta(req.session_id)
+    attachments_meta = None
+    if session_attachments:
+        attachments_meta = [
+            {
+                "object_key": a.object_key,
+                "original_name": a.original_name,
+                "extension": a.extension,
+                "file_size": a.file_size,
+                "mime_type": a.mime_type,
+            }
+            for a in session_attachments
+        ]
+
+    resolved_refs = await attachment_service.resolve_session_attachments(req.session_id)
+    effective_refs = req.attachment_refs or resolved_refs
+
+    # 获取完整附件元数据用于注入 LLM 上下文
+    session_attachments = await attachment_service.get_session_attachments_meta(req.session_id)
+    attachments_meta = None
+    if session_attachments:
+        attachments_meta = [
+            {
+                "object_key": a.object_key,
+                "original_name": a.original_name,
+                "extension": a.extension,
+                "file_size": a.file_size,
+                "mime_type": a.mime_type,
+            }
+            for a in session_attachments
+        ]
+
     chat_gen = coordinator.handle_chat(
         user_id=user_id,
         session_id=req.session_id,
         user_query=req.query,
         background_tasks=background_tasks,
         model_id=resolved_model_id,
+        states=req.states,
+        attachment_refs=req.attachment_refs,
+        attachments_meta=attachments_meta,
         provider_id=resolved_provider_id,
-        states=req.states
     )
 
     return StreamingResponse(

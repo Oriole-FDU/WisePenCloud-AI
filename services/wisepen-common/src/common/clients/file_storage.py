@@ -123,3 +123,10 @@ class FileStorageClient:
             file_id=int(data["fileId"]) if data.get("fileId") is not None else None,
             domain=str(data.get("domain") or ""),
         )
+
+    async def delete_file(self, object_key: str) -> None:
+        await self._rpc.post(
+            self._service_name,
+            "/internal/storage/deleteFiles",
+            json=[object_key],
+        )

@@ -8,25 +8,22 @@ from v2.nacos import NacosNamingService
 from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings
 from chat.core.providers import (
-    CompositeDocumentAttachmentParser,
-    LegacyOfficeAttachmentParser,
-    SimpleAttachmentAuditor,
-    SimpleDocumentAttachmentParser,
-    TextCodeAttachmentParser,
     LiteLLMAdapter,
     Mem0Adapter,
     LocalFSSkillAssetLoader,
     OssSkillAssetLoader,
 )
 from chat.core.persistence import (
-    MongoAttachmentRepository,
     MongoSessionRepository,
     MongoMessageRepository,
     MongoSkillRepository,
     MongoModelRepository,
     MongoProviderRepository,
+    MongoChatAttachmentRepository,
     RedisHotContext,
 )
+from chat.application.attachment_service import AttachmentService
+from chat.application.model_resolver import ModelResolver
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.skill_matcher import KeywordSkillMatcher
 from chat.application.skill_cache_refresher import SkillCacheRefresher
@@ -35,6 +32,11 @@ from chat.application.tools import (
     SearchHistoricalMessagesTool,
     LoadSkillTool,
     LoadSkillAssetTool,
+    ReadTextAttachmentTool,
+    ReadPdfAttachmentTool,
+    ReadWordAttachmentTool,
+    ReadPptAttachmentTool,
+    ReadExcelAttachmentTool,
 )
 from common.clients.file_storage import FileStorageClient
 from chat.core.config.nacos import nacos_client_manager
@@ -61,7 +63,6 @@ class Container(containers.DeclarativeContainer):
     llm_provider = providers.Singleton(LiteLLMAdapter)
     memory_provider = providers.Singleton(Mem0Adapter)
 
-    attachment_repo = providers.Singleton(MongoAttachmentRepository)
     session_repo = providers.Singleton(MongoSessionRepository)
     message_repo = providers.Singleton(MongoMessageRepository)
     model_repo = providers.Singleton(MongoModelRepository)
@@ -88,45 +89,6 @@ class Container(containers.DeclarativeContainer):
     file_storage_client = providers.Singleton(
         FileStorageClient,
         rpc=rpc_client,
-    )
-    # 文档库服务
-    document_service_client = providers.Singleton(
-        DocumentServiceClient,
-        rpc=rpc_client,
-    )
-
-    # 资源标签服务
-    resource_service_client = providers.Singleton(
-        ResourceServiceClient,
-        rpc=rpc_client,
-    )
-
-    # 附件安全审核器
-    attachment_auditor = providers.Singleton(
-        SimpleAttachmentAuditor,
-        file_storage_client=file_storage_client,
-        enabled=settings.ATTACHMENT_AUDIT_ENABLED,
-    )
-    # 附件文档解析器：按格式分发到子解析器
-    simple_attachment_parser = providers.Singleton(
-        SimpleDocumentAttachmentParser,
-        file_storage_client=file_storage_client,
-    )
-    text_code_attachment_parser = providers.Singleton(
-        TextCodeAttachmentParser,
-        file_storage_client=file_storage_client,
-    )
-    legacy_office_attachment_parser = providers.Singleton(
-        LegacyOfficeAttachmentParser,
-        file_storage_client=file_storage_client,
-        converter_command=settings.ATTACHMENT_OFFICE_CONVERTER_COMMAND,
-        converter_timeout_seconds=settings.ATTACHMENT_OFFICE_CONVERTER_TIMEOUT_SECONDS,
-    )
-    attachment_parser = providers.Singleton(
-        CompositeDocumentAttachmentParser,
-        simple_parser=simple_attachment_parser,
-        legacy_office_parser=legacy_office_attachment_parser,
-        text_code_parser=text_code_attachment_parser,
     )
 
     # Skill 子系统：
@@ -184,15 +146,55 @@ class Container(containers.DeclarativeContainer):
         skill_asset_loader=skill_asset_loader,
     )
 
+    model_resolver = providers.Singleton(ModelResolver)
+    chat_attachment_repo = providers.Singleton(MongoChatAttachmentRepository)
+
+    read_text_attachment_tool = providers.Singleton(
+        ReadTextAttachmentTool,
+        file_storage_client=file_storage_client,
+        attachment_repo=chat_attachment_repo,
+    )
+    read_pdf_attachment_tool = providers.Singleton(
+        ReadPdfAttachmentTool,
+        file_storage_client=file_storage_client,
+        attachment_repo=chat_attachment_repo,
+    )
+    read_word_attachment_tool = providers.Singleton(
+        ReadWordAttachmentTool,
+        file_storage_client=file_storage_client,
+        attachment_repo=chat_attachment_repo,
+    )
+    read_ppt_attachment_tool = providers.Singleton(
+        ReadPptAttachmentTool,
+        file_storage_client=file_storage_client,
+        attachment_repo=chat_attachment_repo,
+    )
+    read_excel_attachment_tool = providers.Singleton(
+        ReadExcelAttachmentTool,
+        file_storage_client=file_storage_client,
+        attachment_repo=chat_attachment_repo,
+    )
+
     tool_providers = providers.List(
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
+        read_text_attachment_tool,
+        read_pdf_attachment_tool,
+        read_word_attachment_tool,
+        read_ppt_attachment_tool,
+        read_excel_attachment_tool,
     )
 
     tool_registry = providers.Singleton(
         _build_registry,
         tool_providers=tool_providers,
+    )
+
+    attachment_service = providers.Factory(
+        AttachmentService,
+        file_storage_client=file_storage_client,
+        chat_attachment_repo=chat_attachment_repo,
     )
 
     # Application 层组件
@@ -208,7 +210,6 @@ class Container(containers.DeclarativeContainer):
         tool_registry=tool_registry,
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
-        attachment_service=attachment_service,
     )
 
 

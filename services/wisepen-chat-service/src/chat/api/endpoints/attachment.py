@@ -1,116 +1,56 @@
-from dependency_injector.wiring import inject, Provide
-from fastapi import APIRouter, BackgroundTasks, Depends
-
+from fastapi import APIRouter, Depends
+from common.security.dependencies import require_login
+from chat.application.attachment_service import AttachmentService
 from chat.api.schemas.attachment import (
-    CheckAttachmentUploadCapabilityRequest,
-    CheckAttachmentUploadCapabilityResponse,
-    CompleteAttachmentUploadRequest,
-    CompleteAttachmentUploadResponse,
     InitAttachmentUploadRequest,
     InitAttachmentUploadResponse,
-    QueryAttachmentRequest,
-    QueryAttachmentResponse,
-    RemoveAttachmentRequest,
-    RemoveAttachmentResponse,
-    ReportAttachmentParseResultRequest,
-    ReportAttachmentParseResultResponse,
-    UpdateAttachmentConfigRequest,
-    UpdateAttachmentConfigResponse,
+    ConfirmUploadRequest,
+    ConfirmUploadResponse,
+    DeleteAttachmentRequest,
+    DeleteAttachmentResponse,
+    GetAttachmentPreviewUrlResponse,
 )
-from chat.application.attachment_service import AttachmentService
-from chat.container import Container
-from common.core.domain import R
-from common.security import require_login
-
-router = APIRouter()
+from chat.container import container
 
 
-@router.post("/initUpload", response_model=R[InitAttachmentUploadResponse], status_code=200)
-@inject
-async def init_attachment_upload(
+router = APIRouter(tags=["attachment"])
+
+
+@router.post("/initUpload", response_model=InitAttachmentUploadResponse)
+async def init_upload(
     req: InitAttachmentUploadRequest,
-    background_tasks: BackgroundTasks,
     user_id: str = Depends(require_login),
-    service: AttachmentService = Depends(Provide[Container.attachment_service]),
 ):
-    data = await service.init_upload(req, user_id)
-    if data.flash_uploaded:
-        background_tasks.add_task(
-            service.auto_parse_uploaded_attachment,
-            data.attachment_id,
-            req.session_id,
-            user_id,
-        )
-    return R.success(data=data)
+    """初始化上传附件：前端点击附件按钮后调用，申请上传凭证并预写状态为pending的文件记录"""
+    service: AttachmentService = container.attachment_service()
+    return await service.init_upload(user_id, req)
 
 
-@router.post("/completeUpload", response_model=R[CompleteAttachmentUploadResponse], status_code=200)
-@inject
-async def complete_attachment_upload(
-    req: CompleteAttachmentUploadRequest,
-    background_tasks: BackgroundTasks,
-    user_id: str = Depends(require_login),
-    service: AttachmentService = Depends(Provide[Container.attachment_service]),
+@router.post("/confirmUpload", response_model=ConfirmUploadResponse)
+async def confirm_upload(
+    req: ConfirmUploadRequest,
+    _=Depends(require_login),
 ):
-    data = await service.complete_upload(req, user_id)
-    background_tasks.add_task(
-        service.auto_parse_uploaded_attachment,
-        req.attachment_id,
-        req.session_id,
-        user_id,
-    )
-    return R.success(data=data)
+    """确认上传附件：前端直传 OSS 成功后回调，将附件状态从 pending 转为 uploaded"""
+    service: AttachmentService = container.attachment_service()
+    return await service.confirm_upload(req.object_key)
 
 
-@router.post("/queryAttachments", response_model=R[QueryAttachmentResponse], status_code=200)
-@inject
-async def query_attachments(
-    req: QueryAttachmentRequest,
-    user_id: str = Depends(require_login),
-    service: AttachmentService = Depends(Provide[Container.attachment_service]),
+
+@router.post("/delete", response_model=DeleteAttachmentResponse)
+async def delete_attachment(
+    req: DeleteAttachmentRequest,
+    _=Depends(require_login),
 ):
-    data = await service.query_attachments(req, user_id)
-    return R.success(data=data)
+    service: AttachmentService = container.attachment_service()
+    return await service.delete_attachment(req.object_key)
 
 
-@router.post("/checkUploadCapability", response_model=R[CheckAttachmentUploadCapabilityResponse], status_code=200)
-@inject
-async def check_upload_capability(
-    req: CheckAttachmentUploadCapabilityRequest,
-    service: AttachmentService = Depends(Provide[Container.attachment_service]),
+@router.get("/preview", response_model=GetAttachmentPreviewUrlResponse)
+async def preview_attachment(
+    object_key: str,
+    duration_seconds: int = 900,
+    _=Depends(require_login),
 ):
-    data = await service.check_upload_capability(req)
-    return R.success(data=data)
-
-
-@router.post("/updateAttachmentConfig", response_model=R[UpdateAttachmentConfigResponse], status_code=200)
-@inject
-async def update_attachment_config(
-    req: UpdateAttachmentConfigRequest,
-    user_id: str = Depends(require_login),
-    service: AttachmentService = Depends(Provide[Container.attachment_service]),
-):
-    data = await service.update_attachment_config(req, user_id)
-    return R.success(data=data)
-
-
-@router.post("/reportParseResult", response_model=R[ReportAttachmentParseResultResponse], status_code=200)
-@inject
-async def report_parse_result(
-    req: ReportAttachmentParseResultRequest,
-    user_id: str = Depends(require_login),
-    service: AttachmentService = Depends(Provide[Container.attachment_service]),
-):
-    data = await service.report_parse_result(req, user_id)
-    return R.success(data=data)
-
-
-@router.post("/removeAttachment", response_model=R[RemoveAttachmentResponse], status_code=200)
-@inject
-async def remove_attachment(
-    req: RemoveAttachmentRequest,
-    user_id: str = Depends(require_login),
-    service: AttachmentService = Depends(Provide[Container.attachment_service]),
-):
-    data = await service.remove_attachment(req, user_id)
-    return R.success(data=data)
+    service: AttachmentService = container.attachment_service()
+    return await service.get_preview_url(object_key, duration_seconds)

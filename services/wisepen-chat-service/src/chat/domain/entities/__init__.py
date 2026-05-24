@@ -4,14 +4,17 @@ from .session import ChatSession
 from .model import ModelType, ModelScope, Model, ModelProviderMapping
 from .provider import Provider, ProviderScope, ProviderType
 from .skill import Skill, SkillMeta, SkillAssetMeta
+from .chat_attachment import ChatAttachment
 
 __all__ = [
-    "ChatMessage", "Role",
+    "ChatMessage",
+    "Role",
     "ChatSession",
     "ModelType", "ModelScope", "Model",
     "Provider", "ProviderScope", "ProviderType",
     "ModelProviderMapping",
-    "Skill", 
-    "SkillMeta", 
+    "Skill",
+    "SkillMeta",
     "SkillAssetMeta",
+    "ChatAttachment",
 ]
