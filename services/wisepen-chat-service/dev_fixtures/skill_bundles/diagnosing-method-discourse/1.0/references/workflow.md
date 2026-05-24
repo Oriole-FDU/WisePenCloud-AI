@@ -60,8 +60,8 @@ Confidence scale:
 
 Feedback priority scale:
 
-- 必须补充: absence or weakness would affect the method chain, credibility, validity, reproducibility, or reader trust.
-- 建议补充: adding the detail would improve transparency, but the current text is not logically broken.
+- 必须修改: absence or weakness would affect the method chain, credibility, validity, reproducibility, or reader trust.
+- 建议修改: adding the detail would improve transparency, but the current text is not logically broken.
 - 不必补充: the detail is unrelated to the study design or the current wording is already sufficient. Do not list these items in the final priority tables.
 
 ## 4. Build the Required-Step Profile
@@ -140,7 +140,7 @@ Generate feedback in a teaching style:
 - identify missing, weak, or unclear rhetorical functions;
 - explain why each issue affects credibility or reproducibility;
 - before writing a feedback item, return to the original sentence or unit and confirm that the gap is real, the severity is correct, and the proposed fix still fits the study design;
-- separate the closing feedback into two blocks: 必须补充 and 建议补充;
+- separate the closing feedback into two blocks: 必须修改 and 建议修改;
 - tell the student what to add or clarify next;
 - avoid replacing diagnosis with polished rewritten prose.
 
@@ -150,20 +150,34 @@ Your Methods section already does X. However, it does not yet do Y. This matters
 
 ## 9. Output Structure
 
-Return six sections:
+Steps 1-8 are internal diagnostic work. They support the priority judgment, but they must not appear in the final response.
 
-1. Overall Diagnosis
-2. Move-Step Annotation
-3. Required Step Coverage
-4. Unjustified Methodological Decisions
-5. Method Logic Issues
-6. Revision Priorities
+Final output must contain only the concrete revision priorities.
 
-In section 6, output two blocks in this order:
+Do not output:
 
-- 必须补充: Missing steps and Weak items that materially affect rigour, credibility, reproducibility, validity, or method-chain logic. Re-check the original sentence before listing the item; if the evidence is only a minor transparency issue, downgrade it to 建议补充.
-- 建议补充: Weak items and rationale gaps that would improve transparency, completeness, or reader trust but are not necessary to the method chain.
-- 不必补充: items that are unrelated to the study design or already sufficiently covered. Do not include this as a final table; use it only to avoid over-diagnosis.
+- Overall Diagnosis;
+- Move-Step Annotation;
+- Required Step Coverage;
+- Unjustified Methodological Decisions;
+- Method Logic Issues;
+- `Revision Priorities` or any numbered section heading;
+- paragraph summaries, scores, introductions, closing notes, or follow-up questions.
 
-End with 3-5 prioritized revision actions across both blocks. Each item must be anchored in the original wording and should not invent content for the student.
+Output two blocks in this order:
+
+- 必须修改: Missing steps and Weak items that materially affect rigour, credibility, reproducibility, validity, or method-chain logic. Re-check the original sentence before listing the item; if the evidence is only a minor transparency issue, downgrade it to 建议修改.
+- 建议修改: Weak items and rationale gaps that would improve transparency, completeness, or reader trust but are not necessary to the method chain.
+- 不必补充: items that are unrelated to the study design or already sufficiently covered. Do not include this in the final response; use it only to avoid over-diagnosis.
+
+Use ordered lists for issues and unordered bullet points for item details. Do not use Markdown tables.
+
+Each item must follow this structure:
+
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [original sentence or clause]
+   - 问题: [diagnosis in English]
+   - 具体改进方向: [specific revision direction in English]
+
+Only the two block headings and fixed field labels may be Chinese. All issue summaries and explanatory content must be in English. Each item must be anchored in the original wording and should not invent content for the student.
 

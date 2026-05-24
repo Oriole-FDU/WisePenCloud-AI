@@ -30,12 +30,12 @@ Common Weak cases:
 - the student states a choice that needs rationale but gives none;
 - the student gives partial data preparation but omits key cleaning, coding, or exclusion details.
 
-When converting Weak items into final feedback, decide whether they belong in 必须补充 or 建议补充:
+When converting Weak items into final feedback, decide whether they belong in 必须修改 or 建议修改:
 
-- place them in 必须补充 if the missing detail affects rigour, credibility, reproducibility, validity, or the method chain;
-- place them in 建议补充 if the missing detail mainly improves transparency or completeness.
+- place them in 必须修改 if the missing detail affects rigour, credibility, reproducibility, validity, or the method chain;
+- place them in 建议修改 if the missing detail mainly improves transparency or completeness.
 
-For example, a clear participant profile with only an unclear recruitment channel usually belongs in 建议补充, not 必须补充.
+For example, a clear participant profile with only an unclear recruitment channel usually belongs in 建议修改, not 必须修改.
 
 ### Missing
 
@@ -43,7 +43,7 @@ Mark Missing when the step is required for this discipline/research type but abs
 
 Do not assume the missing information appears elsewhere unless the user provides it.
 
-Missing items belong in 必须补充 in the final feedback.
+Missing items belong in 必须修改 in the final feedback.
 
 ### Not Applicable
 
@@ -129,7 +129,7 @@ Keep feedback evidence-based. Anchor comments in the student's wording whenever 
 
 When writing the closing feedback, split the items into two blocks in this order:
 
-1. 必须补充
-2. 建议补充
+1. 必须修改
+2. 建议修改
 
 Re-read the source sentence before placing an item in either block and make sure the suggested revision is supported by the text and the study design. Do not use the same issue in both blocks.

@@ -41,28 +41,29 @@ Load only the files needed for the current task:
 - `references/introduction-move-step-definitions.md`: read when assigning or explaining Introduction move-step labels.
 - `references/discipline-sensitive-profiles.md`: read when deciding which conventional steps or equivalent functions matter for a discipline.
 - `references/diagnostic-rubric.md`: read when judging Present, Weak, Missing, Not Applicable, or Unclear, and when diagnosing gap quality, gap-aim alignment, or literature organization.
-- `references/output-templates.md`: read when formatting a full diagnostic report, short classroom feedback, sentence-level feedback, or coverage-only answer.
+- `references/output-templates.md`: read when formatting the final revision-priority-only answer.
 - `references/failure-strategies.md`: read when the input may not be an Introduction, is too short, lacks discipline metadata, or asks only for rewriting.
 - `references/source-notes.md`: read when the user asks about the theoretical basis, citations, or why the skill uses this framework.
 
 ## Default Output
 
-Unless the user asks for a shorter format, return seven sections:
+Unless the user explicitly asks for a different format, return only the final concrete revision priorities.
 
-1. Overall Diagnosis
-2. Sentence-Level Move-Step Annotation
-3. Discipline-Sensitive Step Coverage
-4. Gap or Niche Diagnosis
-5. Gap-Aim Alignment
-6. Literature Organization
-7. Revision Priorities
-
-In section 7, split the closing feedback into two tables, in this order:
+Do not include overall diagnosis, sentence-level move-step annotation, step coverage, gap or niche diagnosis, gap-aim alignment, literature-organization tables, diagnostic summaries, or closing notes in the final response. Use those analyses internally, then output only two blocks in this order:
 
 - 必须修改
 - 建议修改
 
-Each table should use `原文句子 | 问题 | 为什么影响 Introduction | 具体改进方向`.
+Use ordered lists for issues and unordered bullet points for item details. Do not use Markdown tables.
+
+Each issue must follow this structure:
+
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [original sentence or clause]
+   - 问题: [diagnosis in English, including why it weakens Introduction when relevant]
+   - 具体改进方向: [specific revision direction in English]
+
+Only the two block headings and fixed field labels may be Chinese. All issue summaries and explanatory content must be in English.
 
 ## Constraints
 

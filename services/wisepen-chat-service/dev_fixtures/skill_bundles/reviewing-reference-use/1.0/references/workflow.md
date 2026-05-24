@@ -52,9 +52,9 @@ Follow this workflow for full reviews of student academic writing. If the user a
 - For weak, irrelevant, or uncertain sources, search for the abstract/introduction only when web access is available and the task warrants it.
 - Explain whether the source should be kept, replaced, removed, or better integrated.
 
-## 8. Produce the report
+## 8. Produce the final priorities
 
-- Use `output-templates.md` for the report shape.
+- Use `output-templates.md` for the final response shape.
 - Put high-impact issues first.
 - Separate formatting problems from relevance problems.
-- End with concrete revision priorities.
+- Use the style, matching, and relevance checks internally, but output only concrete revision priorities.

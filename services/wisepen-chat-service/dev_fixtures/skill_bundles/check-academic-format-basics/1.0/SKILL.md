@@ -151,31 +151,39 @@ Use these two parts in this exact order:
 
 ### 必须修改
 
-| 原句 | 问题 | 修改方向 |
-| ---- | ---- | -------- |
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [exact sentence, heading, phrase, or visible text segment]
+   - 问题: [concise diagnosis in English]
+   - 具体改进方向: [brief revision direction in English]
 
 ### 建议修改
 
-| 原句 | 问题 | 修改方向 |
-| ---- | ---- | -------- |
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [exact sentence, heading, phrase, or visible text segment]
+   - 问题: [concise diagnosis in English]
+   - 具体改进方向: [brief revision direction in English]
 
-Each row must include:
+Each issue must include:
 
-- `原句`: the exact sentence, heading, phrase, or visible text segment that needs revision.
-- `问题`: provide only a concise diagnosis. Do not begin with `必须修改：`, `建议修改：`, `必须修改`, or `建议修改`.
-- `修改方向`: provide a brief direction for revision. A sample rewrite may be included only when it is short and directly useful.
+- `原文句子`: the exact sentence, heading, phrase, or visible text segment that needs revision.
+- `问题`: provide only a concise diagnosis in English. Do not begin with `必须修改：`, `建议修改：`, `必须修改`, or `建议修改`.
+- `具体改进方向`: provide a brief direction for revision in English. A sample rewrite may be included only when it is short and directly useful.
 
-If one part has no items, write exactly `无。` under that part's heading instead of a table.
+Use ordered lists for issues and unordered bullet points for item details. Do not use Markdown tables.
+
+Only the two block headings and fixed field labels may be Chinese. All issue summaries and explanatory content must be in English.
+
+If one part has no items, write exactly `No items.` under that part's heading.
 
 If there are no problems in either part, output:
 
 ### 必须修改
 
-无。
+No items.
 
 ### 建议修改
 
-无。
+No items.
 
 ## Constraints
 

@@ -29,23 +29,29 @@ Load only the files needed for the current task:
 - `references/workflow.md`: read for every full reference review.
 - `references/citation-style-guide.md`: read when classifying citation style, judging discipline fit, or correcting format issues.
 - `references/relevance-rubric.md`: read when judging whether references match the student's topic, research question, or citation context.
-- `references/output-templates.md`: read when formatting a full report, short report, or correction-only answer.
+- `references/output-templates.md`: read when formatting the final revision-priority-only answer.
 - `references/failure-strategies.md`: read when the input lacks a reference list, lacks in-text citations, is interdisciplinary, has mixed styles, or cannot be web-verified.
 - `references/source-notes.md`: read when the user asks about the basis of the citation rules or when a style-specific rule is uncertain.
 
 ## Default Output
 
-Unless the user asks for a shorter answer, return seven sections:
+Unless the user explicitly asks for a different format, return only the final concrete revision priorities.
 
-1. Discipline Identification
-2. Expected Citation Style
-3. Detected Citation Style
-4. Format Problems
-5. In-text Citation and Reference List Matching
-6. Reference Relevance Review
-7. Priority Revision Suggestions
+Do not include discipline identification, expected citation style, detected citation style, format-problem tables, in-text/reference matching tables, reference relevance review, diagnostic summaries, or closing notes in the final response. Use the workflow internally, then output only two blocks in this order:
 
-Use tables for issue lists. Split final priorities into must-fix and suggested-fix items when there are enough issues to justify the distinction.
+- 必须修改
+- 建议修改
+
+Use ordered lists for issues and unordered bullet points for item details. Do not use Markdown tables.
+
+Each issue must follow this structure:
+
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [original citation, reference entry, sentence, or text span]
+   - 问题: [diagnosis in English]
+   - 具体改进方向: [specific revision direction in English]
+
+Only the two block headings and fixed field labels may be Chinese. All issue summaries and explanatory content must be in English.
 
 ## Constraints
 

@@ -1,106 +1,40 @@
 # Output Templates
 
-Use these templates to format diagnostic output. Adapt length to the user's request.
+Use this template to keep Methods diagnoses focused on revision advice only.
 
-## Full Diagnostic Report
+The diagnosis workflow may produce internal move-step annotations, required-step coverage, unjustified-decision checks, and method-logic checks. Do not include those internal diagnostic sections in the final response unless the user explicitly asks for them.
 
-```markdown
-## 1. Overall Diagnosis
+## Final Output
 
-[Brief paragraph identifying research type, discipline if known, main strengths, and main credibility problems.]
+Output only the content that would normally appear under `Revision Priorities`. Do not include a diagnostic report title, section number, overall diagnosis, move-step annotation, required-step coverage, unjustified-methodological-decision table, method-logic table, or closing note.
 
-## 2. Move-Step Annotation
-
-| ID | Text span | Primary label | Secondary label(s) | Confidence | Reason |
-|---|---|---|---|---|---|
-| S1 | ... | M1-S3 | ... | High | ... |
-
-## 3. Required Step Coverage
-
-| Step | Status | Evidence | Problem | Why it matters |
-|---|---|---|---|---|
-| M1-S3 | Present/Weak/Missing/Not Applicable/Unclear | ... | ... | ... |
-
-## 4. Unjustified Methodological Decisions
-
-| Sentence | Decision type | Why justification is needed | Missing rationale | Suggested direction |
-|---|---|---|---|---|
-| ... | ... | ... | ... | ... |
-
-## 5. Method Logic Issues
-
-| Issue type | Evidence | Problem | Affected step(s) | Revision direction |
-|---|---|---|---|---|
-| ... | ... | ... | ... | ... |
-
-## 6. Revision Priorities
-
-### 必须补充
-
-| 原文句子 | 问题 | 具体改进方向 |
-|---|---|---|
-| ... | ... | ... |
-
-### 建议补充
-
-| 原文句子 | 问题 | 具体改进方向 |
-|---|---|---|
-| ... | ... | ... |
-```
-
-## Short Classroom Feedback
+Use this exact structure:
 
 ```markdown
-## Diagnosis
+### 必须修改
 
-[2-4 sentences on what the Methods section already does and what weakens rigour or credibility.]
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [original sentence or clause]
+   - 问题: [diagnosis in English]
+   - 具体改进方向: [specific revision direction in English]
 
-## Most Important Gaps
+### 建议修改
 
-### 必须补充
-
-| 原文句子 | 问题 | 具体改进方向 |
-|---|---|---|
-| ... | ... | ... |
-
-### 建议补充
-
-| 原文句子 | 问题 | 具体改进方向 |
-|---|---|---|
-| ... | ... | ... |
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [original sentence or clause]
+   - 问题: [diagnosis in English]
+   - 具体改进方向: [specific revision direction in English]
 ```
 
-## Sentence-Level Comment Template
+If one block has no items, keep the heading and write `No items.` under it.
 
-Use when the user wants feedback attached to specific sentences.
+## Item Rules
 
-```markdown
-| Sentence | DRaC label | Problem | Teaching feedback |
-|---|---|---|---|
-| ... | M2-S4 / M3-S2 | ... | ... |
-```
-
-## Coverage-Only Template
-
-Use when the user asks only which moves or steps are present/missing.
-
-```markdown
-| Step | Status | Evidence | Note |
-|---|---|---|---|
-| M1-S3 | ... | ... | ... |
-```
-
-## Revision Priority Rules
-
-End with two blocks in this order: 必须补充, then 建议补充.
-
-Use `原文句子 | 问题 | 具体改进方向` in both blocks. The 原文句子 column must quote the corresponding English sentence or clause from the student text.
-
-- Put Missing items and Weak items that affect rigour, credibility, reproducibility, validity, or method-chain logic in 必须补充.
-- Before listing a 必须补充 item, re-check the original sentence to confirm the information is truly absent or too weak to support the method chain.
-- Put Weak items that mainly improve transparency, completeness, or reader trust in 建议补充.
-- Treat details as 不必补充 when they are unrelated to the study design or already sufficiently covered; do not output a separate 不必补充 table.
-- Keep the feedback evidence-based and do not invent details that are not supported by the student's study.
-
-Do not write priorities that require inventing information not present in the student's study.
-
+- Put missing items and weak items that affect rigour, credibility, reproducibility, validity, or method-chain logic under `必须修改`.
+- Before listing a `必须修改` item, re-check the original sentence to confirm the information is truly absent or too weak to support the method chain.
+- Put weak items that mainly improve transparency, completeness, or reader trust under `建议修改`.
+- Use ordered lists for issues and unordered bullet points for item details. Do not use Markdown tables.
+- Start each item with `Issue N:` followed by a concise English issue summary.
+- Anchor each item in original wording.
+- Do not write priorities that require inventing information not present in the student's study.
+- Only the two block headings and fixed field labels may be Chinese. All issue summaries and explanatory content must be in English.

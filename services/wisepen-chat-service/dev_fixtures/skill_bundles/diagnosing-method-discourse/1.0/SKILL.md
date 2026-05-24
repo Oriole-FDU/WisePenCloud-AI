@@ -42,29 +42,29 @@ Load only the files needed for the current task:
 - `references/draC-move-step-definitions.md`: read when assigning or explaining DRaC move-step labels.
 - `references/discipline-required-profiles.md`: read when deciding which steps are teaching-required for a discipline or research type.
 - `references/diagnostic-rubric.md`: read when judging Present, Weak, Missing, Not Applicable, or Unclear, and when identifying rationale gaps or logic issues.
-- `references/output-templates.md`: read when formatting a full diagnostic report, short classroom feedback, or sentence-level feedback.
+- `references/output-templates.md`: read when formatting the final revision-priority-only answer.
 - `references/failure-strategies.md`: read when the input may not be a Methods section, is too short, lacks discipline metadata, or asks only for rewriting.
 - `references/source-notes.md`: read when the user asks about the theoretical basis, citations, or why the skill uses DRaC.
 
 ## Default Output
 
-Unless the user asks for a shorter format, return six sections:
+Unless the user explicitly asks for a different format, return only the final concrete revision priorities.
 
-1. Overall Diagnosis
-2. Move-Step Annotation
-3. Required Step Coverage
-4. Unjustified Methodological Decisions
-5. Method Logic Issues
-6. Revision Priorities
+Do not include overall diagnosis, move-step annotation, required-step coverage, unjustified-decision tables, method-logic tables, diagnostic summaries, or closing notes in the final response. Use those analyses internally, then output only two blocks in this order:
 
-In section 6, split the closing feedback into two tables, in this order:
+- 必须修改
+- 建议修改
 
-- 必须补充
-- 建议补充
+Use ordered lists for issues and unordered bullet points for item details. Do not use Markdown tables.
 
-Each table should use `原文句子 | 问题 | 具体改进方向`.
+Each issue must follow this structure:
 
-Use tables where they make the diagnosis easier to inspect.
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [original sentence or clause]
+   - 问题: [diagnosis in English]
+   - 具体改进方向: [specific revision direction in English]
+
+Only the two block headings and fixed field labels may be Chinese. All issue summaries and explanatory content must be in English.
 
 ## Constraints
 
@@ -86,6 +86,6 @@ Do:
 - identify decisions that need justification;
 - identify logical breaks in the method chain;
 - explain why each issue matters for rigour, credibility, or reproducibility;
-- in the final feedback, separate must-add and suggested-add items, and re-check each one against the original wording before writing it;
+- in the final feedback, separate must-fix and suggested-fix items, and re-check each one against the original wording before writing it;
 - provide concrete revision priorities without inventing content for the student.
 

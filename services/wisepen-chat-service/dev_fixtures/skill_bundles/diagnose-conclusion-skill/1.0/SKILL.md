@@ -64,12 +64,21 @@ Do not output:
 - Key Missing or Weak Functions;
 - scores, summaries, introductions, closing remarks, or follow-up questions.
 
-The final response must contain only two tables, in this order:
+The final response must contain only two blocks, in this order:
 
 - 必须修改
 - 建议修改
 
-Each table should use `原文句子 | 问题 | 为什么影响 Conclusion | 具体改进方向`.
+Use ordered lists for issues and unordered bullet points for item details. Do not use Markdown tables.
+
+Each issue must follow this structure:
+
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [original sentence or clause]
+   - 问题: [diagnosis in English, including why it weakens the Conclusion when relevant]
+   - 具体改进方向: [specific revision direction in English]
+
+Only the two block headings and fixed field labels may be Chinese. All issue summaries and explanatory content must be in English.
 
 ## Constraints
 

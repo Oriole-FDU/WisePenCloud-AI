@@ -160,19 +160,33 @@ Treat literature organization as `必须修改` when it prevents the reader from
 
 Use `references/output-templates.md` for formatting.
 
-Default output sections:
+Steps 1-8 are internal diagnostic work. They support the priority judgment, but they must not appear in the final response.
 
-1. Overall Diagnosis
-2. Sentence-Level Move-Step Annotation
-3. Discipline-Sensitive Step Coverage
-4. Gap or Niche Diagnosis
-5. Gap-Aim Alignment
-6. Literature Organization
-7. Revision Priorities
+Final output must contain only the concrete revision priorities.
 
-In section 7, output two blocks in this order:
+Do not output:
+
+- Overall Diagnosis;
+- Sentence-Level Move-Step Annotation;
+- Discipline-Sensitive Step Coverage;
+- Gap or Niche Diagnosis;
+- Gap-Aim Alignment;
+- Literature Organization;
+- `Revision Priorities` or any numbered section heading;
+- paragraph summaries, scores, introductions, closing notes, or follow-up questions.
+
+Output two blocks in this order:
 
 - 必须修改: missing conventional steps and weak items that materially harm Introduction logic, gap construction, gap-aim fit, or discipline-expected positioning.
 - 建议修改: weak items that would improve specificity, synthesis, citation support, or rhetorical clarity but do not break the Introduction.
 
-Each item must be anchored in original wording and should not invent content for the student.
+Use ordered lists for issues and unordered bullet points for item details. Do not use Markdown tables.
+
+Each item must follow this structure:
+
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [original sentence or clause]
+   - 问题: [diagnosis in English, including why it weakens the Introduction when relevant]
+   - 具体改进方向: [specific revision direction in English]
+
+Only the two block headings and fixed field labels may be Chinese. All issue summaries and explanatory content must be in English. Each item must be anchored in original wording and should not invent content for the student.

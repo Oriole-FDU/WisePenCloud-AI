@@ -1,117 +1,39 @@
 # Discussion Output Templates
 
-Use these templates to keep Discussion diagnoses consistent with other discourse-diagnostic skills.
+Use this template to keep Discussion diagnoses focused on revision advice only.
 
-## Full Diagnostic Report
+The diagnosis workflow may produce internal article profiles, move-step annotations, expected-move coverage, logic-chain checks, and missing/weak-function lists. Do not include those internal diagnostic sections in the final response unless the user explicitly asks for them.
+
+## Final Output
+
+Output only the content that would normally appear under `Revision Priorities`. Do not include a diagnostic report title, section number, overall diagnosis, article profile, functional-unit annotation, coverage table, logic diagnosis, key missing/weak functions table, or closing note.
+
+Use this exact structure:
 
 ```markdown
-## 1. Overall Diagnosis
-
-[Briefly state likely discipline and article type, what the Discussion already does, the main rhetorical problems, and whether the diagnosis is full, limited, or provisional.]
-
-## 2. Article Profile
-
-| Profile dimension | Diagnosis |
-|---|---|
-| Discipline / subdiscipline | ... |
-| Article type | ... |
-| Research tradition | ... |
-| Data / evidence type | ... |
-| Topic / research object | ... |
-| Intended contribution | ... |
-| Confidence | ... |
-
-## 3. Functional-Unit Move-Step Annotation
-
-| Unit | Text span | Primary label | Secondary label(s) | Confidence | Reason |
-|---|---|---|---|---|---|
-| U1 | ... | ... | ... | ... | ... |
-
-## 4. Expected Move Coverage
-
-| Move / Function | Expectedness | Status | Evidence | Problem | Why it matters |
-|---|---|---|---|---|---|
-| M2S1 Finding | ... | ... | ... | ... | ... |
-
-## 5. Discussion Logic Diagnosis
-
-| Logic chain | Evidence | Break / weak link | Why it weakens Discussion | Revision direction |
-|---|---|---|---|---|
-| ... | ... | ... | ... | ... |
-
-## 6. Key Missing or Weak Functions
-
-| Function | Status | Evidence | Why it matters | Revision direction |
-|---|---|---|---|---|
-| ... | ... | ... | ... | ... |
-
-## 7. Revision Priorities
-
 ### 必须修改
 
-| 原文句子 | 问题 | 为什么影响 Discussion | 具体改进方向 |
-|---|---|---|---|
-| ... | ... | ... | ... |
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [original sentence or clause]
+   - 问题: [diagnosis in English, including why it weakens the Discussion when relevant]
+   - 具体改进方向: [specific revision direction in English]
 
 ### 建议修改
 
-| 原文句子 | 问题 | 为什么影响 Discussion | 具体改进方向 |
-|---|---|---|---|
-| ... | ... | ... | ... |
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [original sentence or clause]
+   - 问题: [diagnosis in English, including why it weakens the Discussion when relevant]
+   - 具体改进方向: [specific revision direction in English]
 ```
 
-## Short Classroom Feedback
+If one block has no items, keep the heading and write `No items.` under it.
 
-Use when the user asks for brief feedback.
+## Item Rules
 
-```markdown
-## Diagnosis
-
-[2-4 sentences on what the Discussion already does and what most weakens interpretation, comparison, claim, limitation, or recommendation.]
-
-## Most Important Problems
-
-| Function | Status | Evidence | Revision direction |
-|---|---|---|---|
-| ... | ... | ... | ... |
-
-## Revision Priorities
-
-### 必须修改
-
-| 原文句子 | 问题 | 为什么影响 Discussion | 具体改进方向 |
-|---|---|---|---|
-| ... | ... | ... | ... |
-
-### 建议修改
-
-| 原文句子 | 问题 | 为什么影响 Discussion | 具体改进方向 |
-|---|---|---|---|
-| ... | ... | ... | ... |
-```
-
-## Sentence-Level Annotation Only
-
-Use when the user asks only for move labels.
-
-```markdown
-| Unit | Text span | Primary label | Secondary label(s) | Confidence | Reason |
-|---|---|---|---|---|---|
-| U1 | ... | ... | ... | ... | ... |
-```
-
-Add a short note if a sentence has multiple moves:
-
-```text
-This sentence is assigned multiple labels because it both [function A] and [function B].
-```
-
-## Coverage-Only Output
-
-Use when the user asks only which moves are missing or weak.
-
-```markdown
-| Move / Function | Expectedness | Status | Evidence | Problem | Revision direction |
-|---|---|---|---|---|---|
-| ... | ... | ... | ... | ... | ... |
-```
+- Put missing expected moves and weak items that materially affect Discussion logic, interpretation, contribution, credibility, or reader trust under `必须修改`.
+- Put weak items that would improve specificity, evidence, comparison, explanation, implication, or flow but do not break the core Discussion logic under `建议修改`.
+- Use ordered lists for issues and unordered bullet points for item details. Do not use Markdown tables.
+- Start each item with `Issue N:` followed by a concise English issue summary.
+- Anchor each item in original wording.
+- Do not invent findings, literature, explanations, claims, limitations, recommendations, or implications for the student.
+- Only the two block headings and fixed field labels may be Chinese. All issue summaries and explanatory content must be in English.

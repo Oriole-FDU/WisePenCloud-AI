@@ -239,19 +239,33 @@ Your Discussion already does X. However, it does not yet do Y. This matters beca
 
 ## 9. Output Structure
 
-Return seven sections:
+Steps 1-8 are internal diagnostic work. They support the priority judgment, but they must not appear in the final response.
 
-1. Overall Diagnosis
-2. Article Profile
-3. Functional-Unit Move-Step Annotation
-4. Expected Move Coverage
-5. Discussion Logic Diagnosis
-6. Key Missing or Weak Functions
-7. Revision Priorities
+Final output must contain only the concrete revision priorities.
 
-In section 7, output two blocks in this order:
+Do not output:
+
+- Overall Diagnosis;
+- Article Profile;
+- Functional-Unit Move-Step Annotation;
+- Expected Move Coverage;
+- Discussion Logic Diagnosis;
+- Key Missing or Weak Functions;
+- `Revision Priorities` or any numbered section heading;
+- paragraph summaries, scores, introductions, closing notes, or follow-up questions.
+
+Output two blocks in this order:
 
 - 必须修改: missing expected moves and weak items that materially affect Discussion logic, interpretation, contribution, credibility, or reader trust.
 - 建议修改: weak items that would improve specificity, evidence, comparison, explanation, implication, or flow but do not break the core Discussion logic.
 
-Each item must be anchored in original wording and should not invent content for the student.
+Use ordered lists for issues and unordered bullet points for item details. Do not use Markdown tables.
+
+Each item must follow this structure:
+
+1. Issue 1: [concise issue summary in English]
+   - 原文句子: [original sentence or clause]
+   - 问题: [diagnosis in English, including why it weakens the Discussion when relevant]
+   - 具体改进方向: [specific revision direction in English]
+
+Only the two block headings and fixed field labels may be Chinese. All issue summaries and explanatory content must be in English. Each item must be anchored in original wording and should not invent content for the student.
