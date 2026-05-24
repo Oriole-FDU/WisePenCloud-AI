@@ -6,10 +6,11 @@ from common.logger import log_error
 
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
-from chat.domain.entities.model import Model, ModelType
+from chat.domain.entities.model import ModelScope
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
-from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
+from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository, ProviderRepository
+from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.kafka.producer import KafkaProducerClient
 
 
@@ -25,6 +26,7 @@ class ChatTurnFinalizer:
         message_repo: MessageRepository,
         session_repo: SessionRepository,
         hot_context_repo: HotContextRepository,
+        provider_repo: ProviderRepository,
         kafka_producer: KafkaProducerClient,
     ):
         self.llm = llm
@@ -32,6 +34,7 @@ class ChatTurnFinalizer:
         self.session_repo = session_repo
         self.message_repo = message_repo
         self.hot_context_repo = hot_context_repo
+        self.provider_repo = provider_repo
         self.kafka_producer = kafka_producer
 
     async def _fill_token_counts(self, messages: List[ChatMessage], provider_model_name: str) -> None:
@@ -50,20 +53,29 @@ class ChatTurnFinalizer:
     async def _send_token_billing(
         self,
         user_id: str,
-        model_id: int,
+        resolved_model: ModelRequestInfo,
         messages: List[ChatMessage],
         group_id: Optional[str] = None,
     ) -> None:
         """
         发送 token 计费消息到 Kafka
         """
-        usage_tokens = sum(msg.token_count for msg in messages)
+        usage_tokens = sum(msg.token_count or 0 for msg in messages)
         if usage_tokens == 0:
             return
 
-        model = await Model.find_one(Model.id == model_id)
-        model_type = model.type.value if model else ModelType.UNKNOWN_MODEL.value
-        billing_ratio = model.billing_ratio if model else 1
+        billing_ratio = resolved_model.billing_ratio
+        billable_usage_tokens = usage_tokens * billing_ratio if resolved_model.scope == ModelScope.SYSTEM else 0
+
+        await self.provider_repo.increment_usage(
+            provider_id=resolved_model.provider_id,
+            user_id=resolved_model.owner_user_id,
+            usage_tokens=usage_tokens,
+            billable_usage_tokens=billable_usage_tokens,
+        )
+
+        if resolved_model.scope != ModelScope.SYSTEM:
+            return
 
         trace_id = uuid.uuid4().hex
 
@@ -73,8 +85,8 @@ class ChatTurnFinalizer:
             "usageTokens": usage_tokens,
             "billingRatio": billing_ratio,
             "traceId": trace_id,
-            "modelName": model.display_name,
-            "modelType": model_type,
+            "modelName": resolved_model.model.display_name,
+            "modelType": resolved_model.model.type.value,
             "requestTime": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -111,8 +123,7 @@ class ChatTurnFinalizer:
         self,
         user_id: str,
         session_id: str,
-        model_id: int,
-        provider_model_name: str,
+        resolved_model: ModelRequestInfo,
         new_messages: List[ChatMessage],
         group_id: Optional[str] = None,
     ) -> None:
@@ -120,7 +131,7 @@ class ChatTurnFinalizer:
         # 先裁剪 ephemeral，下游所有持久化都看这份结果
         persistable = self._redact_ephemeral(new_messages)
 
-        await self._fill_token_counts(persistable, provider_model_name)
+        await self._fill_token_counts(persistable, resolved_model.model_name)
 
         # Redis 追加
         try:
@@ -134,7 +145,7 @@ class ChatTurnFinalizer:
                 if msg.get_text_content():
                     msg.build_search_tokens() # 构建搜索向量 (缓解中文分词问题)
 
-            await self.message_repo.save_many(persistable)
+            await self.message_repo.save_messages(persistable)
         except Exception as e:
             log_error("MongoDB 消息归档", e, session=session_id)
 
@@ -146,7 +157,7 @@ class ChatTurnFinalizer:
 
         # 发出 token 计费
         await self._send_token_billing(user_id=user_id,
-                                        model_id=model_id,
+                                        resolved_model=resolved_model,
                                         messages=persistable,
                                         group_id=group_id)
 
@@ -155,7 +166,7 @@ class ChatTurnFinalizer:
     async def auto_generate_title(self, session_id: str, user_id: str, user_query: str) -> None:
         """首轮对话后自动为 'New Chat' 会话生成简洁标题"""
         try:
-            session = await self.session_repo.get_by_id(session_id)
+            session = await self.session_repo.get_session(session_id)
             if session.title != "New Chat":
                 return
 
@@ -184,7 +195,7 @@ class ChatTurnFinalizer:
             if not new_title:
                 return
 
-            await self.session_repo.rename(session_id, user_id, new_title)
+            await self.session_repo.rename_session(session_id, user_id, new_title)
         except Exception as e:
             log_error("自动生成标题", e, session=session_id)
 
@@ -251,11 +262,8 @@ class ChatTurnFinalizer:
 
         # 持久化新摘要到 MongoDB，同时写入压缩时间戳
         try:
-            await self.session_repo.update_summary(
-                session_id=session_id,
-                current_summary=new_summary,
-                summary_updated_at=datetime.now(timezone.utc),
-            )
+            await self.session_repo.update_session_summary(session_id=session_id, current_summary=new_summary,
+                                                           summary_updated_at=datetime.now(timezone.utc))
         except Exception as e:
             log_error("摘要持久化", e, session=session_id)
 

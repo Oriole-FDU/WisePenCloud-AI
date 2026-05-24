@@ -23,10 +23,10 @@ from chat.core.persistence import (
     MongoSessionRepository,
     MongoMessageRepository,
     MongoSkillRepository,
+    MongoModelRepository,
+    MongoProviderRepository,
     RedisHotContext,
 )
-from chat.application.attachment_service import AttachmentService
-from chat.application.model_resolver import ModelResolver
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.skill_matcher import KeywordSkillMatcher
 from chat.application.skill_cache_refresher import SkillCacheRefresher
@@ -36,8 +36,8 @@ from chat.application.tools import (
     LoadSkillTool,
     LoadSkillAssetTool,
 )
-from common.clients import DocumentServiceClient, FileStorageClient, ResourceServiceClient
-from common.cloud.nacos_client import nacos_client_manager
+from common.clients.file_storage import FileStorageClient
+from chat.core.config.nacos import nacos_client_manager
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
 from common.kafka.producer import KafkaProducerClient
@@ -64,6 +64,8 @@ class Container(containers.DeclarativeContainer):
     attachment_repo = providers.Singleton(MongoAttachmentRepository)
     session_repo = providers.Singleton(MongoSessionRepository)
     message_repo = providers.Singleton(MongoMessageRepository)
+    model_repo = providers.Singleton(MongoModelRepository)
+    provider_repo = providers.Singleton(MongoProviderRepository)
     hot_context_repo = providers.Singleton(RedisHotContext)
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
@@ -193,24 +195,13 @@ class Container(containers.DeclarativeContainer):
         tool_providers=tool_providers,
     )
 
-    model_resolver = providers.Singleton(ModelResolver)
-    attachment_service = providers.Factory(
-        AttachmentService,
-        attachment_repo=attachment_repo,
-        session_repo=session_repo,
-        attachment_parser=attachment_parser,
-        attachment_auditor=attachment_auditor,
-        file_storage_client=file_storage_client,
-        document_service_client=document_service_client,
-        resource_service_client=resource_service_client,
-    )
-
     # Application 层组件
     chat_turn_coordinator = providers.Factory(
         ChatTurnCoordinator,
         llm=llm_provider,
         memory=memory_provider,
-        model_resolver=model_resolver,
+        model_repo=model_repo,
+        provider_repo=provider_repo,
         session_repo=session_repo,
         message_repo=message_repo,
         hot_context_repo=hot_context_repo,

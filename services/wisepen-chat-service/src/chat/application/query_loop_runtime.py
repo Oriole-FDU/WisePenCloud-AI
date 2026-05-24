@@ -4,6 +4,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Iterator, AsyncIterator, Tuple, Union
 
+from beanie import PydanticObjectId
+
 from common.logger import log_fail
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
@@ -227,7 +229,7 @@ class QueryLoopRuntime:
         tool_scope: ToolScope,
         session_id: str,
         model_name: str,
-        model_id: Optional[int] = None,
+        model_id: Optional[PydanticObjectId] = None,
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
     ) -> AsyncIterator[StreamEvent]:
@@ -270,7 +272,7 @@ class QueryLoopRuntime:
         messages: List[ChatMessage],
         session_id: str,
         model_name: str,
-        model_id: Optional[int],
+        model_id: Optional[PydanticObjectId],
         api_base: Optional[str],
         api_key: Optional[str],
         iteration: int,

@@ -83,7 +83,7 @@ class LoadSkillAssetTool(BaseTool):
             )
 
         try:
-            skill = await self._skill_repo.get(skill_id)
+            skill = await self._skill_repo.get_published_skill(skill_id)
         except Exception as e:
             log_error("load_skill_asset 查询", e, skill_id=skill_id, path=path)
             return f"[Tool Error] Failed to query skill '{skill_id}': {type(e).__name__}"

@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pymongo import AsyncMongoClient
 from beanie import init_beanie
 
-from common.cloud.nacos_client import nacos_client_manager
+from chat.core.config.nacos import nacos_client_manager
 from common.web.middleware import SecurityHeaderMiddleware
 from common.web.exception_handlers import setup_global_exception_handlers
 

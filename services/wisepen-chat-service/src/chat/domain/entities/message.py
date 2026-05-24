@@ -2,7 +2,7 @@ from enum import Enum
 import jieba
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
-from beanie import Document
+from beanie import Document, PydanticObjectId
 from pydantic import Field, ConfigDict
 from pymongo import IndexModel, ASCENDING
 
@@ -18,8 +18,8 @@ class ChatMessage(Document):
     """单条消息实体（Beanie Document，映射到 chat_messages 集合）"""
     session_id: str
     role: Role
-    model_id: Optional[int] = None  # 生成该消息所用的模型 ID，仅 assistant 消息必填
-    content: Optional[Any] = None   # 支持纯文本或多模态 content block
+    model_id: Optional[PydanticObjectId] = None  # 生成该消息所用的模型 _id，仅 assistant 消息必填
+    content: Optional[str] = None   # 大模型在返回 tool_calls 时 content 经常为 None
     reasoning_content: Optional[str] = None  # 大模型的推理/思考内容（DeepSeek R1 等）
     search_tokens: Optional[str] = None # 专门用于规避 MongoDB 中文分词缺陷的隐藏字段
 

@@ -78,7 +78,7 @@ class Mem0Adapter(MemoryProvider):
                 return []
             if score_threshold is not None:
                 # 按分数阈值过滤，忽略 limit 参数
-                return [r["memory"] for r in results if r.get("rerank_score", 0) >= score_threshold]
+                return [r["memory"] for r in results if r.get_published_skill("rerank_score") >= score_threshold]
             return [r["memory"] for r in results]
 
         try:
@@ -119,13 +119,13 @@ class Mem0Adapter(MemoryProvider):
     async def delete_memory(self, memory_id: str, user_id: str) -> None:
 
         def _sync_verify_and_delete():
-            memory = self.client.get(memory_id)
+            memory = self.client.get_published_skill(memory_id)
             if not memory:
                 return
-            owner_id = memory.get("user_id")
+            owner_id = memory.get_published_skill("user_id")
             if owner_id != user_id:
                 raise ServiceException(ChatErrorCode.MEMORY_NOT_FOUND)
-            self.client.delete(memory_id)
+            self.client.delete_session(memory_id, )
 
         await asyncio.to_thread(_sync_verify_and_delete)
 

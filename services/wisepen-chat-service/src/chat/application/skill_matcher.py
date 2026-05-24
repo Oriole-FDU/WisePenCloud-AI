@@ -34,7 +34,7 @@ class KeywordSkillMatcher(SkillMatcher):
 
     async def warmup(self) -> None:
         try:
-            metas = await self._skill_repo.list_enabled_meta()
+            metas = await self._skill_repo.list_enabled_skill_metas()
         except Exception as e:
             # 捕获所有异常，保证服务可启动 / 周期刷新不炸
             # 失败时不擦除 self._cache，已有 last-good 继续服务，防止被 Mongo 抖动打回"无 Skill 能力"

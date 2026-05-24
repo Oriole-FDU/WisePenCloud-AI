@@ -28,7 +28,14 @@ pipeline {
                 stage('Chat Service') {
                     steps {
                         script {
-                            sh "docker build -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-chat:${IMAGE_TAG} -f Dockerfile ."
+                            sh """
+                                docker build \\
+                                    -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-chat:${IMAGE_TAG} \\
+                                    --build-arg SERVICE_DIR=wisepen-chat-service \\
+                                    --build-arg SERVICE_PKG=chat \\
+                                    --build-arg SERVICE_PORT=9200 \\
+                                    -f Dockerfile .
+                            """
                         }
                     }
                 }

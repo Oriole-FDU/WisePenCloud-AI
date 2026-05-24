@@ -23,7 +23,7 @@ async def create_session(
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
     session = ChatSession(user_id=user_id, title=req.title or "New Chat")
-    created = await session_repo.create(session)
+    created = await session_repo.create_session(session)
     return R.success(data=SessionResponse.from_entity(created))
 
 
@@ -35,7 +35,7 @@ async def list_sessions(
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
-    sessions, total = await session_repo.get_by_user(user_id, page=page, size=size)
+    sessions, total = await session_repo.list_sessions_for_user(user_id, page=page, size=size)
     return R.success(data=PageResult.of(
         items=[SessionResponse.from_entity(s) for s in sessions],
         total=total, page=page, size=size,
@@ -49,7 +49,7 @@ async def delete_session(
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
-    await session_repo.delete(session_id, user_id)
+    await session_repo.delete_session(session_id, user_id)
     return R.success()
 
 
@@ -63,9 +63,9 @@ async def get_session_messages(
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
         message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
 ):
-    await session_repo.get_by_id_and_user(session_id, user_id)
+    await session_repo.get_session_for_user(session_id, user_id)
 
-    page_messages, total_turns = await message_repo.get_page_for_ui(session_id, page=page, size=size)
+    page_messages, total_turns = await message_repo.list_session_message_turns_page(session_id, page=page, size=size)
     ui_messages = convert_to_ui_messages(page_messages)
 
     return R.success(data=PageResult.of(
@@ -82,7 +82,7 @@ async def rename_session(
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
-    session = await session_repo.rename(session_id, user_id, req.new_title or "New Chat")
+    session = await session_repo.rename_session(session_id, user_id, req.new_title or "New Chat")
     return R.success(data=SessionResponse.from_entity(session))
 
 @router.post("/pinSession", response_model=R[SessionResponse], status_code=200)
@@ -93,5 +93,5 @@ async def pin_session(
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
-    session = await session_repo.pin(session_id, user_id, req.set_pin)
+    session = await session_repo.set_session_pinned(session_id, user_id, req.set_pin)
     return R.success(data=SessionResponse.from_entity(session))

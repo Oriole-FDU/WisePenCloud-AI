@@ -16,16 +16,11 @@ class AttachmentRefRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     """
-    [DTO] 聊天请求传输对象。
+    聊天请求传输对象
     """
     session_id: str = Field(..., description="会话ID")
-
-    query: str = Field(default="", description="用户问题")
-
-    model: Optional[int] = Field(default=None, description="模型ID")
-
+    query: str = Field(..., description="用户问题")
+    model: Optional[str] = Field(default=None, description="模型ID")
+    provider_id: Optional[str] = Field(default=None, description="指定供应商ID")
     states: Optional[List[Dict[str, Any]]] = Field(default=None, description="上下文状态列表")
-
-    attachment_refs: Optional[List[AttachmentRefRequest]] = Field(default=None, description="附件引用列表")
-
     model_config = {"extra": "ignore"}

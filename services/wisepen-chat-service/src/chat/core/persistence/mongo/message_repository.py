@@ -10,23 +10,17 @@ from chat.domain.entities import ChatMessage, Role
 
 class MongoMessageRepository(MessageRepository):
 
-    async def save_many(self, messages: List[ChatMessage]) -> None:
+    async def save_messages(self, messages: List[ChatMessage]) -> None:
         if messages:
             await ChatMessage.insert_many(messages)
 
-    async def get_by_session(self, session_id: str, after: datetime = None, limit: int = 50) -> List[ChatMessage]:
+    async def list_session_messages(self, session_id: str, after: datetime = None, limit: int = 50) -> List[ChatMessage]:
         conditions = [ChatMessage.session_id == session_id]
         if after:
             conditions.append(ChatMessage.created_at > after)
         return await ChatMessage.find(*conditions).sort("+created_at").limit(limit).to_list()
 
-    async def get_after_time(self, session_id: str, after: datetime, limit: int) -> List[ChatMessage]:
-        return await ChatMessage.find(
-            ChatMessage.session_id == session_id,
-            ChatMessage.created_at > after,
-        ).sort("+created_at").limit(limit).to_list()
-
-    async def get_page_for_ui(
+    async def list_session_message_turns_page(
         self,
         session_id: str,
         page: int,
@@ -90,7 +84,7 @@ class MongoMessageRepository(MessageRepository):
 
         return page_msgs, total_turns
 
-    async def full_text_search(
+    async def search_messages_by_text(
         self,
         keyword: str,
         session_id: Optional[str] = None,

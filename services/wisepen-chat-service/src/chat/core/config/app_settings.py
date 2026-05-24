@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
-from common.cloud.nacos_client import nacos_client_manager
+from chat.core.config.nacos import nacos_client_manager
 from common.logger import log_event, log_error
 
 SERVICE_ROOT = Path(__file__).resolve().parents[4]
@@ -22,7 +22,7 @@ class AppSettings(BaseModel):
     # LLM 默认网关配置（作为 fallback，主对话链路从 Provider 表动态获取）
     LLM_BASE_URL: str
     LLM_API_KEY: str
-    DEFAULT_MODEL_ID: int = 1
+    DEFAULT_MODEL_ID: str
 
     # 模型配置 (请求依赖 LLM 默认网关配置)
     # Memory相关模型
@@ -62,6 +62,10 @@ class AppSettings(BaseModel):
     # Token 动态滑动窗口 + 双水位压缩
     # 模型上下文窗口总大小（token 数），默认对齐 gpt-4o 的 128k 上下文
     CTX_TOKEN_LIMIT: int = 128000
+    # 模型未配置 max_output_tokens 时使用的输出预留
+    CTX_DEFAULT_OUTPUT_RESERVE_TOKENS: int = 4096
+    # 避免异常模型配置导致 prompt budget 变成 0 或负数
+    CTX_MIN_PROMPT_BUDGET_TOKENS: int = 1024
     # 高水位线（触发阈值）：上下文累计 Token 达到此比例时触发摘要压缩
     CTX_HIGH_WATERMARK_RATIO: float = 0.8
     # 低水位线（安全退役线）：切分时按 Token 保留此比例以内的最新明细。

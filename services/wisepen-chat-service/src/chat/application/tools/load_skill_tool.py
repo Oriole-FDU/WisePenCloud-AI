@@ -70,7 +70,7 @@ class LoadSkillTool(BaseTool):
             )
 
         try:
-            skill = await self._skill_repo.get(skill_id)
+            skill = await self._skill_repo.get_published_skill(skill_id)
         except Exception as e:
             log_error("load_skill 查询", e, skill_id=skill_id)
             return f"[Tool Error] Failed to load skill '{skill_id}': {type(e).__name__}"

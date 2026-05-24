@@ -8,7 +8,8 @@ from typing import Any, Dict, Mapping, Optional
 import httpx
 
 from common.cloud.service_discovery import ServiceDiscovery, LoadBalancingStrategy
-from common.core.constants import SecurityConstants
+from common.core.constants import SecurityConstants, CommonConstants
+from common.gray.context import GrayContextHolder
 from common.core.exceptions import RpcError, ServiceUnavailableError
 from common.logger import log_error, log_fail
 
@@ -84,6 +85,11 @@ class RpcClient:
         }
         if headers:
             merged_headers.update({k: v for k, v in headers.items()})
+
+        # 传递 developer 头
+        developer = GrayContextHolder.get_developer_tag()
+        if developer:
+            merged_headers[CommonConstants.GRAY_HEADER_DEV_KEY] = developer
 
         req_timeout = httpx.Timeout(timeout) if timeout is not None else None
 

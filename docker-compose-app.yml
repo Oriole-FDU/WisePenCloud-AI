@@ -2,6 +2,13 @@ version: '3.8'
 
 services:
   chat-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: wisepen-chat-service
+        SERVICE_PKG: chat
+        SERVICE_PORT: "9200"
     image: ${DOCKER_REGISTRY}/wisepencloud-chat:${APP_VERSION}
     container_name: wisepen-chat-service
     restart: always

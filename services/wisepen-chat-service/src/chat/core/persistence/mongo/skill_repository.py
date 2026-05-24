@@ -9,7 +9,7 @@ class MongoSkillRepository(SkillRepository):
     SkillRepository 的 MongoDB (Beanie) 只读实现
     """
 
-    async def list_enabled_meta(self) -> List[SkillMeta]:
+    async def list_enabled_skill_metas(self) -> List[SkillMeta]:
         # enabled 条目数通常不多，这里简化：读完再映射 dataclass。
         # 如果未来量级上来，可以引入 Beanie 的 projection 模型节流。
         docs = await Skill.find(Skill.enabled == True).to_list()  # noqa: E712
@@ -24,5 +24,5 @@ class MongoSkillRepository(SkillRepository):
             for doc in docs
         ]
 
-    async def get(self, skill_id: str) -> Optional[Skill]:
+    async def get_published_skill(self, skill_id: str) -> Optional[Skill]:
         return await Skill.find_one(Skill.skill_id == skill_id)

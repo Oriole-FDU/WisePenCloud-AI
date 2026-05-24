@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 
+from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 from dependency_injector.wiring import inject, Provide
@@ -58,12 +59,8 @@ async def chat_completions(
        {
          "session_id": "xxx",
          "query": "你好",
-         "model": 1,
-         "attachment_refs": [{
-            "attachment_id": "att_1",
-            "enabled": true,
-            "context_mode": "SUMMARY"
-         }],
+         "model": "Mongo ObjectId string",
+         "provider_id": "Mongo ObjectId string",
          "states": [{
             "key": "selected_text",
             "value": "xxx",
@@ -71,12 +68,16 @@ async def chat_completions(
          ]
        }
     """
-    resolved_model_id = req.model or settings.DEFAULT_MODEL_ID
+    if not req.query:
+        raise HTTPException(status_code=400, detail="缺少查询内容")
 
     if not req.session_id:
         raise HTTPException(status_code=400, detail="缺少 session_id")
 
-    await session_repo.get_by_id_and_user(req.session_id, user_id)
+    resolved_model_id = PydanticObjectId(req.model or settings.DEFAULT_MODEL_ID)
+    resolved_provider_id = PydanticObjectId(req.provider_id) if req.provider_id else None
+
+    await session_repo.get_session_for_user(req.session_id, user_id)
 
     chat_gen = coordinator.handle_chat(
         user_id=user_id,
@@ -84,8 +85,8 @@ async def chat_completions(
         user_query=req.query,
         background_tasks=background_tasks,
         model_id=resolved_model_id,
-        states=req.states,
-        attachment_refs=req.attachment_refs,
+        provider_id=resolved_provider_id,
+        states=req.states
     )
 
     return StreamingResponse(

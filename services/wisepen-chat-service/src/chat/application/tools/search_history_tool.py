@@ -79,13 +79,9 @@ class SearchHistoricalMessagesTool(BaseTool):
         limit = int(kwargs.get("limit", 10))
 
         try:
-            results = await self._message_repo.full_text_search(
-                keyword=keyword,
-                session_id=session_id,
-                start_time=start_time,
-                end_time=end_time,
-                limit=limit,
-            )
+            results = await self._message_repo.search_messages_by_text(keyword=keyword, session_id=session_id,
+                                                                       start_time=start_time, end_time=end_time,
+                                                                       limit=limit)
         except Exception as e:
             log_error("历史消息全文检索", e, session=session_id, keyword=keyword)
             return f"[Tool Error] Search failed: {e}"
