@@ -26,6 +26,7 @@ from common.kafka.producer import KafkaProducerClient
 # Skill 脚手架工具的名字集合：Registry 内部它们 reserved=True 默认隐藏
 # 只有存在可用 skill 时 Coordinator 把本集合作为 `expose` 传入 derive()，从而解禁 schema
 _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
+_HISTORY_SEARCH_TOOL_NAMES = frozenset({"search_historical_messages"})
 
 
 class ChatTurnCoordinator:
@@ -114,14 +115,22 @@ class ChatTurnCoordinator:
         # [Skill Discovery] 注入当前会话可用 Skill 的轻量 metadata，由 LLM 决定是否调用 load_skill。
         # 不再用字符串 triggers 预筛，避免关键词未命中导致 Skill 无法被模型看见。
         available_skills = self._skill_matcher.match(user_query)
-        expose_tool_name_set = None
+        expose_tool_name_set = set()
         if available_skills:
             # 解禁 Registry 里默认隐藏的 skill 脚手架工具（reserved=True）
-            expose_tool_name_set = set(_SKILL_TOOL_NAMES)
+            expose_tool_name_set.update(_SKILL_TOOL_NAMES)
             tool_context["allowed_skill_ids"] = [s.skill_id for s in available_skills]
 
+        # 历史搜索工具默认隐藏。只有当前会话已经有摘要（说明早期明细发生过压缩）时，
+        # 才解禁给模型，避免短会话/未压缩会话里频繁冗余检索。
+        history_search_disabled = not bool(session_summary)
+        if not history_search_disabled:
+            expose_tool_name_set.update(_HISTORY_SEARCH_TOOL_NAMES)
+
+        expose_tool_name_set = expose_tool_name_set or None
+
         # [Tool Scope] 派生本请求的工具视图快照
-        # expose_tool_name_set 仅在存在可用 skill 时解禁 load_skill 系列，否则它们保持隐藏
+        # expose_tool_name_set 仅在满足系统条件时解禁 reserved 工具，否则它们保持隐藏
         # runtime_discovered_tools 预留给"运行时动态发现的工具"（如 Skill bundle 自带 tools），暂时留空
         # allow_tool_name_set/deny_tool_name_set 预留给未来"用户级工具偏好"接入，暂时留空
         tool_scope = self._tool_registry.derive(
