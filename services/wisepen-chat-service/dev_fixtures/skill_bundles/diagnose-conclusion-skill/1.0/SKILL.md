@@ -25,29 +25,53 @@ For review papers, interpret `M1S3` as a synthesized pattern across the reviewed
 
 ## Required Workflow
 
-When performing a real diagnosis, first read `references/workflow.md` and follow its sequence:
+When performing a real diagnosis, first call `load_skill_asset` on `references/workflow.md` and follow its sequence.
+
+For every workflow step below, you MUST call `load_skill_asset` for each listed file before completing that step. If the same file has already been loaded earlier in the current turn, reuse the already loaded content instead of calling `load_skill_asset` again.
 
 1. verify that the input is a Conclusion-related section or passage;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/failure-strategies.md`
 2. identify discipline, article type, research tradition, evidence type, topic, and intended contribution;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/discipline-expectedness-profiles.md`
 3. segment the text into sentence-level units;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
 4. annotate each sentence with one primary move-step label and any secondary labels;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/move-step-definitions.md`
 5. select a discipline-sensitive expectedness profile, then adjust by article type;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/discipline-expectedness-profiles.md`
 6. judge expected move-step coverage using stable status labels;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/diagnostic-rubric.md`
 7. diagnose Conclusion-specific logic chains;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/logic-chain-rubric.md`
 8. identify key missing or weak functions;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/move-step-definitions.md`
+   - MUST load via `load_skill_asset`: `references/diagnostic-rubric.md`
 9. generate teaching-oriented feedback and revision priorities.
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/output-templates.md`
 
 ## Reference Files
 
-Load only the files needed for the current task:
+For a real Conclusion diagnosis, the following files are required by the workflow above and must be loaded through `load_skill_asset` when their workflow step is reached:
 
-- `references/move-step-definitions.md`: read when assigning or explaining Conclusion move-step labels.
-- `references/discipline-expectedness-profiles.md`: read when deciding which steps are Core, Conventional, Conditional, Optional / Enriching, Rare / Not Expected, or Not Applicable for a discipline and article type.
-- `references/diagnostic-rubric.md`: read when judging Expectedness, Present, Weak, Missing, Not Applicable, Unclear, and revision priority.
-- `references/logic-chain-rubric.md`: read when diagnosing looking-back to looking-forward coherence, including finding-significance-implication and limitation-improvement-future chains.
-- `references/output-templates.md`: read when formatting the final revision-priority-only answer.
-- `references/failure-strategies.md`: read when the input may not be a Conclusion, is too short, lacks discipline metadata, or asks only for rewriting.
-- `references/source-notes.md`: read when the user asks about the theoretical basis, citations, or why the skill uses this framework.
+- `references/workflow.md`: required for every real Conclusion diagnosis.
+- `references/failure-strategies.md`: required during input-gate and failure-mode handling.
+- `references/discipline-expectedness-profiles.md`: required when identifying article profile and deciding which steps are Core, Conventional, Conditional, Optional / Enriching, Rare / Not Expected, or Not Applicable for a discipline and article type.
+- `references/move-step-definitions.md`: required when assigning or explaining Conclusion move-step labels.
+- `references/diagnostic-rubric.md`: required when judging Expectedness, Present, Weak, Missing, Not Applicable, Unclear, and revision priority.
+- `references/logic-chain-rubric.md`: required when diagnosing looking-back to looking-forward coherence, including finding-significance-implication and limitation-improvement-future chains.
+- `references/output-templates.md`: required when formatting the final revision-priority-only answer.
+
+Conditional reference:
+
+- `references/source-notes.md`: MUST load via `load_skill_asset` when the user asks about the theoretical basis, citations, source basis, or why the skill uses this framework.
 
 ## Default Output
 

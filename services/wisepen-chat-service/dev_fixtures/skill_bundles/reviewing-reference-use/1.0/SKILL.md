@@ -11,27 +11,49 @@ Produce diagnostic feedback and safe correction guidance, not a complete rewritt
 
 ## Required Workflow
 
-For a real review, first read `references/workflow.md` and follow its sequence:
+For a real review, first call `load_skill_asset` on `references/workflow.md` and follow its sequence.
+
+For every workflow step below, you MUST call `load_skill_asset` for each listed file before completing that step. If the same file has already been loaded earlier in the current turn, reuse the already loaded content instead of calling `load_skill_asset` again.
 
 1. validate the input and extract citation data;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/failure-strategies.md`
 2. identify the article's discipline, article type, and review scope;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/citation-style-guide.md`
 3. select the expected citation style from explicit requirements first, then discipline conventions;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/citation-style-guide.md`
 4. detect the actual in-text citation style and reference-list style;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/citation-style-guide.md`
 5. check style fit, consistency, and in-text/reference-list correspondence;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/citation-style-guide.md`
+   - MUST load via `load_skill_asset`: `references/failure-strategies.md`
 6. suggest safe corrections without inventing missing bibliographic metadata;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/citation-style-guide.md`
 7. assess reference relevance from title, citation context, and, when needed and available, web-verified abstracts or introductions;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/relevance-rubric.md`
 8. produce the final reference review report.
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/output-templates.md`
 
 ## Reference Files
 
-Load only the files needed for the current task:
+For a real reference review, the following files are required by the workflow above and must be loaded through `load_skill_asset` when their workflow step is reached:
 
-- `references/workflow.md`: read for every full reference review.
-- `references/citation-style-guide.md`: read when classifying citation style, judging discipline fit, or correcting format issues.
-- `references/relevance-rubric.md`: read when judging whether references match the student's topic, research question, or citation context.
-- `references/output-templates.md`: read when formatting the final revision-priority-only answer.
-- `references/failure-strategies.md`: read when the input lacks a reference list, lacks in-text citations, is interdisciplinary, has mixed styles, or cannot be web-verified.
-- `references/source-notes.md`: read when the user asks about the basis of the citation rules or when a style-specific rule is uncertain.
+- `references/workflow.md`: required for every full reference review.
+- `references/failure-strategies.md`: required during input-gate, style-mismatch, missing-data, mixed-style, and web-verification failure handling.
+- `references/citation-style-guide.md`: required when classifying citation style, judging discipline fit, or correcting format issues.
+- `references/relevance-rubric.md`: required when judging whether references match the student's topic, research question, or citation context.
+- `references/output-templates.md`: required when formatting the final revision-priority-only answer.
+
+Conditional reference:
+
+- `references/source-notes.md`: MUST load via `load_skill_asset` when the user asks about the basis of the citation rules, citations, source basis, or when a style-specific rule is uncertain.
 
 ## Default Output
 

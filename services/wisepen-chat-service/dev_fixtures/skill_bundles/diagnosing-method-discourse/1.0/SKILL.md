@@ -23,28 +23,51 @@ A move is a broad rhetorical function. A step is a more specific rhetorical acti
 
 ## Required Workflow
 
-When performing a real diagnosis, first read `references/workflow.md` and follow its sequence:
+When performing a real diagnosis, first call `load_skill_asset` on `references/workflow.md` and follow its sequence.
+
+For every workflow step below, you MUST call `load_skill_asset` for each listed file before completing that step. If the same file has already been loaded earlier in the current turn, reuse the already loaded content instead of calling `load_skill_asset` again.
 
 1. verify that the input is a Methods section or methodology passage;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/failure-strategies.md`
 2. identify discipline and research type;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/discipline-required-profiles.md`
 3. extract and segment the Methods text;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
 4. annotate DRaC moves and steps;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/draC-move-step-definitions.md`
 5. build the discipline-sensitive required-step profile;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/discipline-required-profiles.md`
 6. judge step status;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/diagnostic-rubric.md`
 7. detect rationale gaps;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/diagnostic-rubric.md`
 8. detect method-chain logic issues;
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/diagnostic-rubric.md`
 9. generate teaching-oriented feedback and revision priorities.
+   - MUST load via `load_skill_asset`: `references/workflow.md`
+   - MUST load via `load_skill_asset`: `references/output-templates.md`
 
 ## Reference Files
 
-Load only the files needed for the current task:
+For a real Methods diagnosis, the following files are required by the workflow above and must be loaded through `load_skill_asset` when their workflow step is reached:
 
-- `references/draC-move-step-definitions.md`: read when assigning or explaining DRaC move-step labels.
-- `references/discipline-required-profiles.md`: read when deciding which steps are teaching-required for a discipline or research type.
-- `references/diagnostic-rubric.md`: read when judging Present, Weak, Missing, Not Applicable, or Unclear, and when identifying rationale gaps or logic issues.
-- `references/output-templates.md`: read when formatting the final revision-priority-only answer.
-- `references/failure-strategies.md`: read when the input may not be a Methods section, is too short, lacks discipline metadata, or asks only for rewriting.
-- `references/source-notes.md`: read when the user asks about the theoretical basis, citations, or why the skill uses DRaC.
+- `references/workflow.md`: required for every real Methods diagnosis.
+- `references/failure-strategies.md`: required during input-gate and failure-mode handling.
+- `references/discipline-required-profiles.md`: required when identifying article profile and deciding which steps are teaching-required for a discipline or research type.
+- `references/draC-move-step-definitions.md`: required when assigning or explaining DRaC move-step labels.
+- `references/diagnostic-rubric.md`: required when judging Present, Weak, Missing, Not Applicable, or Unclear, and when identifying rationale gaps or logic issues.
+- `references/output-templates.md`: required when formatting the final revision-priority-only answer.
+
+Conditional reference:
+
+- `references/source-notes.md`: MUST load via `load_skill_asset` when the user asks about the theoretical basis, citations, source basis, or why the skill uses DRaC.
 
 ## Default Output
 
