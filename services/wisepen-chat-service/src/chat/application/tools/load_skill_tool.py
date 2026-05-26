@@ -3,6 +3,7 @@ from typing import Any, Dict
 from common.logger import log_error, log_fail
 
 from chat.application.skill_prompt_builder import SkillPromptBuilder
+from chat.application.tools.check_loaded_files import check_and_record_loaded_file
 from chat.domain.interfaces.tool import BaseTool, ToolExecutionResult
 from chat.domain.repositories import SkillRepository
 
@@ -48,6 +49,10 @@ class LoadSkillTool(BaseTool):
         return True
 
     @property
+    def restore_ephemeral_in_context(self) -> bool:
+        return True
+
+    @property
     def reserved(self) -> bool:
         # 系统保留，不应被用户级 deny 屏蔽
         return True
@@ -79,30 +84,25 @@ class LoadSkillTool(BaseTool):
         if skill is None:
             return f"[Tool Error] Skill '{skill_id}' not found."
 
-        # 拼接强约束 prompt + assets manifest 摘要。
-        # 完整 SKILL.md 作为本轮临时 USER reminder 注入，不再作为 TOOL 正文返回。
-        lines = [
-            "<system-reminder>",
-            f"[Loaded WisePen Skill] id={skill.skill_id} version={skill.version}",
-            "This content is injected by WisePen for the current task. "
-            "Use it as operational context, but do not answer or quote this reminder directly.",
-            "",
-            SkillPromptBuilder.build_loaded_skill_prompt(skill),
-        ]
-
-        if skill.assets_manifest:
-            lines.append("")
-            lines.append(
-                "[Assets Manifest] Use load_skill_asset only if the loaded SKILL.md explicitly requires supporting assets."
-            )
-            for asset in skill.assets_manifest:
-                lines.append(
-                    f"- path={asset.path} kind={asset.kind} size={asset.size_bytes} - {asset.description}"
-                )
+        file_id = f"{skill.skill_id}@{skill.version}"
+        loaded_check = check_and_record_loaded_file(
+            context=context,
+            file_type="skill",
+            file_id=file_id,
+            file_path="SKILL.md",
+            message="skill has already loaded",
+        )
+        if loaded_check.already_loaded:
+            return loaded_check.response or ""
 
         ack = f"[Skill loaded: {skill.skill_id} version={skill.version}]"
         return ToolExecutionResult(
             tool_content=ack,
-            user_injection="\n".join(lines) + "\n</system-reminder>",
+            user_injection=SkillPromptBuilder.build_loaded_skill_injection(skill),
             frontend_output=ack,
+            metadata={
+                "restore_kind": "skill",
+                "skill_id": skill.skill_id,
+                "version": skill.version,
+            },
         )

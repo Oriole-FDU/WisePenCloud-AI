@@ -95,7 +95,6 @@ class ChatTurnFinalizer:
     def _redact_ephemeral(new_messages: List[ChatMessage]) -> List[ChatMessage]:
         """
         Per-message 粒度的 ephemeral 处理，须在任何持久化动作之前调用一次
-        - ASSISTANT 消息标 ephemeral=True：整条丢弃。
         - SYSTEM 消息标 ephemeral=True：整条丢弃，避免临时控制指令进入 durable 历史。
         - TOOL 消息标 ephemeral=True：默认保留消息结构（tool_call_id / name 齐全）但 content 置换为占位符。
           若工具显式标记 preserve_ephemeral_content=True，则保留短 ack。
@@ -132,7 +131,7 @@ class ChatTurnFinalizer:
         resolved_model: ModelRequestInfo,
         new_messages: List[ChatMessage],
         group_id: Optional[str] = None,
-    ) -> None:
+    ) -> List[ChatMessage]:
         """后台统一处理所有存储逻辑: ephemeral 裁剪 → Redis 追加 → MongoDB 落盘 → Memory 摄入 → Token 计费"""
         # 先裁剪 ephemeral，下游所有持久化都看这份结果
         persistable = self._redact_ephemeral(new_messages)
@@ -165,6 +164,7 @@ class ChatTurnFinalizer:
                                         resolved_model=resolved_model,
                                         messages=persistable,
                                         group_id=group_id)
+        return persistable
 
 
 
@@ -204,16 +204,16 @@ class ChatTurnFinalizer:
         except Exception as e:
             log_error("自动生成标题", e, session=session_id)
 
-    async def summarize_and_compress(
+    async def generate_updated_summary(
         self,
         session_id: str,
-        messages_keep: List[ChatMessage],
         messages_compress_candidates: List[ChatMessage],
         existing_summary: Optional[str],
-    ) -> None:
-        """
-        增量摘要压缩
-        """
+    ) -> Optional[str]:
+        """生成增量摘要文本；只负责调用摘要模型，不做持久化。"""
+        if not messages_compress_candidates:
+            return None
+
         # 构建摘要输入，将 existing_summary（上一轮摘要，如有）作为前缀，拼接 messages_compress_candidates 明细，让轻量模型生成覆盖范围更广的全局摘要
         oldest_text = "\n".join(
             [f"{m.role.value}: {m.content}" for m in messages_compress_candidates]
@@ -260,15 +260,31 @@ class ChatTurnFinalizer:
             new_summary = message_response.content or ""
         except Exception as e:
             log_error("摘要生成", e, session=session_id)
-            return
+            return None
 
         if not new_summary.strip():
+            return None
+
+        return new_summary
+
+    async def apply_compression_result(
+        self,
+        session_id: str,
+        current_summary: str,
+        summary_updated_at: datetime,
+        messages_keep: List[ChatMessage],
+    ) -> None:
+        """应用已生成的摘要：更新 session summary，并用保留明细重载 Redis。"""
+        if not current_summary.strip():
             return
 
         # 持久化新摘要到 MongoDB，同时写入压缩时间戳
         try:
-            await self.session_repo.update_session_summary(session_id=session_id, current_summary=new_summary,
-                                                           summary_updated_at=datetime.now(timezone.utc))
+            await self.session_repo.update_session_summary(
+                session_id=session_id,
+                current_summary=current_summary,
+                summary_updated_at=summary_updated_at,
+            )
         except Exception as e:
             log_error("摘要持久化", e, session=session_id)
 
@@ -280,3 +296,82 @@ class ChatTurnFinalizer:
             )
         except Exception as e:
             log_error("Redis 上下文重载", e, session=session_id)
+
+    async def summarize_and_compress(
+        self,
+        session_id: str,
+        messages_keep: List[ChatMessage],
+        messages_compress_candidates: List[ChatMessage],
+        existing_summary: Optional[str],
+    ) -> None:
+        """
+        增量摘要压缩
+        """
+        new_summary = await self.generate_updated_summary(
+            session_id=session_id,
+            messages_compress_candidates=messages_compress_candidates,
+            existing_summary=existing_summary,
+        )
+        if not new_summary:
+            return
+
+        summary_updated_at = max(
+            (m.created_at for m in messages_compress_candidates),
+            default=datetime.now(timezone.utc),
+        )
+        await self.apply_compression_result(
+            session_id=session_id,
+            current_summary=new_summary,
+            summary_updated_at=summary_updated_at,
+            messages_keep=messages_keep,
+        )
+
+    async def persist_then_apply_compression_result(
+        self,
+        user_id: str,
+        session_id: str,
+        resolved_model: ModelRequestInfo,
+        new_messages: List[ChatMessage],
+        current_summary: str,
+        summary_updated_at: datetime,
+        messages_keep: List[ChatMessage],
+        group_id: Optional[str] = None,
+    ) -> None:
+        persistable = await self.persist_all(
+            user_id=user_id,
+            session_id=session_id,
+            resolved_model=resolved_model,
+            new_messages=new_messages,
+            group_id=group_id,
+        )
+        await self.apply_compression_result(
+            session_id=session_id,
+            current_summary=current_summary,
+            summary_updated_at=summary_updated_at,
+            messages_keep=messages_keep + persistable,
+        )
+
+    async def persist_then_summarize_and_compress(
+        self,
+        user_id: str,
+        session_id: str,
+        resolved_model: ModelRequestInfo,
+        new_messages: List[ChatMessage],
+        messages_keep: List[ChatMessage],
+        messages_compress_candidates: List[ChatMessage],
+        existing_summary: Optional[str],
+        group_id: Optional[str] = None,
+    ) -> None:
+        persistable = await self.persist_all(
+            user_id=user_id,
+            session_id=session_id,
+            resolved_model=resolved_model,
+            new_messages=new_messages,
+            group_id=group_id,
+        )
+        await self.summarize_and_compress(
+            session_id=session_id,
+            messages_keep=messages_keep + persistable,
+            messages_compress_candidates=messages_compress_candidates,
+            existing_summary=existing_summary,
+        )
