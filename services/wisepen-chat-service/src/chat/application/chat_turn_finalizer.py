@@ -9,6 +9,7 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.model import ModelScope
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
+from chat.domain.message_lifecycle import MessageLifecycle, PersistenceMode
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository, ProviderRepository
 from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.kafka.producer import KafkaProducerClient
@@ -92,37 +93,34 @@ class ChatTurnFinalizer:
         await self.kafka_producer.send(topic=settings.KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value)
 
     @staticmethod
-    def _redact_ephemeral(new_messages: List[ChatMessage]) -> List[ChatMessage]:
+    def _apply_persistence_policy(new_messages: List[ChatMessage]) -> List[ChatMessage]:
         """
-        Per-message 粒度的 ephemeral 处理，须在任何持久化动作之前调用一次
-        - SYSTEM 消息标 ephemeral=True：整条丢弃，避免临时控制指令进入 durable 历史。
-        - TOOL 消息标 ephemeral=True：默认保留消息结构（tool_call_id / name 齐全）但 content 置换为占位符。
-          若工具显式标记 preserve_ephemeral_content=True，则保留短 ack。
-        
-        以确保 SKILL 中 SKILL.md / asset 正文不会进入 durable 历史，后续回合也不会从 Redis / Mongo 读回污染上下文
+        Per-message 粒度的持久化策略处理，须在任何持久化动作之前调用一次。
+        - DROP：整条丢弃，避免临时控制指令进入 durable 历史。
+        - REDACT_CONTENT：保留消息结构但替换 content。
+        - PERSIST_FULL / PERSIST_CONTENT：原样保留。
+
+        restore_ref 会被落到 metadata 中，供后续上下文组装恢复临时注入。
+        进入 Redis / Mongo / Memory 的消息一律重置为默认 lifecycle。
         """
-        redacted: List[ChatMessage] = []
+        persistable: List[ChatMessage] = []
         for msg in new_messages:
-            if not msg.ephemeral:
-                redacted.append(msg)
+            mode = msg.lifecycle.persistence_mode
+            if mode == PersistenceMode.DROP:
                 continue
-            if msg.role == Role.SYSTEM:
-                continue  # 临时 SYSTEM 注入只服务当前 turn，不进入持久历史
-            if msg.role == Role.USER:
-                continue
-            if msg.role == Role.TOOL:
-                if msg.metadata.get("preserve_ephemeral_content"):
-                    redacted.append(msg)
-                    continue
+
+            restore_ref = msg.lifecycle.restore_ref
+            if restore_ref:
+                msg.metadata = dict(msg.metadata or {})
+                msg.metadata["restore_ref"] = restore_ref.model_dump(mode="json")
+
+            if mode == PersistenceMode.REDACT_CONTENT:
                 msg.content = (
-                    f"[Redacted: ephemeral tool '{msg.name or 'unknown'}' scaffolding output]"
+                    f"[Redacted: tool '{msg.name or 'unknown'}' scaffolding output]"
                 )
-                redacted.append(msg)
-                continue
-            # 其他 role 不该被标 ephemeral；保守保留并去 ephemeral 标记
-            msg.ephemeral = False
-            redacted.append(msg)
-        return redacted
+            msg.lifecycle = MessageLifecycle()
+            persistable.append(msg)
+        return persistable
 
     async def persist_all(
         self,
@@ -132,9 +130,9 @@ class ChatTurnFinalizer:
         new_messages: List[ChatMessage],
         group_id: Optional[str] = None,
     ) -> List[ChatMessage]:
-        """后台统一处理所有存储逻辑: ephemeral 裁剪 → Redis 追加 → MongoDB 落盘 → Memory 摄入 → Token 计费"""
-        # 先裁剪 ephemeral，下游所有持久化都看这份结果
-        persistable = self._redact_ephemeral(new_messages)
+        """后台统一处理所有存储逻辑: 生命周期策略裁剪 → Redis 追加 → MongoDB 落盘 → Memory 摄入 → Token 计费"""
+        # 先应用生命周期持久化策略，下游所有持久化都看这份结果
+        persistable = self._apply_persistence_policy(new_messages)
 
         await self._fill_token_counts(persistable, resolved_model.model_name)
 

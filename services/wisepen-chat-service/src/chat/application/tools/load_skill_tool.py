@@ -4,6 +4,7 @@ from common.logger import log_error, log_fail
 
 from chat.application.skill_prompt_builder import SkillPromptBuilder
 from chat.application.tools.check_loaded_files import check_and_record_loaded_file
+from chat.domain.message_lifecycle import MessageLifecycle, PersistenceMode, RestoreRef
 from chat.domain.interfaces.tool import BaseTool, ToolExecutionResult
 from chat.domain.repositories import SkillRepository
 
@@ -42,15 +43,6 @@ class LoadSkillTool(BaseTool):
             },
             "required": ["skill_id"],
         }
-
-    @property
-    def is_ephemeral_output(self) -> bool:
-        # 本工具返回的消息无需持久化
-        return True
-
-    @property
-    def restore_ephemeral_in_context(self) -> bool:
-        return True
 
     @property
     def reserved(self) -> bool:
@@ -101,8 +93,14 @@ class LoadSkillTool(BaseTool):
             user_injection=SkillPromptBuilder.build_loaded_skill_injection(skill),
             frontend_output=ack,
             metadata={
-                "restore_kind": "skill",
                 "skill_id": skill.skill_id,
                 "version": skill.version,
             },
+            lifecycle=MessageLifecycle(
+                persistence_mode=PersistenceMode.PERSIST_CONTENT,
+                restore_ref=RestoreRef(
+                    kind="skill",
+                    data={"skill_id": skill.skill_id, "version": skill.version},
+                ),
+            ),
         )

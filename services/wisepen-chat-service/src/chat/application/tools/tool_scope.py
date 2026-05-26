@@ -35,13 +35,5 @@ class ToolScope:
     def context(self) -> Dict[str, Any]:
         return dict(self._context)
 
-    def is_ephemeral(self, name: str) -> bool:
-        t = self.get(name)
-        return bool(t and t.is_ephemeral_output) # 未在 Scope 视图内的视为 False
-
-    def should_restore_ephemeral_in_context(self, name: str) -> bool:
-        t = self.get(name)
-        return bool(t and t.restore_ephemeral_in_context) # 未在 Scope 视图内的视为 False
-
     def __len__(self) -> int:
         return len(self._tools)
