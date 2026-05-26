@@ -5,7 +5,8 @@ from common.logger import log_error, log_fail
 from chat.core.config.app_settings import settings
 from chat.application.tools.check_loaded_files import check_and_record_loaded_file
 from chat.domain.interfaces.skill_asset_loader import SkillAssetLoader
-from chat.domain.interfaces.tool import BaseTool
+from chat.domain.interfaces.tool import BaseTool, ToolExecutionResult
+from chat.domain.message_lifecycle import MessageLifecycle, PersistenceMode
 from chat.domain.repositories import SkillRepository
 
 
@@ -53,10 +54,6 @@ class LoadSkillAssetTool(BaseTool):
             },
             "required": ["skill_id", "path"],
         }
-
-    @property
-    def is_ephemeral_output(self) -> bool:
-        return True
 
     @property
     def reserved(self) -> bool:
@@ -168,9 +165,14 @@ class LoadSkillAssetTool(BaseTool):
         if len(content) > settings.TOOL_RESULT_MAX_CHARS:
             content = content[: settings.TOOL_RESULT_MAX_CHARS] + "\n...[truncated]"
 
-        return (
-            f"[Loaded Asset] skill_id={skill_id} version={skill.version} path={path}\n"
-            f"===== ASSET BEGIN =====\n"
-            f"{content}\n"
-            f"===== ASSET END ====="
+        return ToolExecutionResult(
+            tool_content=(
+                f"[Loaded Asset] skill_id={skill_id} version={skill.version} path={path}\n"
+                f"===== ASSET BEGIN =====\n"
+                f"{content}\n"
+                f"===== ASSET END ====="
+            ),
+            lifecycle=MessageLifecycle(
+                persistence_mode=PersistenceMode.REDACT_CONTENT,
+            ),
         )

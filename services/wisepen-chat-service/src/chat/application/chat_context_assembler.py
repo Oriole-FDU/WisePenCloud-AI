@@ -6,6 +6,7 @@ from chat.core.config.app_settings import settings
 from chat.application.skill_prompt_builder import SkillPromptBuilder
 from chat.domain.entities import ChatMessage, Role, ChatSession
 from chat.domain.entities.skill import SkillMeta
+from chat.domain.message_lifecycle import MessageLifecycle, PersistenceMode
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository, SkillRepository
 
 
@@ -100,10 +101,11 @@ class ChatContextAssembler:
         if msg.role != Role.TOOL:
             return None
 
-        metadata = msg.metadata or {}
-        if metadata.get("restore_ephemeral_in_context"):
-            skill_id = metadata.get("skill_id")
-            version = metadata.get("version")
+        restore_ref = (msg.metadata or {}).get("restore_ref") or {}
+        if restore_ref.get("kind") == "skill":
+            data = restore_ref.get("data") or {}
+            skill_id = data.get("skill_id")
+            version = data.get("version")
             if skill_id:
                 return str(skill_id), str(version) if version else None
 
@@ -115,7 +117,7 @@ class ChatContextAssembler:
 
         return None
 
-    async def restore_ephemeral_context_injections(
+    async def restore_context_injections(
         self,
         session_id: str,
         windowed_messages: List[ChatMessage],
@@ -159,7 +161,9 @@ class ChatContextAssembler:
                     "restored_skill_id": skill.skill_id,
                     "restored_skill_version": skill.version,
                 },
-                ephemeral=True,
+                lifecycle=MessageLifecycle(
+                    persistence_mode=PersistenceMode.DROP,
+                ),
             ))
 
         return restored
@@ -237,7 +241,9 @@ class ChatContextAssembler:
                 session_id=session_id,
                 role=Role.USER,
                 content=skill_block,
-                ephemeral=True,
+                lifecycle=MessageLifecycle(
+                    persistence_mode=PersistenceMode.DROP,
+                ),
             ))
 
         # 经过滑动窗口裁剪后的近期对话明细

@@ -129,7 +129,7 @@ class ChatTurnCoordinator:
             if precomputed_summary is None:
                 candidate_window = compress_block + candidate_window
 
-            restored_window_messages = await self._context_assembler.restore_ephemeral_context_injections(
+            restored_window_messages = await self._context_assembler.restore_context_injections(
                 session_id,
                 candidate_window,
             )

@@ -11,6 +11,7 @@ from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces import LLMProvider
 from chat.domain.interfaces.tool import ToolExecutionResult
+from chat.domain.message_lifecycle import LLMVisibility, MessageLifecycle, PersistenceMode
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 from chat.application.tools.tool_scope import ToolScope
@@ -227,7 +228,7 @@ class QueryLoopRuntime:
         tool_schemas: List[Dict[str, Any]],
     ) -> str:
         serialized_messages: List[Dict[str, Any]] = []
-        for msg in messages:
+        for msg in QueryLoopRuntime._messages_visible_to_llm(messages):
             item: Dict[str, Any] = {
                 "role": msg.role.value,
                 "content": msg.content or "",
@@ -244,6 +245,13 @@ class QueryLoopRuntime:
             ensure_ascii=False,
             default=str,
         )
+
+    @staticmethod
+    def _messages_visible_to_llm(messages: List[ChatMessage]) -> List[ChatMessage]:
+        return [
+            msg for msg in messages
+            if msg.lifecycle.llm_visibility == LLMVisibility.INCLUDE
+        ]
 
     async def _ensure_prompt_budget(
         self,
@@ -347,7 +355,7 @@ class QueryLoopRuntime:
         try:
             # 调用模型流式接口
             async for chunk in self.llm.stream_chat_completion(
-                messages=messages,
+                messages=self._messages_visible_to_llm(messages),
                 model_name=model_name,
                 tools=tool_schemas or None,
                 api_base=api_base,
@@ -398,7 +406,6 @@ class QueryLoopRuntime:
                 }
                 for tool_call in parsed_tool_calls
             ],
-            ephemeral=False,
         )
         new_messages: List[ChatMessage] = [assistant_msg]
 
@@ -458,9 +465,9 @@ class QueryLoopRuntime:
         """
         并行执行所有工具。
         返回 tool_output_available 事件列表（按 parsed 顺序）和本轮新增消息。
-        新增消息通常是 Role.TOOL；结构化工具结果也可以附带 ephemeral Role.USER 注入。
-        每条 TOOL 消息独立按对应 tool 的 is_ephemeral_output 打 ephemeral 标，
-        让 Finalizer 在 per-message 粒度上决定是否 redact，避免混合轮次里 skill 正文通过"整轮保守落盘"漏进 durable 历史
+        新增消息通常是 Role.TOOL；结构化工具结果也可以附带仅本轮使用的 Role.USER 注入。
+        每条消息携带 lifecycle，让 Finalizer 在 per-message 粒度上决定是否 drop/redact/persist，
+        避免 skill 正文或 asset 正文漏进 durable 历史。
         """
 
         # 并发执行所有工具，return_exceptions=True 保证单工具失败不中断整轮
@@ -469,22 +476,11 @@ class QueryLoopRuntime:
             return_exceptions=True,
         )
 
-        # 查出每个 tool call 对应 tool 的 is_ephemeral_output
-        ephemeral_flags: List[bool] = [
-            tool_scope.is_ephemeral(tool_call.name) for tool_call in parsed_tool_calls
-        ]
-        restore_flags: List[bool] = [
-            tool_scope.should_restore_ephemeral_in_context(tool_call.name)
-            for tool_call in parsed_tool_calls
-        ]
-
         # 遍历结果做异常降级
         events: List[StreamEvent] = []
         tool_messages: List[ChatMessage] = []
         injection_messages: List[ChatMessage] = []
-        for tool_call, result, is_ephemeral, should_restore in zip(
-            parsed_tool_calls, raw_results, ephemeral_flags, restore_flags
-        ):
+        for tool_call, result in zip(parsed_tool_calls, raw_results):
             # 如果某个结果是 Exception，转成字符串形式的 [Tool Execution Error]: ... 并记录日志，否则原样使用。
             # 防止原生 Exception 对象序列化进 API 请求导致异常
             if isinstance(result, Exception):
@@ -500,11 +496,9 @@ class QueryLoopRuntime:
                 else tool_result.tool_content
             )
 
-            should_restore_message = bool(should_restore and tool_result.user_injection)
             metadata = dict(tool_result.metadata or {})
-            metadata["restore_ephemeral_in_context"] = should_restore_message
-            if tool_result.user_injection:
-                metadata["preserve_ephemeral_content"] = True
+            if tool_result.lifecycle.restore_ref:
+                metadata["restore_ref"] = tool_result.lifecycle.restore_ref.model_dump(mode="json")
 
             # 发 ToolOutputAvailableEvent
             events.append(ToolOutputAvailableEvent(call_id=tool_call.id, output=event_output))
@@ -517,7 +511,7 @@ class QueryLoopRuntime:
                     name=tool_call.name,
                     content=tool_result.tool_content,
                     metadata=metadata,
-                    ephemeral=is_ephemeral,
+                    lifecycle=tool_result.lifecycle,
                 )
             )
             if tool_result.user_injection:
@@ -526,7 +520,9 @@ class QueryLoopRuntime:
                         session_id=session_id,
                         role=Role.USER,
                         content=tool_result.user_injection,
-                        ephemeral=True,
+                        lifecycle=MessageLifecycle(
+                            persistence_mode=PersistenceMode.DROP,
+                        ),
                     )
                 )
         return events, tool_messages + injection_messages

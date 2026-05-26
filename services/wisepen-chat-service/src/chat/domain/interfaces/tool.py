@@ -1,7 +1,9 @@
 # src/chat/domain/interfaces/tool.py
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, Union
+
+from chat.domain.message_lifecycle import MessageLifecycle
 
 
 @dataclass(frozen=True)
@@ -14,6 +16,7 @@ class ToolExecutionResult:
     user_injection: Optional[str] = None
     frontend_output: Optional[Any] = None
     metadata: Optional[Dict[str, Any]] = None
+    lifecycle: MessageLifecycle = field(default_factory=MessageLifecycle)
 
 
 class BaseTool(ABC):
@@ -28,25 +31,6 @@ class BaseTool(ABC):
     @property
     @abstractmethod
     def parameters_schema(self) -> Dict[str, Any]: pass
-
-    @property
-    def is_ephemeral_output(self) -> bool:
-        """
-        True 表示本工具的输出属于"仅本轮工作内可见"的脚手架（如 Skill 正文加载）
-        QueryLoopRuntime 会把对应 TOOL 消息标 ephemeral=True
-        ChatTurnFinalizer 在持久化前会将其 content 置换为占位符以防上下文膨胀
-        False 表示本工具的输出属于对话事实，应进入 durable 历史
-        """
-        return False
-
-    @property
-    def restore_ephemeral_in_context(self) -> bool:
-        """
-        True 表示该工具的 ephemeral 注入内容在持久化时不会落库，
-        但后续拼接历史上下文时应根据持久化的 TOOL ack 恢复对应注入。
-        默认不恢复；例如 load_skill 需要恢复 SKILL.md，load_skill_asset 不需要恢复。
-        """
-        return False
 
     @property
     def reserved(self) -> bool:
