@@ -161,6 +161,7 @@ class Container(containers.DeclarativeContainer):
         tool_registry=tool_registry,
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
+        skill_repo=skill_repo,
     )
 
 

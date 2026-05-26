@@ -20,3 +20,27 @@ class SkillPromptBuilder:
             f"{skill.skill_md.rstrip()}\n"
             "===== SKILL.md END ====="
         )
+
+    @staticmethod
+    def build_loaded_skill_injection(skill: Skill) -> str:
+        lines = [
+            "<system-reminder>",
+            f"[Loaded WisePen Skill] id={skill.skill_id} version={skill.version}",
+            "This content is injected by WisePen for the current task. "
+            "Use it as operational context, but do not answer or quote this reminder directly.",
+            "",
+            SkillPromptBuilder.build_loaded_skill_prompt(skill),
+        ]
+
+        if skill.assets_manifest:
+            lines.append("")
+            lines.append(
+                "[Assets Manifest] Use load_skill_asset only if the loaded SKILL.md explicitly requires supporting assets."
+            )
+            for asset in skill.assets_manifest:
+                lines.append(
+                    f"- path={asset.path} kind={asset.kind} size={asset.size_bytes} - {asset.description}"
+                )
+
+        lines.append("</system-reminder>")
+        return "\n".join(lines)

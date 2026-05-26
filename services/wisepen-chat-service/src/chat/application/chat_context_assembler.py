@@ -1,10 +1,17 @@
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from common.logger import log_fail, log_error
 
 from chat.core.config.app_settings import settings
+from chat.application.skill_prompt_builder import SkillPromptBuilder
 from chat.domain.entities import ChatMessage, Role, ChatSession
 from chat.domain.entities.skill import SkillMeta
-from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
+from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository, SkillRepository
+
+
+_SKILL_LOADED_ACK_RE = re.compile(
+    r"^\[Skill loaded:\s*(?P<skill_id>[^\s\]]+)\s+version=(?P<version>[^\]]+)\]$"
+)
 
 
 class ChatContextAssembler:
@@ -15,10 +22,12 @@ class ChatContextAssembler:
         message_repo: MessageRepository,
         session_repo: SessionRepository,
         hot_context_repo: HotContextRepository,
+        skill_repo: SkillRepository,
     ):
         self.message_repo = message_repo
         self.session_repo = session_repo
         self.hot_context_repo = hot_context_repo
+        self.skill_repo = skill_repo
 
     async def get_or_repopulate_hot_context(self, session_id: str) -> List[ChatMessage]:
         """
@@ -85,6 +94,75 @@ class ChatContextAssembler:
         needs_compression = total_token >= high_budget # 由于高水位线（如 80%）预留了安全 Buffer，即便把它们全发给模型，也不会触发 Token 溢出报错
 
         return messages_keep, messages_compress_candidates, needs_compression
+
+    @staticmethod
+    def _extract_restorable_skill(msg: ChatMessage) -> Optional[Tuple[str, Optional[str]]]:
+        if msg.role != Role.TOOL:
+            return None
+
+        metadata = msg.metadata or {}
+        if metadata.get("restore_ephemeral_in_context"):
+            skill_id = metadata.get("skill_id")
+            version = metadata.get("version")
+            if skill_id:
+                return str(skill_id), str(version) if version else None
+
+        # 兼容旧数据：历史记录可能没有 metadata，甚至 name 写错，但保留了 load_skill ack。
+        content = (msg.content or "").strip()
+        match = _SKILL_LOADED_ACK_RE.match(content)
+        if match:
+            return match.group("skill_id"), match.group("version")
+
+        return None
+
+    async def restore_ephemeral_context_injections(
+        self,
+        session_id: str,
+        windowed_messages: List[ChatMessage],
+    ) -> List[ChatMessage]:
+        """
+        持久化历史只保存 load_skill 的短 ack，不保存 SKILL.md 正文。
+        每次组装上下文时，遇到需要恢复的 TOOL ack，就在其后补回正式 load_skill 同款 USER 注入。
+        """
+        restored: List[ChatMessage] = []
+        for msg in windowed_messages:
+            restored.append(msg)
+            skill_ref = self._extract_restorable_skill(msg)
+            if not skill_ref:
+                continue
+
+            skill_id, expected_version = skill_ref
+            try:
+                skill = await self.skill_repo.get_published_skill(skill_id)
+            except Exception as e:
+                log_error("恢复 Skill 上下文", e, session=session_id, skill_id=skill_id)
+                continue
+            if skill is None:
+                log_fail("恢复 Skill 上下文", "skill 不存在", session=session_id, skill_id=skill_id)
+                continue
+            if expected_version and skill.version != expected_version:
+                log_fail(
+                    "恢复 Skill 上下文",
+                    "skill 版本与历史 ack 不一致，使用当前发布版本恢复",
+                    session=session_id,
+                    skill_id=skill_id,
+                    expected_version=expected_version,
+                    actual_version=skill.version,
+                )
+
+            restored.append(ChatMessage(
+                session_id=session_id,
+                role=Role.USER,
+                content=SkillPromptBuilder.build_loaded_skill_injection(skill),
+                metadata={
+                    "restored_from_tool_call_id": msg.tool_call_id,
+                    "restored_skill_id": skill.skill_id,
+                    "restored_skill_version": skill.version,
+                },
+                ephemeral=True,
+            ))
+
+        return restored
 
     def assemble_prompt(
         self,

@@ -3,6 +3,7 @@ from typing import Any, Dict
 from common.logger import log_error, log_fail
 
 from chat.core.config.app_settings import settings
+from chat.application.tools.check_loaded_files import check_and_record_loaded_file
 from chat.domain.interfaces.skill_asset_loader import SkillAssetLoader
 from chat.domain.interfaces.tool import BaseTool
 from chat.domain.repositories import SkillRepository
@@ -117,9 +118,21 @@ class LoadSkillAssetTool(BaseTool):
                 f"please contact the skill publisher."
             )
 
+        file_id = f"{skill.skill_id}@{skill.version}:{path}"
+        loaded_check = check_and_record_loaded_file(
+            context=context,
+            file_type="skill-asset",
+            file_id=file_id,
+            file_path=path,
+            message="skill asset has already loaded",
+        )
+        if loaded_check.already_loaded:
+            return loaded_check.response or ""
+
         try:
             raw = await self._skill_asset_loader.load_by_object_key(object_key)
         except Exception as e:
+            loaded_check.rollback()
             log_error(
                 "load_skill_asset 读取",
                 e,
@@ -135,6 +148,7 @@ class LoadSkillAssetTool(BaseTool):
         try:
             content = raw.decode("utf-8")
         except UnicodeDecodeError:
+            loaded_check.rollback()
             log_fail(
                 "load_skill_asset 解码",
                 "资产非 UTF-8 文本，无法直接返回给 LLM",

@@ -221,6 +221,50 @@ class QueryLoopRuntime:
     def __init__(self, llm: LLMProvider) -> None:
         self.llm = llm
 
+    @staticmethod
+    def _serialize_prompt_for_counting(
+        messages: List[ChatMessage],
+        tool_schemas: List[Dict[str, Any]],
+    ) -> str:
+        serialized_messages: List[Dict[str, Any]] = []
+        for msg in messages:
+            item: Dict[str, Any] = {
+                "role": msg.role.value,
+                "content": msg.content or "",
+            }
+            if msg.tool_calls:
+                item["tool_calls"] = msg.tool_calls
+            if msg.tool_call_id:
+                item["tool_call_id"] = msg.tool_call_id
+            if msg.name:
+                item["name"] = msg.name
+            serialized_messages.append(item)
+        return json.dumps(
+            {"messages": serialized_messages, "tools": tool_schemas},
+            ensure_ascii=False,
+            default=str,
+        )
+
+    async def _ensure_prompt_budget(
+        self,
+        messages: List[ChatMessage],
+        tool_schemas: List[Dict[str, Any]],
+        model_name: str,
+        prompt_budget_tokens: Optional[int],
+    ) -> None:
+        if prompt_budget_tokens is None:
+            return
+        text = self._serialize_prompt_for_counting(messages, tool_schemas)
+        token_count = await self.llm.count_tokens(text, model_name)
+        if token_count > prompt_budget_tokens:
+            raise ServiceException(
+                ChatErrorCode.CONTEXT_LIMIT_EXCEEDED,
+                custom_msg=(
+                    "最终提示词超出模型上下文预算，"
+                    f"tokens={token_count}, budget={prompt_budget_tokens}"
+                ),
+            )
+
     """
     ReAct 循环主入口 (QueryLoop)
     """
@@ -233,6 +277,7 @@ class QueryLoopRuntime:
         model_id: Optional[PydanticObjectId] = None,
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
+        prompt_budget_tokens: Optional[int] = None,
     ) -> AsyncIterator[StreamEvent]:
         # 进入多轮循环
         for iteration in range(settings.AGENT_MAX_ITERATIONS):
@@ -248,6 +293,7 @@ class QueryLoopRuntime:
                 api_key=api_key,
                 iteration=iteration,
                 tool_scope=tool_scope,
+                prompt_budget_tokens=prompt_budget_tokens,
             ):
                 # 如果拿到的是 _StepTerminal 就存到 terminal；否则直接 yield
                 if isinstance(item, _StepTerminal):
@@ -278,6 +324,7 @@ class QueryLoopRuntime:
         api_key: Optional[str],
         iteration: int,
         tool_scope: ToolScope,
+        prompt_budget_tokens: Optional[int],
     ) -> AsyncIterator[Union[StreamEvent, _StepTerminal]]:
         # 发 step 开始事件
         yield StepStartEvent()
@@ -291,6 +338,12 @@ class QueryLoopRuntime:
 
         # schema 已由 ToolScope 在构造期固化，这里零决策直读
         tool_schemas = tool_scope.schemas()
+        await self._ensure_prompt_budget(
+            messages,
+            tool_schemas,
+            model_name,
+            prompt_budget_tokens,
+        )
         try:
             # 调用模型流式接口
             async for chunk in self.llm.stream_chat_completion(
@@ -420,12 +473,18 @@ class QueryLoopRuntime:
         ephemeral_flags: List[bool] = [
             tool_scope.is_ephemeral(tool_call.name) for tool_call in parsed_tool_calls
         ]
+        restore_flags: List[bool] = [
+            tool_scope.should_restore_ephemeral_in_context(tool_call.name)
+            for tool_call in parsed_tool_calls
+        ]
 
         # 遍历结果做异常降级
         events: List[StreamEvent] = []
         tool_messages: List[ChatMessage] = []
         injection_messages: List[ChatMessage] = []
-        for tool_call, result, is_ephemeral in zip(parsed_tool_calls, raw_results, ephemeral_flags):
+        for tool_call, result, is_ephemeral, should_restore in zip(
+            parsed_tool_calls, raw_results, ephemeral_flags, restore_flags
+        ):
             # 如果某个结果是 Exception，转成字符串形式的 [Tool Execution Error]: ... 并记录日志，否则原样使用。
             # 防止原生 Exception 对象序列化进 API 请求导致异常
             if isinstance(result, Exception):
@@ -441,6 +500,12 @@ class QueryLoopRuntime:
                 else tool_result.tool_content
             )
 
+            should_restore_message = bool(should_restore and tool_result.user_injection)
+            metadata = dict(tool_result.metadata or {})
+            metadata["restore_ephemeral_in_context"] = should_restore_message
+            if tool_result.user_injection:
+                metadata["preserve_ephemeral_content"] = True
+
             # 发 ToolOutputAvailableEvent
             events.append(ToolOutputAvailableEvent(call_id=tool_call.id, output=event_output))
             # 构造对话历史中的 Tool 消息
@@ -451,9 +516,7 @@ class QueryLoopRuntime:
                     tool_call_id=tool_call.id,
                     name=tool_call.name,
                     content=tool_result.tool_content,
-                    metadata={
-                        "preserve_ephemeral_content": True
-                    } if tool_result.user_injection else {},
+                    metadata=metadata,
                     ephemeral=is_ephemeral,
                 )
             )
