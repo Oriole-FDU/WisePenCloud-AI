@@ -85,21 +85,6 @@ class LiteLLMAdapter(LLMProvider):
         formatted_msgs = self._convert_messages(messages)
         litellm_model = self._format_model_for_litellm(model_name)
 
-        import json
-        print(
-            "[LLM 请求 payload]",
-            json.dumps(
-                {
-                    "model": litellm_model,
-                    "messages": formatted_msgs,
-                    "tools": tools,
-                },
-                ensure_ascii=False,
-                default=str,
-                indent=2,
-            ),
-            flush=True,
-        )
         try:
             response = await litellm.acompletion(
                 model=litellm_model,
