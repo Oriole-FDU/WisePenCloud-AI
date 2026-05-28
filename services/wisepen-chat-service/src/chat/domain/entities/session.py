@@ -1,8 +1,18 @@
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List
 from beanie import Document
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pymongo import IndexModel, ASCENDING, DESCENDING
+
+
+class AttachmentMeta(BaseModel):
+    """附件元数据（嵌入 ChatSession.attachments 列表）"""
+    object_key: str
+    original_name: str
+    extension: str
+    file_size: int
+    mime_type: Optional[str] = None
+    uploaded_at: Optional[datetime] = None
 
 
 class ChatSession(Document):
@@ -11,6 +21,7 @@ class ChatSession(Document):
     title: str = "New Chat"
     is_pinned: bool = False
     pinned_at: Optional[datetime] = None
+    attachments: List[AttachmentMeta] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     current_summary: Optional[str] = None

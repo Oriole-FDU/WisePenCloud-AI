@@ -1,11 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, UploadFile, File, Form
 from common.security.dependencies import require_login
 from chat.application.attachment_service import AttachmentService
 from chat.api.schemas.attachment import (
-    InitAttachmentUploadRequest,
-    InitAttachmentUploadResponse,
-    ConfirmUploadRequest,
-    ConfirmUploadResponse,
+    InitLargeUploadRequest,
+    InitLargeUploadResponse,
+    UploadSmallResponse,
     DeleteAttachmentRequest,
     DeleteAttachmentResponse,
     GetAttachmentPreviewUrlResponse,
@@ -16,25 +15,25 @@ from chat.container import container
 router = APIRouter(tags=["attachment"])
 
 
-@router.post("/initUpload", response_model=InitAttachmentUploadResponse)
-async def init_upload(
-    req: InitAttachmentUploadRequest,
+@router.post("/initLargeUpload", response_model=InitLargeUploadResponse)
+async def init_large_upload(
+    req: InitLargeUploadRequest,
     user_id: str = Depends(require_login),
 ):
-    """初始化上传附件：前端点击附件按钮后调用，申请上传凭证并预写状态为pending的文件记录"""
+    """初始化大文件上传：返回 OSS 预签名 URL 供前端直传"""
     service: AttachmentService = container.attachment_service()
-    return await service.init_upload(user_id, req)
+    return await service.init_large_upload(user_id, req)
 
 
-@router.post("/confirmUpload", response_model=ConfirmUploadResponse)
-async def confirm_upload(
-    req: ConfirmUploadRequest,
-    _=Depends(require_login),
+@router.post("/uploadSmall", response_model=UploadSmallResponse)
+async def upload_small(
+    session_id: str = Form(...),
+    file: UploadFile = File(...),
+    user_id: str = Depends(require_login),
 ):
-    """确认上传附件：前端直传 OSS 成功后回调，将附件状态从 pending 转为 uploaded"""
+    """小文件上传：服务端中转 PUT 到 OSS"""
     service: AttachmentService = container.attachment_service()
-    return await service.confirm_upload(req.object_key)
-
+    return await service.upload_small_file(user_id, session_id, file)
 
 
 @router.post("/delete", response_model=DeleteAttachmentResponse)

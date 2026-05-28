@@ -8,7 +8,7 @@ import httpx
 from common.logger import log_error
 from chat.core.config.app_settings import settings
 from chat.domain.interfaces.tool import BaseTool
-from chat.domain.repositories import ChatAttachmentRepository
+from chat.domain.repositories import SessionRepository
 from common.clients.file_storage import FileStorageClient
 
 
@@ -18,10 +18,10 @@ class BaseReadAttachmentTool(BaseTool, ABC):
     def __init__(
         self,
         file_storage_client: FileStorageClient,
-        attachment_repo: ChatAttachmentRepository,
+        session_repo: SessionRepository,
     ) -> None:
         self._file_storage = file_storage_client
-        self._repo = attachment_repo
+        self._session_repo = session_repo
 
     async def _validate_and_download(
         self, context: Dict[str, Any], object_key: str
@@ -30,11 +30,10 @@ class BaseReadAttachmentTool(BaseTool, ABC):
         session_id: str = context.get("session_id", "")
         user_id: str = context.get("user_id", "")
 
-        attachment = await self._repo.get_by_object_key(object_key)
-        if attachment is None:
+        session = await self._session_repo.get_session_for_user(session_id, user_id)
+        matched = any(a.object_key == object_key for a in session.attachments)
+        if not matched:
             return None, f"[Tool Error] Attachment not found: '{object_key}'."
-        if attachment.session_id != session_id or attachment.user_id != user_id:
-            return None, f"[Tool Error] Attachment '{object_key}' does not belong to the current session."
 
         try:
             download_url = await self._file_storage.get_download_url(object_key)

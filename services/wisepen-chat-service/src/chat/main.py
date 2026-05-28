@@ -24,7 +24,7 @@ from chat.api.endpoints import chat as chat_endpoints
 from chat.api.endpoints import session as session_endpoints
 from chat.api.endpoints import memory as memory_endpoints
 from chat.api.endpoints import model as model_endpoints
-from chat.domain.entities import ChatAttachment, ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill
+from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill
 
 
 # 避免 HTTP 代理拦截内部中间件请求。
@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
     mongo_client = AsyncMongoClient(settings.MONGODB_URL)
     await init_beanie(
         database=mongo_client[settings.MONGODB_DB_NAME],
-        document_models=[ChatAttachment, ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill],
+        document_models=[ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill],
     )
     log_event("Beanie 初始化", db=settings.MONGODB_DB_NAME)
 
@@ -58,6 +58,10 @@ async def lifespan(app: FastAPI):
     # 启动 Kafka Producer
     kafka_producer = container.kafka_producer()
     await kafka_producer.start()
+
+    # 启动 Kafka Consumer（附件上传完成事件）
+    kafka_consumer = container.kafka_consumer()
+    await kafka_consumer.start()
 
     # 启动 Skill cache refresher
     skill_cache_refresher = container.skill_cache_refresher()
@@ -86,6 +90,10 @@ async def lifespan(app: FastAPI):
     # 关闭 Kafka Producer
     kafka_producer = container.kafka_producer()
     await kafka_producer.stop()
+
+    # 关闭 Kafka Consumer
+    kafka_consumer = container.kafka_consumer()
+    await kafka_consumer.stop()
 
     # 关闭 Skill 资产加载器
     skill_asset_loader = container.skill_asset_loader()

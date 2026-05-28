@@ -1,7 +1,8 @@
 from .chat import ChatRequest, AttachmentRefRequest
 from .attachment import (
-    InitAttachmentUploadRequest,
-    InitAttachmentUploadResponse,
+    InitLargeUploadRequest,
+    InitLargeUploadResponse,
+    UploadSmallResponse,
     DeleteAttachmentRequest,
     DeleteAttachmentResponse,
     GetAttachmentPreviewUrlResponse,
@@ -10,8 +11,9 @@ from .attachment import (
 __all__ = [
     "ChatRequest",
     "AttachmentRefRequest",
-    "InitAttachmentUploadRequest",
-    "InitAttachmentUploadResponse",
+    "InitLargeUploadRequest",
+    "InitLargeUploadResponse",
+    "UploadSmallResponse",
     "DeleteAttachmentRequest",
     "DeleteAttachmentResponse",
     "GetAttachmentPreviewUrlResponse",

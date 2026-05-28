@@ -19,11 +19,9 @@ from chat.core.persistence import (
     MongoSkillRepository,
     MongoModelRepository,
     MongoProviderRepository,
-    MongoChatAttachmentRepository,
     RedisHotContext,
 )
 from chat.application.attachment_service import AttachmentService
-from chat.application.model_resolver import ModelResolver
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.skill_matcher import KeywordSkillMatcher
 from chat.application.skill_cache_refresher import SkillCacheRefresher
@@ -43,6 +41,7 @@ from chat.core.config.nacos import nacos_client_manager
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
 from common.kafka.producer import KafkaProducerClient
+from chat.core.kafka import FileUploadedConsumer
 
 
 async def _provide_nacos_naming() -> NacosNamingService:
@@ -129,13 +128,19 @@ class Container(containers.DeclarativeContainer):
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
     )
 
+    kafka_consumer = providers.Singleton(
+        FileUploadedConsumer,
+        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+        topic="wisepen-storage-file-uploaded-topic",
+        group_id="wisepen-chat-upload-callback-group",
+        session_repo=session_repo,
+    )
+
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期
-    # SearchHistoricalMessagesTool
     search_history_tool = providers.Singleton(
         SearchHistoricalMessagesTool,
         message_repo=message_repo,
     )
-    # LoadSkillTool / LoadSkillAssetTool
     load_skill_tool = providers.Singleton(
         LoadSkillTool,
         skill_repo=skill_repo,
@@ -146,33 +151,31 @@ class Container(containers.DeclarativeContainer):
         skill_asset_loader=skill_asset_loader,
     )
 
-    model_resolver = providers.Singleton(ModelResolver)
-    chat_attachment_repo = providers.Singleton(MongoChatAttachmentRepository)
-
+    # Attachment reading tools — 使用 SessionRepository 鉴权附件归属
     read_text_attachment_tool = providers.Singleton(
         ReadTextAttachmentTool,
         file_storage_client=file_storage_client,
-        attachment_repo=chat_attachment_repo,
+        session_repo=session_repo,
     )
     read_pdf_attachment_tool = providers.Singleton(
         ReadPdfAttachmentTool,
         file_storage_client=file_storage_client,
-        attachment_repo=chat_attachment_repo,
+        session_repo=session_repo,
     )
     read_word_attachment_tool = providers.Singleton(
         ReadWordAttachmentTool,
         file_storage_client=file_storage_client,
-        attachment_repo=chat_attachment_repo,
+        session_repo=session_repo,
     )
     read_ppt_attachment_tool = providers.Singleton(
         ReadPptAttachmentTool,
         file_storage_client=file_storage_client,
-        attachment_repo=chat_attachment_repo,
+        session_repo=session_repo,
     )
     read_excel_attachment_tool = providers.Singleton(
         ReadExcelAttachmentTool,
         file_storage_client=file_storage_client,
-        attachment_repo=chat_attachment_repo,
+        session_repo=session_repo,
     )
 
     tool_providers = providers.List(
@@ -194,7 +197,7 @@ class Container(containers.DeclarativeContainer):
     attachment_service = providers.Factory(
         AttachmentService,
         file_storage_client=file_storage_client,
-        chat_attachment_repo=chat_attachment_repo,
+        session_repo=session_repo,
     )
 
     # Application 层组件
