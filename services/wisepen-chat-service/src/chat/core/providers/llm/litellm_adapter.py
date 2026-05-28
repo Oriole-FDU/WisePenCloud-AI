@@ -108,4 +108,5 @@ class LiteLLMAdapter(LLMProvider):
         try:
             return litellm.token_counter(model=model_name, text=text)
         except:
+            # 降级策略
             return len(text)

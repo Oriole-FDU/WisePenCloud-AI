@@ -1,0 +1,50 @@
+# ============================================================
+# Nacos 配置中心 - wisepen-chat-service-dev.yaml
+# Data ID : wisepen-chat-service-dev.yaml
+# Group   : DEFAULT_GROUP
+# Namespace: public（根据实际 namespace 调整）
+#
+# 说明：此文件中的键名对应 Settings 类的字段名（大写），
+#       Nacos 拉取后会覆盖本地 .env 的同名字段。
+# ============================================================
+
+# --- 服务基础 ---
+APP_NAME: "WisePen Chat Service"
+SERVICE_NAME: "wisepen-chat-service"
+SERVICE_HOST: "127.0.0.1"
+SERVICE_PORT: 8000
+DEV: true
+LOG_LEVEL: "INFO"
+
+# --- LLM 统一网关 ---
+LLM_BASE_URL: "https://api.deepseek.com"
+LLM_API_KEY: "sk-7c133f0fe50241b5bf08c5dd99980d2a"
+
+# --- 模型配置 ---
+DEFAULT_MODEL: "deepseek/deepseek-v4-pro"
+MEMORY_LLM_MODEL: "deepseek/deepseek-v4-pro"
+MEMORY_EMBEDDING_MODEL: "text-embedding-3-large"
+MEMORY_RERANKER_ZE_MODEL: "zerank-1"
+ZERO_ENTROPY_API_KEY: "ze_PiBC8D5Jh836VTVF"
+SUMMARY_MODEL: "openai/gemini-3-flash-preview"
+
+# --- 安全 ---
+FROM_SOURCE_SECRET: "local-dev-secret"
+
+# --- 依赖服务（本地 Docker 默认）---
+REDIS_URL: "redis://127.0.0.1:6379/0"
+MONGODB_URL: "mongodb://127.0.0.1:27017"
+MONGODB_DB_NAME: "wisepen_chat"
+QDRANT_HOST: ""
+QDRANT_PORT: 6333
+
+CTX_TOKEN_LIMIT: 900
+CTX_HIGH_WATERMARK_RATIO: 0.8
+CTX_LOW_WATERMARK_RATIO: 0.5
+CTX_FALLBACK_HISTORY_LIMIT: 20
+AGENT_MAX_ITERATIONS: 5
+TOOL_RESULT_MAX_CHARS: 4000
+
+SANDBOX_BASE_URL: "http://127.0.0.1:9001"
+SANDBOX_FROM_SOURCE: ""
+SANDBOX_TIMEOUT_SECONDS: 30

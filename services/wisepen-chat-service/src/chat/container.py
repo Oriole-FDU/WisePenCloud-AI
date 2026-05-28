@@ -10,6 +10,7 @@ from chat.core.config.bootstrap_settings import bootstrap_settings
 from chat.core.providers import (
     LiteLLMAdapter,
     Mem0Adapter,
+    NullMemoryAdapter,
     LocalFSSkillAssetLoader,
     OssSkillAssetLoader,
 )
@@ -35,6 +36,7 @@ from chat.application.tools import (
     ReadWordAttachmentTool,
     ReadPptAttachmentTool,
     ReadExcelAttachmentTool,
+    RunSandboxScriptTool,
 )
 from common.clients.file_storage import FileStorageClient
 from chat.core.config.nacos import nacos_client_manager
@@ -60,7 +62,11 @@ def _build_registry(tool_providers: List[providers.Provider]) -> ToolRegistry:
 class Container(containers.DeclarativeContainer):
     """依赖注入容器，管理单例对象的生命周期。"""
     llm_provider = providers.Singleton(LiteLLMAdapter)
-    memory_provider = providers.Singleton(Mem0Adapter)
+
+    if (settings.QDRANT_HOST or "").strip().lower() in ("", "memory"):
+        memory_provider = providers.Singleton(NullMemoryAdapter)
+    else:
+        memory_provider = providers.Singleton(Mem0Adapter)
 
     session_repo = providers.Singleton(MongoSessionRepository)
     message_repo = providers.Singleton(MongoMessageRepository)
@@ -151,6 +157,13 @@ class Container(containers.DeclarativeContainer):
         skill_asset_loader=skill_asset_loader,
     )
 
+    # 沙箱脚本执行工具
+    run_sandbox_script_tool = providers.Singleton(
+        RunSandboxScriptTool,
+        base_url=settings.SANDBOX_BASE_URL,
+        from_source=settings.SANDBOX_FROM_SOURCE,
+    )
+
     # Attachment reading tools — 使用 SessionRepository 鉴权附件归属
     read_text_attachment_tool = providers.Singleton(
         ReadTextAttachmentTool,
@@ -182,6 +195,7 @@ class Container(containers.DeclarativeContainer):
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
+        run_sandbox_script_tool,
         read_text_attachment_tool,
         read_pdf_attachment_tool,
         read_word_attachment_tool,
