@@ -1,11 +1,12 @@
 [project]
 name = "wisepen-server-py"
-version = "0.1.0"
+version = "0.1.1"
 description = "WisePen Python Microservices Monorepo"
 requires-python = ">=3.9"
 dependencies = [
     "wisepen-chat-service",
     "wisepen-common",
+    "wisepen-sandbox-service",
 ]
 
 [tool.uv.workspace]
@@ -16,3 +17,4 @@ members = [
 [tool.uv.sources]
 wisepen-chat-service = { workspace = true }
 wisepen-common = { workspace = true }
+wisepen-sandbox-service = {workspace = true}

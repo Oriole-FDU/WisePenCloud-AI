@@ -1,5 +1,6 @@
 import yaml
 import asyncio
+import os
 import threading
 from pathlib import Path
 from typing import Literal
@@ -106,6 +107,11 @@ class AppSettings(BaseModel):
     # ServiceDiscovery 本地缓存兜底 TTL（秒），即便订阅通道断连也会周期性强制 list
     SERVICE_DISCOVERY_CACHE_TTL_SECONDS: float = 30.0
 
+    # 沙箱服务配置
+    SANDBOX_BASE_URL: str = "http://127.0.0.1:9001"
+    SANDBOX_FROM_SOURCE: str = ""
+    SANDBOX_TIMEOUT_SECONDS: int = 30
+
 
 def _run_async(coro):
     """在新线程的独立事件循环中执行协程，兼容 uvicorn 启动时已有运行中事件循环的场景。"""
@@ -127,6 +133,20 @@ def _run_async(coro):
 
 
 def load_settings() -> AppSettings:
+    def _load_local() -> dict:
+        cfg_path = Path(__file__).resolve().parents[4] / "wisepen-chat-service.nacos.yaml"
+        raw = cfg_path.read_text(encoding="utf-8")
+        cfg = yaml.safe_load(raw) if raw else {}
+        if not isinstance(cfg, dict):
+            raise ValueError("local config must be a yaml mapping")
+        log_event("使用本地配置文件启动（DEV 模式）", file=str(cfg_path))
+        return cfg
+
+    use_nacos = str(os.getenv("CHAT_USE_NACOS") or "").strip().lower() in ("1", "true", "yes")
+    if bootstrap_settings.DEV and not use_nacos:
+        full_config = {**bootstrap_settings.model_dump(), **_load_local()}
+        return AppSettings(**full_config)
+
     try:
         log_event("从 Nacos 拉取核心业务配置")
         raw_yaml = _run_async(nacos_client_manager.pull_config())
@@ -134,7 +154,9 @@ def load_settings() -> AppSettings:
         return AppSettings(**(config_dict or {}))
     except Exception as e:
         log_error("Nacos 配置拉取或解析", e)
+        if bootstrap_settings.DEV:
+            full_config = {**bootstrap_settings.model_dump(), **_load_local()}
+            return AppSettings(**full_config)
         raise
-
 
 settings = load_settings()

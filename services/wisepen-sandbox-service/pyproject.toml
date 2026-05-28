@@ -1,0 +1,10 @@
+[project]
+name = "wisepen-sandbox-service"
+version = "0.1.0"
+description = "WisePen Sandbox Microservice: Safe Script Execution"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "YiChen Wang", email = "23300240022@m.fudan.edu.cn" }
+]
+dependencies = []

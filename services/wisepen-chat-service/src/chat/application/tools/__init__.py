@@ -8,6 +8,7 @@ from .read_pdf_attachment_tool import ReadPdfAttachmentTool
 from .read_word_attachment_tool import ReadWordAttachmentTool
 from .read_ppt_attachment_tool import ReadPptAttachmentTool
 from .read_excel_attachment_tool import ReadExcelAttachmentTool
+from .run_sandbox_script import RunSandboxScriptTool
 
 __all__ = [
     "ToolRegistry",
@@ -20,5 +21,5 @@ __all__ = [
     "ReadWordAttachmentTool",
     "ReadPptAttachmentTool",
     "ReadExcelAttachmentTool",
+    "RunSandboxScriptTool",
 ]
-
