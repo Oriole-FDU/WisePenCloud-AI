@@ -12,6 +12,7 @@ resolution-markers = [
 members = [
     "wisepen-chat-service",
     "wisepen-common",
+    "wisepen-sandbox-service",
     "wisepen-server-py",
 ]
 
@@ -3384,18 +3385,25 @@ requires-dist = [
 ]
 
 [[package]]
-name = "wisepen-server-py"
+name = "wisepen-sandbox-service"
 version = "0.1.0"
+source = { editable = "services/wisepen-sandbox-service" }
+
+[[package]]
+name = "wisepen-server-py"
+version = "0.1.1"
 source = { virtual = "." }
 dependencies = [
     { name = "wisepen-chat-service" },
     { name = "wisepen-common" },
+    { name = "wisepen-sandbox-service" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "wisepen-chat-service", editable = "services/wisepen-chat-service" },
     { name = "wisepen-common", editable = "services/wisepen-common" },
+    { name = "wisepen-sandbox-service", editable = "services/wisepen-sandbox-service" },
 ]
 
 [[package]]

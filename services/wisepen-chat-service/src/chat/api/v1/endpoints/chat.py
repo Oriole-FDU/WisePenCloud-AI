@@ -1,4 +1,6 @@
 import json
+import os
+import re
 import time
 import uuid
 from fastapi import APIRouter, Depends, BackgroundTasks
@@ -8,6 +10,7 @@ from dependency_injector.wiring import inject, Provide
 from common.security import require_login
 from chat.api.schemas.chat import ChatRequest
 from chat.application.chat_orchestrator import ChatOrchestrator
+from chat.application.tools.registry import ToolRegistry
 from chat.container import Container
 from chat.core.config.app_settings import settings
 from chat.domain.repositories import SessionRepository
@@ -50,6 +53,17 @@ async def _sse_generator(chat_gen, model_name: str):
     yield "data: [DONE]\n\n"
 
 
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _extract_kv(text: str, key: str) -> str | None:
+    m = re.search(rf"(?:^|\s){re.escape(key)}\s*=\s*([^\s,;]+)", text)
+    if not m:
+        return None
+    return m.group(1).strip().strip("\"'") or None
+
+
 @router.post("/completions")
 @inject
 async def chat_completions(
@@ -57,6 +71,7 @@ async def chat_completions(
         background_tasks: BackgroundTasks,
         user_id: str = Depends(require_login),
         service: ChatOrchestrator = Depends(Provide[Container.chat_service]),
+        tool_registry: ToolRegistry = Depends(Provide[Container.tool_registry]),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
     """
@@ -68,6 +83,31 @@ async def chat_completions(
     await session_repo.get_by_id_and_user(req.session_id, user_id)
 
     resolved_model = req.model or settings.DEFAULT_MODEL
+
+    if settings.DEV and _truthy(os.getenv("DEVELOPER_ENABLE")) and "run_sandbox_script" in (req.query or ""):
+        package_id = _extract_kv(req.query, "package_id")
+        entry = _extract_kv(req.query, "entry")
+
+        async def _direct_tool_gen():
+            if not package_id:
+                yield "[System Error]: missing package_id (use: run_sandbox_script package_id=... entry=...)"
+                return
+            tool = tool_registry.get("run_sandbox_script")
+            text = await tool.execute(
+                context={"session_id": req.session_id, "user_id": user_id},
+                package_id=package_id,
+                entry=entry,
+            )
+            yield text
+
+        return StreamingResponse(
+            _sse_generator(_direct_tool_gen(), resolved_model),  # type: ignore[arg-type]
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     chat_gen = service.handle_chat(
         user_id=user_id,

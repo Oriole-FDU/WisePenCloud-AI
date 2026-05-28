@@ -1,9 +1,15 @@
 from .llm.litellm_adapter import LiteLLMAdapter
 from .llm.openai_adapter import OpenAIAdapter
-from .memory.mem0_adapter import Mem0Adapter
+from .memory.null_adapter import NullMemoryAdapter
+
+try:
+    from .memory.mem0_adapter import Mem0Adapter
+except Exception:
+    Mem0Adapter = None
 
 __all__ = [
     "LiteLLMAdapter",
     "OpenAIAdapter",
-    "Mem0Adapter"
+    "NullMemoryAdapter",
+    "Mem0Adapter",
 ]

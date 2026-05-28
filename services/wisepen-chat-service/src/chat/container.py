@@ -2,23 +2,32 @@
 
 from dependency_injector import containers, providers
 
-from chat.core.providers import LiteLLMAdapter, Mem0Adapter
+from chat.core.config.app_settings import settings
+from chat.core.providers import LiteLLMAdapter, Mem0Adapter, NullMemoryAdapter
 from chat.core.persistence import MongoSessionRepository, MongoMessageRepository, RedisHotContext
 from chat.application.chat_orchestrator import ChatOrchestrator
-from chat.application.tools import ToolRegistry, SearchHistoricalMessagesTool
+from chat.application.tools import ToolRegistry, SearchHistoricalMessagesTool, RunSandboxScriptTool
 
 
-def _build_registry(search_history_tool: SearchHistoricalMessagesTool) -> ToolRegistry:
+def _build_registry(
+    search_history_tool: SearchHistoricalMessagesTool,
+    run_sandbox_tool: RunSandboxScriptTool,
+) -> ToolRegistry:
     """工厂函数：组装并返回已注册所有工具的 ToolRegistry 实例。"""
     registry = ToolRegistry()
     registry.register(search_history_tool)
+    registry.register(run_sandbox_tool)
     return registry
 
 
 class Container(containers.DeclarativeContainer):
     """依赖注入容器，管理单例对象的生命周期。"""
     llm_provider = providers.Singleton(LiteLLMAdapter)
-    memory_provider = providers.Singleton(Mem0Adapter)
+
+    if (settings.QDRANT_HOST or "").strip().lower() in ("", "memory"):
+        memory_provider = providers.Singleton(NullMemoryAdapter)
+    else:
+        memory_provider = providers.Singleton(Mem0Adapter or NullMemoryAdapter)
 
     session_repo = providers.Singleton(MongoSessionRepository)
     message_repo = providers.Singleton(MongoMessageRepository)
@@ -29,9 +38,15 @@ class Container(containers.DeclarativeContainer):
         SearchHistoricalMessagesTool,
         message_repo=message_repo,
     )
+    run_sandbox_tool = providers.Singleton(
+        RunSandboxScriptTool,
+        base_url=settings.SANDBOX_BASE_URL,
+        from_source=settings.SANDBOX_FROM_SOURCE,
+    )
     tool_registry = providers.Singleton(
         _build_registry,
         search_history_tool=search_history_tool,
+        run_sandbox_tool=run_sandbox_tool,
     )
 
     # Application 层组件

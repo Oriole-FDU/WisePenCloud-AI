@@ -5,5 +5,5 @@ from .redis.hot_context import RedisHotContext
 __all__ = [
     "MongoMessageRepository",
     "MongoSessionRepository",
-    "RedisHotContext"
+    "RedisHotContext",
 ]
