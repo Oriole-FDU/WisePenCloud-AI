@@ -44,6 +44,4 @@ ENV/
 Thumbs.db
 
 # json
-origin_text.txt
-json_text.txt
-to_json.py
+/zyq
