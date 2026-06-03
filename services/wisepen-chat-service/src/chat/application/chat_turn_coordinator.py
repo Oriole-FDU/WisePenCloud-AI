@@ -170,7 +170,7 @@ class ChatTurnCoordinator:
         messages_for_llm = self._context_assembler.assemble_prompt(
             session_id, user_query, messages_keep+messages_compress_candidates, relevant_facts, session_summary,
             states=states,
-            candidate_skills=available_skills or None,
+            available_skills=available_skills or None,
         )
 
         # 记录进入 Agent 循环前的列表长度
