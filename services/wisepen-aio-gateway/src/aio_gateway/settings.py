@@ -29,6 +29,10 @@ class AppSettings(BaseModel):
     FROM_SOURCE_SECRET: str
     AIO_BASE_URL: str = "http://127.0.0.1:8080"
 
+    # 工作域清理配置
+    WORKSPACE_CLEANUP_TTL_SECONDS: int = 7 * 24 * 3600   # 7 天未访问 → 清理
+    WORKSPACE_CLEANUP_INTERVAL_SECONDS: int = 3600        # 每小时扫描一次
+
 
 def _load_local() -> dict:
     cfg_path = SERVICE_ROOT / "wisepen-aio-gateway.nacos.yaml"
