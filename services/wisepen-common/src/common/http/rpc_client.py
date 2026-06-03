@@ -1,15 +1,13 @@
 """
 基于 Nacos ServiceDiscovery 的通用内部 RPC 客户端
 """
-from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Set
 
 import httpx
 
-from common.cloud.service_discovery import ServiceDiscovery, LoadBalancingStrategy
-from common.core.constants import SecurityConstants, CommonConstants
-from common.gray.context import GrayContextHolder
+from common.cloud.service_discovery import LoadBalancingStrategy, ServiceDiscovery
+from common.core.constants import SecurityConstants
 from common.core.exceptions import RpcError, ServiceUnavailableError
 from common.logger import log_error, log_fail
 
@@ -73,7 +71,7 @@ class RpcClient:
         发起到内部服务的 HTTP 调用并解包
         """
         attempts = self._retries + 1
-        tried_instances: set[str] = set()
+        tried_instances: Set[str] = set()
 
         last_status: Optional[int] = None
         last_code: Optional[int] = None
@@ -85,11 +83,6 @@ class RpcClient:
         }
         if headers:
             merged_headers.update({k: v for k, v in headers.items()})
-
-        # 传递 developer 头
-        developer = GrayContextHolder.get_developer_tag()
-        if developer:
-            merged_headers[CommonConstants.GRAY_HEADER_DEV_KEY] = developer
 
         req_timeout = httpx.Timeout(timeout) if timeout is not None else None
 

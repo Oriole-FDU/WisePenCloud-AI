@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import os
@@ -9,13 +7,23 @@ from typing import Dict, Optional
 
 import httpx
 
+from chat.domain.interfaces.skill_asset_loader import SkillAssetLoader
 from common.clients.file_storage import FileStorageClient
 from common.logger import log_error, log_event, log_fail
 
-from chat.domain.interfaces.skill_asset_loader import SkillAssetLoader
-
 # OSS 路径布局与发布侧保持一致
 _OBJECT_KEY_PREFIX = "skills"
+_SERVICE_ROOT = Path(__file__).resolve().parents[5]
+SKILL_OSS_CACHE_DIR = "dev_fixtures/skill_oss_cache"
+SKILL_OSS_CACHE_TTL_SECONDS = 6 * 3600
+SKILL_OSS_CACHE_GC_INTERVAL_SECONDS = 30 * 60
+
+
+def skill_oss_cache_path() -> Path:
+    path = Path(SKILL_OSS_CACHE_DIR)
+    if path.is_absolute():
+        return path
+    return (_SERVICE_ROOT / path).resolve()
 
 
 class OssSkillAssetLoader(SkillAssetLoader):
@@ -28,15 +36,15 @@ class OssSkillAssetLoader(SkillAssetLoader):
         self,
         file_storage_client: FileStorageClient,
         *,
-        cache_dir: Path,
+        cache_dir: Optional[Path] = None,
         download_duration_seconds: int = 900,
         http_timeout: float = 10.0,
-        cache_ttl_seconds: int = 6 * 3600,
-        gc_interval_seconds: int = 30 * 60,
+        cache_ttl_seconds: int = SKILL_OSS_CACHE_TTL_SECONDS,
+        gc_interval_seconds: int = SKILL_OSS_CACHE_GC_INTERVAL_SECONDS,
     ) -> None:
         self._fsc = file_storage_client
         self._duration = int(download_duration_seconds)
-        self._cache_dir = Path(cache_dir).resolve()
+        self._cache_dir = Path(cache_dir or skill_oss_cache_path()).resolve()
         self._cache_ttl = float(cache_ttl_seconds)
         self._gc_interval = float(gc_interval_seconds)
 
@@ -47,7 +55,9 @@ class OssSkillAssetLoader(SkillAssetLoader):
 
     async def start(self) -> None:
         if self._gc_task is None or self._gc_task.done():
-            self._gc_task = asyncio.create_task(self._gc_loop(), name="skill-asset-cache-gc")
+            self._gc_task = asyncio.create_task(
+                self._gc_loop(), name="skill-asset-cache-gc"
+            )
             log_event(
                 "Skill 资产磁盘缓存 GC 启动",
                 cache_dir=str(self._cache_dir),
@@ -64,7 +74,6 @@ class OssSkillAssetLoader(SkillAssetLoader):
                 pass
             self._gc_task = None
         await self._http.aclose()
-
 
     async def load_by_object_key(self, object_key: str) -> bytes:
         if not object_key:
@@ -91,7 +100,9 @@ class OssSkillAssetLoader(SkillAssetLoader):
             return content
 
     async def load_asset(self, skill_id: str, version: str, path: str) -> bytes:
-        return await self.load_by_object_key(self._derive_object_key(skill_id, version, path))
+        return await self.load_by_object_key(
+            self._derive_object_key(skill_id, version, path)
+        )
 
     # ---------- 内部实现 ----------
 
@@ -166,7 +177,9 @@ class OssSkillAssetLoader(SkillAssetLoader):
             except OSError as e:
                 log_fail("Skill 资产缓存 GC 单文件", e, path=str(p))
         if removed:
-            log_event("Skill 资产缓存 GC", removed=removed, ttl_seconds=int(self._cache_ttl))
+            log_event(
+                "Skill 资产缓存 GC", removed=removed, ttl_seconds=int(self._cache_ttl)
+            )
 
     @staticmethod
     def _derive_object_key(skill_id: str, version: str, path: str) -> str:

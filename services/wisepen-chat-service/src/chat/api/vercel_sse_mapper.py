@@ -2,18 +2,33 @@
 QueryLoopRuntime 产出的领域事件 → Vercel AI SDK Data Stream Protocol SSE 字符串
 将来若要支持 OpenAI 原生 stream / WebSocket 等其他协议，新增一个同构的 *_mapper.py 即可
 """
+
 from chat.api.vercel_formats import (
-    step_start, step_finish,
-    text_start, text_delta, text_end,
-    reasoning_start, reasoning_delta, reasoning_end,
-    tool_input_start, tool_input_available, tool_output_available,
+    reasoning_delta,
+    reasoning_end,
+    reasoning_start,
+    step_finish,
+    step_start,
+    text_delta,
+    text_end,
+    text_start,
+    tool_input_available,
+    tool_input_start,
+    tool_output_available,
 )
 from chat.application.query_loop_runtime import (
+    ReasoningDeltaEvent,
+    ReasoningEndEvent,
+    ReasoningStartEvent,
+    StepFinishEvent,
+    StepStartEvent,
     StreamEvent,
-    StepStartEvent, StepFinishEvent,
-    TextStartEvent, TextDeltaEvent, TextEndEvent,
-    ReasoningStartEvent, ReasoningDeltaEvent, ReasoningEndEvent,
-    ToolInputStartEvent, ToolInputAvailableEvent, ToolOutputAvailableEvent,
+    TextDeltaEvent,
+    TextEndEvent,
+    TextStartEvent,
+    ToolInputAvailableEvent,
+    ToolInputStartEvent,
+    ToolOutputAvailableEvent,
 )
 
 

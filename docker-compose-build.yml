@@ -1,0 +1,19 @@
+services:
+  chat-service:
+    image: ${DOCKER_REGISTRY}/wisepencloud-chat:${APP_VERSION}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        HF_TOKEN: ${HF_TOKEN}
+        HTTP_PROXY: ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        http_proxy: ${http_proxy}
+        https_proxy: ${https_proxy}
+        PRELOAD_TRANSLATION_MODELS: ${PRELOAD_TRANSLATION_MODELS:-true}
+
+  sage-math-worker:
+    image: ${DOCKER_REGISTRY}/wisepencloud-sage-math-worker:${APP_VERSION}
+    build:
+      context: services/sage_math_worker
+      dockerfile: Dockerfile

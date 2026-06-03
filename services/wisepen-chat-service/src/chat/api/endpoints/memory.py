@@ -1,15 +1,15 @@
-from typing import List, Any, Dict
+from typing import List
+
+from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends
-from dependency_injector.wiring import inject, Provide
 
 from chat.api.schemas.memory import MemoryItemResponse
+from chat.container import Container
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import MemoryProvider
-from chat.container import Container
-
-from common.security import require_login
-from common.core.exceptions import ServiceException
 from common.core.domain import R
+from common.core.exceptions import ServiceException
+from common.security import require_login
 
 router = APIRouter()
 
@@ -25,14 +25,16 @@ async def list_memories(
         items = await memory.get_all(user_id=user_id)
     except Exception as e:
         raise ServiceException(ChatErrorCode.MEMORY_OPERATION_FAILED, custom_msg=str(e))
-    return R.success(data=[
-        MemoryItemResponse(
-            id=str(item.get("id", "")),
-            memory=item.get("memory", ""),
-            metadata=item.get("metadata") or {},
-        )
-        for item in items
-    ])
+    return R.success(
+        data=[
+            MemoryItemResponse(
+                id=str(item.get("id", "")),
+                memory=item.get("memory", ""),
+                metadata=item.get("metadata") or {},
+            )
+            for item in items
+        ]
+    )
 
 
 @router.post("/deleteMemory", response_model=R, status_code=200)
@@ -46,7 +48,9 @@ async def delete_memory(
     try:
         await memory.delete_memory(memory_id=memory_id, user_id=user_id)
     except PermissionError:
-        raise ServiceException(ChatErrorCode.MEMORY_OPERATION_FAILED, custom_msg="无权删除该记忆条目")
+        raise ServiceException(
+            ChatErrorCode.MEMORY_OPERATION_FAILED, custom_msg="无权删除该记忆条目"
+        )
     except Exception as e:
         raise ServiceException(ChatErrorCode.MEMORY_OPERATION_FAILED, custom_msg=str(e))
     return R.success()
