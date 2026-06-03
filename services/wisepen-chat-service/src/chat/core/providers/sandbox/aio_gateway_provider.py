@@ -72,6 +72,16 @@ class AioGatewayProvider:
         data = await self._post("/v1/aio/file/replace", body, user_id=user_id, session_id=session_id)
         return data if isinstance(data, dict) else {}
 
+    # ---- Shell operations ----
+
+    async def shell_exec(
+        self, command: str, exec_dir: str = "/workspace",
+        timeout_ms: int = 30000, user_id: str = "", session_id: str = "",
+    ) -> Dict[str, Any]:
+        body = {"command": command, "exec_dir": exec_dir, "timeout_ms": timeout_ms}
+        data = await self._post("/v1/aio/shell/exec", body, user_id=user_id, session_id=session_id)
+        return data if isinstance(data, dict) else {}
+
     # ---- Internal HTTP helpers ----
 
     async def _post(

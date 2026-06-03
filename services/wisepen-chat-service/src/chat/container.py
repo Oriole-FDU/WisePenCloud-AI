@@ -40,6 +40,10 @@ from chat.application.tools import (
     RunSandboxScriptTool,
     ReadFileTool,
     WriteFileTool,
+    ListDirectoryTool,
+    GrepFilesTool,
+    EditFileTool,
+    ShellExecTool,
 )
 from common.clients.file_storage import FileStorageClient
 from chat.core.config.nacos import nacos_client_manager
@@ -181,6 +185,22 @@ class Container(containers.DeclarativeContainer):
         WriteFileTool,
         aio_gateway=aio_gateway_provider,
     )
+    list_directory_tool = providers.Singleton(
+        ListDirectoryTool,
+        aio_gateway=aio_gateway_provider,
+    )
+    grep_files_tool = providers.Singleton(
+        GrepFilesTool,
+        aio_gateway=aio_gateway_provider,
+    )
+    edit_file_tool = providers.Singleton(
+        EditFileTool,
+        aio_gateway=aio_gateway_provider,
+    )
+    shell_exec_tool = providers.Singleton(
+        ShellExecTool,
+        aio_gateway=aio_gateway_provider,
+    )
 
     # Attachment reading tools — 使用 SessionRepository 鉴权附件归属
     read_text_attachment_tool = providers.Singleton(
@@ -216,6 +236,10 @@ class Container(containers.DeclarativeContainer):
         run_sandbox_script_tool,
         read_file_tool,
         write_file_tool,
+        list_directory_tool,
+        grep_files_tool,
+        edit_file_tool,
+        shell_exec_tool,
         read_text_attachment_tool,
         read_pdf_attachment_tool,
         read_word_attachment_tool,

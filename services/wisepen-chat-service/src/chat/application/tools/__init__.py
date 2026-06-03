@@ -11,6 +11,10 @@ from .read_excel_attachment_tool import ReadExcelAttachmentTool
 from .run_sandbox_script import RunSandboxScriptTool
 from .aio_read_file import ReadFileTool
 from .aio_write_file import WriteFileTool
+from .aio_list_directory import ListDirectoryTool
+from .aio_grep_files import GrepFilesTool
+from .aio_edit_file import EditFileTool
+from .aio_shell_exec import ShellExecTool
 
 __all__ = [
     "ToolRegistry",
@@ -26,4 +30,8 @@ __all__ = [
     "RunSandboxScriptTool",
     "ReadFileTool",
     "WriteFileTool",
+    "ListDirectoryTool",
+    "GrepFilesTool",
+    "EditFileTool",
+    "ShellExecTool",
 ]
