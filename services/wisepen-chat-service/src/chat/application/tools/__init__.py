@@ -9,6 +9,8 @@ from .read_word_attachment_tool import ReadWordAttachmentTool
 from .read_ppt_attachment_tool import ReadPptAttachmentTool
 from .read_excel_attachment_tool import ReadExcelAttachmentTool
 from .run_sandbox_script import RunSandboxScriptTool
+from .aio_read_file import ReadFileTool
+from .aio_write_file import WriteFileTool
 
 __all__ = [
     "ToolRegistry",
@@ -22,4 +24,6 @@ __all__ = [
     "ReadPptAttachmentTool",
     "ReadExcelAttachmentTool",
     "RunSandboxScriptTool",
+    "ReadFileTool",
+    "WriteFileTool",
 ]

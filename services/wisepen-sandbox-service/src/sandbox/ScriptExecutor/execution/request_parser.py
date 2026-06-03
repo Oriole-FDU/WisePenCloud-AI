@@ -29,6 +29,11 @@ class DefaultExecutionRequestParser(ExecutionRequestParser):
     def __init__(self, parser_factory: ScriptParserFactory) -> None:
         self._parser_factory = parser_factory
 
+    # 解析执行请求
+    # 1. 验证请求 ID
+    # 2. 解析上下文
+    # 3. 解析沙箱规格
+    # 4. 解析脚本包
     def parse(self, structured_request: Dict[str, Any], package: ScriptPackage) -> ExecutionRequest:
         request_id = str(structured_request.get("request_id") or structured_request.get("id") or "").strip()
         if not request_id:

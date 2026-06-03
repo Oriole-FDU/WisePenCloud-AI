@@ -14,6 +14,7 @@ from chat.core.providers import (
     LocalFSSkillAssetLoader,
     OssSkillAssetLoader,
 )
+from chat.core.providers.sandbox import AioGatewayProvider
 from chat.core.persistence import (
     MongoSessionRepository,
     MongoMessageRepository,
@@ -37,6 +38,8 @@ from chat.application.tools import (
     ReadPptAttachmentTool,
     ReadExcelAttachmentTool,
     RunSandboxScriptTool,
+    ReadFileTool,
+    WriteFileTool,
 )
 from common.clients.file_storage import FileStorageClient
 from chat.core.config.nacos import nacos_client_manager
@@ -164,6 +167,21 @@ class Container(containers.DeclarativeContainer):
         from_source=settings.SANDBOX_FROM_SOURCE,
     )
 
+    # AIO Gateway 文件操作工具
+    aio_gateway_provider = providers.Singleton(
+        AioGatewayProvider,
+        base_url=settings.AIO_GATEWAY_URL,
+        from_source=settings.FROM_SOURCE_SECRET,
+    )
+    read_file_tool = providers.Singleton(
+        ReadFileTool,
+        aio_gateway=aio_gateway_provider,
+    )
+    write_file_tool = providers.Singleton(
+        WriteFileTool,
+        aio_gateway=aio_gateway_provider,
+    )
+
     # Attachment reading tools — 使用 SessionRepository 鉴权附件归属
     read_text_attachment_tool = providers.Singleton(
         ReadTextAttachmentTool,
@@ -196,6 +214,8 @@ class Container(containers.DeclarativeContainer):
         load_skill_tool,
         load_skill_asset_tool,
         run_sandbox_script_tool,
+        read_file_tool,
+        write_file_tool,
         read_text_attachment_tool,
         read_pdf_attachment_tool,
         read_word_attachment_tool,
