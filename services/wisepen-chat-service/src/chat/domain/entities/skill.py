@@ -28,9 +28,9 @@ class Skill(Document):
     skill_id: str = Field(..., description="唯一 slug，如 'paper-translation'；工具参数、日志、权限校验都只用这个")
     display_name: str = Field(..., description="展示名，如 'Paper Translation'，仅用于日志和可能的 UI 列表")
     description: str = Field(..., description="一句话说明本 Skill 的场景与目的")
-    triggers: List[str] = Field(default_factory=list, description="关键词列表，供 KeywordSkillMatcher 大小写无关 substring 匹配")
+    triggers: List[str] = Field(default_factory=list, description="历史关键词列表；当前主链路不再依赖字符串匹配激活 Skill")
 
-    skill_md: str = Field(..., description="发布时 SKILL.md 正文快照（含 frontmatter 去掉 --- 后的 body）")
+    skill_md: str = Field(..., description="发布时 SKILL.md 完整正文快照（含 frontmatter）")
     skill_md_object_key: str = Field(..., description="SKILL.md 在 OSS 的权威副本 object_key")
     assets_manifest: List[SkillAssetMeta] = Field(default_factory=list, description="附件清单，LLM 看得到的只有这一层")
 

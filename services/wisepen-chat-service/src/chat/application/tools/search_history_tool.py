@@ -23,11 +23,15 @@ class SearchHistoricalMessagesTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Search historical chat messages by keyword and optional time range. "
-            "Use this when you need to recall specific facts, events, or details "
-            "from earlier in the conversation that may not be in the current context window."
-            "NOTE that the search keyword's language should match the user's chat language; otherwise, the search may fail. If no results are found, consider switching the keyword's language."
+            "Search older messages in the current chat session only when the conversation "
+            "has been compressed and the user explicitly asks about prior conversation history. "
+            "Do not use for general answering, writing, translation, summarization, skill execution, "
+            "or when the needed information is already present in the current context."
         )
+
+    @property
+    def reserved(self) -> bool:
+        return True
 
     @property
     def parameters_schema(self) -> Dict[str, Any]:

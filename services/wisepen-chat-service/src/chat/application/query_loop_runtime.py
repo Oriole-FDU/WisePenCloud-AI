@@ -8,6 +8,8 @@ from common.logger import log_fail
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces import LLMProvider
+from chat.domain.interfaces.tool import ToolExecutionResult
+from chat.domain.message_lifecycle import LLMVisibility, MessageLifecycle, PersistenceMode
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 from chat.application.tools.tool_scope import ToolScope
@@ -218,6 +220,57 @@ class QueryLoopRuntime:
     def __init__(self, llm: LLMProvider) -> None:
         self.llm = llm
 
+    @staticmethod
+    def _serialize_prompt_for_counting(
+        messages: List[ChatMessage],
+        tool_schemas: List[Dict[str, Any]],
+    ) -> str:
+        serialized_messages: List[Dict[str, Any]] = []
+        for msg in QueryLoopRuntime._messages_visible_to_llm(messages):
+            item: Dict[str, Any] = {
+                "role": msg.role.value,
+                "content": msg.content or "",
+            }
+            if msg.tool_calls:
+                item["tool_calls"] = msg.tool_calls
+            if msg.tool_call_id:
+                item["tool_call_id"] = msg.tool_call_id
+            if msg.name:
+                item["name"] = msg.name
+            serialized_messages.append(item)
+        return json.dumps(
+            {"messages": serialized_messages, "tools": tool_schemas},
+            ensure_ascii=False,
+            default=str,
+        )
+
+    @staticmethod
+    def _messages_visible_to_llm(messages: List[ChatMessage]) -> List[ChatMessage]:
+        return [
+            msg for msg in messages
+            if msg.lifecycle.llm_visibility == LLMVisibility.INCLUDE
+        ]
+
+    async def _ensure_prompt_budget(
+        self,
+        messages: List[ChatMessage],
+        tool_schemas: List[Dict[str, Any]],
+        model_name: str,
+        prompt_budget_tokens: Optional[int],
+    ) -> None:
+        if prompt_budget_tokens is None:
+            return
+        text = self._serialize_prompt_for_counting(messages, tool_schemas)
+        token_count = await self.llm.count_tokens(text, model_name)
+        if token_count > prompt_budget_tokens:
+            raise ServiceException(
+                ChatErrorCode.CONTEXT_LIMIT_EXCEEDED,
+                custom_msg=(
+                    "最终提示词超出模型上下文预算，"
+                    f"tokens={token_count}, budget={prompt_budget_tokens}"
+                ),
+            )
+
     """
     ReAct 循环主入口 (QueryLoop)
     """
@@ -230,6 +283,7 @@ class QueryLoopRuntime:
         model_id: Optional[int] = None,
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
+        prompt_budget_tokens: Optional[int] = None,
     ) -> AsyncIterator[StreamEvent]:
         # 进入多轮循环
         for iteration in range(settings.AGENT_MAX_ITERATIONS):
@@ -245,6 +299,7 @@ class QueryLoopRuntime:
                 api_key=api_key,
                 iteration=iteration,
                 tool_scope=tool_scope,
+                prompt_budget_tokens=prompt_budget_tokens,
             ):
                 # 如果拿到的是 _StepTerminal 就存到 terminal；否则直接 yield
                 if isinstance(item, _StepTerminal):
@@ -275,6 +330,7 @@ class QueryLoopRuntime:
         api_key: Optional[str],
         iteration: int,
         tool_scope: ToolScope,
+        prompt_budget_tokens: Optional[int],
     ) -> AsyncIterator[Union[StreamEvent, _StepTerminal]]:
         # 发 step 开始事件
         yield StepStartEvent()
@@ -288,11 +344,16 @@ class QueryLoopRuntime:
 
         # schema 已由 ToolScope 在构造期固化，这里零决策直读
         tool_schemas = tool_scope.schemas()
-
+        await self._ensure_prompt_budget(
+            messages,
+            tool_schemas,
+            model_name,
+            prompt_budget_tokens,
+        )
         try:
             # 调用模型流式接口
             async for chunk in self.llm.stream_chat_completion(
-                messages=messages,
+                messages=self._messages_visible_to_llm(messages),
                 model_name=model_name,
                 tools=tool_schemas or None,
                 api_base=api_base,
@@ -343,7 +404,6 @@ class QueryLoopRuntime:
                 }
                 for tool_call in parsed_tool_calls
             ],
-            ephemeral=False,
         )
         new_messages: List[ChatMessage] = [assistant_msg]
 
@@ -367,6 +427,12 @@ class QueryLoopRuntime:
         # 结束本轮并继续下一轮模型推理（因为调用工具）
         yield StepFinishEvent()
         yield _StepTerminal(should_continue=True, new_messages=new_messages)
+
+    @staticmethod
+    def _coerce_tool_result(result: Any) -> ToolExecutionResult:
+        if isinstance(result, ToolExecutionResult):
+            return result
+        return ToolExecutionResult(tool_content=str(result))
 
     @staticmethod
     def _parse_tool_calls(
@@ -396,9 +462,10 @@ class QueryLoopRuntime:
     ) -> Tuple[List[StreamEvent], List[ChatMessage]]:
         """
         并行执行所有工具。
-        返回 tool_output_available 事件列表（按 parsed 顺序）和对应的 Role.TOOL 消息列表（按 parsed 顺序）。
-        每条 TOOL 消息独立按对应 tool 的 is_ephemeral_output 打 ephemeral 标，
-        让 Finalizer 在 per-message 粒度上决定是否 redact，避免混合轮次里 skill 正文通过"整轮保守落盘"漏进 durable 历史
+        返回 tool_output_available 事件列表（按 parsed 顺序）和本轮新增消息。
+        新增消息通常是 Role.TOOL；结构化工具结果也可以附带仅本轮使用的 Role.USER 注入。
+        每条消息携带 lifecycle，让 Finalizer 在 per-message 粒度上决定是否 drop/redact/persist，
+        避免 skill 正文或 asset 正文漏进 durable 历史。
         """
 
         # 并发执行所有工具，return_exceptions=True 保证单工具失败不中断整轮
@@ -407,25 +474,32 @@ class QueryLoopRuntime:
             return_exceptions=True,
         )
 
-        # 查出每个 tool call 对应 tool 的 is_ephemeral_output
-        ephemeral_flags: List[bool] = [
-            tool_scope.is_ephemeral(tool_call.name) for tool_call in parsed_tool_calls
-        ]
-
         # 遍历结果做异常降级
         events: List[StreamEvent] = []
         tool_messages: List[ChatMessage] = []
-        for tool_call, result, is_ephemeral in zip(parsed_tool_calls, raw_results, ephemeral_flags):
+        injection_messages: List[ChatMessage] = []
+        for tool_call, result in zip(parsed_tool_calls, raw_results):
             # 如果某个结果是 Exception，转成字符串形式的 [Tool Execution Error]: ... 并记录日志，否则原样使用。
             # 防止原生 Exception 对象序列化进 API 请求导致异常
             if isinstance(result, Exception):
                 safe_result = f"[Tool Execution Error]: {type(result).__name__}: {result}"
                 log_fail("工具调用", result, name=tool_call.name, session=session_id)
+                tool_result = ToolExecutionResult(tool_content=safe_result)
             else:
-                safe_result = result
+                tool_result = self._coerce_tool_result(result)
+
+            event_output = (
+                tool_result.frontend_output
+                if tool_result.frontend_output is not None
+                else tool_result.tool_content
+            )
+
+            metadata = dict(tool_result.metadata or {})
+            if tool_result.lifecycle.restore_ref:
+                metadata["restore_ref"] = tool_result.lifecycle.restore_ref.model_dump(mode="json")
 
             # 发 ToolOutputAvailableEvent
-            events.append(ToolOutputAvailableEvent(call_id=tool_call.id, output=safe_result))
+            events.append(ToolOutputAvailableEvent(call_id=tool_call.id, output=event_output))
             # 构造对话历史中的 Tool 消息
             tool_messages.append(
                 ChatMessage(
@@ -433,18 +507,30 @@ class QueryLoopRuntime:
                     role=Role.TOOL,
                     tool_call_id=tool_call.id,
                     name=tool_call.name,
-                    content=safe_result,
-                    ephemeral=is_ephemeral,
+                    content=tool_result.tool_content,
+                    metadata=metadata,
+                    lifecycle=tool_result.lifecycle,
                 )
             )
-        return events, tool_messages
+            if tool_result.user_injection:
+                injection_messages.append(
+                    ChatMessage(
+                        session_id=session_id,
+                        role=Role.USER,
+                        content=tool_result.user_injection,
+                        lifecycle=MessageLifecycle(
+                            persistence_mode=PersistenceMode.DROP,
+                        ),
+                    )
+                )
+        return events, tool_messages + injection_messages
 
     async def _invoke_tool(
         self,
         name: str,
         tool_scope: ToolScope,
         args: Dict[str, Any],
-    ) -> str:
+    ) -> Union[str, ToolExecutionResult]:
         """按 tool_scope 视图查工具并执行；未在视图内（被 deny 掉或未注册）时降级文本"""
         tool = tool_scope.get(name)
         if tool is None:

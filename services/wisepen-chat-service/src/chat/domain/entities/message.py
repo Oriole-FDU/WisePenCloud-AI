@@ -6,6 +6,8 @@ from beanie import Document
 from pydantic import Field, ConfigDict
 from pymongo import IndexModel, ASCENDING
 
+from chat.domain.message_lifecycle import MessageLifecycle
+
 
 class Role(str, Enum):
     SYSTEM = "system"
@@ -30,10 +32,7 @@ class ChatMessage(Document):
     tool_call_id: Optional[str] = None
     name: Optional[str] = None
 
-    # 仅本轮工作内可见标识
-    # True 时可对 ASSISTANT 消息整条丢弃、对 TOOL 消息 content 置换为占位符
-    # 确保 Skill 等脚手架内容不污染 durable 历史
-    ephemeral: bool = False
+    lifecycle: MessageLifecycle = Field(default_factory=MessageLifecycle)
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

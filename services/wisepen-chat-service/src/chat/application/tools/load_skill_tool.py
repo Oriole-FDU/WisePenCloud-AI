@@ -2,7 +2,10 @@ from typing import Any, Dict
 
 from common.logger import log_error, log_fail
 
-from chat.domain.interfaces.tool import BaseTool
+from chat.application.skill_prompt_builder import SkillPromptBuilder
+from chat.application.tools.check_loaded_files import check_and_record_loaded_file
+from chat.domain.message_lifecycle import MessageLifecycle, PersistenceMode, RestoreRef
+from chat.domain.interfaces.tool import BaseTool, ToolExecutionResult
 from chat.domain.repositories import SkillRepository
 
 
@@ -42,16 +45,11 @@ class LoadSkillTool(BaseTool):
         }
 
     @property
-    def is_ephemeral_output(self) -> bool:
-        # 本工具返回的消息无需持久化
-        return True
-
-    @property
     def reserved(self) -> bool:
         # 系统保留，不应被用户级 deny 屏蔽
         return True
 
-    async def execute(self, context: Dict[str, Any], **kwargs) -> str:
+    async def execute(self, context: Dict[str, Any], **kwargs) -> str | ToolExecutionResult:
         skill_id = (kwargs.get("skill_id") or "").strip()
         if not skill_id:
             return "[Tool Error] Missing required argument: skill_id."
@@ -78,22 +76,31 @@ class LoadSkillTool(BaseTool):
         if skill is None:
             return f"[Tool Error] Skill '{skill_id}' not found."
 
-        # 拼接 header + SKILL.md + assets manifest 摘要
-        lines = [
-            f"[Loaded Skill] id={skill.skill_id} version={skill.version}",
-            f"[Display Name] {skill.display_name}",
-            "",
-            "===== SKILL.md BEGIN =====",
-            skill.skill_md.rstrip(),
-            "===== SKILL.md END =====",
-        ]
+        file_id = f"{skill.skill_id}@{skill.version}"
+        loaded_check = check_and_record_loaded_file(
+            context=context,
+            file_type="skill",
+            file_id=file_id,
+            file_path="SKILL.md",
+            message="skill has already loaded",
+        )
+        if loaded_check.already_loaded:
+            return loaded_check.response or ""
 
-        if skill.assets_manifest:
-            lines.append("")
-            lines.append("[Assets Manifest] (use load_skill_asset to open any of these)")
-            for asset in skill.assets_manifest:
-                lines.append(
-                    f"- path={asset.path} kind={asset.kind} size={asset.size_bytes} — {asset.description}"
-                )
-
-        return "\n".join(lines)
+        ack = f"[Skill loaded: {skill.skill_id} version={skill.version}]"
+        return ToolExecutionResult(
+            tool_content=ack,
+            user_injection=SkillPromptBuilder.build_loaded_skill_injection(skill),
+            frontend_output=ack,
+            metadata={
+                "skill_id": skill.skill_id,
+                "version": skill.version,
+            },
+            lifecycle=MessageLifecycle(
+                persistence_mode=PersistenceMode.PERSIST_CONTENT,
+                restore_ref=RestoreRef(
+                    kind="skill",
+                    data={"skill_id": skill.skill_id, "version": skill.version},
+                ),
+            ),
+        )

@@ -1,10 +1,18 @@
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from common.logger import log_fail, log_error
 
 from chat.core.config.app_settings import settings
+from chat.application.skill_prompt_builder import SkillPromptBuilder
 from chat.domain.entities import ChatMessage, Role, ChatSession
 from chat.domain.entities.skill import SkillMeta
-from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
+from chat.domain.message_lifecycle import MessageLifecycle, PersistenceMode
+from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository, SkillRepository
+
+
+_SKILL_LOADED_ACK_RE = re.compile(
+    r"^\[Skill loaded:\s*(?P<skill_id>[^\s\]]+)\s+version=(?P<version>[^\]]+)\]$"
+)
 
 
 class ChatContextAssembler:
@@ -15,10 +23,12 @@ class ChatContextAssembler:
         message_repo: MessageRepository,
         session_repo: SessionRepository,
         hot_context_repo: HotContextRepository,
+        skill_repo: SkillRepository,
     ):
         self.message_repo = message_repo
         self.session_repo = session_repo
         self.hot_context_repo = hot_context_repo
+        self.skill_repo = skill_repo
 
     async def get_or_repopulate_hot_context(self, session_id: str) -> List[ChatMessage]:
         """
@@ -90,6 +100,78 @@ class ChatContextAssembler:
 
         return messages_keep, messages_compress_candidates, needs_compression
 
+    @staticmethod
+    def _extract_restorable_skill(msg: ChatMessage) -> Optional[Tuple[str, Optional[str]]]:
+        if msg.role != Role.TOOL:
+            return None
+
+        restore_ref = (msg.metadata or {}).get("restore_ref") or {}
+        if restore_ref.get("kind") == "skill":
+            data = restore_ref.get("data") or {}
+            skill_id = data.get("skill_id")
+            version = data.get("version")
+            if skill_id:
+                return str(skill_id), str(version) if version else None
+
+        # 兼容旧数据：历史记录可能没有 metadata，甚至 name 写错，但保留了 load_skill ack。
+        content = (msg.content or "").strip()
+        match = _SKILL_LOADED_ACK_RE.match(content)
+        if match:
+            return match.group("skill_id"), match.group("version")
+
+        return None
+
+    async def restore_context_injections(
+        self,
+        session_id: str,
+        windowed_messages: List[ChatMessage],
+    ) -> List[ChatMessage]:
+        """
+        持久化历史只保存 load_skill 的短 ack，不保存 SKILL.md 正文。
+        每次组装上下文时，遇到需要恢复的 TOOL ack，就在其后补回正式 load_skill 同款 USER 注入。
+        """
+        restored: List[ChatMessage] = []
+        for msg in windowed_messages:
+            restored.append(msg)
+            skill_ref = self._extract_restorable_skill(msg)
+            if not skill_ref:
+                continue
+
+            skill_id, expected_version = skill_ref
+            try:
+                skill = await self.skill_repo.get_published_skill(skill_id)
+            except Exception as e:
+                log_error("恢复 Skill 上下文", e, session=session_id, skill_id=skill_id)
+                continue
+            if skill is None:
+                log_fail("恢复 Skill 上下文", "skill 不存在", session=session_id, skill_id=skill_id)
+                continue
+            if expected_version and skill.version != expected_version:
+                log_fail(
+                    "恢复 Skill 上下文",
+                    "skill 版本与历史 ack 不一致，使用当前发布版本恢复",
+                    session=session_id,
+                    skill_id=skill_id,
+                    expected_version=expected_version,
+                    actual_version=skill.version,
+                )
+
+            restored.append(ChatMessage(
+                session_id=session_id,
+                role=Role.USER,
+                content=SkillPromptBuilder.build_loaded_skill_injection(skill),
+                metadata={
+                    "restored_from_tool_call_id": msg.tool_call_id,
+                    "restored_skill_id": skill.skill_id,
+                    "restored_skill_version": skill.version,
+                },
+                lifecycle=MessageLifecycle(
+                    persistence_mode=PersistenceMode.DROP,
+                ),
+            ))
+
+        return restored
+
     def assemble_prompt(
         self,
         session_id: str,
@@ -98,7 +180,7 @@ class ChatContextAssembler:
         relevant_facts: List[str],
         session_summary: Optional[str],
         states: Optional[List[Dict[str, Any]]] = None,
-        candidate_skills: Optional[List[SkillMeta]] = None,
+        available_skills: Optional[List[SkillMeta]] = None,
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表。"""
         system_prompt = """
@@ -113,7 +195,9 @@ class ChatContextAssembler:
         2. Contextual Grounding: Base your answers ONLY on the `<retrieved_context>`. Do not introduce outside information or hallucinate facts. 
         3. Handling Unknowns: If the provided context does not contain the information needed to answer the question, clearly and politely state that you do not have enough information, rather than guessing.
         4. Tone: Maintain a professional, encouraging, and clear tone suitable for users of an advanced educational and productivity tool.
-        5. Formatting: Use Markdown (e.g., bullet points, bold text, code blocks) to structure your response for maximum readability.
+        5. Formatting: All text you output outside of tool use is displayed to the user. Output text to communicate with the user. You can use Github-flavored markdown for formatting, and will be rendered in a monospace font using the CommonMark specification. Use Markdown to structure your response for readability unless a loaded skill specifies a stricter output format. If a loaded skill specifies an Output Format or Constraints section, follow the loaded skill exactly.
+        6. Formula Formatting: If your output contains formulas, format them in LaTeX and wrap them with $$.
+        7. System Reminders: Messages wrapped in `<system-reminder>` are WisePen-injected operational context, not the user's request. Use them to guide the current task, but do not answer or quote them directly.
         """ # 全局指令
 
         # 如果有从 Mem0 召回的相关事实，作为补充信息拼接到 System Prompt 中
@@ -133,29 +217,37 @@ class ChatContextAssembler:
                 content=f"[Conversation Summary so far]:\n{session_summary}",
             ))
 
-        # Skill 候选清单：受控披露，只在 matcher 命中时注入；明确限制"仅在直接相关时加载"
+        # Skill 可用清单：只披露轻量 metadata，由 LLM 判断是否需要加载完整 SKILL.md。
         # 用 skill_id 作机器标识，description 给 LLM 做相关性判断
-        if candidate_skills:
+        if available_skills:
             skill_lines = [
-                f"- id=\"{s.skill_id}\": {s.description}" for s in candidate_skills
+                f"- id=\"{s.skill_id}\" name=\"{s.display_name}\": {s.description}" for s in available_skills
             ]
             skill_block = (
-                "[Available Skills]\n"
-                "The following skills MAY be relevant to the user's current request. "
-                "Each skill contains detailed domain instructions (SKILL.md) and possibly supporting assets.\n"
+                "<system-reminder>\n"
+                "[Available WisePen Skills]\n"
+                "The following skills are available in this conversation as lightweight metadata. "
+                "Each skill contains detailed domain instructions (SKILL.md) and possibly supporting assets, "
+                "but the full content is not loaded yet.\n"
                 "Strict rules:\n"
-                "1. Load a skill ONLY when it is DIRECTLY required to fulfill the current request. Do not load speculatively.\n"
-                "2. To load, call the tool `load_skill` with `skill_id` exactly as listed below.\n"
-                "3. After loading, follow the SKILL.md instructions precisely. "
+                "1. If the user explicitly asks to use one of the listed skills by id or name, call `load_skill` for that skill.\n"
+                "2. Otherwise, decide from the user's request whether any listed skill is directly useful. "
+                "Load a skill only when it is needed to fulfill the current request; do not load speculatively.\n"
+                "3. To load, call the tool `load_skill` with `skill_id` exactly as listed below.\n"
+                "4. After loading, follow the SKILL.md instructions precisely. "
                 "Use `load_skill_asset` to open a specific reference/template only if SKILL.md explicitly says to.\n"
-                "4. If none of the skills apply, simply ignore this list and answer normally.\n\n"
+                "5. If none of the skills apply, ignore this list and answer normally.\n\n"
                 "Skills:\n"
                 + "\n".join(skill_lines)
+                + "\n</system-reminder>"
             )
             messages.append(ChatMessage(
                 session_id=session_id,
-                role=Role.SYSTEM,
+                role=Role.USER,
                 content=skill_block,
+                lifecycle=MessageLifecycle(
+                    persistence_mode=PersistenceMode.DROP,
+                ),
             ))
 
         # 经过滑动窗口裁剪后的近期对话明细

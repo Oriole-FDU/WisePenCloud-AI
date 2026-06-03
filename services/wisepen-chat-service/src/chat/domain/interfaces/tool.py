@@ -1,6 +1,22 @@
 # src/chat/domain/interfaces/tool.py
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional, Union
+
+from chat.domain.message_lifecycle import MessageLifecycle
+
+
+@dataclass(frozen=True)
+class ToolExecutionResult:
+    """
+    Structured tool result used when a tool needs to separate protocol-facing
+    tool content from turn-local control-plane instructions.
+    """
+    tool_content: str
+    user_injection: Optional[str] = None
+    frontend_output: Optional[Any] = None
+    metadata: Optional[Dict[str, Any]] = None
+    lifecycle: MessageLifecycle = field(default_factory=MessageLifecycle)
 
 
 class BaseTool(ABC):
@@ -15,16 +31,6 @@ class BaseTool(ABC):
     @property
     @abstractmethod
     def parameters_schema(self) -> Dict[str, Any]: pass
-
-    @property
-    def is_ephemeral_output(self) -> bool:
-        """
-        True 表示本工具的输出属于"仅本轮工作内可见"的脚手架（如 Skill 正文加载）
-        QueryLoopRuntime 会把对应 TOOL 消息标 ephemeral=True
-        ChatTurnFinalizer 在持久化前会将其 content 置换为占位符以防上下文膨胀
-        False 表示本工具的输出属于对话事实，应进入 durable 历史
-        """
-        return False
 
     @property
     def reserved(self) -> bool:
@@ -49,7 +55,7 @@ class BaseTool(ABC):
         }
 
     @abstractmethod
-    async def execute(self, context: Dict[str, Any], **kwargs) -> str:
+    async def execute(self, context: Dict[str, Any], **kwargs) -> Union[str, ToolExecutionResult]:
         """
         执行工具逻辑。
         :param context: 系统强注入的安全上下文（session_id、user_id 等），
