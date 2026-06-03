@@ -9,12 +9,12 @@ services:
         SERVICE_DIR: wisepen-chat-service
         SERVICE_PKG: chat
         SERVICE_PORT: "9200"
-    image: ${DOCKER_REGISTRY}/wisepencloud-chat:${APP_VERSION}
-    container_name: wisepen-chat-service
+    image: ${DOCKER_REGISTRY}/${PROJECT_NAME:-wisepencloud}-chat:${APP_VERSION}
+    container_name: ${CHAT_CONTAINER_NAME:-wisepen-chat-service}
     restart: always
     environment:
       - TZ=Asia/Shanghai
-      - PROFILE=prod
+      - PROFILE=${PROFILE:-prod}
       - NACOS_SERVER_ADDR=nacos:8848
       - NACOS_NAMESPACE_ID=
       - NACOS_GROUP=DEFAULT_GROUP
@@ -24,13 +24,11 @@ services:
       - SERVICE_PORT=9200
       - LOG_LEVEL=INFO
     volumes:
-      - ../logs/chat:/logs
+      - ../logs/${CHAT_CONTAINER_NAME:-wisepen-chat-service}:/logs
     networks:
-      wisepen-net:
-        aliases:
-          - chat-service
+      - cloud-infra_cloud-net
 
 networks:
-  wisepen-net:
+  cloud-infra_cloud-net:
     external: true
-    name: wisepen-net
+    name: cloud-infra_cloud-net
