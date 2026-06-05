@@ -1,0 +1,6 @@
+[project]
+name = "wisepen-aio-service"
+version = "0.1.0"
+description = "AIO Sandbox — All-in-One agent sandbox environment (browser, shell, file, Jupyter, VSCode, MCP)"
+requires-python = ">=3.11"
+dependencies = []

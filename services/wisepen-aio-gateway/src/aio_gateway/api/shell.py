@@ -47,7 +47,7 @@ async def shell_exec(
         result = await _proxy_to_aio("POST", "/v1/shell/exec", body)
         return R.success(result)
     except PathValidationError as e:
-        return R.fail({"code": 403, "msg": str(e)})
+        return R(code=403, msg=str(e), data=None)
     except Exception as e:
         log_error("AIO shell/exec 代理失败", e, command=request.command)
-        return R.fail({"code": 500, "msg": f"shell exec failed: {e}"})
+        return R(code=500, msg=f"shell exec failed: {e}", data=None)

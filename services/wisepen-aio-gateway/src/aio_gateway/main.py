@@ -1,5 +1,5 @@
 from common.logger import setup_logging_intercept, log_event, log_error
-from aio_gateway.settings import bootstrap_settings
+from aio_gateway.bootstrap import bootstrap_settings
 setup_logging_intercept(bootstrap_settings.LOG_LEVEL)
 
 import asyncio
@@ -97,7 +97,7 @@ app.include_router(api_router, prefix="/v1/aio")
 async def admin_cleanup():
     cleaner = deps._cleaner
     if not cleaner:
-        return R.fail({"code": 503, "msg": "cleaner not initialized"})
+        return R(code=503, msg="cleaner not initialized", data=None)
     deleted = await cleaner.cleanup_expired()
     return R.success({"deleted_workspaces": deleted})
 

@@ -3,16 +3,52 @@ Multi-tenant workspace isolation for AIO Gateway.
 
 PathTranslator maps LLM-visible virtual paths (e.g. /workspace/main.py)
 to tenant-scoped physical paths (e.g. /home/gem/workspaces/user_A/sess_1/main.py).
+
+IMPORTANT: All paths are Unix paths (AIO runs in Linux container).
+We use pure string operations instead of os.path to avoid Windows \ conversion.
 """
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 
 SANDBOX_ROOT = "/home/gem/workspaces"
 VIRTUAL_ROOT = "/workspace"
 _ALLOWED_CHARS = re.compile(r"^[a-zA-Z0-9_-]+$")
+SEP = "/"
+
+
+def _normpath(p: str) -> str:
+    """Normalize a Unix path using only forward-slash logic (no os.path)."""
+    if not p:
+        return "."
+    parts = p.replace("\\", "/").split(SEP)
+    result: list[str] = []
+    for part in parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if result and result[-1] != "..":
+                result.pop()
+            else:
+                result.append("..")
+        else:
+            result.append(part)
+    if not result:
+        return SEP if p.startswith(SEP) else "."
+    normalized = SEP.join(result)
+    if p.startswith(SEP):
+        normalized = SEP + normalized
+    return normalized
+
+
+def _join(a: str, b: str) -> str:
+    """Join two Unix path segments. b is relative, a may end with /."""
+    a = a.rstrip(SEP)
+    b = b.lstrip(SEP)
+    if not b:
+        return a
+    return f"{a}{SEP}{b}"
 
 
 class PathValidationError(ValueError):
@@ -54,7 +90,7 @@ class PathTranslator:
 
     def __init__(self, scope: TenantScope):
         self._scope = scope
-        self._physical_root = os.path.normpath(
+        self._physical_root = _normpath(
             f"{SANDBOX_ROOT}/{scope.user_id}/{scope.session_id}"
         )
 
@@ -67,29 +103,32 @@ class PathTranslator:
         if not p:
             raise PathValidationError("empty path")
 
-        # Rule 1: /workspace/... → tenant root
+        # Rule 1: /workspace/xxx → tenant root
         if p.startswith(VIRTUAL_ROOT + "/") or p == VIRTUAL_ROOT:
-            rel = os.path.normpath(p[len(VIRTUAL_ROOT):]).lstrip("/")
+            rel = _normpath(p[len(VIRTUAL_ROOT):]).lstrip(SEP)
             return self._resolve(rel)
 
-        # Rule 2: ~/... → tenant root
+        # Rule 2: ~/xxx → tenant root
         if p.startswith("~/"):
-            rel = os.path.normpath(p[2:]).lstrip("/")
+            rel = _normpath(p[2:]).lstrip(SEP)
             return self._resolve(rel)
 
         # Rule 3: relative path → tenant root
         if not p.startswith("/"):
-            rel = os.path.normpath(p).lstrip("/")
+            rel = _normpath(p).lstrip(SEP)
             return self._resolve(rel)
 
         # Rule 4: other absolute paths → rejected
-        raise PathValidationError(f"access denied: absolute paths outside {VIRTUAL_ROOT} are not allowed")
+        raise PathValidationError(
+            f"access denied: absolute paths outside {VIRTUAL_ROOT} are not allowed"
+        )
 
     def _resolve(self, relative: str) -> str:
-        resolved = os.path.normpath(os.path.join(self._physical_root, relative))
-        if ".." in resolved.split(os.sep):
+        resolved = _normpath(_join(self._physical_root, relative)) if relative else self._physical_root
+        parts = resolved.split(SEP)
+        if ".." in parts:
             raise PathValidationError("path traversal denied")
-        if not resolved.startswith(self._physical_root + os.sep) and resolved != self._physical_root:
+        if not resolved.startswith(self._physical_root + SEP) and resolved != self._physical_root:
             raise PathValidationError("access outside workspace denied")
         return resolved
 

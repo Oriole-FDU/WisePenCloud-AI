@@ -7,20 +7,11 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict
 
-from common.core.config.bootstrap_settings import BootstrapSettings
+from aio_gateway.bootstrap import bootstrap_settings
 from aio_gateway.nacos import nacos_client_manager
 from common.logger import log_event, log_error
 
-SERVICE_ROOT = Path(__file__).resolve().parents[3]
-
-
-class GatewayBootstrapSettings(BootstrapSettings):
-    APP_NAME: str = "WisePen AIO Gateway"
-    SERVICE_NAME: str = "wisepen-aio-service"
-    SERVICE_PORT: int = 8001
-
-
-bootstrap_settings = GatewayBootstrapSettings()
+SERVICE_ROOT = Path(__file__).resolve().parents[2]
 
 
 class AppSettings(BaseModel):

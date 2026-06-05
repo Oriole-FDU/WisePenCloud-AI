@@ -7,6 +7,7 @@ import httpx
 
 from common.logger import log_error
 from common.core.domain.responses import R
+from common.core.domain.enums import ResultCode
 from aio_gateway.settings import settings
 from aio_gateway.isolation import PathTranslator, PathValidationError
 from aio_gateway.api.deps import get_path_translator
@@ -88,10 +89,10 @@ async def file_read(
         result = await _proxy_to_aio("POST", "/v1/file/read", body)
         return R.success(_scrub_result(result, translator))
     except PathValidationError as e:
-        return R.fail({"code": 403, "msg": str(e)})
+        return R(code=403, msg=str(e), data=None)
     except Exception as e:
         log_error("AIO file/read 代理失败", e, file=request.file)
-        return R.fail({"code": 500, "msg": f"read failed: {e}"})
+        return R(code=500, msg=f"read failed: {e}", data=None)
 
 
 @router.post("/write")
@@ -109,10 +110,10 @@ async def file_write(
         result = await _proxy_to_aio("POST", "/v1/file/write", body)
         return R.success(_scrub_result(result, translator))
     except PathValidationError as e:
-        return R.fail({"code": 403, "msg": str(e)})
+        return R(code=403, msg=str(e), data=None)
     except Exception as e:
         log_error("AIO file/write 代理失败", e, file=request.file)
-        return R.fail({"code": 500, "msg": f"write failed: {e}"})
+        return R(code=500, msg=f"write failed: {e}", data=None)
 
 
 @router.post("/list")
@@ -126,10 +127,10 @@ async def file_list(
         result = await _proxy_to_aio("POST", "/v1/file/list", body)
         return R.success(_scrub_result(result, translator))
     except PathValidationError as e:
-        return R.fail({"code": 403, "msg": str(e)})
+        return R(code=403, msg=str(e), data=None)
     except Exception as e:
         log_error("AIO file/list 代理失败", e, path=request.path)
-        return R.fail({"code": 500, "msg": f"list failed: {e}"})
+        return R(code=500, msg=f"list failed: {e}", data=None)
 
 
 @router.post("/grep")
@@ -148,10 +149,10 @@ async def file_grep(
         result = await _proxy_to_aio("POST", "/v1/file/grep", body)
         return R.success(_scrub_result(result, translator))
     except PathValidationError as e:
-        return R.fail({"code": 403, "msg": str(e)})
+        return R(code=403, msg=str(e), data=None)
     except Exception as e:
         log_error("AIO file/grep 代理失败", e, path=request.path)
-        return R.fail({"code": 500, "msg": f"grep failed: {e}"})
+        return R(code=500, msg=f"grep failed: {e}", data=None)
 
 
 @router.post("/replace")
@@ -169,7 +170,7 @@ async def file_replace(
         result = await _proxy_to_aio("POST", "/v1/file/replace", body)
         return R.success(_scrub_result(result, translator))
     except PathValidationError as e:
-        return R.fail({"code": 403, "msg": str(e)})
+        return R(code=403, msg=str(e), data=None)
     except Exception as e:
         log_error("AIO file/replace 代理失败", e, file=request.file)
-        return R.fail({"code": 500, "msg": f"replace failed: {e}"})
+        return R(code=500, msg=f"replace failed: {e}", data=None)
