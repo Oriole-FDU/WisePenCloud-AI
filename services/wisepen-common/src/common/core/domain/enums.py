@@ -1,7 +1,6 @@
 from enum import Enum
 from typing import Optional
 
-
 class IErrorCode(Enum):
     @property
     def code(self) -> int:

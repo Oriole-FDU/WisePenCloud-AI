@@ -1,16 +1,21 @@
+version: '3.8'
+
 services:
   chat-service:
-    image: ${DOCKER_REGISTRY}/wisepencloud-chat:${APP_VERSION}
-    container_name: wisepen-chat-service
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: wisepen-chat-service
+        SERVICE_PKG: chat
+        SERVICE_PORT: "9200"
+    image: ${DOCKER_REGISTRY}/${PROJECT_NAME:-wisepencloud}-chat:${APP_VERSION}
+    container_name: ${CHAT_CONTAINER_NAME:-wisepen-chat-service}
     restart: always
-
-    extra_hosts:
-      - "wisepen-dev-server:10.176.44.11"
-
     environment:
       - TZ=Asia/Shanghai
-      - PROFILE=dev
-      - NACOS_SERVER_ADDR=wisepen-dev-server:8848
+      - PROFILE=${PROFILE:-prod}
+      - NACOS_SERVER_ADDR=nacos:8848
       - NACOS_NAMESPACE_ID=
       - NACOS_GROUP=DEFAULT_GROUP
       - NACOS_USERNAME=${NACOS_USERNAME}
@@ -18,135 +23,12 @@ services:
       - SERVICE_HOST=0.0.0.0
       - SERVICE_PORT=9200
       - LOG_LEVEL=INFO
-      - SEARCH_PROVIDER_CREDENTIAL_MASTER_KEY=${SEARCH_PROVIDER_CREDENTIAL_MASTER_KEY}
-      - SEARCH_PROVIDER_CREDENTIAL_KEY_ID=${SEARCH_PROVIDER_CREDENTIAL_KEY_ID}
-      - SEARCH_PROVIDER_CREDENTIAL_HMAC_SECRET=${SEARCH_PROVIDER_CREDENTIAL_HMAC_SECRET}
-
-      # baked model cache
-      - HF_HOME=/opt/wisepen/models/huggingface
-      - HF_TOKEN=${HF_TOKEN}
-
-      # translation_assist
-      - TRANSLATION_DEVICE=cpu
-
-      # document temp file protocol
-      - DOCUMENT_TEMP_FILE_ROOT=/tmp/wisepen-chat-upload-files
-
-      # web_search / web_fetch external services
-      - FOURGET_BASE_URL=http://fourget:80
-      - FOURGET_WEB_SCRAPER=ddg
-      - STEEL_BASE_URL=http://steel-browser:3000
-
     volumes:
-      - ../logs/chat:/logs
-      - wisepen-document-temp:/tmp/wisepen-chat-upload-files
-      - ./.runtime/model-cache/datalab:/root/.cache/datalab
-
-    ports:
-      - "${CHAT_SERVICE_PORT:-9200}:9200"
-
+      - ../logs/${CHAT_CONTAINER_NAME:-wisepen-chat-service}:/logs
     networks:
-      wisepen-net:
-        aliases:
-          - chat-service
-
-    depends_on:
-      fourget:
-        condition: service_started
-      steel-browser:
-        condition: service_healthy
-      sage-math-worker:
-        condition: service_healthy
-
-  fourget:
-    image: luuul/4get:latest
-    container_name: fourget
-    restart: unless-stopped
-
-    environment:
-      - FOURGET_PROTO=http
-      - FOURGET_SERVER_NAME=fourget
-
-    ports:
-      - "8088:80"
-
-    networks:
-      wisepen-net:
-        aliases:
-          - fourget
-
-  steel-browser:
-    image: ghcr.io/steel-dev/steel-browser-api:latest
-    container_name: steel-browser
-    restart: always
-
-    environment:
-      - TZ=Asia/Shanghai
-      - DOMAIN=steel-browser:3000
-      - CDP_DOMAIN=steel-browser:9223
-      - CHROME_HEADLESS=true
-      - LOG_LEVEL=warn
-      - LOG_STORAGE_ENABLED=true
-      - LOG_STORAGE_PATH=/data/logs/browser-logs.duckdb
-      - SKIP_FINGERPRINT_INJECTION=true
-
-    volumes:
-      - steel-logs:/data/logs
-      - steel-exports:/tmp/steel-browser-exports
-
-    networks:
-      wisepen-net:
-        aliases:
-          - steel-browser
-
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "curl --fail --silent --show-error http://localhost:3000/v1/health >/dev/null || exit 1"
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 90s
-
-  sage-math-worker:
-    image: ${DOCKER_REGISTRY}/wisepencloud-sage-math-worker:${APP_VERSION}
-    container_name: sage-math-worker
-    restart: always
-
-    environment:
-      - TZ=Asia/Shanghai
-      - PYTHONUNBUFFERED=1
-
-    cpus: "2.0"
-    mem_limit: 4g
-
-    networks:
-      wisepen-net:
-        aliases:
-          - sage-math-worker
-
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "sage -python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5).read()\""
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-
-volumes:
-  steel-logs:
-    driver: local
-  steel-exports:
-    driver: local
-  wisepen-document-temp:
-    driver: local
+      - cloud-infra_cloud-net
 
 networks:
-  wisepen-net:
+  cloud-infra_cloud-net:
     external: true
-    name: wisepen-net
+    name: cloud-infra_cloud-net

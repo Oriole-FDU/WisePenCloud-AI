@@ -1,22 +1,18 @@
 # src/chat/domain/entities/__init__.py
-from chat.application.tools.web.services.web_search.provider_policy.persistence import UserSearchProviderConfig
 from .message import ChatMessage, Role
-from .model import Model, ModelType
-from .model_provider_mapping import ModelProviderMapping
-from .provider import Provider
 from .session import ChatSession
-from .skill import Skill, SkillAssetMeta, SkillMeta
+from .model import ModelType, Model
+from .provider import Provider
+from .model_provider_mapping import ModelProviderMapping
+from .skill import Skill, SkillMeta, SkillAssetMeta
 
 __all__ = [
-    "ChatMessage",
-    "Role",
+    "ChatMessage", "Role",
     "ChatSession",
-    "ModelType",
-    "Model",
+    "ModelType", "Model",
     "Provider",
-    "UserSearchProviderConfig",
     "ModelProviderMapping",
-    "Skill",
-    "SkillMeta",
+    "Skill", 
+    "SkillMeta", 
     "SkillAssetMeta",
 ]

@@ -1,5 +1,4 @@
 from enum import IntEnum
-
 from beanie import Document
 from pydantic import Field
 
@@ -15,7 +14,6 @@ class Model(Document):
     模型配置（存入 MongoDB）
     仅包含前端可见的模型元信息，不含供应商细节
     """
-
     id: int = Field(..., description="模型序号ID")
     display_name: str = Field(..., description="展示名称（如 GPT-4o）")
     vendor: str = Field(..., description="模型厂商（如 OpenAI、Google、DeepSeek）")

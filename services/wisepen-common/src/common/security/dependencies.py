@@ -1,8 +1,7 @@
 from typing import Callable
-
-from common.core.domain import IdentityType
 from .context import SecurityContextHolder
-from .exceptions import PermissionErrorCode, PermissionException
+from .exceptions import PermissionException, PermissionErrorCode
+from common.core.domain import IdentityType
 
 
 def require_login() -> str:

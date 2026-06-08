@@ -1,1 +1,0 @@
-"""Elasticsearch persistence implementation package."""

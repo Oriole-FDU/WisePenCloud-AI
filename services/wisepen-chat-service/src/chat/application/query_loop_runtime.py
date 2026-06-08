@@ -2,110 +2,97 @@ import asyncio
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Tuple
+from typing import Dict, List, Any, Optional, Iterator, AsyncIterator, Tuple, Union
 
-from chat.application.tool_output_aspect import ToolOutputAspect
-from chat.application.tool_scope import ToolScope
-from chat.domain.entities import ChatMessage, Role
-from chat.domain.error_codes import ChatErrorCode
-from chat.domain.interfaces import LLMProvider
-from common.core.exceptions import ServiceException
 from common.logger import log_fail
-
-_AGENT_MAX_ITERATIONS = 15
+from chat.core.config.app_settings import settings
+from chat.domain.entities import ChatMessage, Role
+from chat.domain.interfaces import LLMProvider
+from chat.domain.interfaces.tool import ToolExecutionResult
+from chat.domain.message_lifecycle import LLMVisibility, MessageLifecycle, PersistenceMode
+from chat.domain.error_codes import ChatErrorCode
+from common.core.exceptions import ServiceException
+from chat.application.tools.tool_scope import ToolScope
 
 
 # =============================================================================
 # QueryLoopRuntime 领域事件
 # =============================================================================
 
-
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class StreamEvent:
     """QueryLoopRuntime 产出的领域事件基类。"""
-
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class StepStartEvent(StreamEvent):
     """一个 agent step 开始。coordinator 借此重置 reasoning 累加缓冲。"""
-
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class StepFinishEvent(StreamEvent):
     """一个 agent step 结束。"""
-
     pass
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class TextStartEvent(StreamEvent):
     """开始一段普通文本流。"""
-
     text_id: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class TextDeltaEvent(StreamEvent):
     """普通文本增量。delta 为纯文本，供 coordinator 累加进最终回答以用于持久化。"""
-
     text_id: str
     delta: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class TextEndEvent(StreamEvent):
     """结束一段普通文本流。"""
-
     text_id: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ReasoningStartEvent(StreamEvent):
     """开始一段推理/思考文本流。"""
-
     reasoning_id: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ReasoningDeltaEvent(StreamEvent):
     """推理/思考增量。delta 为纯文本，供 coordinator 累加进 reasoning 内容。"""
-
     reasoning_id: str
     delta: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ReasoningEndEvent(StreamEvent):
     """结束一段推理/思考文本流。"""
-
     reasoning_id: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ToolInputStartEvent(StreamEvent):
     """工具调用 input 阶段开始（id + name 已识别，args 未必齐）。"""
-
     call_id: str
     tool_name: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ToolInputAvailableEvent(StreamEvent):
     """工具调用 input 阶段完成，args 已解析完毕。"""
-
     call_id: str
     tool_name: str
     input: Dict[str, Any]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ToolOutputAvailableEvent(StreamEvent):
     """工具执行完成，output 已产出。"""
-
     call_id: str
     output: Any
 
@@ -114,32 +101,28 @@ class ToolOutputAvailableEvent(StreamEvent):
 # 内部数据结构
 # =============================================================================
 
-
-@dataclass(slots=True)
+@dataclass
 class _ToolCallAccumulator:
     """在流式 delta 中按 index 分槽累积单个 tool_call 的碎片。"""
-
     id: str = ""
     name: str = ""
     arguments: str = ""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _ParsedToolCall:
     """对 _ToolCallAccumulator 做 JSON 解析、降级后的结果。"""
-
     id: str
     name: str
     args: Dict[str, Any]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _StepTerminal:
     """_run_single_step 的终端控制信号，固定为 async generator 的最后一项，由 QueryLoopRuntime 外层识别并分流
     - should_continue: 本轮 finish_reason == 'tool_calls' 且有 tool accumulator 时为 True
     - new_messages:    本轮要追加到会话的 assistant (+tool) 消息；可能为空列表
     """
-
     should_continue: bool
     new_messages: List[ChatMessage]
 
@@ -152,7 +135,6 @@ class _StepDeltaInterpreter:
     - 累加 assistant_content / assistant_reasoning，按 index 累积 tool_call 碎片
     - 向外产出 StreamEvent
     """
-
     def __init__(self, text_id: str, reasoning_id: str) -> None:
         self.text_id = text_id
         self.reasoning_id = reasoning_id
@@ -207,15 +189,13 @@ class _StepDeltaInterpreter:
                 idx = tool_call_delta.index
                 if idx not in self.accumulators:
                     self.accumulators[idx] = _ToolCallAccumulator()
-                if tool_call_delta.id:  # 累加 id（如果有）
-                    self.accumulators[idx].id = tool_call_delta.id
-                if tool_call_delta.function:  # 累加 function（如果有）
-                    if tool_call_delta.function.name:  # 累加 name
+                if tool_call_delta.id: # 累加 id（如果有）
+                    self.accumulators[idx].id = tool_call_delta.id 
+                if tool_call_delta.function: # 累加 function（如果有）
+                    if tool_call_delta.function.name: # 累加 name
                         self.accumulators[idx].name += tool_call_delta.function.name
-                    if tool_call_delta.function.arguments:  # 累加 arguments
-                        self.accumulators[
-                            idx
-                        ].arguments += tool_call_delta.function.arguments
+                    if tool_call_delta.function.arguments: # 累加 arguments
+                        self.accumulators[idx].arguments += tool_call_delta.function.arguments
         # tool_call 只有在一整轮模型输出结束后，才能确定是不是完整、能不能解析
 
     def close(self) -> Iterator[StreamEvent]:
@@ -232,20 +212,68 @@ class _StepDeltaInterpreter:
 # QueryLoopRuntime
 # =============================================================================
 
-
 class QueryLoopRuntime:
     """
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
     """
 
-    def __init__(self, llm: LLMProvider, tool_output_aspect: ToolOutputAspect) -> None:
+    def __init__(self, llm: LLMProvider) -> None:
         self.llm = llm
-        self._tool_output_aspect = tool_output_aspect
+
+    @staticmethod
+    def _serialize_prompt_for_counting(
+        messages: List[ChatMessage],
+        tool_schemas: List[Dict[str, Any]],
+    ) -> str:
+        serialized_messages: List[Dict[str, Any]] = []
+        for msg in QueryLoopRuntime._messages_visible_to_llm(messages):
+            item: Dict[str, Any] = {
+                "role": msg.role.value,
+                "content": msg.content or "",
+            }
+            if msg.tool_calls:
+                item["tool_calls"] = msg.tool_calls
+            if msg.tool_call_id:
+                item["tool_call_id"] = msg.tool_call_id
+            if msg.name:
+                item["name"] = msg.name
+            serialized_messages.append(item)
+        return json.dumps(
+            {"messages": serialized_messages, "tools": tool_schemas},
+            ensure_ascii=False,
+            default=str,
+        )
+
+    @staticmethod
+    def _messages_visible_to_llm(messages: List[ChatMessage]) -> List[ChatMessage]:
+        return [
+            msg for msg in messages
+            if msg.lifecycle.llm_visibility == LLMVisibility.INCLUDE
+        ]
+
+    async def _ensure_prompt_budget(
+        self,
+        messages: List[ChatMessage],
+        tool_schemas: List[Dict[str, Any]],
+        model_name: str,
+        prompt_budget_tokens: Optional[int],
+    ) -> None:
+        if prompt_budget_tokens is None:
+            return
+        text = self._serialize_prompt_for_counting(messages, tool_schemas)
+        token_count = await self.llm.count_tokens(text, model_name)
+        if token_count > prompt_budget_tokens:
+            raise ServiceException(
+                ChatErrorCode.CONTEXT_LIMIT_EXCEEDED,
+                custom_msg=(
+                    "最终提示词超出模型上下文预算，"
+                    f"tokens={token_count}, budget={prompt_budget_tokens}"
+                ),
+            )
 
     """
     ReAct 循环主入口 (QueryLoop)
     """
-
     async def stream_chat_with_tool_calling(
         self,
         messages: List[ChatMessage],
@@ -255,9 +283,10 @@ class QueryLoopRuntime:
         model_id: Optional[int] = None,
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
+        prompt_budget_tokens: Optional[int] = None,
     ) -> AsyncIterator[StreamEvent]:
         # 进入多轮循环
-        for iteration in range(_AGENT_MAX_ITERATIONS):
+        for iteration in range(settings.AGENT_MAX_ITERATIONS):
             terminal: Optional[_StepTerminal] = None
             # 把当前 messages、模型参数 和 tool_scope 委派给 _run_single_step()
             # 然后异步消费它的产出
@@ -270,6 +299,7 @@ class QueryLoopRuntime:
                 api_key=api_key,
                 iteration=iteration,
                 tool_scope=tool_scope,
+                prompt_budget_tokens=prompt_budget_tokens,
             ):
                 # 如果拿到的是 _StepTerminal 就存到 terminal；否则直接 yield
                 if isinstance(item, _StepTerminal):
@@ -290,7 +320,6 @@ class QueryLoopRuntime:
     """
     Agent Step：发起一次流式推理 → 解析 → 若需要则执行工具
     """
-
     async def _run_single_step(
         self,
         messages: List[ChatMessage],
@@ -301,26 +330,30 @@ class QueryLoopRuntime:
         api_key: Optional[str],
         iteration: int,
         tool_scope: ToolScope,
-    ) -> AsyncIterator[StreamEvent | _StepTerminal]:
+        prompt_budget_tokens: Optional[int],
+    ) -> AsyncIterator[Union[StreamEvent, _StepTerminal]]:
         # 发 step 开始事件
         yield StepStartEvent()
 
         # 创建本轮推理的 delta 解释器
         text_id = f"txt_{uuid.uuid4().hex}"
         reasoning_id = f"rsn_{uuid.uuid4().hex}"
-        delta_interpreter = _StepDeltaInterpreter(
-            text_id=text_id, reasoning_id=reasoning_id
-        )
+        delta_interpreter = _StepDeltaInterpreter(text_id=text_id, reasoning_id=reasoning_id)
 
         finish_reason: str = "stop"
 
         # schema 已由 ToolScope 在构造期固化，这里零决策直读
         tool_schemas = tool_scope.schemas()
-
+        await self._ensure_prompt_budget(
+            messages,
+            tool_schemas,
+            model_name,
+            prompt_budget_tokens,
+        )
         try:
             # 调用模型流式接口
             async for chunk in self.llm.stream_chat_completion(
-                messages=messages,
+                messages=self._messages_visible_to_llm(messages),
                 model_name=model_name,
                 tools=tool_schemas or None,
                 api_base=api_base,
@@ -349,7 +382,7 @@ class QueryLoopRuntime:
             yield StepFinishEvent()
             yield _StepTerminal(should_continue=False, new_messages=[])
             return
-
+        
         # 如果有工具调用，则进入工具阶段
 
         # 解析工具调用
@@ -367,14 +400,10 @@ class QueryLoopRuntime:
                 {
                     "id": tool_call.id,
                     "type": "function",
-                    "function": {
-                        "name": tool_call.name,
-                        "arguments": json.dumps(tool_call.args),
-                    },
+                    "function": {"name": tool_call.name, "arguments": json.dumps(tool_call.args)},
                 }
                 for tool_call in parsed_tool_calls
             ],
-            ephemeral=False,
         )
         new_messages: List[ChatMessage] = [assistant_msg]
 
@@ -400,6 +429,12 @@ class QueryLoopRuntime:
         yield _StepTerminal(should_continue=True, new_messages=new_messages)
 
     @staticmethod
+    def _coerce_tool_result(result: Any) -> ToolExecutionResult:
+        if isinstance(result, ToolExecutionResult):
+            return result
+        return ToolExecutionResult(tool_content=str(result))
+
+    @staticmethod
     def _parse_tool_calls(
         accumulators: Dict[int, _ToolCallAccumulator],
     ) -> List[_ParsedToolCall]:
@@ -415,65 +450,56 @@ class QueryLoopRuntime:
                     name=acc.name,
                 )
                 args = {}
-            parsed_tool_calls.append(
-                _ParsedToolCall(id=acc.id, name=acc.name, args=args)
-            )
+            parsed_tool_calls.append(_ParsedToolCall(id=acc.id, name=acc.name, args=args))
         return parsed_tool_calls
+
 
     async def _run_tools(
         self,
         parsed_tool_calls: List[_ParsedToolCall],
         tool_scope: ToolScope,
-        session_id: str,
+        session_id: str
     ) -> Tuple[List[StreamEvent], List[ChatMessage]]:
         """
         并行执行所有工具。
-        返回 tool_output_available 事件列表（按 parsed 顺序）和对应的 Role.TOOL 消息列表（按 parsed 顺序）。
-        每条 TOOL 消息独立按对应 tool 的 is_ephemeral_output 打 ephemeral 标，
-        让 Finalizer 在 per-message 粒度上决定是否 redact，避免混合轮次里 skill 正文通过"整轮保守落盘"漏进 durable 历史
+        返回 tool_output_available 事件列表（按 parsed 顺序）和本轮新增消息。
+        新增消息通常是 Role.TOOL；结构化工具结果也可以附带仅本轮使用的 Role.USER 注入。
+        每条消息携带 lifecycle，让 Finalizer 在 per-message 粒度上决定是否 drop/redact/persist，
+        避免 skill 正文或 asset 正文漏进 durable 历史。
         """
 
         # 并发执行所有工具，return_exceptions=True 保证单工具失败不中断整轮
         raw_results = await asyncio.gather(
-            *[
-                self._invoke_tool(tc.name, tool_scope, tc.args)
-                for tc in parsed_tool_calls
-            ],
+            *[self._invoke_tool(tc.name, tool_scope, tc.args) for tc in parsed_tool_calls],
             return_exceptions=True,
         )
-
-        # 查出每个 tool call 对应 tool 的 is_ephemeral_output
-        ephemeral_flags: List[bool] = [
-            tool_scope.is_ephemeral(tool_call.name) for tool_call in parsed_tool_calls
-        ]
 
         # 遍历结果做异常降级
         events: List[StreamEvent] = []
         tool_messages: List[ChatMessage] = []
-        for tool_call, result, is_ephemeral in zip(
-            parsed_tool_calls, raw_results, ephemeral_flags
-        ):
+        injection_messages: List[ChatMessage] = []
+        for tool_call, result in zip(parsed_tool_calls, raw_results):
             # 如果某个结果是 Exception，转成字符串形式的 [Tool Execution Error]: ... 并记录日志，否则原样使用。
             # 防止原生 Exception 对象序列化进 API 请求导致异常
             if isinstance(result, Exception):
-                safe_result = (
-                    f"[Tool Execution Error]: {type(result).__name__}: {result}"
-                )
+                safe_result = f"[Tool Execution Error]: {type(result).__name__}: {result}"
                 log_fail("工具调用", result, name=tool_call.name, session=session_id)
+                tool_result = ToolExecutionResult(tool_content=safe_result)
             else:
-                safe_result = result
+                tool_result = self._coerce_tool_result(result)
 
-            # 缓存超过阈值的工具输出，返回首个可见窗口（多为引导窗口）
-            visible_result = self._tool_output_aspect.process(
-                session_id=session_id,
-                tool_name=tool_call.name,
-                output=safe_result,
+            event_output = (
+                tool_result.frontend_output
+                if tool_result.frontend_output is not None
+                else tool_result.tool_content
             )
+
+            metadata = dict(tool_result.metadata or {})
+            if tool_result.lifecycle.restore_ref:
+                metadata["restore_ref"] = tool_result.lifecycle.restore_ref.model_dump(mode="json")
 
             # 发 ToolOutputAvailableEvent
-            events.append(
-                ToolOutputAvailableEvent(call_id=tool_call.id, output=visible_result)
-            )
+            events.append(ToolOutputAvailableEvent(call_id=tool_call.id, output=event_output))
             # 构造对话历史中的 Tool 消息
             tool_messages.append(
                 ChatMessage(
@@ -481,18 +507,30 @@ class QueryLoopRuntime:
                     role=Role.TOOL,
                     tool_call_id=tool_call.id,
                     name=tool_call.name,
-                    content=visible_result,
-                    ephemeral=is_ephemeral,
+                    content=tool_result.tool_content,
+                    metadata=metadata,
+                    lifecycle=tool_result.lifecycle,
                 )
             )
-        return events, tool_messages
+            if tool_result.user_injection:
+                injection_messages.append(
+                    ChatMessage(
+                        session_id=session_id,
+                        role=Role.USER,
+                        content=tool_result.user_injection,
+                        lifecycle=MessageLifecycle(
+                            persistence_mode=PersistenceMode.DROP,
+                        ),
+                    )
+                )
+        return events, tool_messages + injection_messages
 
     async def _invoke_tool(
         self,
         name: str,
         tool_scope: ToolScope,
         args: Dict[str, Any],
-    ) -> str:
+    ) -> Union[str, ToolExecutionResult]:
         """按 tool_scope 视图查工具并执行；未在视图内（被 deny 掉或未注册）时降级文本"""
         tool = tool_scope.get(name)
         if tool is None:
@@ -504,7 +542,7 @@ class QueryLoopRuntime:
         self, session_id: str
     ) -> AsyncIterator[StreamEvent]:
         """Agent 循环超出最大迭代次数时的兜底文本输出"""
-        warn = f"Agent 推理超出最大迭代次数{_AGENT_MAX_ITERATIONS}，未能生成最终答案"
+        warn = f"Agent 推理超出最大迭代次数{settings.AGENT_MAX_ITERATIONS}，未能生成最终答案"
         log_fail("工具调用", warn, session=session_id)
         text_id = f"txt_{uuid.uuid4().hex}"
         yield StepStartEvent()

@@ -1,20 +1,13 @@
+from __future__ import annotations
+
 import os
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
-from chat.core.providers.skill_assets.oss_loader import OssSkillAssetLoader
-from chat.domain.interfaces.skill_asset_loader import SkillAssetLoader
 from common.logger import log_event
 
-_SERVICE_ROOT = Path(__file__).resolve().parents[5]
-SKILL_ASSETS_CACHE_DIR = "dev_fixtures/skill_bundles"
-
-
-def skill_assets_cache_path() -> Path:
-    path = Path(SKILL_ASSETS_CACHE_DIR)
-    if path.is_absolute():
-        return path
-    return (_SERVICE_ROOT / path).resolve()
+from chat.domain.interfaces.skill_asset_loader import SkillAssetLoader
+from chat.core.providers.skill_assets.oss_loader import OssSkillAssetLoader
 
 
 class LocalFSSkillAssetLoader(SkillAssetLoader):
@@ -32,11 +25,11 @@ class LocalFSSkillAssetLoader(SkillAssetLoader):
 
     def __init__(
         self,
-        root_dir: Optional[str] = None,
+        root_dir: str,
         *,
         oss_fallback: Optional[OssSkillAssetLoader] = None,
     ) -> None:
-        self._root = Path(root_dir or skill_assets_cache_path()).resolve()
+        self._root = Path(root_dir).resolve()
         self._oss = oss_fallback
 
     async def start(self) -> None:
@@ -59,13 +52,9 @@ class LocalFSSkillAssetLoader(SkillAssetLoader):
 
         # 既无本地也无 OSS：给出清晰的失败语义
         if parsed is None:
-            raise ValueError(
-                f"object_key 不符合 skills/<skill_id>/<version>/<path> 约定: {object_key!r}"
-            )
+            raise ValueError(f"object_key 不符合 skills/<skill_id>/<version>/<path> 约定: {object_key!r}")
         skill_id, version, path = parsed
-        raise FileNotFoundError(
-            f"Asset not found in local fixtures: {skill_id}/{version}/{path}"
-        )
+        raise FileNotFoundError(f"Asset not found in local fixtures: {skill_id}/{version}/{path}")
 
     async def load_asset(self, skill_id: str, version: str, path: str) -> bytes:
         self._ensure_safe_segment(skill_id, kind="skill_id")
@@ -83,18 +72,16 @@ class LocalFSSkillAssetLoader(SkillAssetLoader):
                 version=version,
                 path=path,
             )
-            return await self._oss.load_asset(
-                skill_id=skill_id, version=version, path=path
-            )
+            return await self._oss.load_asset(skill_id=skill_id, version=version, path=path)
 
         raise FileNotFoundError(f"Asset not found: {skill_id}/{version}/{path}")
 
     # ---------- 内部实现 ----------
 
-    def _parse_object_key(self, object_key: str) -> Optional[Tuple[str, str, str]]:
+    def _parse_object_key(self, object_key: str) -> Optional[tuple[str, str, str]]:
         if not object_key or not object_key.startswith(self._OBJECT_KEY_PREFIX):
             return None
-        rel = object_key[len(self._OBJECT_KEY_PREFIX) :]
+        rel = object_key[len(self._OBJECT_KEY_PREFIX):]
         parts = rel.split("/", 2)
         if len(parts) < 3 or not parts[2]:
             return None
@@ -107,14 +94,11 @@ class LocalFSSkillAssetLoader(SkillAssetLoader):
             return None
         return skill_id, version, path
 
-    def _try_read_local(self, parsed: Tuple[str, str, str]) -> Optional[bytes]:
+    def _try_read_local(self, parsed: tuple[str, str, str]) -> Optional[bytes]:
         skill_id, version, path = parsed
         target_root = (self._root / skill_id / version).resolve()
         target = (target_root / path).resolve()
-        if (
-            not str(target).startswith(str(target_root) + os.sep)
-            and target != target_root
-        ):
+        if not str(target).startswith(str(target_root) + os.sep) and target != target_root:
             raise PermissionError(f"Asset path escapes skill asset root: {path}")
         if not target.is_file():
             return None

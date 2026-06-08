@@ -1,4 +1,4 @@
-from .enums import GroupRoleType, IdentityType, IErrorCode, ResultCode
-from .responses import PageResult, R
+from .responses import R, PageResult
+from .enums import IErrorCode, ResultCode, IdentityType, GroupRoleType
 
 __all__ = ["IErrorCode", "ResultCode", "IdentityType", "GroupRoleType", "R", "PageResult"]
