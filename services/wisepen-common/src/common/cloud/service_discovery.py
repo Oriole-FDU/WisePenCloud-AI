@@ -1,12 +1,11 @@
 """
 基于 Nacos 的客户端服务发现 + 客户端侧负载均衡
 """
-from __future__ import annotations
 
 import asyncio
 import random
 import time
-from typing import Awaitable, Callable, Dict, Iterable, List, Literal, Optional
+from typing import Awaitable, Callable, Dict, Iterable, List, Literal, Optional, Set
 
 from v2.nacos import (
     Instance,
@@ -15,9 +14,7 @@ from v2.nacos import (
     SubscribeServiceParam,
 )
 
-from common.core.constants import CommonConstants
 from common.core.exceptions import ServiceUnavailableError
-from common.gray.context import GrayContextHolder
 from common.logger import log_error, log_event, log_fail
 
 NamingClientProvider = Callable[[], Awaitable[NacosNamingService]]
@@ -43,7 +40,7 @@ class ServiceDiscovery:
     ) -> None:
         # 懒加载 Nacos 客户端
         self._naming_provider = naming_client_provider
-        self._naming: NacosNamingService | None = None
+        self._naming: Optional[NacosNamingService] = None
         self._naming_lock = asyncio.Lock()
 
         # 服务组名
@@ -58,7 +55,7 @@ class ServiceDiscovery:
         # 轮询策略游标
         self._rr_cursor: Dict[str, int] = {}
         # 记录已经订阅过 Nacos 变更的服务
-        self._subscribed: set[str] = set()
+        self._subscribed: Set[str] = set()
         # 锁，避免同一个服务在高并发下同时刷新 Nacos
         self._locks: Dict[str, asyncio.Lock] = {}
 
@@ -71,31 +68,6 @@ class ServiceDiscovery:
             if self._naming is None:
                 self._naming = await self._naming_provider()
             return self._naming
-
-
-    @staticmethod
-    def _developer_of(instance: Instance) -> str:
-        metadata = getattr(instance, "metadata", None) or {}
-        return str(metadata.get(CommonConstants.GRAY_METADATA_DEV_KEY) or "").strip()
-
-    # 选择灰度池（开发者隔离）
-    def _select_gray_pool(self, service_name: str, instances: List[Instance]) -> List[Instance]:
-        developer = (GrayContextHolder.get_developer_tag() or "").strip()
-
-        baseline = [i for i in instances if not self._developer_of(i)]
-
-        if developer:
-            matched = [i for i in instances if self._developer_of(i) == developer]
-            if matched:
-                return matched
-            if baseline:
-                return baseline
-            raise ServiceUnavailableError(service_name, self._group)
-
-        if baseline:
-            return baseline
-
-        raise ServiceUnavailableError(service_name, self._group)
 
     # 从本地缓存挑一个可用实例
     async def pick(
@@ -113,12 +85,9 @@ class ServiceDiscovery:
         await self._ensure_ready(service_name)
 
         instances = self._cache.get(service_name, [])
-        instances = self._select_gray_pool(service_name, instances)
-
         if exclude:
             deny = set(exclude)
             instances = [i for i in instances if f"{i.ip}:{i.port}" not in deny]
-
         if not instances:
             raise ServiceUnavailableError(service_name, self._group)
 
@@ -169,7 +138,7 @@ class ServiceDiscovery:
                 if service_name not in self._cache:
                     log_error("Nacos list_instances", e, service=service_name, group=self._group)
                     raise ServiceUnavailableError(service_name, self._group) from e
-                log_fail("Nacos list_instances 降级用缓存", e, service=service_name, group=self._group)
+                log_event("Nacos list_instances 降级用缓存", service=service_name, group=self._group)
                 return
 
             # 首次成功拉取后注册订阅，靠推送增量刷新，失败不致命
@@ -184,9 +153,9 @@ class ServiceDiscovery:
                         )
                     )
                     self._subscribed.add(service_name)
-                    log_event("Nacos subscribe", service=service_name, group=self._group)
+                    log_event("Nacos 订阅注册", service=service_name, group=self._group)
                 except Exception as e:
-                    log_fail("Nacos subscribe", e, service=service_name, group=self._group)
+                    log_fail("Nacos 订阅", e, service=service_name, group=self._group)
 
     async def _refresh(self, service_name: str) -> None:
         naming = await self._get_naming()
@@ -208,9 +177,9 @@ class ServiceDiscovery:
         async def _on_change(instance_list: List[Instance]) -> None:
             usable = [i for i in (instance_list or []) if self._is_usable(i)]
             if not usable:
-                log_fail(
+                log_event(
                     "Nacos 推送实例为空，保留旧缓存",
-                    "empty instance list",
+                    reason="empty instance list",
                     service=service_name,
                     group=self._group,
                 )

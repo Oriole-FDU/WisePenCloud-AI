@@ -1,17 +1,35 @@
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+
 import litellm
-from typing import AsyncGenerator, List, Dict, Optional, Any
-from chat.domain.entities import ChatMessage
-from chat.domain.interfaces import LLMProvider
-from chat.domain.error_codes import ChatErrorCode
-from common.core.exceptions import ServiceException
+
 from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings
+from chat.domain.entities import ChatMessage
+from chat.domain.error_codes import ChatErrorCode
+from chat.domain.interfaces import LLMProvider
+from common.core.exceptions import ServiceException
 
 litellm.telemetry = False
 
 _is_debug = bootstrap_settings.LOG_LEVEL.upper() == "DEBUG"
 litellm.set_verbose = _is_debug
 litellm.suppress_debug_info = not _is_debug
+
+
+_DISABLE_PARALLEL_TOOL_CALL_NAMES: Tuple[str, ...] = ("browse_interact", "web_search")
+
+
+def _should_disable_parallel_tool_calls(tools: Optional[List[Dict[str, Any]]]) -> bool:
+    if not tools:
+        return False
+    disabled_names = set(_DISABLE_PARALLEL_TOOL_CALL_NAMES)
+    for tool in tools:
+        function = tool.get("function")
+        if isinstance(function, dict):
+            name = function.get("name")
+            if isinstance(name, str) and name in disabled_names:
+                return True
+    return False
 
 
 class LiteLLMAdapter(LLMProvider):
@@ -46,66 +64,86 @@ class LiteLLMAdapter(LLMProvider):
         return f"openai/{model_name}"
 
     async def chat_completion(
-            self,
-            messages: List[ChatMessage],
-            model_name: str,
-            temperature: float = 0.7,
-            tools: Optional[List[Dict[str, Any]]] = None,
-            api_base: Optional[str] = None,
-            api_key: Optional[str] = None,
-    ) -> Any:
+        self,
+        messages: List[ChatMessage],
+        model_name: str,
+        temperature: float = 0.7,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        api_base: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ):
         formatted_msgs = self._convert_messages(messages)
         litellm_model = self._format_model_for_litellm(model_name)
+
+        completion_kwargs: Dict[str, Any] = {
+            "model": litellm_model,
+            "messages": formatted_msgs,
+            "stream": False,
+            "temperature": temperature,
+            "drop_params": True,
+            "api_base": api_base or self._default_api_base,
+            "api_key": api_key or self._default_api_key,
+        }
+
+        if tools:
+            completion_kwargs["tools"] = tools
+
+        if _should_disable_parallel_tool_calls(tools):
+            completion_kwargs["parallel_tool_calls"] = False
+
         try:
-            response = await litellm.acompletion(
-                model=litellm_model,
-                messages=formatted_msgs,
-                stream=False,
-                temperature=temperature,
-                drop_params=True,
-                api_base=api_base or self._default_api_base,
-                api_key=api_key or self._default_api_key,
-            )
+            response = await litellm.acompletion(**completion_kwargs)
             return response.choices[0].message
         except litellm.ContextWindowExceededError:
             raise ServiceException(ChatErrorCode.CONTEXT_LIMIT_EXCEEDED)
         except Exception as e:
-            raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Provider Error: {e}")
+            raise ServiceException(
+                ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Provider Error: {e}"
+            )
 
     async def stream_chat_completion(
-            self,
-            messages: List[ChatMessage],
-            model_name: str,
-            temperature: float = 0.7,
-            tools: Optional[List[Dict[str, Any]]] = None,
-            api_base: Optional[str] = None,
-            api_key: Optional[str] = None,
+        self,
+        messages: List[ChatMessage],
+        model_name: str,
+        temperature: float = 0.7,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        api_base: Optional[str] = None,
+        api_key: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
 
         formatted_msgs = self._convert_messages(messages)
         litellm_model = self._format_model_for_litellm(model_name)
 
+        completion_kwargs: Dict[str, Any] = {
+            "model": litellm_model,
+            "messages": formatted_msgs,
+            "stream": True,
+            "temperature": temperature,
+            "drop_params": True,
+            "api_base": api_base or self._default_api_base,
+            "api_key": api_key or self._default_api_key,
+        }
+
+        if tools:
+            completion_kwargs["tools"] = tools
+
+        if _should_disable_parallel_tool_calls(tools):
+            completion_kwargs["parallel_tool_calls"] = False
+
         try:
-            response = await litellm.acompletion(
-                model=litellm_model,
-                messages=formatted_msgs,
-                stream=True,
-                temperature=temperature,
-                tools=tools,
-                drop_params=True,
-                api_base=api_base or self._default_api_base,
-                api_key=api_key or self._default_api_key,
-            )
+            response = await litellm.acompletion(**completion_kwargs)
             async for chunk in response:
                 yield chunk
 
         except litellm.ContextWindowExceededError:
             raise ServiceException(ChatErrorCode.CONTEXT_LIMIT_EXCEEDED)
         except Exception as e:
-            raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Provider Error: {e}")
+            raise ServiceException(
+                ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Provider Error: {e}"
+            )
 
     async def count_tokens(self, text: str, model_name: str = "gpt-4o") -> int:
         try:
             return litellm.token_counter(model=model_name, text=text)
-        except:
+        except Exception:
             return len(text)

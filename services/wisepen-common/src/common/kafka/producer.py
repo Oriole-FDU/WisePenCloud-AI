@@ -1,7 +1,9 @@
-from aiokafka import AIOKafkaProducer
 import json
+from typing import Dict, List, Optional, Tuple
+
+from aiokafka import AIOKafkaProducer
+
 from common.logger import log_error, log_event
-from typing import Dict, List, Tuple, Optional
 
 
 class KafkaProducerClient:

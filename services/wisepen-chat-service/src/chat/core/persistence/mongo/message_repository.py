@@ -1,26 +1,64 @@
-from typing import List, Optional, Tuple
 from datetime import datetime
+from typing import List, Optional, Tuple
+
+from beanie import PydanticObjectId
 from beanie.odm.operators.find.evaluation import Text
 
-from chat.domain.repositories import MessageRepository
 from chat.domain.entities import ChatMessage, Role
-
-
+from chat.domain.repositories import MessageRepository
 
 
 class MongoMessageRepository(MessageRepository):
-
-    async def save_messages(self, messages: List[ChatMessage]) -> None:
+    async def save_many(self, messages: List[ChatMessage]) -> None:
         if messages:
             await ChatMessage.insert_many(messages)
 
-    async def list_session_messages(self, session_id: str, after: datetime = None, limit: int = 50) -> List[ChatMessage]:
+    async def get_by_session(
+        self, session_id: str, after: datetime = None, limit: int = 50
+    ) -> List[ChatMessage]:
         conditions = [ChatMessage.session_id == session_id]
         if after:
             conditions.append(ChatMessage.created_at > after)
-        return await ChatMessage.find(*conditions).sort("+created_at").limit(limit).to_list()
+        return (
+            await ChatMessage.find(*conditions)
+            .sort("+created_at")
+            .limit(limit)
+            .to_list()
+        )
 
-    async def list_session_message_turns_page(
+    async def get_after_time(
+        self, session_id: str, after: datetime, limit: int
+    ) -> List[ChatMessage]:
+        return (
+            await ChatMessage.find(
+                ChatMessage.session_id == session_id,
+                ChatMessage.created_at > after,
+            )
+            .sort("+created_at")
+            .limit(limit)
+            .to_list()
+        )
+
+    async def delete_from_message(self, session_id: str, message_id: str) -> int:
+        try:
+            object_id = PydanticObjectId(message_id)
+        except Exception:
+            return 0
+
+        anchor = await ChatMessage.find_one(
+            ChatMessage.id == object_id,
+            ChatMessage.session_id == session_id,
+        )
+        if anchor is None:
+            return 0
+
+        result = await ChatMessage.find(
+            ChatMessage.session_id == session_id,
+            ChatMessage.created_at >= anchor.created_at,
+        ).delete()
+        return int(getattr(result, "deleted_count", 0) or 0)
+
+    async def get_page_for_ui(
         self,
         session_id: str,
         page: int,
@@ -46,18 +84,20 @@ class MongoMessageRepository(MessageRepository):
         fetch_skip = max(0, skip - 1) if page > 1 else 0
         fetch_limit = size + (1 if page > 1 else 0)
 
-        user_msgs = await ChatMessage.find(*user_condition) \
-            .sort("-created_at") \
-            .skip(fetch_skip) \
-            .limit(fetch_limit) \
+        user_msgs = (
+            await ChatMessage.find(*user_condition)
+            .sort("-created_at")
+            .skip(fetch_skip)
+            .limit(fetch_limit)
             .to_list()
+        )
 
         if not user_msgs:
             return [], total_turns
 
         if page > 1 and len(user_msgs) > 0:
-            upper_bound_user = user_msgs[0]   # 前一页最末（更新）的 user 消息
-            page_user_msgs = user_msgs[1:]    # 本页的 user 消息
+            upper_bound_user = user_msgs[0]  # 前一页最末（更新）的 user 消息
+            page_user_msgs = user_msgs[1:]  # 本页的 user 消息
         else:
             upper_bound_user = None
             page_user_msgs = user_msgs
@@ -78,13 +118,13 @@ class MongoMessageRepository(MessageRepository):
         if upper_bound_user is not None:
             msg_conditions.append(ChatMessage.created_at < upper_bound_user.created_at)
 
-        page_msgs = await ChatMessage.find(*msg_conditions) \
-            .sort("+created_at") \
-            .to_list()
+        page_msgs = (
+            await ChatMessage.find(*msg_conditions).sort("+created_at").to_list()
+        )
 
         return page_msgs, total_turns
 
-    async def search_messages_by_text(
+    async def full_text_search(
         self,
         keyword: str,
         session_id: Optional[str] = None,
@@ -105,4 +145,30 @@ class MongoMessageRepository(MessageRepository):
         if end_time:
             conditions.append(ChatMessage.created_at <= end_time)
 
-        return await ChatMessage.find(*conditions).sort("+created_at").limit(limit).to_list()
+        return (
+            await ChatMessage.find(*conditions)
+            .sort("+created_at")
+            .limit(limit)
+            .to_list()
+        )
+
+    async def get_recent_by_session(
+        self,
+        session_id: str,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        limit: int = 200,
+    ) -> List[ChatMessage]:
+        """按时间倒序读取会话消息，用于内部纯文本筛选。"""
+        conditions = [ChatMessage.session_id == session_id]
+        if start_time:
+            conditions.append(ChatMessage.created_at >= start_time)
+        if end_time:
+            conditions.append(ChatMessage.created_at <= end_time)
+
+        return (
+            await ChatMessage.find(*conditions)
+            .sort("-created_at")
+            .limit(limit)
+            .to_list()
+        )

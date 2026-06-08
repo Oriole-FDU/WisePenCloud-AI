@@ -9,4 +9,5 @@ class ChatBootstrapSettings(BootstrapSettings):
     APP_NAME: str = "WisePen Chat Service"
     SERVICE_NAME: str = "wisepen-chat-service"
 
+
 bootstrap_settings = ChatBootstrapSettings()

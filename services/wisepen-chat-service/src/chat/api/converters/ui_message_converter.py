@@ -2,6 +2,7 @@
 将 MongoDB 中按 OpenAI 格式存储的 ChatMessage 列表转换为
 Vercel AI SDK 6.x UIMessage 格式（带 parts 数组），供前端 useChat 的 initialMessages 使用。
 """
+
 import json
 from typing import Any, Dict, List, Optional
 
@@ -87,38 +88,48 @@ def _build_assistant_ui_message(group: List[ChatMessage]) -> Optional[Dict[str, 
             parts.append({"type": "step-start"})
 
             if msg.reasoning_content:
-                parts.append({
-                    "type": "reasoning",
-                    "text": msg.reasoning_content,
-                    "state": "done",
-                })
+                parts.append(
+                    {
+                        "type": "reasoning",
+                        "text": msg.reasoning_content,
+                        "state": "done",
+                    }
+                )
 
             if msg.tool_calls:
                 for tc in msg.tool_calls:
-                    tool_name = tc.get("function", {}).get_published_skill("name")
+                    tool_name = tc.get("function", {}).get("name", "unknown")
                     tool_call_id = tc.get("id", "")
-                    raw_args = tc.get("function", {}).get_published_skill("arguments")
+                    raw_args = tc.get("function", {}).get("arguments", "{}")
                     try:
-                        parsed_input = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                        parsed_input = (
+                            json.loads(raw_args)
+                            if isinstance(raw_args, str)
+                            else raw_args
+                        )
                     except (json.JSONDecodeError, TypeError):
                         parsed_input = {}
 
                     tool_output = tool_results.get(tool_call_id, "")
 
-                    parts.append({
-                        "type": f"tool-{tool_name}",
-                        "toolCallId": tool_call_id,
-                        "state": "output-available",
-                        "input": parsed_input,
-                        "output": tool_output,
-                    })
+                    parts.append(
+                        {
+                            "type": f"tool-{tool_name}",
+                            "toolCallId": tool_call_id,
+                            "state": "output-available",
+                            "input": parsed_input,
+                            "output": tool_output,
+                        }
+                    )
 
             if msg.content:
-                parts.append({
-                    "type": "text",
-                    "text": msg.content,
-                    "state": "done",
-                })
+                parts.append(
+                    {
+                        "type": "text",
+                        "text": msg.content,
+                        "state": "done",
+                    }
+                )
 
             last_id = str(msg.id) if msg.id else last_id
 

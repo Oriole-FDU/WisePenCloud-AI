@@ -1,10 +1,19 @@
-from typing import Any, Dict, List, Optional, Tuple
-from common.logger import log_fail, log_error
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role, ChatSession
+from chat.application.prompt_context.current_date import build_current_date_context
+from chat.domain.entities import ChatMessage, ChatSession, Role
 from chat.domain.entities.skill import SkillMeta
-from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
+from chat.domain.repositories import (
+    HotContextRepository,
+    MessageRepository,
+    SessionRepository,
+)
+from common.logger import log_error, log_fail
+
+_CTX_TOKEN_LIMIT = 128000
+_CTX_HIGH_WATERMARK_RATIO = 0.8
+_CTX_LOW_WATERMARK_RATIO = 0.5
+_CTX_FALLBACK_HISTORY_LIMIT = 20
 
 
 class ChatContextAssembler:
@@ -34,14 +43,21 @@ class ChatContextAssembler:
 
         if not recent_messages:
             try:
-                session: Optional[ChatSession] = await self.session_repo.get_session(session_id)
-
-                history = await self.message_repo.list_session_messages(
-                    session_id=session_id,
-                    after=session.summary_updated_at,
-                    limit=settings.CTX_FALLBACK_HISTORY_LIMIT,
+                session: Optional[ChatSession] = await self.session_repo.get_by_id(
+                    session_id
                 )
-
+                if session and session.summary_updated_at:
+                    # 有压缩记录：只拉取压缩时间戳之后的明细，跳过已摘要的历史
+                    history = await self.message_repo.get_after_time(
+                        session_id=session_id,
+                        after=session.summary_updated_at,
+                        limit=_CTX_FALLBACK_HISTORY_LIMIT,
+                    )
+                else:
+                    # 无压缩记录：正常拉取最近 N 条
+                    history = await self.message_repo.get_by_session(
+                        session_id, limit=_CTX_FALLBACK_HISTORY_LIMIT
+                    )
                 if history:
                     await self.hot_context_repo.load_messages(session_id, history)
                     return history
@@ -53,7 +69,9 @@ class ChatContextAssembler:
     async def get_session_summary(self, session_id: str) -> Optional[str]:
         """从 MongoDB 读取当前会话的摘要（如有）"""
         try:
-            session: Optional[ChatSession] = await self.session_repo.get_session(session_id)
+            session: Optional[ChatSession] = await self.session_repo.get_by_id(
+                session_id
+            )
             return session.current_summary if session else None
         except Exception:
             return None
@@ -61,13 +79,12 @@ class ChatContextAssembler:
     async def build_context_window(
         self,
         messages: List[ChatMessage],
-        prompt_budget_tokens: int,
     ) -> Tuple[List[ChatMessage], List[ChatMessage], bool]:
         """
         从后往前累加Token，构建不超过高水位预算的动态滑动窗口。若超过高水位，则触发摘要。
         """
-        high_budget = int(prompt_budget_tokens * settings.CTX_HIGH_WATERMARK_RATIO)
-        low_budget = int(prompt_budget_tokens * settings.CTX_LOW_WATERMARK_RATIO)
+        high_budget = int(_CTX_TOKEN_LIMIT * _CTX_HIGH_WATERMARK_RATIO)
+        low_budget = int(_CTX_TOKEN_LIMIT * _CTX_LOW_WATERMARK_RATIO)
 
         total_token = 0
 
@@ -75,14 +92,18 @@ class ChatContextAssembler:
         messages_keep: List[ChatMessage] = []
 
         for msg in reversed(messages):
-            total_token += msg.token_count or 0
+            total_token += msg.token_count
             if total_token <= low_budget:
                 messages_keep.insert(0, msg)  # 保留在 messages_keep
             else:
-                messages_compress_candidates.insert(0, msg)  # 超出低水位，进入 messages_compress_candidates
+                messages_compress_candidates.insert(
+                    0, msg
+                )  # 超出低水位，进入 messages_compress_candidates
 
         # 当整体 Token 超过高水位时，触发需要压缩的标志
-        needs_compression = total_token >= high_budget # 由于高水位线（如 80%）预留了安全 Buffer，即便把它们全发给模型，也不会触发 Token 溢出报错
+        needs_compression = (
+            total_token >= high_budget
+        )  # 由于高水位线（如 80%）预留了安全 Buffer，即便把它们全发给模型，也不会触发 Token 溢出报错
 
         return messages_keep, messages_compress_candidates, needs_compression
 
@@ -97,7 +118,7 @@ class ChatContextAssembler:
         candidate_skills: Optional[List[SkillMeta]] = None,
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表。"""
-        system_prompt = """
+        base_system_prompt = """
         # Role
         You are the official AI Assistant for the WisePen system. You are helpful, professional, and precise. 
         
@@ -105,12 +126,19 @@ class ChatContextAssembler:
         Answer the user's queries accurately and comprehensively, relying strictly on the provided retrieved context.
         
         # Constraints & Guidelines
-        1. Language Consistency: **ALWAYS respond in the exact same language as the user's prompt.** (e.g., If the user asks in Simplified Chinese, respond in Simplified Chinese; if in English, respond in English).
+        1. Language Consistency: Use the user's explicit response-language request first; otherwise use the language of the user's current message.
         2. Contextual Grounding: Base your answers ONLY on the `<retrieved_context>`. Do not introduce outside information or hallucinate facts. 
         3. Handling Unknowns: If the provided context does not contain the information needed to answer the question, clearly and politely state that you do not have enough information, rather than guessing.
         4. Tone: Maintain a professional, encouraging, and clear tone suitable for users of an advanced educational and productivity tool.
         5. Formatting: Use Markdown (e.g., bullet points, bold text, code blocks) to structure your response for maximum readability.
-        """ # 全局指令
+        """  # 全局指令
+
+        system_prompt = "\n\n".join(
+            [
+                base_system_prompt.strip(),
+                build_current_date_context(),
+            ]
+        )
 
         # 如果有从 Mem0 召回的相关事实，作为补充信息拼接到 System Prompt 中
         if relevant_facts:
@@ -123,17 +151,19 @@ class ChatContextAssembler:
 
         # 如果有摘要，将其注入为第二条 system 消息，位于明细上下文之前
         if session_summary:
-            messages.append(ChatMessage(
-                session_id=session_id,
-                role=Role.SYSTEM,
-                content=f"[Conversation Summary so far]:\n{session_summary}",
-            ))
+            messages.append(
+                ChatMessage(
+                    session_id=session_id,
+                    role=Role.SYSTEM,
+                    content=f"[Conversation Summary so far]:\n{session_summary}",
+                )
+            )
 
         # Skill 候选清单：受控披露，只在 matcher 命中时注入；明确限制"仅在直接相关时加载"
         # 用 skill_id 作机器标识，description 给 LLM 做相关性判断
         if candidate_skills:
             skill_lines = [
-                f"- id=\"{s.skill_id}\": {s.description}" for s in candidate_skills
+                f'- id="{s.skill_id}": {s.description}' for s in candidate_skills
             ]
             skill_block = (
                 "[Available Skills]\n"
@@ -145,29 +175,108 @@ class ChatContextAssembler:
                 "3. After loading, follow the SKILL.md instructions precisely. "
                 "Use `load_skill_asset` to open a specific reference/template only if SKILL.md explicitly says to.\n"
                 "4. If none of the skills apply, simply ignore this list and answer normally.\n\n"
-                "Skills:\n"
-                + "\n".join(skill_lines)
+                "Skills:\n" + "\n".join(skill_lines)
             )
-            messages.append(ChatMessage(
-                session_id=session_id,
-                role=Role.SYSTEM,
-                content=skill_block,
-            ))
+            messages.append(
+                ChatMessage(
+                    session_id=session_id,
+                    role=Role.SYSTEM,
+                    content=skill_block,
+                )
+            )
+        else:
+            messages.append(
+                ChatMessage(
+                    session_id=session_id,
+                    role=Role.SYSTEM,
+                    content=(
+                        "[Tool Discovery]\n"
+                        "No relevant skill was matched for the user's current request. "
+                        "Before answering or attempting the task with only the initially visible tools, "
+                        "you MUST first call `tool_search` to discover whether a more appropriate "
+                        "deferred tool or tool namespace is available. "
+                        "If `tool_search` finds no useful tool, continue with the best available approach."
+                    ),
+                )
+            )
 
         # 经过滑动窗口裁剪后的近期对话明细
-        messages.extend(windowed_messages)
+        # 修复可能存在的不完整 ASSISTANT(tool_calls) / TOOL 消息组。
+        safe_messages = _ensure_tool_message_pairing(windowed_messages)
+        messages.extend(safe_messages)
 
         # 前端上下文注入：作为独立 SYSTEM 消息插入在历史消息和用户问题之间
-        active_states = [s for s in (states or []) if not s.get("disabled", False) and s.get("value")]
+        active_states = [
+            s for s in (states or []) if not s.get("disabled", False) and s.get("value")
+        ]
         if active_states:
-            ctx_lines = [f'<context key="{s["key"]}">\n{s["value"]}\n</context>' for s in active_states]
-            messages.append(ChatMessage(
-                session_id=session_id,
-                role=Role.SYSTEM,
-                content="[Frontend Context]\n" + "\n".join(ctx_lines),
-            ))
+            ctx_lines = [
+                f'<context key="{s["key"]}">\n{s["value"]}\n</context>'
+                for s in active_states
+            ]
+            messages.append(
+                ChatMessage(
+                    session_id=session_id,
+                    role=Role.SYSTEM,
+                    content="[Frontend Context]\n" + "\n".join(ctx_lines),
+                )
+            )
 
         # 用户最新输入的问题
-        messages.append(ChatMessage(session_id=session_id, role=Role.USER, content=user_query))
+        messages.append(
+            ChatMessage(session_id=session_id, role=Role.USER, content=user_query)
+        )
         return messages
 
+
+def _ensure_tool_message_pairing(messages: List[ChatMessage]) -> List[ChatMessage]:
+    """
+    确保消息序列符合 OpenAI tool calling 协议:
+    - 每个 ASSISTANT(tool_calls) 后必须紧跟覆盖全部 tool_call_id 的 TOOL 消息。
+    - 每个 TOOL 消息必须属于前一个 ASSISTANT(tool_calls) 消息组。
+
+    如果 Redis LTRIM、Token 窗口裁剪或脏历史切断了消息组，则丢弃整组不完整
+    ASSISTANT(tool_calls) + TOOL 片段，防止供应商协议校验失败。
+    这是一道防线，防止历史脏数据触发 OpenAI 协议校验错误。
+    """
+    result: List[ChatMessage] = []
+    index = 0
+    while index < len(messages):
+        msg = messages[index]
+        if msg.role != Role.ASSISTANT or not msg.tool_calls:
+            if msg.role != Role.TOOL:
+                result.append(msg)
+            index += 1
+            continue
+
+        expected_ids = _tool_call_ids(msg.tool_calls)
+        if not expected_ids:
+            index += 1
+            continue
+
+        tool_messages: List[ChatMessage] = []
+        seen_ids: Set[str] = set()
+        next_index = index + 1
+        while next_index < len(messages) and messages[next_index].role == Role.TOOL:
+            tool_msg = messages[next_index]
+            tool_call_id = tool_msg.tool_call_id
+            if tool_call_id in expected_ids and tool_call_id not in seen_ids:
+                tool_messages.append(tool_msg)
+                seen_ids.add(tool_call_id)
+            next_index += 1
+
+        if seen_ids == expected_ids:
+            result.append(msg)
+            result.extend(tool_messages)
+
+        index = next_index
+    return result
+
+
+def _tool_call_ids(tool_calls: List[Dict[str, Any]]) -> Set[str]:
+    ids: Set[str] = set()
+    for tool_call in tool_calls:
+        tc_id = tool_call.get("id") if isinstance(tool_call, dict) else None
+        if tc_id:
+            ids.add(tc_id)
+    return ids

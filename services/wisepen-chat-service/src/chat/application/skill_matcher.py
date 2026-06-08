@@ -1,11 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Tuple
 
-from common.logger import log_error, log_fail, log_event
-
-from chat.core.config.app_settings import settings
 from chat.domain.entities.skill import SkillMeta
 from chat.domain.repositories import SkillRepository
+from common.logger import log_error, log_event, log_fail
 
 
 class SkillMatcher(ABC):
@@ -34,7 +32,7 @@ class KeywordSkillMatcher(SkillMatcher):
 
     async def warmup(self) -> None:
         try:
-            metas = await self._skill_repo.list_enabled_skill_metas()
+            metas = await self._skill_repo.list_enabled_meta()
         except Exception as e:
             # 捕获所有异常，保证服务可启动 / 周期刷新不炸
             # 失败时不擦除 self._cache，已有 last-good 继续服务，防止被 Mongo 抖动打回"无 Skill 能力"
@@ -58,7 +56,7 @@ class KeywordSkillMatcher(SkillMatcher):
             return []
 
         lowered = query.lower()
-        scored: List[tuple[int, SkillMeta]] = []
+        scored: List[Tuple[int, SkillMeta]] = []
         for meta in self._cache:
             # 大小写无关 substring：同一 trigger 命中只记 1 分（去重）；命中数越多排名越高
             hits = 0
@@ -73,5 +71,5 @@ class KeywordSkillMatcher(SkillMatcher):
 
         # 先按命中数降序；命中数相同时按 skill_id 字典序稳定
         scored.sort(key=lambda x: (-x[0], x[1].skill_id))
-        top_k = max(1, settings.SKILL_MATCH_TOP_K)
+        top_k = max(1, app_settings.SKILL_MATCH_TOP_K)
         return [m for _, m in scored[:top_k]]

@@ -1,9 +1,17 @@
-# Python 构建产物
+﻿# Python
 __pycache__/
 *.py[cod]
-*$py.class
+*.class
 *.pyo
 *.pyd
+
+# Node.js / 前端
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
 
 # 打包 / 分发
 dist/
@@ -12,9 +20,20 @@ build/
 *.egg
 MANIFEST
 
+# 模型缓存 / 大文件
+.runtime/
+**/.runtime/
+*.safetensors
+*.bin
+*.pth
+*.pt
+*.onnx
+*.pb
+
 # 工具下载产物 / 运行期资源 / 日志
 *.log
 logs/
+**/logs/
 
 # 虚拟环境
 .venv/
@@ -27,18 +46,58 @@ ENV/
 !.env.example
 
 # uv
-# lock 文件应提交，仅忽略 uv 自身缓存
 .uv/
 
-# PyCharm / VS Code
+# IDE
 .idea/
 .vscode/
 *.iml
 
-# mypy / ruff
+# 缓存
 .mypy_cache/
 .ruff_cache/
+.pytest_cache/
 
 # 操作系统
 .DS_Store
 Thumbs.db
+
+# 前端本地目录
+services/wisepen-chat-ui/node_modules/
+services/wisepen-chat-ui/.runtime/
+services/wisepen-chat-ui/dist/
+services/wisepen-chat-ui/build/
+
+# Docker / 部署文件
+Dockerfile
+Dockerfile.*
+dockerfile
+dockerfile.*
+docker-compose.yml
+docker-compose.yaml
+docker-compose.*.yml
+docker-compose.*.yaml
+compose.yml
+compose.yaml
+compose.*.yml
+compose.*.yaml
+docker-*
+docker/
+.docker/
+.dockerignore
+
+# CI / CD
+Jenkinsfile
+Jenkinsfile.*
+
+# Nacos / 本地部署配置
+nacos/
+*.local.yml
+*.local.yaml
+*.dev.yml
+*.dev.yaml
+*.prod.yml
+*.prod.yaml
+
+# 项目文档 / 本地说明文档
+services/wisepen-chat-service/docs/

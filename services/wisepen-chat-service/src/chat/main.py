@@ -1,116 +1,227 @@
-from common.logger import setup_logging_intercept, log_event, log_error
-from chat.core.config.bootstrap_settings import bootstrap_settings
-# 在任何其他 import 之前完成日志桥接，确保 uvicorn/fastapi 日志统一输出到 Loguru
-# LOG_LEVEL 来自 bootstrap_settings（.env），无需等待 Nacos
-setup_logging_intercept(bootstrap_settings.LOG_LEVEL)
+"""应用入口。管理 FastAPI 生命周期、容器初始化和资源清理。"""
 
+from __future__ import annotations
+
+import asyncio
 import os
-import uvicorn
 from contextlib import asynccontextmanager
+from typing import Optional
+
+import uvicorn
+from beanie import init_beanie
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pymongo import AsyncMongoClient
-from beanie import init_beanie
 
-from chat.core.config.nacos import nacos_client_manager
-from common.web.middleware import SecurityHeaderMiddleware
-from common.web.exception_handlers import setup_global_exception_handlers
-
+from chat.api.endpoints import (
+    chat as chat_endpoints,
+    chat_file as chat_file_endpoints,
+    memory as memory_endpoints,
+    model as model_endpoints,
+    # RAG API 暂时关闭：恢复时重新加入 wiring modules。
+    # rag as rag_endpoints,
+    search_provider as search_provider_endpoints,
+    session as session_endpoints,
+)
+from chat.api.router import api_router
+from chat.application.rag.runtime.persistence.entities import (
+    DocumentResourceDocument,
+    NoteResourceDocument,
+)
+from chat.application.rag.runtime.persistence.entities import (
+    RagIndexManifestDocument,
+)
+from chat.application.rag.runtime.persistence.entities.chunk_documents import (
+    RetrieveChunkDocument,
+    SearchChunkDocument,
+)
 from chat.container import container  # noqa: F401 — 触发 dependency_injector wiring，不可删除
 from chat.core.config.app_settings import settings
-from chat.api.router import api_router
-from chat.api.endpoints import chat as chat_endpoints
-from chat.api.endpoints import session as session_endpoints
-from chat.api.endpoints import memory as memory_endpoints
-from chat.api.endpoints import model as model_endpoints
-from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill
+from chat.core.config.bootstrap_settings import bootstrap_settings
+from chat.domain.entities import (
+    ChatMessage,
+    ChatSession,
+    Model,
+    ModelProviderMapping,
+    Provider,
+    Skill,
+    UserSearchProviderConfig,
+)
+from common.cloud.nacos_client import nacos_client_manager
+from common.logger import log_error, log_event, setup_logging_intercept
+from common.web.exception_handlers import setup_global_exception_handlers
+from common.web.middleware import SecurityHeaderMiddleware
+
+# ==============================================================================
+#   Bootstrap: 日志拦截 & 网络环境
+# ==============================================================================
+
+setup_logging_intercept(bootstrap_settings.LOG_LEVEL)
+
+os.environ.update(
+    no_proxy="localhost,127.0.0.1,wisepen-dev-server",
+    NO_PROXY="localhost,127.0.0.1,wisepen-dev-server",
+)
 
 
-# 避免 HTTP 代理拦截内部中间件请求。
-no_proxy = ",".join(filter(None, [
-    os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "",
-    "localhost, 127.0.0.1"
-]))
-os.environ["no_proxy"] = no_proxy
-os.environ["NO_PROXY"] = no_proxy
+# ==============================================================================
+#   Beanie Document Models（用于 init_beanie 注册）
+# ==============================================================================
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # 应用生命周期
-    # --- 启动阶段 ---
-    log_event(f"{bootstrap_settings.APP_NAME} 启动")
+DOCUMENT_MODELS = [
+    ChatSession,
+    ChatMessage,
+    Provider,
+    Model,
+    ModelProviderMapping,
+    Skill,
+    UserSearchProviderConfig,
+    NoteResourceDocument,
+    DocumentResourceDocument,
+    RagIndexManifestDocument,
+    RetrieveChunkDocument,
+    SearchChunkDocument,
+]
 
-    # 初始化 Beanie
-    mongo_client = AsyncMongoClient(settings.MONGODB_URL)
+rag_index_worker_task: Optional[asyncio.Task[None]] = None
+
+
+async def guarded(label: str, coro) -> None:
+    """执行协程；捕获并记录异常，不中断调用链。"""
+    try:
+        await coro
+    except Exception as e:
+        log_error(label, e)
+
+
+# ==============================================================================
+#   应用生命周期：启动
+# ==============================================================================
+
+
+async def start_application() -> None:
+    global rag_index_worker_task
+    log_event(f"{settings.APP_NAME} 启动")
+
+    # ----- 1. 容器资源初始化（HTTP 连接池等）-----
+    await container.init_resources()
+
+    # ----- 2. 启动常驻后台 Scheduler -----
+    # RAG 暂时不启用，避免索引生态阻塞主聊天流程。
+    # container.rag_index_gc_scheduler().start()
+    container.document_temp_file_cleanup_scheduler().start()
+
+    # ----- 3. MongoDB ODM（Beanie）初始化 -----
     await init_beanie(
-        database=mongo_client[settings.MONGODB_DB_NAME],
-        document_models=[ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, Skill],
+        database=container.mongo_client()[settings.MONGODB_DB_NAME],
+        document_models=DOCUMENT_MODELS,
     )
     log_event("Beanie 初始化", db=settings.MONGODB_DB_NAME)
 
-    # 注册 Nacos 服务
-    try:
-        await nacos_client_manager.register_instance()
-    except Exception as e:
-        log_error("Nacos 服务注册", e)
-    
-    # 启动 Kafka Producer
-    kafka_producer = container.kafka_producer()
-    await kafka_producer.start()
+    # RAG worker 暂时不启用，恢复时取消注释该分支。
+    # if settings.RAG_INDEX_WORKER_IN_PROCESS:
+    #     rag_index_worker_task = asyncio.create_task(
+    #         container.rag_index_worker_runner().start()
+    #     )
 
-    # 启动 Skill cache refresher
-    skill_cache_refresher = container.skill_cache_refresher()
-    await skill_cache_refresher.start()
+    # ----- 4. 基础设施连接（Nacos / Kafka / Skill 缓存）-----
+    await guarded("Nacos 服务注册", nacos_client_manager.register_instance())
+    await container.kafka_producer().start()
+    await container.skill_cache_refresher().start()
 
-    # 启动 Skill 资产加载器
-    skill_asset_loader = container.skill_asset_loader()
-    if getattr(skill_asset_loader, "start", None) is not None:
+    # ----- 5. 启动重量级子进程（OCR / 浏览器池）-----
+    await guarded("SkillAssetLoader 启动", container.skill_asset_loader().start())
+    await guarded("DocumentExport BrowserPool 启动", container.document_export_browser_pool().start())
+
+    log_event(f"{settings.APP_NAME} 就绪", port=settings.SERVICE_PORT)
+
+
+# ==============================================================================
+#   应用生命周期：关闭（按启动反向顺序释放）
+# ==============================================================================
+
+
+async def shutdown_application() -> None:
+    global rag_index_worker_task
+    log_event(f"{settings.APP_NAME} 关闭流程开始")
+
+    if rag_index_worker_task is not None:
+        rag_index_worker_task.cancel()
         try:
-            await skill_asset_loader.start()
-        except Exception as e:
-            log_error("SkillAssetLoader 启动", e)
+            await rag_index_worker_task
+        except asyncio.CancelledError:
+            pass
+        finally:
+            rag_index_worker_task = None
 
-    log_event(f"{bootstrap_settings.APP_NAME} 就绪", port=bootstrap_settings.SERVICE_PORT)
+    steps = [
+        ("Skill Cache Refresher",        container.skill_cache_refresher().stop),
+        ("Kafka Producer",               container.kafka_producer().stop),
+        ("SkillAssetLoader",             container.skill_asset_loader().stop),
+        ("OCR Processor",                container.ocr_processor().close),
+        ("Browser Pool",                 container.document_export_browser_pool().stop),
+        ("BrowseInteractTool",           container.browse_interact_tool().close),
+        ("LocalScriptFetcher",           container.local_script_fetcher().close),
+        ("PythonMathSolverTool",         container.python_math_solver_tool().close),
+        ("SageMathClient",               container.sage_runtime_client().close),
+        ("TranslationAssistTool",        container.translation_assist_tool().close),
+        ("Document Cleanup Scheduler",   container.document_temp_file_cleanup_scheduler().close),
+        # RAG 暂时不启用，shutdown 阶段也不要主动实例化 RAG 资源。
+        # ("RAG Index GC Scheduler",       container.rag_index_gc_scheduler().close),
+        # ("RAG Redis Queue",              container.rag_indexing_queue().close),
+        # ("RAG Qdrant Client",            container.rag_qdrant_client().close),
+        # ("RAG Elasticsearch Client",     container.rag_elasticsearch_client().close),
+        # ("RAG ZeroEntropy Client",       container.rag_zero_entropy_client().close),
+        ("RpcClient",                    container.rpc_client().aclose),
+        ("ServiceDiscovery",             container.service_discovery().close),
+    ]
+    for label, fn in steps:
+        await guarded(f"{label} 释放失败", fn())
 
-    # --- 运行阶段 ---
-    yield
+    await guarded("Nacos 服务注销", nacos_client_manager.deregister_instance())
+    await guarded("容器资源释放失败", container.shutdown_resources())
 
-    # --- 关闭阶段 ---
-    log_event(f"{bootstrap_settings.APP_NAME} 关闭")
+    log_event(f"{settings.APP_NAME} 安全退出")
 
-    # 关闭 Skill cache refresher
-    skill_cache_refresher = container.skill_cache_refresher()
-    await skill_cache_refresher.stop()
 
-    # 关闭 Kafka Producer
-    kafka_producer = container.kafka_producer()
-    await kafka_producer.stop()
+# ==============================================================================
+#   FastAPI Lifespan（启动 & 关闭的编排入口）
+# ==============================================================================
 
-    # 关闭 Skill 资产加载器
-    skill_asset_loader = container.skill_asset_loader()
-    if getattr(skill_asset_loader, "stop", None) is not None:
-        try:
-            await skill_asset_loader.stop()
-        except Exception as e:
-            log_error("SkillAssetLoader 关闭", e)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await start_application()
     try:
-        await container.rpc_client().aclose()
-    except Exception as e:
-        log_error("RpcClient 关闭", e)
-    try:
-        await container.service_discovery().close()
-    except Exception as e:
-        log_error("ServiceDiscovery 关闭", e)
+        yield
+    finally:
+        await shutdown_application()
 
-    try:
-        await nacos_client_manager.deregister_instance()
-    except Exception as e:
-        log_error("Nacos 服务注销", e)
 
-container.wire(modules=[chat_endpoints, session_endpoints, memory_endpoints, model_endpoints])  # 注入依赖到路由模块
-app = FastAPI(title=bootstrap_settings.APP_NAME, lifespan=lifespan, docs_url="/docs")
+# ==============================================================================
+#   依赖注入 Wiring（将 container provider 注入到 endpoint 模块）
+# ==============================================================================
 
-# CORS 中间件
+
+container.wire(
+    modules=[
+        chat_endpoints,
+        session_endpoints,
+        memory_endpoints,
+        model_endpoints,
+        # RAG API 暂时关闭：恢复时重新加入 wiring modules。
+        # rag_endpoints,
+        search_provider_endpoints,
+        chat_file_endpoints,
+    ]
+)
+
+
+# ==============================================================================
+#   FastAPI 应用实例 & 中间件
+# ==============================================================================
+
+
+app = FastAPI(title=settings.APP_NAME, lifespan=lifespan, docs_url="/docs")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -118,15 +229,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# 注册安全中间件：校验 X-From-Source，解析 X-User-Id 等网关透传 Headers
 app.add_middleware(SecurityHeaderMiddleware, from_source_secret=settings.FROM_SOURCE_SECRET)
-
-# 注册全局异常处理器：ServiceException / PermissionException / RequestValidationError 统一转为 R 格式
-setup_global_exception_handlers(app, is_dev=bootstrap_settings.IS_DEV)
-
-# 挂载业务路由
+setup_global_exception_handlers(app, is_dev=settings.DEV)
 app.include_router(api_router, prefix="/chat")
+
+
+# ==============================================================================
+#   直接运行入口
+# ==============================================================================
+
 
 if __name__ == "__main__":
     uvicorn.run(
@@ -135,4 +246,6 @@ if __name__ == "__main__":
         port=bootstrap_settings.SERVICE_PORT,
         reload=False,
         workers=1,
+        env_file="./.env",
+        ws="websockets-sansio",
     )

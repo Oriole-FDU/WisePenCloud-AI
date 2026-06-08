@@ -1,7 +1,8 @@
-from typing import Generic, TypeVar, Optional, Any, List
+from typing import Any, Generic, List, Optional, TypeVar
+
 from pydantic import BaseModel
 
-from .enums import ResultCode, IErrorCode
+from .enums import IErrorCode, ResultCode
 
 T = TypeVar("T")
 

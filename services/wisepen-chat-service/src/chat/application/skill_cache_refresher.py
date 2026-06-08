@@ -1,9 +1,10 @@
 import asyncio
 from typing import Optional
 
+from chat.application.skill_matcher import SkillMatcher
 from common.logger import log_error, log_event
 
-from chat.application.skill_matcher import SkillMatcher
+SKILL_CACHE_TTL_SECONDS = 30
 
 
 class SkillCacheRefresher:
@@ -13,7 +14,9 @@ class SkillCacheRefresher:
     之后每 ttl_seconds 调一次 matcher.warmup()，使得用户发布的 Skill 变化能在 TTL 内被当前副本感知
     """
 
-    def __init__(self, matcher: SkillMatcher, ttl_seconds: int) -> None:
+    def __init__(
+        self, matcher: SkillMatcher, ttl_seconds: int = SKILL_CACHE_TTL_SECONDS
+    ) -> None:
         self._matcher = matcher
         self._ttl = max(1, ttl_seconds)
         self._task: Optional[asyncio.Task] = None
@@ -36,7 +39,9 @@ class SkillCacheRefresher:
         # 避免"启动后前 TTL 秒 cache 空窗"的隐患。
         # 失败由 trigger/matcher 内部 catch，不阻塞服务启动。
         await self.trigger()
-        self._task = asyncio.create_task(self._tick_loop(), name="skill-cache-refresher")
+        self._task = asyncio.create_task(
+            self._tick_loop(), name="skill-cache-refresher"
+        )
         log_event("Skill cache refresher 已启动", ttl_seconds=self._ttl)
 
     async def stop(self) -> None:
