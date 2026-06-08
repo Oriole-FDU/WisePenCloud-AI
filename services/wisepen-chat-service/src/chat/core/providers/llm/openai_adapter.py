@@ -1,28 +1,12 @@
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
-
-import tiktoken
+from typing import AsyncGenerator, List, Dict, Optional, Any
 from openai import AsyncOpenAI, BadRequestError
+import tiktoken
 
-from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage
-from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
+from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
-
-_DISABLE_PARALLEL_TOOL_CALL_NAMES: Tuple[str, ...] = ("browse_interact", "web_search")
-
-
-def _should_disable_parallel_tool_calls(tools: Optional[List[Dict[str, Any]]]) -> bool:
-    if not tools:
-        return False
-    disabled_names = set(_DISABLE_PARALLEL_TOOL_CALL_NAMES)
-    for tool in tools:
-        function = tool.get("function")
-        if isinstance(function, dict):
-            name = function.get("name")
-            if isinstance(name, str) and name in disabled_names:
-                return True
-    return False
+from chat.core.config.app_settings import settings
 
 
 class OpenAIAdapter(LLMProvider):
@@ -31,7 +15,7 @@ class OpenAIAdapter(LLMProvider):
             api_key=settings.LLM_API_KEY,
             base_url=settings.LLM_BASE_URL,
             timeout=120.0,
-            max_retries=2,
+            max_retries=2
         )
 
     def _convert_messages(self, messages: List[ChatMessage]) -> List[Dict[str, Any]]:
@@ -52,12 +36,12 @@ class OpenAIAdapter(LLMProvider):
         return formatted
 
     async def chat_completion(
-        self,
-        messages: List[ChatMessage],
-        model_name: str,
-        temperature: float = 0.7,
-        tools: Optional[List[Dict[str, Any]]] = None,
-    ):
+            self,
+            messages: List[ChatMessage],
+            model_name: str,
+            temperature: float = 0.7,
+            tools: Optional[List[Dict[str, Any]]] = None
+    ) -> Any:
         formatted_msgs = self._convert_messages(messages)
 
         # 组装请求参数，忽略 None 值的 tools
@@ -70,9 +54,6 @@ class OpenAIAdapter(LLMProvider):
         if tools:
             kwargs["tools"] = tools
 
-        if _should_disable_parallel_tool_calls(tools):
-            kwargs["parallel_tool_calls"] = False
-
         try:
             response = await self.client.chat.completions.create(**kwargs)
             return response.choices[0].message
@@ -81,20 +62,16 @@ class OpenAIAdapter(LLMProvider):
             # 识别上下文超限错误
             if "context_length_exceeded" in str(e):
                 raise ServiceException(ChatErrorCode.CONTEXT_LIMIT_EXCEEDED)
-            raise ServiceException(
-                ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Bad Request: {e}"
-            )
+            raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Bad Request: {e}")
         except Exception as e:
-            raise ServiceException(
-                ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Provider Error: {e}"
-            )
+            raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Provider Error: {e}")
 
     async def stream_chat_completion(
-        self,
-        messages: List[ChatMessage],
-        model_name: str,
-        temperature: float = 0.7,
-        tools: Optional[List[Dict[str, Any]]] = None,
+            self,
+            messages: List[ChatMessage],
+            model_name: str,
+            temperature: float = 0.7,
+            tools: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncGenerator[Any, None]:
 
         formatted_msgs = self._convert_messages(messages)
@@ -108,9 +85,6 @@ class OpenAIAdapter(LLMProvider):
         if tools:
             kwargs["tools"] = tools
 
-        if _should_disable_parallel_tool_calls(tools):
-            kwargs["parallel_tool_calls"] = False
-
         try:
             response_stream = await self.client.chat.completions.create(**kwargs)
             async for chunk in response_stream:
@@ -121,13 +95,9 @@ class OpenAIAdapter(LLMProvider):
         except BadRequestError as e:
             if "context_length_exceeded" in str(e):
                 raise ServiceException(ChatErrorCode.CONTEXT_LIMIT_EXCEEDED)
-            raise ServiceException(
-                ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Bad Request: {e}"
-            )
+            raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Bad Request: {e}")
         except Exception as e:
-            raise ServiceException(
-                ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Provider Error: {e}"
-            )
+            raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Provider Error: {e}")
 
     async def count_tokens(self, text: str, model_name: str = "gpt-4o") -> int:
         """

@@ -1,1 +1,0 @@
-"""Qdrant persistence implementation package."""

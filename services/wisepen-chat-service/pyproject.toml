@@ -8,83 +8,19 @@ authors = [
     { name = "Jiazheng Sun", email = "jzsun24@m.fudan.edu.cn" }
 ]
 dependencies = [
-    # ==========================================
-    # 1. 核心 Web 框架与微服务基建 (Core & Microservices)
-    # ==========================================
     "fastapi",
-    "uvicorn[standard]",
     "pydantic",
     "pydantic-settings",
+    "uvicorn[standard]",
     "dependency_injector",
+    "litellm",
+    "mem0ai",
+    "openai",
+    "beanie",
+    "redis[asyncio]",
     "nacos-sdk-python",
     "pyyaml",
-    "wisepen-common",
-
-    # ==========================================
-    # 2. 数据库与高性能持久化驱动 (Storage & Vector & Search DB)
-    # ==========================================
-    "beanie",          # MongoDB ODM
-    "redis",           # KV 缓存
-    "qdrant_client",   # 向量数据库
-    "elasticsearch",   # 倒排索引与关键词检索
-    "dnspython",       # 安全解析与基建连接兜底
-
-    # ==========================================
-    # 3. 大模型、记忆门面与 RAG 网关 (LLM, Memory & Gateway)
-    # ==========================================
-    "openai",
-    "litellm",
+    "jieba",
     "zeroentropy",
-    "mem0ai[nlp]",
-
-    # ==========================================
-    # 4. 文档解析、高级 PDF 抽取与网页面料抓取 (Document Parsers & Ingestion)
-    # ==========================================
-    "docling",                 # 多模态文档解析
-    "markitdown",              # 微软官方全格式转 Markdown
-    "pymupdf",                 # 高性能 PDF 基础操作
-    "markdown-it-py",          # MD 渲染与分块辅助
-    "langchain-text-splitters",# 文本切片器
-    "magika",                  # Google AI 深度文件类型检测
-    "steel-sdk",               # 浏览器自动化提取
-    "trafilatura",             # 高性能网页正文抓取
-    "playwright",              # 自动化无头浏览器
-    "beautifulsoup4",
-    # ==========================================
-    # 5. 传统 NLP 与特定业务策略工具 (NLP & Rule-based Tools)
-    # ==========================================
-    "jieba",                   # 传统中文分词 (服务于 BM25/Exact)
-    "rank-bm25",               # 传统检索算法
-
-    # ==========================================
-    # 6. 垂直算法、深度学习与 OCR 生态 (Torch & Paddle Heavy Engines)
-    # ==========================================
-    "torch",                   # 深度学习底层
-    "transformers",            # HuggingFace 模型加载
-    "sentencepiece",           # Tokenizer 基础
-    "sentencex",               # 翻译前句子边界切分
-    "paddleocr",               # 垂直 OCR 提取
-    "paddlepaddle==3.1.1",     # 飞桨深度学习底层
-
-    # ==========================================
-    # 7. 基础科学计算、重度数据处理与安全 (Data Science & Security)
-    # ==========================================
-    "numpy",
-    "scipy",
-    "pandas",
-    "openpyxl",                # Excel 重度读写支持
-    "sympy",                   # 专有业务：符号数学计算与推理
-    "cachetools",              # 运行时内存缓存
-    "cryptography>=48.0.0",    # 凭证底层刚性加解密
-
-    # ==========================================
-    # 8. 可溯源图表渲染 (Provenance-aware Chart Render)
-    # ==========================================
-    "matplotlib",               # Chart Render 唯一渲染后端
-    "seaborn",                   # 普通 session quick chart 风格化绘图；可追溯 chart 不使用
-]
-
-[dependency-groups]
-dev = [
-    "pytest-asyncio>=1.3.0",
+    "wisepen-common",
 ]

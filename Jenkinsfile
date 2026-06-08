@@ -9,7 +9,8 @@ pipeline {
     }
 
     parameters {
-        string(name: 'BRANCH_NAME', defaultValue: 'main', description: '选择需要构建的 Git 分支')
+        string(name: 'BRANCH_NAME', defaultValue: 'main', description: '要构建的 Git 分支')
+        choice(name: 'DEPLOY_MODE', choices: ['prod', 'preview'], description: '部署模式')
     }
 
     stages {
@@ -17,7 +18,14 @@ pipeline {
             steps {
                 echo "开始拉取 ${params.BRANCH_NAME} 分支代码..."
                 checkout scm
+                script {
+                    env.DEPLOY_PROJECT_NAME = params.DEPLOY_MODE == 'preview'
+                            ? "${env.PROJECT_NAME}-preview"
+                            : "${env.PROJECT_NAME}"
+                }
                 echo "代码拉取成功，当前构建版本 TAG: ${IMAGE_TAG}"
+                echo "当前部署模式: ${params.DEPLOY_MODE}"
+                echo "当前镜像项目名: ${DEPLOY_PROJECT_NAME}"
             }
         }
 
@@ -28,7 +36,14 @@ pipeline {
                 stage('Chat Service') {
                     steps {
                         script {
-                            sh "docker build -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-chat:${IMAGE_TAG} -f Dockerfile ."
+                            sh """
+                                docker build \\
+                                    -t ${DOCKER_REGISTRY}/${DEPLOY_PROJECT_NAME}-chat:${IMAGE_TAG} \\
+                                    --build-arg SERVICE_DIR=wisepen-chat-service \\
+                                    --build-arg SERVICE_PKG=chat \\
+                                    --build-arg SERVICE_PORT=9200 \\
+                                    -f Dockerfile .
+                            """
                         }
                     }
                 }
@@ -51,21 +66,26 @@ pipeline {
                     fi
 
                     export APP_VERSION=${IMAGE_TAG}
+                    export PROJECT_NAME=${DEPLOY_PROJECT_NAME}
                     export DOCKER_REGISTRY=${DOCKER_REGISTRY}
                     export NACOS_USERNAME=\${NACOS_USER}
                     export NACOS_PASSWORD=\${NACOS_PWD}
 
-                    # 网络兼容
-                    # 检测到遗留 cloud-infra_cloud-net 时叠加 legacy-net overlay
-                    # 老中间件全部下线后，本脚本可以与docker-compose-app.legacy-net.yml文件、部署脚本中的探测分支一并删除
-                    docker network create wisepen-net 2>/dev/null || true
                     COMPOSE_FILES="-f ${COMPOSE_FILE_PATH}"
-                    if docker network inspect cloud-infra_cloud-net >/dev/null 2>&1; then
-                        echo "检测到遗留网络 cloud-infra_cloud-net，叠加 docker-compose-app.legacy-net.yml"
-                        COMPOSE_FILES="\$COMPOSE_FILES -f docker-compose-app.legacy-net.yml"
+
+                    if [ "${params.DEPLOY_MODE}" = "preview" ]; then
+                        export COMPOSE_PROJECT_NAME=${DEPLOY_PROJECT_NAME}
+                        export CHAT_CONTAINER_NAME=wisepen-chat-service-preview
+                        export CHAT_SERVICE_ALIAS=chat-service
+                        export PROFILE=prod
+                    else
+                        export COMPOSE_PROJECT_NAME=${PROJECT_NAME}
+                        export CHAT_CONTAINER_NAME=wisepen-chat-service
+                        export CHAT_SERVICE_ALIAS=chat-service
+                        export PROFILE=prod
                     fi
 
-                    docker-compose \$COMPOSE_FILES up -d --force-recreate --remove-orphans
+                    docker-compose \$COMPOSE_FILES up -d --remove-orphans
                     """
                 }
             }

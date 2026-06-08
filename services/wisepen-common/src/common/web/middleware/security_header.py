@@ -1,9 +1,8 @@
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-
-from common.core.constants import CommonConstants, SecurityConstants
-from common.gray.context import GrayContextHolder, _gray_context
+from common.core.constants import SecurityConstants, CommonConstants
 from common.security.context import SecurityContextHolder, _security_context
+from common.gray.context import GrayContextHolder, _gray_context
 
 
 class SecurityHeaderMiddleware(BaseHTTPMiddleware):

@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
-
+from typing import List, Dict, Any, Optional
 from chat.domain.entities import ChatMessage
 
 
 class MemoryProvider(ABC):
+
     @abstractmethod
     async def search(
         self,

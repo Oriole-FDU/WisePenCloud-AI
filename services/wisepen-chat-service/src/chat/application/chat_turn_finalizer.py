@@ -1,19 +1,17 @@
-import uuid
+from typing import List, Optional
 from datetime import datetime, timezone
-from typing import List, Optional, Set
+import uuid
+
+from common.logger import log_error
 
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.model import Model, ModelType
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
-from chat.domain.repositories import (
-    HotContextRepository,
-    MessageRepository,
-    SessionRepository,
-)
+from chat.domain.message_lifecycle import MessageLifecycle, PersistenceMode
+from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
 from common.kafka.producer import KafkaProducerClient
-from common.logger import log_error
 
 
 class ChatTurnFinalizer:
@@ -37,9 +35,7 @@ class ChatTurnFinalizer:
         self.hot_context_repo = hot_context_repo
         self.kafka_producer = kafka_producer
 
-    async def _fill_token_counts(
-        self, messages: List[ChatMessage], provider_model_name: str
-    ) -> None:
+    async def _fill_token_counts(self, messages: List[ChatMessage], provider_model_name: str) -> None:
         """批量计算 token_count"""
         for msg in messages:
             if msg.content is None:
@@ -47,9 +43,7 @@ class ChatTurnFinalizer:
             if msg.token_count is None:
                 try:
                     # 调用 llm.count_tokens 计算
-                    msg.token_count = await self.llm.count_tokens(
-                        msg.content, provider_model_name
-                    )
+                    msg.token_count = await self.llm.count_tokens(msg.content, provider_model_name)
                 except Exception:
                     msg.token_count = len(msg.content) // 4  # 降级为 4 字符 1 token
 
@@ -84,45 +78,37 @@ class ChatTurnFinalizer:
             "requestTime": datetime.now(timezone.utc).isoformat(),
         }
 
-        await self.kafka_producer.send(
-            topic=settings.KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value
-        )
+        await self.kafka_producer.send(topic=settings.KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value)
 
     @staticmethod
-    def _redact_ephemeral(new_messages: List[ChatMessage]) -> List[ChatMessage]:
+    def _apply_persistence_policy(new_messages: List[ChatMessage]) -> List[ChatMessage]:
         """
-        Per-message 粒度的 ephemeral 处理，须在任何持久化动作之前调用一次
-        - ASSISTANT 消息标 ephemeral=True：整条丢弃，同时丢弃其关联的所有 TOOL 消息。
-        - TOOL 消息标 ephemeral=True 且其关联的 ASSISTANT 消息未被丢弃：保留消息结构但 content 置换为占位符。
-        - TOOL 消息标 ephemeral=True 且其关联的 ASSISTANT 消息已被丢弃：一并丢弃。
+        Per-message 粒度的持久化策略处理，须在任何持久化动作之前调用一次。
+        - DROP：整条丢弃，避免临时控制指令进入 durable 历史。
+        - REDACT_CONTENT：保留消息结构但替换 content。
+        - PERSIST_FULL / PERSIST_CONTENT：原样保留。
 
-        以确保 SKILL 中 SKILL.md / asset 正文不会进入 durable 历史，后续回合也不会从 Redis / Mongo 读回污染上下文
-        同时保证持久化的消息序列中不会出现没有前置 ASSISTANT(tool_calls) 的孤立 TOOL 消息
+        restore_ref 会被落到 metadata 中，供后续上下文组装恢复临时注入。
+        进入 Redis / Mongo / Memory 的消息一律重置为默认 lifecycle。
         """
-        dropped_tool_call_ids: Set[str] = set()
-        redacted: List[ChatMessage] = []
+        persistable: List[ChatMessage] = []
         for msg in new_messages:
-            if not msg.ephemeral:
-                if msg.role == Role.TOOL and msg.tool_call_id in dropped_tool_call_ids:
-                    continue
-                redacted.append(msg)
+            mode = msg.lifecycle.persistence_mode
+            if mode == PersistenceMode.DROP:
                 continue
-            if msg.role == Role.ASSISTANT:
-                if msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        tc_id = tc.get("id") if isinstance(tc, dict) else None
-                        if tc_id:
-                            dropped_tool_call_ids.add(tc_id)
-                continue
-            if msg.role == Role.TOOL:
-                if msg.tool_call_id in dropped_tool_call_ids:
-                    continue
-                msg.content = f"[Redacted: ephemeral tool '{msg.name or 'unknown'}' scaffolding output]"
-                redacted.append(msg)
-                continue
-            msg.ephemeral = False
-            redacted.append(msg)
-        return redacted
+
+            restore_ref = msg.lifecycle.restore_ref
+            if restore_ref:
+                msg.metadata = dict(msg.metadata or {})
+                msg.metadata["restore_ref"] = restore_ref.model_dump(mode="json")
+
+            if mode == PersistenceMode.REDACT_CONTENT:
+                msg.content = (
+                    f"[Redacted: tool '{msg.name or 'unknown'}' scaffolding output]"
+                )
+            msg.lifecycle = MessageLifecycle()
+            persistable.append(msg)
+        return persistable
 
     async def persist_all(
         self,
@@ -132,10 +118,10 @@ class ChatTurnFinalizer:
         provider_model_name: str,
         new_messages: List[ChatMessage],
         group_id: Optional[str] = None,
-    ) -> None:
-        """后台统一处理所有存储逻辑: ephemeral 裁剪 → Redis 追加 → MongoDB 落盘 → Memory 摄入 → Token 计费"""
-        # 先裁剪 ephemeral，下游所有持久化都看这份结果
-        persistable = self._redact_ephemeral(new_messages)
+    ) -> List[ChatMessage]:
+        """后台统一处理所有存储逻辑: 生命周期策略裁剪 → Redis 追加 → MongoDB 落盘 → Memory 摄入 → Token 计费"""
+        # 先应用生命周期持久化策略，下游所有持久化都看这份结果
+        persistable = self._apply_persistence_policy(new_messages)
 
         await self._fill_token_counts(persistable, provider_model_name)
 
@@ -148,8 +134,7 @@ class ChatTurnFinalizer:
         # MongoDB 落盘
         try:
             for msg in persistable:
-                if msg.content:
-                    msg.build_search_tokens()  # 构建搜索向量 (缓解中文分词问题)
+                if msg.content: msg.build_search_tokens() # 构建搜索向量 (缓解中文分词问题)
 
             await self.message_repo.save_many(persistable)
         except Exception as e:
@@ -162,13 +147,15 @@ class ChatTurnFinalizer:
             log_error("长期记忆写入", e, user=user_id)
 
         # 发出 token 计费
-        await self._send_token_billing(
-            user_id=user_id, model_id=model_id, messages=persistable, group_id=group_id
-        )
+        await self._send_token_billing(user_id=user_id,
+                                        model_id=model_id,
+                                        messages=persistable,
+                                        group_id=group_id)
+        return persistable
 
-    async def auto_generate_title(
-        self, session_id: str, user_id: str, user_query: str
-    ) -> None:
+
+
+    async def auto_generate_title(self, session_id: str, user_id: str, user_query: str) -> None:
         """首轮对话后自动为 'New Chat' 会话生成简洁标题"""
         try:
             session = await self.session_repo.get_by_id(session_id)
@@ -180,13 +167,13 @@ class ChatTurnFinalizer:
                     session_id=session_id,
                     role=Role.SYSTEM,
                     content="You are a conversation title generator. Generate a concise conversation title based on the user's query."
-                    "Requirements: Maximum 20 words, no punctuation, no quotation marks, and output the title text directly.",
+                    "Requirements: Maximum 20 words, no punctuation, no quotation marks, and output the title text directly."
                 ),
                 ChatMessage(
                     session_id=session_id,
                     role=Role.USER,
                     content=user_query,
-                ),
+                )
             ]
 
             response = await self.llm.chat_completion(
@@ -196,7 +183,7 @@ class ChatTurnFinalizer:
                 api_base=settings.LLM_BASE_URL,
                 api_key=settings.LLM_API_KEY,
             )
-            new_title = (response.content or "").strip().strip('"\'""')
+            new_title = (response.content or "").strip().strip('"\'""''')
             if not new_title:
                 return
 
@@ -204,16 +191,16 @@ class ChatTurnFinalizer:
         except Exception as e:
             log_error("自动生成标题", e, session=session_id)
 
-    async def summarize_and_compress(
+    async def generate_updated_summary(
         self,
         session_id: str,
-        messages_keep: List[ChatMessage],
         messages_compress_candidates: List[ChatMessage],
         existing_summary: Optional[str],
-    ) -> None:
-        """
-        增量摘要压缩
-        """
+    ) -> Optional[str]:
+        """生成增量摘要文本；只负责调用摘要模型，不做持久化。"""
+        if not messages_compress_candidates:
+            return None
+
         # 构建摘要输入，将 existing_summary（上一轮摘要，如有）作为前缀，拼接 messages_compress_candidates 明细，让轻量模型生成覆盖范围更广的全局摘要
         oldest_text = "\n".join(
             [f"{m.role.value}: {m.content}" for m in messages_compress_candidates]
@@ -223,7 +210,9 @@ class ChatTurnFinalizer:
             user_content_parts.append(
                 f"[Existing Summary of earlier conversation]:\n{existing_summary}"
             )
-        user_content_parts.append(f"[New conversation to incorporate]:\n{oldest_text}")
+        user_content_parts.append(
+            f"[New conversation to incorporate]:\n{oldest_text}"
+        )
         user_content_parts.append(
             "Please generate a single, updated summary that incorporates both the existing summary "
             "and the new conversation above."
@@ -238,13 +227,13 @@ class ChatTurnFinalizer:
                     "Produce a concise but complete summary preserving key facts, "
                     "user preferences, decisions, and important context. "
                     "Output only the summary text, no preamble or labels."
-                ),
+                )
             ),
             ChatMessage(
                 session_id=session_id,
                 role=Role.USER,
-                content="\n\n".join(user_content_parts),
-            ),
+                content="\n\n".join(user_content_parts)
+            )
         ]
 
         try:
@@ -258,17 +247,30 @@ class ChatTurnFinalizer:
             new_summary = message_response.content or ""
         except Exception as e:
             log_error("摘要生成", e, session=session_id)
-            return
+            return None
 
         if not new_summary.strip():
+            return None
+
+        return new_summary
+
+    async def apply_compression_result(
+        self,
+        session_id: str,
+        current_summary: str,
+        summary_updated_at: datetime,
+        messages_keep: List[ChatMessage],
+    ) -> None:
+        """应用已生成的摘要：更新 session summary，并用保留明细重载 Redis。"""
+        if not current_summary.strip():
             return
 
         # 持久化新摘要到 MongoDB，同时写入压缩时间戳
         try:
-            await self.session_repo.update_summary(
+            await self.session_repo.update_session_summary(
                 session_id=session_id,
-                current_summary=new_summary,
-                summary_updated_at=datetime.now(timezone.utc),
+                current_summary=current_summary,
+                summary_updated_at=summary_updated_at,
             )
         except Exception as e:
             log_error("摘要持久化", e, session=session_id)
@@ -281,3 +283,32 @@ class ChatTurnFinalizer:
             )
         except Exception as e:
             log_error("Redis 上下文重载", e, session=session_id)
+
+    async def summarize_and_compress(
+        self,
+        session_id: str,
+        messages_keep: List[ChatMessage],
+        messages_compress_candidates: List[ChatMessage],
+        existing_summary: Optional[str],
+    ) -> None:
+        """
+        增量摘要压缩
+        """
+        new_summary = await self.generate_updated_summary(
+            session_id=session_id,
+            messages_compress_candidates=messages_compress_candidates,
+            existing_summary=existing_summary,
+        )
+        if not new_summary:
+            return
+
+        summary_updated_at = max(
+            (m.created_at for m in messages_compress_candidates),
+            default=datetime.now(timezone.utc),
+        )
+        await self.apply_compression_result(
+            session_id=session_id,
+            current_summary=new_summary,
+            summary_updated_at=summary_updated_at,
+            messages_keep=messages_keep,
+        )

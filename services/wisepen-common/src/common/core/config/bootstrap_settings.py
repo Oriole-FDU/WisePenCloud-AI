@@ -1,5 +1,4 @@
 from typing import Literal, Optional
-
 from dotenv import find_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -18,7 +17,6 @@ class BootstrapSettings(BaseSettings):
     # 服务身份（子类硬编码覆盖）
     APP_NAME: str = "WisePen Unnamed Service (Python)"
     SERVICE_NAME: str = "wisepen-unnamed-service-py"
-    SERVICE_VERSION: str = "0.1.0"
 
     # 服务监听
     SERVICE_HOST: str = "127.0.0.1"
@@ -30,6 +28,10 @@ class BootstrapSettings(BaseSettings):
     # Profile
     # 本机起服务保持 dev，容器/Jenkins 部署时由 docker compose 直接覆盖为 prod
     PROFILE: Literal["dev", "prod"] = "dev"
+
+    # 开发者配置
+    DEVELOPER_ENABLE: bool = False
+    DEVELOPER_NAME: str | None = None
 
     # Nacos 接入
     NACOS_SERVER_ADDR: str

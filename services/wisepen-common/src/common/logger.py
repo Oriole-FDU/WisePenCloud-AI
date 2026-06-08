@@ -1,9 +1,8 @@
-import logging
 import sys
-import warnings
+import logging
 from typing import Any
-
 from loguru import logger
+
 
 # 全局 Loguru Sink 配置（整个进程只注册一次）
 logger.remove()  # 移除默认 sink
@@ -15,39 +14,11 @@ logger.add(
 )
 
 
-SUPPRESSED_THIRD_PARTY_LOGGERS = (
-    "ddgs",
-    "httpx",
-    "httpcore",
-    "mem0",
-    "litellm",
-    "courlan",
-    "htmldate",
-    "trafilatura",
-)
-
-SUPPRESSED_LOG_PATTERNS = (
-    "predates v3 hybrid search",
-    "Failed to fetch remote model cost map",
-    "missing link attribute",
-)
-
-SUPPRESSED_WARNINGS = (
-    "pkg_resources is deprecated",
-)
-
-for msg in SUPPRESSED_WARNINGS:
-    warnings.filterwarnings("ignore", message=msg)
-
-
 class _InterceptHandler(logging.Handler):
     """将标准 logging（uvicorn / FastAPI / third-party）接管到 Loguru"""
 
     def emit(self, record: logging.LogRecord):
         try:
-            msg = record.getMessage()
-            if any(pattern in msg for pattern in SUPPRESSED_LOG_PATTERNS):
-                return
             level = logger.level(record.levelname).name
         except ValueError:
             level = record.levelno
@@ -82,9 +53,6 @@ def setup_logging_intercept(log_level: str = "INFO"):
         log.handlers = [_InterceptHandler()]
         log.propagate = False
 
-    for name in SUPPRESSED_THIRD_PARTY_LOGGERS:
-        logging.getLogger(name).setLevel(logging.ERROR)
-
 
 def fmt(**fields: Any) -> str:
     """
@@ -96,37 +64,28 @@ def fmt(**fields: Any) -> str:
     return f" | {parts}"
 
 
-def _caller_module() -> str:
-    frame = sys._getframe(2)
-    name = frame.f_globals.get("__name__", "?")
-    return name.rsplit(".", 1)[-1] if name else "?"
-
-
 def log_ok(op: str, **fields: Any) -> None:
     """
     操作成功（INFO）
-    格式："{module} | {op}成功 | k=v ..."
+    格式："{op}成功 | k=v ..."
     """
-    logger.opt(depth=1).info(f"{_caller_module()} | {op}成功{fmt(**fields)}")
+    logger.opt(depth=1).info(f"{op}成功{fmt(**fields)}")
 
 
 def log_fail(op: str, error: Any, **fields: Any) -> None:
     """
     操作失败，预期内的可恢复降级（WARNING）
-    格式："{module} | {op}失败 | k=v ...: {error}"
+    格式："{op}失败 | k=v ...: {error}"
     """
-    logger.opt(depth=1).warning(f"{_caller_module()} | {op}失败{fmt(**fields)}: {error}")
+    logger.opt(depth=1).warning(f"{op}失败{fmt(**fields)}: {error}")
 
 
 def log_error(op: str, error: Any, **fields: Any) -> None:
     """
     操作异常，非预期的系统故障（ERROR）
-    格式："{module} | {op}异常 | k=v ...: {error}"
+    格式："{op}异常 | k=v ...: {error}"
     """
-    logger.opt(
-        depth=1,
-        exception=error if isinstance(error, BaseException) else None,
-    ).error(f"{_caller_module()} | {op}异常{fmt(**fields)}: {error}")
+    logger.opt(depth=1).error(f"{op}异常{fmt(**fields)}: {error}")
 
 
 def log_event(event: str, **fields: Any) -> None:

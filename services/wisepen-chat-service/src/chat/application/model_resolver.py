@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from chat.domain.entities import ModelProviderMapping, Provider
+from common.logger import log_error
+from chat.domain.entities import Provider, ModelProviderMapping
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 
@@ -9,7 +10,6 @@ from common.core.exceptions import ServiceException
 @dataclass(frozen=True)
 class ResolvedModel:
     """ModelResolver 的解析结果，包含调用供应商 API 所需的全部信息"""
-
     provider_model_name: str
     api_base_url: str
     api_key: str
