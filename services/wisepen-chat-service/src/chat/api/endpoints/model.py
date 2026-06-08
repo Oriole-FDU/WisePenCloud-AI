@@ -1,9 +1,9 @@
 from fastapi import APIRouter
 
-from chat.domain.entities import ModelType
-from chat.domain.entities.model import Model
 from chat.api.schemas.model import ModelInfo, ModelsResponse
 from chat.core.config.app_settings import settings
+from chat.domain.entities import ModelType
+from chat.domain.entities.model import Model
 from common.core.domain import R
 
 router = APIRouter()
@@ -35,8 +35,10 @@ async def get_models():
         else:
             other_models.append(model_info)
 
-    return R.success(data=ModelsResponse(
-        standard_models=standard_models,
-        advanced_models=advanced_models,
-        other_models=other_models,
-    ))
+    return R.success(
+        data=ModelsResponse(
+            standard_models=standard_models,
+            advanced_models=advanced_models,
+            other_models=other_models,
+        )
+    )

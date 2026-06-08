@@ -1,9 +1,11 @@
 import json
-import redis.asyncio as redis
 from typing import List
-from chat.domain.repositories import HotContextRepository
-from chat.domain.entities import ChatMessage
+
+import redis.asyncio as redis
+
 from chat.core.config.app_settings import settings
+from chat.domain.entities import ChatMessage
+from chat.domain.repositories import HotContextRepository
 
 
 class RedisHotContext(HotContextRepository):
@@ -20,7 +22,9 @@ class RedisHotContext(HotContextRepository):
             for msg in messages
         ]
 
-    async def append_messages(self, session_id: str, messages: List[ChatMessage], max_length: int = 50) -> None:
+    async def append_messages(
+        self, session_id: str, messages: List[ChatMessage], max_length: int = 50
+    ) -> None:
         key = self._get_key(session_id)
         serialized = self._serialize(messages)
         async with self.redis.pipeline(transaction=True) as pipe:
@@ -36,14 +40,14 @@ class RedisHotContext(HotContextRepository):
 
     async def load_messages(self, session_id: str, messages: List[ChatMessage]) -> None:
         """将历史明细批量写入 Redis，重建热缓存。"""
-        if not messages:
-            return
         key = self._get_key(session_id)
         serialized = self._serialize(messages)
         async with self.redis.pipeline(transaction=True) as pipe:
             await pipe.delete(key)
-            await pipe.rpush(key, *serialized)
-            await pipe.expire(key, self.ttl)
+            if serialized:
+                await pipe.rpush(key, *serialized)
+                await pipe.expire(key, self.ttl)
             await pipe.execute()
 
-
+    async def clear(self, session_id: str) -> None:
+        await self.redis.delete(self._get_key(session_id))

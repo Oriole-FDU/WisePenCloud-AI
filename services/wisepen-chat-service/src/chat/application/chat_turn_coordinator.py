@@ -1,42 +1,40 @@
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Optional, List, Dict, Any
-from fastapi import BackgroundTasks
-from common.logger import log_error
+from typing import Any, Dict, List, Optional
 
-from chat.core.config.app_settings import settings
+from fastapi import BackgroundTasks
+
+from chat.api.vercel_sse_mapper import to_vercel_sse
+from chat.application.chat_context_assembler import ChatContextAssembler
+from chat.application.chat_turn_finalizer import ChatTurnFinalizer
+from chat.application.model_resolver import ModelResolver
+from chat.application.query_loop_runtime import (
+    QueryLoopRuntime,
+    ReasoningDeltaEvent,
+    StepStartEvent,
+    TextDeltaEvent,
+)
+from chat.application.skill_matcher import SkillMatcher
+from chat.application.tool_output_aspect import ToolOutputAspect
+from chat.application.tool_registry import ToolRegistry
+from chat.application.tools.web.services.web_search.enums import ProviderMode
+from chat.application.tools.web.services.web_search.provider_policy.service import (
+    SearchProviderConfig,
+    SearchProviderConfigService,
+)
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
-from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, SkillRepository
-from common.core.exceptions import ServiceException
-from chat.application.chat_context_assembler import ChatContextAssembler
-from chat.application.query_loop_runtime import (
-    QueryLoopRuntime,
-    StepStartEvent,
-    TextDeltaEvent,
-    ReasoningDeltaEvent,
+from chat.domain.repositories import (
+    HotContextRepository,
+    MessageRepository,
+    SessionRepository,
 )
-from chat.api.vercel_sse_mapper import to_vercel_sse
-from chat.application.chat_turn_finalizer import ChatTurnFinalizer
-from chat.application.model_resolver import ModelResolver
-from chat.application.skill_matcher import SkillMatcher
-from chat.application.tools.tool_registry import ToolRegistry
+from common.core.exceptions import ServiceException
 from common.kafka.producer import KafkaProducerClient
-
+from common.logger import log_error
 
 # Skill 脚手架工具的名字集合：Registry 内部它们 reserved=True 默认隐藏
-# 只有存在可用 skill 时 Coordinator 把本集合作为 `expose` 传入 derive()，从而解禁 schema
-_SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
-_HISTORY_SEARCH_TOOL_NAMES = frozenset({"search_historical_messages"})
-
-
-@dataclass(frozen=True)
-class PromptAssemblyResult:
-    messages_for_llm: List[ChatMessage]
-    messages_keep_for_hot_context: List[ChatMessage]
-    precomputed_summary: Optional[str]
-    summary_updated_at: Optional[datetime]
+# 只有 skill 命中时 Coordinator 把本集合作为 `expose` 传入 derive()，从而解禁 schema
+SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
 
 
 class ChatTurnCoordinator:
@@ -46,17 +44,18 @@ class ChatTurnCoordinator:
     """
 
     def __init__(
-            self,
-            llm: LLMProvider,
-            memory: MemoryProvider,
-            model_resolver: ModelResolver,
-            session_repo: SessionRepository,
-            message_repo: MessageRepository,
-            hot_context_repo: HotContextRepository,
-            tool_registry: ToolRegistry,
-            kafka_producer: KafkaProducerClient,
-            skill_matcher: SkillMatcher,
-            skill_repo: SkillRepository,
+        self,
+        llm: LLMProvider,
+        memory: MemoryProvider,
+        model_resolver: ModelResolver,
+        session_repo: SessionRepository,
+        message_repo: MessageRepository,
+        hot_context_repo: HotContextRepository,
+        tool_registry: ToolRegistry,
+        kafka_producer: KafkaProducerClient,
+        skill_matcher: SkillMatcher,
+        tool_output_aspect: ToolOutputAspect,
+        search_provider_config_service: SearchProviderConfigService | None = None,
     ):
         self._memory = memory
         self._model_resolver = model_resolver
@@ -64,102 +63,87 @@ class ChatTurnCoordinator:
             message_repo=message_repo,
             session_repo=session_repo,
             hot_context_repo=hot_context_repo,
-            skill_repo=skill_repo,
         )
         self._tool_registry = tool_registry
-        self._llm = llm
-        self._query_loop_runtime = QueryLoopRuntime(llm=llm)
+        self._query_loop_runtime = QueryLoopRuntime(
+            llm=llm,
+            tool_output_aspect=tool_output_aspect,
+        )
         self._turn_finalizer = ChatTurnFinalizer(
-            llm=llm, memory=memory,
-            message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo,
-            kafka_producer=kafka_producer
+            llm=llm,
+            memory=memory,
+            message_repo=message_repo,
+            session_repo=session_repo,
+            hot_context_repo=hot_context_repo,
+            kafka_producer=kafka_producer,
         )
         self._skill_matcher = skill_matcher
-
-    @staticmethod
-    def _group_history_messages(messages: List[ChatMessage]) -> List[List[ChatMessage]]:
-        groups: List[List[ChatMessage]] = []
-        current: List[ChatMessage] = []
-        for msg in sorted(messages, key=lambda m: m.created_at):
-            if msg.role == Role.USER and current:
-                groups.append(current)
-                current = [msg]
-            else:
-                current.append(msg)
-        if current:
-            groups.append(current)
-        return groups
-
-    async def _count_final_prompt_tokens(
-        self,
-        messages: List[ChatMessage],
-        tool_schemas: List[Dict[str, Any]],
-        model_name: str,
-    ) -> int:
-        text = QueryLoopRuntime._serialize_prompt_for_counting(messages, tool_schemas)
-        return await self._llm.count_tokens(text, model_name)
+        self._search_provider_config_service = search_provider_config_service
 
     # -------------------------------------------------------------------------
     # 公共入口
     # -------------------------------------------------------------------------
     async def handle_chat(
-            self,
-            user_id: str,
-            session_id: str,
-            user_query: str,
-            background_tasks: BackgroundTasks,
-            model_id: Optional[int] = None,
-            states: Optional[List[Dict[str, Any]]] = None,
+        self,
+        user_id: str,
+        session_id: str,
+        user_query: str,
+        background_tasks: BackgroundTasks,
+        model_id: Optional[int] = None,
+        states: Optional[List[Dict[str, Any]]] = None,
     ):
-        model_id = model_id or settings.DEFAULT_MODEL_ID
-
-        # [Model Resolve] 通过映射表查找首选供应商，获取实际模型名和 API 凭证
         resolved = await self._model_resolver.resolve(model_id)
 
         # [Retrieval - 短期记忆] 从 Redis 读取最近对话, 如果 Redis 缓存失效（Cache Miss），会自动从 MongoDB 回填最近的 N 条历史 （可配置），确保对话连贯性。
-        recent_messages = await self._context_assembler.get_or_repopulate_hot_context(session_id)
+        recent_messages = await self._context_assembler.get_or_repopulate_hot_context(
+            session_id
+        )
 
         # [Retrieval - 长期记忆] 从 Memory 按相似度阈值召回跨会话事实 (此处实现是Mem0)
         relevant_facts = await self._memory.search(
-            user_id=user_id, query=user_query, limit=10,
+            user_id=user_id,
+            query=user_query,
+            limit=10,
             score_threshold=0.6,  # 低质量召回直接丢弃，防止噪声污染上下文
         )
 
         # 会话的历史摘要
         session_summary = await self._context_assembler.get_session_summary(session_id)
         # [Token Window] 从后往前累加 Token，超过高水位时将 messages_compress_candidates 压缩为会话的历史摘要（本轮结束时）
-        messages_keep, messages_compress_candidates, needs_compression = await self._context_assembler.build_context_window(recent_messages)
+        (
+            messages_keep,
+            messages_compress_candidates,
+            needs_compression,
+        ) = await self._context_assembler.build_context_window(recent_messages)
+        windowed_messages = messages_compress_candidates + messages_keep
 
-        tool_context: dict[str, Any] = {
+        search_config = SearchProviderConfig(provider_mode=ProviderMode.DEFAULT)
+        if self._search_provider_config_service is not None:
+            search_config = await self._search_provider_config_service.runtime_context(
+                user_id=user_id,
+            )
+
+        tool_context: Dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
-            "turn_loaded_files": set(),
+            "search_config": search_config,
         }
 
-        # [Skill Discovery] 注入当前会话可用 Skill 的轻量 metadata，由 LLM 决定是否调用 load_skill。
-        # 不再用字符串 triggers 预筛，避免关键词未命中导致 Skill 无法被模型看见。
-        available_skills = self._skill_matcher.match(user_query)
-        expose_tool_name_set = set()
-        if available_skills:
+        # [Skill Match] 预筛当前 query 可能相关的 Skill，命中才暴露 schema + 注入 Available Skills
+        candidate_skills = self._skill_matcher.match(user_query)
+        expose_tool_name_set = None
+        if candidate_skills:
             # 解禁 Registry 里默认隐藏的 skill 脚手架工具（reserved=True）
-            expose_tool_name_set.update(_SKILL_TOOL_NAMES)
-            tool_context["allowed_skill_ids"] = [s.skill_id for s in available_skills]
-
-        # 历史搜索工具默认隐藏。只有当前会话已经有摘要（说明早期明细发生过压缩）时，
-        # 才解禁给模型，避免短会话/未压缩会话里频繁冗余检索。
-        history_search_disabled = not bool(session_summary)
-        if not history_search_disabled:
-            expose_tool_name_set.update(_HISTORY_SEARCH_TOOL_NAMES)
-
-        expose_tool_name_set = expose_tool_name_set or None
+            expose_tool_name_set = set(SKILL_TOOL_NAMES)
+            tool_context["allowed_skill_ids"] = [s.skill_id for s in candidate_skills]
 
         # [Tool Scope] 派生本请求的工具视图快照
-        # expose_tool_name_set 仅在满足系统条件时解禁 reserved 工具，否则它们保持隐藏
+        # expose_tool_name_set 仅在 skill 命中时解禁 load_skill系列，未命中时它们保持隐藏
         # runtime_discovered_tools 预留给"运行时动态发现的工具"（如 Skill bundle 自带 tools），暂时留空
         # allow_tool_name_set/deny_tool_name_set 预留给未来"用户级工具偏好"接入，暂时留空
         tool_scope = self._tool_registry.derive(
             session_id=session_id,
-            tool_context=tool_context, 
+            tool_context=tool_context,
             runtime_discovered_tools=None,
             expose_tool_name_set=expose_tool_name_set,
             allow_tool_name_set=None,
@@ -168,9 +152,13 @@ class ChatTurnCoordinator:
 
         # [Context Construction] 将系统提示词、Mem0 检索到的事实、会话的历史摘要、前端上下文以及窗口内的明细消息组装成 LLM 所需的格式
         messages_for_llm = self._context_assembler.assemble_prompt(
-            session_id, user_query, messages_keep+messages_compress_candidates, relevant_facts, session_summary,
+            session_id,
+            user_query,
+            windowed_messages,
+            relevant_facts,
+            session_summary,
             states=states,
-            available_skills=available_skills or None,
+            candidate_skills=candidate_skills or None,
         )
 
         # 记录进入 Agent 循环前的列表长度
@@ -178,7 +166,9 @@ class ChatTurnCoordinator:
 
         # 在流式推理之前构造 user_msg，确保 created_at 早于所有中间消息
         user_msg = ChatMessage(
-            session_id=session_id, role=Role.USER, content=user_query,
+            session_id=session_id,
+            role=Role.USER,
+            content=user_query,
             metadata={"states": states} if states else {},
         )
 
@@ -217,7 +207,9 @@ class ChatTurnCoordinator:
         #   - _turn_finalizer.summarize_and_compress；调用轻量级模型生成并更新会话的全局摘要
         if background_tasks is not None:
             assistant_msg = ChatMessage(
-                session_id=session_id, role=Role.ASSISTANT, content=full_response_content,
+                session_id=session_id,
+                role=Role.ASSISTANT,
+                content=full_response_content,
                 reasoning_content=full_reasoning_content or None,
                 model_id=model_id,
             )
@@ -226,13 +218,17 @@ class ChatTurnCoordinator:
 
             background_tasks.add_task(
                 self._turn_finalizer.persist_all,
-                user_id, session_id, model_id,
+                user_id,
+                session_id,
+                model_id,
                 resolved.provider_model_name,
-                messages_to_persist
+                messages_to_persist,
             )
             background_tasks.add_task(
                 self._turn_finalizer.auto_generate_title,
-                session_id, user_id, user_query
+                session_id,
+                user_id,
+                user_query,
             )
             if needs_compression:
                 background_tasks.add_task(
@@ -240,5 +236,5 @@ class ChatTurnCoordinator:
                     session_id,
                     messages_keep + messages_to_persist,
                     messages_compress_candidates,
-                    session_summary
+                    session_summary,
                 )

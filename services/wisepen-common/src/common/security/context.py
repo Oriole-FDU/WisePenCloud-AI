@@ -1,9 +1,9 @@
 import json
 from contextvars import ContextVar
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
-from common.core.domain import IdentityType, GroupRoleType
-from .exceptions import PermissionException, PermissionErrorCode
+from common.core.domain import GroupRoleType, IdentityType
+from .exceptions import PermissionErrorCode, PermissionException
 
 _security_context: ContextVar[Dict[str, Any]] = ContextVar("security_context", default={})
 

@@ -1,12 +1,14 @@
 from datetime import datetime, timezone
 from typing import Optional
+
 from beanie import Document
 from pydantic import Field
-from pymongo import IndexModel, ASCENDING, DESCENDING
+from pymongo import ASCENDING, DESCENDING, IndexModel
 
 
 class ChatSession(Document):
     """会话实体（Beanie Document，映射到 chat_sessions 集合）"""
+
     user_id: str
     title: str = "New Chat"
     is_pinned: bool = False

@@ -1,17 +1,21 @@
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 
 class ChatRequest(BaseModel):
     """
     [DTO] 聊天请求传输对象。
     """
-    session_id: str = Field(..., description="会话ID")
 
-    query: str = Field(..., description="用户问题")
+    session_id: StrictStr = Field(..., description="会话ID")
 
-    model: Optional[int] = Field(default=None, description="模型ID")
+    query: StrictStr = Field(..., description="用户问题")
 
-    states: Optional[List[Dict[str, Any]]] = Field(default=None, description="上下文状态列表")
+    model: Optional[StrictInt] = Field(default=None, description="模型ID")
 
-    model_config = {"extra": "ignore"}
+    states: Optional[List[Dict[str, Any]]] = Field(
+        default=None, description="上下文状态列表"
+    )
+
+    model_config = ConfigDict(extra="forbid")

@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RAG 链路数据模型与流转图</title>
+  <style>
+    :root {
+      --ink: #111827;
+      --muted: #617083;
+      --paper: #f4f7fb;
+      --card: #ffffff;
+      --line: #d9e2ef;
+      --blue: #2563eb;
+      --blue-dark: #1d4ed8;
+      --cyan: #0e7490;
+      --green: #047857;
+      --amber: #b45309;
+      --red: #b91c1c;
+      --purple: #6d28d9;
+      --shadow: 0 24px 70px rgba(15, 23, 42, .16);
+      --soft-blue: #eef5ff;
+      --soft-green: #ecfdf5;
+      --soft-amber: #fff7ed;
+      --soft-purple: #f5f3ff;
+      --soft-red: #fef2f2;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 20% 0%, rgba(37, 99, 235, .10), transparent 32%),
+        radial-gradient(circle at 90% 8%, rgba(109, 40, 217, .09), transparent 28%),
+        linear-gradient(180deg, #fff 0%, var(--paper) 45%, #eaf0f8 100%);
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.58;
+    }
+    header {
+      padding: 36px 5vw 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, .88);
+      backdrop-filter: blur(10px);
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(34px, 4.6vw, 64px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 0 0 16px;
+      font-size: clamp(26px, 3vw, 42px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+    h3 {
+      margin: 0 0 10px;
+      font-size: 22px;
+      line-height: 1.18;
+    }
+    p { margin: 0 0 12px; }
+    code {
+      padding: 2px 6px;
+      border: 1px solid #dfe7f2;
+      border-radius: 6px;
+      background: #f5f8fc;
+      font-family: Consolas, "JetBrains Mono", monospace;
+      font-size: .92em;
+    }
+    .lead {
+      max-width: 1120px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+    .progress {
+      height: 6px;
+      margin-top: 20px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e7edf7;
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--blue), var(--green));
+      transition: width .22s ease;
+    }
+    .deck {
+      width: min(1360px, calc(100vw - 36px));
+      margin: 26px auto 46px;
+    }
+    .viewer {
+      position: relative;
+      min-height: 860px;
+    }
+    .page {
+      display: none;
+      min-height: 860px;
+      padding: 36px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, .95);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .page.active { display: block; }
+    .page-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 26px;
+    }
+    .page-kicker {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 3px 10px;
+      margin-bottom: 12px;
+      border-radius: 999px;
+      background: var(--soft-blue);
+      color: var(--blue-dark);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .page-desc {
+      max-width: 880px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 18px;
+    }
+    .span-3 { grid-column: span 3; }
+    .span-4 { grid-column: span 4; }
+    .span-5 { grid-column: span 5; }
+    .span-6 { grid-column: span 6; }
+    .span-7 { grid-column: span 7; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: span 12; }
+    .card {
+      position: relative;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--card);
+      box-shadow: 0 12px 30px rgba(15, 23, 42, .08);
+    }
+    .card.big { min-height: 220px; }
+    .card.blue { background: var(--soft-blue); border-color: #c8dcff; }
+    .card.green { background: var(--soft-green); border-color: #b9efd0; }
+    .card.amber { background: var(--soft-amber); border-color: #fed7aa; }
+    .card.purple { background: var(--soft-purple); border-color: #ddd6fe; }
+    .card.red { background: var(--soft-red); border-color: #fecaca; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 9px;
+      margin: 0 6px 8px 0;
+      border-radius: 999px;
+      background: #eef4ff;
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .tag.green { background: #dcfce7; color: #166534; }
+    .tag.amber { background: #ffedd5; color: #9a3412; }
+    .tag.purple { background: #ede9fe; color: #5b21b6; }
+    .tag.red { background: #fee2e2; color: #991b1b; }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 14px;
+      align-items: stretch;
+      margin-top: 18px;
+    }
+    .node {
+      min-height: 132px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, .07);
+    }
+    .node strong { display: block; margin-bottom: 8px; font-size: 18px; }
+    .node small { display: block; color: var(--muted); font-size: 13px; }
+    .arrow-row {
+      display: grid;
+      grid-template-columns: 1fr 48px 1fr 48px 1fr;
+      align-items: center;
+      gap: 10px;
+    }
+    .arrow {
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      color: var(--blue-dark);
+      font-size: 28px;
+      font-weight: 900;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+    }
+    th, td {
+      padding: 13px 14px;
+      border-bottom: 1px solid #e6edf5;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #f8fbff;
+      color: #243244;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .field-name {
+      color: var(--blue-dark);
+      font-family: Consolas, "JetBrains Mono", monospace;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .muted { color: var(--muted); }
+    .callout {
+      padding: 18px 20px;
+      border-left: 6px solid var(--blue);
+      border-radius: 12px;
+      background: #f8fbff;
+    }
+    .pager {
+      position: sticky;
+      bottom: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
+      pointer-events: none;
+      margin-top: -82px;
+      padding: 0 24px 24px;
+    }
+    .pager-inner {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px 10px 18px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .92);
+      box-shadow: 0 18px 38px rgba(15, 23, 42, .16);
+      pointer-events: auto;
+      backdrop-filter: blur(10px);
+    }
+    .page-count {
+      min-width: 74px;
+      color: var(--muted);
+      font-weight: 800;
+      text-align: center;
+    }
+    .dot-strip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 330px;
+      overflow-x: auto;
+      padding: 0 4px;
+    }
+    .dot {
+      width: 9px;
+      height: 9px;
+      flex: 0 0 auto;
+      border: 0;
+      border-radius: 999px;
+      background: #cbd5e1;
+      cursor: pointer;
+    }
+    .dot.active {
+      width: 26px;
+      background: var(--blue);
+    }
+    .nav-btn {
+      width: 48px;
+      height: 48px;
+      border: 0;
+      border-radius: 50%;
+      color: #fff;
+      background: var(--blue);
+      font-size: 28px;
+      line-height: 1;
+      cursor: pointer;
+      box-shadow: 0 12px 25px rgba(37, 99, 235, .32);
+    }
+    .nav-btn:disabled {
+      cursor: not-allowed;
+      opacity: .38;
+      box-shadow: none;
+    }
+    .nav-btn.prev {
+      background: #64748b;
+      font-size: 24px;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .legend span {
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    @media (max-width: 920px) {
+      .page { padding: 22px; }
+      .span-3, .span-4, .span-5, .span-6, .span-7, .span-8 { grid-column: span 12; }
+      .flow, .arrow-row { grid-template-columns: 1fr; }
+      .arrow { transform: rotate(90deg); margin: 0 auto; }
+      .pager { padding-right: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RAG 链路数据模型与流转图</h1>
+    <p class="lead">这份图只描述当前 RAG 业务语义：资源如何变成线上索引，查询如何跨 Dense / BM25 / Keyword 三路召回，候选如何融合、父块聚合、重排、MMR 选择，最后进入可回答上下文。</p>
+    <div class="progress" aria-hidden="true"><div class="progress-bar" id="progressBar"></div></div>
+  </header>
+
+  <main class="deck">
+    <div class="viewer" id="viewer">
+      <section class="page active">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Overview</div>
+            <h2>一条 RAG 链路，分成“索引发布”和“线上检索”两条主干</h2>
+            <p class="page-desc">索引侧负责把用户资源变成多版本、可过滤的物理索引；检索侧只读取已发布 Manifest 指向的 index_version，不读取未发布影子版本。</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card blue span-6 big">
+            <h3>索引发布链路</h3>
+            <span class="tag">ResourceService</span><span class="tag purple">RagIndexWorker</span><span class="tag green">Manifest last</span>
+            <p>资源写入后生成 <code>VersionSnapshot</code> 和 <code>RagIndexMessage</code>。Worker 消费消息，校验资源事实版本仍有效，完成 Mongo / Qdrant / Elasticsearch 写入后，最后发布 <code>RagIndexManifest</code>。</p>
+          </div>
+          <div class="card purple span-6 big">
+            <h3>线上检索链路</h3>
+            <span class="tag purple">rag_search</span><span class="tag">Hybrid Retrieval</span><span class="tag amber">Answerability</span>
+            <p><code>rag_search</code> 由上下文注入 <code>user_id</code>，构造 <code>RagRetrievalQuery</code>，通过三路召回、RRF、父块聚合、Mongo 水合、ZeroEntropy rerank、MMR 和充分性判断输出证据包。</p>
+          </div>
+          <div class="span-12 flow">
+            <div class="node"><strong>Resource</strong><small>note / document 原文事实</small></div>
+            <div class="node"><strong>Index Version</strong><small>material_hash + pipeline_version</small></div>
+            <div class="node"><strong>Search Index</strong><small>Mongo + Qdrant + Elasticsearch</small></div>
+            <div class="node"><strong>Retrieval</strong><small>Dense / BM25 / Keyword</small></div>
+            <div class="node"><strong>Evidence</strong><small>Rerank + MMR + assembled context</small></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Indexing 1/4</div>
+            <h2>资源写入：RagResource 是 RAG 的事实源</h2>
+            <p class="page-desc">资源服务不直接写索引。它保存资源事实，计算索引版本快照，并发布异步索引消息。</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card span-5 big">
+            <h3>输入事实：RagResource</h3>
+            <p><code>RagResource</code> 表示 note / document 的当前业务事实。<code>version</code> 用于淘汰过期 indexing message，<code>is_deleted</code> 会使线上 Manifest 删除。</p>
+            <div class="legend">
+              <span>resource_id</span><span>user_id</span><span>resource_kind</span><span>content</span><span>version</span><span>is_deleted</span>
+            </div>
+          </div>
+          <div class="card span-7 blue big">
+            <h3>版本计算：VersionSnapshot</h3>
+            <p><code>material_hash</code> 由 resource_kind、resource_id、content_hash、display_name 计算；<code>pipeline_version</code> 由分块、索引文本、embedding、context 配置计算；<code>index_version</code> 由 user_id、resource_id、material_hash、pipeline_version 共同决定。</p>
+          </div>
+          <div class="span-12 table-wrap">
+            <table>
+              <thead><tr><th>dataclass</th><th>关键字段</th><th>语义</th><th>强关联</th></tr></thead>
+              <tbody>
+                <tr><td class="field-name">RagResource</td><td><code>display_name</code></td><td>note 用 title，document 用 document_name；进入 material_hash、索引文本和 evidence 展示。</td><td>影响 <code>VersionSnapshot.material_hash</code></td></tr>
+                <tr><td class="field-name">VersionSnapshot</td><td><code>index_version</code></td><td>索引代次，不直接包含 resource.version。</td><td>贯穿 Mongo / Qdrant / Elasticsearch / Manifest / RetrievalScope</td></tr>
+                <tr><td class="field-name">RagIndexMessage</td><td><code>expected_version</code></td><td>Worker 用它判断消息是否被后续资源更新淘汰。</td><td>必须等于当前 <code>RagResource.version</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Indexing 2/4</div>
+            <h2>父子分块：RetrieveChunk 用于阅读，SearchChunk 用于召回</h2>
+            <p class="page-desc">RAG 明确区分阅读单位和检索单位。SearchChunk 只能在单个 RetrieveChunk 内继续切分，不允许跨父块。</p>
+          </div>
+        </div>
+        <div class="arrow-row">
+          <div class="card green big"><h3>RagResource.content</h3><p>资源完整原文，不能被摘要替代。</p></div>
+          <div class="arrow">→</div>
+          <div class="card blue big"><h3>RetrieveChunk</h3><p>父块，阅读和 citation 的最终主证据来源。</p></div>
+          <div class="arrow">→</div>
+          <div class="card purple big"><h3>SearchChunk</h3><p>子块，写入 Qdrant / Elasticsearch，用于多通道召回。</p></div>
+        </div>
+        <div class="grid" style="margin-top:18px">
+          <div class="card span-6">
+            <h3>RetrieveChunk 字段</h3>
+            <p><code>chunk_id/resource_id/resource_kind/chunk_index/text/content_hash</code></p>
+            <p class="muted">chunk_id 包含资源类型、resource_id、retrieve 序号和 content_hash 前缀。</p>
+          </div>
+          <div class="card span-6">
+            <h3>SearchChunk 字段</h3>
+            <p><code>chunk_id/parent_chunk_id/parent_chunk_index/chunk_index/text/content_hash</code></p>
+            <p class="muted">parent_chunk_id 是回连父块、neighbor、evidence 组装的核心外键。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Indexing 3/4</div>
+            <h2>Context Indexing 与双索引文本</h2>
+            <p class="page-desc">Context Indexing 永远启用。它给 SearchChunk 生成检索上下文，增强语义召回；但 keyword_text 必须保持原文，服务 exact 检索。</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card purple span-4 big">
+            <h3>SearchChunkContext</h3>
+            <p><code>chunk_id</code> + <code>context_text</code></p>
+            <p>由 context client 基于 resource、parent_chunk、search_chunk 生成。缓存键包含模型版本、prompt 版本和 context_input_hash。</p>
+          </div>
+          <div class="card blue span-4 big">
+            <h3>semantic_indexing_text</h3>
+            <p>组合 display_name、resource_kind、retrieval_context、chunk text。</p>
+            <p>用于 dense embedding 与 Qdrant BM25 document。</p>
+          </div>
+          <div class="card amber span-4 big">
+            <h3>keyword_text</h3>
+            <p>严格等于 SearchChunk 原文。</p>
+            <p>用于 Elasticsearch keyword exact，不能混入 LLM context_text。</p>
+          </div>
+          <div class="span-12 callout">
+            <strong>强边界：</strong>Context Indexing 是索引增强，不是 evidence 原文。最终回答仍要回到 RetrieveChunk 原文、matched search text 与 neighbor texts。
+          </div>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Indexing 4/4</div>
+            <h2>三处物理写入全部成功后，Manifest 才发布</h2>
+            <p class="page-desc">Manifest 是线上检索指针。它不表达构建过程状态，只表达当前已发布的 index_version。</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card green span-4 big"><h3>Mongo Chunk Store</h3><p>保存 RetrieveChunk、SearchChunk、retrieval_context、semantic_indexing_text、keyword_text。</p></div>
+          <div class="card blue span-4 big"><h3>Qdrant</h3><p>SearchChunk point：dense vector + BM25 document + payload 强过滤字段。</p></div>
+          <div class="card amber span-4 big"><h3>Elasticsearch</h3><p>keyword_text、display_name、heading_path，服务 keyword_exact 通道。</p></div>
+          <div class="card purple span-12">
+            <h3>RagIndexManifest</h3>
+            <p><code>user_id/resource_kind/resource_id/resource_version/material_hash/pipeline_version/current_index_version</code></p>
+            <p class="muted">检索侧只读取 <code>current_index_version</code>。Manifest 发布前，旧版本仍然服务线上检索。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Retrieval 1/5</div>
+            <h2>rag_search 工具入口：从模型参数变成 RagRetrievalQuery</h2>
+            <p class="page-desc">工具层注入 user_id，验证 query、mode、resource_kinds 和 query variants，再套用 mode 默认水位。</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card span-5 big">
+            <h3>ModeRetrievalDefaults</h3>
+            <p>normal / semantic / exact 影响 top_k、fusion_top_k、rerank_top_n、final_top_k、neighbor_before、neighbor_after、mmr_lambda 和 query variant 上限。</p>
+          </div>
+          <div class="card blue span-7 big">
+            <h3>RagRetrievalQuery</h3>
+            <p><code>user_id/query/semantic_queries/keyword_queries/mode/resource_kinds/top_k/fusion_top_k/rerank_top_n/final_top_k/neighbor_before/neighbor_after/mmr_lambda</code></p>
+          </div>
+          <div class="span-12 callout">
+            <strong>边界：</strong>RAG 查询只面向用户已索引 note/document。当前事实、公开网页、新闻、价格、法规应走 web_search。
+          </div>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Retrieval 2/5</div>
+            <h2>Manifest Resolver 生成线上检索范围</h2>
+            <p class="page-desc">检索不会扫全库。它先读取用户已发布 Manifest，转换为 <code>RagIndexScope</code>，所有下游检索都强绑定 scope。</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card purple span-6 big">
+            <h3>RagIndexScope</h3>
+            <p><code>user_id/resource_kind/resource_id/index_version</code></p>
+            <p>每条 scope 对应一个已发布 Manifest。没有 scope 时直接返回空结果，避免 Qdrant / ES 无过滤扫描。</p>
+          </div>
+          <div class="card red span-6 big">
+            <h3>多租户与版本隔离</h3>
+            <p>Qdrant payload filter 和 Elasticsearch bool filter 都必须包含 user_id、resource_kind、resource_id、index_version。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Retrieval 3/5</div>
+            <h2>三路召回：Dense Semantic、Sparse Lexical、Keyword Exact</h2>
+            <p class="page-desc">RagRetrievalOrchestrator 只负责并发召回，不做融合、不组装 evidence、不 rerank。</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card blue span-4 big"><h3>Dense Semantic</h3><p>Qdrant dense vector。query 先走 embedding cache，未命中再调用 embedding client。</p></div>
+          <div class="card green span-4 big"><h3>Sparse Lexical</h3><p>Qdrant BM25 document。使用 semantic_indexing_text 做词法召回。</p></div>
+          <div class="card amber span-4 big"><h3>Keyword Exact</h3><p>Elasticsearch keyword_text / display_name / heading_path，多字段 boost。</p></div>
+          <div class="span-12 table-wrap">
+            <table>
+              <thead><tr><th>dataclass</th><th>字段</th><th>语义</th></tr></thead>
+              <tbody>
+                <tr><td class="field-name">RagRetrievedCandidate</td><td><code>channel/score/chunk_id/parent_chunk_id/matched_query</code></td><td>子块级召回候选，不携带父块原文。</td></tr>
+                <tr><td class="field-name">ChannelRetrievalResult</td><td><code>channel/candidates</code></td><td>单个召回通道返回的一组 SearchChunk 级命中。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Retrieval 4/5</div>
+            <h2>RRF 融合后，必须从 SearchChunk 聚合回 RetrieveChunk 父块</h2>
+            <p class="page-desc">多通道融合仍然是子块级结果。最终 evidence 必须是父块级，才能保持完整阅读上下文和 citation 稳定性。</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card blue span-6 big">
+            <h3>RagFusedCandidate</h3>
+            <p><code>candidate/rrf_score/rank/sources</code></p>
+            <p>候选 key 由 user_id、resource_kind、resource_id、index_version、chunk_id 构成。</p>
+          </div>
+          <div class="card purple span-6 big">
+            <h3>ParentCandidate</h3>
+            <p><code>chunk_id</code> 是父块 ID；<code>best_child_hit</code> 保留最强子块命中；<code>matched_channels</code> 和 <code>matched_queries</code> 稳定去重。</p>
+          </div>
+          <div class="span-12 callout">
+            <strong>强关联：</strong><code>SearchChunk.parent_chunk_id</code> → <code>ParentCandidate.chunk_id</code> → Mongo 读取 <code>RetrieveChunk</code> → 最终 evidence 的 <code>parent_chunk_id</code>。
+          </div>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Retrieval 5/5</div>
+            <h2>水合、重排、MMR、多样性选择</h2>
+            <p class="page-desc">EvidenceAssembler 读取 Mongo 补全原文和相邻父块，构造 rerank_text 和 mmr_text。ZeroEntropy 负责相关性重排，MMR 控制同资源/同父块霸榜。</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card green span-4 big"><h3>RagHydratedCandidate</h3><p>parent_candidate + search_record + parent_chunk + neighbor_chunks + rerank_text + mmr_text + group_key。</p></div>
+          <div class="card purple span-4 big"><h3>RerankableDocument</h3><p><code>id/text</code> 进入 ZeroEntropy。输出 <code>RerankedDocument(id/score/rank)</code>。</p></div>
+          <div class="card amber span-4 big"><h3>MMR</h3><p>使用 relevance_score、similarity_text、group_key，最终选出 final_top_k。</p></div>
+          <div class="span-12 table-wrap">
+            <table>
+              <thead><tr><th>最终模型</th><th>关键字段</th><th>职责</th></tr></thead>
+              <tbody>
+                <tr><td class="field-name">RagEvidence</td><td><code>text/search_text/retrieval_context/neighbor_texts</code></td><td>回答可见证据，父块原文为主，search text 解释命中点，neighbor 补上下文。</td></tr>
+                <tr><td class="field-name">SufficiencyResult</td><td><code>sufficient/reason</code></td><td>检索可用性边界，不等于最终答案完整性。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Output</div>
+            <h2>Context Assembler 产出最终 evidence pack</h2>
+            <p class="page-desc">最终输出不是候选列表，而是按资源分组、按父块顺序拼接后的 assembled context，并携带 Answerability 策略。</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card blue span-6 big">
+            <h3>RagAssembledContext</h3>
+            <p><code>text/included_evidence_ids/skipped_evidence_count</code></p>
+            <p>按资源分组，组内按 parent_chunk_index 排序；断层用 <code>[...]</code> 表示；总长度受 <code>MAX_CONTEXT_CHARS</code> 控制。</p>
+          </div>
+          <div class="card red span-6 big">
+            <h3>Answerability</h3>
+            <p>如果 <code>sufficient=false</code>，工具输出会要求模型不要假装知识库支持该结论。NO_RESULTS、LOW_SCORE、EXACT_MODE_NO_KEYWORD_HIT 分别给出不同拒答策略。</p>
+          </div>
+          <div class="span-12 callout">
+            <strong>使用规则：</strong>Assistant 必须只基于 assembled context 回答；RAG evidence 不覆盖 web_search 的当前事实能力。
+          </div>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Dataclass Map</div>
+            <h2>大规模流转模型总表</h2>
+            <p class="page-desc">这些 dataclass 是 RAG 的主要语义边界。关注它们之间的外键关联，比文件编排更重要。</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>阶段</th><th>dataclass</th><th>核心语义</th><th>关键外键/强关联</th></tr></thead>
+            <tbody>
+              <tr><td>资源事实</td><td class="field-name">RagResource</td><td>note/document 原文事实源。</td><td><code>user_id/resource_id/resource_kind/version</code></td></tr>
+              <tr><td>版本</td><td class="field-name">VersionSnapshot</td><td>一次索引构建的版本快照。</td><td><code>index_version</code> 贯穿所有物理索引。</td></tr>
+              <tr><td>消息</td><td class="field-name">RagIndexMessage</td><td>异步索引请求。</td><td><code>expected_version</code> 校验过期。</td></tr>
+              <tr><td>分块</td><td class="field-name">RetrieveChunk</td><td>父块，最终阅读单位。</td><td><code>chunk_id</code> 被 SearchChunk.parent_chunk_id 引用。</td></tr>
+              <tr><td>分块</td><td class="field-name">SearchChunk</td><td>子块，召回单位。</td><td><code>parent_chunk_id</code> 回连父块。</td></tr>
+              <tr><td>索引文本</td><td class="field-name">IndexingTextPair</td><td>semantic_indexing_text 与 keyword_text 双文本。</td><td><code>chunk_id</code> 映射 SearchChunk。</td></tr>
+              <tr><td>发布</td><td class="field-name">RagIndexManifest</td><td>线上索引指针。</td><td><code>current_index_version</code> 生成 RagIndexScope。</td></tr>
+              <tr><td>召回</td><td class="field-name">RagRetrievedCandidate</td><td>SearchChunk 级命中。</td><td><code>chunk_id/parent_chunk_id/index_version</code></td></tr>
+              <tr><td>融合</td><td class="field-name">RagFusedCandidate</td><td>RRF 后候选。</td><td>候选 key 绑定 chunk_id。</td></tr>
+              <tr><td>父聚合</td><td class="field-name">ParentCandidate</td><td>父块级候选。</td><td><code>chunk_id</code> 是父块 ID。</td></tr>
+              <tr><td>水合</td><td class="field-name">RagHydratedCandidate</td><td>补齐 Mongo 原文和 neighbor。</td><td><code>candidate_id</code> 连接 reranker/MMR。</td></tr>
+              <tr><td>输出</td><td class="field-name">RagEvidence</td><td>最终可回答证据。</td><td><code>parent_chunk_id/search_text/retrieval_context</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="page">
+        <div class="page-top">
+          <div>
+            <div class="page-kicker">Strong Links</div>
+            <h2>必须保持稳定的强关联关系</h2>
+            <p class="page-desc">这些关联一旦断裂，会造成越权检索、读错版本、候选无法水合、citation 不稳定或回答无法追溯。</p>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card red span-6 big"><h3>多租户隔离</h3><p><code>user_id</code> 必须进入 index_version 计算、Mongo/Qdrant/ES payload/filter 和 retrieval query。</p></div>
+          <div class="card purple span-6 big"><h3>版本隔离</h3><p><code>Manifest.current_index_version</code> 是线上唯一读指针。检索侧不能扫描未发布 index_version。</p></div>
+          <div class="card blue span-6 big"><h3>父子块回连</h3><p><code>SearchChunk.parent_chunk_id</code> 必须指向同资源同版本的 <code>RetrieveChunk.chunk_id</code>。</p></div>
+          <div class="card green span-6 big"><h3>原文边界</h3><p><code>keyword_text</code> 和最终 <code>RagEvidence.text</code> 必须来自原文，不应被 LLM context_text 替换。</p></div>
+          <div class="card amber span-12"><h3>发布顺序</h3><p>Mongo chunks、Qdrant points、Elasticsearch docs 全部成功后才能发布 Manifest；删除资源时先删 Manifest，让线上立即退出检索，物理索引交给 GC。</p></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="pager" aria-label="分页控制">
+      <div class="pager-inner">
+        <button class="nav-btn prev" id="prevBtn" aria-label="上一页">‹</button>
+        <span class="dot-strip" id="dotStrip" aria-label="页面跳转"></span>
+        <span class="page-count" id="pageCount">1 / 12</span>
+        <button class="nav-btn" id="nextBtn" aria-label="下一页">›</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const pages = Array.from(document.querySelectorAll('.page'));
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const pageCount = document.getElementById('pageCount');
+    const progressBar = document.getElementById('progressBar');
+    const dotStrip = document.getElementById('dotStrip');
+    let index = 0;
+
+    pages.forEach((_, pageIndex) => {
+      const dot = document.createElement('button');
+      dot.className = 'dot';
+      dot.type = 'button';
+      dot.setAttribute('aria-label', `跳转到第 ${pageIndex + 1} 页`);
+      dot.addEventListener('click', () => {
+        index = pageIndex;
+        renderPage();
+      });
+      dotStrip.appendChild(dot);
+    });
+
+    function renderPage() {
+      pages.forEach((page, i) => page.classList.toggle('active', i === index));
+      pageCount.textContent = `${index + 1} / ${pages.length}`;
+      prevBtn.disabled = index === 0;
+      nextBtn.disabled = index === pages.length - 1;
+      progressBar.style.width = `${((index + 1) / pages.length) * 100}%`;
+      dotStrip.querySelectorAll('.dot').forEach((dot, i) => dot.classList.toggle('active', i === index));
+      history.replaceState(null, '', `#${index + 1}`);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    prevBtn.addEventListener('click', () => {
+      if (index > 0) {
+        index -= 1;
+        renderPage();
+      }
+    });
+
+    nextBtn.addEventListener('click', () => {
+      if (index < pages.length - 1) {
+        index += 1;
+        renderPage();
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowRight') nextBtn.click();
+      if (event.key === 'ArrowLeft') prevBtn.click();
+      if (event.key === 'Home') {
+        index = 0;
+        renderPage();
+      }
+      if (event.key === 'End') {
+        index = pages.length - 1;
+        renderPage();
+      }
+    });
+
+    const initialPage = Number.parseInt(window.location.hash.replace('#', ''), 10);
+    if (Number.isInteger(initialPage) && initialPage >= 1 && initialPage <= pages.length) {
+      index = initialPage - 1;
+    }
+    renderPage();
+  </script>
+</body>
+</html>

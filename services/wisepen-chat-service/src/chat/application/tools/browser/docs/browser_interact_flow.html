@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>browser_interact 蒸馏落地报告</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #667085;
+      --line: #d9e2ef;
+      --paper: #f6f8fc;
+      --panel: #ffffff;
+      --blue: #2563eb;
+      --green: #047857;
+      --amber: #b45309;
+      --red: #b42318;
+      --violet: #6d28d9;
+      --cyan: #0e7490;
+      --shadow: 0 28px 80px rgba(18, 32, 61, .16);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      color: var(--ink);
+      background:
+        linear-gradient(135deg, rgba(37, 99, 235, .10), transparent 32%),
+        linear-gradient(315deg, rgba(14, 116, 144, .10), transparent 30%),
+        linear-gradient(180deg, #fff 0%, var(--paper) 46%, #edf2f8 100%);
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.56;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      padding: 22px 5vw;
+      border-bottom: 1px solid rgba(217, 226, 239, .9);
+      background: rgba(255, 255, 255, .90);
+      backdrop-filter: blur(16px);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 22px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      padding: 4px 10px;
+      border: 1px solid #c7d7fe;
+      border-radius: 999px;
+      background: #eef4ff;
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 {
+      margin-top: 10px;
+      font-size: clamp(30px, 4vw, 58px);
+      line-height: 1.04;
+      letter-spacing: 0;
+    }
+    h2 {
+      font-size: clamp(26px, 3vw, 44px);
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+    h3 { font-size: 20px; line-height: 1.2; }
+    code {
+      padding: 2px 6px;
+      border: 1px solid #dce5f2;
+      border-radius: 6px;
+      background: #f6f9fd;
+      font-family: Consolas, "JetBrains Mono", monospace;
+      font-size: .92em;
+    }
+    .lead {
+      max-width: 980px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+    .deck { width: min(1380px, calc(100vw - 36px)); margin: 26px auto 92px; }
+    .progress {
+      height: 6px;
+      margin-top: 18px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e7edf7;
+    }
+    .bar { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--blue), var(--cyan)); transition: width .25s ease; }
+    .slide {
+      display: none;
+      min-height: 780px;
+      padding: 38px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, .96);
+      box-shadow: var(--shadow);
+    }
+    .slide.active { display: block; }
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 28px;
+    }
+    .desc { max-width: 920px; margin-top: 12px; color: var(--muted); font-size: 17px; }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; }
+    .span-3 { grid-column: span 3; }
+    .span-4 { grid-column: span 4; }
+    .span-5 { grid-column: span 5; }
+    .span-6 { grid-column: span 6; }
+    .span-7 { grid-column: span 7; }
+    .span-8 { grid-column: span 8; }
+    .span-12 { grid-column: span 12; }
+    .card {
+      min-height: 136px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+      box-shadow: 0 12px 30px rgba(18, 32, 61, .07);
+    }
+    .card p { margin-top: 9px; color: var(--muted); }
+    .blue { background: #eef5ff; border-color: #c7d7fe; }
+    .green { background: #ecfdf5; border-color: #b9efcf; }
+    .amber { background: #fff7ed; border-color: #fed7aa; }
+    .red { background: #fff1f1; border-color: #fecaca; }
+    .violet { background: #f5f3ff; border-color: #ddd6fe; }
+    .cyan { background: #ecfeff; border-color: #a5f3fc; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      margin: 0 8px 8px 0;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: #eef4ff;
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+    .node {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+      min-height: 150px;
+    }
+    .node strong { display: block; margin-bottom: 8px; font-size: 17px; }
+    .node small { color: var(--muted); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+    table { width: 100%; min-width: 860px; border-collapse: collapse; }
+    th, td { padding: 14px 15px; border-bottom: 1px solid #e6edf5; vertical-align: top; text-align: left; }
+    th { background: #f8fbff; color: #26354a; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .callout {
+      padding: 18px 20px;
+      border-left: 5px solid var(--blue);
+      border-radius: 14px;
+      background: #f8fbff;
+      color: #344054;
+    }
+    .pager {
+      position: fixed;
+      left: 50%;
+      bottom: 22px;
+      z-index: 20;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .92);
+      box-shadow: 0 14px 34px rgba(18, 32, 61, .18);
+      backdrop-filter: blur(14px);
+    }
+    button {
+      width: 42px;
+      height: 42px;
+      border: 0;
+      border-radius: 999px;
+      background: #172033;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .35; cursor: default; }
+    .count { min-width: 76px; text-align: center; color: #344054; font-weight: 800; }
+    @media (max-width: 900px) {
+      header { position: static; }
+      .slide { padding: 22px; min-height: auto; }
+      .grid, .flow { grid-template-columns: 1fr; }
+      .span-3, .span-4, .span-5, .span-6, .span-7, .span-8, .span-12 { grid-column: span 1; }
+      .topline, .brand { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div>
+        <span class="eyebrow">Agent Browser Distillation</span>
+        <h1>browser_interact 工作流与能力边界</h1>
+        <p class="lead">这份报告描述从 agent-browser 蒸馏到当前 browser_interact 的核心能力：snapshot/ref、用户介入、运行时观测、iframe、tab、视觉定位、显式等待与下载触发观测。</p>
+      </div>
+      <div class="eyebrow">2026-05-31</div>
+    </div>
+    <div class="progress"><div class="bar" id="bar"></div></div>
+  </header>
+
+  <main class="deck">
+    <section class="slide active">
+      <div class="topline">
+        <div>
+          <span class="eyebrow">Overview</span>
+          <h2>核心原则：让 LLM 操作页面，但不让页面控制 LLM</h2>
+          <p class="desc">browser_interact 被收敛为一个结构化浏览器执行面。页面内容全部视为不可信输入；动作必须经由 schema、session、snapshot/ref 和策略边界进入浏览器。</p>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card blue span-4"><h3>Ref-first</h3><p>先 snapshot，再使用精确 ref。禁止用 role、label、文本猜目标。</p></div>
+        <div class="card green span-4"><h3>Runtime portable</h3><p>headless、sandbox、dev_shm 通过配置注入，兼顾本地与沙箱。</p></div>
+        <div class="card amber span-4"><h3>User boundary</h3><p>登录、验证码、敏感凭据、高风险行为进入用户介入通道。</p></div>
+        <div class="card violet span-6"><h3>Observable</h3><p>status 暴露 dialog、console、pageerror、network、dom_version、tab 等低噪声摘要。</p></div>
+        <div class="card cyan span-6"><h3>Recoverable</h3><p>错误响应提供 category、code、retryable、recovery_hint 和 user_action，而不是裸异常。</p></div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="topline">
+        <div>
+          <span class="eyebrow">Action Loop</span>
+          <h2>一次浏览器动作的标准路径</h2>
+          <p class="desc">tool 层只校验注入上下文；controller 做 action 分派；action runtime 统一拼装 session/page/runtime/error/success 响应。</p>
+        </div>
+      </div>
+      <div class="flow">
+        <div class="node"><strong>1. Tool</strong><small>校验 <code>session_id</code> / <code>user_id</code>，复制 schema，注入启动选项。</small></div>
+        <div class="node"><strong>2. Controller</strong><small>解析 action type，按 session 串行化，分派 handler。</small></div>
+        <div class="node"><strong>3. Session</strong><small>校验 browser_session_id，创建或复用 Playwright page。</small></div>
+        <div class="node"><strong>4. Action</strong><small>执行 navigate、snapshot、ref action、tab、wait、screenshot。</small></div>
+        <div class="node"><strong>5. Response</strong><small>通过 build_response/error_factory 返回稳定 JSON。</small></div>
+      </div>
+      <div class="callout" style="margin-top:20px">action handler 内部不散落 response 组装逻辑，复杂错误通过 error_factory 归类，models 只保留 dataclass。</div>
+    </section>
+
+    <section class="slide">
+      <div class="topline">
+        <div>
+          <span class="eyebrow">Snapshot / Ref</span>
+          <h2>snapshot 是交互坐标系，不是正文抽取器</h2>
+          <p class="desc">snapshot 生成可操作树和 refs；get_content 负责正文抽取。两条链路分工明确，避免把正文阅读和点击定位混在一起。</p>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card blue span-6"><h3>Ref 元数据</h3><p><code>role/name/frame_path/frame_id/bounds/in_viewport</code> 支持定位、iframe 解析、overlay 截图和错误诊断。</p></div>
+        <div class="card green span-6"><h3>Scoped snapshot</h3><p><code>snapshot(ref=eN)</code> 可对已知子树局部展开，减少复杂页面噪声。</p></div>
+        <div class="card amber span-6"><h3>Focused snapshot</h3><p><code>mode=focused</code> + <code>goal</code> 用于找复杂页面中的具体控件。</p></div>
+        <div class="card violet span-6"><h3>Ref 失效</h3><p>navigate、click、scroll、key、tab 切换等动作后保守失效，要求 fresh snapshot。</p></div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="topline">
+        <div>
+          <span class="eyebrow">Safety</span>
+          <h2>用户介入策略前置到真实动作之前</h2>
+          <p class="desc">高风险点击和敏感输入不是执行后提醒，而是在 click/fill 之前阻断并返回 USER_INTERVENTION_REQUIRED。</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>信号</th><th>触发来源</th><th>工具行为</th><th>用户动作</th></tr></thead>
+          <tbody>
+            <tr><td><code>auth_page</code></td><td>URL / DOM 登录验证信号</td><td>停止自动操作</td><td>用户在可见浏览器完成登录或验证</td></tr>
+            <tr><td><code>captcha</code></td><td>reCAPTCHA / hCaptcha / Turnstile / 文本信号</td><td>停止自动操作</td><td>用户完成验证码</td></tr>
+            <tr><td><code>secret_input</code></td><td>password / OTP / token / API key 字段</td><td>fill 前阻断</td><td>用户手动输入敏感凭据</td></tr>
+            <tr><td><code>high_risk_action</code></td><td>删除、支付、购买、转账、退款、退订等</td><td>click 前阻断</td><td>用户确认或手动完成</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="topline">
+        <div>
+          <span class="eyebrow">Observability</span>
+          <h2>status 是诊断面，不是另一个执行入口</h2>
+          <p class="desc">status 汇总低噪声运行态，帮助判断页面空白、脚本错误、网络错误、dialog、DOM 变化和多 tab 状态。</p>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card blue span-3"><h3>dialog</h3><p>alert/beforeunload 自动处理；confirm/prompt 自动 dismiss 并记录。</p></div>
+        <div class="card green span-3"><h3>network</h3><p>记录 failed request、4xx/5xx、主文档状态码，URL query 脱敏。</p></div>
+        <div class="card amber span-3"><h3>dom_version</h3><p>MutationObserver 记录 DOM 变化版本，辅助判断是否刷新 snapshot。</p></div>
+        <div class="card violet span-3"><h3>tabs</h3><p>显式 list/switch/new/close tab，并在切换后让 refs 失效。</p></div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="topline">
+        <div>
+          <span class="eyebrow">Content</span>
+          <h2>get_content 补回 HTML 到 Markdown 能力</h2>
+          <p class="desc">删除 web_fetch.content_processor 依赖后，browser_interact 本地使用 trafilatura 处理 HTML。空结果直接返回空，不做规则 fallback。</p>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card green span-6"><h3>Rendered first</h3><p>优先读取浏览器渲染后的正文文本，适配 SPA 和动态页面。</p></div>
+        <div class="card blue span-6"><h3>HTML markdown</h3><p>需要时使用 trafilatura 做 HTML -> Markdown，避免回接 web_fetch。</p></div>
+        <div class="card red span-12"><h3>Trust boundary</h3><p><code>snapshot</code> 和 <code>get_content</code> 均标记 <code>untrusted_page_content</code>，页面内容永远不是系统指令。</p></div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="topline">
+        <div>
+          <span class="eyebrow">Action Surface</span>
+          <h2>能力面按真实浏览器工作流组织</h2>
+          <p class="desc">不加入 upload/download 文件接管；下载只观测触发事件，后续交给沙箱同步临时文件。</p>
+        </div>
+      </div>
+      <div>
+        <span class="pill">navigate / go_back / go_forward</span>
+        <span class="pill">snapshot / get_content / screenshot</span>
+        <span class="pill">click_ref / fill_ref / select_ref / check_ref</span>
+        <span class="pill">scroll / key / wait</span>
+        <span class="pill">wait_for_ref / wait_for_text</span>
+        <span class="pill">new_tab / list_tabs / switch_tab / close_tab</span>
+        <span class="pill">clear_browser_events</span>
+      </div>
+      <div class="grid" style="margin-top:22px">
+        <div class="card cyan span-6"><h3>Overlay screenshot</h3><p><code>screenshot(annotate_refs=true)</code> 在截图上标出当前 refs，视觉状态和 snapshot 坐标可对齐。</p></div>
+        <div class="card amber span-6"><h3>Download trigger only</h3><p><code>click_ref(expect_download=true)</code> 只返回 <code>download_triggered</code> 和 <code>suggested_filename</code>，不处理文件路径。</p></div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="topline">
+        <div>
+          <span class="eyebrow">Quality Gates</span>
+          <h2>最终约束和验证结果</h2>
+          <p class="desc">本轮不再继续蒸馏没有明确落地价值的能力；剩余高风险项已经通过边界设计规避。</p>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card green span-4"><h3>编译</h3><p><code>uv run python -m compileall</code> 覆盖 browser、container、tool_settings。</p></div>
+        <div class="card blue span-4"><h3>静态扫描</h3><p>无相对导入、无 Union、无 PEP585 泛型、无 urls、无 web_fetch content_processor 回流。</p></div>
+        <div class="card violet span-4"><h3>工具烟测</h3><p>用户介入、iframe refs、tab、overlay、network、wait、download trigger 均通过。</p></div>
+        <div class="callout span-12">明确未做：upload、下载文件接管、跨 tool call 事后确认 dialog、规则驱动 get_content fallback。</div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="pager" aria-label="分页控制">
+    <button id="prev" aria-label="上一页">‹</button>
+    <span class="count" id="count">1 / 8</span>
+    <button id="next" aria-label="下一页">›</button>
+  </nav>
+  <script>
+    const slides = Array.from(document.querySelectorAll('.slide'));
+    const prev = document.getElementById('prev');
+    const next = document.getElementById('next');
+    const count = document.getElementById('count');
+    const bar = document.getElementById('bar');
+    let i = 0;
+    function render() {
+      slides.forEach((s, idx) => s.classList.toggle('active', idx === i));
+      count.textContent = `${i + 1} / ${slides.length}`;
+      prev.disabled = i === 0;
+      next.disabled = i === slides.length - 1;
+      bar.style.width = `${((i + 1) / slides.length) * 100}%`;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    prev.onclick = () => { if (i > 0) { i -= 1; render(); } };
+    next.onclick = () => { if (i < slides.length - 1) { i += 1; render(); } };
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft') prev.click();
+      if (e.key === 'ArrowRight') next.click();
+    });
+    render();
+  </script>
+</body>
+</html>
