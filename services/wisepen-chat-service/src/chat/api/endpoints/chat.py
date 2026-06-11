@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import uuid
 
 from beanie import PydanticObjectId
@@ -7,11 +7,11 @@ from fastapi.responses import StreamingResponse
 from dependency_injector.wiring import inject, Provide
 
 from chat.api.vercel_formats import (
-    message_start, message_finish, stream_done, abort, error,
+    message_start, message_finish, stream_done, abort, error as sse_error,
 )
 
 from common.security import require_login
-from common.logger import log_event, log_error
+from common.logger import error, info
 from chat.api.schemas.chat import ChatRequest
 from chat.application.attachment_service import AttachmentService
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
@@ -35,14 +35,14 @@ async def _vercel_generator(chat_gen, model_name: str):
         yield stream_done()
 
     except asyncio.CancelledError:
-        log_event("用户取消请求")
+        info("chat stream generation cancelled.")
         yield abort(reason="user_cancelled")
         yield stream_done()
         raise
 
     except Exception as e:
-        log_error("流生成", e)
-        yield error(error_text=str(e))
+        error("chat stream generation failed.", exc=e)
+        yield sse_error(error_text=str(e))
         yield stream_done()
 
 
@@ -108,6 +108,12 @@ async def chat_completions(
         user_query=req.query,
         background_tasks=background_tasks,
         model_id=resolved_model_id,
+        provider_id=resolved_provider_id,
+        frontend_states=req.frontend_states,
+        user_defined_allow_tool_names=req.user_defined_allow_tool_names,
+        user_defined_deny_tool_names=req.user_defined_deny_tool_names,
+        user_defined_on_demand_skill_ids=req.user_defined_on_demand_skill_ids,
+        user_defined_force_enabled_skill_ids=req.user_defined_force_enabled_skill_ids,
         states=req.states,
         attachment_refs=effective_refs,
         attachments_meta=attachments_meta,
@@ -122,3 +128,4 @@ async def chat_completions(
             "x-vercel-ai-ui-message-stream": "v1",
         },
     )
+

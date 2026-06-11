@@ -68,6 +68,20 @@ class MongoSessionRepository(SessionRepository):
         await session.save()
         return session
 
+    async def set_session_agent(
+        self,
+        session_id: str,
+        user_id: str,
+        agent_id: str | None,
+        agent_version: int | None,
+    ) -> ChatSession:
+        session = await self._safe_get_session(session_id, user_id)
+        session.agent_id = agent_id
+        session.agent_version = agent_version
+        session.updated_at = datetime.now(timezone.utc)
+        await session.save()
+        return session
+
     async def _safe_get_session(self, session_id: str, user_id: str) -> ChatSession:
         """安全获取会话，查不到（不存在或不属于该用户）统一抛 SESSION_NOT_FOUND，防止枚举他人 session_id。"""
         session = await ChatSession.find_one(

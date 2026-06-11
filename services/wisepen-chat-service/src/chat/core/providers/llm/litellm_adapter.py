@@ -1,8 +1,11 @@
+import json
+
 import litellm
-from typing import AsyncGenerator, List, Dict, Optional, Any
+from typing import AsyncGenerator, List, Dict, Optional, Any, cast, AsyncIterable
 from chat.domain.entities import ChatMessage
 from chat.domain.interfaces import LLMProvider
 from chat.domain.error_codes import ChatErrorCode
+from chat.domain.interfaces.llm import LLMStreamChunk, LLMCompletionResult
 from common.core.exceptions import ServiceException
 from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings
@@ -24,21 +27,19 @@ class LiteLLMAdapter(LLMProvider):
         self._default_api_base = settings.LLM_BASE_URL
         self._default_api_key = settings.LLM_API_KEY
 
-    def _convert_messages(self, messages: List[ChatMessage]) -> List[Dict[str, Any]]:
-        formatted = []
-        for msg in messages:
-            payload = {"role": msg.role.value, "content": msg.content}
-
-            if getattr(msg, "tool_calls", None):
-                payload["tool_calls"] = msg.tool_calls
-            if getattr(msg, "tool_call_id", None):
-                payload["tool_call_id"] = msg.tool_call_id
-            if getattr(msg, "name", None):
-                payload["name"] = msg.name
-
-            formatted.append(payload)
-
-        return formatted
+    @staticmethod
+    def _convert_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
+        formatted_messages = []
+        for message in messages:
+            payload = {"role": message.role.value, "content": message.content}
+            if getattr(message, "tool_calls", None):
+                payload["tool_calls"] = message.tool_calls
+            if getattr(message, "tool_call_id", None):
+                payload["tool_call_id"] = message.tool_call_id
+            if getattr(message, "name", None):
+                payload["name"] = message.name
+            formatted_messages.append(payload)
+        return formatted_messages
 
     def _format_model_for_litellm(self, model_name: str) -> str:
         if "/" in model_name:
@@ -53,20 +54,24 @@ class LiteLLMAdapter(LLMProvider):
             tools: Optional[List[Dict[str, Any]]] = None,
             api_base: Optional[str] = None,
             api_key: Optional[str] = None,
-    ) -> Any:
-        formatted_msgs = self._convert_messages(messages)
+    ) -> LLMCompletionResult:
+        formatted_messages = self._convert_messages(messages)
         litellm_model = self._format_model_for_litellm(model_name)
         try:
             response = await litellm.acompletion(
                 model=litellm_model,
-                messages=formatted_msgs,
+                messages=formatted_messages,
                 stream=False,
                 temperature=temperature,
+                tools=tools,
                 drop_params=True,
                 api_base=api_base or self._default_api_base,
                 api_key=api_key or self._default_api_key,
             )
-            return response.choices[0].message
+            usage = getattr(response, "usage", None)
+            usage_tokens = getattr(usage, "total_tokens", 0) if usage else 0
+            return LLMCompletionResult(raw=response, usage_tokens=int(usage_tokens))
+
         except litellm.ContextWindowExceededError:
             raise ServiceException(ChatErrorCode.CONTEXT_LIMIT_EXCEEDED)
         except Exception as e:
@@ -80,7 +85,7 @@ class LiteLLMAdapter(LLMProvider):
             tools: Optional[List[Dict[str, Any]]] = None,
             api_base: Optional[str] = None,
             api_key: Optional[str] = None,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[LLMStreamChunk, None]:
 
         formatted_msgs = self._convert_messages(messages)
         litellm_model = self._format_model_for_litellm(model_name)
@@ -90,23 +95,50 @@ class LiteLLMAdapter(LLMProvider):
                 model=litellm_model,
                 messages=formatted_msgs,
                 stream=True,
+                stream_options={"include_usage": True},
                 temperature=temperature,
                 tools=tools,
                 drop_params=True,
                 api_base=api_base or self._default_api_base,
                 api_key=api_key or self._default_api_key,
             )
-            async for chunk in response:
-                yield chunk
+            stream = cast(AsyncIterable[Any], response)
+
+            async for chunk in stream:
+                usage = getattr(chunk, "usage", None)
+                usage_tokens = getattr(usage, "total_tokens", 0) if usage else 0
+                yield LLMStreamChunk(raw=chunk, usage_tokens=int(usage_tokens))
 
         except litellm.ContextWindowExceededError:
             raise ServiceException(ChatErrorCode.CONTEXT_LIMIT_EXCEEDED)
         except Exception as e:
             raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Provider Error: {e}")
 
-    async def count_tokens(self, text: str, model_name: str = "gpt-4o") -> int:
+    async def count_tokens(
+            self,
+            text: str,
+            model_name: str = "gpt-4o"
+    ) -> int:
         try:
-            return litellm.token_counter(model=model_name, text=text)
-        except:
-            # 降级策略
+            litellm_model = self._format_model_for_litellm(model_name)
+            return litellm.token_counter(model=litellm_model, text=text)
+        except Exception:
             return len(text)
+
+    async def count_message_tokens(
+            self,
+            messages: List[ChatMessage],
+            model_name: str = "gpt-4o",
+            tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> int:
+        try:
+            formatted_messages = self._convert_messages(messages)
+            litellm_model = self._format_model_for_litellm(model_name)
+            result = await litellm.acount_tokens(
+                model=litellm_model,
+                messages=formatted_messages,
+                tools=tools,
+            )
+            return int(getattr(result, "total_tokens", 0) or 0)
+        except Exception:
+            return len(json.dumps(messages, ensure_ascii=False))

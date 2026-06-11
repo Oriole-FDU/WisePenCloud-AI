@@ -18,7 +18,8 @@ class MongoMessageRepository(MessageRepository):
         conditions = [ChatMessage.session_id == session_id]
         if after:
             conditions.append(ChatMessage.created_at > after)
-        return await ChatMessage.find(*conditions).sort("+created_at").limit(limit).to_list()
+        messages = await ChatMessage.find(*conditions).sort("-created_at").limit(limit).to_list()
+        return list(reversed(messages))
 
     async def list_session_message_turns_page(
         self,
@@ -83,6 +84,9 @@ class MongoMessageRepository(MessageRepository):
             .to_list()
 
         return page_msgs, total_turns
+
+    async def has_session_messages(self, session_id: str) -> bool:
+        return await ChatMessage.find_one(ChatMessage.session_id == session_id) is not None
 
     async def search_messages_by_text(
         self,

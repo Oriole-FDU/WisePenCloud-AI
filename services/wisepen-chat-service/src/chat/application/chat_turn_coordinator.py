@@ -1,7 +1,8 @@
-from typing import Optional, List, Dict, Any
+﻿from typing import Optional, List, Dict, Any, Set
 from beanie import PydanticObjectId
 from fastapi import BackgroundTasks
-from common.logger import log_error
+
+from common.logger import error
 
 from chat.api.schemas.chat import AttachmentRefRequest
 from chat.core.config.app_settings import settings
@@ -12,23 +13,23 @@ from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, ProviderRepository
 from common.core.exceptions import ServiceException
 from chat.application.chat_context_assembler import ChatContextAssembler
-from chat.application.query_loop_runtime import (
-    QueryLoopRuntime,
-    StepStartEvent,
-    TextDeltaEvent,
-    ReasoningDeltaEvent,
+from chat.application.query_loop_runtime import QueryLoopRuntime
+from chat.application.agents import (
+    AgentResolver,
+    DefaultAgentResolver,
 )
+from chat.application.events import StepFinishEvent, ErrorEvent
 from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
-from chat.application.skill_matcher import SkillMatcher
-from chat.application.tools.tool_registry import ToolRegistry
+from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
+from chat.application.tools.core import ToolRegistry
 from common.kafka.producer import KafkaProducerClient
 
 
-# Skill 脚手架工具的名字集合：Registry 内部它们 reserved=True 默认隐藏
-# 只有 skill 命中时 Coordinator 把本集合作为 `expose` 传入 derive()，从而解禁 schema
+# Skill 工具默认不暴露；仅在本轮存在可展示 Skill 时整体解禁
 _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
-
+# Session 工具默认不暴露；仅在本轮存在存在不可见的上下文历史时解禁（有summary）
+_SESSION_TOOL_NAMES = frozenset({"get_historical_chat_messages"})
 
 class ChatTurnCoordinator:
     """
@@ -48,9 +49,11 @@ class ChatTurnCoordinator:
             tool_registry: ToolRegistry,
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
+            agent_resolver: AgentResolver | None = None,
     ):
         self._memory = memory
         self._model_repo = model_repo
+        self._session_repo = session_repo
         self._context_assembler = ChatContextAssembler(
             message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo
         )
@@ -63,6 +66,7 @@ class ChatTurnCoordinator:
             kafka_producer=kafka_producer
         )
         self._skill_matcher = skill_matcher
+        self._agent_resolver = agent_resolver or DefaultAgentResolver()
 
     # -------------------------------------------------------------------------
     # 公共入口
@@ -78,72 +82,157 @@ class ChatTurnCoordinator:
             states: Optional[List[Dict[str, Any]]] = None,
             attachment_refs: Optional[List[AttachmentRefRequest]] = None,
             attachments_meta: Optional[List[Dict[str, Any]]] = None,
+            frontend_states: Optional[List[Dict[str, Any]]] = None,
+            user_defined_allow_tool_names: Optional[Set[str]] = None,
+            user_defined_deny_tool_names: Optional[Set[str]] = None,
+            user_defined_on_demand_skill_ids: Optional[Set[str]] = None,
+            user_defined_force_enabled_skill_ids: Optional[Set[str]] = None,
     ):
-        # [Model Resolve] 通过仓储解析模型、映射、供应商和 API 凭证
-        resolved = await self._model_repo.resolve_model_for_chat(
-            model_id=model_id,
+        # 获取当前对话的 Agent
+        session = await self._session_repo.get_session_for_user(session_id, user_id)
+        agent = await self._agent_resolver.resolve(session.agent_id)
+
+        agent_spec = agent.spec
+        memory_policy = agent_spec.memory_policy
+        tool_and_skill_policy = agent_spec.tool_and_skill_policy
+        model_policy = agent_spec.model_policy
+
+        resolved_model_id = model_id
+        resolved_provider_id = provider_id
+
+        # 如果禁止覆盖，且指定了模型和供应商
+        if not model_policy.allow_request_override:
+            if model_policy.default_model_id: resolved_model_id = PydanticObjectId(model_policy.default_model_id)
+            if model_policy.default_provider_id: resolved_provider_id = PydanticObjectId(model_policy.default_provider_id)
+
+        # 解析模型、映射、供应商和 API 凭证
+        resolved_model = await self._model_repo.resolve_model_for_chat(
+            model_id=resolved_model_id,
             user_id=user_id,
-            provider_id=provider_id,
+            provider_id=resolved_provider_id,
         )
 
-        context_limit = resolved.context_window_tokens or settings.CTX_TOKEN_LIMIT
-        output_reserve = resolved.max_output_tokens or settings.CTX_DEFAULT_OUTPUT_RESERVE_TOKENS
+        # Token窗口尺寸
+        context_limit = resolved_model.context_window_tokens or settings.CTX_TOKEN_LIMIT
+        output_reserve = resolved_model.max_output_tokens or settings.CTX_DEFAULT_OUTPUT_RESERVE_TOKENS
         prompt_budget_tokens = max(
             context_limit - output_reserve,
             settings.CTX_MIN_PROMPT_BUDGET_TOKENS,
         )
 
-        # [Retrieval - 短期记忆] 从 Redis 读取最近对话, 如果 Redis 缓存失效（Cache Miss），会自动从 MongoDB 回填最近的 N 条历史 （可配置），确保对话连贯性。
-        recent_messages = await self._context_assembler.get_or_repopulate_hot_context(session_id)
+        # 加载会话历史 (若启用)
+        # 从 Redis 读取最近对话, 如果 Redis 缓存失效，会自动从 MongoDB 回填最近的 N 条历史，确保对话连贯性
+        if memory_policy.enable_chat_memory:
+            chat_history_record_messages = await self._context_assembler.get_chat_history_record_messages(session_id)
+        else:
+            chat_history_record_messages = []
 
-        # [Retrieval - 长期记忆] 从 Memory 按相似度阈值召回跨会话事实 (此处实现是Mem0)
-        relevant_facts = await self._memory.search(
-            user_id=user_id, query=effective_user_query, limit=10,
-            score_threshold=0.6,  # 低质量召回直接丢弃，防止噪声污染上下文
-        )
+        # 加载长期记忆 (若启用)
+        # 从 Memory 按相似度阈值召回跨会话事实 (此处实现是Mem0)
+        relevant_facts = []
+        if memory_policy.enable_long_term_memory:
+            relevant_facts = await self._memory.search(
+                user_id=user_id,
+                query=user_query,
+                limit=memory_policy.long_term_memory_limit,
+                score_threshold=memory_policy.long_term_memory_score_threshold,
+            )
 
-        # 会话的历史摘要
-        session_summary = await self._context_assembler.get_session_summary(session_id)
-        # [Token Window] 从后往前累加 Token，超过高水位时将 messages_compress_candidates 压缩为会话的历史摘要（本轮结束时）
-        messages_keep, messages_compress_candidates, needs_compression = await self._context_assembler.build_context_window(
-            recent_messages,
-            prompt_budget_tokens=prompt_budget_tokens,
-        )
+        # 加载会话的历史摘要 (若启用，前提是必须启用会话历史)
+        session_summary = None
+        windowed_history_messages = None
 
+        if memory_policy.enable_chat_memory and memory_policy.enable_chat_memory_summary:
+            session_summary = await self._context_assembler.get_session_summary(session_id)
+
+            # 窗口化消息以用于压缩
+            # 从后往前累加 Token，超过高水位时将 messages_compress_candidates 压缩为会话的历史摘要（本轮结束时）
+            windowed_history_messages = await self._context_assembler.build_windowed_messages(
+                chat_history_record_messages,
+                prompt_budget_tokens=prompt_budget_tokens,
+                high_watermark_ratio=memory_policy.high_watermark_ratio,
+                low_watermark_ratio=memory_policy.low_watermark_ratio,
+            )
+
+        # 构建工具上下文
         tool_context: dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
-        } 
+        }
+
+        # 构建Skill视图
+        # 返回本轮可展示给 LLM 的 Skill metadata，由 LLM 判断是否加载
+        available_skills = []
+        if tool_and_skill_policy.enable_use_tool and tool_and_skill_policy.enable_use_skill:
+            # 若用户指定了 user_defined_on_demand_skill_ids，则覆盖 agent 预设的 on_demand_skill_ids
+            on_demand_skill_ids = user_defined_on_demand_skill_ids or tool_and_skill_policy.on_demand_skill_ids or set()
+            # 构建 available_skills
+            available_skills = await self._skill_matcher.match(
+                on_demand_skill_ids=on_demand_skill_ids,
+                user_query=user_query,
+                skill_match_top_k=tool_and_skill_policy.skill_match_top_k,
+            )
 
         # [Skill Match] 预筛当前 query 可能相关的 Skill，命中才暴露 schema + 注入 Available Skills
         candidate_skills = self._skill_matcher.match(effective_user_query)
         expose_tool_name_set = None
-        if candidate_skills:
-            # 解禁 Registry 里默认隐藏的 skill 脚手架工具（reserved=True）
-            expose_tool_name_set = set(_SKILL_TOOL_NAMES)
-            tool_context["allowed_skill_ids"] = [s.skill_id for s in candidate_skills]
+        if available_skills:
+            expose_tool_name_set = set()
+            expose_tool_name_set.update(_SKILL_TOOL_NAMES)
+            # allowed_skill_ids 表示本轮展示给 LLM 的 Skill 白名单，工具执行前仍会校验
+            tool_context["allowed_skill_ids"] = [s.skill_id for s in available_skills]
 
-        # [Tool Scope] 派生本请求的工具视图快照
-        # expose_tool_name_set 仅在 skill 命中时解禁 load_skill 系列，未命中时它们保持隐藏
-        # runtime_discovered_tools 预留给"运行时动态发现的工具"（如 Skill bundle 自带 tools），暂时留空
-        # allow_tool_name_set/deny_tool_name_set 预留给未来"用户级工具偏好"接入，暂时留空
+        if session_summary is not None:
+            expose_tool_name_set.update(_SESSION_TOOL_NAMES)
+
+        # 构建工具视图
+        # expose_tool_name_set 仅在有可展示 Skill 时解禁 Skill 工具
+
+        if not tool_and_skill_policy.enable_use_tool:
+            # 若不启用Tool，则allow_tool_name_set为空
+            allow_tool_name_set:Set[str] = set()
+        else:
+            # 若用户指定了 user_defined_allow_tool_names，则覆盖 agent 预设的 allow_tool_names
+            allow_tool_name_set = user_defined_allow_tool_names or tool_and_skill_policy.allow_tool_names or None
+
+        # 若用户指定了 user_defined_deny_tool_names，则覆盖 agent 预设的 deny_tool_names
+        deny_tool_name_set = user_defined_deny_tool_names or tool_and_skill_policy.deny_tool_names or None
+
         tool_scope = self._tool_registry.derive(
-            session_id=session_id,
-            tool_context=tool_context, 
-            runtime_discovered_tools=None,
+            tool_context=tool_context,
             expose_tool_name_set=expose_tool_name_set,
-            allow_tool_name_set=None,
-            deny_tool_name_set=None,
+            allow_tool_name_set=allow_tool_name_set,
+            deny_tool_name_set=deny_tool_name_set,
         )
 
-        # [Context Construction] 将系统提示词、Mem0 检索到的事实、会话的历史摘要、前端上下文以及窗口内的明细消息组装成 LLM 所需的格式
+        # 提示词组装
+        # 将系统提示词、Mem0 检索到的事实、会话的历史摘要、前端上下文以及窗口内的明细消息组装成 LLM 所需的格式
         messages_for_llm = self._context_assembler.assemble_prompt(
+            session_id=session_id,
+            user_query=user_query,
+            system_prompt=agent_spec.system_prompt,  # 系统提示词
+            session_summary=session_summary,  # 会话的历史摘要
+            history_messages=chat_history_record_messages, # 会话历史
+            relevant_facts=relevant_facts, # 长期记忆检索的事实
+            frontend_states=frontend_states, # 用户前端状态
+            available_skills=available_skills or None, # 可用技能
             session_id, effective_user_query, hydrated_window_messages, relevant_facts, session_summary,
             states=merged_states,
             candidate_skills=candidate_skills or None,
             attachments_meta=attachments_meta,
         )
 
+        # 构造 chat_record_messages
+        # chat_record_messages 将用于记录本轮对话的历史，以供后续对话使用
+        user_message_metadata = {
+            "relevant_facts": relevant_facts,
+            "frontend_states": frontend_states or {},
+            "available_skills_id": [skill.skill_id for skill in available_skills] or [],
+        }
+        chat_record_messages: List[ChatMessage] = [ChatMessage(
+            session_id=session_id, role=Role.USER, content=user_query,
+            metadata=user_message_metadata,
+        )]
         # 记录进入 Agent 循环前的列表长度
         original_msg_count = len(messages_for_llm)
 
@@ -156,62 +245,67 @@ class ChatTurnCoordinator:
             },
         )
 
-        # [Generation] 流式推理，使用解析后的供应商模型名和凭证
-        full_response_content = ""
-        full_reasoning_content = ""
+        usage_tokens = 0
+        # 流式推理
         try:
             async for event in self._query_loop_runtime.stream_chat_with_tool_calling(
-                messages_for_llm,
+                messages=messages_for_llm,
                 tool_scope=tool_scope,
                 session_id=session_id,
-                model_name=resolved.model_name,
-                model_id=resolved.model_id,
-                api_base=resolved.api_base_url,
-                api_key=resolved.api_key,
+                agent_max_iterations=agent_spec.agent_max_iterations,
+                model_name=resolved_model.model_name,
+                model_id=resolved_model.model_id,
+                api_base=resolved_model.api_base_url,
+                api_key=resolved_model.api_key,
             ):
-                # QueryLoopRuntime 只产出领域事件；这里按需累加纯文本，并把事件翻译为 Vercel SSE 字符串
-                if isinstance(event, StepStartEvent):
-                    full_reasoning_content = ""
-                    full_response_content = ""
-                elif isinstance(event, TextDeltaEvent):
-                    full_response_content += event.delta
-                elif isinstance(event, ReasoningDeltaEvent):
-                    full_reasoning_content += event.delta
+                # QueryLoopRuntime 产出的事件如果是 StepFinishEvent 额外处理消息累积
+                if isinstance(event, StepFinishEvent):
+                    usage_tokens += event.usage_tokens # 计费
+                    if not event.is_finished:
+                        # 向 chat_record_messages 追加中间消息（Tool Calls）
+                        chat_record_messages.extend(event.intermediate_messages)
+                    else:
+                        # 向 chat_record_messages 追加最终回复消息
+                        chat_record_messages.append(event.final_assistant_message)
                 yield to_vercel_sse(event)
         except ServiceException as e:
-            log_error("LLM 流式推理", e, session=session_id)
-            yield f"\n[System Error]: {e.msg}"
+            error("chat stream generation failed.", session_id=session_id, exc=e)
+            yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
 
-        # 通过切片，提取出 QueryLoopRuntime 在运行过程中追加的所有中间消息（Tool Calls & Results）
-        intermediate_messages = messages_for_llm[original_msg_count:]
-
-        # [Persistence] 使用 FastAPI 的 BackgroundTasks 在响应返回给用户后，异步执行
-        #   - _turn_finalizer.persist_all：将新消息写入 Redis 和 MongoDB；将新对话摄入 Memory 长期记忆
-        #   - _turn_finalizer.summarize_and_compress；调用轻量级模型生成并更新会话的全局摘要
+        # 使用 FastAPI 的 BackgroundTasks 在响应返回给用户后，异步执行
         if background_tasks is not None:
-            assistant_msg = ChatMessage(
-                session_id=session_id, role=Role.ASSISTANT, content=full_response_content,
-                reasoning_content=full_reasoning_content or None,
-                model_id=resolved.model_id,
-            )
-
-            messages_to_persist = [user_msg] + intermediate_messages + [assistant_msg]
-
+            # 发送Token计费
             background_tasks.add_task(
-                self._turn_finalizer.persist_all,
-                user_id, session_id, resolved,
-                messages_to_persist
+                self._turn_finalizer.send_token_billing,
+                user_id=user_id,
+                resolved_model=resolved_model,
+                usage_tokens=usage_tokens,
+                group_id=agent_spec.billing_group_id
             )
+            # 将新消息写入 Redis 和 MongoDB，并摄入 Memory 长期记忆
             background_tasks.add_task(
+                self._turn_finalizer.persist_messages,
+                user_id=user_id,
+                session_id=session_id,
+                chat_record_messages=chat_record_messages,
+                memory_policy=memory_policy,
                 self._turn_finalizer.auto_generate_title,
                 session_id, user_id, effective_user_query
             )
-            if needs_compression:
+            # 调用轻量级模型生成并更新会话的全局摘要
+            if memory_policy.enable_chat_memory and memory_policy.enable_chat_memory_summary and windowed_history_messages.needs_compression:
                 background_tasks.add_task(
                     self._turn_finalizer.summarize_and_compress,
-                    session_id,
-                    messages_keep + messages_to_persist,
-                    messages_compress_candidates,
-                    session_summary
+                    session_id=session_id,
+                    windowed_history_messages=windowed_history_messages,
+                    chat_record_messages=chat_record_messages,
+                    existing_summary=session_summary,
+                    memory_policy=memory_policy,
+                )
+            # 自动生成标题
+            if agent_spec.auto_generate_title:
+                background_tasks.add_task(
+                    self._turn_finalizer.auto_generate_title,
+                    session_id=session_id, user_id=user_id, user_query=user_query
                 )

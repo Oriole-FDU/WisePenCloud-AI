@@ -1,10 +1,10 @@
-import asyncio
+﻿import asyncio
 from typing import List, Dict, Any, Optional
 from mem0 import Memory
 
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
-from common.logger import log_fail, log_debug
+from common.logger import debug, warn
 
 from chat.domain.entities import ChatMessage
 from chat.domain.interfaces import MemoryProvider
@@ -49,11 +49,11 @@ class Mem0Adapter(MemoryProvider):
         }
         
         try:
-            log_debug("Initializing Mem0 Client...")
+            debug("mem0 client initializing.")
             self.client = Memory.from_config(self._config)
-            log_debug("Mem0 Client initialized successfully.")
+            debug("mem0 client initialized.")
         except Exception as e:
-            log_fail("Mem0 客户端初始化失败", e)
+            warn("mem0 client initialize failed.", exc=e)
             raise e
 
     async def search(
@@ -66,7 +66,7 @@ class Mem0Adapter(MemoryProvider):
 
         def _sync_search():
             raw_results = self.client.search(query, user_id=user_id, limit=limit)
-            log_debug(f"Raw Results from Mem0", query=query, user_id=user_id, raw_results=raw_results)
+            debug("mem0 raw search results returned.", query=query, user_id=user_id, raw_results=raw_results)
 
             # 兼容 Mem0 返回字典 {"results": [...]} 或直接返回列表的情况
             if isinstance(raw_results, dict):
@@ -84,7 +84,7 @@ class Mem0Adapter(MemoryProvider):
         try:
             return await asyncio.to_thread(_sync_search)
         except Exception as e:
-            log_fail("长期记忆检索", e, user=user_id)
+            warn("mem0 search failed.", user_id=user_id, exc=e)
             return []
 
     async def add_interaction(self, user_id: str, messages: List[ChatMessage]):
@@ -101,7 +101,7 @@ class Mem0Adapter(MemoryProvider):
             try:
                 self.client.add(formatted_msgs, user_id=user_id)
             except Exception as e:
-                log_fail("长期记忆写入异常", e, user=user_id)
+                warn("mem0 write failed.", user_id=user_id, exc=e)
 
         await asyncio.to_thread(_sync_add)
 
@@ -135,3 +135,4 @@ class Mem0Adapter(MemoryProvider):
             self.client.delete_all(user_id=user_id)
 
         await asyncio.to_thread(_sync_delete_all)
+

@@ -1,6 +1,6 @@
-import socket
+﻿import socket
 from typing import Callable, Optional
-from common.logger import log_ok, log_error
+from common.logger import error, info
 from v2.nacos import (
     NacosConfigService,
     NacosNamingService,
@@ -105,13 +105,13 @@ class NacosClientManager:
                     ephemeral=True,
                 )
             )
-            log_ok(
-                "Nacos 服务注册",
+            info(
+                "nacos instance registered.",
                 service=self.bootstrap_settings.SERVICE_NAME,
                 addr=f"{host}:{self.bootstrap_settings.SERVICE_PORT}",
             )
         except Exception as e:
-            log_error("Nacos 服务注册", e, service=self.bootstrap_settings.SERVICE_NAME)
+            error("nacos instance register failed.", service=self.bootstrap_settings.SERVICE_NAME, exc=e)
 
     async def deregister_instance(self) -> None:
         """从 Nacos 注销当前服务实例（优雅关闭）。"""
@@ -127,9 +127,9 @@ class NacosClientManager:
                     ephemeral=True,
                 )
             )
-            log_ok("Nacos 服务注销", service=self.bootstrap_settings.SERVICE_NAME)
+            info("nacos instance deregistered.", service=self.bootstrap_settings.SERVICE_NAME)
         except Exception as e:
-            log_error("Nacos 服务注销", e, service=self.bootstrap_settings.SERVICE_NAME)
+            error("nacos instance deregister failed.", service=self.bootstrap_settings.SERVICE_NAME, )
 
     async def watch_config(self, callback: Callable[[dict], None]) -> None:
         """启动 Nacos 配置监听"""
@@ -141,6 +141,6 @@ class NacosClientManager:
                 group=self.bootstrap_settings.NACOS_GROUP,
                 cb=callback
             )
-            log_ok("Nacos 配置热更新监听", data_id=self.bootstrap_settings.NACOS_DATA_ID)
+            info("nacos config watcher registered.", data_id=self.bootstrap_settings.NACOS_DATA_ID)
         except Exception as e:
-            log_error("Nacos 配置热更新监听", e, data_id=self.bootstrap_settings.NACOS_DATA_ID)
+            error("nacos config watcher register failed.", data_id=self.bootstrap_settings.NACOS_DATA_ID, exc=e)

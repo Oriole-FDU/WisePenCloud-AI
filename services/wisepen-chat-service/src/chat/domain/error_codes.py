@@ -5,6 +5,8 @@ class ChatErrorCode(IErrorCode):
     # --- 会话相关 ---
     SESSION_NOT_FOUND = (40001, "目标会话不存在")
     CONTEXT_LIMIT_EXCEEDED = (40002, "对话上下文超出模型限制")
+    AGENT_NOT_FOUND = (40003, "Agent 不存在或未发布")
+    SESSION_AGENT_CHANGE_FORBIDDEN = (40004, "已有消息的会话不能切换 Agent")
     CHAT_EMPTY_INPUT = (40003, "缺少有效输入内容")
 
     # --- Provider 相关 ---

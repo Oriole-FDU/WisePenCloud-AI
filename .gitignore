@@ -29,6 +29,7 @@ ENV/
 # uv
 # lock 文件应提交，仅忽略 uv 自身缓存
 .uv/
+.uv-cache/
 
 # PyCharm / VS Code
 .idea/

@@ -26,6 +26,8 @@ class ChatSession(Document):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     current_summary: Optional[str] = None
     summary_updated_at: Optional[datetime] = None
+    agent_id: Optional[str] = None
+    agent_version: Optional[int] = None
 
     class Settings:
         name = "wisepen_chat_session"  # MongoDB 集合名

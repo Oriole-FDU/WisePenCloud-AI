@@ -6,10 +6,10 @@ from chat.api.vercel_formats import (
     step_start, step_finish,
     text_start, text_delta, text_end,
     reasoning_start, reasoning_delta, reasoning_end,
-    tool_input_start, tool_input_available, tool_output_available,
+    tool_input_start, tool_input_available, tool_output_available, error,
 )
-from chat.application.query_loop_runtime import (
-    StreamEvent,
+from chat.application.events import (
+    StreamEvent, ErrorEvent,
     StepStartEvent, StepFinishEvent,
     TextStartEvent, TextDeltaEvent, TextEndEvent,
     ReasoningStartEvent, ReasoningDeltaEvent, ReasoningEndEvent,
@@ -17,11 +17,14 @@ from chat.application.query_loop_runtime import (
 )
 
 
+
 def to_vercel_sse(event: StreamEvent) -> str:
     """
     将 QueryLoopRuntime 产出的单个领域事件翻译为 Vercel SSE 字符串
     未知事件类型会抛 TypeError，新增 StreamEvent 子类时必须同步更新本映射表，否则在开发期就暴露遗漏，而不是生产期静默丢帧
     """
+    if isinstance(event, ErrorEvent):
+        return error(error_text=event.error_text)
     if isinstance(event, StepStartEvent):
         return step_start()
     if isinstance(event, StepFinishEvent):

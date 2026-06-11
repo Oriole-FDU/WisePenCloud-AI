@@ -20,7 +20,7 @@ class BootstrapSettings(BaseSettings):
 
     # 服务监听
     SERVICE_HOST: str = "127.0.0.1"
-    SERVICE_PORT: int = 9200
+    SERVICE_PORT: int = 19900
 
     # 早期日志（Nacos 拉取之前生效）
     LOG_LEVEL: str = "INFO"

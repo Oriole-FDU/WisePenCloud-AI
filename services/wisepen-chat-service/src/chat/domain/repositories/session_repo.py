@@ -30,3 +30,13 @@ class SessionRepository(ABC):
 
     @abstractmethod
     async def set_session_pinned(self, session_id: str, user_id: str, is_pinned: bool) -> ChatSession: pass
+
+    @abstractmethod
+    async def set_session_agent(
+        self,
+        session_id: str,
+        user_id: str,
+        agent_id: str | None,
+        agent_version: int | None,
+    ) -> ChatSession:
+        pass

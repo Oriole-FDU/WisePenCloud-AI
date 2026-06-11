@@ -1,4 +1,4 @@
-"""
+﻿"""
 基于 Nacos 的客户端服务发现 + 客户端侧负载均衡
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from v2.nacos import (
 from common.core.constants import CommonConstants
 from common.core.exceptions import ServiceUnavailableError
 from common.gray.context import GrayContextHolder
-from common.logger import log_error, log_event, log_fail
+from common.logger import error, info, warn
 
 NamingClientProvider = Callable[[], Awaitable[NacosNamingService]]
 
@@ -167,9 +167,9 @@ class ServiceDiscovery:
                 # list_instances 失败时保留旧缓存以支持降级
                 # 无旧缓存则抛出 ServiceUnavailableError
                 if service_name not in self._cache:
-                    log_error("Nacos list_instances", e, service=service_name, group=self._group)
+                    error("nacos instances refresh failed.", service=service_name, group=self._group, exc=e)
                     raise ServiceUnavailableError(service_name, self._group) from e
-                log_fail("Nacos list_instances 降级用缓存", e, service=service_name, group=self._group)
+                warn("nacos instances refresh degraded to cache.", service=service_name, group=self._group, exc=e)
                 return
 
             # 首次成功拉取后注册订阅，靠推送增量刷新，失败不致命
@@ -184,9 +184,9 @@ class ServiceDiscovery:
                         )
                     )
                     self._subscribed.add(service_name)
-                    log_event("Nacos subscribe", service=service_name, group=self._group)
+                    info("nacos service subscribed.", service=service_name, group=self._group)
                 except Exception as e:
-                    log_fail("Nacos subscribe", e, service=service_name, group=self._group)
+                    warn("nacos service subscribe failed.", service=service_name, group=self._group, exc=e)
 
     async def _refresh(self, service_name: str) -> None:
         naming = await self._get_naming()
@@ -208,17 +208,16 @@ class ServiceDiscovery:
         async def _on_change(instance_list: List[Instance]) -> None:
             usable = [i for i in (instance_list or []) if self._is_usable(i)]
             if not usable:
-                log_fail(
-                    "Nacos 推送实例为空，保留旧缓存",
-                    "empty instance list",
+                warn(
+                    "nacos pushed empty instance list, keep previous cache.",
                     service=service_name,
                     group=self._group,
                 )
                 return
             self._cache[service_name] = usable
             self._fetched_at[service_name] = time.monotonic()
-            log_event(
-                "Nacos 实例列表更新",
+            info(
+                "nacos instance list updated.",
                 service=service_name,
                 group=self._group,
                 count=len(usable),
@@ -245,3 +244,4 @@ class ServiceDiscovery:
         cursor = self._rr_cursor.get(service_name, 0) % len(instances)
         self._rr_cursor[service_name] = cursor + 1
         return instances[cursor]
+

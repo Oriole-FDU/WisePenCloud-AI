@@ -10,6 +10,7 @@ from chat.core.config.bootstrap_settings import bootstrap_settings
 from chat.core.providers import (
     LiteLLMAdapter,
     Mem0Adapter,
+    OssFileLoader,
     NullMemoryAdapter,
     LocalFSSkillAssetLoader,
     OssSkillAssetLoader,
@@ -18,13 +19,14 @@ from chat.core.providers.sandbox import AioGatewayProvider
 from chat.core.persistence import (
     MongoSessionRepository,
     MongoMessageRepository,
-    MongoSkillRepository,
     MongoModelRepository,
     MongoProviderRepository,
     RedisHotContext,
 )
 from chat.application.attachment_service import AttachmentService
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
+from chat.application.agents import (
+    DefaultAgentResolver,
 from chat.application.skill_matcher import KeywordSkillMatcher
 from chat.application.skill_cache_refresher import SkillCacheRefresher
 from chat.application.tools import (
@@ -45,8 +47,13 @@ from chat.application.tools import (
     EditFileTool,
     ShellExecTool,
 )
-from common.clients.file_storage import FileStorageClient
+from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
+from chat.application.tools.skill_tools import LoadSkillAssetTool
+from chat.application.tools.skill_tools import LoadSkillTool
+from chat.application.tools.core import ToolRegistry
+from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.core.config.nacos import nacos_client_manager
+from chat.service_client import FileStorageClient, AIAssetClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
 from common.kafka.producer import KafkaProducerClient
@@ -102,40 +109,32 @@ class Container(containers.DeclarativeContainer):
         FileStorageClient,
         rpc=rpc_client,
     )
+    ai_asset_client = providers.Singleton(
+        AIAssetClient,
+        rpc=rpc_client,
+    )
+    resource_client = providers.Singleton(
+        ResourceClient,
+        rpc=rpc_client,
+    )
+
+    # OssFileLoader
+    oss_file_loader = providers.Singleton(
+        OssFileLoader,
+        file_storage_client=file_storage_client,
+        cache_dir=settings.OSS_CACHE_DIR,
+        cache_ttl_seconds=settings.OSS_CACHE_TTL_SECONDS,
+        gc_interval_seconds=settings.OSS_CACHE_GC_INTERVAL_SECONDS,
+    )
 
     # Skill 子系统：
-    # - SkillRepository 只读 Mongo 里的 Skill 实体
-    # - SkillAssetLoader：DEV=True 用 LocalFS+OSS 回退；DEV=False 直连裸 OSS
-    skill_repo = providers.Singleton(MongoSkillRepository)
-    oss_skill_asset_loader = providers.Singleton(
-        OssSkillAssetLoader,
-        file_storage_client=file_storage_client,
-        cache_dir=settings.SKILL_OSS_CACHE_DIR,
-        cache_ttl_seconds=settings.SKILL_OSS_CACHE_TTL_SECONDS,
-        gc_interval_seconds=settings.SKILL_OSS_CACHE_GC_INTERVAL_SECONDS,
-    )
-    # 开发态（profile=dev）使用 LocalFSSkillAssetLoader
-    # 生产态（profile=prod）使用 OssSkillAssetLoader
-    if bootstrap_settings.IS_DEV:
-        skill_asset_loader = providers.Singleton(
-            LocalFSSkillAssetLoader,
-            root_dir=str(settings.SKILL_ASSETS_CACHE_PATH),
-            oss_fallback=oss_skill_asset_loader,
-        )
-    else:
-        skill_asset_loader = oss_skill_asset_loader
-    # KeywordSkillMatcher
+    # - SkillRepository 从 Java ai-asset 读取 Skill
+    # DefaultSkillMatcher
     skill_matcher = providers.Singleton(
-        KeywordSkillMatcher,
-        skill_repo=skill_repo,
+        DefaultSkillMatcher,
+        ai_asset_client=ai_asset_client,
     )
-    # SkillCacheRefresher
-    skill_cache_refresher = providers.Singleton(
-        SkillCacheRefresher,
-        matcher=skill_matcher,
-        ttl_seconds=settings.SKILL_CACHE_TTL_SECONDS,
-    )
-
+    agent_resolver = providers.Singleton(DefaultAgentResolver)
     kafka_producer = providers.Singleton(
         KafkaProducerClient,
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
@@ -150,18 +149,22 @@ class Container(containers.DeclarativeContainer):
     )
 
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期
+    # GetHistoricalChatMessagesTool
     search_history_tool = providers.Singleton(
-        SearchHistoricalMessagesTool,
+        GetHistoricalChatMessagesTool,
         message_repo=message_repo,
     )
     load_skill_tool = providers.Singleton(
         LoadSkillTool,
-        skill_repo=skill_repo,
+        ai_asset_client=ai_asset_client,
+        resource_client=resource_client,
+        file_loader=oss_file_loader,
     )
     load_skill_asset_tool = providers.Singleton(
         LoadSkillAssetTool,
-        skill_repo=skill_repo,
-        skill_asset_loader=skill_asset_loader,
+        ai_asset_client=ai_asset_client,
+        resource_client=resource_client,
+        file_loader=oss_file_loader,
     )
 
     # 沙箱脚本执行工具
@@ -271,6 +274,7 @@ class Container(containers.DeclarativeContainer):
         tool_registry=tool_registry,
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
+        agent_resolver=agent_resolver,
     )
 
 

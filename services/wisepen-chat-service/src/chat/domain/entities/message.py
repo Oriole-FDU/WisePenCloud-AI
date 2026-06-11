@@ -31,9 +31,7 @@ class ChatMessage(Document):
     name: Optional[str] = None
 
     # 仅本轮工作内可见标识
-    # True 时可对 ASSISTANT 消息整条丢弃、对 TOOL 消息 content 置换为占位符
-    # 确保 Skill 等脚手架内容不污染 durable 历史
-    ephemeral: bool = False
+    persisted_output_placeholder: str | None = None
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

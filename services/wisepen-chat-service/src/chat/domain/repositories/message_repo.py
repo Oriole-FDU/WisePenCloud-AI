@@ -35,6 +35,10 @@ class MessageRepository(ABC):
         pass
 
     @abstractmethod
+    async def has_session_messages(self, session_id: str) -> bool:
+        pass
+
+    @abstractmethod
     async def search_messages_by_text(
         self,
         keyword: str,

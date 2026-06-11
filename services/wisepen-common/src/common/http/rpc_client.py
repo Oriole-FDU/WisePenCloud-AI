@@ -9,9 +9,10 @@ import httpx
 
 from common.cloud.service_discovery import ServiceDiscovery, LoadBalancingStrategy
 from common.core.constants import SecurityConstants, CommonConstants
+from common.security.context import SecurityContextHolder
 from common.gray.context import GrayContextHolder
 from common.core.exceptions import RpcError, ServiceUnavailableError
-from common.logger import log_error, log_fail
+from common.logger import error, warn
 
 # Java 端 R<T> 的成功 code；与 ResultCode.SUCCESS 对齐（200）
 _R_SUCCESS_CODE = 200
@@ -86,6 +87,12 @@ class RpcClient:
         if headers:
             merged_headers.update({k: v for k, v in headers.items()})
 
+        user_id = SecurityContextHolder.get_user_id()
+        if user_id:
+            merged_headers[SecurityConstants.HEADER_USER_ID] = user_id
+            merged_headers[SecurityConstants.HEADER_IDENTITY_TYPE] = SecurityContextHolder.set_identity_type()
+            [SecurityConstants.HEADER_GROUP_ROLE_MAP] = SecurityContextHolder.set_group_role_map()
+
         # 传递 developer 头
         developer = GrayContextHolder.get_developer_tag()
         if developer:
@@ -119,9 +126,9 @@ class RpcClient:
 
                 if resp.status_code >= 500:
                     last_msg = f"upstream 5xx: {resp.text[:200]}"
-                    log_fail(
-                        "RPC upstream 5xx",
-                        last_msg,
+                    warn(
+                        "rpc upstream failed.",
+                        message=last_msg,
                         service=service_name,
                         path=path,
                         addr=addr,
@@ -153,19 +160,19 @@ class RpcClient:
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
                 last_exc = e
                 last_msg = f"{type(e).__name__}: {e}"
-                log_fail(
-                    "RPC 网络异常",
-                    last_msg,
+                warn(
+                    "rpc network failed.",
                     service=service_name,
                     path=path,
                     addr=addr,
                     attempt=attempt + 1,
+                    exc=e
                 )
                 continue
             except Exception as e:
                 last_exc = e
                 last_msg = f"{type(e).__name__}: {e}"
-                log_error("RPC 未预期异常", e, service=service_name, path=path, addr=addr)
+                error("rpc unexpected error.", service=service_name, path=path, addr=addr, exc=e)
                 break
 
         raise RpcError(

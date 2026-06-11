@@ -1,62 +1,67 @@
-from datetime import datetime, timezone
 from dataclasses import dataclass
-from typing import List
-from beanie import Document
+from typing import Any, List, Mapping
 from pydantic import BaseModel, Field
-from pymongo import IndexModel, ASCENDING
 
 
 class SkillAssetMeta(BaseModel):
-    """
-    Skill Bundle 内单个附件的元信息
-    仅描述"有哪些文件 / 什么用途 / 什么类型"，不存储文件
-    实际正文由 SkillAssetLoader.load_by_object_key(object_key) / SkillAssetLoader.load_asset(skill_id, version, path) 按需懒加载
-    """
-    path: str = Field(..., description="作者视角的逻辑相对路径，出现在 assets_manifest 供 LLM 选择")
-    object_key: str = Field(..., description="OSS 对象 key")
-    kind: str = Field(..., description="资产类型 reference / template / script / example / other")
-    description: str = Field(default="", description="对作者和 LLM 友好的简短说明，出现在 assets_manifest 里给模型看")
-    size_bytes: int = Field(default=0, description="快照时记录的文件大小，便于治理与审计")
+    id: str = Field(...)
+    path: str = Field(...)
+    object_key: str = Field(...)
+    kind: str = Field(...)
+    upload_status: str = Field(...)
+    description: str | None = None
+    size_bytes: int = Field(default=0)
 
+    @classmethod
+    def from_response(cls, payload: Mapping[str, Any]) -> "SkillAssetMeta":
+        return cls(
+            id=str(payload.get("id")),
+            path=str(f"{payload.get('path')}/{payload.get("name")}"),
+            object_key=str(payload.get("objectKey")),
+            kind=str(payload.get("skillAssetResourceType")),
+            upload_status=str(payload.get("uploadStatus")),
+            description=str(payload.get("description") or ""),
+            size_bytes=int(payload.get("size") or 0),
+        )
 
-class Skill(Document):
-    """
-    已发布的 Skill 快照
-    """
+class Skill(BaseModel):
+    skill_id: str = Field(...)
+    name: str = Field(default="")
+    description: str = Field(default="")
+    source_type: str = Field(default="")
+    skill_md_object_key: str = Field(default="")
+    assets_manifest: List[SkillAssetMeta] = Field(default_factory=list)
+    version: int = Field(default=0)
 
-    # MongoDB _id 直接用 skill_id（slug，机器标识），全链路只用这一个值
-    skill_id: str = Field(..., description="唯一 slug，如 'paper-translation'；工具参数、日志、权限校验都只用这个")
-    display_name: str = Field(..., description="展示名，如 'Paper Translation'，仅用于日志和可能的 UI 列表")
-    description: str = Field(..., description="一句话说明本 Skill 的场景与目的")
-    triggers: List[str] = Field(default_factory=list, description="关键词列表，供 KeywordSkillMatcher 大小写无关 substring 匹配")
-
-    skill_md: str = Field(..., description="发布时 SKILL.md 正文快照（含 frontmatter 去掉 --- 后的 body）")
-    skill_md_object_key: str = Field(..., description="SKILL.md 在 OSS 的权威副本 object_key")
-    assets_manifest: List[SkillAssetMeta] = Field(default_factory=list, description="附件清单，LLM 看得到的只有这一层")
-
-    version: str = Field(..., description="发布版本号；资产寻址走 (skill_id, version, path) 三元组")
-    enabled: bool = Field(default=True, description="启停开关；False 时 matcher 不会召回")
-
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-    class Settings:
-        name = "wisepen_published_skill"
-        indexes = [
-            # skill_id 作为业务主键，需保证唯一；查询也都走它
-            IndexModel([("skill_id", ASCENDING)], unique=True),
-            # matcher warmup 只拉 enabled=True 的；triggers 未来可能建多键索引，暂不建以省空间
-            IndexModel([("enabled", ASCENDING)]),
-        ]
-
+    @classmethod
+    def from_response(cls, payload: Mapping[str, Any]) -> "Skill":
+        latest_published_skill = payload.get("skillVersionBundle")
+        main_skill_md = latest_published_skill.get("mainSkillMD") or {}
+        return cls(
+            skill_id=str(payload.get("resourceId")),
+            name=str(payload.get("name") or ""),
+            description=str(payload.get("description") or ""),
+            source_type=str(payload.get("sourceType")),
+            skill_md_object_key=str(main_skill_md.get("objectKey") or ""),
+            assets_manifest=[
+                SkillAssetMeta.from_response(item)
+                for item in (latest_published_skill.get("skillAssets") or [])
+            ],
+            version=int(payload.get("version") or 0),
+        )
 
 @dataclass(frozen=True)
 class SkillMeta:
-    """
-    Matcher / Coordinator 用的轻量元信息快照。
-    """
     skill_id: str
-    display_name: str
+    name: str
     description: str
-    triggers: List[str]
-    version: str
+    version: int
+
+    @classmethod
+    def from_response(cls, payload: Mapping[str, Any]) -> "SkillMeta":
+        return cls(
+            skill_id=str(payload.get("resourceId")),
+            name=str(payload.get("name")),
+            description=str(payload.get("description")),
+            version=int(payload.get("version")),
+        )

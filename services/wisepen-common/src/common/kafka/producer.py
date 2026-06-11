@@ -1,6 +1,6 @@
 from aiokafka import AIOKafkaProducer
 import json
-from common.logger import log_error, log_event
+from common.logger import error, info
 from typing import Dict, List, Tuple, Optional
 
 
@@ -16,21 +16,21 @@ class KafkaProducerClient:
                 value_serializer=lambda x: json.dumps(x, ensure_ascii=False).encode('utf-8'),
             )
             await self._producer.start()
-            log_event(f"Kafka Producer 已启动", bootstrap_servers=self.bootstrap_servers)
+            info("kafka producer started.", bootstrap_servers=self.bootstrap_servers)
         except Exception as e:
-            log_error("Kafka Producer 启动", e)
+            error("kafka producer start failed.", exc=e)
 
     async def stop(self):
         if self._producer:
             await self._producer.stop()
-            log_event("Kafka Producer 已停止")
+            info("kafka producer stopped.")
 
     async def send(self, topic: str, value: Dict, headers: List[Tuple[str, bytes]] = None):
         if not self._producer:
-            log_error("Kafka 发送", "Producer 未启动或启动失败")
+            error("kafka publish failed because producer is not started", topic=topic)
             return
         try:
             await self._producer.send_and_wait(topic, value=value, headers=headers)
         except Exception as e:
-            log_error("Kafka 发送", e, topic=topic)
+            error("kafka publish failed.", topic=topic, exc=e)
        

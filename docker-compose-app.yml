@@ -8,7 +8,7 @@ services:
       args:
         SERVICE_DIR: wisepen-chat-service
         SERVICE_PKG: chat
-        SERVICE_PORT: "9200"
+        SERVICE_PORT: "19904"
     image: ${DOCKER_REGISTRY}/wisepencloud-chat:${APP_VERSION}
     container_name: wisepen-chat-service
     restart: always
@@ -21,8 +21,14 @@ services:
       - NACOS_USERNAME=${NACOS_USERNAME}
       - NACOS_PASSWORD=${NACOS_PASSWORD}
       - SERVICE_HOST=0.0.0.0
-      - SERVICE_PORT=9200
+      - SERVICE_PORT=19904
       - LOG_LEVEL=INFO
+      - OTEL_SERVICE_NAME=wisepen-chat-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=otlp
+      - OTEL_LOGS_EXPORTER=otlp
     volumes:
       - ../logs/chat:/logs
     networks:

@@ -1,4 +1,3 @@
-from .localfs_loader import LocalFSSkillAssetLoader
-from .oss_loader import OssSkillAssetLoader
+from .oss_loader import OssFileLoader
 
-__all__ = ["LocalFSSkillAssetLoader", "OssSkillAssetLoader"]
+__all__ = ["OssFileLoader"]
