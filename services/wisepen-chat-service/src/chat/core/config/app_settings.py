@@ -1,4 +1,4 @@
-﻿import yaml
+import yaml
 import asyncio
 import threading
 from pathlib import Path
@@ -37,7 +37,7 @@ class AppSettings(BaseModel):
     # 安全配置
     # 与 APISIX 网关约定的请求来源 token
     FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
-
+    
     # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str
     KAFKA_TOKEN_CONSUMPTION_TOPIC: str = "wisepen-user-token-consumption-topic"
@@ -97,6 +97,11 @@ class AppSettings(BaseModel):
     # ServiceDiscovery 本地缓存兜底 TTL（秒），即便订阅通道断连也会周期性强制 list
     SERVICE_DISCOVERY_CACHE_TTL_SECONDS: float = 30.0
 
+    # AIO 沙箱网关配置
+    # TODO: 暂时写死本地地址，待 Nacos 配置就绪后移除默认值
+    AIO_GATEWAY_BASE_URL: str = "http://127.0.0.1:9100"
+    SANDBOX_TIMEOUT_SECONDS: int = 30
+
     # OSS 资产本地磁盘缓存目录（运行期管理，GC 自动清理）
     OSS_CACHE_DIR: str = "/var/oss_cache"
     # 缓存文件 TTL：mtime 距今超过该秒数 → GC 清理（默认 6 小时）
@@ -133,7 +138,6 @@ def load_settings() -> AppSettings:
     except Exception as e:
         error("nacos app config pull failed.", exc=e)
         raise
-
 
 settings = load_settings()
 

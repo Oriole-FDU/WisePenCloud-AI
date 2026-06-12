@@ -1,4 +1,4 @@
-﻿from copy import deepcopy
+from copy import deepcopy
 from typing import List, Optional
 from datetime import datetime, timezone
 import uuid

@@ -1,4 +1,4 @@
-﻿import json
+import json
 import uuid
 from typing import Dict, List, Optional, Iterator, AsyncIterator, Union
 

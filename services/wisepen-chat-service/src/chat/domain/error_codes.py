@@ -26,5 +26,5 @@ class ChatErrorCode(IErrorCode):
     LLM_GENERATION_FAILED = (50011, "大模型生成失败")
 
     # --- 记忆相关 ---
-    MEMORY_NOT_FOUND = (40001, "目标记忆不存在")
+    MEMORY_NOT_FOUND = (40061, "目标记忆不存在")
     MEMORY_OPERATION_FAILED = (50021, "记忆操作失败")

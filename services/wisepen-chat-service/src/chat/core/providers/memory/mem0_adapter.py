@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 from typing import List, Dict, Any, Optional
 from mem0 import Memory
 
@@ -78,7 +78,7 @@ class Mem0Adapter(MemoryProvider):
                 return []
             if score_threshold is not None:
                 # 按分数阈值过滤，忽略 limit 参数
-                return [r["memory"] for r in results if r.get("rerank_score") >= score_threshold]
+                return [r["memory"] for r in results if r.get("rerank_score", 0) >= score_threshold]
             return [r["memory"] for r in results]
 
         try:
@@ -125,7 +125,7 @@ class Mem0Adapter(MemoryProvider):
             owner_id = memory.get("user_id")
             if owner_id != user_id:
                 raise ServiceException(ChatErrorCode.MEMORY_NOT_FOUND)
-            self.client.delete_session(memory_id, )
+            self.client.delete(memory_id)
 
         await asyncio.to_thread(_sync_verify_and_delete)
 

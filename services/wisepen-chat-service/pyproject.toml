@@ -9,6 +9,7 @@ authors = [
 ]
 dependencies = [
     "fastapi",
+    "python-multipart",
     "pydantic",
     "pydantic-settings",
     "uvicorn[standard]",
@@ -17,6 +18,9 @@ dependencies = [
     "mem0ai",
     "openai",
     "beanie",
+    "pypdf",
+    "Pillow",
+    "pytesseract",
     "redis[asyncio]",
     "nacos-sdk-python",
     "pyyaml",

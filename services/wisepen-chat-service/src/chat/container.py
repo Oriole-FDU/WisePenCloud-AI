@@ -19,6 +19,7 @@ from chat.core.persistence import (
     MongoProviderRepository,
     RedisHotContext,
 )
+from chat.application.attachment_service import AttachmentService
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.agents import (
     DefaultAgentResolver,
@@ -51,6 +52,7 @@ def _build_registry(tool_providers: List[providers.Provider]) -> ToolRegistry:
 class Container(containers.DeclarativeContainer):
     """依赖注入容器，管理单例对象的生命周期。"""
     llm_provider = providers.Singleton(LiteLLMAdapter)
+
     memory_provider = providers.Singleton(Mem0Adapter)
 
     session_repo = providers.Singleton(MongoSessionRepository)
@@ -75,6 +77,7 @@ class Container(containers.DeclarativeContainer):
         retries=settings.RPC_DEFAULT_RETRIES,
         default_strategy=settings.RPC_LB_STRATEGY,
     )
+    # 文件存储服务
     file_storage_client = providers.Singleton(
         FileStorageClient,
         rpc=rpc_client,
@@ -110,13 +113,12 @@ class Container(containers.DeclarativeContainer):
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
     )
 
+
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期
-    # GetHistoricalChatMessagesTool
     search_history_tool = providers.Singleton(
         GetHistoricalChatMessagesTool,
         message_repo=message_repo,
     )
-    # LoadSkillTool / LoadSkillAssetTool
     load_skill_tool = providers.Singleton(
         LoadSkillTool,
         ai_asset_client=ai_asset_client,
@@ -139,6 +141,13 @@ class Container(containers.DeclarativeContainer):
     tool_registry = providers.Singleton(
         _build_registry,
         tool_providers=tool_providers,
+    )
+
+    attachment_service = providers.Factory(
+        AttachmentService,
+        session_repo=session_repo,
+        file_storage_client=file_storage_client,
+        rpc_client=rpc_client,
     )
 
     # Application 层组件

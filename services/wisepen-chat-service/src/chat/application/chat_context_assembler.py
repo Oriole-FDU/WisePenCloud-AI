@@ -1,4 +1,4 @@
-﻿from dataclasses import field, dataclass
+from dataclasses import field, dataclass
 from typing import Any, Dict, List, Optional
 
 from common.logger import error, warn
@@ -110,6 +110,10 @@ class ChatContextAssembler:
         relevant_facts: List[str],
         frontend_states: Optional[List[Dict[str, Any]]] = None,
         available_skills: Optional[List[SkillMeta]] = None,
+        user_content: Optional[Any] = None,
+        attachments_meta: Optional[List[Dict[str, Any]]] = None,
+        resource_refs: Optional[List[Any]] = None,
+        image_b64_list: Optional[List[Dict[str, str]]] = None,
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表"""
 
@@ -157,6 +161,41 @@ class ChatContextAssembler:
             ctx_lines = [f'<context key="{state["key"]}">\n{state["value"]}\n</context>' for state in active_frontend_states]
             context_blocks.append(
                 "<user_frontend_context>\n" + "\n".join(ctx_lines) + "\n</user_frontend_context>"
+            )
+
+        # 会话附件元数据
+        if attachments_meta:
+            meta_lines = []
+            for a in attachments_meta:
+                size_kb = int(a.get("file_size", 0)) // 1024
+                meta_lines.append(
+                    f"- object_key=\"{a.get('object_key', '')}\" "
+                    f"filename=\"{a.get('original_name', '')}\" "
+                    f"type=\"{a.get('extension', '')}\" "
+                    f"size={size_kb}KB"
+                )
+            attachments_block = (
+                "[Session Attachments]\n"
+                + "\n".join(meta_lines)
+            )
+            context_blocks.append(
+                f"<session_attachments>\n{attachments_block}\n</session_attachments>"
+            )
+
+        # 会话文档库资源
+        active_resources = [r for r in (resource_refs or []) if not getattr(r, "deleted", False)]
+        if active_resources:
+            res_lines = []
+            for r in active_resources:
+                res_lines.append(
+                    f"- {r.resource_id}: \"{r.name}\" ({r.extension}) "
+                    f"→ /workspace/resources/{r.resource_id}/"
+                )
+            resources_block = (
+                "\n".join(res_lines)
+            )
+            context_blocks.append(
+                f"<session_resources>\n{resources_block}\n</session_resources>"
             )
 
         # 用户最新输入的问题

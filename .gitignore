@@ -43,3 +43,4 @@ ENV/
 # 操作系统
 .DS_Store
 Thumbs.db
+wisepen-chat-service.nacos.yaml

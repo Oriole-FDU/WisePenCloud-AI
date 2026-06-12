@@ -1,11 +1,15 @@
+import httpx
 from fastapi import APIRouter, Depends, Query
 from dependency_injector.wiring import inject, Provide
 
 from chat.api.schemas.session import (
     SessionResponse, CreateSessionRequest, RenameSessionRequest,
-    PinSessionRequest, SetSessionAgentRequest, UIMessageResponse,
+    PinSessionRequest, SetSessionAgentRequest,
+    AddResourcesRequest, DeleteResourcesRequest, ResourceBindItem,
+    UIMessageResponse,
 )
 from chat.api.converters import convert_to_ui_messages
+from chat.core.config.app_settings import settings
 from chat.application.agents import AgentResolver
 from chat.domain.entities import ChatSession
 from chat.domain.error_codes import ChatErrorCode
@@ -13,10 +17,22 @@ from chat.domain.repositories import SessionRepository, MessageRepository
 from chat.container import Container
 
 from common.security import require_login
+from common.logger import logger
 from common.core.domain import R, PageResult
 from common.core.exceptions import ServiceException
 
 router = APIRouter()
+
+@router.get("/getSession", response_model=R[SessionResponse])
+@inject
+async def get_session(
+        session_id: str,
+        user_id: str = Depends(require_login),
+        session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    session = await session_repo.get_session_for_user(session_id, user_id)
+    return R.success(data=SessionResponse.from_entity(session))
+
 
 @router.post("/createSession", response_model=R[SessionResponse], status_code=200)
 @inject
@@ -59,6 +75,25 @@ async def delete_session(
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
+    gateway_url = settings.AIO_GATEWAY_BASE_URL.rstrip("/")
+    from_source = settings.FROM_SOURCE_SECRET
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{gateway_url}/v1/aio/shell/exec",
+                json={
+                    "command": "rm -rf /workspace",
+                    "exec_dir": "/workspace",
+                },
+                headers={
+                    "X-User-Id": user_id,
+                    "X-Session-Id": session_id,
+                    "X-From-Source": from_source,
+                },
+            )
+    except Exception as e:
+        logger.opt(exception=e).warning("workspacePurge failed userId={}", user_id)
+
     await session_repo.delete_session(session_id, user_id)
     return R.success()
 
@@ -94,6 +129,35 @@ async def rename_session(
 ):
     session = await session_repo.rename_session(session_id, user_id, req.new_title or "New Chat")
     return R.success(data=SessionResponse.from_entity(session))
+
+@router.post("/addResources", response_model=R[SessionResponse], status_code=200)
+@inject
+async def add_resources(
+    req: AddResourcesRequest,
+    user_id: str = Depends(require_login),
+    session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    await session_repo.get_session_for_user(req.session_id, user_id)
+    from chat.container import container as ctr
+    service = ctr.attachment_service()
+    resources_dicts = [{"resource_id": r.resource_id, "resource_type": r.resource_type} for r in req.resources]
+    session = await service.add_resources(user_id, req.session_id, resources_dicts)
+    return R.success(data=SessionResponse.from_entity(session))
+
+
+@router.post("/deleteResources", response_model=R[SessionResponse], status_code=200)
+@inject
+async def delete_resources(
+    req: DeleteResourcesRequest,
+    user_id: str = Depends(require_login),
+    session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    await session_repo.get_session_for_user(req.session_id, user_id)
+    from chat.container import container as ctr
+    service = ctr.attachment_service()
+    session = await service.delete_resources(user_id, req.session_id, req.resource_ids)
+    return R.success(data=SessionResponse.from_entity(session))
+
 
 @router.post("/pinSession", response_model=R[SessionResponse], status_code=200)
 @inject

@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 from typing import Dict, Any, Optional
 from common.logger import error
 

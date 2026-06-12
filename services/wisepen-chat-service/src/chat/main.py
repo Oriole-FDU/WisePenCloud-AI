@@ -1,4 +1,4 @@
-﻿# 屏蔽 websockets.legacy 第三方弃用提示
+# 屏蔽 websockets.legacy 第三方弃用提示
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"websockets\.legacy",)
 
@@ -29,6 +29,7 @@ from common.observability import instrument_fastapi_app
 from chat.container import container  # noqa: F401 — 触发 dependency_injector wiring，不可删除
 from chat.core.config.app_settings import settings
 from chat.api.router import api_router
+from chat.api.endpoints import attachment as attachment_endpoints
 from chat.api.endpoints import chat as chat_endpoints
 from chat.api.endpoints import session as session_endpoints
 from chat.api.endpoints import memory as memory_endpoints
@@ -109,7 +110,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         error("nacos instance deregister failed.", exc=e)
 
-container.wire(modules=[chat_endpoints, session_endpoints, memory_endpoints, model_endpoints])  # 注入依赖到路由模块
+container.wire(modules=[attachment_endpoints, chat_endpoints, session_endpoints, memory_endpoints, model_endpoints])  # 注入依赖到路由模块
 app = FastAPI(title=bootstrap_settings.APP_NAME, lifespan=lifespan, docs_url="/docs")
 instrument_fastapi_app(app)
 

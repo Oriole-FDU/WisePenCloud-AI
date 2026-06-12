@@ -1,4 +1,4 @@
-﻿from typing import Protocol
+from typing import Protocol
 
 from common.logger import error
 

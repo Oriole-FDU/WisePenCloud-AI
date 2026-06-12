@@ -75,6 +75,10 @@ class ModelRequestInfo:
     def max_output_tokens(self) -> Optional[int]:
         return self.model.max_output_tokens
 
+    @property
+    def support_vision(self) -> bool:
+        return self.model.support_vision
+
 class ModelRepository(ABC):
 
     @abstractmethod

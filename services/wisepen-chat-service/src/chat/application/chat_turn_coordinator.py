@@ -1,11 +1,13 @@
-﻿from typing import Optional, List, Dict, Any, Set
+from typing import Optional, List, Dict, Any, Set
 from beanie import PydanticObjectId
 from fastapi import BackgroundTasks
 
 from common.logger import error
 
+from chat.api.schemas.chat import AttachmentRefRequest
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
+from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces.llm import LLMProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, ProviderRepository
@@ -78,6 +80,10 @@ class ChatTurnCoordinator:
             model_id: PydanticObjectId,
             provider_id: Optional[PydanticObjectId] = None,
             frontend_states: Optional[List[Dict[str, Any]]] = None,
+            attachment_refs: Optional[List[AttachmentRefRequest]] = None,
+            attachments_meta: Optional[List[Dict[str, Any]]] = None,
+            image_b64_list: Optional[List[Dict[str, str]]] = None,
+            resource_refs: Optional[List[Any]] = None,
             user_defined_allow_tool_names: Optional[Set[str]] = None,
             user_defined_deny_tool_names: Optional[Set[str]] = None,
             user_defined_on_demand_skill_ids: Optional[Set[str]] = None,
@@ -198,6 +204,10 @@ class ChatTurnCoordinator:
             deny_tool_name_set=deny_tool_name_set,
         )
 
+        # 非视觉模型时静默忽略前端传入的图片 base64
+        if image_b64_list and not resolved.support_vision:
+            image_b64_list = None
+
         # 提示词组装
         # 将系统提示词、Mem0 检索到的事实、会话的历史摘要、前端上下文以及窗口内的明细消息组装成 LLM 所需的格式
         messages_for_llm = self._context_assembler.assemble_prompt(
@@ -209,6 +219,9 @@ class ChatTurnCoordinator:
             relevant_facts=relevant_facts, # 长期记忆检索的事实
             frontend_states=frontend_states, # 用户前端状态
             available_skills=available_skills or None, # 可用技能
+            attachments_meta=attachments_meta,
+            resource_refs=resource_refs,
+            image_b64_list=image_b64_list,
         )
 
         # 构造 chat_record_messages

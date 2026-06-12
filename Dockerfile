@@ -28,6 +28,17 @@ FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
+# LibreOffice: Office 文档转 PDF；Tesseract: 图片 OCR（简繁中文）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-core \
+    libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
+    tesseract-ocr \
+    tesseract-ocr-chi-sim \
+    tesseract-ocr-chi-tra \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/services /app/services
 
