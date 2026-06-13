@@ -9,7 +9,7 @@ import json
 from typing import Any, Dict, Optional
 from urllib.request import Request, urlopen
 
-from common.logger import log_error
+from common.logger import error as log_error
 from chat.core.config.app_settings import settings
 
 

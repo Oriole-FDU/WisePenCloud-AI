@@ -140,11 +140,11 @@ def load_settings() -> AppSettings:
         cfg = yaml.safe_load(raw) if raw else {}
         if not isinstance(cfg, dict):
             raise ValueError("local config must be a yaml mapping")
-        log_event("使用本地配置文件启动（DEV 模式）", file=str(cfg_path))
+        info("使用本地配置文件启动（DEV 模式）", file=str(cfg_path))
         return cfg
 
     use_nacos = str(os.getenv("CHAT_USE_NACOS") or "").strip().lower() in ("1", "true", "yes")
-    if bootstrap_settings.DEV and not use_nacos:
+    if bootstrap_settings.IS_DEV and not use_nacos:
         full_config = {**bootstrap_settings.model_dump(), **_load_local()}
         return AppSettings(**full_config)
 
@@ -154,8 +154,8 @@ def load_settings() -> AppSettings:
         config_dict = yaml.safe_load(raw_yaml) if raw_yaml else {}
         return AppSettings(**(config_dict or {}))
     except Exception as e:
-        log_error("Nacos 配置拉取或解析", e)
-        if bootstrap_settings.DEV:
+        error("Nacos 配置拉取或解析", exc=e)
+        if bootstrap_settings.IS_DEV:
             full_config = {**bootstrap_settings.model_dump(), **_load_local()}
             return AppSettings(**full_config)
         raise

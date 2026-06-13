@@ -1,4 +1,4 @@
-from common.logger import setup_logging_intercept, log_event, log_error
+from common.logger import setup_logging_intercept, info, error
 from aio_gateway.bootstrap import bootstrap_settings
 setup_logging_intercept(bootstrap_settings.LOG_LEVEL)
 
@@ -28,7 +28,7 @@ os.environ["NO_PROXY"] = no_proxy
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log_event(f"{bootstrap_settings.APP_NAME} 启动")
+    info(f"{bootstrap_settings.APP_NAME} 启动")
 
     # 创建 WorkspaceCleaner 并注入到 deps
     cleaner = WorkspaceCleaner(
@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     shutdown_event = asyncio.Event()
 
     async def _cleanup_loop():
-        log_event("工作域清理任务启动",
+        info("工作域清理任务启动",
                   ttl_days=settings.WORKSPACE_CLEANUP_TTL_SECONDS // 86400,
                   interval_hours=settings.WORKSPACE_CLEANUP_INTERVAL_SECONDS // 3600)
         while not shutdown_event.is_set():
@@ -50,18 +50,18 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                log_error("清理循环异常", e)
+                error("清理循环异常", exc=e)
 
     cleanup_task = asyncio.create_task(_cleanup_loop())
 
     try:
         await nacos_client_manager.register_instance()
     except Exception as e:
-        log_error("Nacos 服务注册", e)
+        error("Nacos 服务注册", exc=e)
 
-    log_event(f"{bootstrap_settings.APP_NAME} 就绪", port=bootstrap_settings.SERVICE_PORT)
+    info(f"{bootstrap_settings.APP_NAME} 就绪", port=bootstrap_settings.SERVICE_PORT)
     yield
-    log_event(f"{bootstrap_settings.APP_NAME} 关闭")
+    info(f"{bootstrap_settings.APP_NAME} 关闭")
 
     shutdown_event.set()
     cleanup_task.cancel()
@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
     try:
         await nacos_client_manager.deregister_instance()
     except Exception as e:
-        log_error("Nacos 服务注销", e)
+        error("Nacos 服务注销", exc=e)
 
 
 app = FastAPI(title=bootstrap_settings.APP_NAME, lifespan=lifespan, docs_url="/docs")

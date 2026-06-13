@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from aio_gateway.bootstrap import bootstrap_settings
 from aio_gateway.nacos import nacos_client_manager
-from common.logger import log_event, log_error
+from common.logger import info, error
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -31,7 +31,7 @@ def _load_local() -> dict:
     cfg = yaml.safe_load(raw) if raw else {}
     if not isinstance(cfg, dict):
         raise ValueError("local config must be a yaml mapping")
-    log_event("使用本地配置文件启动（DEV 模式）", file=str(cfg_path))
+    info("使用本地配置文件启动（DEV 模式）", file=str(cfg_path))
     return cfg
 
 
@@ -59,12 +59,12 @@ def load_settings() -> AppSettings:
         return AppSettings(**_load_local())
 
     try:
-        log_event("从 Nacos 拉取核心业务配置")
+        info("从 Nacos 拉取核心业务配置")
         raw_yaml = _run_async(nacos_client_manager.pull_config())
         config_dict = yaml.safe_load(raw_yaml) if raw_yaml else {}
         return AppSettings(**(config_dict or {}))
     except Exception as e:
-        log_error("Nacos 配置拉取或解析", e)
+        error("Nacos 配置拉取或解析", exc=e)
         if bootstrap_settings.IS_DEV:
             return AppSettings(**_load_local())
         raise

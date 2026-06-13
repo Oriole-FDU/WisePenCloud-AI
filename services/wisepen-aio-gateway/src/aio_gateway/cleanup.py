@@ -11,7 +11,7 @@ import asyncio
 import math
 import httpx
 
-from common.logger import log_event, log_error
+from common.logger import info, error
 from aio_gateway.isolation import TenantScope, SANDBOX_ROOT
 
 
@@ -25,6 +25,7 @@ class WorkspaceCleaner:
 
     def __init__(self, aio_base_url: str, ttl_seconds: int = 7 * 24 * 3600):
         self._aio_url = aio_base_url.rstrip("/")
+        self._aio_client = httpx.AsyncClient(timeout=65.0)
         self._ttl_seconds = ttl_seconds
         self._ttl_days = max(1, math.ceil(ttl_seconds / 86400))
 
@@ -55,17 +56,16 @@ class WorkspaceCleaner:
             stdout = result.get("stdout", "")
             deleted_count = stdout.count("deleting:")
             if deleted_count > 0:
-                log_event("清理过期工作域", count=deleted_count, ttl_days=self._ttl_days)
+                info("清理过期工作域", count=deleted_count, ttl_days=self._ttl_days)
             return deleted_count
         except Exception as e:
-            log_error("工作域清理失败", e)
+            error("工作域清理失败", exc=e)
             return 0
 
     async def _shell_exec(self, command: str, timeout: int = 30) -> dict:
         url = f"{self._aio_url}/v1/shell/exec"
         body = {"command": command, "timeout": timeout}
-        async with httpx.AsyncClient(timeout=float(timeout + 5)) as client:
-            resp = await client.post(url, json=body)
-            resp.raise_for_status()
-            data = resp.json()
-            return data if isinstance(data, dict) else {}
+        resp = await self._aio_client.post(url, json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, dict) else {}

@@ -73,13 +73,6 @@ async def lifespan(app: FastAPI):
     kafka_consumer = container.kafka_consumer()
     await kafka_consumer.start()
 
-    # 启动 Skill cache refresher
-    skill_cache_refresher = container.skill_cache_refresher()
-    await skill_cache_refresher.start()
-
-    # 启动 Skill 资产加载器
-    skill_asset_loader = container.skill_asset_loader()
-    if getattr(skill_asset_loader, "start", None) is not None:
     # 启动 Oss File 加载器
     oss_file_loader = container.oss_file_loader()
     if getattr(oss_file_loader, "start", None) is not None:
@@ -104,9 +97,6 @@ async def lifespan(app: FastAPI):
     kafka_consumer = container.kafka_consumer()
     await kafka_consumer.stop()
 
-    # 关闭 Skill 资产加载器
-    skill_asset_loader = container.skill_asset_loader()
-    if getattr(skill_asset_loader, "stop", None) is not None:
     # 关闭 Oss File 加载器
     oss_file_loader = container.oss_file_loader()
     if getattr(oss_file_loader, "stop", None) is not None:

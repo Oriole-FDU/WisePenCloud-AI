@@ -3,13 +3,14 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Request
 import httpx
 
-from common.logger import log_error
+from common.logger import error as log_error
 from common.core.domain.responses import R
 from aio_gateway.settings import settings
 from aio_gateway.isolation import PathTranslator, PathValidationError
 from aio_gateway.api.deps import get_path_translator
 
 router = APIRouter()
+_aio_client = httpx.AsyncClient(timeout=30.0)
 
 
 class ShellExecRequest(BaseModel):
@@ -24,10 +25,9 @@ async def _proxy_to_aio(
     json_body: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     url = f"{settings.AIO_BASE_URL}{path}"
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.request(method, url, json=json_body)
-        resp.raise_for_status()
-        return resp.json()
+    resp = await _aio_client.request(method, url, json=json_body)
+    resp.raise_for_status()
+    return resp.json()
 
 
 @router.post("/exec")
