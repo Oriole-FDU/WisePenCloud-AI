@@ -5,7 +5,7 @@ from common.logger import error
 
 from chat.core.config.app_settings import settings
 from chat.service_client import AIAssetClient
-from chat.domain.entities.skill import SkillMeta
+from chat.domain.entities.skill import SkillMetaqing
 
 
 class SkillMatcher(ABC):

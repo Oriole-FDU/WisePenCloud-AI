@@ -2,6 +2,7 @@ from chat.application.tools.core.definition import (
     Tool,
     ToolDefinition,
     ToolLLMSpec,
+    ToolOutput,
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
@@ -22,7 +23,6 @@ from chat.application.tools.core.llm.invocation import (
 from chat.application.tools.core.llm.renderer import (
     RenderToolResult,
     schema_renderer,
-    tool_result_renderer,
 )
 
 from chat.application.tools.core.execution.result import (
@@ -55,6 +55,7 @@ __all__ = [
     "Tool",
     "ToolDefinition",
     "ToolLLMSpec",
+    "ToolOutput",
     "ToolParametersSchema",
     "ToolPolicy",
     "ToolRiskLevel",
@@ -72,7 +73,6 @@ __all__ = [
     # renderer
     "RenderToolResult",
     "schema_renderer",
-    "tool_result_renderer",
 
     # execution result
     "ToolBatchResult",

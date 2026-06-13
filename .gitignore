@@ -40,6 +40,16 @@ ENV/
 .mypy_cache/
 .ruff_cache/
 
+# 临时测试脚本 / 设计稿
+bench_*.py
+bench_results/
+tests/
+services/wisepen-chat-service/docs/add_tool_guide.md
+services/wisepen-chat-service/docs/tool_architecture_report.md
+services/wisepen-chat-service/test/
+services/wisepen-chat-service/src/chat/application/tools/common/*.html
+services/wisepen-chat-service/src/chat/application/tools/common/**/*_design.html
+
 # 操作系统
 .DS_Store
 Thumbs.db

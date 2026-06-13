@@ -5,9 +5,9 @@ from typing import Dict, List, Optional, Iterator, AsyncIterator, Union
 from beanie import PydanticObjectId
 
 from chat.application.tools import ToolScope
+from chat.application.tool_output_aspect import ToolOutputAspect
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.llm.invocation import ToolCallMessageAccumulator, tool_call_parse
-from chat.application.tools.core.llm.renderer import tool_result_renderer
 from common.logger import warn
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
@@ -119,9 +119,10 @@ class QueryLoopRuntime:
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
     """
 
-    def __init__(self, llm: LLMProvider) -> None:
+    def __init__(self, llm: LLMProvider, tool_output_aspect: ToolOutputAspect) -> None:
         self.llm = llm
         self._tool_dispatcher = ToolDispatcher()
+        self._tool_output_aspect = tool_output_aspect
 
     """
     ReAct 循环主入口 (QueryLoop)
@@ -293,7 +294,11 @@ class QueryLoopRuntime:
 
         for result in tool_outputs.results:
             tool = tool_scope.get(result.tool_invocation.tool_name)
-            result = tool_result_renderer(result, tool.definition if tool else None)
+            result = self._tool_output_aspect.process_result(
+                tool_result=result,
+                tool_definition=tool.definition if tool else None,
+                context=tool_scope.context,
+            )
 
             yield ToolOutputAvailableEvent(
                 call_id=result.tool_call_id,

@@ -20,6 +20,7 @@ from chat.core.persistence import (
     RedisHotContext,
 )
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
+from chat.application.tool_output_aspect import ToolOutputAspect
 from chat.application.agents import (
     DefaultAgentResolver,
 )
@@ -28,6 +29,13 @@ from chat.application.tools.skill_tools import LoadSkillAssetTool
 from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
+from chat.application.tools.common.chunking_engine import ChunkingEngine
+from chat.application.tools.common.context_bundle import ContextAdapter, ModelContextRenderer
+from chat.application.tools.common.tool_content_store.repository import RedisToolContentRepository
+from chat.application.tools.common.tool_content_store.store import (
+    DEFAULT_TOOL_CONTENT_TTL_SECONDS,
+    ToolContentStore,
+)
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
@@ -58,6 +66,28 @@ class Container(containers.DeclarativeContainer):
     model_repo = providers.Singleton(MongoModelRepository)
     provider_repo = providers.Singleton(MongoProviderRepository)
     hot_context_repo = providers.Singleton(RedisHotContext)
+
+    # ToolContentStore：工具输出只走专用 Redis 仓储，分块由 ChunkingEngine 负责
+    chunking_engine = providers.Singleton(ChunkingEngine)
+    tool_content_repository = providers.Singleton(
+        RedisToolContentRepository,
+        redis_url=settings.REDIS_URL,
+        ttl_seconds=DEFAULT_TOOL_CONTENT_TTL_SECONDS,
+    )
+    tool_content_store = providers.Singleton(
+        ToolContentStore,
+        repository=tool_content_repository,
+        chunking_engine=chunking_engine,
+    )
+    context_adapter = providers.Singleton(ContextAdapter)
+    model_context_renderer = providers.Singleton(ModelContextRenderer)
+    tool_output_aspect = providers.Singleton(
+        ToolOutputAspect,
+        content_store=tool_content_store,
+        adapter=context_adapter,
+        renderer=model_context_renderer,
+        inline_max_chars=settings.TOOL_RESULT_MAX_CHARS,
+    )
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
     service_discovery = providers.Singleton(
@@ -154,6 +184,7 @@ class Container(containers.DeclarativeContainer):
         tool_registry=tool_registry,
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
+        tool_output_aspect=tool_output_aspect,
         agent_resolver=agent_resolver,
     )
 

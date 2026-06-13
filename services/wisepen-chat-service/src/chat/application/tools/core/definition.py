@@ -1,9 +1,15 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Protocol, Dict, Callable, TYPE_CHECKING
+from typing import Any, Protocol, Dict, Callable, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from chat.application.tools.core.execution.hooks.base import ToolPreflightHook
+    from chat.application.tools.common.context_bundle.models import ContextBundle
+
+
+ToolOutput = Union[str, "ContextBundle"]
 
 
 class ToolTimeoutStrategy(StrEnum):
@@ -100,5 +106,5 @@ class Tool(Protocol):
     def definition(self) -> ToolDefinition:
         ...
 
-    async def execute(self, context: Dict[str, Any], **kwargs) -> Any:
+    async def execute(self, context: Dict[str, Any], **kwargs) -> ToolOutput:
         ...

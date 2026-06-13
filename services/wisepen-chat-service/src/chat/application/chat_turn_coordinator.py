@@ -12,6 +12,7 @@ from chat.domain.repositories import SessionRepository, MessageRepository, HotCo
 from common.core.exceptions import ServiceException
 from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.query_loop_runtime import QueryLoopRuntime
+from chat.application.tool_output_aspect import ToolOutputAspect
 from chat.application.agents import (
     AgentResolver,
     DefaultAgentResolver,
@@ -47,6 +48,7 @@ class ChatTurnCoordinator:
             tool_registry: ToolRegistry,
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
+            tool_output_aspect: ToolOutputAspect,
             agent_resolver: AgentResolver | None = None,
     ):
         self._memory = memory
@@ -56,7 +58,7 @@ class ChatTurnCoordinator:
             message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo
         )
         self._tool_registry = tool_registry
-        self._query_loop_runtime = QueryLoopRuntime(llm=llm)
+        self._query_loop_runtime = QueryLoopRuntime(llm=llm, tool_output_aspect=tool_output_aspect)
         self._turn_finalizer = ChatTurnFinalizer(
             llm=llm, memory=memory,
             message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo,
