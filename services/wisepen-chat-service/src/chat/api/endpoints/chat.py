@@ -17,7 +17,6 @@ from chat.application.attachment_service import AttachmentService
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.container import Container
 from chat.core.config.app_settings import settings
-from chat.domain.repositories import SessionRepository
 
 router = APIRouter()
 
@@ -53,7 +52,6 @@ async def chat_completions(
         background_tasks: BackgroundTasks,
         user_id: str = Depends(require_login),
         coordinator: ChatTurnCoordinator = Depends(Provide[Container.chat_turn_coordinator]),
-        session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
         attachment_service: AttachmentService = Depends(Provide[Container.attachment_service]),
 ):
     if not req.query:
@@ -65,30 +63,11 @@ async def chat_completions(
     resolved_model_id = PydanticObjectId(req.model or settings.DEFAULT_MODEL_ID)
     resolved_provider_id = PydanticObjectId(req.provider_id) if req.provider_id else None
 
-    session = await session_repo.get_session_for_user(req.session_id, user_id)
-
     resolved_refs = await attachment_service.resolve_session_attachments(req.session_id)
     effective_refs = req.attachment_refs or resolved_refs
-
-    # 获取完整附件元数据用于注入 LLM 上下文
-    session_attachments = await attachment_service.get_session_attachments_meta(req.session_id)
-    attachments_meta = None
-    if session_attachments:
-        attachments_meta = [
-            {
-                "object_key": a.object_key,
-                "original_name": a.original_name,
-                "extension": a.extension,
-                "file_size": a.file_size,
-                "mime_type": a.mime_type,
-            }
-            for a in session_attachments
-        ]
-
-    # 获取未删除的资源引用
-    active_resource_refs = [
-        r for r in session.resource_refs if not getattr(r, "deleted", False)
-    ] if session.resource_refs else None
+    attachments_meta, active_resource_refs = await attachment_service.get_session_context(
+        req.session_id, user_id,
+    )
 
     chat_gen = coordinator.handle_chat(
         user_id=user_id,

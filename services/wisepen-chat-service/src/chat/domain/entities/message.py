@@ -64,7 +64,7 @@ class ChatMessage(Document):
             self.search_tokens = " ".join([w for w in words if len(w.strip()) > 1])
 
     def get_text_content(self) -> str:
-        """提取可用于检索、摘要、计费的纯文本内容"""
+        """提取可用于检索、摘要、计费的纯文本内容，去除视觉模型的image_url字段"""
         if self.content is None:
             return ""
         if isinstance(self.content, str):

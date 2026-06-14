@@ -39,7 +39,6 @@ class AttachmentMetaResponse(BaseModel):
     extension: str
     file_size: int
     mime_type: Optional[str] = None
-    uploaded_at: Optional[str] = None
 
     @classmethod
     def from_entity(cls, meta) -> "AttachmentMetaResponse":
@@ -49,15 +48,12 @@ class AttachmentMetaResponse(BaseModel):
             extension=meta.extension,
             file_size=meta.file_size,
             mime_type=meta.mime_type,
-            uploaded_at=meta.uploaded_at.isoformat() if meta.uploaded_at else None,
         )
 
 
 class ResourceRefResponse(BaseModel):
     resource_id: str
     resource_type: str
-    name: str
-    extension: str
     loaded_at: Optional[str] = None
 
     @classmethod
@@ -65,8 +61,6 @@ class ResourceRefResponse(BaseModel):
         return cls(
             resource_id=ref.resource_id,
             resource_type=ref.resource_type,
-            name=ref.name,
-            extension=ref.extension,
             loaded_at=ref.loaded_at.isoformat() if ref.loaded_at else None,
         )
 

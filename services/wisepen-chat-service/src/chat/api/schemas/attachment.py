@@ -19,11 +19,6 @@ class InitUploadResponse(BaseModel):
     callback_header: str = Field(default="", description="OSS 回调 header")
 
 
-class ConfirmUploadRequest(BaseModel):
-    session_id: str = Field(..., description="会话 ID")
-    object_key: str = Field(..., description="OSS 对象键（来自 initUpload 返回值）")
-
-
 class DeleteAttachmentRequest(BaseModel):
     session_id: str = Field(..., description="会话 ID")
     filename: str = Field(..., description="文件名")

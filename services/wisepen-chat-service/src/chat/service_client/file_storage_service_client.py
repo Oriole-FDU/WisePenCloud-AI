@@ -124,6 +124,35 @@ class FileStorageClient:
             domain=str(data.get("domain") or ""),
         )
 
+    async def init_document_upload(
+        self,
+        *,
+        user_id: str,
+        filename: str,
+        extension: str,
+        md5: str,
+        expected_size: int,
+        biz_path: str,
+    ):
+        """调用 Java document-service 的 uploadDoc 接口，返回 (object_key, put_url, callback_header)。"""
+        data = await self._rpc.post(
+            "wisepen-document-service",
+            "/document/uploadDoc",
+            json={
+                "filename": filename,
+                "extension": extension,
+                "md5": md5,
+                "expectedSize": expected_size,
+                "bizPath": biz_path,
+            },
+            headers={"X-WP-User-Id": user_id},
+        )
+        object_key = data.get("objectKey")
+        put_url = data.get("putUrl")
+        if not object_key or not put_url:
+            raise ValueError(f"uploadDoc response missing required fields: {data!r}")
+        return str(object_key), str(put_url), str(data.get("callbackHeader", ""))
+
     async def delete_file(self, object_key: str) -> None:
         await self._rpc.post(
             self._service_name,

@@ -13,7 +13,6 @@ class AttachmentMeta(BaseModel):
     extension: str
     file_size: int
     mime_type: Optional[str] = None
-    uploaded_at: Optional[datetime] = None
     deleted: bool = False
 
 
@@ -21,8 +20,6 @@ class ResourceRef(BaseModel):
     """文档库资源引用（嵌入 ChatSession.resource_refs 列表）"""
     resource_id: str
     resource_type: str
-    name: str
-    extension: str
     loaded_at: Optional[datetime] = None
     deleted: bool = False
 

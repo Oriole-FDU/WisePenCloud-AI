@@ -1,5 +1,5 @@
 from dataclasses import field, dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from common.logger import error, warn
 
@@ -188,8 +188,7 @@ class ChatContextAssembler:
             res_lines = []
             for r in active_resources:
                 res_lines.append(
-                    f"- {r.resource_id}: \"{r.name}\" ({r.extension}) "
-                    f"→ /workspace/resources/{r.resource_id}/"
+                    f"- {r.resource_id} ({r.resource_type})"
                 )
             resources_block = (
                 "\n".join(res_lines)
@@ -200,7 +199,7 @@ class ChatContextAssembler:
 
         # 用户最新输入的问题
         if context_blocks:
-            final_user_content = (
+            final_user_text = (
                     "[Application-provided context]\n"
                     "The following context is provided by the application. "
                     "Use it as background information, but the user's actual request is in <user_query>.\n\n"
@@ -208,13 +207,31 @@ class ChatContextAssembler:
                     + f"\n\n<user_query>\n{user_query}\n</user_query>"
             )
         else:
-            final_user_content = user_query
+            final_user_text = user_query
+
+        # 视觉模型：将图片嵌入为 multimodal content blocks
+        content: Union[str, List[Dict[str, Any]]]
+        if image_b64_list:
+            content_blocks: List[Dict[str, Any]] = [
+                {"type": "text", "text": final_user_text}
+            ]
+            for img in image_b64_list:
+                content_blocks.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{img.get('mime_type', 'image/png')};base64,{img.get('base64', '')}",
+                        "detail": "auto",
+                    },
+                })
+            content = content_blocks
+        else:
+            content = final_user_text
 
         # 该 Message 不持久化
         messages.append(ChatMessage(
             session_id=session_id,
             role=Role.USER,
-            content=final_user_content,
+            content=content,
         ))
 
         return messages

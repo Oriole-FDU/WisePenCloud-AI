@@ -147,7 +147,6 @@ class Container(containers.DeclarativeContainer):
         AttachmentService,
         session_repo=session_repo,
         file_storage_client=file_storage_client,
-        rpc_client=rpc_client,
     )
 
     # Application 层组件
