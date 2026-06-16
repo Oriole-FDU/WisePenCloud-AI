@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any, TYPE_CHECKING
 
 from chat.application.tools.core.llm.invocation import ToolInvocation
+from chat.application.tools.core.llm.renderer import RenderToolResult
 
 if TYPE_CHECKING:
     from chat.application.tools.core.definition import ToolOutput
@@ -27,4 +28,4 @@ class ToolExecutionResult:
 
 @dataclass(frozen=True)
 class ToolBatchResult:
-    results: list[ToolExecutionResult]
+    results: list[RenderToolResult]

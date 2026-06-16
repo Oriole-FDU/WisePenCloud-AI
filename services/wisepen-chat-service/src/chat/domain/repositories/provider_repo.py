@@ -5,6 +5,7 @@ from beanie import PydanticObjectId
 
 from chat.domain.entities.provider import Provider
 
+
 class ProviderRepository(ABC):
 
     @abstractmethod

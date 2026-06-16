@@ -1,19 +1,47 @@
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from chat.application.tools.core.execution.hooks.builtin import JsonSchemaCheck, RequiredContextCheck
 from chat.application.tools.core.execution.result import ToolExecutionError, ToolExecutionResult
-
 from chat.application.tools.core.llm.invocation import ToolInvocation
+from chat.application.tools.core.llm.renderer import RenderToolResult
 from chat.application.tools.core.registry import ToolScope
+
+if TYPE_CHECKING:
+    from chat.application.tools.tool_output_cache import ToolOutputCache
+    from chat.application.tools.tool_output_renderer import ToolOutputRenderer
 
 
 class ToolExecutor:
-    def __init__(self, tool_scope: ToolScope) -> None:
+    def __init__(
+        self,
+        tool_scope: ToolScope,
+        *,
+        output_renderer: ToolOutputRenderer,
+        output_cache: ToolOutputCache,
+    ) -> None:
         self._tool_scope = tool_scope
+        self._output_renderer = output_renderer
+        self._output_cache = output_cache
 
-    async def execute_one(self, invocation: ToolInvocation) -> ToolExecutionResult:
+    async def execute_one(self, invocation: ToolInvocation) -> RenderToolResult:
+        raw_result = await self._execute_raw(invocation)
+        tool = self._tool_scope.get(invocation.tool_name)
+
+        if raw_result.tool_execution_error is not None:
+            return self._output_renderer.render_error_result(tool_result=raw_result)
+
+        rendered = self._output_renderer.render_result(tool_result=raw_result)
+        return await self._output_cache.process_rendered(
+            rendered=rendered,
+            tool_definition=tool.definition if tool else None,
+            context=self._tool_scope.context,
+        )
+
+    async def _execute_raw(self, invocation: ToolInvocation) -> ToolExecutionResult:
         started_at = datetime.now(timezone.utc)
         tool = self._tool_scope.get(invocation.tool_name)
 
@@ -45,8 +73,7 @@ class ToolExecutor:
                         detail_reason=output.message,
                         retryable=False,
                     )
-                else:
-                    preflight_metadata.update(output.metadata)
+                preflight_metadata.update(output.metadata)
 
             output = await self._run(
                 tool.execute({
@@ -57,14 +84,22 @@ class ToolExecutor:
                 tool_name=invocation.tool_name,
             )
 
-            return ToolExecutionResult(tool_invocation=invocation, tool_output=output,
-                                       started_at=started_at, finished_at=datetime.now(timezone.utc),
-                                       tool_execution_error=None)
+            return ToolExecutionResult(
+                tool_invocation=invocation,
+                tool_output=output,
+                started_at=started_at,
+                finished_at=datetime.now(timezone.utc),
+                tool_execution_error=None,
+            )
         except ToolExecutionError as tool_execution_error:
-            return ToolExecutionResult(tool_invocation=invocation, tool_output=None,
-                                       started_at=started_at, finished_at=datetime.now(timezone.utc),
-                                       tool_execution_error=tool_execution_error)
-        except Exception as exc:
+            return ToolExecutionResult(
+                tool_invocation=invocation,
+                tool_output=None,
+                started_at=started_at,
+                finished_at=datetime.now(timezone.utc),
+                tool_execution_error=tool_execution_error,
+            )
+        except Exception as e:
             return ToolExecutionResult(
                 tool_invocation=invocation,
                 tool_output=None,
@@ -72,7 +107,7 @@ class ToolExecutor:
                 finished_at=datetime.now(timezone.utc),
                 tool_execution_error=ToolExecutionError(
                     reason="Tool Execution Failed",
-                    detail_reason=str(exc),
+                    detail_reason=str(e),
                     retryable=False,
                 ),
             )
@@ -82,9 +117,9 @@ class ToolExecutor:
             return await awaitable
         try:
             return await asyncio.wait_for(awaitable, timeout=timeout_seconds)
-        except asyncio.TimeoutError as exc:
+        except asyncio.TimeoutError as e:
             raise ToolExecutionError(
                 reason="Tool Execution Timeout",
                 detail_reason=f"Tool '{tool_name}' timed out.",
                 retryable=False,
-            ) from exc
+            ) from e

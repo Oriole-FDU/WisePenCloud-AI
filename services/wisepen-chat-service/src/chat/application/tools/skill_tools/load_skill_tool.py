@@ -1,11 +1,5 @@
 from typing import Any, Dict
 
-from chat.domain.entities import Skill
-from chat.domain.interfaces import FileLoader
-from chat.service_client import AIAssetClient
-from chat.service_client.resource_service_client import ResourceClient
-
-from chat.core.config.app_settings import settings
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -14,7 +8,12 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
-from chat.application.tools.skill_tools.common import AllowedSkillIdCheck, build_skill_output_placeholder, SkillPermissionCheck
+from chat.application.tools.skill_tools.common import AllowedSkillIdCheck, build_skill_output_placeholder, \
+    SkillPermissionCheck
+from chat.domain.entities import Skill
+from chat.domain.interfaces import FileLoader
+from chat.service_client import AIAssetClient
+from chat.service_client.resource_service_client import ResourceClient
 
 
 class LoadSkillTool:
@@ -28,6 +27,7 @@ class LoadSkillTool:
         file_loader: FileLoader,
         ai_asset_client: AIAssetClient,
         resource_client: ResourceClient,
+        max_output_chars: int,
     ) -> None:
         self._file_loader = file_loader
         self._ai_asset_client = ai_asset_client
@@ -59,7 +59,7 @@ class LoadSkillTool:
                 risk_level=ToolRiskLevel.MEDIUM,
                 required_context_keys=("allowed_skill_ids",),
                 timeout_seconds=8.0,
-                max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+                max_output_chars=max_output_chars,
             ),
             preflight_hooks=(AllowedSkillIdCheck(), SkillPermissionCheck(resource_client)),
         )

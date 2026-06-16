@@ -1,11 +1,10 @@
-from typing import List, Optional, Tuple
 from datetime import datetime
+from typing import List, Optional, Tuple
+
 from beanie.odm.operators.find.evaluation import Text
 
-from chat.domain.repositories import MessageRepository
 from chat.domain.entities import ChatMessage, Role
-
-
+from chat.domain.repositories import MessageRepository
 
 
 class MongoMessageRepository(MessageRepository):

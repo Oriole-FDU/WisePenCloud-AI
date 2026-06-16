@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import List, Tuple
 from datetime import datetime
+from typing import List, Tuple
+
 from chat.domain.entities import ChatSession
 
 

@@ -1,12 +1,12 @@
 ﻿from dataclasses import field, dataclass
 from typing import Any, Dict, List, Optional
 
-from common.logger import error, warn
-
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role, ChatSession
 from chat.domain.entities.skill import SkillMeta
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
+from common.logger import error, warn
+
 
 @dataclass
 class WindowedMessages:
@@ -40,7 +40,7 @@ class ChatContextAssembler:
         try:
             recent_messages = await self.hot_context_repo.get_recent_context(session_id)
         except Exception as e:
-            warn("get chat history record messages from read redis hot-context failed.", session_id=session_id, exc=e)
+            warn("get chat history record messages from read redis hot-context failed.", session_id=session_id, e=e)
             recent_messages = []
 
         if not recent_messages:
@@ -57,7 +57,7 @@ class ChatContextAssembler:
                     await self.hot_context_repo.load_messages(session_id, history)
                     return history
             except Exception as e:
-                error("chat history record messages repopulate failed.", session_id=session_id, exc=e)
+                error("chat history record messages repopulate failed.", session_id=session_id, e=e)
 
         return recent_messages
 

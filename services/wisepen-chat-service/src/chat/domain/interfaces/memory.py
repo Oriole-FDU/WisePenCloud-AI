@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
+
 from chat.domain.entities import ChatMessage
 
 

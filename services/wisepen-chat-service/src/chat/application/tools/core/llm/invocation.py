@@ -29,7 +29,7 @@ def tool_call_parse(accumulators: dict[int, ToolCallMessageAccumulator], *, quer
         try:
             tool_call_arguments = json.loads(acc.tool_call_argument_str) if acc.tool_call_argument_str else {}
         except json.JSONDecodeError as e:
-            warn("tool call arguments parse failed.", tool_name=acc.tool_name, exc=e)
+            warn("tool call arguments parse failed.", tool_name=acc.tool_name, e=e)
             tool_call_arguments = {}
         if not isinstance(tool_call_arguments, dict):
             warn(

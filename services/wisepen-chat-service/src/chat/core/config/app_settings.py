@@ -1,8 +1,9 @@
-﻿import yaml
-import asyncio
+﻿import asyncio
 import threading
 from pathlib import Path
 from typing import Literal
+
+import yaml
 from pydantic import BaseModel, ConfigDict
 
 from chat.core.config.nacos import nacos_client_manager
@@ -25,11 +26,19 @@ class AppSettings(BaseModel):
     DEFAULT_MODEL_ID: str
 
     # 模型配置 (请求依赖 LLM 默认网关配置)
+    QUERY_MODEL: str = "openai/qwen3-4b"
+    EMBEDDING_MODEL: str = "openai/qwen3-embedding-8b"
+    EMBEDDING_DIMENSIONS: int = 1024
+
     # Memory相关模型
     MEMORY_LLM_MODEL: str
     MEMORY_EMBEDDING_MODEL: str
     MEMORY_RERANKER_ZE_MODEL: str
     ZERO_ENTROPY_API_KEY: str
+    TOOL_CONTENT_RERANKER_ZE_MODEL: str = "zerank-1"
+    TOOL_CONTENT_RERANKER_ZE_TOP_N: int | None = None
+    EVIDENCE_RANKER_ZE_MODEL: str = "zerank-1"
+    EVIDENCE_RANKER_ZE_TOP_N: int | None = None
 
     # 摘要模型
     SUMMARY_MODEL: str
@@ -37,6 +46,8 @@ class AppSettings(BaseModel):
     # 安全配置
     # 与 APISIX 网关约定的请求来源 token
     FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
+    # 通用可解密密钥加密主密钥，使用 Fernet key；生产环境必须由配置中心或密钥系统提供。
+    SECRET_ENCRYPTION_KEY: str = ""
 
     # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str
@@ -82,6 +93,18 @@ class AppSettings(BaseModel):
     # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
     TOOL_RESULT_MAX_CHARS: int = 4000
 
+    # PaddleOCR 云端 PP-StructureV3 基础连接信息；工具行为参数在 tool_settings.py 中配置。
+    PADDLE_OCR_API_URL: str | None = None
+    PADDLE_OCR_TOKEN: str | None = None
+
+    # 平台内置 Web Search 源；用户自定义搜索源不写入 AppSettings。
+    WEB_SEARCH_FOURGET_BASE_URL: str = "http://127.0.0.1:8088"
+    WEB_SEARCH_EXA_BASE_URL: str = "https://api.exa.ai"
+    WEB_SEARCH_TAVILY_BASE_URL: str = "https://api.tavily.com"
+    WEB_SEARCH_ANYSEARCH_BASE_URL: str = "https://api.anysearch.com"
+    WEB_SEARCH_PLATFORM_EXA_ENABLED: bool = False
+    WEB_SEARCH_PLATFORM_EXA_API_KEY: str | None = None
+
     # Skill 配置
 
     # 默认召回数量
@@ -104,23 +127,29 @@ class AppSettings(BaseModel):
     # GC 扫描周期（秒）
     OSS_CACHE_GC_INTERVAL_SECONDS: int = 30 * 60
 
+    # ToolRunFileStore：工具产出临时文件工作区
+    TOOL_RUN_FILE_ROOT: str = "/tmp/wisepen-tool-run-files"
+    TOOL_RUN_FILE_REF_TTL_SECONDS: int = 6 * 3600
+    TOOL_RUN_FILE_CLEANUP_GRACE_SECONDS: int = 10 * 60
+    TOOL_RUN_FILE_MAX_BYTES: int = 50 * 1024 * 1024
+
 
 def _run_async(coro):
     """在新线程的独立事件循环中执行协程，兼容 uvicorn 启动时已有运行中事件循环的场景。"""
-    result, exc = None, None
+    result, e = None, None
 
     def _target():
-        nonlocal result, exc
+        nonlocal result, e
         try:
             result = asyncio.run(coro)
         except Exception as e:
-            exc = e
+            e = e
 
     t = threading.Thread(target=_target)
     t.start()
     t.join()
-    if exc:
-        raise exc
+    if e:
+        raise e
     return result
 
 
@@ -131,7 +160,7 @@ def load_settings() -> AppSettings:
         config_dict = yaml.safe_load(raw_yaml) if raw_yaml else {}
         return AppSettings(**(config_dict or {}))
     except Exception as e:
-        error("nacos app config pull failed.", exc=e)
+        error("nacos app config pull failed.", e=e)
         raise
 
 

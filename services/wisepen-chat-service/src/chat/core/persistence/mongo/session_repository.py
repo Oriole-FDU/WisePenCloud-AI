@@ -1,12 +1,12 @@
-from typing import List, Tuple
 from datetime import datetime, timezone
+from typing import List, Tuple
 
 from beanie import PydanticObjectId
 
-from common.core.exceptions import ServiceException
-from chat.domain.repositories import SessionRepository
 from chat.domain.entities import ChatSession
 from chat.domain.error_codes import ChatErrorCode
+from chat.domain.repositories import SessionRepository
+from common.core.exceptions import ServiceException
 
 
 class MongoSessionRepository(SessionRepository):

@@ -6,7 +6,6 @@ from common.core.domain import GroupRoleType
 from common.core.exceptions import RpcError
 from common.http.rpc_client import RpcClient
 
-
 _DEFAULT_SERVICE_NAME = "wisepen-resource-service"
 _CHECK_RES_PERMISSION_PATH = "/internal/resource/checkResPermission"
 

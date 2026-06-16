@@ -8,47 +8,39 @@ from chat.application.tools.core.definition import (
     ToolRiskLevel,
     ToolTimeoutStrategy,
 )
-
-from chat.application.tools.core.registry import (
-    ToolRegistry,
-    ToolScope,
+from chat.application.tools.core.execution.dispatcher import (
+    ToolDispatcher,
 )
-
-from chat.application.tools.core.llm.invocation import (
-    ToolCallMessageAccumulator,
-    ToolInvocation,
-    tool_call_parse,
+from chat.application.tools.core.execution.executor import (
+    ToolExecutor,
 )
-
-from chat.application.tools.core.llm.renderer import (
-    RenderToolResult,
-    schema_renderer,
+from chat.application.tools.core.execution.hooks.base import (
+    ToolPreflightHook,
+    ToolPreflightResult,
 )
-
+from chat.application.tools.core.execution.hooks.builtin import (
+    JsonSchemaCheck,
+    RequiredContextCheck,
+)
 from chat.application.tools.core.execution.result import (
     ToolBatchResult,
     ToolExecutionError,
     ToolExecutionResult,
 )
-
-from chat.application.tools.core.execution.executor import (
-    ToolExecutor,
+from chat.application.tools.core.llm.invocation import (
+    ToolCallMessageAccumulator,
+    ToolInvocation,
+    tool_call_parse,
 )
-
-from chat.application.tools.core.execution.dispatcher import (
-    ToolDispatcher,
+from chat.application.tools.core.llm.renderer import (
+    RenderToolResult,
+    schema_renderer,
 )
-
-from chat.application.tools.core.execution.hooks.base import (
-    ToolPreflightHook,
-    ToolPreflightResult,
+from chat.application.tools.core.registry import (
+    ToolRegistry,
+    ToolScope,
 )
-
-from chat.application.tools.core.execution.hooks.builtin import (
-    JsonSchemaCheck,
-    RequiredContextCheck,
-)
-
+from chat.application.tools.core.tool_return import ToolReturn
 
 __all__ = [
     # definition
@@ -58,6 +50,7 @@ __all__ = [
     "ToolOutput",
     "ToolParametersSchema",
     "ToolPolicy",
+    "ToolReturn",
     "ToolRiskLevel",
     "ToolTimeoutStrategy",
 

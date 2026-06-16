@@ -6,6 +6,7 @@ from beanie import Document
 from pydantic import Field
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
+
 class ProviderScope(str, Enum):
     SYSTEM = "SYSTEM"  # 平台内置供应商
     USER = "USER"      # 用户自定义供应商

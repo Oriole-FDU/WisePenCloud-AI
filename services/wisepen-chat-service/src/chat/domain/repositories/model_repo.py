@@ -7,6 +7,7 @@ from beanie import PydanticObjectId
 from chat.domain.entities.model import Model, ModelScope, ModelProviderMapping
 from chat.domain.entities.provider import Provider
 
+
 @dataclass(frozen=True)
 class ModelInfo:
     model: Model

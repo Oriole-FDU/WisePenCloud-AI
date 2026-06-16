@@ -2,21 +2,20 @@
 import uuid
 
 from beanie import PydanticObjectId
+from dependency_injector.wiring import inject, Provide
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
-from dependency_injector.wiring import inject, Provide
 
+from chat.api.schemas.chat import ChatRequest
 from chat.api.vercel_formats import (
     message_start, message_finish, stream_done, abort, error as sse_error,
 )
-
-from common.security import require_login
-from common.logger import error, info
-from chat.api.schemas.chat import ChatRequest
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.container import Container
 from chat.core.config.app_settings import settings
 from chat.domain.repositories import SessionRepository
+from common.logger import error, info
+from common.security import require_login
 
 router = APIRouter()
 
@@ -40,7 +39,7 @@ async def _vercel_generator(chat_gen, model_name: str):
         raise
 
     except Exception as e:
-        error("chat stream generation failed.", exc=e)
+        error("chat stream generation failed.", e=e)
         yield sse_error(error_text=str(e))
         yield stream_done()
 

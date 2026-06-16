@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from .repository import ToolContentRepository
-from .store import ToolContentStore
+from .store import ToolContentStore, ToolContentRepository
 
 __all__ = [
     "ToolContentStore",
