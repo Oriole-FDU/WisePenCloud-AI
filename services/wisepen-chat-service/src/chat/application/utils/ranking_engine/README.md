@@ -4,6 +4,8 @@ Ranking Engine 是工具层共用的排序小框架。它的目标不是展示�
 
 读这份文档时请抓住一个边界：Ranking Engine 只排序，不读取 Redis，不解析 content_id，不格式化 tool output，也不决定业务流程。
 
+内置 engine 通过 `registry.py` 显式注册并维护单例，不做懒加载或懒导入。
+
 ## 什么时候用
 
 适合用 Ranking Engine 的场景：

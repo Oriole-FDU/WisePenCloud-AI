@@ -35,6 +35,7 @@ class ResolvedToolFile:
     sha256: str  # 文件内容哈希
     producer: str  # 产出该文件的工具或内部组件名称
     expires_at: datetime  # 引用过期时间
+    metadata: dict[str, object] = field(default_factory=dict)  # 发布时附加的轻量元数据
 
 
 @dataclass(frozen=True, slots=True)

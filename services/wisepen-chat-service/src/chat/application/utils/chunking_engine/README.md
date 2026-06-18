@@ -31,21 +31,21 @@ ChunkDocument
   -> ChunkingResult
 ```
 
-工具或 Store 一般不需要关心每一步，只需要选择合适的 preset pipeline。
+工具或 Store 一般不需要关心每一步，只需要选择合适的 preset 名称。
 
 ## 推荐 Pipeline
 
 | Pipeline | 什么时候用 | 说明 |
 | --- | --- | --- |
-| `MARKDOWN_PIPELINE` | Markdown、网页正文、document_parse Markdown | 默认首选，保留标题/表格/代码块等结构 |
-| `PLAIN_TEXT_PIPELINE` | 无结构纯文本 | 没有 section/page/anchor 索引 |
-| `MARKDOWN_RECURSIVE_PIPELINE` | Markdown 很长且结构块过大 | 会更偏字符递归切分 |
-| `NESTED_MARKDOWN_PIPELINE` | 后续需要父子块召回 | 当前不要默认使用，除非明确需要嵌套语义 |
+| `markdown` | Markdown、网页正文、document_parse Markdown | 默认首选，保留标题/表格/代码块等结构 |
+| `plain_text` | 无结构纯文本 | 没有 section/page/anchor 索引 |
+| `markdown_recursive` | Markdown 很长且结构块过大 | 会更偏字符递归切分 |
+| `nested_markdown` | 后续需要父子块召回 | 当前不要默认使用，除非明确需要嵌套语义 |
 
 ToolContentStore 默认规则：
 
-- `content_type == "text/markdown"` 使用 `MARKDOWN_PIPELINE`
-- 其它文本使用 `PLAIN_TEXT_PIPELINE`
+- `content_type == "text/markdown"` 使用 `markdown`
+- 其它文本使用 `plain_text`
 
 ## 下游应该依赖的字段
 
@@ -117,7 +117,7 @@ Markdown pipeline 会识别：
 
 ```python
 from chat.application.utils.chunking_engine import ChunkDocument, ChunkingEngine
-from chat.application.utils.chunking_engine.presets import MARKDOWN_PIPELINE
+from chat.application.utils.chunking_engine.registry import get_chunking_pipeline
 
 engine = ChunkingEngine()
 result = engine.chunk(
@@ -125,7 +125,7 @@ result = engine.chunk(
         text="# 标题\n\n正文内容",
         content_type="text/markdown",
     ),
-    pipeline=MARKDOWN_PIPELINE,
+    pipeline=get_chunking_pipeline("markdown"),
 )
 
 for chunk in result.chunks:

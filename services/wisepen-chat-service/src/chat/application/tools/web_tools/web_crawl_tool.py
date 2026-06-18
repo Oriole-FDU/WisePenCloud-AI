@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from common.logger import warn
+
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -18,6 +20,7 @@ from chat.application.tools.core.tool_return import (
 from chat.application.tools.web_tools.web_fetch import WebCrawlService
 from chat.application.tools.web_tools.web_fetch.errors import WebFetchError
 
+# --- 全局常量限制 ---
 DEFAULT_MAX_PAGES = 20
 DEFAULT_MAX_DEPTH = 2
 MAX_MAX_PAGES = 100
@@ -70,7 +73,7 @@ PARAMETERS_SCHEMA: dict[str, Any] = {
 class WebCrawlTool:
     """Web crawl 工具门面，递归爬取同域 HTML 页面。
 
-    复用 FetchCoordinator 的 fetcher 链路（httpx → scrapling fallback）+ cleaner，
+    复用 FetchCoordinator 的 fetcher 链路（httpx -> scrapling fallback）+ cleaner，
     用 lxml 从 raw_html 提取链接，BFS 递归爬取。
 
     与 web_fetch 的区别：
@@ -84,9 +87,9 @@ class WebCrawlTool:
     __slots__ = ("_definition", "_service")
 
     def __init__(
-        self,
-        *,
-        service: WebCrawlService,
+            self,
+            *,
+            service: WebCrawlService,
     ) -> None:
         self._service = service
         self._definition = ToolDefinition(
@@ -131,17 +134,12 @@ class WebCrawlTool:
         return self._definition
 
     async def execute(self, context: dict[str, Any], **kwargs: Any) -> ToolReturn:
-        seed_url = str(kwargs["seed_url"]).strip()
-        max_pages = int(kwargs.get("max_pages") or DEFAULT_MAX_PAGES)
-        max_depth = int(kwargs.get("max_depth") or DEFAULT_MAX_DEPTH)
-        same_domain = bool(kwargs.get("same_domain") if kwargs.get("same_domain") is not None else True)
+        # 1. 参数提取与前置合法性校验
+        seed_url = kwargs["seed_url"].strip()
+        max_pages = kwargs.get("max_pages") or DEFAULT_MAX_PAGES
+        max_depth = kwargs.get("max_depth") or DEFAULT_MAX_DEPTH
+        same_domain = kwargs.get("same_domain") if kwargs.get("same_domain") is not None else True
 
-        if not seed_url:
-            raise ToolExecutionError(
-                reason="missing_seed_url",
-                detail_reason="seed_url must be a non-empty string.",
-                retryable=False,
-            )
         if not seed_url.startswith(("http://", "https://")):
             raise ToolExecutionError(
                 reason="invalid_seed_url",
@@ -149,9 +147,7 @@ class WebCrawlTool:
                 retryable=False,
             )
 
-        max_pages = max(1, min(max_pages, MAX_MAX_PAGES))
-        max_depth = max(0, min(max_depth, MAX_MAX_DEPTH))
-
+        # 2. 调度异步批量递归爬虫服务
         try:
             results = await self._service.crawl(
                 seed_url,
@@ -166,12 +162,22 @@ class WebCrawlTool:
                 retryable=True,
             ) from exc
         except Exception as exc:
+            warn(
+                "web crawl unexpected error.",
+                e=exc,
+                seed_url=seed_url,
+                max_pages=max_pages,
+                max_depth=max_depth,
+                same_domain=same_domain,
+                audit_message="web_crawl 抓取发生未预期异常，已包装为不可重试 ToolExecutionError。",
+            )
             raise ToolExecutionError(
                 reason="web_crawl_unexpected_error",
                 detail_reason=str(exc),
                 retryable=False,
             ) from exc
 
+        # 3. 结果空值防御
         if not results:
             raise ToolExecutionError(
                 reason="web_crawl_empty_result",
@@ -179,7 +185,7 @@ class WebCrawlTool:
                 retryable=True,
             )
 
-        # 构造可见结果：页面摘要列表
+        # 4. 构造可见结果：提取精简页面摘要列表
         pages_summary = [
             {
                 "url": r.source_url,
@@ -191,7 +197,7 @@ class WebCrawlTool:
             for r in results
         ]
 
-        # cacheable_texts: 所有页面的 markdown 拼接，供缓存层建索引
+        # 转换可缓存文本集合，供上层切面提取并建立索引分块
         cacheable_texts = tuple(r.markdown for r in results if r.markdown)
 
         return ToolReturn(

@@ -3,19 +3,18 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from chat.application.utils.ranking_engine.core import (
-    RankCandidate,
-    RankQuery,
-    RankRequest,
-    RankingEngine,
-)
-
 from chat.application.tools.common.tool_content_store import ToolContentStore
 from chat.application.tools.common.tool_content_store.models import (
     StoredToolContent,
 )
 from chat.application.tools.session_tools.evidence_rank.models import EvidenceRankItem
-from chat.application.utils.ranking_engine.factory import get_ranking_engine
+from chat.application.utils.ranking_engine import (
+    RankCandidate,
+    RankQuery,
+    RankRequest,
+    RankingEngine,
+)
+from chat.application.utils.ranking_engine import get_ranking_engine
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,84 +32,75 @@ class _EvidenceCandidate:
 
 
 class EvidenceRankService:
-    """跨多个 ToolContent 做一次二次精排。"""
+    """跨多个工具内容存储凭证（ToolContent）的全局二次精排服务。"""
 
     __slots__ = ("_ranking_engine", "_store")
 
     def __init__(
-        self,
-        *,
-        store: ToolContentStore,
-        ranking_engine: RankingEngine | None = None,
+            self,
+            *,
+            store: ToolContentStore,
+            ranking_engine: RankingEngine | None = None,
     ) -> None:
         self._store = store
         self._ranking_engine = ranking_engine or get_ranking_engine("session.evidence_rank")
 
     async def rank(
-        self,
-        *,
-        query: str,
-        content_ids: tuple[str, ...],
-        session_id: str,
-        max_evidence: int,
+            self,
+            *,
+            query: str,
+            content_ids: tuple[str, ...],
+            session_id: str,
+            max_evidence: int,
     ) -> tuple[EvidenceRankItem, ...]:
-        """对一批已缓存内容做一次跨 content_id 精排。
-
-        Args:
-            query: 二次精排使用的窄查询。
-            content_ids: 会话内 ToolContentStore 的 cnt_* 引用。
-            session_id: 会话隔离键。
-            max_evidence: 返回的证据定位数量上限。
-
-        Returns:
-            只包含 content_id、chunk_index、rank、score 的定位结果；正文和结构元信息
-            由后续 tool_content_read 直接展开时注入。
-        """
+        """对批量的缓存内容进行跨实体的全局打分重排，仅返回高价值的定位索引。"""
+        # 1. 并发拉取并还原所有底层的工具输出载荷
         fetched = await asyncio.gather(
             *(
-                self._fetch_content(content_id=content_id, session_id=session_id)
-                for content_id in content_ids
+                self._fetch_content(content_id=cid, session_id=session_id)
+                for cid in content_ids
             )
         )
 
         found: dict[str, StoredToolContent] = {}
         found_order: list[str] = []
 
+        # 过滤空数据并去重保留原始序列
         for item in fetched:
-            if item.stored is None:
-                continue
-            if item.content_id in found:
+            if item.stored is None or item.content_id in found:
                 continue
             found[item.content_id] = item.stored
             found_order.append(item.content_id)
 
-        # 这里合并所有 content 的 chunk 后只调用一次 reranker，保证排名是跨 content_id 的全局顺序。
+        # 2. 将所有文档的切片块扁平化连接，确保重排处于全局同一基准线
         evidence_candidates = tuple(
             candidate
-            for content_id in found_order
-            for candidate in self._build_evidence_candidates(found[content_id])
+            for cid in found_order
+            for candidate in self._build_evidence_candidates(found[cid])
         )
 
         if not evidence_candidates:
             return ()
 
+        # 构建快速索引映射表
         source_by_candidate_id = {
-            candidate.candidate_id: candidate
-            for candidate in evidence_candidates
+            c.candidate_id: c for c in evidence_candidates
         }
-        # metadata 只放回填定位所需字段；不要在 evidence_rank 返回中暴露展示元信息。
+
+        # 3. 规整并换算重排引擎的标准输入格式
         rank_candidates = tuple(
             RankCandidate(
-                candidate_id=candidate.candidate_id,
-                text=candidate.text,
+                candidate_id=c.candidate_id,
+                text=c.text,
                 metadata={
-                    "content_id": candidate.stored.content_id,
-                    "chunk_index": candidate.chunk_index,
+                    "content_id": c.stored.content_id,
+                    "chunk_index": c.chunk_index,
                 },
             )
-            for candidate in evidence_candidates
+            for c in evidence_candidates
         )
 
+        # 4. 驱动异步重排交叉双塔模型
         result = await self._ranking_engine.rank_async(
             RankRequest(
                 query=RankQuery(text=query),
@@ -120,40 +110,39 @@ class EvidenceRankService:
             )
         )
 
+        # 5. 回填定位凭证并规整输出结构
         items = tuple(
             self._to_result_item(
-                ranked_item=ranked_item,
-                source=source_by_candidate_id[ranked_item.candidate_id],
+                source=source_by_candidate_id[ranked.candidate_id],
             )
-            for ranked_item in result.ranked
+            for ranked in result.ranked
         )
 
         return items
 
     async def _fetch_content(
-        self,
-        *,
-        content_id: str,
-        session_id: str,
+            self,
+            *,
+            content_id: str,
+            session_id: str,
     ) -> _FetchedContent:
-        canonical_content_id, _ = await self._store.canonicalize_content_id(
+        """换算真实重定向标识并拉取内容实体。"""
+        canonical_id, _ = await self._store.canonicalize_content_id(
             content_id=content_id,
             session_id=session_id,
         )
         stored = await self._store.get(
-            content_id=canonical_content_id,
+            content_id=canonical_id,
             session_id=session_id,
         )
-        return _FetchedContent(
-            content_id=canonical_content_id,
-            stored=stored,
-        )
+        return _FetchedContent(content_id=canonical_id, stored=stored)
 
     @staticmethod
     def _build_evidence_candidates(
-        stored: StoredToolContent,
+            stored: StoredToolContent,
     ) -> tuple[_EvidenceCandidate, ...]:
-        """把 StoredToolContent 展开为 reranker 候选。"""
+        """将内容文本细化拆解为符合重排粒度的候选证据颗粒。"""
+        # 退化保护：针对无结构、无分块的数据进行全文字串兜底
         if not stored.chunks:
             text = stored.text.strip()
             if not text:
@@ -167,14 +156,17 @@ class EvidenceRankService:
                 ),
             )
 
-        candidates: list[_EvidenceCandidate] = []
+        # 矩阵物理切片映射转换
+        candidates = []
         for chunk in sorted(stored.chunks, key=lambda item: item.chunk_index):
             if chunk.start_offset is None or chunk.end_offset is None:
                 text = ""
             else:
                 text = stored.text[chunk.start_offset:chunk.end_offset].strip()
+
             if not text:
                 continue
+
             candidates.append(
                 _EvidenceCandidate(
                     stored=stored,
@@ -187,12 +179,11 @@ class EvidenceRankService:
 
     @staticmethod
     def _to_result_item(
-        *,
-        ranked_item,
-        source: _EvidenceCandidate,
+            *,
+            source: _EvidenceCandidate,
     ) -> EvidenceRankItem:
-        stored = source.stored
+        """剥离多余特征元数据，仅保留回填所需的定位锚点。"""
         return EvidenceRankItem(
-            content_id=stored.content_id,
+            content_id=source.stored.content_id,
             chunk_index=source.chunk_index,
         )

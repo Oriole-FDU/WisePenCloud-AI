@@ -15,4 +15,5 @@ def decode_bytes(raw: bytes, declared_encoding: str | None) -> str:
         raw,
         cp_isolation=["utf-8", "gbk", "big5", "shift_jis", "euc_kr"],
     ).best()
+
     return str(result) if result is not None else raw.decode("utf-8", errors="replace")

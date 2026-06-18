@@ -3,7 +3,9 @@
 from typing import List
 
 import httpx
+import hishel.httpx as hishel_httpx
 from dependency_injector import containers, providers
+from github import Auth, Github
 from v2.nacos import NacosNamingService
 
 from chat.application.agents import (
@@ -22,8 +24,8 @@ from chat.application.tools.document_tools.document_parse import (
     DocumentParseService,
 )
 from chat.application.tools.document_tools.document_parse.parsers.ocr import (
-    PaddleCloudPPStructureV3Client,
-    PaddleCloudPPStructureV3Config,
+    PaddleCloudClient,
+    PaddleCloudConfig,
 )
 from chat.application.tools.document_tools.document_parse_tool import DocumentParseTool
 from chat.application.tools.math_tools.calculus_solver_tool import CalculusSolverTool
@@ -47,6 +49,12 @@ from chat.application.tools.utils.markdown_renderer import (
     TableMarkdownRenderer,
     WebPageMarkdownRenderer,
 )
+from chat.application.tools.web_tools.github_hydrate_tool import GitHubHydrateTool
+from chat.application.tools.web_tools.hydrators import (
+    GitHubHydrator,
+    PaperHydrator,
+)
+from chat.application.tools.web_tools.paper_hydrate_tool import PaperHydrateTool
 from chat.application.tools.web_tools.web_crawl_tool import WebCrawlTool
 from chat.application.tools.web_tools.web_fetch import (
     FetchCoordinator,
@@ -63,27 +71,45 @@ from chat.application.tools.web_tools.web_fetch.fetchers.scrapling_fetcher impor
 )
 from chat.application.tools.web_tools.web_fetch_tool import WebFetchTool
 from chat.application.tools.web_tools.web_search.providers.models import SearchProviderName
+from chat.application.tools.web_tools.web_search.runtime_context import (
+    WebSearchRuntimeContextResolver,
+)
 from chat.application.tools.web_tools.web_search.searcher import WebSearchProviderSearcher
 from chat.application.tools.web_tools.web_search.searchers import (
-    BaseProviderSearcher,
+    DdgSearcher,
+    ExaSearcher,
+    FouGetDdgSearcher,
     FourGetSearcher,
+    ProviderSearcher,
     SearchProviderConfig,
 )
-from chat.application.tools.web_tools.web_search.service import WebSearchService
+from chat.application.tools.web_tools.web_search.service import (
+    WebSearchCustomSourceFactory,
+    WebSearchService,
+)
 from chat.application.tools.web_tools.web_search_tool import WebSearchTool
 from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings
 from chat.core.config.nacos import nacos_client_manager
-from chat.core.persistence import (
-    MongoSessionRepository,
-    MongoMessageRepository,
-    MongoModelRepository,
-    MongoProviderRepository,
+from chat.core.persistence.mongo.message_repository import MongoMessageRepository
+from chat.core.persistence.mongo.model_repository import MongoModelRepository
+from chat.core.persistence.mongo.provider_repository import MongoProviderRepository
+from chat.core.persistence.mongo.session_repository import MongoSessionRepository
+from chat.core.persistence.mongo.web_search_credential_repository import (
     MongoWebSearchCredentialRepository,
-    RedisHotContext,
 )
+from chat.core.persistence.redis.hot_context import RedisHotContext
 from chat.core.persistence.redis.tool_content_repository import RedisToolContentRepository
 from chat.core.persistence.redis.tool_run_file_repository import RedisToolRunFileRepository
+from chat.core.persistence.redis.web_content_cache_repository import (
+    RedisMongoWebContentCacheRepository,
+)
+from chat.core.persistence.redis.web_content_cache_refresh_queue import (
+    ArqWebContentCacheRefreshTaskPublisher,
+)
+from chat.core.persistence.redis.web_search_candidate_repository import (
+    RedisWebSearchCandidateRepository,
+)
 from chat.core.providers import (
     LiteLLMAdapter,
     Mem0Adapter,
@@ -111,22 +137,20 @@ def _build_registry(tool_providers: List[providers.Provider]) -> ToolRegistry:
 def _build_paddle_ocr_client(
     *,
     http_client: httpx.AsyncClient,
-    table_renderer: TableMarkdownRenderer,
-    html_renderer: FragmentMarkdownRenderer,
-) -> PaddleCloudPPStructureV3Client | None:
-    if not settings.PADDLE_OCR_API_URL or not settings.PADDLE_OCR_TOKEN:
+) -> PaddleCloudClient | None:
+    if not settings.PADDLE_OCR_TOKEN:
         return None
 
-    return PaddleCloudPPStructureV3Client(
-        config=PaddleCloudPPStructureV3Config(
+    return PaddleCloudClient(
+        config=PaddleCloudConfig(
             api_url=settings.PADDLE_OCR_API_URL,
             token=settings.PADDLE_OCR_TOKEN,
+            model=settings.PADDLE_OCR_MODEL,
             timeout_seconds=tool_settings.PADDLE_OCR_TIMEOUT_SECONDS,
-            retries=tool_settings.PADDLE_OCR_RETRIES,
+            poll_interval_seconds=tool_settings.PADDLE_OCR_POLL_INTERVAL_SECONDS,
+            max_poll_attempts=tool_settings.PADDLE_OCR_MAX_POLL_ATTEMPTS,
         ),
         http_client=http_client,
-        table_renderer=table_renderer,
-        html_renderer=html_renderer,
     )
 
 
@@ -134,16 +158,43 @@ def _build_platform_web_searcher(
     *,
     http_client: httpx.AsyncClient,
 ) -> WebSearchProviderSearcher:
-    provider_searchers: dict[SearchProviderName, BaseProviderSearcher] = {
-        SearchProviderName.FOURGET: FourGetSearcher(
-            http_client=http_client,
-            config=SearchProviderConfig(
-                base_url=settings.WEB_SEARCH_FOURGET_BASE_URL,
-                source_id="platform:4get",
+    provider_searchers: dict[SearchProviderName, ProviderSearcher] = {
+        SearchProviderName.FOUGET_DDG: FouGetDdgSearcher(
+            fourget_searcher=FourGetSearcher(
+                http_client=http_client,
+                config=SearchProviderConfig(
+                    base_url=settings.WEB_SEARCH_FOURGET_BASE_URL,
+                    source_id="platform:4get_ddg",
+                ),
             ),
+            ddg_searcher=DdgSearcher(),
         ),
     }
+    if settings.WEB_SEARCH_PLATFORM_EXA_ENABLED and settings.WEB_SEARCH_PLATFORM_EXA_API_KEY:
+        provider_searchers[SearchProviderName.EXA] = ExaSearcher(
+            http_client=http_client,
+            config=SearchProviderConfig(
+                base_url=settings.WEB_SEARCH_EXA_BASE_URL,
+                api_key=settings.WEB_SEARCH_PLATFORM_EXA_API_KEY,
+                source_id="platform:exa",
+            ),
+        )
     return WebSearchProviderSearcher(provider_searchers=provider_searchers)
+
+
+def _build_web_fetch_http_client() -> httpx.AsyncClient:
+    transport = hishel_httpx.AsyncCacheTransport(
+        next_transport=httpx.AsyncHTTPTransport(retries=0, trust_env=False),
+    )
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(tool_settings.WEB_FETCH_TIMEOUT_SECONDS),
+        transport=transport,
+        trust_env=False,
+    )
+
+
+def _build_github_api_client() -> Github:
+    return Github(auth=Auth.Token(settings.GITHUB_TOKEN))
 
 
 class Container(containers.DeclarativeContainer):
@@ -229,20 +280,68 @@ class Container(containers.DeclarativeContainer):
         _build_platform_web_searcher,
         http_client=web_search_http_client,
     )
+    web_search_runtime_context_resolver = providers.Singleton(
+        WebSearchRuntimeContextResolver,
+        credential_repository=web_search_credential_repo,
+        cipher=secret_cipher,
+        platform_exa_enabled=settings.WEB_SEARCH_PLATFORM_EXA_ENABLED,
+        platform_exa_api_key=settings.WEB_SEARCH_PLATFORM_EXA_API_KEY,
+    )
+    web_search_custom_source_factory = providers.Singleton(
+        WebSearchCustomSourceFactory,
+        http_client=web_search_http_client,
+        exa_base_url=settings.WEB_SEARCH_EXA_BASE_URL,
+        tavily_base_url=settings.WEB_SEARCH_TAVILY_BASE_URL,
+        anysearch_base_url=settings.WEB_SEARCH_ANYSEARCH_BASE_URL,
+        serper_base_url=settings.WEB_SEARCH_SERPER_BASE_URL,
+    )
+    web_search_candidate_repository = providers.Singleton(
+        RedisWebSearchCandidateRepository,
+        redis_url=settings.REDIS_URL,
+    )
+    web_content_cache_repository = providers.Singleton(
+        RedisMongoWebContentCacheRepository,
+        redis_url=settings.REDIS_URL,
+    )
+    web_content_cache_refresh_task_publisher = providers.Singleton(
+        ArqWebContentCacheRefreshTaskPublisher,
+        redis_url=settings.REDIS_URL,
+    )
     web_search_service = providers.Singleton(
         WebSearchService,
         platform_searcher=platform_web_searcher,
     )
+    paper_hydrate_service = providers.Singleton(
+        PaperHydrator,
+        http_client=web_search_http_client,
+        api_key=settings.OPENALEX_API_KEY,
+        base_url=settings.OPENALEX_BASE_URL,
+    )
+    github_api_client = providers.Singleton(
+        _build_github_api_client,
+    )
+    github_hydrate_service = providers.Singleton(
+        GitHubHydrator,
+        github_client=github_api_client,
+    )
+    paper_hydrate_tool = providers.Singleton(
+        PaperHydrateTool,
+        service=paper_hydrate_service,
+    )
+    github_hydrate_tool = providers.Singleton(
+        GitHubHydrateTool,
+        service=github_hydrate_service,
+    )
     web_search_tool = providers.Singleton(
         WebSearchTool,
         service=web_search_service,
+        custom_source_factory=web_search_custom_source_factory,
+        candidate_repository=web_search_candidate_repository,
         max_hops=3,
     )
     # Web Crawl / Web Fetch 共用的 fetcher 链路
     web_fetch_http_client = providers.Singleton(
-        httpx.AsyncClient,
-        timeout=httpx.Timeout(tool_settings.WEB_FETCH_TIMEOUT_SECONDS),
-        trust_env=False,
+        _build_web_fetch_http_client,
     )
     web_fetch_httpx_fetcher = providers.Singleton(
         HttpxFetcher,
@@ -276,18 +375,19 @@ class Container(containers.DeclarativeContainer):
         scrapling_fetcher=web_fetch_scrapling_fetcher,
         cleaner=web_fetch_cleaner,
         file_store=tool_run_file_store,
+        content_cache_repository=web_content_cache_repository,
+        refresh_task_publisher=web_content_cache_refresh_task_publisher,
         min_text_length=tool_settings.WEB_FETCH_MIN_TEXT_LENGTH,
         batch_concurrency=tool_settings.WEB_FETCH_BATCH_CONCURRENCY,
     )
     web_fetch_tool = providers.Singleton(
         WebFetchTool,
         service=web_fetch_coordinator,
+        candidate_repository=web_search_candidate_repository,
     )
     paddle_ocr_client = providers.Singleton(
         _build_paddle_ocr_client,
         http_client=paddle_ocr_http_client,
-        table_renderer=providers.Factory(TableMarkdownRenderer),
-        html_renderer=providers.Factory(FragmentMarkdownRenderer),
     )
 
     tool_content_repository = providers.Singleton(
@@ -367,6 +467,8 @@ class Container(containers.DeclarativeContainer):
         DocumentParseTool,
         file_store=tool_run_file_store,
         parse_service=document_parse_service,
+        content_cache_repository=web_content_cache_repository,
+        refresh_task_publisher=web_content_cache_refresh_task_publisher,
     )
     calculus_solver_tool = providers.Singleton(CalculusSolverTool)
     linear_algebra_solver_tool = providers.Singleton(LinearAlgebraSolverTool)
@@ -383,6 +485,8 @@ class Container(containers.DeclarativeContainer):
         tool_content_read_tool,
         tool_content_batch_read_tool,
         evidence_rank_tool,
+        paper_hydrate_tool,
+        github_hydrate_tool,
         web_search_tool,
         web_crawl_tool,
         web_fetch_tool,
@@ -410,6 +514,7 @@ class Container(containers.DeclarativeContainer):
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
         agent_resolver=agent_resolver,
+        web_search_runtime_context_resolver=web_search_runtime_context_resolver,
     )
 
 

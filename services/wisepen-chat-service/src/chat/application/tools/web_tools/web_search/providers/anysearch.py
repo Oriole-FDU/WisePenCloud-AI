@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .helpers.coerce import as_dict_tuple, as_str, as_str_or_none, as_str_tuple
-from .helpers.search_result import dedupe_by_url, is_valid_result
+from .utils.coerce import as_dict_tuple, as_str, as_str_or_none, as_str_tuple
+from .utils.search_result import dedupe_by_url, is_valid_result
 from .models import (
     ProviderSearchHttpRequest,
     ProviderSearchRequest,
@@ -54,20 +54,20 @@ def map_anysearch_response(
     items = [
         result
         for item in as_dict_tuple(payload.get("results"))
-        if (result := _map_anysearch_item(item=item, answer=answer)) is not None
+        if (result := _map_anysearch_item(item=item)) is not None
     ]
     return ProviderSearchResponse(
         query=query,
         provider=SearchProviderName.ANYSEARCH,
         endpoint=endpoint,
         results=dedupe_by_url(items, url_getter=lambda item: item.url, limit=max_results),
+        answer=answer,
     )
 
 
 def _map_anysearch_item(
     *,
     item: dict[str, Any],
-    answer: str | None,
 ) -> ProviderSearchResult | None:
     """归一化 AnySearch 单条结果。"""
     title = as_str(item.get("title"))
@@ -81,6 +81,5 @@ def _map_anysearch_item(
         preview=SearchPreview(
             overview=as_str_or_none(item.get("snippet") or item.get("description") or item.get("summary")),
             highlights=highlights,
-            answer=answer,
         ),
     )

@@ -36,9 +36,9 @@ class MongoSessionRepository(SessionRepository):
         query = ChatSession.find(ChatSession.user_id == user_id)
         total = await query.count()
         items = await query.sort(
-            "-is_pinned",    
-            "-pinned_at",      
-            "-updated_at"      
+            "-is_pinned",
+            "-pinned_at",
+            "-updated_at"
         ).skip((page - 1) * size).limit(size).to_list()
         return items, total
 
@@ -63,17 +63,17 @@ class MongoSessionRepository(SessionRepository):
     async def set_session_pinned(self, session_id: str, user_id: str, is_pinned: bool) -> ChatSession:
         session = await self._safe_get_session(session_id, user_id)
         session.is_pinned = is_pinned
-        session.pinned_at = datetime.now(timezone.utc) if is_pinned else None   # 取消置顶时，置顶时间设为 None
+        session.pinned_at = datetime.now(timezone.utc) if is_pinned else None  # 取消置顶时，置顶时间设为 None
         session.updated_at = datetime.now(timezone.utc)
         await session.save()
         return session
 
     async def set_session_agent(
-        self,
-        session_id: str,
-        user_id: str,
-        agent_id: str | None,
-        agent_version: int | None,
+            self,
+            session_id: str,
+            user_id: str,
+            agent_id: str | None,
+            agent_version: int | None,
     ) -> ChatSession:
         session = await self._safe_get_session(session_id, user_id)
         session.agent_id = agent_id

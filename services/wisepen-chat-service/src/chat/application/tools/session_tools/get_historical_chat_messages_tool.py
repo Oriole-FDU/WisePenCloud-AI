@@ -88,19 +88,8 @@ class GetHistoricalChatMessagesTool:
 
     async def execute(self, context: dict[str, Any], **kwargs: Any) -> str:
         # session_id 从系统注入的 context 读取
-        session_id: Optional[str] = context.get("session_id")
-        if not session_id:
-            raise ToolExecutionError(
-                reason="missing_session_id",
-                detail_reason="Missing session_id in execution context.",
-            )
-
-        keyword: str = kwargs.get("keyword", "").strip()
-        if not keyword:
-            raise ToolExecutionError(
-                reason="missing_keyword",
-                detail_reason="Missing required argument: keyword.",
-            )
+        session_id: str = context["session_id"]
+        keyword: str = kwargs["keyword"].strip()
 
         start_time: Optional[datetime] = None
         end_time: Optional[datetime] = None
@@ -112,7 +101,7 @@ class GetHistoricalChatMessagesTool:
         except ValueError:
             pass  # 非法时间格式，静默忽略，不中断检索
 
-        limit = int(kwargs.get("limit", 10))
+        limit = int(kwargs.get("limit") or 10)
 
         try:
             results = await self._message_repo.search_messages_by_text(keyword=keyword, session_id=session_id,

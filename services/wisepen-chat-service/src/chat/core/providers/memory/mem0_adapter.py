@@ -47,7 +47,7 @@ class Mem0Adapter(MemoryProvider):
                 },
             },
         }
-        
+
         try:
             debug("mem0 client initializing.")
             self.client = Memory.from_config(self._config)
@@ -135,4 +135,3 @@ class Mem0Adapter(MemoryProvider):
             self.client.delete_all(user_id=user_id)
 
         await asyncio.to_thread(_sync_delete_all)
-

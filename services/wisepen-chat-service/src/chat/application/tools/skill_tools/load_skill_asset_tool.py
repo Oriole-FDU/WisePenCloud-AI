@@ -1,5 +1,7 @@
 from typing import Any, Dict
 
+from common.logger import warn
+
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -115,6 +117,15 @@ class LoadSkillAssetTool:
         try:
             raw = await self._file_loader.load_by_object_key(object_key)
         except Exception as e:
+            warn(
+                "skill asset load failed.",
+                e=e,
+                skill_id=skill_id,
+                path=path,
+                object_key=object_key,
+                reason="skill_asset_load_failed",
+                audit_message="技能资产对象读取失败，已包装为可重试工具错误。",
+            )
             raise ToolExecutionError(
                 reason="Skill Asset Load Failed",
                 detail_reason=f"Failed to load skill asset: {type(e).__name__}",

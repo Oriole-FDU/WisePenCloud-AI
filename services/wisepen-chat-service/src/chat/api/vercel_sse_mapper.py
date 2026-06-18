@@ -17,7 +17,6 @@ from chat.application.events import (
 )
 
 
-
 def to_vercel_sse(event: StreamEvent) -> str:
     """
     将 QueryLoopRuntime 产出的单个领域事件翻译为 Vercel SSE 字符串

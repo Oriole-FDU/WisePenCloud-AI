@@ -10,7 +10,7 @@ from chat.application.tools.session_tools.utils.content_window_builder import To
 
 
 class ToolContentBatchReadService:
-    """按 content 绑定 chunk_indices 的批量窗口读取服务。"""
+    """批量工具内容分块读取服务，支持点对点的显式数据块切片提取。"""
 
     __slots__ = ("_store",)
 
@@ -18,43 +18,50 @@ class ToolContentBatchReadService:
         self._store = store
 
     async def read(
-        self,
-        *,
-        request: ToolContentBatchReadRequest,
-        session_id: str,
+            self,
+            *,
+            request: ToolContentBatchReadRequest,
+            session_id: str,
     ) -> tuple[ToolContentBatchReadItemResult, ...]:
-        """批量读取多个 content 的显式 chunk 窗口。"""
+        """批量读取多个内容凭证下显式指定的多个数据块窗口。"""
         items: list[ToolContentBatchReadItemResult] = []
         for item in request.items:
-            items.append(await self._read_one(item=item, request=request, session_id=session_id))
+            res = await self._read_one(item=item, request=request, session_id=session_id)
+            items.append(res)
 
         return tuple(items)
 
     async def _read_one(
-        self,
-        *,
-        item: ToolContentBatchReadItemRequest,
-        request: ToolContentBatchReadRequest,
-        session_id: str,
+            self,
+            *,
+            item: ToolContentBatchReadItemRequest,
+            request: ToolContentBatchReadRequest,
+            session_id: str,
     ) -> ToolContentBatchReadItemResult:
-        """读取单个 content；单项失败转为 failed item。"""
+        """读取单个凭证的数据块。单项异常降级为 failed，不破坏批处理连贯性。"""
         try:
-            canonical_content_id, _ = await self._store.canonicalize_content_id(
+            # 自动规整并换算可能的重定向收据
+            canonical_id, _ = await self._store.canonicalize_content_id(
                 content_id=item.content_id,
                 session_id=session_id,
             )
-            stored = await self._store.get(content_id=canonical_content_id, session_id=session_id)
+            stored = await self._store.get(content_id=canonical_id, session_id=session_id)
+
             if stored is None:
                 return ToolContentBatchReadItemResult(
-                    content_id=canonical_content_id,
+                    content_id=canonical_id,
                     status="failed",
                     reason="content_not_found",
                 )
 
-            available = {chunk.chunk_index for chunk in stored.chunks}
-            # 去重但保留模型请求顺序；chunk_index 只在当前 content 内解释。
+            # 提取现存可用分块索引集合进行边界防御
+            available = {c.chunk_index for c in stored.chunks}
+
+            # 有序去重请求的块索引，并剔除越界无效索引
             requested = tuple(dict.fromkeys(item.chunk_indices))
-            centers = tuple(index for index in requested if index in available)
+            centers = tuple(idx for idx in requested if idx in available)
+
+            # 批量构建滑动合并窗口
             windows = tuple(
                 ToolContentWindowBuilder.expand(
                     stored,
@@ -64,11 +71,13 @@ class ToolContentBatchReadService:
                 )
                 for center in centers
             )
+
             return ToolContentBatchReadItemResult(
-                content_id=canonical_content_id,
+                content_id=canonical_id,
                 status="success",
                 windows=windows,
             )
+
         except Exception as e:
             return ToolContentBatchReadItemResult(
                 content_id=item.content_id,

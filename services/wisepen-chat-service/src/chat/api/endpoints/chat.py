@@ -101,4 +101,3 @@ async def chat_completions(
             "x-vercel-ai-ui-message-stream": "v1",
         },
     )
-

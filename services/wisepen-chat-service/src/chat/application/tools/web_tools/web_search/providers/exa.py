@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .helpers.coerce import as_dict_tuple, as_str, as_str_or_none, as_str_tuple
-from .helpers.search_result import dedupe_by_url, is_valid_result
+from .utils.coerce import as_dict_tuple, as_str, as_str_or_none, as_str_tuple
+from .utils.search_result import dedupe_by_url, is_valid_result
 from .models import (
     ProviderSearchHttpRequest,
     ProviderSearchRequest,
@@ -30,19 +30,25 @@ class ExaSearchRequest(ProviderSearchRequest):
         return "/search"
 
     def to_http_request(self) -> ProviderSearchHttpRequest:
+        payload: dict[str, object] = {
+            "query": self.query,
+            "type": "auto",
+            "numResults": self.max_results,
+            "contents": {
+                "highlights": True,
+                "summary": True,
+                "text": False,
+            },
+        }
+        # Exa 支持 category 参数限定搜索领域
+        if self.endpoint == SearchProviderEndpoint.NEWS:
+            payload["category"] = "news"
+        elif self.endpoint == SearchProviderEndpoint.SCHOLAR:
+            payload["category"] = "research paper"
         return ProviderSearchHttpRequest(
             method="POST",
             path=self.path,
-            json={
-                "query": self.query,
-                "type": "auto",
-                "numResults": self.max_results,
-                "contents": {
-                    "highlights": True,
-                    "summary": True,
-                    "text": False,
-                },
-            },
+            json=payload,
         )
 
 
@@ -58,20 +64,20 @@ def map_exa_response(
     items = [
         result
         for item in as_dict_tuple(data.get("results"))
-        if (result := _map_exa_item(item=item, answer=answer)) is not None
+        if (result := _map_exa_item(item=item)) is not None
     ]
     return ProviderSearchResponse(
         query=query,
         provider=SearchProviderName.EXA,
         endpoint=endpoint,
         results=dedupe_by_url(items, url_getter=lambda item: item.url, limit=max_results),
+        answer=answer,
     )
 
 
 def _map_exa_item(
     *,
     item: dict[str, Any],
-    answer: str | None,
 ) -> ProviderSearchResult | None:
     """归一化 Exa 单条结果。"""
     title = as_str(item.get("title"))
@@ -85,6 +91,5 @@ def _map_exa_item(
         preview=SearchPreview(
             overview=as_str_or_none(item.get("summary")),
             highlights=highlights,
-            answer=answer,
         ),
     )

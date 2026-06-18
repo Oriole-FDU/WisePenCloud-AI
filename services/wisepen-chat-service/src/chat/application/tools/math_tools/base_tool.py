@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from common.logger import error
+
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -71,6 +73,13 @@ class MathSolverTool:
                 metadata={"task": task},
             ) from e
         except Exception as e:
+            error(
+                "math tool unexpected error.",
+                e=e,
+                tool_name=self._name,
+                task=task,
+                audit_message="数学工具发生未预期异常，已包装为不可重试失败。",
+            )
             raise ToolExecutionError(
                 reason=f"{self._name}_failed",
                 detail_reason=str(e),

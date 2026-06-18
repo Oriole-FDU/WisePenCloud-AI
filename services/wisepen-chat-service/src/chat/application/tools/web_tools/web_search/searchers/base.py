@@ -2,11 +2,27 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import httpx
 
 from ..providers.models import ProviderSearchResponse, SearchProviderEndpoint, SearchProviderName
+
+
+@runtime_checkable
+class ProviderSearcher(Protocol):
+    """Provider 搜索器协议：只要实现 search 方法即可被 WebSearchProviderSearcher 调度。
+
+    BaseProviderSearcher、DdgSearcher、FouGetDdgSearcher 均满足此协议。
+    """
+
+    async def search(
+        self,
+        *,
+        query: str,
+        endpoint: SearchProviderEndpoint,
+        max_results: int,
+    ) -> ProviderSearchResponse: ...
 
 
 @dataclass(frozen=True, slots=True)

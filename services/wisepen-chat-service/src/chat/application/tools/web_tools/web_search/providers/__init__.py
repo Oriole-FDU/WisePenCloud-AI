@@ -12,6 +12,7 @@ from .models import (
     SearchProviderEndpoint,
     SearchProviderName,
 )
+from .serper import SerperSearchRequest
 from .tavily import TavilySearchRequest
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "SearchPreview",
     "SearchProviderEndpoint",
     "SearchProviderName",
+    "SerperSearchRequest",
     "TavilySearchRequest",
 ]

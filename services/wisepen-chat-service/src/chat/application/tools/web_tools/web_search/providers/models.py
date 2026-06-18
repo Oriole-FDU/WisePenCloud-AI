@@ -7,10 +7,11 @@ from enum import StrEnum
 class SearchProviderName(StrEnum):
     """Web search provider 标识。"""
 
-    FOURGET = "4get"
+    FOUGET_DDG = "4get_ddg"
     EXA = "exa"
     TAVILY = "tavily"
     ANYSEARCH = "anysearch"
+    SERPER = "serper"
 
 
 class SearchProviderEndpoint(StrEnum):
@@ -44,7 +45,6 @@ class SearchPreview:
 
     overview: str | None = None  # provider 真实返回的摘要/简介/snippet
     highlights: tuple[str, ...] = ()  # provider 返回的高亮片段
-    answer: str | None = None  # provider 真实返回的直接答案
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,4 +64,5 @@ class ProviderSearchResponse:
     provider: SearchProviderName  # 响应来源 provider
     endpoint: SearchProviderEndpoint  # 响应垂类端点
     results: tuple[ProviderSearchResult, ...] = ()  # 模型最终消费的结果列表
+    answer: str | None = None  # 供应商对整个 query 的直答，仅作为检索提示
     source_id: str | None = None  # 来源标识，区分平台内置源和用户自定义源

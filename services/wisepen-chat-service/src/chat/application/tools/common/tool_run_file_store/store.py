@@ -30,8 +30,7 @@ DEFAULT_TOOL_RUN_FILE_REF_TTL_SECONDS = 6 * 60 * 60
 DEFAULT_TOOL_RUN_FILE_CLEANUP_GRACE_SECONDS = 10 * 60
 DEFAULT_TOOL_RUN_FILE_MAX_BYTES = 50 * 1024 * 1024
 
-_REF_ID_PATTERN = re.compile(r"^tfile_(?:[a-z][a-z0-9]*_)?[A-Za-z0-9]{8,64}$")
-_REF_PREFIX_PATTERN = re.compile(r"^[a-z][a-z0-9]*$")
+_REF_ID_PREFIX = "tfile_"
 _SAFE_COMPONENT_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
 _HASH_CHUNK_BYTES = 1024 * 1024
 
@@ -286,7 +285,7 @@ class ToolRunFileStore:
             ToolFileNotFoundError: 引用不存在、已过期或文件不存在。
             ToolFileUnreadableError: 文件不是普通文件或大小校验失败。
         """
-        if _REF_ID_PATTERN.fullmatch(ref_id) is None:
+        if not ref_id.startswith(_REF_ID_PREFIX):
             raise InvalidToolFileRefError()
 
         record = await self._repository.get(ref_id)
@@ -328,6 +327,7 @@ class ToolRunFileStore:
             sha256=record.sha256,
             producer=record.producer,
             expires_at=record.expires_at,
+            metadata=dict(record.metadata),
         )
 
     def remove_staging_dir(self, staging_dir: str | Path) -> None:
@@ -446,11 +446,10 @@ def _safe_component(value: str | None, *, fallback: str) -> str:
 def _build_ref_id(prefix: str | None) -> str:
     """生成 tfile_* 引用 ID。有前缀时为 `tfile_{prefix}_{random}`，无前缀时为 `tfile_{random}`。"""
     random_part = uuid.uuid4().hex[:16]
-    if prefix:
-        if _REF_PREFIX_PATTERN.fullmatch(prefix) is None:
-            raise InvalidToolFileRefError()
-        return f"tfile_{prefix}_{random_part}"
-    return f"tfile_{random_part}"
+    prefix_text = str(prefix or "").strip()
+    if prefix_text:
+        return f"{_REF_ID_PREFIX}{prefix_text}_{random_part}"
+    return f"{_REF_ID_PREFIX}{random_part}"
 
 
 def _sha256_file(path: Path) -> str:
@@ -509,5 +508,3 @@ def _remove_empty_children(root: Path) -> None:
         if item.is_dir():
             with suppress(OSError):
                 item.rmdir()  # 非空目录会抛 OSError，suppress 静默跳过
-
-

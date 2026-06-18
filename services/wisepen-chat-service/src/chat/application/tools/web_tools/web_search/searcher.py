@@ -5,17 +5,13 @@ from collections.abc import Iterable, Mapping
 
 from .providers.models import ProviderSearchResponse, SearchProviderName
 from .routing.endpoint_planner import SearchEndpointPlan
-from .searchers import BaseProviderSearcher, SearchProviderError
+from .searchers import ProviderSearcher, SearchProviderError
 
 
 class WebSearchProviderSearcher:
     """按 endpoint plan 调度已构造好的 provider searcher。"""
 
-    def __init__(
-        self,
-        *,
-        provider_searchers: Mapping[SearchProviderName, BaseProviderSearcher],
-    ) -> None:
+    def __init__(self, *, provider_searchers: Mapping[SearchProviderName, ProviderSearcher]) -> None:
         self._searchers = dict(provider_searchers)
 
     async def search(

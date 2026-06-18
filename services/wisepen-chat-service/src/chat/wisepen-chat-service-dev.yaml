@@ -24,16 +24,15 @@ QUERY_MODEL: "openai/qwen3-4b"
 EMBEDDING_MODEL: "openai/qwen3-embedding-8b"
 EMBEDDING_DIMENSIONS: 1024
 
-# --- Web Search 平台源 ---
+# --- Web Search 平台源（api key 在 .env 中配置，不写入 Nacos）---
 WEB_SEARCH_FOURGET_BASE_URL: "http://127.0.0.1:8088"
 WEB_SEARCH_EXA_BASE_URL: "https://api.exa.ai"
 WEB_SEARCH_TAVILY_BASE_URL: "https://api.tavily.com"
 WEB_SEARCH_ANYSEARCH_BASE_URL: "https://api.anysearch.com"
+WEB_SEARCH_SERPER_BASE_URL: "https://google.serper.dev"
 WEB_SEARCH_PLATFORM_EXA_ENABLED: false
 WEB_SEARCH_PLATFORM_EXA_API_KEY: null
 
 # --- 安全 ---
 FROM_SOURCE_SECRET: "APISIX-wX0iR6tY"
 SECRET_ENCRYPTION_KEY: "JDW8fLFPrOMRlywslZKMQoy3SOzfkB0bXJMKl3_O-Kw="
-
-

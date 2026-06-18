@@ -47,5 +47,3 @@ class RedisHotContext(HotContextRepository):
             await pipe.rpush(key, *serialized)
             await pipe.expire(key, self.ttl)
             await pipe.execute()
-
-

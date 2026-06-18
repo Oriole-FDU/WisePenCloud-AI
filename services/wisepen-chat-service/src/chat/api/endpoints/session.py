@@ -17,6 +17,7 @@ from common.security import require_login
 
 router = APIRouter()
 
+
 @router.post("/createSession", response_model=R[SessionResponse], status_code=200)
 @inject
 async def create_session(
@@ -93,6 +94,7 @@ async def rename_session(
 ):
     session = await session_repo.rename_session(session_id, user_id, req.new_title or "New Chat")
     return R.success(data=SessionResponse.from_entity(session))
+
 
 @router.post("/pinSession", response_model=R[SessionResponse], status_code=200)
 @inject

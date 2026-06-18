@@ -21,14 +21,14 @@ class OssFileLoader(FileLoader):
     """
 
     def __init__(
-        self,
-        file_storage_client: FileStorageClient,
-        *,
-        cache_dir: Path,
-        download_duration_seconds: int = 900,
-        http_timeout: float = 10.0,
-        cache_ttl_seconds: int = 6 * 3600,
-        gc_interval_seconds: int = 30 * 60,
+            self,
+            file_storage_client: FileStorageClient,
+            *,
+            cache_dir: Path,
+            download_duration_seconds: int = 900,
+            http_timeout: float = 10.0,
+            cache_ttl_seconds: int = 6 * 3600,
+            gc_interval_seconds: int = 30 * 60,
     ) -> None:
         self._fsc = file_storage_client
         self._duration = int(download_duration_seconds)
@@ -60,7 +60,6 @@ class OssFileLoader(FileLoader):
                 pass
             self._gc_task = None
         await self._http.aclose()
-
 
     async def load_by_object_key(self, object_key: str) -> bytes:
         if not object_key:

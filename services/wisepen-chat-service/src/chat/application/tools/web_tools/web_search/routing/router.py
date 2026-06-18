@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-import re
+
+from async_lru import alru_cache
 
 from chat.application.utils.llm_clients import LiteLLMQueryClient, query_client
 from .endpoint_planner import SearchIntentRoute
@@ -34,7 +35,6 @@ ROUTE_CLASSIFICATION_SYSTEM_PROMPT = """\
 
 
 _ROUTE_MAP: dict[str, SearchIntentRoute] = {r.value: r for r in SearchIntentRoute}
-_CLEANUP_RE = re.compile(r"[^\w]")
 
 
 class WebSearchRouter:
@@ -47,6 +47,7 @@ class WebSearchRouter:
     ) -> None:
         self._client = client
 
+    @alru_cache(maxsize=1024)
     async def route(self, query: str) -> SearchIntentRoute:
         result = await self._client.aquery(
             prompt=f"<query>{query.strip()}</query>",
@@ -55,18 +56,9 @@ class WebSearchRouter:
             max_tokens=32,  # {"route": "academic"} 约 10 token，留足余量
         )
 
-        # 主路径：JSON 解析
         try:
             value = str(json.loads(result.content.strip()).get("route", "")).lower().strip()
         except (json.JSONDecodeError, AttributeError):
-            # 降级：裸文本容错（去标点后精确匹配 → 子串匹配）
-            value = _CLEANUP_RE.sub("", result.content.strip().lower())
+            return SearchIntentRoute.GENERAL
 
-        if route := _ROUTE_MAP.get(value):
-            return route
-
-        for key, route in _ROUTE_MAP.items():
-            if key in value:
-                return route
-
-        return SearchIntentRoute.GENERAL
+        return _ROUTE_MAP.get(value, SearchIntentRoute.GENERAL)

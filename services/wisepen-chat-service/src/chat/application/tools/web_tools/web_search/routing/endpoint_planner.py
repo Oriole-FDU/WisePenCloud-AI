@@ -22,7 +22,7 @@ class SearchEndpointPlan:
 
 # provider 支持的 route → endpoint；未列出的 route 在查询时回落到 GENERAL
 _PROVIDER_ROUTES: dict[SearchProviderName, dict[SearchIntentRoute, SearchProviderEndpoint]] = {
-    SearchProviderName.FOURGET: {
+    SearchProviderName.FOUGET_DDG: {
         SearchIntentRoute.GENERAL: SearchProviderEndpoint.WEB,
         SearchIntentRoute.NEWS:    SearchProviderEndpoint.NEWS,
     },
@@ -37,6 +37,11 @@ _PROVIDER_ROUTES: dict[SearchProviderName, dict[SearchIntentRoute, SearchProvide
     },
     SearchProviderName.ANYSEARCH: {
         SearchIntentRoute.GENERAL: SearchProviderEndpoint.WEB,
+    },
+    SearchProviderName.SERPER: {
+        SearchIntentRoute.GENERAL:  SearchProviderEndpoint.WEB,
+        SearchIntentRoute.NEWS:     SearchProviderEndpoint.NEWS,
+        SearchIntentRoute.ACADEMIC: SearchProviderEndpoint.SCHOLAR,
     },
 }
 

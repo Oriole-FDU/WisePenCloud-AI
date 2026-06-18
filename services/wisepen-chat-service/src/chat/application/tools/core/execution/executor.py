@@ -4,6 +4,8 @@ import asyncio
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from common.logger import error
+
 from chat.application.tools.core.execution.hooks.builtin import JsonSchemaCheck, RequiredContextCheck
 from chat.application.tools.core.execution.result import ToolExecutionError, ToolExecutionResult
 from chat.application.tools.core.llm.invocation import ToolInvocation
@@ -100,6 +102,13 @@ class ToolExecutor:
                 tool_execution_error=tool_execution_error,
             )
         except Exception as e:
+            error(
+                "tool execution unexpected error.",
+                e=e,
+                tool_name=invocation.tool_name,
+                tool_call_id=invocation.tool_call_id,
+                audit_message="工具发生未捕获异常，已包装为不可重试失败。",
+            )
             return ToolExecutionResult(
                 tool_invocation=invocation,
                 tool_output=None,

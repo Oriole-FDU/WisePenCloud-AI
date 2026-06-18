@@ -93,17 +93,27 @@ class AppSettings(BaseModel):
     # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
     TOOL_RESULT_MAX_CHARS: int = 4000
 
-    # PaddleOCR 云端 PP-StructureV3 基础连接信息；工具行为参数在 tool_settings.py 中配置。
-    PADDLE_OCR_API_URL: str | None = None
-    PADDLE_OCR_TOKEN: str | None = None
+    # PaddleOCR 云端服务配置
+    # PaddleOCR 云端 API Token；工具行为参数在 tool_settings.py 中配置。
+    PADDLE_OCR_TOKEN: str | None = "9926073f27dcb122bc45ac5e9103f0da54c9c167"
+    PADDLE_OCR_API_URL: str = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
+    PADDLE_OCR_MODEL: str = "PaddleOCR-VL-1.6"
 
-    # 平台内置 Web Search 源；用户自定义搜索源不写入 AppSettings。
+    # Web Search 搜索引擎基础设施网关
     WEB_SEARCH_FOURGET_BASE_URL: str = "http://127.0.0.1:8088"
     WEB_SEARCH_EXA_BASE_URL: str = "https://api.exa.ai"
     WEB_SEARCH_TAVILY_BASE_URL: str = "https://api.tavily.com"
     WEB_SEARCH_ANYSEARCH_BASE_URL: str = "https://api.anysearch.com"
+    WEB_SEARCH_SERPER_BASE_URL: str = "https://google.serper.dev"
+
+    # 平台专属托管 Exa 分流策略控制, Q2 不接入链路
     WEB_SEARCH_PLATFORM_EXA_ENABLED: bool = False
-    WEB_SEARCH_PLATFORM_EXA_API_KEY: str | None = None
+    WEB_SEARCH_PLATFORM_EXA_API_KEY: str | None = "e4734bd6-3a94-458b-a90f-d5091aed436f"
+
+    # 三方垂直领域服务与鉴权凭证 (学术 / 开源社区)
+    OPENALEX_BASE_URL: str = "https://api.openalex.org"
+    OPENALEX_API_KEY: str = "XgpyHsvgfEbhTmZ9E8rAFO"
+    GITHUB_TOKEN: str = "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"
 
     # Skill 配置
 
@@ -165,4 +175,3 @@ def load_settings() -> AppSettings:
 
 
 settings = load_settings()
-

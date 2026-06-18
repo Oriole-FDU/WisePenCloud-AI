@@ -15,6 +15,9 @@ from chat.application.query_loop_runtime import QueryLoopRuntime
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
+from chat.application.tools.web_tools.web_search.runtime_context import (
+    WebSearchRuntimeContextResolver,
+)
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces.llm import LLMProvider
@@ -49,6 +52,7 @@ class ChatTurnCoordinator:
             tool_dispatcher: ToolDispatcher,
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
+            web_search_runtime_context_resolver: WebSearchRuntimeContextResolver,
             agent_resolver: AgentResolver | None = None,
     ):
         self._memory = memory
@@ -69,6 +73,7 @@ class ChatTurnCoordinator:
             kafka_producer=kafka_producer
         )
         self._skill_matcher = skill_matcher
+        self._web_search_runtime_context_resolver = web_search_runtime_context_resolver
         self._agent_resolver = agent_resolver or DefaultAgentResolver()
 
     # -------------------------------------------------------------------------
@@ -154,10 +159,16 @@ class ChatTurnCoordinator:
                 low_watermark_ratio=memory_policy.low_watermark_ratio,
             )
 
+        search_config = await self._web_search_runtime_context_resolver.resolve(
+            user_id=user_id,
+            session_id=session_id,
+        )
+
         # 构建工具上下文
         tool_context: dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
+            "search_config": search_config
         }
 
         # 构建Skill视图

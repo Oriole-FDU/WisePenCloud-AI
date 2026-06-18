@@ -12,7 +12,7 @@ class BlockAwarePackerConfig:
     chunk_size: int  # 单个 chunk 的目标字符数，超过则切分到下一个 chunk
     level: ChunkLevel = ChunkLevel.READ  # 输出 chunk 的用途层级
     separator: str = "\n\n"  # chunk 内多个 unit 文本之间的连接符
-    chunk_id_prefix: str = "chunk"  # chunk ID 前缀（会被 ChunkFinalizer 覆盖）
+    chunk_id_prefix: str = "chunk"  # chunk ID 前缀（会被 finalizer 覆盖）
 
 
 class BlockAwarePacker:

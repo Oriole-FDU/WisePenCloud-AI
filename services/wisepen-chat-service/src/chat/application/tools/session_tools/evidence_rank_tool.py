@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from common.logger import warn
+
 from chat.application.tools.common.tool_content_store import ToolContentStore
 from chat.application.tools.core import (
     ToolDefinition,
@@ -100,22 +102,14 @@ class EvidenceRankTool:
         return self._definition
 
     async def execute(self, context: dict[str, Any], **kwargs: Any):
-        session_id = context.get("session_id")
-        if not session_id:
-            raise ToolExecutionError(
-                reason="missing_session_id",
-                detail_reason="Missing session_id in execution context.",
-                retryable=False,
-            )
-
         content_ids = tuple(str(value) for value in kwargs["content_ids"])
-        query = str(kwargs["query"]).strip()
+        query = kwargs["query"].strip()
 
         try:
             result = await self._service.rank(
                 query=query,
                 content_ids=content_ids,
-                session_id=str(session_id),
+                session_id=str(context["session_id"]),
                 max_evidence=int(kwargs.get("max_evidence") or 8),
             )
             # 建议动作属于工具返回边界：service 只产出排序定位，下一步读取策略由工具门面提示。
@@ -133,6 +127,13 @@ class EvidenceRankTool:
         except ToolExecutionError:
             raise
         except Exception as e:
+            warn(
+                "evidence rank failed.",
+                e=e,
+                content_ids=content_ids,
+                max_evidence=int(kwargs.get("max_evidence") or 8),
+                audit_message="证据精排服务失败，已包装为不可重试工具错误。",
+            )
             raise ToolExecutionError(
                 reason="evidence_rank_failed",
                 detail_reason=str(e),

@@ -6,8 +6,8 @@ from typing import Mapping, Any
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ToolReturn:
-    """Runtime envelope for tools that need structured visible output plus cached text."""
+    """工具执行结果的运行时信封，包含结构化可见输出与可缓存的富文本。"""
 
-    tag: str
-    visible_result: Mapping[str, Any] = field(default_factory=dict)
-    cacheable_texts: tuple[str, ...] = ()
+    tag: str  # 根节点 XML 标签名称
+    visible_result: Mapping[str, Any] = field(default_factory=dict)  # 对模型直接可见的结构化载荷
+    cacheable_texts: tuple[str, ...] = ()  # 触发动态存仓治理的大文本内容块

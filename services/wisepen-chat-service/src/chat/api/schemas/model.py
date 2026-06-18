@@ -77,6 +77,7 @@ class UpdateUserProviderRequest(BaseModel):
 class DeleteUserProviderRequest(BaseModel):
     provider_id: str
 
+
 class CreateUserModelRequest(BaseModel):
     display_name: str
     vendor: str

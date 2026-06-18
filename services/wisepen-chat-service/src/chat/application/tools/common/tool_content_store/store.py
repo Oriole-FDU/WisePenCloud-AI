@@ -8,11 +8,11 @@ from chat.application.utils.chunking_engine import (
     Chunk,
     ChunkDocument,
     ChunkingEngine,
-    ChunkingPipeline,
 )
-from chat.application.utils.chunking_engine.presets import (
-    MARKDOWN_PIPELINE,
-    PLAIN_TEXT_PIPELINE,
+from chat.application.utils.chunking_engine.registry import (
+    MARKDOWN_PIPELINE_NAME,
+    PLAIN_TEXT_PIPELINE_NAME,
+    get_chunking_pipeline,
 )
 from .models import (
     Metadata,
@@ -65,7 +65,7 @@ class ToolContentStore:
         content_type: str = "text/markdown",
         content_role: str | ToolContentRole = ToolContentRole.TOOL_OUTPUT,
         metadata: Metadata | None = None,
-        chunking_pipeline: ChunkingPipeline | None = None,
+        chunking_pipeline_name: str | None = None,
         chunked: bool = True,
     ) -> ToolContentReceipt | None:
         """写入内容并返回 receipt；空文本或超长返回 None。"""
@@ -80,14 +80,15 @@ class ToolContentStore:
         chunks: tuple[ToolContentChunk, ...] = ()
         index = ToolContentIndex()
         chunk_metadata: Metadata = {}
-        chunking_pipeline_name: str | None = None
+        used_chunking_pipeline_name: str | None = None
 
         if chunked:
-            pipeline = chunking_pipeline or (
-                MARKDOWN_PIPELINE
+            pipeline_name = chunking_pipeline_name or (
+                MARKDOWN_PIPELINE_NAME
                 if content_type == "text/markdown"
-                else PLAIN_TEXT_PIPELINE
+                else PLAIN_TEXT_PIPELINE_NAME
             )
+            pipeline = get_chunking_pipeline(pipeline_name)
 
             result = self._chunking_engine.chunk(
                 document=ChunkDocument(
@@ -108,7 +109,7 @@ class ToolContentStore:
                 for idx in result.indexes)
             )
             chunk_metadata = dict(result.metadata)
-            chunking_pipeline_name = result.pipeline
+            used_chunking_pipeline_name = result.pipeline
 
         stored = StoredToolContent(
             content_id=f"cnt_{uuid.uuid4().hex[:16]}",
@@ -123,7 +124,7 @@ class ToolContentStore:
             metadata={
                 **safe_metadata,
                 "chunked": chunked,
-                "chunking_pipeline": chunking_pipeline_name,
+                "chunking_pipeline": used_chunking_pipeline_name,
                 "chunking": chunk_metadata,
             },
         )
@@ -207,4 +208,3 @@ def _selectors(stored: StoredToolContent) -> tuple[str, ...]:
     if stored.index is not None and stored.index.entries:
         selectors.extend(("section", "page", "anchor"))
     return tuple(selectors)
-

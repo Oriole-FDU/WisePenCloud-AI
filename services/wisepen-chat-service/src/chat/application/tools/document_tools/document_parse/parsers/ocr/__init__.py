@@ -1,3 +1,3 @@
-from .paddle_cloud import PaddleCloudPPStructureV3Client, PaddleCloudPPStructureV3Config
+from .paddle_cloud import PaddleCloudClient, PaddleCloudConfig
 
-__all__ = ["PaddleCloudPPStructureV3Client", "PaddleCloudPPStructureV3Config"]
+__all__ = ["PaddleCloudClient", "PaddleCloudConfig"]

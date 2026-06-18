@@ -3,61 +3,64 @@ from __future__ import annotations
 from chat.application.tools.common.tool_content_store.models import StoredToolContent, ToolContentChunk
 from chat.application.tools.session_tools.tool_content_read.models import ToolContentWindow
 
-# 单个窗口最大字符数，超过则截断
+# 聚合窗口的最大允许硬字符上限，超出则执行安全裁剪
 MAX_TOOL_CONTENT_WINDOW_CHARS = 20_000
 
 
 class ToolContentWindowBuilder:
-    """ToolContent chunk 窗口构造器。
-
-    显式 chunk 展开、ranked_expand 和 regex_match 都需要同一套窗口拼接逻辑。
-    这里保持为无状态命名空间，避免不同工具各自实现窗口边界和截断规则。
-    """
+    """无状态工具内容滑动窗口构建器，统一处理块聚合、文本拼接与截断保护。"""
 
     __slots__ = ()
 
     @staticmethod
     def expand(
-        stored: StoredToolContent,
-        *,
-        center_chunk: int,       # 中心 chunk 序号
-        merge_before: int,       # 向前合并的 chunk 数
-        merge_after: int,        # 向后合并的 chunk 数
+            stored: StoredToolContent,
+            *,
+            center_chunk: int,
+            merge_before: int,
+            merge_after: int,
     ) -> ToolContentWindow:
-        """以 center_chunk 为中心，前后合并 chunks 生成一个窗口。"""
-        by_index = {chunk.chunk_index: chunk for chunk in stored.chunks}
-        start_index = max(center_chunk - max(merge_before, 0), 0)
-        end_index = min(center_chunk + max(merge_after, 0), max(by_index.keys(), default=0))
-        chunks = tuple(by_index[index] for index in range(start_index, end_index + 1) if index in by_index)
+        """以核心块为中心，向两侧滑动混叠相邻分块文本，生成高内聚的上下文窗口。"""
+        by_index = {c.chunk_index: c for c in stored.chunks}
 
-        # 用双换行拼接 chunk 文本，保持 Markdown 段落边界。
+        # 1. 换算滑动覆盖的块索引边界
+        start_idx = max(center_chunk - max(merge_before, 0), 0)
+        end_idx = min(center_chunk + max(merge_after, 0), max(by_index.keys(), default=0))
+
+        # 2. 提取有效分块矩阵序列
+        chunks = tuple(by_index[idx] for idx in range(start_idx, end_idx + 1) if idx in by_index)
+
+        # 3. 聚合清洗并拼接各分块文本段落
         text = "\n\n".join(
-            ToolContentWindowBuilder.chunk_text(stored, chunk)
-            for chunk in chunks
-            if ToolContentWindowBuilder.chunk_text(stored, chunk)
+            ToolContentWindowBuilder.chunk_text(stored, c)
+            for c in chunks
+            if ToolContentWindowBuilder.chunk_text(stored, c)
         )
+
+        # 4. 超限硬截断保护
         if len(text) > MAX_TOOL_CONTENT_WINDOW_CHARS:
             text = text[:MAX_TOOL_CONTENT_WINDOW_CHARS].rstrip() + "\n...[truncated]"
 
-        # 收集窗口覆盖的原文 offset 范围，便于模型后续连续读取或定位。
+        # 5. 反向追溯计算在物理原文中的绝对字符偏置范围
         offsets = tuple(
             offset
-            for chunk in chunks
-            for offset in (chunk.start_offset, chunk.end_offset)
+            for c in chunks
+            for offset in (c.start_offset, c.end_offset)
             if offset is not None
         )
+
         return ToolContentWindow(
             text=text,
             start_offset=min(offsets) if offsets else None,
             end_offset=max(offsets) if offsets else None,
             center_chunk=center_chunk,
-            chunk_start=start_index,
-            chunk_end=end_index,
+            chunk_start=start_idx,
+            chunk_end=end_idx,
         )
 
     @staticmethod
     def chunk_text(stored: StoredToolContent, chunk: ToolContentChunk) -> str:
-        """从原始文本中按 offset 截取 chunk 对应的文本片段。"""
+        """从底层的原始大文本中，基于物理偏置闭包安全裁剪单个块的内容。"""
         if chunk.start_offset is None or chunk.end_offset is None:
             return ""
         return stored.text[chunk.start_offset:chunk.end_offset].strip()

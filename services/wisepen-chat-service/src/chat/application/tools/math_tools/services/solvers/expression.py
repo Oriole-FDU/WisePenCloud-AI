@@ -8,8 +8,10 @@ import sympy as sp
 
 from chat.application.tools.math_tools.services.errors import MathSolverError
 from chat.application.tools.math_tools.services.solvers.utils.expression_parser import MathExpressionParser
-from chat.application.tools.math_tools.services.solvers.utils.latex import latex_or_none
-from chat.application.tools.math_tools.services.solvers.utils.payload_reader import MathPayloadReader
+from chat.application.tools.math_tools.services.solvers.utils.reader import (
+    read_latex,
+    read_variable_names,
+)
 from chat.application.tools.math_tools.services.tasks import ExpressionTask
 
 
@@ -24,47 +26,50 @@ class ExpressionSolver:
 
         exact: Any
         numeric: Any = None
-        if task_type in {
-            ExpressionTask.SIMPLIFY,
-            ExpressionTask.EXPAND,
-            ExpressionTask.FACTOR,
-            ExpressionTask.NUMERIC,
-        }:
-            expression = MathExpressionParser.parse_expr(
-                payload.get("expression"),
-                MathPayloadReader.variable_names(payload),
-            )
-            if task_type is ExpressionTask.SIMPLIFY:
-                exact = sp.simplify(expression)
-            elif task_type is ExpressionTask.EXPAND:
-                exact = sp.expand(expression)
-            elif task_type is ExpressionTask.FACTOR:
-                exact = sp.factor(expression)
-            else:
-                exact = sp.N(expression)
-                numeric = self._float_or_none(exact)
-        elif task_type is ExpressionTask.FACTORIAL:
-            exact = sp.factorial(payload["n"])
-        elif task_type is ExpressionTask.COMBINATIONS:
-            exact = sp.binomial(payload["n"], payload["k"])
-        elif task_type is ExpressionTask.PERMUTATIONS:
-            n = payload["n"]
-            k = payload["k"]
-            exact = sp.factorial(n) / sp.factorial(n - k)
-        elif task_type in {ExpressionTask.GCD, ExpressionTask.LCM}:
-            integers = payload["integers"]
-            exact = math.gcd(*integers) if task_type is ExpressionTask.GCD else math.lcm(*integers)
-        elif task_type is ExpressionTask.PRIME_FACTORS:
-            exact = sp.factorint(payload["integer"])
-        else:
-            raise MathSolverError(f"unsupported expression task: {task_type.value}")
 
-        return numeric if numeric is not None else latex_or_none(exact)
+        # 根据任务类型进行路由分发
+        match task_type:
+            # 1. 符号代数类任务 (需要解析表达式)
+            case ExpressionTask.SIMPLIFY | ExpressionTask.EXPAND | ExpressionTask.FACTOR | ExpressionTask.NUMERIC:
+                expression = MathExpressionParser.parse_expr(
+                    payload.get("expression"),
+                    read_variable_names(payload),
+                )
 
-    @staticmethod
-    def _float_or_none(value: Any) -> float | None:
-        """尽力把数值结果转换为 float。"""
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+                if task_type is ExpressionTask.SIMPLIFY:
+                    exact = sp.simplify(expression)
+                elif task_type is ExpressionTask.EXPAND:
+                    exact = sp.expand(expression)
+                elif task_type is ExpressionTask.FACTOR:
+                    exact = sp.factor(expression)
+                else:
+                    exact = sp.N(expression)
+                    try:
+                        numeric = float(exact)
+                    except (TypeError, ValueError):
+                        numeric = None
+
+            # 2. 组合数学类任务
+            case ExpressionTask.FACTORIAL:
+                exact = sp.factorial(payload["n"])
+
+            case ExpressionTask.COMBINATIONS:
+                exact = sp.binomial(payload["n"], payload["k"])
+
+            case ExpressionTask.PERMUTATIONS:
+                n = payload["n"]
+                k = payload["k"]
+                exact = sp.factorial(n) / sp.factorial(n - k)
+
+            # 3. 数论类任务
+            case ExpressionTask.GCD | ExpressionTask.LCM:
+                integers = payload["integers"]
+                exact = math.gcd(*integers) if task_type is ExpressionTask.GCD else math.lcm(*integers)
+
+            case ExpressionTask.PRIME_FACTORS:
+                exact = sp.factorint(payload["integer"])
+
+            case _:
+                raise MathSolverError(f"unsupported expression task: {task_type.value}")
+
+        return numeric if numeric is not None else read_latex(exact)

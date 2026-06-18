@@ -206,7 +206,7 @@ class ChunkExtraIndexer:
         return None
 
 
-# -- helpers -----------------------------------------------------------------
+# -- utils -----------------------------------------------------------------
 
 def _chunks_covering_range(
     chunks: tuple[Chunk, ...],

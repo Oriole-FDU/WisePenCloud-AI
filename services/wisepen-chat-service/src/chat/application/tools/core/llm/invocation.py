@@ -1,5 +1,5 @@
 ﻿import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from common.logger import warn
@@ -19,7 +19,7 @@ class ToolInvocation:
     tool_name: str
     tool_call_arguments: dict[str, Any]
     query_loop_iteration: int | None = None
-    # metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def tool_call_parse(accumulators: dict[int, ToolCallMessageAccumulator], *, query_loop_iteration: int | None = None) -> list[ToolInvocation]:

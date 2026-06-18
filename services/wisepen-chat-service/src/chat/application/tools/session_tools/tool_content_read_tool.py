@@ -251,12 +251,7 @@ class ToolContentReadTool:
 
     async def execute(self, context: dict[str, Any], **kwargs: Any) -> tuple[ToolContentReadItemResult, ...]:
         """执行工具读取操作：解析请求 → 调用 Service → 返回普通结构化结果。"""
-        session_id = context.get("session_id")
-        if not session_id:
-            raise ToolExecutionError(
-                reason="missing session id",
-                detail_reason="Missing session_id in execution context.",
-            )
+        session_id = context["session_id"]
 
         try:
             # 解析 selector 负载：从 kwargs 的 selector dict 转为 Typed 的 ToolContentSelector

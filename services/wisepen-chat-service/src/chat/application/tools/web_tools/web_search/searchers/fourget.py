@@ -8,7 +8,7 @@ from ..providers.models import SearchProviderName
 
 
 class FourGetSearcher(BaseProviderSearcher):
-    provider = SearchProviderName.FOURGET
+    provider = SearchProviderName.FOUGET_DDG
     request_class = FourGetSearchRequest
     response_mapper = staticmethod(map_fourget_response)
 

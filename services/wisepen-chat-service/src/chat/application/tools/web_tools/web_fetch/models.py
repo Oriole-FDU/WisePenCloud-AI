@@ -45,6 +45,7 @@ class WebFetchResult:
     warnings: tuple[str, ...] = ()
     file_ref: str | None = None
     file_label: str | None = None
+    source_scope: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

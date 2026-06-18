@@ -1,15 +1,6 @@
-from .mongo.message_repository import MongoMessageRepository
-from .mongo.model_repository import MongoModelRepository
-from .mongo.provider_repository import MongoProviderRepository
-from .mongo.session_repository import MongoSessionRepository
-from .mongo.web_search_credential_repository import MongoWebSearchCredentialRepository
-from .redis.hot_context import RedisHotContext
+"""Persistence package.
 
-__all__ = [
-    "MongoMessageRepository",
-    "MongoSessionRepository",
-    "MongoModelRepository",
-    "MongoProviderRepository",
-    "MongoWebSearchCredentialRepository",
-    "RedisHotContext",
-]
+具体仓储请从 mongo/redis 子模块导入，避免包根聚合导入触发配置加载副作用。
+"""
+
+__all__: list[str] = []

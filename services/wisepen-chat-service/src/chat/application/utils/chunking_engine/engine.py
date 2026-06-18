@@ -11,7 +11,7 @@ class ChunkingEngine:
 
     用法：
         engine = ChunkingEngine()
-        result = engine.chunk(document=doc, pipeline=MARKDOWN_PIPELINE)
+        result = engine.chunk(document=doc, pipeline=get_chunking_pipeline("markdown"))
     """
 
     __slots__ = ()
@@ -86,17 +86,13 @@ class ChunkingEngine:
 
     @staticmethod
     def _assign_chunk_indices(chunks: tuple[Chunk, ...]) -> tuple[Chunk, ...]:
-        """按 level 重新分配连续 chunk_index。
+        """全局连续重新分配 chunk_index。
 
-        后处理器可能增删 chunk，导致 chunk_index 不连续，
-        此方法按 level 分组重新从 0 编号。
+        后处理器可能增删 chunk（如 SecondaryChunkProcessor 追加子 chunk），
+        导致 chunk_index 不连续。此方法全局从 0 重新编号，
+        确保父子 chunk 不会出现 chunk_index 冲突。
         """
-        counters: dict[str, int] = {}
-        assigned: list[Chunk] = []
-
-        for chunk in chunks:
-            index = counters.get(chunk.level, 0)
-            counters[chunk.level] = index + 1
-            assigned.append(replace(chunk, chunk_index=index))
-
-        return tuple(assigned)
+        return tuple(
+            replace(chunk, chunk_index=i)
+            for i, chunk in enumerate(chunks)
+        )

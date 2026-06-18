@@ -22,12 +22,18 @@ class UnitType(StrEnum):
 
 
 class ChunkLevel(StrEnum):
-    """Chunk 的用途层级。"""
+    """Chunk 的用途层级。
 
-    READ = "read"        # 阅读级：大 chunk
-    RETRIEVE = "retrieve"  # 检索级：中 chunk
-    SEARCH = "search"    # 搜索级：小 chunk
-    DEFAULT = "default"  # 默认
+    READ 和 RETRIEVAL 地位等价，只是功能差异：
+    - READ：阅读级，大 chunk，用于单层分块场景的 RAG 上下文注入
+    - RETRIEVAL：检索级，大 chunk，用于父子分块场景的父 chunk（RAG 上下文注入）
+    - SEARCH：搜索级，小 chunk，用于父子分块场景的子 chunk（精准搜索）
+    正常单层分块场景都是 READ；父子分块场景父用 RETRIEVAL，子用 SEARCH。
+    """
+
+    READ = "read"
+    RETRIEVAL = "retrieval"
+    SEARCH = "search"
 
 
 class IndexKind(StrEnum):
@@ -89,13 +95,13 @@ class Chunk:
     chunk_id: str  # chunk 唯一标识
     text: str  # chunk 文本内容
     chunk_index: int  # chunk 在同 level 中的顺序（从 0 开始，由 engine 自动分配）
-    level: ChunkLevel = ChunkLevel.DEFAULT  # 用途层级
+    level: ChunkLevel = ChunkLevel.READ  # 用途层级
     parent_chunk_id: str | None = None  # 父 chunk ID（嵌套分块时，子 chunk 指向父 chunk）
     start_offset: int | None = None  # 在原文中的起始字符偏移量
     end_offset: int | None = None  # 在原文中的结束字符偏移量
     start_unit: int | None = None  # 起始 unit index
     end_unit: int | None = None  # 结束 unit index
-    content_hash: str = ""  # 内容 SHA-256 哈希（由 ChunkFinalizer 填充）
+    content_hash: str = ""  # 内容 SHA-256 哈希（由 finalizer 填充）
     metadata: Metadata = field(default_factory=dict)  # 额外元信息
 
 

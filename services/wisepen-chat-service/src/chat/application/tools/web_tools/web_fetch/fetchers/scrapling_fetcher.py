@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from scrapling.fetchers import StealthyFetcher
+
 from common.logger import warn
 from .base import RawFetchOutput
 from ..errors import WebFetchHttpError, WebFetchNetworkError, WebFetchUnsupportedUrlError
@@ -36,14 +38,6 @@ class ScraplingFetcher:
                 url=url,
                 reason="unsupported url scheme, only http/https allowed",
             )
-
-        try:
-            from scrapling.fetchers import StealthyFetcher
-        except ImportError as exc:
-            raise WebFetchNetworkError(
-                url=url,
-                reason=f"scrapling not available: {exc}",
-            ) from exc
 
         try:
             response = await StealthyFetcher.async_fetch(

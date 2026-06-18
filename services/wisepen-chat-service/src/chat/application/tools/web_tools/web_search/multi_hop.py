@@ -27,7 +27,7 @@ ANSWER_SUFFICIENCY_SYSTEM_PROMPT = """\
 
 CANDIDATE_RANKER_SYSTEM_PROMPT = """\
 <instructions>
-你是搜索结果排序器。给定"用户问题"和"候选列表"（每项含编号、标题、URL、overview、highlights、supplier_answer），按回答用户问题的相关性和证据价值，输出候选编号的优先级排序。
+你是搜索结果排序器。给定"用户问题"和"候选列表"（每项含编号、标题、URL、overview、highlights），以及可选的"supplier_answer"（供应商对整个 query 的直答），按回答用户问题的相关性和证据价值，输出候选编号的优先级排序。
 
 <rules>
   - 只能从给定候选编号中选择，禁止编造编号。
@@ -110,7 +110,7 @@ async def rank_candidate_ids(
 ) -> list[str]:
     """用小模型对候选编号按相关性排序，最多返回 MAX_RANKED_CANDIDATES 个编号。
 
-    candidates_text 应包含每个候选的编号、标题、URL、overview、highlights、supplier_answer。
+    candidates_text 应包含每个候选的编号、标题、URL、overview、highlights，以及可选的 supplier_answer（供应商对整个 query 的直答，统一输出一次）。
     解析失败时返回空列表，由调用方回退到原始顺序。
     """
     result = await client.aquery(

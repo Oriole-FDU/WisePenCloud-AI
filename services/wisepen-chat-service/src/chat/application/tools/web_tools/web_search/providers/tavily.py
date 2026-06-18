@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .helpers.coerce import as_dict_tuple, as_str, as_str_or_none
-from .helpers.search_result import dedupe_by_url, is_valid_result
+from .utils.coerce import as_dict_tuple, as_str, as_str_or_none
+from .utils.search_result import dedupe_by_url, is_valid_result
 from .models import (
     ProviderSearchHttpRequest,
     ProviderSearchRequest,
@@ -58,20 +58,20 @@ def map_tavily_response(
     items = [
         result
         for item in as_dict_tuple(data.get("results"))
-        if (result := _map_tavily_item(item=item, answer=answer)) is not None
+        if (result := _map_tavily_item(item=item)) is not None
     ]
     return ProviderSearchResponse(
         query=query,
         provider=SearchProviderName.TAVILY,
         endpoint=endpoint,
         results=dedupe_by_url(items, url_getter=lambda item: item.url, limit=max_results),
+        answer=answer,
     )
 
 
 def _map_tavily_item(
     *,
     item: dict[str, Any],
-    answer: str | None,
 ) -> ProviderSearchResult | None:
     """归一化 Tavily 单条结果。"""
     title = as_str(item.get("title"))
@@ -83,6 +83,5 @@ def _map_tavily_item(
         url=url,
         preview=SearchPreview(
             overview=as_str_or_none(item.get("content")),
-            answer=answer,
         ),
     )

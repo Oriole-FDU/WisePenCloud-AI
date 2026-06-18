@@ -7,35 +7,38 @@ from ..splitters.recursive_text_splitter import RecursiveTextSplitter, Recursive
 
 
 @dataclass(frozen=True, slots=True)
-class NestedChunkConfig:
-    """嵌套分块配置。"""
+class SecondaryChunkConfig:
+    """二次分块配置。"""
 
     child_chunk_size: int = 600  # 子 chunk 目标字符数
     child_overlap: int = 100  # 子 chunk 重叠字符数
-    child_level: ChunkLevel = ChunkLevel.RETRIEVE  # 子 chunk 用途层级
+    child_level: ChunkLevel = ChunkLevel.SEARCH  # 子 chunk 用途层级
 
 
-class NestedChunkProcessor:
-    """嵌套分块后处理器，将父 chunk 拆分为子 chunk 用于精准检索。
+class SecondaryChunkProcessor:
+    """二次分块后处理器，将父 chunk 拆分为子 chunk 用于精准检索。
 
     原理：
-    - 父 chunk（level=READ）保持不变，用于 RAG 上下文注入
-    - 对每个父 chunk 的文本，用 RecursiveTextSplitter 切分为更小的子 chunk
-    - 子 chunk（level=RETRIEVE）通过 parent_chunk_id 关联到父 chunk
+    - 父 chunk（level=RETRIEVAL）保持不变，用于 RAG 上下文注入
+    - 对每个父 chunk 的文本，用 Markdown 专用分隔符切分为更小的子 chunk
+      （父 chunk 由 MarkdownBlockSplitter + BlockAwarePacker 产出，文本仍是 Markdown）
+    - 子 chunk（level=SEARCH）通过 parent_chunk_id 关联到父 chunk
     - 检索时命中子 chunk，再通过 parent_chunk_id 取回完整父 chunk 作为上下文
 
-    注意：此处理器应放在 ChunkFinalizer 之前，
-    因为 ChunkFinalizer 会生成最终 chunk_id，
-    而子 chunk 需要引用父 chunk 的最终 ID。
+    注意：此处理器应放在 SingleLayerFinalizer / SecondaryChunkFinalizer 之前。
+    此时父 chunk 的 chunk_id 仍是 packer 分配的临时 ID（如 "chunk-0"），
+    子 chunk 的 parent_chunk_id 引用该临时 ID；随后 finalizer 统一为
+    父子 chunk 生成最终 ID 和 content_hash，并基于 old_id → new_id 映射
+    更新子 chunk 的 parent_chunk_id，保证父子关系正确。
     """
 
     __slots__ = ("name", "config", "_splitter")
 
-    def __init__(self, config: NestedChunkConfig | None = None) -> None:
-        self.config = config or NestedChunkConfig()
-        self.name = "nested_chunk_processor"
+    def __init__(self, config: SecondaryChunkConfig | None = None) -> None:
+        self.config = config or SecondaryChunkConfig()
+        self.name = "secondary_chunk_processor"
         self._splitter = RecursiveTextSplitter(
-            RecursiveTextSplitterConfig(
+            RecursiveTextSplitterConfig.for_markdown(
                 chunk_size=self.config.child_chunk_size,
                 chunk_overlap=self.config.child_overlap,
             )
@@ -53,7 +56,7 @@ class NestedChunkProcessor:
             doc = ChunkDocument(text=parent.text)
             units = self._splitter.split(document=doc)
 
-            # 如果父 chunk 只拆出 1 个子 chunk，无需嵌套
+            # 如果父 chunk 只拆出 1 个子 chunk，无需二次分块
             if len(units) <= 1:
                 continue
 
@@ -72,7 +75,7 @@ class NestedChunkProcessor:
 
                 children.append(
                     Chunk(
-                        chunk_id=f"child-{parent.chunk_id}-{i}",
+                        chunk_id=f"{parent.chunk_id}:child:{i}",  # 临时 ID，由 finalizer 覆盖
                         text=unit.text,
                         chunk_index=0,  # 由 engine 重新分配
                         level=self.config.child_level,

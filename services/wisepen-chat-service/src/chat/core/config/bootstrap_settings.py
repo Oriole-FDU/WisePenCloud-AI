@@ -10,4 +10,5 @@ class ChatBootstrapSettings(BootstrapSettings):
     SERVICE_NAME: str = "wisepen-chat-service"
     SERVICE_PORT: int = 19904
 
+
 bootstrap_settings = ChatBootstrapSettings()

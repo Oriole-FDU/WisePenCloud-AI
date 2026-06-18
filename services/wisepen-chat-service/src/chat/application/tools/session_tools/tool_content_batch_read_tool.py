@@ -128,13 +128,7 @@ class ToolContentBatchReadTool:
 
     async def execute(self, context: dict[str, Any], **kwargs: Any) -> tuple[ToolContentBatchReadItemResult, ...]:
         """解析 per-content chunk 请求并返回普通结构化窗口结果。"""
-        session_id = context.get("session_id")
-        if not session_id:
-            raise ToolExecutionError(
-                reason="missing_session_id",
-                detail_reason="Missing session_id in execution context.",
-                retryable=False,
-            )
+        session_id = context["session_id"]
 
         items_payload = kwargs["items"]
         items = tuple(

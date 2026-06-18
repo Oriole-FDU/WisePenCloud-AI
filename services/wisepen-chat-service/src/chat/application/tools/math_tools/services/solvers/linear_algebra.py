@@ -6,8 +6,12 @@ from typing import Any
 import numpy as np
 
 from chat.application.tools.math_tools.services.errors import MathSolverError
-from chat.application.tools.math_tools.services.solvers.utils.latex import latex_or_none
-from chat.application.tools.math_tools.services.solvers.utils.payload_reader import MathPayloadReader
+from chat.application.tools.math_tools.services.solvers.utils.reader import (
+    read_latex,
+    read_matrix,
+    read_numeric_matrix,
+    read_vector,
+)
 from chat.application.tools.math_tools.services.tasks import LinearAlgebraTask
 
 
@@ -19,51 +23,63 @@ class LinearAlgebraSolver:
 
     def _solve_sync(self, task: str, payload: dict[str, Any]) -> Any:
         task_type = LinearAlgebraTask(task)
-
         numeric: Any = None
+
+        # 1. 数值矩阵分解与计算路由 (不走 SymPy 符号解析)
         if task_type in {
             LinearAlgebraTask.SVD,
             LinearAlgebraTask.QR_DECOMPOSITION,
             LinearAlgebraTask.MATRIX_POWER,
         }:
             exact = self._solve_numeric(task_type, payload)
-            numeric = exact
-            latex = None
-        else:
-            matrix = MathPayloadReader.matrix(payload)
-            if task_type is LinearAlgebraTask.DETERMINANT:
+            return exact
+
+        # 2. 符号矩阵计算路由
+        matrix = read_matrix(payload)
+
+        match task_type:
+            case LinearAlgebraTask.DETERMINANT:
                 exact = matrix.det()
-            elif task_type is LinearAlgebraTask.TRACE:
+
+            case LinearAlgebraTask.TRACE:
                 exact = matrix.trace()
-            elif task_type is LinearAlgebraTask.RANK:
+
+            case LinearAlgebraTask.RANK:
                 exact = matrix.rank()
-            elif task_type is LinearAlgebraTask.INVERSE:
+
+            case LinearAlgebraTask.INVERSE:
                 exact = matrix.inv()
-            elif task_type is LinearAlgebraTask.RREF:
+
+            case LinearAlgebraTask.RREF:
                 reduced, pivots = matrix.rref()
                 exact = {"matrix": reduced, "pivots": list(pivots)}
-            elif task_type is LinearAlgebraTask.EIGENVALUES:
+
+            case LinearAlgebraTask.EIGENVALUES:
                 exact = matrix.eigenvals()
-            elif task_type is LinearAlgebraTask.LINEAR_SOLVE:
+
+            case LinearAlgebraTask.LINEAR_SOLVE:
                 rhs = (
-                    MathPayloadReader.vector(payload)
+                    read_vector(payload)
                     if payload.get("vector") is not None
-                    else MathPayloadReader.matrix(payload, "matrix_b")
+                    else read_matrix(payload, "matrix_b")
                 )
                 exact = matrix.gauss_jordan_solve(rhs)[0]
-            elif task_type is LinearAlgebraTask.MATRIX_MULTIPLY:
-                exact = matrix * MathPayloadReader.matrix(payload, "matrix_b")
-            elif task_type is LinearAlgebraTask.NULL_SPACE:
-                exact = matrix.nullspace()
-            else:
-                raise MathSolverError(f"unsupported linear algebra task: {task_type.value}")
-            latex = latex_or_none(exact)
 
-        return numeric if numeric is not None else latex
+            case LinearAlgebraTask.MATRIX_MULTIPLY:
+                exact = matrix * read_matrix(payload, "matrix_b")
+
+            case LinearAlgebraTask.NULL_SPACE:
+                exact = matrix.nullspace()
+
+            case _:
+                raise MathSolverError(f"unsupported linear algebra task: {task_type.value}")
+
+        return read_latex(exact)
 
     @staticmethod
     def _solve_numeric(task: LinearAlgebraTask, payload: dict[str, Any]) -> Any:
-        matrix = MathPayloadReader.numeric_matrix(payload)
+        matrix = read_numeric_matrix(payload)
+
         if task is LinearAlgebraTask.SVD:
             u, singular_values, vh = np.linalg.svd(matrix)
             return {
@@ -71,9 +87,12 @@ class LinearAlgebraSolver:
                 "singular_values": singular_values.tolist(),
                 "vh": vh.tolist(),
             }
+
         if task is LinearAlgebraTask.QR_DECOMPOSITION:
             q, r = np.linalg.qr(matrix)
             return {"q": q.tolist(), "r": r.tolist()}
+
         if task is LinearAlgebraTask.MATRIX_POWER:
             return np.linalg.matrix_power(matrix, payload["power"]).tolist()
+
         raise MathSolverError(f"unsupported numeric linear algebra task: {task}")

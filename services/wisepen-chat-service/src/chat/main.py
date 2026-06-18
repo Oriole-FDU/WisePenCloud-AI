@@ -41,6 +41,7 @@ from chat.domain.entities import (
     ModelProviderMapping,
     Provider,
     WebSearchCredential,
+    WebContentCacheValueDocument,
 )
 
 
@@ -69,6 +70,7 @@ async def lifespan(app: FastAPI):
             Model,
             ModelProviderMapping,
             WebSearchCredential,
+            WebContentCacheValueDocument,
         ],
     )
     info("beanie initialized.", db=settings.MONGODB_DB_NAME)
@@ -126,6 +128,14 @@ async def lifespan(app: FastAPI):
         await container.web_search_http_client().aclose()
     except Exception as e:
         error("web search http client close failed.", e=e)
+    try:
+        await container.web_fetch_http_client().aclose()
+    except Exception as e:
+        error("web fetch http client close failed.", e=e)
+    try:
+        await container.web_content_cache_refresh_task_publisher().close()
+    except Exception as e:
+        error("web content cache refresh task publisher close failed.", e=e)
 
     try:
         await nacos_client_manager.deregister_instance()

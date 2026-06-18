@@ -33,8 +33,6 @@ class Scorer(Protocol):
         ...
 
 
-
-
 class Fusion(Protocol):
     """融合插件协议，负责把多路 ScoreSignal 合成初始 RankedCandidate。
 

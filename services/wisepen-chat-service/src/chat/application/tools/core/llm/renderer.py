@@ -14,9 +14,11 @@ def schema_renderer(llm_spec: ToolLLMSpec) -> dict[str, Any]:
         },
     }
 
+
 @dataclass(frozen=True)
 class RenderToolResult:
     tool_call_id: str
     tool_name: str
     persisted_output_placeholder: str | None
     tool_output: Any | None
+    debug_output: Any | None = None
