@@ -1,4 +1,5 @@
-﻿import asyncio
+import asyncio
+import traceback
 import uuid
 
 from beanie import PydanticObjectId
@@ -32,8 +33,15 @@ async def _vercel_generator(chat_gen, model_name: str):
         yield message_finish()
         yield stream_done()
 
-    except asyncio.CancelledError:
-        info("chat stream generation cancelled.")
+    except asyncio.CancelledError as e:
+        info(
+            "chat stream generation cancelled.",
+            model=model_name,
+            message_id=message_id,
+            exc_type=type(e).__name__,
+            exc_str=str(e) if str(e) else "(no message)",
+            traceback=traceback.format_exc(),
+        )
         yield abort(reason="user_cancelled")
         yield stream_done()
         raise

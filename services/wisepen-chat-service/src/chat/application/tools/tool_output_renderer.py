@@ -7,6 +7,10 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from dicttoxml import dicttoxml
+
+# 禁用 dicttoxml 的调试日志
+import logging
+logging.getLogger("dicttoxml").setLevel(logging.WARNING)
 from lxml import etree
 from pydantic import BaseModel
 

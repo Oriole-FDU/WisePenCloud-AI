@@ -13,6 +13,7 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 from chat.application.tools.math_tools.services.errors import MathSolverError
+from chat.application.tools.tool_settings import tool_settings
 
 
 class MathSolver(Protocol):
@@ -45,10 +46,10 @@ class MathSolverTool:
                 parameters_schema=ToolParametersSchema(parameters_schema),
             ),
             policy=ToolPolicy(
-                expose_by_default=False,
+                expose_by_default=True,
                 persist_output=True,
                 risk_level=ToolRiskLevel.LOW,
-                timeout_seconds=20.0,
+                timeout_seconds=tool_settings.MATH_TOOL_TIMEOUT_SECONDS,
             ),
         )
 

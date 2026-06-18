@@ -12,8 +12,9 @@ from sympy.parsing.sympy_parser import (
 )
 
 from chat.application.tools.math_tools.services.errors import MathSolverError
+from chat.application.tools.tool_settings import tool_settings
 
-MAX_EXPRESSION_CHARS = 2000
+MAX_EXPRESSION_CHARS = tool_settings.MATH_TOOL_MAX_EXPRESSION_CHARS
 
 _TRANSFORMATIONS = standard_transformations + (
     implicit_multiplication_application,

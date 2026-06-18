@@ -16,52 +16,38 @@ from common.core.exceptions import ServiceException
 
 
 class MongoWebSearchCredentialRepository:
-    """Web search 用户凭证 MongoDB 仓储。"""
+    """Web search 用户凭证 MongoDB 仓储。
+
+    数据模型：每个 (user_id, source, provider) 是独立、稳定的文档。
+    - PLATFORM 下 FOUGET_DDG 和 EXA 各自一条文档，会员切换通过 is_active 切换文档。
+    - CUSTOM 下每个 provider 各自一条文档。
+    运行期通过 is_active 字段保证同一 user 仅一条凭证为激活态。
+    """
 
     def __init__(self, *, secret_cipher: SecretCipher) -> None:
         self._secret_cipher = secret_cipher
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     async def init_platform_credential(
             self,
             *,
             user_id: str,
     ) -> WebSearchCredential:
-        # 1. 优先检索是否已存在平台默认凭证
-        credential = await WebSearchCredential.find_one(
+        """确保默认 FOUGET_DDG 平台凭证存在，用于设置面板首次展示兜底。"""
+        has_active_custom = await WebSearchCredential.find_one(
             WebSearchCredential.user_id == user_id,
-            WebSearchCredential.source == WebSearchCredentialSource.PLATFORM,
-            WebSearchCredential.provider == SearchProviderName.FOUGET_DDG,
-        )
-        if credential is not None:
-            return credential
+            WebSearchCredential.source == WebSearchCredentialSource.CUSTOM,
+            WebSearchCredential.is_active == True,  # noqa: E712
+        ) is not None
 
-        # 2. 构造初始无感平台搜索凭证 (默认使用 FOUGET_DDG)
-        now = datetime.now(timezone.utc)
-        credential = WebSearchCredential(
+        return await self._get_or_create_platform_credential(
             user_id=user_id,
             provider=SearchProviderName.FOUGET_DDG,
-            source=WebSearchCredentialSource.PLATFORM,
-            is_member=False,
-            api_key_ciphertext="",
-            api_key_masked="",
-            api_key_fingerprint="",
-            created_at=now,
-            updated_at=now,
+            is_active_default=not has_active_custom,
         )
-
-        try:
-            await credential.insert()
-        except DuplicateKeyError:
-            # 高并发场景下，防止其他请求先一步插入导致冲突，此处进行降级兜底查询
-            credential = await WebSearchCredential.find_one(
-                WebSearchCredential.user_id == user_id,
-                WebSearchCredential.source == WebSearchCredentialSource.PLATFORM,
-                WebSearchCredential.provider == SearchProviderName.FOUGET_DDG,
-            )
-            if credential is None:
-                raise
-
-        return credential
 
     async def upsert_custom_credential(
             self,
@@ -115,17 +101,15 @@ class MongoWebSearchCredentialRepository:
                 updated_at=now,
             )
             await credential.insert()
-            return credential
+            return await self._ensure_single_active(user_id=user_id, target=credential)
 
-        # 分支 B: 覆盖并激活旧凭证
+        # 分支 B: 覆盖旧凭证
         credential.api_key_ciphertext = api_key_ciphertext
         credential.api_key_masked = self._mask_api_key(api_key)
         credential.api_key_fingerprint = self._fingerprint_api_key(api_key)
-        credential.is_active = True
         credential.updated_at = now
 
-        await credential.save()
-        return credential
+        return await self._ensure_single_active(user_id=user_id, target=credential)
 
     async def get_custom_api_key(
             self,
@@ -133,7 +117,6 @@ class MongoWebSearchCredentialRepository:
             user_id: str,
             provider: SearchProviderName,
     ) -> str:
-        # 1. 只读取目前处于激活状态的自定义凭证
         credential = await WebSearchCredential.find_one(
             WebSearchCredential.user_id == user_id,
             WebSearchCredential.source == WebSearchCredentialSource.CUSTOM,
@@ -146,7 +129,6 @@ class MongoWebSearchCredentialRepository:
                 custom_msg="custom 搜索凭证不存在",
             )
 
-        # 2. 解密返回明文
         try:
             return self._secret_cipher.decrypt(credential.api_key_ciphertext)
         except SecretCipherError as exc:
@@ -160,9 +142,11 @@ class MongoWebSearchCredentialRepository:
             *,
             user_id: str,
     ) -> WebSearchCredential | None:
+        """返回当前生效的 PLATFORM 凭证（可能是 FOUGET_DDG 或 EXA，取决于会员态）。"""
         return await WebSearchCredential.find_one(
             WebSearchCredential.user_id == user_id,
             WebSearchCredential.source == WebSearchCredentialSource.PLATFORM,
+            WebSearchCredential.is_active == True,  # noqa: E712
         )
 
     async def set_platform_membership(
@@ -176,29 +160,17 @@ class MongoWebSearchCredentialRepository:
         会员态属于平台凭证，不应由 custom credential 的增改过程隐式覆盖。
         这里仅服务本地/内测 UI 的搜索源联调；真实订阅服务上线后，应由统一订阅域管理会员状态。
         """
-        credential = await self.init_platform_credential(user_id=user_id)
-
-        # 状态变更分流：会员使用高级 Exa 搜索，非会员回退到默认 4get+ddg
-        credential.is_member = is_member
-        credential.provider = (
-            SearchProviderName.EXA
-            if is_member
-            else SearchProviderName.FOUGET_DDG
+        provider = SearchProviderName.EXA if is_member else SearchProviderName.FOUGET_DDG
+        credential = await self._get_or_create_platform_credential(
+            user_id=user_id,
+            provider=provider,
+            is_active_default=False,
         )
+        credential.is_member = is_member
         credential.updated_at = datetime.now(timezone.utc)
 
-        await credential.save()
-        return credential
-
-    async def cancel_platform_membership(
-            self,
-            *,
-            user_id: str,
-    ) -> WebSearchCredential:
-        return await self.set_platform_membership(
-            user_id=user_id,
-            is_member=False,
-        )
+        # 订阅/取消订阅都会切换为平台源，因此强制走单激活不变量。
+        return await self._ensure_single_active(user_id=user_id, target=credential)
 
     async def set_active_credential(
             self,
@@ -207,42 +179,26 @@ class MongoWebSearchCredentialRepository:
             source: WebSearchCredentialSource,
             provider: SearchProviderName,
     ) -> WebSearchCredential:
-        now = datetime.now(timezone.utc)
-
         if source == WebSearchCredentialSource.PLATFORM:
-            credential = await self.init_platform_credential(user_id=user_id)
-            customs = await WebSearchCredential.find(
+            credential = await self._get_or_create_platform_credential(
+                user_id=user_id,
+                provider=provider,
+                is_active_default=False,
+            )
+        else:
+            credential = await WebSearchCredential.find_one(
                 WebSearchCredential.user_id == user_id,
                 WebSearchCredential.source == WebSearchCredentialSource.CUSTOM,
-                WebSearchCredential.is_active == True,  # noqa: E712
-            ).to_list()
-            for custom in customs:
-                custom.is_active = False
-                custom.updated_at = now
-                await custom.save()
-            return credential
-
-        credential = await WebSearchCredential.find_one(
-            WebSearchCredential.user_id == user_id,
-            WebSearchCredential.source == WebSearchCredentialSource.CUSTOM,
-            WebSearchCredential.provider == provider,
-        )
-        if credential is None:
-            raise ServiceException(
-                ChatErrorCode.WEB_SEARCH_CREDENTIAL_INVALID,
-                custom_msg="custom 搜索凭证不存在",
+                WebSearchCredential.provider == provider,
             )
+            if credential is None:
+                raise ServiceException(
+                    ChatErrorCode.WEB_SEARCH_CREDENTIAL_INVALID,
+                    custom_msg="custom 搜索凭证不存在",
+                )
 
-        customs = await WebSearchCredential.find(
-            WebSearchCredential.user_id == user_id,
-            WebSearchCredential.source == WebSearchCredentialSource.CUSTOM,
-        ).to_list()
-        for custom in customs:
-            custom.is_active = custom.provider == provider
-            custom.updated_at = now
-            await custom.save()
-
-        return credential
+        credential.updated_at = datetime.now(timezone.utc)
+        return await self._ensure_single_active(user_id=user_id, target=credential)
 
     async def get_active_custom_credential(
             self,
@@ -261,10 +217,14 @@ class MongoWebSearchCredentialRepository:
             *,
             user_id: str,
     ) -> list[WebSearchCredential]:
-        # 优先展示激活的、以及最新修改的凭证列表
+        """优先展示激活的、以及最新修改的凭证列表。"""
         return await WebSearchCredential.find(
             WebSearchCredential.user_id == user_id,
         ).sort("-is_active", "-updated_at").to_list()
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _mask_api_key(api_key: str) -> str:
@@ -277,3 +237,76 @@ class MongoWebSearchCredentialRepository:
     def _fingerprint_api_key(api_key: str) -> str:
         """计算秘钥摘要，以便在不解密明文的情况下比对凭证是否发生变更。"""
         return sha256(api_key.encode("utf-8")).hexdigest()
+
+    async def _get_or_create_platform_credential(
+            self,
+            *,
+            user_id: str,
+            provider: SearchProviderName,
+            is_active_default: bool,
+    ) -> WebSearchCredential:
+        """按 provider 获取或创建 PLATFORM 凭证（不修改 active 态）。
+
+        每个 (user, PLATFORM, provider) 是独立、稳定的文档，
+        会员态切换通过切换 active 的文档实现，而不是原地改写 provider 字段。
+        """
+        credential = await WebSearchCredential.find_one(
+            WebSearchCredential.user_id == user_id,
+            WebSearchCredential.source == WebSearchCredentialSource.PLATFORM,
+            WebSearchCredential.provider == provider,
+        )
+        if credential is not None:
+            return credential
+
+        now = datetime.now(timezone.utc)
+        credential = WebSearchCredential(
+            user_id=user_id,
+            provider=provider,
+            source=WebSearchCredentialSource.PLATFORM,
+            is_member=provider == SearchProviderName.EXA,
+            is_active=is_active_default,
+            api_key_ciphertext="",
+            api_key_masked="",
+            api_key_fingerprint="",
+            created_at=now,
+            updated_at=now,
+        )
+        try:
+            await credential.insert()
+        except DuplicateKeyError:
+            # 高并发场景下，防止其他请求先一步插入导致冲突，此处进行降级兜底查询
+            credential = await WebSearchCredential.find_one(
+                WebSearchCredential.user_id == user_id,
+                WebSearchCredential.source == WebSearchCredentialSource.PLATFORM,
+                WebSearchCredential.provider == provider,
+            )
+            if credential is None:
+                raise
+        return credential
+
+    async def _ensure_single_active(
+            self,
+            *,
+            user_id: str,
+            target: WebSearchCredential,
+    ) -> WebSearchCredential:
+        """保证同一 user 仅存在一个 is_active=True 凭证。
+
+        将 target 强制置为激活态，并把同 user 的其他激活态凭证（跨 PLATFORM/CUSTOM）全部置为 False。
+        """
+        now = datetime.now(timezone.utc)
+        target.is_active = True
+        target.updated_at = now
+        await target.save()
+
+        others = await WebSearchCredential.find(
+            WebSearchCredential.user_id == user_id,
+            WebSearchCredential.id != target.id,
+            WebSearchCredential.is_active == True,  # noqa: E712
+        ).to_list()
+        for other in others:
+            other.is_active = False
+            other.updated_at = now
+            await other.save()
+
+        return target

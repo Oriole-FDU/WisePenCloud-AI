@@ -12,6 +12,7 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.skill_tools.common import AllowedSkillIdCheck, build_skill_output_placeholder, \
     SkillPermissionCheck
+from chat.application.tools.tool_settings import tool_settings
 from chat.domain.entities import Skill
 from chat.domain.interfaces import FileLoader
 from chat.service_client import AIAssetClient
@@ -60,7 +61,7 @@ class LoadSkillTool:
                 persisted_output_placeholder_factory=build_skill_output_placeholder,
                 risk_level=ToolRiskLevel.MEDIUM,
                 required_context_keys=("allowed_skill_ids",),
-                timeout_seconds=8.0,
+                timeout_seconds=tool_settings.LOAD_SKILL_TOOL_TIMEOUT_SECONDS,
                 max_output_chars=max_output_chars,
             ),
             preflight_hooks=(AllowedSkillIdCheck(), SkillPermissionCheck(resource_client)),

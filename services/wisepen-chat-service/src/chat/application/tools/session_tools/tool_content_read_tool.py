@@ -18,6 +18,7 @@ from chat.application.tools.session_tools.tool_content_read.models import (
     ToolContentSelector,
 )
 from chat.application.tools.session_tools.tool_content_read.service import ToolContentReadService
+from chat.application.tools.tool_settings import tool_settings
 
 # JSON Schema：定义 LLM 可调用的 tool_content_read 工具参数
 PARAMETERS_SCHEMA: dict[str, Any] = {
@@ -190,7 +191,7 @@ PARAMETERS_SCHEMA: dict[str, Any] = {
     ],
 }
 
-MAX_CONTENT_IDS = 8
+MAX_CONTENT_IDS = tool_settings.TOOL_CONTENT_READ_MAX_CONTENT_IDS
 
 
 class ToolContentReadTool:
@@ -240,7 +241,7 @@ class ToolContentReadTool:
                 persist_output=True,         # 输出需要持久化到会话记录
                 risk_level=ToolRiskLevel.LOW,  # 低风险
                 required_context_keys=("session_id",),  # 执行上下文必须包含 session_id
-                timeout_seconds=5.0,
+                timeout_seconds=tool_settings.TOOL_CONTENT_READ_TIMEOUT_SECONDS,
             ),
         )
 

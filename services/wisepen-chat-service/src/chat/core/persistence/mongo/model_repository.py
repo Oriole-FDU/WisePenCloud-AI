@@ -33,10 +33,18 @@ class MongoModelRepository(ModelRepository):
             self,
             user_id: Optional[str] = None,
     ) -> List[ModelInfo]:
+        target_scope = self._scope_for(user_id)
         models = await Model.find(
-            Model.scope == self._scope_for(user_id),
+            Model.scope == target_scope,
             Model.owner_user_id == user_id,
         ).sort("-is_active", "-updated_at").to_list()
+
+        # 兼容旧数据：scope 字段缺失时也返回
+        if not models and user_id is None:
+            models = await Model.find(
+                Model.scope == None,  # noqa: E711
+                Model.owner_user_id == None,
+            ).sort("-is_active", "-updated_at").to_list()
 
         return [
             ModelInfo(

@@ -16,9 +16,10 @@ from chat.application.tools.session_tools.tool_content_batch_read.models import 
     ToolContentBatchReadRequest,
 )
 from chat.application.tools.session_tools.tool_content_batch_read.service import ToolContentBatchReadService
+from chat.application.tools.tool_settings import tool_settings
 
-MAX_BATCH_READ_ITEMS = 8
-MAX_CHUNK_INDICES_PER_ITEM = 8
+MAX_BATCH_READ_ITEMS = tool_settings.TOOL_CONTENT_BATCH_READ_MAX_ITEMS
+MAX_CHUNK_INDICES_PER_ITEM = tool_settings.TOOL_CONTENT_BATCH_READ_MAX_CHUNK_INDICES
 
 PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -117,7 +118,7 @@ class ToolContentBatchReadTool:
                 persist_output=True,
                 risk_level=ToolRiskLevel.LOW,
                 required_context_keys=("session_id",),
-                timeout_seconds=5.0,
+                timeout_seconds=tool_settings.TOOL_CONTENT_BATCH_READ_TIMEOUT_SECONDS,
             ),
         )
 

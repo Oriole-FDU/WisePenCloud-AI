@@ -14,6 +14,7 @@ from chat.application.utils.chunking_engine.registry import (
     PLAIN_TEXT_PIPELINE_NAME,
     get_chunking_pipeline,
 )
+from chat.application.tools.tool_settings import tool_settings
 from .models import (
     Metadata,
     StoredToolContent,
@@ -24,8 +25,8 @@ from .models import (
     ToolContentRole,
 )
 
-DEFAULT_TOOL_CONTENT_TTL_SECONDS = 30 * 60
-DEFAULT_TOOL_CONTENT_MAX_CHARS = 20_000_000
+DEFAULT_TOOL_CONTENT_TTL_SECONDS = tool_settings.TOOL_CONTENT_DEFAULT_TTL_SECONDS
+DEFAULT_TOOL_CONTENT_MAX_CHARS = tool_settings.TOOL_CONTENT_MAX_CHARS
 _DEFAULT_CHUNKING_ENGINE = ChunkingEngine()
 
 

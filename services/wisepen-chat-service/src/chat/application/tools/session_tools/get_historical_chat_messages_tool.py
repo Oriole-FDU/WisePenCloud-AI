@@ -9,6 +9,7 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
+from chat.application.tools.tool_settings import tool_settings
 from chat.domain.repositories import MessageRepository
 from common.logger import error
 
@@ -77,7 +78,7 @@ class GetHistoricalChatMessagesTool:
                 persist_output=True,
                 risk_level=ToolRiskLevel.LOW,
                 required_context_keys=("session_id",),
-                timeout_seconds=5.0,
+                timeout_seconds=tool_settings.GET_HISTORICAL_CHAT_MESSAGES_TIMEOUT_SECONDS,
                 max_output_chars=max_output_chars,
             ),
         )

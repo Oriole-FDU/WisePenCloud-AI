@@ -17,6 +17,9 @@ from chat.application.tools.common.tool_content_store.store import (
     ToolContentStore,
 )
 from chat.application.tools.common.tool_run_file_store import ToolRunFileStore
+from chat.application.tools.common.tool_run_file_store.gc import (
+    ToolRunFileStoreGcScheduler,
+)
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.document_tools.document_parse import (
@@ -39,7 +42,9 @@ from chat.application.tools.session_tools.get_historical_chat_messages_tool impo
 )
 from chat.application.tools.session_tools.tool_content_batch_read_tool import ToolContentBatchReadTool
 from chat.application.tools.session_tools.tool_content_read_tool import ToolContentReadTool
-from chat.application.tools.skill_tools import LoadSkillAssetTool, LoadSkillTool
+from chat.application.tools.skill_tools import CreateSkillTool, LoadSkillAssetTool, LoadSkillTool
+from chat.application.tools.skill_tools.create_skill.skill_publisher import SkillPublisher
+from chat.application.tools.core import ToolExecutionError
 from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
 from chat.application.tools.tool_output_cache import ToolOutputCache
 from chat.application.tools.tool_output_renderer import ToolOutputRenderer
@@ -197,6 +202,27 @@ def _build_github_api_client() -> Github:
     return Github(auth=Auth.Token(settings.GITHUB_TOKEN))
 
 
+class _PlaceholderSkillPublisher(SkillPublisher):
+    async def publish(
+        self,
+        *,
+        skill_id: str,
+        title: str,
+        trigger_description: str,
+        markdown: str,
+        user_id: str,
+        session_id: str,
+    ):
+        raise ToolExecutionError(
+            reason="skill_publish_not_available",
+            detail_reason=(
+                "Skill publishing is not yet available. "
+                "The create_skill tool is registered but the publish backend is not connected."
+            ),
+            retryable=False,
+        )
+
+
 class Container(containers.DeclarativeContainer):
     """依赖注入容器，管理单例对象的生命周期。"""
     llm_provider = providers.Singleton(LiteLLMAdapter)
@@ -267,10 +293,70 @@ class Container(containers.DeclarativeContainer):
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
     )
 
+    # ==================================================================
+    # Tool 基础设施：仓储、存储、缓存、渲染、调度
+    # ==================================================================
+    tool_content_repository = providers.Singleton(
+        RedisToolContentRepository,
+        redis_url=settings.REDIS_URL,
+        ttl_seconds=DEFAULT_TOOL_CONTENT_TTL_SECONDS,
+    )
+    tool_content_store = providers.Singleton(
+        ToolContentStore,
+        repository=tool_content_repository,
+    )
+    tool_run_file_repository = providers.Singleton(
+        RedisToolRunFileRepository,
+        redis_url=settings.REDIS_URL,
+    )
+    tool_run_file_store = providers.Singleton(
+        ToolRunFileStore,
+        repository=tool_run_file_repository,
+        root_dir=settings.TOOL_RUN_FILE_ROOT,
+        ref_ttl_seconds=tool_settings.TOOL_RUN_FILE_REF_TTL_SECONDS,
+        cleanup_grace_seconds=tool_settings.TOOL_RUN_FILE_CLEANUP_GRACE_SECONDS,
+        max_file_size_bytes=tool_settings.TOOL_RUN_FILE_MAX_BYTES,
+    )
+    tool_run_file_store_gc_scheduler = providers.Singleton(
+        ToolRunFileStoreGcScheduler,
+        store=tool_run_file_store,
+    )
+    tool_output_renderer = providers.Singleton(ToolOutputRenderer)
+    tool_output_cache = providers.Singleton(
+        ToolOutputCache,
+        content_store=tool_content_store,
+        inline_max_chars=settings.TOOL_RESULT_MAX_CHARS,
+    )
+    tool_dispatcher = providers.Singleton(
+        ToolDispatcher,
+        output_renderer=tool_output_renderer,
+        output_cache=tool_output_cache,
+    )
+
+    # ==================================================================
+    # Tool 组件：HTTP 客户端、Fetcher、Searcher、Service、Hydrator 等
+    # ==================================================================
+
+    # --- Document Parse 组件 ---
     paddle_ocr_http_client = providers.Singleton(
         httpx.AsyncClient,
         timeout=httpx.Timeout(tool_settings.PADDLE_OCR_TIMEOUT_SECONDS),
     )
+    paddle_ocr_client = providers.Singleton(
+        _build_paddle_ocr_client,
+        http_client=paddle_ocr_http_client,
+    )
+    document_parse_planner = providers.Singleton(
+        DocumentParsePlanner,
+        ocr_client=paddle_ocr_client,
+        table_renderer=providers.Factory(TableMarkdownRenderer),
+    )
+    document_parse_service = providers.Singleton(
+        DocumentParseService,
+        planner=document_parse_planner,
+    )
+
+    # --- Web Search 组件 ---
     web_search_http_client = providers.Singleton(
         httpx.AsyncClient,
         timeout=httpx.Timeout(tool_settings.WEB_SEARCH_TIMEOUT_SECONDS),
@@ -299,6 +385,12 @@ class Container(containers.DeclarativeContainer):
         RedisWebSearchCandidateRepository,
         redis_url=settings.REDIS_URL,
     )
+    web_search_service = providers.Singleton(
+        WebSearchService,
+        platform_searcher=platform_web_searcher,
+    )
+
+    # --- Web Fetch / Crawl 组件 ---
     web_content_cache_repository = providers.Singleton(
         RedisMongoWebContentCacheRepository,
         redis_url=settings.REDIS_URL,
@@ -307,39 +399,6 @@ class Container(containers.DeclarativeContainer):
         ArqWebContentCacheRefreshTaskPublisher,
         redis_url=settings.REDIS_URL,
     )
-    web_search_service = providers.Singleton(
-        WebSearchService,
-        platform_searcher=platform_web_searcher,
-    )
-    paper_hydrate_service = providers.Singleton(
-        PaperHydrator,
-        http_client=web_search_http_client,
-        api_key=settings.OPENALEX_API_KEY,
-        base_url=settings.OPENALEX_BASE_URL,
-    )
-    github_api_client = providers.Singleton(
-        _build_github_api_client,
-    )
-    github_hydrate_service = providers.Singleton(
-        GitHubHydrator,
-        github_client=github_api_client,
-    )
-    paper_hydrate_tool = providers.Singleton(
-        PaperHydrateTool,
-        service=paper_hydrate_service,
-    )
-    github_hydrate_tool = providers.Singleton(
-        GitHubHydrateTool,
-        service=github_hydrate_service,
-    )
-    web_search_tool = providers.Singleton(
-        WebSearchTool,
-        service=web_search_service,
-        custom_source_factory=web_search_custom_source_factory,
-        candidate_repository=web_search_candidate_repository,
-        max_hops=3,
-    )
-    # Web Crawl / Web Fetch 共用的 fetcher 链路
     web_fetch_http_client = providers.Singleton(
         _build_web_fetch_http_client,
     )
@@ -365,10 +424,6 @@ class Container(containers.DeclarativeContainer):
         min_text_length=tool_settings.WEB_FETCH_MIN_TEXT_LENGTH,
         concurrency=tool_settings.WEB_FETCH_BATCH_CONCURRENCY,
     )
-    web_crawl_tool = providers.Singleton(
-        WebCrawlTool,
-        service=web_crawl_service,
-    )
     web_fetch_coordinator = providers.Singleton(
         FetchCoordinator,
         httpx_fetcher=web_fetch_httpx_fetcher,
@@ -380,66 +435,49 @@ class Container(containers.DeclarativeContainer):
         min_text_length=tool_settings.WEB_FETCH_MIN_TEXT_LENGTH,
         batch_concurrency=tool_settings.WEB_FETCH_BATCH_CONCURRENCY,
     )
-    web_fetch_tool = providers.Singleton(
-        WebFetchTool,
-        service=web_fetch_coordinator,
-        candidate_repository=web_search_candidate_repository,
+
+    # --- Hydrator 组件 ---
+    paper_hydrate_service = providers.Singleton(
+        PaperHydrator,
+        http_client=web_search_http_client,
+        api_key=settings.OPENALEX_API_KEY,
+        base_url=settings.OPENALEX_BASE_URL,
     )
-    paddle_ocr_client = providers.Singleton(
-        _build_paddle_ocr_client,
-        http_client=paddle_ocr_http_client,
+    github_api_client = providers.Singleton(
+        _build_github_api_client,
+    )
+    github_hydrate_service = providers.Singleton(
+        GitHubHydrator,
+        github_client=github_api_client,
     )
 
-    tool_content_repository = providers.Singleton(
-        RedisToolContentRepository,
-        redis_url=settings.REDIS_URL,
-        ttl_seconds=DEFAULT_TOOL_CONTENT_TTL_SECONDS,
-    )
-    tool_content_store = providers.Singleton(
-        ToolContentStore,
-        repository=tool_content_repository,
-    )
-    tool_run_file_repository = providers.Singleton(
-        RedisToolRunFileRepository,
-        redis_url=settings.REDIS_URL,
-    )
-    tool_run_file_store = providers.Singleton(
-        ToolRunFileStore,
-        repository=tool_run_file_repository,
-        root_dir=settings.TOOL_RUN_FILE_ROOT,
-        ref_ttl_seconds=settings.TOOL_RUN_FILE_REF_TTL_SECONDS,
-        cleanup_grace_seconds=settings.TOOL_RUN_FILE_CLEANUP_GRACE_SECONDS,
-        max_file_size_bytes=settings.TOOL_RUN_FILE_MAX_BYTES,
-    )
-    tool_output_renderer = providers.Singleton(ToolOutputRenderer)
-    tool_output_cache = providers.Singleton(
-        ToolOutputCache,
-        content_store=tool_content_store,
-        inline_max_chars=settings.TOOL_RESULT_MAX_CHARS,
-    )
-    tool_dispatcher = providers.Singleton(
-        ToolDispatcher,
-        output_renderer=tool_output_renderer,
-        output_cache=tool_output_cache,
+    # --- Skill 组件 ---
+    _placeholder_skill_publisher = providers.Singleton(_PlaceholderSkillPublisher)
+
+    # ==================================================================
+    # Tool 本身：最终注册到 ToolRegistry 的工具实例
+    # ==================================================================
+
+    # --- Math Tools ---
+    calculus_solver_tool = providers.Singleton(CalculusSolverTool)
+    linear_algebra_solver_tool = providers.Singleton(LinearAlgebraSolverTool)
+    equation_solver_tool = providers.Singleton(EquationSolverTool)
+    stats_solver_tool = providers.Singleton(StatsSolverTool)
+    expression_solver_tool = providers.Singleton(ExpressionSolverTool)
+
+    # --- Document Tools ---
+    document_parse_tool = providers.Singleton(
+        DocumentParseTool,
+        file_store=tool_run_file_store,
+        parse_service=document_parse_service,
+        content_cache_repository=web_content_cache_repository,
+        refresh_task_publisher=web_content_cache_refresh_task_publisher,
     )
 
+    # --- Session Tools ---
     search_history_tool = providers.Singleton(
         GetHistoricalChatMessagesTool,
         message_repo=message_repo,
-        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
-    )
-    load_skill_tool = providers.Singleton(
-        LoadSkillTool,
-        ai_asset_client=ai_asset_client,
-        resource_client=resource_client,
-        file_loader=oss_file_loader,
-        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
-    )
-    load_skill_asset_tool = providers.Singleton(
-        LoadSkillAssetTool,
-        ai_asset_client=ai_asset_client,
-        resource_client=resource_client,
-        file_loader=oss_file_loader,
         max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
     )
     tool_content_read_tool = providers.Singleton(
@@ -454,27 +492,54 @@ class Container(containers.DeclarativeContainer):
         EvidenceRankTool,
         content_store=tool_content_store,
     )
-    document_parse_planner = providers.Singleton(
-        DocumentParsePlanner,
-        ocr_client=paddle_ocr_client,
-        table_renderer=providers.Factory(TableMarkdownRenderer),
+
+    # --- Web Tools ---
+    web_search_tool = providers.Singleton(
+        WebSearchTool,
+        service=web_search_service,
+        custom_source_factory=web_search_custom_source_factory,
+        candidate_repository=web_search_candidate_repository,
+        max_hops=3,
     )
-    document_parse_service = providers.Singleton(
-        DocumentParseService,
-        planner=document_parse_planner,
+    web_crawl_tool = providers.Singleton(
+        WebCrawlTool,
+        service=web_crawl_service,
     )
-    document_parse_tool = providers.Singleton(
-        DocumentParseTool,
-        file_store=tool_run_file_store,
-        parse_service=document_parse_service,
-        content_cache_repository=web_content_cache_repository,
-        refresh_task_publisher=web_content_cache_refresh_task_publisher,
+    web_fetch_tool = providers.Singleton(
+        WebFetchTool,
+        service=web_fetch_coordinator,
+        candidate_repository=web_search_candidate_repository,
     )
-    calculus_solver_tool = providers.Singleton(CalculusSolverTool)
-    linear_algebra_solver_tool = providers.Singleton(LinearAlgebraSolverTool)
-    equation_solver_tool = providers.Singleton(EquationSolverTool)
-    stats_solver_tool = providers.Singleton(StatsSolverTool)
-    expression_solver_tool = providers.Singleton(ExpressionSolverTool)
+    paper_hydrate_tool = providers.Singleton(
+        PaperHydrateTool,
+        service=paper_hydrate_service,
+    )
+    github_hydrate_tool = providers.Singleton(
+        GitHubHydrateTool,
+        service=github_hydrate_service,
+    )
+
+    # --- Skill Tools ---
+    load_skill_tool = providers.Singleton(
+        LoadSkillTool,
+        ai_asset_client=ai_asset_client,
+        resource_client=resource_client,
+        file_loader=oss_file_loader,
+        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+    )
+    load_skill_asset_tool = providers.Singleton(
+        LoadSkillAssetTool,
+        ai_asset_client=ai_asset_client,
+        resource_client=resource_client,
+        file_loader=oss_file_loader,
+        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+    )
+    create_skill_tool = providers.Singleton(
+        CreateSkillTool,
+        skill_publisher=_placeholder_skill_publisher,
+    )
+
+    # --- Tool Registry ---
     tool_providers = providers.List(
         document_parse_tool,
         calculus_solver_tool,
@@ -493,6 +558,7 @@ class Container(containers.DeclarativeContainer):
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
+        create_skill_tool,
     )
     tool_registry = providers.Singleton(
         _build_registry,

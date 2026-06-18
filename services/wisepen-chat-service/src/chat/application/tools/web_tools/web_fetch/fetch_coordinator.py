@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 
@@ -22,6 +22,7 @@ from chat.application.tools.web_tools.web_content_cache.refresh_queue import (
     WebContentCacheRefreshTaskPublisher,
 )
 from common.logger import info, warn
+from chat.application.tools.web_tools.web_content_cache.cache_ttl import compute_ttl
 from .cleaners.base import BaseCleaner
 from .errors import WebFetchError
 from .fetchers.base import BaseFetcher, RawFetchOutput
@@ -29,8 +30,6 @@ from .models import WebFetchBatchResult, WebFetchFailure, WebFetchResult
 from .utils import filename_from_url, judge_quality
 
 _PRODUCER_NAME = "web_fetch"
-_DEFAULT_HTML_SOFT_TTL = timedelta(minutes=30)
-_DEFAULT_HTML_HARD_TTL = timedelta(hours=2)
 _REFRESH_LOCK_TTL_SECONDS = 300
 
 
@@ -435,7 +434,6 @@ class FetchCoordinator:
             self.refresh_stale_url(
                 url=url,
                 user_id=user_id,
-                session_id=session_id,
                 source_scope=source_scope,
             )
         )
@@ -445,7 +443,6 @@ class FetchCoordinator:
         *,
         url: str,
         user_id: str,
-        session_id: str,
         source_scope: str,
     ) -> None:
         try:
@@ -518,6 +515,16 @@ class FetchCoordinator:
                 if source_scope == "web_custom"
                 else WebContentCacheMode.PUBLIC
             )
+            # 基于 HTTP 响应头智能计算 TTL
+            ttl = compute_ttl(
+                headers=raw.headers,
+                now=now,
+                is_shared_cache=(mode == WebContentCacheMode.PUBLIC),
+                status_code=raw.status_code or 200,
+            )
+            if ttl.no_store:
+                info("网页抓取缓存被 no-store 指令跳过", url=url)
+                return
             canonical_url = url.strip()
             content_hash_payload = f"{raw.raw_html or ''}\n---markdown---\n{result.markdown}"
             value = WebContentCacheValue(
@@ -538,6 +545,7 @@ class FetchCoordinator:
                     "source_url": result.source_url,
                     "fetcher": raw.fetcher,
                     "cleaner": self._cleaner.name,
+                    "cache_control": raw.headers.get("cache-control"),
                 },
             )
             doc_id = await repository.save_value(value)
@@ -548,8 +556,8 @@ class FetchCoordinator:
                     canonical_url=canonical_url,
                     mongo_doc_id=doc_id,
                     cache_mode=mode,
-                    soft_expire_at=now + _DEFAULT_HTML_SOFT_TTL,
-                    hard_expire_at=now + _DEFAULT_HTML_HARD_TTL,
+                    soft_expire_at=ttl.soft_expire_at,
+                    hard_expire_at=ttl.hard_expire_at,
                     etag=raw.headers.get("etag"),
                     last_modified=raw.headers.get("last-modified"),
                 )
@@ -583,6 +591,16 @@ class FetchCoordinator:
                 if source_scope == "web_custom"
                 else WebContentCacheMode.PUBLIC
             )
+            # 基于 HTTP 响应头智能计算 TTL
+            ttl = compute_ttl(
+                headers=raw.headers,
+                now=now,
+                is_shared_cache=(mode == WebContentCacheMode.PUBLIC),
+                status_code=raw.status_code or 200,
+            )
+            if ttl.no_store:
+                info("网页抓取非 HTML 缓存被 no-store 指令跳过", url=raw.source_url)
+                return None
             canonical_url = raw.source_url.strip()
             value = WebContentCacheValue(
                 id=None,
@@ -600,6 +618,7 @@ class FetchCoordinator:
                     "source_url": raw.source_url,
                     "fetcher": raw.fetcher,
                     "file_label": raw.file_label,
+                    "cache_control": raw.headers.get("cache-control"),
                 },
             )
             doc_id = await repository.save_value(value)
@@ -610,8 +629,8 @@ class FetchCoordinator:
                     canonical_url=canonical_url,
                     mongo_doc_id=doc_id,
                     cache_mode=mode,
-                    soft_expire_at=now + _DEFAULT_HTML_SOFT_TTL,
-                    hard_expire_at=now + _DEFAULT_HTML_HARD_TTL,
+                    soft_expire_at=ttl.soft_expire_at,
+                    hard_expire_at=ttl.hard_expire_at,
                     etag=raw.headers.get("etag"),
                     last_modified=raw.headers.get("last-modified"),
                 )

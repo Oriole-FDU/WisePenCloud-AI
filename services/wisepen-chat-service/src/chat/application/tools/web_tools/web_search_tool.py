@@ -12,6 +12,7 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 from chat.application.tools.core.tool_return import ToolReturn
+from chat.application.tools.tool_settings import tool_settings
 from chat.application.tools.web_tools.web_search.candidate_store.repository import (
     WebSearchCandidateRepository,
 )
@@ -47,13 +48,12 @@ from chat.application.tools.web_tools.web_search.service import (
     WebSearchService,
 )
 
-# 边界控制常量
-DEFAULT_MAX_HOPS = 3
-DEFAULT_WEB_SEARCH_RESULTS = 10
-MAX_WEB_SEARCH_RESULTS = 20
-MAX_SUFFICIENCY_TEXT_CHARS = 12000
-MAX_RECOMMENDED_CANDIDATES = 5
-FALLBACK_CANDIDATES_COUNT = 3
+# 边界控制常量（全部通过 tool_settings 调参控制）
+DEFAULT_WEB_SEARCH_RESULTS = tool_settings.WEB_SEARCH_DEFAULT_RESULTS
+MAX_WEB_SEARCH_RESULTS = tool_settings.WEB_SEARCH_MAX_RESULTS
+MAX_SUFFICIENCY_TEXT_CHARS = tool_settings.WEB_SEARCH_MAX_SUFFICIENCY_TEXT_CHARS
+MAX_RECOMMENDED_CANDIDATES = tool_settings.WEB_SEARCH_MAX_RECOMMENDED_CANDIDATES
+FALLBACK_CANDIDATES_COUNT = tool_settings.WEB_SEARCH_FALLBACK_CANDIDATES_COUNT
 
 # 大模型 Function Calling 参数契约（保持英文描述以确保模型理解的精确度）
 PARAMETERS_SCHEMA: dict[str, Any] = {
@@ -106,23 +106,29 @@ PARAMETERS_SCHEMA: dict[str, Any] = {
 class WebSearchTool:
     """Web 搜索工具门面：对外封装纯英文元数据契约，对内编排轻量多跳循环检索流。"""
 
-    __slots__ = ("_candidate_repository", "_candidate_ttl_seconds", "_custom_source_factory", "_definition",
-                 "_max_hops", "_service")
+    __slots__ = (
+        "_candidate_repository",
+        "_candidate_ttl_seconds",
+        "_custom_source_factory",
+        "_definition",
+        "_max_hops",
+        "_service",
+    )
 
     def __init__(
-            self,
-            *,
-            service: WebSearchService,
-            custom_source_factory: WebSearchCustomSourceFactory,
-            candidate_repository: WebSearchCandidateRepository,
-            candidate_ttl_seconds: int = 3600,
-            max_hops: int = DEFAULT_MAX_HOPS,
+        self,
+        *,
+        service: WebSearchService,
+        custom_source_factory: WebSearchCustomSourceFactory,
+        candidate_repository: WebSearchCandidateRepository,
+        candidate_ttl_seconds: int = 3600,
+        max_hops: int = tool_settings.WEB_SEARCH_MAX_HOPS,
     ) -> None:
         self._service = service
         self._custom_source_factory = custom_source_factory
         self._candidate_repository = candidate_repository
         self._candidate_ttl_seconds = candidate_ttl_seconds
-        self._max_hops = min(max(1, max_hops), DEFAULT_MAX_HOPS)
+        self._max_hops = min(max(1, max_hops), tool_settings.WEB_SEARCH_MAX_HOPS)
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="web_search",
@@ -161,7 +167,7 @@ class WebSearchTool:
                 expose_by_default=True,
                 persist_output=True,
                 risk_level=ToolRiskLevel.LOW,
-                timeout_seconds=45.0,
+                timeout_seconds=tool_settings.WEB_SEARCH_TOOL_TIMEOUT_SECONDS,
                 cache_chunked=False,
                 required_context_keys=("user_id", "session_id", "search_config"),
             ),
@@ -172,7 +178,7 @@ class WebSearchTool:
         return self._definition
 
     async def execute(self, context: dict[str, Any], **kwargs: Any) -> ToolReturn:
-        """解析引擎主执行切面。处理多维领域异常并转换为安全的标准运行时错误。"""
+
         question = kwargs["question"].strip()
         first_query = kwargs["first_query"].strip()
         fallback_query = kwargs["fallback_query"].strip()
@@ -182,7 +188,15 @@ class WebSearchTool:
 
         try:
             # 1. 动态凭证安全识别
-            custom_source = self._custom_source_from_context(search_config)
+            if search_config.search_mode == WebSearchMode.PLATFORM:
+                custom_source = None
+            else:
+                if not search_config.is_valid:
+                    raise WebSearchCustomApiKeyInvalid(
+                        provider=search_config.provider,
+                        reason=search_config.error_message or "custom 搜索配置不可用",
+                    )
+                custom_source = self._custom_source_factory.build(search_config)
 
             # 2. 调度执行轻量级多跳收敛循环
             merged_result, sufficiency, candidates, final_query = await self._run_multi_hop(
@@ -236,7 +250,11 @@ class WebSearchTool:
             ) from exc
 
         # 多跳完结判定：若最终仍未收敛，挂载警告视窗
-        warning = f"Multi-hop search did not converge: {sufficiency.reason}" if sufficiency and not sufficiency.sufficient else None
+        warning = (
+            f"Multi-hop search did not converge: {sufficiency.reason}"
+            if sufficiency and not sufficiency.sufficient
+            else None
+        )
 
         # 4. 交叉计算推荐展示结果
         recommended_ids = await self._select_recommended_ids(
@@ -256,14 +274,14 @@ class WebSearchTool:
         )
 
     async def _run_multi_hop(
-            self,
-            *,
-            question: str,
-            first_query: str,
-            fallback_query: str,
-            max_results: int,
-            custom_source: WebSearchCustomSource | None,
-            search_config: WebSearchRuntimeConfig,
+        self,
+        *,
+        question: str,
+        first_query: str,
+        fallback_query: str,
+        max_results: int,
+        custom_source: WebSearchCustomSource | None,
+        search_config: WebSearchRuntimeConfig,
     ) -> tuple[WebSearchResult, AnswerSufficiency | None, tuple[WebSearchCandidate, ...], str]:
         """轻量级多跳迭代控制流。返回合并结果、充分性判断、候选列表和最终使用的查询词。"""
         results: list[WebSearchResult] = []
@@ -305,12 +323,12 @@ class WebSearchTool:
         return merged, sufficiency, candidates, query
 
     async def _select_recommended_ids(
-            self,
-            *,
-            question: str,
-            candidates: tuple[WebSearchCandidate, ...],
-            responses: tuple[ProviderSearchResponse, ...],
-            sufficiency: AnswerSufficiency | None,
+        self,
+        *,
+        question: str,
+        candidates: tuple[WebSearchCandidate, ...],
+        responses: tuple[ProviderSearchResponse, ...],
+        sufficiency: AnswerSufficiency | None,
     ) -> tuple[str, ...]:
         """交叉相关性重排过滤。"""
         if not candidates:
@@ -324,29 +342,20 @@ class WebSearchTool:
             )
             if ranked:
                 valid_ids = {c.candidate_id for c in candidates}
-                filtered = tuple(cid for cid in ranked if cid in valid_ids)[:MAX_RECOMMENDED_CANDIDATES]
+                filtered = tuple(cid for cid in ranked if cid in valid_ids)[
+                    :MAX_RECOMMENDED_CANDIDATES
+                ]
                 if filtered:
                     return filtered
 
         # 退化兜底路径：信息不足或精排失败，直接默认裁剪原始顺序的前 3 个
         return tuple(c.candidate_id for c in candidates[:FALLBACK_CANDIDATES_COUNT])
 
-    def _custom_source_from_context(self, search_config: WebSearchRuntimeConfig) -> WebSearchCustomSource | None:
-        """上下文自定义凭证工厂构建拦截器。"""
-        if search_config.search_mode == WebSearchMode.PLATFORM:
-            return None
-        if not search_config.is_valid:
-            raise WebSearchCustomApiKeyInvalid(
-                provider=search_config.provider,
-                reason=search_config.error_message or "custom 搜索配置不可用",
-            )
-        return self._custom_source_factory.build(search_config)
-
     async def _store_candidate_mappings(
-            self,
-            *,
-            user_id: str,
-            candidates: tuple[WebSearchCandidate, ...],
+        self,
+        *,
+        user_id: str,
+        candidates: tuple[WebSearchCandidate, ...],
     ) -> None:
         """批量注册映射中间件，维护运行时生存周期 TTL。"""
         for mapping in build_candidate_mappings(candidates, user_id=user_id):
@@ -365,7 +374,11 @@ def _merge_results(*, question: str, results: list[WebSearchResult]) -> WebSearc
             detail_reason="web_search did not execute any search request.",
             retryable=True,
         )
-    return replace(results[0], query=question, responses=tuple(r for res in results for r in res.responses))
+    return replace(
+        results[0],
+        query=question,
+        responses=tuple(r for res in results for r in res.responses),
+    )
 
 
 def _search_context_text(results: list[WebSearchResult]) -> str:
@@ -386,9 +399,9 @@ def _search_context_text(results: list[WebSearchResult]) -> str:
 
 
 def _candidates_text(
-        candidates: tuple[WebSearchCandidate, ...],
-        *,
-        responses: tuple[ProviderSearchResponse, ...],
+    candidates: tuple[WebSearchCandidate, ...],
+    *,
+    responses: tuple[ProviderSearchResponse, ...],
 ) -> str:
     """构建用于微型排序模型的标准文本序列（含去重直答提示）。"""
     unique_answers = dict.fromkeys(r.answer for r in responses if r.answer)
@@ -398,7 +411,11 @@ def _candidates_text(
         lines.append("supplier_answer:\n" + "\n".join(f"- {a}" for a in unique_answers))
 
     for candidate in candidates:
-        parts = [f"id: {candidate.candidate_id}", f"title: {candidate.title}", f"url: {candidate.url}"]
+        parts = [
+            f"id: {candidate.candidate_id}",
+            f"title: {candidate.title}",
+            f"url: {candidate.url}",
+        ]
         if candidate.overview:
             parts.append(f"overview: {candidate.overview}")
         if candidate.highlights:

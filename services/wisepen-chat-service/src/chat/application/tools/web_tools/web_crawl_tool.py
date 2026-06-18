@@ -17,14 +17,15 @@ from chat.application.tools.core.tool_return import (
     SuggestedActionPriority,
     ToolReturn,
 )
+from chat.application.tools.tool_settings import tool_settings
 from chat.application.tools.web_tools.web_fetch import WebCrawlService
 from chat.application.tools.web_tools.web_fetch.errors import WebFetchError
 
-# --- 全局常量限制 ---
-DEFAULT_MAX_PAGES = 20
-DEFAULT_MAX_DEPTH = 2
-MAX_MAX_PAGES = 100
-MAX_MAX_DEPTH = 5
+# --- 全局常量限制（通过 tool_settings 调参控制）---
+DEFAULT_MAX_PAGES = tool_settings.WEB_CRAWL_DEFAULT_MAX_PAGES
+DEFAULT_MAX_DEPTH = tool_settings.WEB_CRAWL_DEFAULT_MAX_DEPTH
+MAX_MAX_PAGES = tool_settings.WEB_CRAWL_MAX_MAX_PAGES
+MAX_MAX_DEPTH = tool_settings.WEB_CRAWL_MAX_MAX_DEPTH
 
 PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -124,7 +125,7 @@ class WebCrawlTool:
                 expose_by_default=True,
                 persist_output=True,
                 risk_level=ToolRiskLevel.MEDIUM,
-                timeout_seconds=180.0,
+                timeout_seconds=tool_settings.WEB_CRAWL_TOOL_TIMEOUT_SECONDS,
                 cache_chunked=True,
             ),
         )

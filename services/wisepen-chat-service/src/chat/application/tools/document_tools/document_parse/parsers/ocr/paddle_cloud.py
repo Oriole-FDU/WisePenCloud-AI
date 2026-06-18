@@ -16,6 +16,7 @@ from chat.application.tools.document_tools.document_parse.models import (
     DocumentParseMonitorName,
     OcrPageResult,
 )
+from chat.application.tools.tool_settings import tool_settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +115,7 @@ class PaddleCloudClient:
             resp = await self._http.get(
                 f"{self._config.api_url}/{job_id}",
                 headers=self._headers,
-                timeout=30.0,
+                timeout=tool_settings.PADDLE_OCR_POLL_HTTP_TIMEOUT,
             )
             resp.raise_for_status()
 
@@ -147,7 +148,7 @@ class PaddleCloudClient:
 
     async def _download_results(self, json_url: str) -> list[dict[str, Any]]:
         """下载并反序列化云端流式 JSONL 数据。"""
-        resp = await self._http.get(json_url, timeout=60.0)
+        resp = await self._http.get(json_url, timeout=tool_settings.PADDLE_OCR_RESULT_HTTP_TIMEOUT)
         resp.raise_for_status()
         return [json.loads(line) for line in resp.text.strip().splitlines() if line.strip()]
 

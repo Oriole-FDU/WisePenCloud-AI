@@ -10,6 +10,7 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
+from chat.application.tools.tool_settings import tool_settings
 from chat.application.tools.web_tools.hydrators import GitHubHydrator
 
 
@@ -72,7 +73,7 @@ class GitHubHydrateTool:
                 expose_by_default=True,
                 persist_output=True,
                 risk_level=ToolRiskLevel.LOW,
-                timeout_seconds=20.0,
+                timeout_seconds=tool_settings.GITHUB_HYDRATE_TOOL_TIMEOUT_SECONDS,
                 cache_chunked=False,
             ),
         )

@@ -87,15 +87,24 @@ async def judge_answer_sufficiency(
         )
 
     sufficient = bool(payload.get("sufficient"))
-    reason = _str(payload.get("reason")) or (
+    raw_reason = payload.get("reason")
+    reason = (raw_reason.strip() if isinstance(raw_reason, str) else "") or (
         "当前文本足够回答问题。" if sufficient else "当前文本不足以回答问题。"
     )
-    next_query = "" if sufficient else (_str(payload.get("next_query")) or question.strip())
+    if sufficient:
+        next_query = ""
+    else:
+        raw_next_query = payload.get("next_query")
+        next_query = (
+            raw_next_query.strip()
+            if isinstance(raw_next_query, str) and raw_next_query.strip()
+            else question.strip()
+        )
 
     return AnswerSufficiency(
         sufficient=sufficient,
         reason=reason,
-        next_query=next_query
+        next_query=next_query,
     )
 
 
@@ -135,13 +144,9 @@ async def rank_candidate_ids(
 
     ranked: list[str] = []
     for value in raw_ids:
-        candidate_id = _str(value)
+        candidate_id = value.strip() if isinstance(value, str) else ""
         if candidate_id:
             ranked.append(candidate_id)
         if len(ranked) >= MAX_RANKED_CANDIDATES:
             break
     return ranked
-
-
-def _str(value: object) -> str:
-    return value.strip() if isinstance(value, str) else ""

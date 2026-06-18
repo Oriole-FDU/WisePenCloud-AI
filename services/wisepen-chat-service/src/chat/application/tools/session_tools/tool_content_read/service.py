@@ -12,6 +12,7 @@ from chat.application.tools.session_tools.tool_content_read.models import (
     ToolContentWindow,
 )
 from chat.application.tools.session_tools.utils.content_window_builder import ToolContentWindowBuilder
+from chat.application.tools.tool_settings import tool_settings
 from chat.application.utils.ranking_engine import (
     RankCandidate,
     RankQuery,
@@ -21,7 +22,7 @@ from chat.application.utils.ranking_engine import (
 from chat.application.utils.ranking_engine import get_ranking_engine
 
 # 正则模式串最大字符数限制，防止 DoS 攻击引发灾难性回溯
-MAX_REGEX_PATTERN_CHARS = 500
+MAX_REGEX_PATTERN_CHARS = tool_settings.TOOL_CONTENT_READ_MAX_REGEX_PATTERN_CHARS
 
 
 class ToolContentReadService:

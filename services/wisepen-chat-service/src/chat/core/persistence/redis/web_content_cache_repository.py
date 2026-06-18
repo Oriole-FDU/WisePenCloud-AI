@@ -89,7 +89,7 @@ class RedisMongoWebContentCacheRepository(WebContentCacheRepository):
         )
 
     async def set_entry(self, entry: WebContentCacheEntry) -> None:
-        canonical_url = self.canonicalize_url(entry.canonical_url)
+        canonical_url = entry.canonical_url.strip()
         payload = json.dumps(
             _jsonable(
                 {
@@ -201,13 +201,10 @@ class RedisMongoWebContentCacheRepository(WebContentCacheRepository):
             return f"{_ENTRY_KEY_PREFIX}public:{url_hash}"
         return f"{_ENTRY_KEY_PREFIX}private:{cls._hash(user_id)}:{url_hash}"
 
-    @staticmethod
-    def canonicalize_url(url: str) -> str:
-        return url.strip()
 
     @classmethod
     def url_hash(cls, url: str) -> str:
-        canonical_url = cls.canonicalize_url(url)
+        canonical_url = url.strip()
         return cls._hash(canonical_url)
 
     @staticmethod

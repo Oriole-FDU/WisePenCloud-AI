@@ -17,6 +17,7 @@ from chat.application.tools.core.tool_return import (
     SuggestedActionPriority,
     ToolReturn,
 )
+from chat.application.tools.tool_settings import tool_settings
 from chat.application.tools.web_tools.web_fetch import FetchCoordinator
 from chat.application.tools.web_tools.web_fetch.errors import WebFetchError
 from chat.application.tools.web_tools.web_search.candidate_store.repository import (
@@ -69,10 +70,10 @@ class WebFetchTool:
     __slots__ = ("_candidate_repository", "_definition", "_service")
 
     def __init__(
-            self,
-            *,
-            service: FetchCoordinator,
-            candidate_repository: WebSearchCandidateRepository,
+        self,
+        *,
+        service: FetchCoordinator,
+        candidate_repository: WebSearchCandidateRepository,
     ) -> None:
         self._service = service
         self._candidate_repository = candidate_repository
@@ -110,7 +111,7 @@ class WebFetchTool:
                 expose_by_default=True,
                 persist_output=True,
                 risk_level=ToolRiskLevel.MEDIUM,
-                timeout_seconds=120.0,
+                timeout_seconds=tool_settings.WEB_FETCH_TOOL_TIMEOUT_SECONDS,
                 cache_chunked=True,
                 required_context_keys=("user_id", "session_id"),
             ),
@@ -148,7 +149,13 @@ class WebFetchTool:
                     urls.append(url)
 
             case "from_search_results":
-                search_refs = self._parse_search_refs(raw_search_refs)
+                if raw_search_refs is None:
+                    raise ToolExecutionError(
+                        reason="missing_search_refs",
+                        detail_reason="search_refs is required when mode='from_search_results'.",
+                        retryable=False,
+                    )
+                search_refs = tuple(item.strip() for item in raw_search_refs)
                 urls, source_scope = await self._resolve_search_urls(
                     user_id=str(context["user_id"]),
                     search_refs=search_refs,
@@ -193,41 +200,61 @@ class WebFetchTool:
                 retryable=False,
             ) from exc
 
-        # 3. 动态计算下一步建议行为 (Suggested Action)
-        # 只要有一项是文件类型引用，就建议进行文件深度解析；否则进行文本窗口读取检索
+        # 3. 动态计算下一步建议行为 (Suggested Actions)
+        # 始终建议 tool_content_read；若存在文件类型引用则追加 document_parse
         has_file_ref = any(r.file_ref is not None for r in batch.items)
-        if has_file_ref:
-            suggested = SuggestedAction(
-                tool_name="document_parse",
-                reason="Parse the fetched non-HTML file(s) to extract their content.",
-                priority=SuggestedActionPriority.HIGH,
-            )
-        else:
-            suggested = SuggestedAction(
+        action_list = [
+            SuggestedAction(
                 tool_name="tool_content_read",
                 mode="ranked_expand",
                 reason="Search the fetched markdown for answer-relevant windows.",
                 priority=SuggestedActionPriority.HIGH,
+            ),
+        ]
+        if has_file_ref:
+            action_list.append(
+                SuggestedAction(
+                    tool_name="document_parse",
+                    reason="Parse the fetched non-HTML file(s) to extract their content.",
+                    priority=SuggestedActionPriority.HIGH,
+                ),
             )
+        suggested = SuggestedActions(suggested_actions=tuple(action_list))
 
         cacheable_texts = tuple(r.markdown for r in batch.items if r.markdown)
+
+        # visible_result 中的 items 不能暴露 markdown，markdown 只能通过 cacheable_texts 走缓存
+        visible_items = tuple(
+            {
+                "source_url": r.source_url,
+                "final_url": r.final_url,
+                "status_code": r.status_code,
+                "content_type": r.content_type,
+                "title": r.title,
+                "warnings": r.warnings,
+                "file_ref": r.file_ref,
+                "file_label": r.file_label,
+                "source_scope": r.source_scope,
+            }
+            for r in batch.items
+        )
 
         return ToolReturn(
             tag="web_fetch_result",
             visible_result={
-                "items": batch.items,
+                "items": visible_items,
                 "failed": batch.failed,
                 "warnings": batch.warnings,
-                "suggested_action": suggested,
+                "suggested_actions": suggested,
             },
             cacheable_texts=cacheable_texts,
         )
 
     async def _resolve_search_urls(
-            self,
-            *,
-            user_id: str,
-            search_refs: tuple[str, ...],
+        self,
+        *,
+        user_id: str,
+        search_refs: tuple[str, ...],
     ) -> tuple[list[str], str]:
         """将检索引用换算为实际抓取的真实 URL 路径。"""
         urls: list[str] = []
@@ -247,15 +274,12 @@ class WebFetchTool:
             urls.append(mapping.url)
             if source_scope is None:
                 source_scope = mapping.source_scope
+            elif source_scope != mapping.source_scope:
+                # 同一批抓取只允许一个缓存访问域，避免 public/custom 混写污染缓存。
+                raise ToolExecutionError(
+                    reason="mixed_search_ref_source_scope",
+                    detail_reason="search_refs in one web_fetch call must share the same source scope.",
+                    retryable=False,
+                )
 
         return urls, source_scope or "web_public"
-
-    @staticmethod
-    def _parse_search_refs(raw_search_refs: Any) -> tuple[str, ...]:
-        if raw_search_refs is None:
-            raise ToolExecutionError(
-                reason="missing_search_refs",
-                detail_reason="search_refs is required when mode='from_search_results'.",
-                retryable=False,
-            )
-        return tuple(item.strip() for item in raw_search_refs)

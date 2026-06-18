@@ -92,17 +92,6 @@ async def set_platform_membership(
     return R.success(data=to_response(credential))
 
 
-@router.post("/cancelPlatformMembership", response_model=R[WebSearchCredentialResponse], status_code=200)
-@inject
-async def cancel_platform_membership(
-        user_id: str = Depends(require_login),
-        credential_repo: MongoWebSearchCredentialRepository = Depends(Provide[Container.web_search_credential_repo]),
-):
-    # 本接口仅用于本地/内测 UI 调试搜索源选择；真实订阅能力应迁移到统一订阅服务管理。
-    credential = await credential_repo.cancel_platform_membership(user_id=user_id)
-    return R.success(data=to_response(credential))
-
-
 @router.post("/setActiveWebSearchCredential", response_model=R[WebSearchCredentialResponse], status_code=200)
 @inject
 async def set_active_web_search_credential(

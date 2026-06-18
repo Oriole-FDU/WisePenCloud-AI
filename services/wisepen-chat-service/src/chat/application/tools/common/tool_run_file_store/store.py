@@ -24,15 +24,16 @@ from .models import (
     ToolRunFileCleanupResult,
 )
 from .utils import sanitize_tool_file_name
+from chat.application.tools.tool_settings import tool_settings
 
 DEFAULT_TOOL_RUN_FILE_ROOT = Path(tempfile.gettempdir()) / "wisepen-tool-run-files"
-DEFAULT_TOOL_RUN_FILE_REF_TTL_SECONDS = 6 * 60 * 60
-DEFAULT_TOOL_RUN_FILE_CLEANUP_GRACE_SECONDS = 10 * 60
-DEFAULT_TOOL_RUN_FILE_MAX_BYTES = 50 * 1024 * 1024
+DEFAULT_TOOL_RUN_FILE_REF_TTL_SECONDS = tool_settings.TOOL_RUN_FILE_REF_TTL_SECONDS
+DEFAULT_TOOL_RUN_FILE_CLEANUP_GRACE_SECONDS = tool_settings.TOOL_RUN_FILE_CLEANUP_GRACE_SECONDS
+DEFAULT_TOOL_RUN_FILE_MAX_BYTES = tool_settings.TOOL_RUN_FILE_MAX_BYTES
 
 _REF_ID_PREFIX = "tfile_"
 _SAFE_COMPONENT_PATTERN = re.compile(r"[^A-Za-z0-9._-]+")
-_HASH_CHUNK_BYTES = 1024 * 1024
+_HASH_CHUNK_BYTES = 1024 * 1024  # SHA-256 流式哈希分块大小，算法常量
 
 
 class ToolRunFileRepository(Protocol):

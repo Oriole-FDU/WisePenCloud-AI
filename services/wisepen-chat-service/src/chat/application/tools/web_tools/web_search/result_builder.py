@@ -82,7 +82,15 @@ def build_web_search_tool_return(
 
     visible_result: dict[str, object] = {
         "query": result.query,
-        "candidates": tuple(_to_visible_candidate(candidate) for candidate in candidates),
+        "candidates": tuple(
+            VisibleWebSearchCandidate(
+                search_ref=candidate.search_ref,
+                title=candidate.title,
+                overview=candidate.overview,
+                highlights=candidate.highlights,
+            )
+            for candidate in candidates
+        ),
         "recommended_ids": recommended_ids,
         "suggested_actions": SuggestedActions(
             suggested_actions=(
@@ -120,16 +128,6 @@ def build_web_search_tool_return(
         visible_result["supplier_answers"] = supplier_answers
     if warning:
         visible_result["warning"] = warning
-        visible_result["suggested_actions"] = SuggestedActions(
-            suggested_actions=(
-                SuggestedAction(
-                    tool_name="web_search",
-                    reason="Multi-hop search did not converge; try a different query angle to supplement results.",
-                    priority=SuggestedActionPriority.MEDIUM,
-                ),
-                *visible_result["suggested_actions"].suggested_actions,
-            ),
-        )
 
     return ToolReturn(
         tag="web_search_result",
@@ -155,13 +153,4 @@ def build_candidate_mappings(
             metadata={"title": candidate.title},
         )
         for candidate in candidates
-    )
-
-
-def _to_visible_candidate(candidate: WebSearchCandidate) -> VisibleWebSearchCandidate:
-    return VisibleWebSearchCandidate(
-        search_ref=candidate.search_ref,
-        title=candidate.title,
-        overview=candidate.overview,
-        highlights=candidate.highlights,
     )

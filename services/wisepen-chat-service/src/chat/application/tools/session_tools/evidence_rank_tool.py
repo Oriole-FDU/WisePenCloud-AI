@@ -15,8 +15,9 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.core.tool_return import SuggestedAction, SuggestedActionPriority
 from chat.application.tools.session_tools.evidence_rank.service import EvidenceRankService
+from chat.application.tools.tool_settings import tool_settings
 
-MAX_CONTENT_IDS = 8
+MAX_CONTENT_IDS = tool_settings.EVIDENCE_RANK_MAX_CONTENT_IDS
 
 PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -93,7 +94,7 @@ class EvidenceRankTool:
                 persist_output=True,
                 risk_level=ToolRiskLevel.LOW,
                 required_context_keys=("session_id",),
-                timeout_seconds=15.0,
+                timeout_seconds=tool_settings.EVIDENCE_RANK_TOOL_TIMEOUT_SECONDS,
             ),
         )
 
@@ -110,7 +111,7 @@ class EvidenceRankTool:
                 query=query,
                 content_ids=content_ids,
                 session_id=str(context["session_id"]),
-                max_evidence=int(kwargs.get("max_evidence") or 8),
+                max_evidence=int(kwargs.get("max_evidence") or tool_settings.EVIDENCE_RANK_DEFAULT_MAX_EVIDENCE),
             )
             # 建议动作属于工具返回边界：service 只产出排序定位，下一步读取策略由工具门面提示。
             return {
@@ -131,7 +132,7 @@ class EvidenceRankTool:
                 "evidence rank failed.",
                 e=e,
                 content_ids=content_ids,
-                max_evidence=int(kwargs.get("max_evidence") or 8),
+                max_evidence=int(kwargs.get("max_evidence") or tool_settings.EVIDENCE_RANK_DEFAULT_MAX_EVIDENCE),
                 audit_message="证据精排服务失败，已包装为不可重试工具错误。",
             )
             raise ToolExecutionError(

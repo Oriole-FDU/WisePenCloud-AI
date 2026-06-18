@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
 
@@ -41,13 +41,13 @@ from chat.application.tools.web_tools.web_content_cache.refresh_queue import (
     WebContentCacheRefreshJob,
     WebContentCacheRefreshTaskPublisher,
 )
+from chat.application.tools.web_tools.web_content_cache.cache_ttl import compute_ttl
+from chat.application.tools.tool_settings import tool_settings
 
-MAX_DOCUMENT_PARSE_FILE_REFS = 8
-DOCUMENT_PARSE_CONCURRENCY = 3
-_DEFAULT_PARSED_SOFT_TTL = timedelta(minutes=30)
-_DEFAULT_PARSED_HARD_TTL = timedelta(hours=2)
+MAX_DOCUMENT_PARSE_FILE_REFS = tool_settings.DOCUMENT_PARSE_MAX_FILE_REFS
+DOCUMENT_PARSE_CONCURRENCY = tool_settings.DOCUMENT_PARSE_CONCURRENCY
 _DOCUMENT_PARSE_CACHE_PARSER_VERSION = "document_parse:v1"
-_REFRESH_LOCK_TTL_SECONDS = 300
+_REFRESH_LOCK_TTL_SECONDS = tool_settings.DOCUMENT_PARSE_REFRESH_LOCK_TTL_SECONDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +141,7 @@ class DocumentParseTool:
                 persist_output=True,
                 risk_level=ToolRiskLevel.LOW,
                 required_context_keys=("user_id", "session_id"),
-                timeout_seconds=120.0,
+                timeout_seconds=tool_settings.DOCUMENT_PARSE_TOOL_TIMEOUT_SECONDS,
                 cache_chunked=True,
             ),
         )
@@ -481,6 +481,18 @@ class DocumentParseTool:
             )
             doc_id = _string_metadata(metadata, "source_cache_doc_id")
             existing = await repository.get_value(doc_id=doc_id) if doc_id else None
+            # 从已有缓存条目的 metadata 中提取 cache-control，用于智能 TTL 计算
+            cache_control_header = None
+            if existing is not None and isinstance(existing.metadata, dict):
+                cache_control_header = existing.metadata.get("cache_control")
+            ttl = compute_ttl(
+                headers={"cache-control": cache_control_header} if cache_control_header else {},
+                now=now,
+                is_shared_cache=(mode == WebContentCacheMode.PUBLIC),
+                status_code=existing.status_code if existing is not None else 200,
+            )
+            if ttl.no_store:
+                return
             raw_html = existing.raw_html if existing is not None else None
             content_hash_payload = f"{raw_html or ''}\n---markdown---\n{markdown}"
             final_url = _string_metadata(metadata, "final_url")
@@ -515,8 +527,8 @@ class DocumentParseTool:
                     canonical_url=value.canonical_url,
                     mongo_doc_id=saved_doc_id,
                     cache_mode=mode,
-                    soft_expire_at=now + _DEFAULT_PARSED_SOFT_TTL,
-                    hard_expire_at=now + _DEFAULT_PARSED_HARD_TTL,
+                    soft_expire_at=ttl.soft_expire_at,
+                    hard_expire_at=ttl.hard_expire_at,
                 )
             )
         except Exception:
