@@ -1,11 +1,10 @@
-from typing import List, Optional, Tuple
 from datetime import datetime
+from typing import List, Optional, Tuple
+
 from beanie.odm.operators.find.evaluation import Text
 
-from chat.domain.repositories import MessageRepository
 from chat.domain.entities import ChatMessage, Role
-
-
+from chat.domain.repositories import MessageRepository
 
 
 class MongoMessageRepository(MessageRepository):
@@ -14,7 +13,8 @@ class MongoMessageRepository(MessageRepository):
         if messages:
             await ChatMessage.insert_many(messages)
 
-    async def list_session_messages(self, session_id: str, after: datetime = None, limit: int = 50) -> List[ChatMessage]:
+    async def list_session_messages(self, session_id: str, after: datetime = None, limit: int = 50) -> List[
+        ChatMessage]:
         conditions = [ChatMessage.session_id == session_id]
         if after:
             conditions.append(ChatMessage.created_at > after)
@@ -22,10 +22,10 @@ class MongoMessageRepository(MessageRepository):
         return list(reversed(messages))
 
     async def list_session_message_turns_page(
-        self,
-        session_id: str,
-        page: int,
-        size: int,
+            self,
+            session_id: str,
+            page: int,
+            size: int,
     ) -> Tuple[List[ChatMessage], int]:
         """
         以 user 消息为回合锚点的分页查询。
@@ -57,8 +57,8 @@ class MongoMessageRepository(MessageRepository):
             return [], total_turns
 
         if page > 1 and len(user_msgs) > 0:
-            upper_bound_user = user_msgs[0]   # 前一页最末（更新）的 user 消息
-            page_user_msgs = user_msgs[1:]    # 本页的 user 消息
+            upper_bound_user = user_msgs[0]  # 前一页最末（更新）的 user 消息
+            page_user_msgs = user_msgs[1:]  # 本页的 user 消息
         else:
             upper_bound_user = None
             page_user_msgs = user_msgs
@@ -89,12 +89,12 @@ class MongoMessageRepository(MessageRepository):
         return await ChatMessage.find_one(ChatMessage.session_id == session_id) is not None
 
     async def search_messages_by_text(
-        self,
-        keyword: str,
-        session_id: Optional[str] = None,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        limit: int = 10,
+            self,
+            keyword: str,
+            session_id: Optional[str] = None,
+            start_time: Optional[datetime] = None,
+            end_time: Optional[datetime] = None,
+            limit: int = 10,
     ) -> List[ChatMessage]:
         """
         利用 MongoDB $text 全文索引进行关键词检索。
