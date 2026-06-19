@@ -1,8 +1,8 @@
-from collections.abc import Iterable
 from typing import Any
 
 from chat.application.tools.core.definition import Tool
 from chat.application.tools.core.llm.renderer import schema_renderer
+
 
 class ToolScope:
     """一次请求内的工具可见性和可信上下文快照"""

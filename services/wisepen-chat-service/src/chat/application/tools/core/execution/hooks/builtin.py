@@ -1,68 +1,63 @@
+from __future__ import annotations
+
 from typing import Any
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
+
 from chat.application.tools.core.definition import ToolParametersSchema, ToolPolicy
-from chat.application.tools.core.execution.hooks.base import ToolPreflightResult, ToolPreflightHook
+from chat.application.tools.core.execution.hooks.base import ToolPreflightHook, ToolPreflightResult
 from chat.application.tools.core.llm.invocation import ToolInvocation
 
 
 class RequiredContextCheck(ToolPreflightHook):
+    """校验工具执行所需的 context key 是否齐备。"""
+
     name = "required_context"
 
-
-    async def check(self, invocation: ToolInvocation, policy: ToolPolicy,
-                    parameters_schema: ToolParametersSchema, context: dict[str, Any]) -> ToolPreflightResult:
-        missing = [
-            key for key in policy.required_context_keys
-            if key not in context
-        ]
-
-        if missing:
-            return ToolPreflightResult(ok=False, message=f"Missing required context keys for tool '{invocation.tool_name}': {missing}")
+    async def check(
+        self,
+        invocation: ToolInvocation,
+        policy: ToolPolicy,
+        parameters_schema: ToolParametersSchema,
+        context: dict[str, Any],
+    ) -> ToolPreflightResult:
+        if missing := [key for key in policy.required_context_keys if key not in context]:
+            return ToolPreflightResult(
+                ok=False,
+                message=f"Missing required context keys for tool '{invocation.tool_name}': {missing}",
+            )
         return ToolPreflightResult(ok=True)
 
 
 class JsonSchemaCheck(ToolPreflightHook):
+    """校验工具调用参数是否符合 JSON Schema。
+
+    委托给 jsonschema 库，而非手写递归校验器。
+    OpenAI function-calling 协议禁用 oneOf/anyOf/allOf/$ref，schema 永远是单一线性路径，
+    所以不需要 best_match 那套多分支裁决逻辑——iter_errors 的第一条就是唯一会出现的错误。
+    """
+
     name = "json_schema"
 
-    async def check(self, invocation: ToolInvocation, policy: ToolPolicy,
-                    parameters_schema: ToolParametersSchema, context: dict[str, Any]) -> ToolPreflightResult:
-        arguments = invocation.tool_call_arguments
+    async def check(
+        self,
+        invocation: ToolInvocation,
+        policy: ToolPolicy,
+        parameters_schema: ToolParametersSchema,
+        context: dict[str, Any],
+    ) -> ToolPreflightResult:
+        validator = Draft202012Validator(parameters_schema.raw)
 
-        for key in parameters_schema.required:
-            if key not in arguments:
-                return ToolPreflightResult(ok=False, message=f"Missing required tool argument: {key}")
+        error = next(iter(validator.iter_errors(invocation.tool_call_arguments)), None)
+        if error is None:
+            return ToolPreflightResult(ok=True)
 
-        properties = parameters_schema.properties
+        return ToolPreflightResult(ok=False, message=_format_error(error, invocation.tool_name))
 
-        for key, value in arguments.items():
-            if key not in properties:
-                if parameters_schema.raw.get("additionalProperties", True) is False:
-                    return ToolPreflightResult(ok=False, message=f"Unexpected tool argument: {key}")
-                continue
 
-            expected_type = properties[key].get("type")
-            if expected_type and not self._matches_type(value, expected_type):
-                return ToolPreflightResult(
-                    ok=False,
-                    message=f"Invalid type for argument '{key}'. Expected {expected_type}, got {type(value).__name__}.",
-                )
-
-        return ToolPreflightResult(ok=True)
-
-    @staticmethod
-    def _matches_type(value: Any, expected_type: str) -> bool:
-        if expected_type == "string":
-            return isinstance(value, str)
-        if expected_type == "integer":
-            return isinstance(value, int) and not isinstance(value, bool)
-        if expected_type == "number":
-            return isinstance(value, (int, float)) and not isinstance(value, bool)
-        if expected_type == "boolean":
-            return isinstance(value, bool)
-        if expected_type == "object":
-            return isinstance(value, dict)
-        if expected_type == "array":
-            return isinstance(value, list)
-        if expected_type == "null":
-            return value is None
-        return True
+def _format_error(error: ValidationError, tool_name: str) -> str:
+    """将 jsonschema 的 ValidationError 转为人类可读提示，仅拼接路径前缀。"""
+    # absolute_path 是 deque，形如 deque(['a', 'b', 0])；点号拼接成 JSON Pointer 风格路径
+    path = ".".join(str(part) for part in error.absolute_path) or "arguments"
+    return f"Invalid arguments for '{tool_name}' at {path}: {error.message}"

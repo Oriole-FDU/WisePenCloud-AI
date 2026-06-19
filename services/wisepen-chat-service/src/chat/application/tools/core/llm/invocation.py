@@ -1,5 +1,5 @@
 ﻿import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from common.logger import warn
@@ -19,7 +19,7 @@ class ToolInvocation:
     tool_name: str
     tool_call_arguments: dict[str, Any]
     query_loop_iteration: int | None = None
-    # metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def tool_call_parse(accumulators: dict[int, ToolCallMessageAccumulator], *, query_loop_iteration: int | None = None) -> list[ToolInvocation]:
@@ -29,7 +29,7 @@ def tool_call_parse(accumulators: dict[int, ToolCallMessageAccumulator], *, quer
         try:
             tool_call_arguments = json.loads(acc.tool_call_argument_str) if acc.tool_call_argument_str else {}
         except json.JSONDecodeError as e:
-            warn("tool call arguments parse failed.", tool_name=acc.tool_name, exc=e)
+            warn("tool call arguments parse failed.", tool_name=acc.tool_name, e=e)
             tool_call_arguments = {}
         if not isinstance(tool_call_arguments, dict):
             warn(
