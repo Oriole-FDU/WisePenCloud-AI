@@ -1,7 +1,8 @@
 from typing import Callable
+
+from common.core.domain import IdentityType
 from .context import SecurityContextHolder
 from .exceptions import PermissionException, PermissionErrorCode
-from common.core.domain import IdentityType
 
 
 def require_login() -> str:
@@ -21,10 +22,12 @@ def require_role(*roles: IdentityType) -> Callable:
     同时隐含登录校验。
     用法：_ = Depends(require_role(IdentityType.ADMIN, IdentityType.TEACHER))
     """
+
     def _check() -> str:
         user_id = require_login()
         current = SecurityContextHolder.get_identity_type()
         if current is None or current not in roles:
             raise PermissionException(PermissionErrorCode.IDENTITY_UNAUTHORIZED)
         return user_id
+
     return _check

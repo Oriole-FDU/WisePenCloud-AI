@@ -6,6 +6,7 @@ class PermissionException(ServiceException):
     """权限相关异常"""
     pass
 
+
 class PermissionErrorCode(IErrorCode):
     NOT_LOGIN = (401, "未登录")
     UNAUTHORIZED = (401, "未授权")

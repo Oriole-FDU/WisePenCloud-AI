@@ -5,6 +5,7 @@ class SecurityConstants:
     HEADER_GROUP_ROLE_MAP = "X-Group-Role-Map"
     HEADER_FROM_SOURCE = "X-From-Source"
 
+
 class CommonConstants:
     GRAY_METADATA_DEV_KEY = "developer"
     GRAY_HEADER_DEV_KEY = "X-Developer"

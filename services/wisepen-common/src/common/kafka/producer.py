@@ -1,7 +1,9 @@
-from aiokafka import AIOKafkaProducer
 import json
-from common.logger import error, info
 from typing import Dict, List, Tuple, Optional
+
+from aiokafka import AIOKafkaProducer
+
+from common.logger import error, info
 
 
 class KafkaProducerClient:
@@ -18,7 +20,7 @@ class KafkaProducerClient:
             await self._producer.start()
             info("kafka producer started.", bootstrap_servers=self.bootstrap_servers)
         except Exception as e:
-            error("kafka producer start failed.", exc=e)
+            error("kafka producer start failed.", e=e)
 
     async def stop(self):
         if self._producer:
@@ -32,5 +34,4 @@ class KafkaProducerClient:
         try:
             await self._producer.send_and_wait(topic, value=value, headers=headers)
         except Exception as e:
-            error("kafka publish failed.", topic=topic, exc=e)
-       
+            error("kafka publish failed.", topic=topic, e=e)

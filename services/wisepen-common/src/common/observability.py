@@ -4,7 +4,6 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
-
 _OTEL_READY = False
 _OTEL_LOGGER: Any | None = None
 _TRACER: Any | None = None
@@ -12,10 +11,10 @@ _METER: Any | None = None
 
 
 def setup_observability(
-    *,
-    service_name: str | None = None,
-    service_version: str | None = None,
-    environment: str | None = None,
+        *,
+        service_name: str | None = None,
+        service_version: str | None = None,
+        environment: str | None = None,
 ) -> None:
     """初始化 OpenTelemetry SDK
     OTel 依赖缺失、协议不支持或未配置 Collector 时，都降级为本地控制台日志
@@ -100,7 +99,7 @@ def setup_observability(
     if endpoint:
         logger_provider.add_log_record_processor(
             BatchLogRecordProcessor(OTLPLogExporter(endpoint=_signal_endpoint(endpoint, "logs")))
-    )
+        )
     set_logger_provider(logger_provider)
     if endpoint:
         # 业务日志直连 OTel logs API
@@ -121,12 +120,12 @@ def setup_observability(
 
 
 def emit_log(
-    *,
-    severity_text: str,
-    body: str,
-    attributes: Mapping[str, Any] | None = None,
-    event_name: str | None = None,
-    exc: BaseException | None = None,
+        *,
+        severity_text: str,
+        body: str,
+        attributes: Mapping[str, Any] | None = None,
+        event_name: str | None = None,
+        e: BaseException | None = None,
 ) -> None:
     if _OTEL_LOGGER is None:
         return
@@ -150,7 +149,7 @@ def emit_log(
             body=body,
             attributes=normalize_attributes(attributes or {}),
             event_name=event_name,
-            exception=exc,
+            exception=e,
         )
     except Exception:
         return
@@ -164,7 +163,7 @@ def instrument_fastapi_app(app: Any) -> None:
         return
 
 
-def record_exception(exc: BaseException, attributes: Mapping[str, Any] | None = None) -> None:
+def record_exception(e: BaseException, attributes: Mapping[str, Any] | None = None) -> None:
     try:
         from opentelemetry import trace
         from opentelemetry.trace import Status, StatusCode
@@ -172,8 +171,8 @@ def record_exception(exc: BaseException, attributes: Mapping[str, Any] | None = 
         # 记录到当前 span，而不是只写一条日志
         # Tempo 中能直接看到错误状态
         span = trace.get_current_span()
-        span.record_exception(exc, attributes=normalize_attributes(attributes or {}))
-        span.set_status(Status(StatusCode.ERROR, f"{type(exc).__name__}: {exc}"))
+        span.record_exception(e, attributes=normalize_attributes(attributes or {}))
+        span.set_status(Status(StatusCode.ERROR, f"{type(e).__name__}: {e}"))
     except Exception:
         return
 

@@ -9,18 +9,17 @@ from aiokafka import AIOKafkaConsumer
 
 from common.logger import error, info
 
-
 MessageHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class KafkaConsumerClient:
     def __init__(
-        self,
-        *,
-        bootstrap_servers: str,
-        topic: str,
-        group_id: str,
-        handler: MessageHandler,
+            self,
+            *,
+            bootstrap_servers: str,
+            topic: str,
+            group_id: str,
+            handler: MessageHandler,
     ) -> None:
         self.bootstrap_servers = bootstrap_servers
         self.topic = topic
@@ -41,7 +40,7 @@ class KafkaConsumerClient:
         try:
             await self._consumer.start()
         except Exception as e:
-            error("kafka consumer start failed.", topic=self.topic, group_id=self.group_id, exc=e)
+            error("kafka consumer start failed.", topic=self.topic, group_id=self.group_id, e=e)
             self._consumer = None
             return
         self._task = asyncio.create_task(self._consume_loop(), name=f"kafka-consumer-{self.topic}")
@@ -71,7 +70,7 @@ class KafkaConsumerClient:
                 except Exception as e:
                     error(
                         "kafka event consumption failed.",
-                        exc=e,
+                        e=e,
                         topic=self.topic,
                         partition=msg.partition,
                         offset=msg.offset,
@@ -79,7 +78,7 @@ class KafkaConsumerClient:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            error("kafka consumer loop failed.", topic=self.topic, group_id=self.group_id, exc=e)
+            error("kafka consumer loop failed.", topic=self.topic, group_id=self.group_id, e=e)
 
     @staticmethod
     def _decode_message(value: bytes | bytearray | memoryview | str | dict[str, Any]) -> dict[str, Any]:

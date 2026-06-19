@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WisePen Chat Service 快速上手与 Review</title>
+  <style>
+    :root{--bg:#f7f8fb;--panel:#fff;--text:#111827;--muted:#4b5563;--line:#d1d5db;--accent:#0f766e;--accent2:#1d4ed8;--warn:#92400e;--bad:#991b1b}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Arial,sans-serif;line-height:1.65}
+    .layout{display:grid;grid-template-columns:280px minmax(0,1fr);min-height:100vh}
+    aside{position:sticky;top:0;height:100vh;overflow:auto;background:#fff;border-right:1px solid var(--line);padding:24px 18px}
+    main{max-width:1140px;padding:36px 44px 72px}
+    h1{font-size:34px;line-height:1.2;margin:0 0 10px}
+    h2{font-size:24px;margin:34px 0 12px;border-top:1px solid var(--line);padding-top:24px}
+    h3{font-size:18px;margin:24px 0 8px}
+    p{margin:8px 0;color:var(--muted)}
+    a{color:var(--accent2);text-decoration:none}
+    a:hover{text-decoration:underline}
+    nav a{display:block;color:#374151;padding:8px 10px;border-radius:6px;margin:2px 0;font-size:14px}
+    nav a:hover{background:#eef2ff;text-decoration:none}
+    .tag{display:inline-block;background:#ccfbf1;color:#115e59;font-weight:700;border-radius:999px;padding:3px 9px;font-size:12px;margin-bottom:12px}
+    .lead{font-size:17px;max-width:860px}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:16px 0}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px}
+    .callout{border-left:4px solid var(--accent);background:#ecfdf5;padding:12px 14px;border-radius:6px;margin:16px 0;color:#134e4a}
+    .warn{border-left-color:var(--warn);background:#fffbeb;color:#78350f}
+    .bad{border-left-color:var(--bad);background:#fef2f2;color:#7f1d1d}
+    code{background:#e5e7eb;border-radius:5px;padding:2px 5px;font-family:"Cascadia Code",Consolas,monospace;font-size:.92em}
+    pre{background:#111827;color:#f9fafb;border-radius:8px;padding:14px;overflow:auto;font-size:13px;line-height:1.55}
+    pre code{background:transparent;color:inherit;padding:0}
+    table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:14px 0}
+    th,td{border-bottom:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top;font-size:14px}
+    th{background:#f3f4f6}
+    tr:last-child td{border-bottom:none}
+    ul,ol{padding-left:22px}
+    li{margin:6px 0}
+    .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0}
+    .node{background:#fff;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-weight:700;font-size:14px}
+    .arrow{color:#6b7280;font-weight:700}
+    @media(max-width:880px){.layout{grid-template-columns:1fr}aside{position:relative;height:auto}main{padding:24px 16px 56px}.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <span class="tag">Quickstart</span>
+    <h3>导航</h3>
+    <nav>
+      <a href="#first">先看什么</a>
+      <a href="#map">代码地图</a>
+      <a href="#flow">主执行链</a>
+      <a href="#session">核心读取链</a>
+      <a href="#external">外界信息链</a>
+      <a href="#add-tool">新增工具</a>
+      <a href="#return">返回与缓存</a>
+      <a href="#docs">文档定位</a>
+      <a href="#review">Review 清单</a>
+    </nav>
+  </aside>
+  <main>
+    <h1>WisePen Chat Service 快速上手与 Review</h1>
+    <p class="lead">这份 quickstart 只做一件事：让第一次接手当前仓库的人，在最短路径上看懂真实运行结构、核心工具链和文档落点。稳定规则以 <code>docs/team/</code> 为准，这里负责“先看哪里”。</p>
+
+    <section id="first">
+      <h2>先看什么</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>理解工具系统</h3>
+          <p>先读 <code>src/chat/container.py</code>、<code>tools/core/registry.py</code>、<code>tools/core/execution/executor.py</code>、<code>tools/tool_output_renderer.py</code>、<code>tools/tool_output_cache.py</code>。</p>
+        </div>
+        <div class="card">
+          <h3>理解核心读取链</h3>
+          <p>读 <code>tool_content_read_tool.py</code>、<code>tool_content_read/service.py</code>、<code>tool_content_sequential_read_tool.py</code>、<code>tool_content_store/store.py</code>。</p>
+        </div>
+        <div class="card">
+          <h3>理解外界信息链</h3>
+          <p>读 <code>web_search_tool.py</code>、<code>web_fetch_tool.py</code>、<code>web_crawl_tool.py</code>、<code>document_parse_tool.py</code>。</p>
+        </div>
+        <div class="card">
+          <h3>理解基础设施</h3>
+          <p>读 <code>utils/ranking_engine/</code>、<code>utils/chunking_engine/</code>、<code>tools/web_tools/web_content_cache/</code>。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="map">
+      <h2>代码地图</h2>
+      <table>
+        <thead><tr><th>关注点</th><th>路径</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>DI 入口</td><td><code>src/chat/container.py</code></td><td>当前唯一应用级依赖图入口，工具注册也从这里看。</td></tr>
+          <tr><td>Tool 契约</td><td><code>src/chat/application/tools/core/definition.py</code></td><td><code>ToolDefinition</code>、<code>ToolPolicy</code>、<code>ToolParametersSchema</code>。</td></tr>
+          <tr><td>Tool 可见性</td><td><code>src/chat/application/tools/core/registry.py</code></td><td>控制本轮模型实际看到哪些工具。</td></tr>
+          <tr><td>Tool 执行</td><td><code>src/chat/application/tools/core/execution/</code></td><td>schema/context preflight、超时、错误包装。</td></tr>
+          <tr><td>统一渲染</td><td><code>src/chat/application/tools/tool_output_renderer.py</code></td><td>普通 Python 返回值和 <code>ToolReturn</code> 都从这里进 XML。</td></tr>
+          <tr><td>统一缓存</td><td><code>src/chat/application/tools/tool_output_cache.py</code></td><td>只处理 <code>cacheable_texts</code>，大文本转 <code>cnt_*</code>。</td></tr>
+          <tr><td>内容存储</td><td><code>src/chat/application/tools/common/tool_content_store/</code></td><td>短期大文本存储、chunk/index、receipt。</td></tr>
+          <tr><td>核心读取工具</td><td><code>src/chat/application/tools/session_tools/</code></td><td>当前只保留跨文档检索和单文档顺序阅读两把工具。</td></tr>
+          <tr><td>URL 内容缓存</td><td><code>src/chat/application/tools/web_tools/web_content_cache/</code></td><td>web/document 共用的 URL 级缓存边界。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="flow">
+      <h2>主执行链</h2>
+      <div class="flow">
+        <span class="node">container</span><span class="arrow">-></span>
+        <span class="node">ToolRegistry</span><span class="arrow">-></span>
+        <span class="node">ToolScope</span><span class="arrow">-></span>
+        <span class="node">LLM schemas</span><span class="arrow">-></span>
+        <span class="node">ToolExecutor</span><span class="arrow">-></span>
+        <span class="node">ToolOutputRenderer</span><span class="arrow">-></span>
+        <span class="node">ToolOutputCache</span>
+      </div>
+      <p>业务工具本身应该尽量薄：写清 schema、边界和 service 调用。XML 渲染、缓存、receipt、会话隔离不是每个工具各自重做的事情。</p>
+    </section>
+
+    <section id="session">
+      <h2>核心读取链</h2>
+      <table>
+        <thead><tr><th>工具</th><th>用途</th><th>边界</th></tr></thead>
+        <tbody>
+          <tr><td><code>tool_content_read</code></td><td>跨一个或多个 <code>cnt_*</code> 做全局检索</td><td>只支持 <code>ranked_expand</code> / <code>regex_match</code>，返回全局有序 matches。</td></tr>
+          <tr><td><code>tool_content_sequential_read</code></td><td>顺序继续读一个 <code>cnt_*</code></td><td>只接受单个 <code>content_id</code>，按 <code>offset + limit</code> 读。</td></tr>
+        </tbody>
+      </table>
+      <div class="callout">当前仓库的核心读取心智模型已经收敛为两类动作：跨文档检索，或单文档继续阅读。不要再按旧思路寻找 <code>evidence_rank</code> 或 <code>tool_content_batch_read</code>。</div>
+    </section>
+
+    <section id="external">
+      <h2>外界信息链</h2>
+      <pre><code>web_search
+  -> search_ref
+  -> web_fetch(mode="from_search_results")
+  -> cnt_*
+  -> tool_content_read / tool_content_sequential_read
+
+direct HTML URL
+  -> web_fetch(mode="from_direct_urls")
+  -> cnt_*
+  -> session read tools
+
+direct file URL
+  -> document_parse(mode="from_direct_urls")
+  -> cnt_*
+  -> session read tools
+
+unknown/search file URL
+  -> web_fetch
+  -> tfile_*
+  -> document_parse(mode="from_web_fetch")
+  -> cnt_*</code></pre>
+      <p><code>web_fetch</code> 和 <code>document_parse</code> 在 URL 缓存、fetcher 和 source metadata 上共享边界，这是当前仓库刻意保留的核心体系耦合，不是待拆耦合问题。</p>
+    </section>
+
+    <section id="add-tool">
+      <h2>新增工具</h2>
+      <ol>
+        <li>先确认功能应该落在现有域，还是确实需要新域。</li>
+        <li>先写 <code>ToolLLMSpec.description</code> 和 <code>ToolParametersSchema</code>，把触发边界写清。</li>
+        <li>普通结果直接返回普通 Python 值；只有大文本才返回 <code>ToolReturn</code>。</li>
+        <li>大文本一律通过 <code>cacheable_texts</code> 进入统一缓存切面。</li>
+        <li>需要工具实例时再进 <code>container.py</code> 注册。</li>
+        <li>同步更新 <code>docs/tools/</code> 和必要的 <code>docs/team/</code> 规则。</li>
+      </ol>
+    </section>
+
+    <section id="return">
+      <h2>返回与缓存</h2>
+      <table>
+        <thead><tr><th>情况</th><th>返回方式</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>短结构化结果</td><td><code>dict</code> / dataclass / list</td><td>统一 renderer 会递归处理。</td></tr>
+          <tr><td>大正文</td><td><code>ToolReturn(..., cacheable_texts=...)</code></td><td>统一 cache 决定内联还是转 <code>cnt_*</code>。</td></tr>
+          <tr><td>读取窗口</td><td>普通结构</td><td>读取工具只消费已有 <code>cnt_*</code>，不再生成新 receipt。</td></tr>
+        </tbody>
+      </table>
+      <p>当前 <code>content_receipt</code> 对模型可见字段已经收敛，不再暴露 <code>read_action</code> 和 <code>read_modes</code>。</p>
+    </section>
+
+    <section id="docs">
+      <h2>文档定位</h2>
+      <ul>
+        <li><code>docs/team/</code>：长期工程规则，review 以这里为准。</li>
+        <li><code>docs/tools/</code>：当前已注册工具的真实契约。</li>
+        <li><code>docs/important/</code>：已经落地且需要长期追溯的关键变更。</li>
+        <li><code>docs/todo/</code>：即将实行的事项，不放完成项。</li>
+        <li><code>docs/plans/</code>：有价值但短期不做的规划。</li>
+        <li><code>docs/ai_assist/</code>：单次任务的 AI 接手文档，文件名必须精确反映任务。</li>
+      </ul>
+    </section>
+
+    <section id="review">
+      <h2>Review 清单</h2>
+      <ul>
+        <li>是否复用了统一渲染、统一缓存和统一引用协议。</li>
+        <li>是否把大文本放进 <code>cacheable_texts</code>，而不是塞进普通 dict。</li>
+        <li>是否误把 URL cache 和 <code>ToolContentStore</code> 混为一谈。</li>
+        <li>session 工具是否保持“跨文档检索 / 单文档顺序读”这两个清晰边界。</li>
+        <li>是否把真实稳定规则沉淀到了 <code>docs/team/</code> 或 <code>docs/tools/</code>，而不是堆进临时计划。</li>
+      </ul>
+      <div class="warn">
+        <p><strong>当前仍未完成的长期事项：</strong><code>ToolPolicy.allow_parallel</code> 还没有真正进入 dispatcher 调度逻辑，这仍是活跃规划，不是已完成项。</p>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

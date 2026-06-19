@@ -3,6 +3,7 @@ from common.core.domain import IErrorCode
 
 class ServiceException(Exception):
     """业务异常基类"""
+
     def __init__(self, error_code: IErrorCode, custom_msg: str = None):
         self.code = error_code.code
         self.msg = custom_msg if custom_msg else error_code.msg
@@ -11,6 +12,7 @@ class ServiceException(Exception):
 
 class ServiceUnavailableError(Exception):
     """服务不可用异常"""
+
     def __init__(self, service_name: str, group_name: str | None = None):
         self.service_name = service_name
         self.group_name = group_name
@@ -21,15 +23,16 @@ class ServiceUnavailableError(Exception):
 
 class RpcError(Exception):
     """跨服务 RPC 调用失败的统一异常类型"""
+
     def __init__(
-        self,
-        service_name: str,
-        path: str,
-        *,
-        status: int | None = None,
-        code: int | None = None,
-        msg: str | None = None,
-        cause: BaseException | None = None,
+            self,
+            service_name: str,
+            path: str,
+            *,
+            status: int | None = None,
+            code: int | None = None,
+            msg: str | None = None,
+            cause: BaseException | None = None,
     ):
         self.service_name = service_name
         self.path = path

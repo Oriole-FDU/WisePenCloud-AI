@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Optional
 
+
 class IErrorCode(Enum):
     @property
     def code(self) -> int:
@@ -10,10 +11,12 @@ class IErrorCode(Enum):
     def msg(self) -> str:
         return self.value[1]
 
+
 class ResultCode(IErrorCode):
     SUCCESS = (200, "操作成功")
     SYSTEM_ERROR = (500, "系统内部错误")
     PARAM_ERROR = (400, "参数验证失败")
+
 
 class IdentityType(Enum):
     STUDENT = (1, "STUDENT")
@@ -52,4 +55,3 @@ class GroupRoleType(Enum):
             if member.code == code:
                 return member
         return None
-

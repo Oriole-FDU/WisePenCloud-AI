@@ -43,6 +43,7 @@ def setup_logging_intercept(log_level: str = "INFO"):
         log.propagate = False
 
 
+
 def debug(event: str, **fields: Any) -> None:
     _emit("DEBUG", event, None, fields)
 
@@ -59,15 +60,15 @@ def warning(event: str, **fields: Any) -> None:
     warn(event, **fields)
 
 
-def error(event: str, exc: BaseException | None = None, **fields: Any) -> None:
-    _emit("ERROR", event, exc, fields)
+def error(event: str, e: BaseException | None = None, **fields: Any) -> None:
+    _emit("ERROR", event, e, fields)
 
 
 def _emit(
-    level: str,
-    event: str,
-    exc: BaseException | None,
-    fields: Mapping[str, Any],
+        level: str,
+        event: str,
+        e: BaseException | None,
+        fields: Mapping[str, Any],
 ) -> None:
     # 事件名保持英文短句风格，并补齐句末标点，便于 Grafana/Loki 中检索。
     event_name = " ".join(str(event).strip().split()) or "event"
@@ -97,12 +98,12 @@ def _emit(
         if parts:
             message = f"{event_name} {' '.join(parts)}"
 
-    if exc is not None:
-        # error(..., exc=e) 同时把异常记录到当前 span，和日志输出相互独立。
-        record_exception(exc, fields)
+    if e is not None:
+        # error(..., e=e) 同时把异常记录到当前 span，和日志输出相互独立。
+        record_exception(e, fields)
 
     log = _loguru.bind(logger="wisepen")
-    log.opt(depth=2, exception=exc).log(level, message)
+    log.opt(depth=2, exception=e).log(level, message)
 
     # 业务日志直接写 OTel logs API
     emit_log(
@@ -110,5 +111,5 @@ def _emit(
         body=event_name,
         attributes={"event.name": event_name, **fields},
         event_name=event_name,
-        exc=exc,
+        e=e,
     )

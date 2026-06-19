@@ -1,4 +1,5 @@
 from typing import Generic, TypeVar, Optional, Any, List
+
 from pydantic import BaseModel
 
 from .enums import ResultCode, IErrorCode

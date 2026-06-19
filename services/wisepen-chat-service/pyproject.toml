@@ -8,27 +8,53 @@ authors = [
     { name = "Jiazheng Sun", email = "jzsun24@m.fudan.edu.cn" }
 ]
 dependencies = [
-    "fastapi",
-    "pydantic",
-    "pydantic-settings",
-    "uvicorn[standard]",
-    "dependency_injector",
-    "litellm",
-    "mem0ai",
-    "openai",
-    "beanie",
-    "redis[asyncio]",
-    "nacos-sdk-python",
-    "pyyaml",
-    "jieba",
-    "zeroentropy",
-    "wisepen-common",
-    "bm25s>=0.3.9",
-    "sentence-transformers>=5.5.1",
-    "flagembedding>=1.4.0",
-    "numpy>=2.4.6",
-    "langchain_text_splitters",
-    "mdit-py-plugins",
-    "markdown-it-py",
-    "lxml"
+    # --- Web 框架与微服务基础核心 ---
+    "fastapi",                 # 异步 Web API 框架，构建服务接口
+    "pydantic",                # 数据校验与序列化核心库
+    "pydantic-settings",       # 配合 pydantic 的环境变量与配置管理
+    "uvicorn[standard]",       # 高性能 ASGI Web 服务器
+    "dependency_injector",     # 依赖注入框架，实现组件解耦
+    "nacos-sdk-python",        # Nacos 注册中心/配置中心客户端，用于微服务治理
+    "pyyaml",                  # YAML 格式配置文件解析器
+    # --- 大模型与智能代理(Agent)记忆 ---
+    "litellm",                 # 大模型 API 统一转接层，抹平不同厂商接口差异
+    "openai",                  # OpenAI 官方 SDK
+    "mem0ai",                  # 为 AI Agent 提供长期记忆管理的智能记忆层
+    # --- 文档多模态解析与内容提取 ---
+    "docling",                 # IBM 开源的高清文档解析工具（擅长复杂 PDF、表格和公式）
+    "pymupdf4llm",             # 将 PDF 转换为适合大模型阅读的 Markdown 格式
+    "markitdown",              # 微软开源的多格式文档转 Markdown 工具
+    "trafilatura",             # 高效的网页正文与元数据精准提取工具
+    "beautifulsoup4",          # 经典的 HTML/XML 网页解析与清洗库
+    "markdownify",             # 将 HTML 转换为 Markdown 文本
+    "magika",                  # 谷歌基于深度学习的智能文件类型(MIME)检测工具
+    # --- 文本切分与结构化数据处理 ---
+    "langchain_text_splitters", # 专业的文本分块(Chunking)工具，防止超上下文
+    "pandas",                  # 强大的结构化数据分析与 DataFrame 处理库
+    "openpyxl",                # 读写 Excel (xlsx) 文件的底层驱动
+    "numpy>=2.4.6",            # 矩阵计算与向量操作的基石
+    "scipy>=1.17.1",           # 数值优化、统计分布和回归计算
+    "sympy>=1.14.0",           # 符号计算、代数、微积分与方程求解
+    # --- 传统检索、分词增强与联网搜索 ---
+    "bm25s>=0.3.9",            # 极速的 BM25 稀疏向量检索算法，用于关键词匹配
+    "jieba",                   # 中文分词工具，为中文检索提供分词支持
+    "ddgs>=9.14.4",            # DuckDuckGo 搜索客户端，用于零成本免密钥联网检索
+    # --- 数据存储与缓存驱动 ---
+    "beanie",                  # 基于 Motor 的 MongoDB 异步 ODM (对象文档映射)
+    "redis",                   # Redis 客户端，用于多轮对话 Session 缓存或限流
+    # --- 格式化、序列化与文本/契约渲染 ---
+    "dicttoxml",               # 将 Python 字典/列表深度转换为 XML 字符串
+    "jsonschema",              # JSON Schema 校验器，用于复杂结构化输入/输出契约校验
+    "tabulate ",               # 将数据结构化格式化为美观的文本表格
+    "markdown-it-py",          # 快速且符合标准的 Markdown 解析器
+    "mdit-py-plugins",         # 为 markdown-it-py 提供的数学公式、脚注等高级插件
+    # --- 内部私有库与通用网络请求 ---
+    "wisepen-common",          # 项目组内部封装的公共基础组件库
+    "zeroentropy",             # 零熵相关 SDK（可能用于安全合规、脱敏或特定 AI 基础设施）
+    "httpx",                   # 支持异步的高性能 HTTP 客户端，用于内部服务间通信
+    "PyGithub",                # GitHub REST API SDK，用于仓库元数据补全
+    "cryptography",            # 认证加密，用于可解密 API key 的数据库加密存储
+    "hishel[async]",
+    "arq>=0.28.0",
+    "async_lru",
 ]

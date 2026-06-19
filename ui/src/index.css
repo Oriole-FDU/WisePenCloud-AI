@@ -1,0 +1,524 @@
+@import "tailwindcss";
+@import "react18-json-view/src/style.css";
+@import "react-shiki/css";
+
+/* ── Streamdown Tailwind source directives ── */
+@source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+@source "../node_modules/@streamdown/mermaid/dist/*.js";
+@source "../node_modules/@streamdown/math/dist/*.js";
+
+:root {
+  color-scheme: light;
+  font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  background:
+    radial-gradient(circle at top left, rgba(214, 225, 255, 0.45), transparent 28%),
+    radial-gradient(circle at top right, rgba(255, 236, 221, 0.55), transparent 22%),
+    linear-gradient(180deg, #fcfcfd 0%, #f5f6f8 100%);
+  color: #1f2937;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* ── App design tokens ── */
+  --app-bg: #f6f7f9;
+  --app-panel: rgba(255, 255, 255, 0.92);
+  --app-panel-strong: #ffffff;
+  --app-border: rgba(15, 23, 42, 0.08);
+  --app-border-strong: rgba(15, 23, 42, 0.12);
+  --app-text: #111827;
+  --app-text-muted: #667085;
+  --app-accent: #0ea5e9;
+  --app-accent-soft: rgba(14, 165, 233, 0.08);
+  --app-success: #15803d;
+  --app-success-soft: rgba(21, 128, 61, 0.1);
+  --app-danger: #b42318;
+  --app-danger-soft: rgba(180, 35, 24, 0.08);
+  --app-shadow: 0 16px 48px rgba(15, 23, 42, 0.08);
+  --app-shadow-soft: 0 10px 30px rgba(15, 23, 42, 0.06);
+
+  /* ── Streamdown / shadcn design tokens ── */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.45 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --primary: oklch(0.55 0.2 260);
+  --primary-foreground: oklch(0.985 0 0);
+  --radius: 0.625rem;
+}
+
+@theme {
+  --font-sans: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  --font-display: "Space Grotesk", "IBM Plex Sans", "PingFang SC", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(214, 225, 255, 0.45), transparent 28%),
+    radial-gradient(circle at top right, rgba(255, 236, 221, 0.55), transparent 22%),
+    linear-gradient(180deg, #fcfcfd 0%, #f5f6f8 100%);
+  color: var(--app-text);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background: rgba(37, 99, 235, 0.16);
+}
+
+.app-shell {
+  position: relative;
+  min-height: 100vh;
+}
+
+.app-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.024) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.35), transparent 92%);
+  pointer-events: none;
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 999px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+.scrollbar-thin::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── KaTeX math formula overflow handling ── */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding: 0.5rem 0;
+}
+
+.katex-display > .katex {
+  white-space: nowrap;
+}
+
+.markdown-body .katex-display {
+  margin: 1em 0;
+}
+
+.json-code-highlighter pre {
+  margin: 0;
+  padding: 1rem 1.15rem;
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.72;
+}
+
+.json-code-highlighter pre {
+  background: transparent !important;
+}
+
+.json-code-highlighter code {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+
+/* ──────────────────────────────────────────────
+   Markdown rendering overrides via Streamdown
+   ────────────────────────────────────────────── */
+
+/* Base container */
+.markdown-body {
+  color: var(--app-text);
+  font-size: 1.0625rem !important;
+  font-weight: 500;
+  line-height: 1.78;
+  font-variant-numeric: tabular-nums;
+}
+
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* ── Heading hierarchy (via data-streamdown selectors) ── */
+[data-streamdown="heading-1"] {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #111827;
+  letter-spacing: 0.025em;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  line-height: 1.45;
+}
+
+[data-streamdown="heading-2"] {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin-top: 1.75rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.5;
+}
+
+[data-streamdown="heading-3"] {
+  font-size: 1.05rem;
+  font-weight: 650;
+  color: #1f2937;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.5;
+}
+
+[data-streamdown="heading-4"] {
+  font-size: 0.96rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-top: 1.25rem;
+  margin-bottom: 0.4rem;
+  line-height: 1.55;
+}
+
+[data-streamdown="heading-5"],
+[data-streamdown="heading-6"] {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-top: 1rem;
+  margin-bottom: 0.35rem;
+  line-height: 1.55;
+}
+
+/* ── Links ── */
+[data-streamdown="link"] {
+  color: #0284c7;
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(2, 132, 199, 0.2);
+  border-radius: 1px;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+
+[data-streamdown="link"]:hover {
+  color: #0369a1;
+  border-bottom-color: #0284c7;
+  background-color: rgba(2, 132, 199, 0.06);
+}
+
+/* ── Inline code ── */
+[data-streamdown="inline-code"] {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875em;
+  background: rgba(15, 23, 42, 0.055);
+  border: 1px solid rgba(15, 23, 42, 0.05);
+  border-radius: 0.5rem;
+  padding: 0.18rem 0.35rem;
+}
+
+/* ── Blockquote: overridden via Streamdown components prop (see markdown.tsx) ── */
+
+/* ── Table (zebra stripes, dark header, generous padding) ── */
+[data-streamdown="table-wrapper"] {
+  border-radius: 0.75rem;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+[data-streamdown="table"] {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+[data-streamdown="table-header"] {
+  background: #f1f5f9;
+}
+
+[data-streamdown="table-header-cell"] {
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: #1f2937;
+  text-align: left;
+  border-bottom: 2px solid rgba(15, 23, 42, 0.08);
+}
+
+[data-streamdown="table-cell"] {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+}
+
+/* Zebra stripes on odd body rows */
+[data-streamdown="table-body"] [data-streamdown="table-row"]:nth-child(odd) {
+  background: rgba(248, 250, 252, 0.6);
+}
+
+[data-streamdown="table-body"] [data-streamdown="table-row"]:hover {
+  background: rgba(2, 132, 199, 0.04);
+}
+
+/* ── Code block (Shiki via @streamdown/code) ── */
+[data-streamdown="code-block"] {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* ── Mermaid block ── */
+[data-streamdown="mermaid-block"] {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.5);
+}
+
+/* ── Horizontal rule ── */
+[data-streamdown="horizontal-rule"] {
+  border: none;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  margin: 1.5rem 0;
+}
+
+/* ── Variant: user markdown (smaller) ── */
+.user-markdown-body,
+.input-markdown-preview,
+.reasoning-markdown-body {
+  font-size: 0.875rem;
+  line-height: 1.72;
+}
+
+.reasoning-markdown-body {
+  color: #374151;
+}
+
+.input-markdown-preview {
+  max-height: 12rem;
+  overflow: auto;
+}
+
+/* ── JSON view ── */
+.json-view {
+  color: #111827;
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: 0.92rem;
+  font-weight: 600;
+  --json-property: #0369a1;
+  --json-index: #4b5563;
+  --json-number: #b45309;
+  --json-string: #15803d;
+  --json-boolean: #9333ea;
+  --json-null: #9333ea;
+}
+
+.json-tree-panel .json-view {
+  line-height: 1.82;
+}
+
+.json-tree-panel .json-view * {
+  font-weight: 600;
+}
+
+.rendered-code-panel {
+  background: #ffffff;
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+
+.rendered-code-panel .shiki {
+  margin: 0 !important;
+  min-width: max-content;
+  border: 0 !important;
+  background: #ffffff !important;
+  box-shadow: none !important;
+  color: var(--shiki-light, #24292f) !important;
+  font-family: var(--font-mono) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  font-variant-ligatures: none;
+  line-height: 1.82 !important;
+  padding: 1rem 1.25rem !important;
+}
+
+.rendered-code-panel .shiki code {
+  background: #ffffff !important;
+  counter-reset: rendered-line;
+  font-family: var(--font-mono) !important;
+  font-weight: 600 !important;
+  font-variant-ligatures: none;
+}
+
+.rendered-code-panel .shiki span {
+  font-weight: 600 !important;
+}
+
+.rendered-code-panel .shiki a,
+.rendered-code-panel .shiki a span {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 0;
+}
+
+.rendered-code-panel .line {
+  counter-increment: rendered-line;
+  min-height: 1.82em;
+}
+
+.rendered-code-panel .line::before {
+  content: counter(rendered-line);
+  display: inline-block;
+  color: #8c959f !important;
+  border-right: 1px solid rgba(140, 149, 159, 0.28);
+  margin-right: 1rem !important;
+  padding-right: 0.75rem !important;
+  min-width: 2.5rem !important;
+  text-align: right !important;
+}
+
+.json-code-panel {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+
+.json-code-panel .rs-root {
+  background: #0d1117 !important;
+}
+
+.json-code-panel .rs-root pre {
+  margin: 0 !important;
+  overflow: auto !important;
+  border: 0 !important;
+  background: #0d1117 !important;
+  box-shadow: none !important;
+  color: #abb2bf !important;
+  font-family: var(--font-mono) !important;
+  font-size: 12px !important;
+  font-variant-ligatures: none;
+  line-height: 1.72 !important;
+  padding: 3rem 1rem 1rem 0 !important;
+}
+
+.json-code-panel .line {
+  position: relative;
+}
+
+.json-code-panel .line::before {
+  color: #6e7681 !important;
+  border-right: 1px solid rgba(110, 118, 129, 0.24);
+  margin-right: 1rem !important;
+  padding-right: 0.75rem !important;
+  min-width: 3.25rem !important;
+  text-align: right !important;
+}
+
+.json-code-panel .line::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: calc(3.25rem + 1.75rem);
+  border-left: 1px solid rgba(171, 178, 191, 0.12);
+  pointer-events: none;
+}
+
+.rs-root.rs-default-styles pre {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: linear-gradient(180deg, #fbfdff 0%, #f5f8fc 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.typing-cursor::after {
+  content: "";
+  display: inline-block;
+  width: 0.6ch;
+  height: 1.1em;
+  margin-left: 0.1rem;
+  vertical-align: -0.12em;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.4);
+  animation: blink 1s steps(1) infinite;
+}
+
+.dashed-spinner {
+  border: 1.5px dashed currentColor;
+  border-radius: 999px;
+  animation: spin 1.2s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes blink {
+  0%,
+  48% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
+}

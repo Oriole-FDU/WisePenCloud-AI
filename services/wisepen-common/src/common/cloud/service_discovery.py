@@ -34,12 +34,12 @@ class ServiceDiscovery:
     """
 
     def __init__(
-        self,
-        naming_client_provider: NamingClientProvider,
-        *,
-        group_name: str,
-        default_strategy: LoadBalancingStrategy = "weighted_random",
-        cache_ttl_seconds: float = _DEFAULT_CACHE_TTL_SECONDS,
+            self,
+            naming_client_provider: NamingClientProvider,
+            *,
+            group_name: str,
+            default_strategy: LoadBalancingStrategy = "weighted_random",
+            cache_ttl_seconds: float = _DEFAULT_CACHE_TTL_SECONDS,
     ) -> None:
         # 懒加载 Nacos 客户端
         self._naming_provider = naming_client_provider
@@ -72,7 +72,6 @@ class ServiceDiscovery:
                 self._naming = await self._naming_provider()
             return self._naming
 
-
     @staticmethod
     def _developer_of(instance: Instance) -> str:
         metadata = getattr(instance, "metadata", None) or {}
@@ -99,11 +98,11 @@ class ServiceDiscovery:
 
     # 从本地缓存挑一个可用实例
     async def pick(
-        self,
-        service_name: str,
-        *,
-        strategy: Optional[LoadBalancingStrategy] = None,
-        exclude: Optional[Iterable[str]] = None,
+            self,
+            service_name: str,
+            *,
+            strategy: Optional[LoadBalancingStrategy] = None,
+            exclude: Optional[Iterable[str]] = None,
     ) -> Instance:
         """
         从本地缓存挑一个可用实例
@@ -140,13 +139,12 @@ class ServiceDiscovery:
         self._rr_cursor.clear()
         self._subscribed.clear()
 
-
     async def _ensure_ready(self, service_name: str) -> None:
         # TTL 没过期就直接用缓存
         now = time.monotonic()
         if (
-            service_name in self._cache
-            and (now - self._fetched_at.get(service_name, 0.0)) < self._ttl
+                service_name in self._cache
+                and (now - self._fetched_at.get(service_name, 0.0)) < self._ttl
         ):
             return
 
@@ -156,8 +154,8 @@ class ServiceDiscovery:
             # 双检：防止在等待锁的时候别的协程刷新好了缓存
             now = time.monotonic()
             if (
-                service_name in self._cache
-                and (now - self._fetched_at.get(service_name, 0.0)) < self._ttl
+                    service_name in self._cache
+                    and (now - self._fetched_at.get(service_name, 0.0)) < self._ttl
             ):
                 return
 
@@ -167,9 +165,9 @@ class ServiceDiscovery:
                 # list_instances 失败时保留旧缓存以支持降级
                 # 无旧缓存则抛出 ServiceUnavailableError
                 if service_name not in self._cache:
-                    error("nacos instances refresh failed.", service=service_name, group=self._group, exc=e)
+                    error("nacos instances refresh failed.", service=service_name, group=self._group, e=e)
                     raise ServiceUnavailableError(service_name, self._group) from e
-                warn("nacos instances refresh degraded to cache.", service=service_name, group=self._group, exc=e)
+                warn("nacos instances refresh degraded to cache.", service=service_name, group=self._group, e=e)
                 return
 
             # 首次成功拉取后注册订阅，靠推送增量刷新，失败不致命
@@ -186,7 +184,7 @@ class ServiceDiscovery:
                     self._subscribed.add(service_name)
                     info("nacos service subscribed.", service=service_name, group=self._group)
                 except Exception as e:
-                    warn("nacos service subscribe failed.", service=service_name, group=self._group, exc=e)
+                    warn("nacos service subscribe failed.", service=service_name, group=self._group, e=e)
 
     async def _refresh(self, service_name: str) -> None:
         naming = await self._get_naming()
@@ -205,6 +203,7 @@ class ServiceDiscovery:
         Nacos subscribe 回调
         如果推送过来的列表为空则保守保留旧缓存，下一次 TTL 触发强制 refresh
         """
+
         async def _on_change(instance_list: List[Instance]) -> None:
             usable = [i for i in (instance_list or []) if self._is_usable(i)]
             if not usable:
@@ -244,4 +243,3 @@ class ServiceDiscovery:
         cursor = self._rr_cursor.get(service_name, 0) % len(instances)
         self._rr_cursor[service_name] = cursor + 1
         return instances[cursor]
-
