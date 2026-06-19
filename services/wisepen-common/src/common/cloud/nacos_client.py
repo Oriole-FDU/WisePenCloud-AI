@@ -1,6 +1,6 @@
 ﻿import socket
 from typing import Callable, Optional
-from common.logger import error, info
+
 from v2.nacos import (
     NacosConfigService,
     NacosNamingService,
@@ -12,6 +12,7 @@ from v2.nacos import (
 )
 
 from common.core.config.bootstrap_settings import BootstrapSettings
+from common.logger import error, info
 
 _config_client: NacosConfigService | None = None
 _naming_client: NacosNamingService | None = None
@@ -22,6 +23,7 @@ class NacosClientManager:
     Nacos 客户端管理器 (单例类)
     封装了 Nacos 的配置拉取、配置监听、服务注册与注销逻辑
     """
+
     def __init__(self, bootstrap_settings: BootstrapSettings):
         self.bootstrap_settings = bootstrap_settings
 
@@ -111,7 +113,7 @@ class NacosClientManager:
                 addr=f"{host}:{self.bootstrap_settings.SERVICE_PORT}",
             )
         except Exception as e:
-            error("nacos instance register failed.", service=self.bootstrap_settings.SERVICE_NAME, exc=e)
+            error("nacos instance register failed.", service=self.bootstrap_settings.SERVICE_NAME, e=e)
 
     async def deregister_instance(self) -> None:
         """从 Nacos 注销当前服务实例（优雅关闭）。"""
@@ -143,4 +145,4 @@ class NacosClientManager:
             )
             info("nacos config watcher registered.", data_id=self.bootstrap_settings.NACOS_DATA_ID)
         except Exception as e:
-            error("nacos config watcher register failed.", data_id=self.bootstrap_settings.NACOS_DATA_ID, exc=e)
+            error("nacos config watcher register failed.", data_id=self.bootstrap_settings.NACOS_DATA_ID, e=e)

@@ -1,4 +1,5 @@
 from typing import Literal, Optional
+
 from dotenv import find_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
