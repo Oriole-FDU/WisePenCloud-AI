@@ -23,7 +23,7 @@ class AppSettings(BaseModel):
     DEFAULT_MODEL_ID: str
 
     # ── Model Selection (模型选型) ─────────────────────────────────────
-    QUERY_MODEL: str = "openai/deepseek-v4-flash"
+    QUERY_MODEL: str = "openai/gpt-4o-mini"
     EMBEDDING_MODEL: str = "openai/qwen3-embedding-8b"
     EMBEDDING_DIMENSIONS: int = 1024
     SUMMARY_MODEL: str
@@ -71,7 +71,7 @@ class AppSettings(BaseModel):
     CTX_LONG_TERM_MEMORY_THRESHOLD: int = 0.6                            # 召回相似度阈值
 
     # ── Agent Loop (ReAct 循环控制) ────────────────────────────────────
-    AGENT_MAX_ITERATIONS: int = 15                                       # 最大推理迭代次数
+    AGENT_MAX_ITERATIONS: int = 100                                  # 最大推理迭代次数
     TOOL_RESULT_MAX_CHARS: int = 4000                                    # 工具返回内容截断上限 (~1000 token)
 
     # ── PaddleOCR Cloud (OCR 云端服务网关) ─────────────────────────────

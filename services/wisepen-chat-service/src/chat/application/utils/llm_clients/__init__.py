@@ -2,9 +2,9 @@ from .embedding import (
     EmbeddingInput,
     EmbeddingResult,
     LiteLLMEmbeddingClient,
-    embedding_client,
+    build_embedding_client,
 )
-from .query import LiteLLMQueryClient, QueryResult, query_client
+from .query import LiteLLMQueryClient, QueryResult, build_query_client
 
 __all__ = [
     "EmbeddingInput",
@@ -12,6 +12,6 @@ __all__ = [
     "LiteLLMEmbeddingClient",
     "LiteLLMQueryClient",
     "QueryResult",
-    "embedding_client",
-    "query_client",
+    "build_embedding_client",
+    "build_query_client",
 ]

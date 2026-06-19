@@ -10,6 +10,7 @@ import redis.asyncio as redis
 from beanie import PydanticObjectId
 
 from chat.application.tools.web_tools.web_content_cache.models import (
+    WebContentCacheCleanupResult,
     WebContentCacheEntry,
     WebContentCacheMode,
     WebContentCacheValue,
@@ -193,6 +194,51 @@ class RedisMongoWebContentCacheRepository(WebContentCacheRepository):
             nx=True,
         )
         return bool(locked)
+
+    async def cleanup_inactive_values(
+        self,
+        *,
+        updated_before: datetime,
+        batch_size: int,
+    ) -> WebContentCacheCleanupResult:
+        """删除已经没有 active Redis entry 指向的 Mongo cache value。
+
+        Redis entry 是缓存 active 状态的权威索引。Mongo value 只有在超过保留期、
+        且同 URL/mode 下的 Redis entry 不再指向该 doc_id 时才会被删除。
+        """
+        scanned = deleted = active = failed = 0
+        cursor = (
+            WebContentCacheValueDocument
+            .find(WebContentCacheValueDocument.updated_at < updated_before)
+            .sort("+updated_at")
+            .limit(max(1, batch_size))
+        )
+        documents = await cursor.to_list()
+
+        for document in documents:
+            scanned += 1
+            try:
+                doc_id = str(document.id)
+                entry = await self.get_entry(
+                    user_id=document.user_id,
+                    url=document.canonical_url,
+                    cache_mode=document.cache_mode,
+                )
+                if entry is not None and entry.mongo_doc_id == doc_id:
+                    active += 1
+                    continue
+
+                await document.delete()
+                deleted += 1
+            except Exception:
+                failed += 1
+
+        return WebContentCacheCleanupResult(
+            scanned=scanned,
+            deleted=deleted,
+            active=active,
+            failed=failed,
+        )
 
     @classmethod
     def _entry_key(cls, *, user_id: str, url: str, cache_mode: WebContentCacheMode) -> str:

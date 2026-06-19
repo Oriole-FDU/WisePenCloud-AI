@@ -11,7 +11,7 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 from chat.application.tools.skill_tools.create_skill.models import CreateSkillRequest
-from chat.application.tools.skill_tools.create_skill.service import CreateSkillService
+from chat.application.tools.skill_tools.create_skill.serializer import package_skill
 from chat.application.tools.skill_tools.create_skill.skill_publisher import (
     SkillPublisher,
 )
@@ -168,16 +168,13 @@ PARAMETERS_SCHEMA: Dict[str, Any] = {
 
 
 class CreateSkillTool:
-    """从结构化标题树创建并发布新的 Skill 文档。
-
-    Tool 层只负责：参数解析 → 业务校验 → 委托 Service → 返回结果。
-    """
+    """从结构化标题树创建并发布新的 Skill 文档。"""
 
     def __init__(
         self,
         skill_publisher: SkillPublisher,
     ) -> None:
-        self._service = CreateSkillService(publisher=skill_publisher)
+        self._skill_publisher = skill_publisher
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="create_skill",
@@ -236,12 +233,31 @@ class CreateSkillTool:
                 retryable=False,
             )
 
-        # 3. 委托 Service 完成打包 + 发布
-        result = await self._service.create(
-            request, user_id=user_id, session_id=session_id
+        # 3. 打包为 zip（含 SKILL.md + references/ + scripts/ + assets/）
+        package = package_skill(
+            skill_id=request.skill_id,
+            trigger_description=request.trigger_description,
+            title=request.title,
+            body=request.body,
+            children=request.children,
+            references=request.references,
+            scripts=request.scripts,
+            assets=request.assets,
+            user_id=user_id,
+            session_id=session_id,
         )
 
-        # 4. 返回创建结果
+        # 4. 发布到后端存储
+        result = await self._skill_publisher.publish(
+            skill_id=request.skill_id,
+            title=request.title,
+            trigger_description=request.trigger_description,
+            package=package,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+        # 5. 返回创建结果
         return {
             "skill_id": result.skill_id,
             "version": result.version,

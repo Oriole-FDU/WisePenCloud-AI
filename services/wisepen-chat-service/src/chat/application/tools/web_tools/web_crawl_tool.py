@@ -14,6 +14,7 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.core.tool_return import (
     SuggestedAction,
+    SuggestedActions,
     SuggestedActionPriority,
     ToolReturn,
 )
@@ -127,6 +128,7 @@ class WebCrawlTool:
                 risk_level=ToolRiskLevel.MEDIUM,
                 timeout_seconds=tool_settings.WEB_CRAWL_TOOL_TIMEOUT_SECONDS,
                 cache_chunked=True,
+                required_context_keys=("user_id", "session_id"),
             ),
         )
 
@@ -152,6 +154,9 @@ class WebCrawlTool:
         try:
             results = await self._service.crawl(
                 seed_url,
+                user_id=str(context["user_id"]),
+                session_id=str(context["session_id"]),
+                source_scope="web_public",
                 max_pages=max_pages,
                 max_depth=max_depth,
                 same_domain=same_domain,
@@ -207,11 +212,15 @@ class WebCrawlTool:
                 "seed_url": seed_url,
                 "pages_crawled": len(results),
                 "pages": pages_summary,
-                "suggested_action": SuggestedAction(
-                    tool_name="tool_content_read",
-                    mode="ranked_expand",
-                    reason="Search the crawled pages' markdown for answer-relevant windows.",
-                    priority=SuggestedActionPriority.HIGH,
+                "suggested_actions": SuggestedActions(
+                    suggested_actions=(
+                        SuggestedAction(
+                            tool_name="tool_content_read",
+                            mode="ranked_expand",
+                            reason="Search the crawled pages' markdown for answer-relevant windows.",
+                            priority=SuggestedActionPriority.HIGH,
+                        ),
+                    ),
                 ),
             },
             cacheable_texts=cacheable_texts,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -158,8 +159,10 @@ def _get_value(source: Any, key: str, default: Any = None) -> Any:
     return getattr(source, key, default)
 
 
-query_client = LiteLLMQueryClient(
-    model=settings.QUERY_MODEL,
-    api_base=settings.LLM_BASE_URL,
-    api_key=settings.LLM_API_KEY,
-)
+@lru_cache(maxsize=1)
+def build_query_client() -> LiteLLMQueryClient:
+    return LiteLLMQueryClient(
+        model=settings.QUERY_MODEL,
+        api_base=settings.LLM_BASE_URL,
+        api_key=settings.LLM_API_KEY,
+    )

@@ -21,6 +21,10 @@ from chat.application.tools.web_tools.web_content_cache.refresh_queue import (
     WebContentCacheRefreshJob,
     WebContentCacheRefreshTaskPublisher,
 )
+from chat.application.tools.web_tools.web_content_cache.service import (
+    HtmlCacheWrite,
+    WebContentCacheService,
+)
 from common.logger import info, warn
 from chat.application.tools.web_tools.web_content_cache.cache_ttl import compute_ttl
 from .cleaners.base import BaseCleaner
@@ -40,6 +44,7 @@ class FetchCoordinator:
         "_httpx_fetcher",
         "_scrapling_fetcher",
         "_cleaner",
+        "_content_cache_service",
         "_content_cache_repository",
         "_refresh_task_publisher",
         "_file_store",
@@ -65,6 +70,10 @@ class FetchCoordinator:
         self._file_store = file_store
         self._content_cache_repository = content_cache_repository
         self._refresh_task_publisher = refresh_task_publisher
+        self._content_cache_service = WebContentCacheService(
+            repository=content_cache_repository,
+            refresh_task_publisher=refresh_task_publisher,
+        )
         self._min_text_length = min_text_length
         self._batch_concurrency = batch_concurrency
 
@@ -352,12 +361,15 @@ class FetchCoordinator:
                         if entry.cache_mode == WebContentCacheMode.PRIVATE
                         else "web_public"
                     )
-                    await self._schedule_stale_refresh(
+                    await self._content_cache_service.schedule_stale_refresh(
                         url=url,
                         user_id=user_id,
                         session_id=session_id,
                         source_scope=refresh_source_scope,
                         cache_mode=entry.cache_mode,
+                        refresh_job_prefix="web_fetch",
+                        refresh_task_name=WEB_FETCH_REFRESH_JOB,
+                        refresh_lock_ttl_seconds=_REFRESH_LOCK_TTL_SECONDS,
                     )
                     info(
                         "网页抓取命中 stale 缓存",
@@ -379,64 +391,6 @@ class FetchCoordinator:
             warn("网页抓取缓存读取失败，降级为实时抓取", url=url, e=exc)
 
         return None
-
-    async def _schedule_stale_refresh(
-        self,
-        *,
-        url: str,
-        user_id: str,
-        session_id: str,
-        source_scope: str,
-        cache_mode: WebContentCacheMode,
-    ) -> None:
-        repository = self._content_cache_repository
-        if repository is None:
-            return
-
-        try:
-            lock_owner = "public" if cache_mode == WebContentCacheMode.PUBLIC else user_id
-            lock_key = f"web_fetch:{cache_mode.value}:{lock_owner}:{url}"
-            if not await repository.try_acquire_refresh_lock(
-                key=lock_key,
-                ttl_seconds=_REFRESH_LOCK_TTL_SECONDS,
-            ):
-                return
-        except Exception as exc:
-            warn("网页抓取 stale 刷新锁获取失败", url=url, e=exc)
-            return
-
-        url_hash = sha256(url.encode("utf-8")).hexdigest()
-        job_id = (
-            f"web_fetch:{cache_mode.value}:"
-            f"{'public' if cache_mode == WebContentCacheMode.PUBLIC else user_id}:"
-            f"{url_hash}"
-        )
-        if self._refresh_task_publisher is not None:
-            try:
-                await self._refresh_task_publisher.enqueue(
-                    WebContentCacheRefreshJob(
-                        name=WEB_FETCH_REFRESH_JOB,
-                        job_id=job_id,
-                        payload={
-                            "url": url,
-                            "user_id": user_id,
-                            "session_id": session_id,
-                            "source_scope": source_scope,
-                            "cache_mode": cache_mode.value,
-                        },
-                    )
-                )
-                return
-            except Exception as exc:
-                warn("网页抓取 stale 刷新任务入队失败，降级为本进程后台任务", url=url, e=exc)
-
-        asyncio.create_task(
-            self.refresh_stale_url(
-                url=url,
-                user_id=user_id,
-                source_scope=source_scope,
-            )
-        )
 
     async def refresh_stale_url(
         self,
@@ -503,73 +457,23 @@ class FetchCoordinator:
         result: WebFetchResult,
     ) -> None:
         """写入 HTML 清洗结果缓存；写失败不影响本次抓取结果。"""
-        repository = self._content_cache_repository
-        if repository is None or not result.markdown:
-            return
-
-        try:
-            now = datetime.now(timezone.utc)
-            # web_custom 是用户私有来源，其余 web_fetch 来源进入公共缓存域。
-            mode = (
-                WebContentCacheMode.PRIVATE
-                if source_scope == "web_custom"
-                else WebContentCacheMode.PUBLIC
-            )
-            # 基于 HTTP 响应头智能计算 TTL
-            ttl = compute_ttl(
-                headers=raw.headers,
-                now=now,
-                is_shared_cache=(mode == WebContentCacheMode.PUBLIC),
-                status_code=raw.status_code or 200,
-            )
-            if ttl.no_store:
-                info("网页抓取缓存被 no-store 指令跳过", url=url)
-                return
-            canonical_url = url.strip()
-            content_hash_payload = f"{raw.raw_html or ''}\n---markdown---\n{result.markdown}"
-            value = WebContentCacheValue(
-                id=None,
+        await self._content_cache_service.write_html_markdown(
+            HtmlCacheWrite(
+                url=url,
                 user_id=user_id,
-                canonical_url=canonical_url,
+                source_scope=source_scope,
                 final_url=result.final_url,
-                cache_mode=mode,
                 status_code=result.status_code,
                 content_type=result.content_type,
                 raw_html=raw.raw_html,
                 markdown=result.markdown,
-                content_hash=sha256(content_hash_payload.encode("utf-8")).hexdigest(),
-                fetched_at=now,
-                metadata={
-                    "title": result.title,
-                    "source_scope": source_scope,
-                    "source_url": result.source_url,
-                    "fetcher": raw.fetcher,
-                    "cleaner": self._cleaner.name,
-                    "cache_control": raw.headers.get("cache-control"),
-                },
+                title=result.title,
+                headers=raw.headers,
+                fetcher=raw.fetcher,
+                cleaner=self._cleaner.name,
+                producer=_PRODUCER_NAME,
             )
-            doc_id = await repository.save_value(value)
-            await repository.set_entry(
-                WebContentCacheEntry(
-                    user_id=user_id,
-                    url_hash=sha256(canonical_url.encode("utf-8")).hexdigest(),
-                    canonical_url=canonical_url,
-                    mongo_doc_id=doc_id,
-                    cache_mode=mode,
-                    soft_expire_at=ttl.soft_expire_at,
-                    hard_expire_at=ttl.hard_expire_at,
-                    etag=raw.headers.get("etag"),
-                    last_modified=raw.headers.get("last-modified"),
-                )
-            )
-            info(
-                "网页抓取缓存已写入",
-                url=url,
-                cache_mode=mode.value,
-                doc_id=doc_id,
-            )
-        except Exception as exc:
-            warn("网页抓取缓存写入失败", url=url, e=exc)
+        )
 
     async def _write_non_html_cache_stub(
         self,

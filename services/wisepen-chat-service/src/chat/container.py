@@ -36,11 +36,12 @@ from chat.application.tools.math_tools.equation_solver_tool import EquationSolve
 from chat.application.tools.math_tools.expression_solver_tool import ExpressionSolverTool
 from chat.application.tools.math_tools.linear_algebra_solver_tool import LinearAlgebraSolverTool
 from chat.application.tools.math_tools.stats_solver_tool import StatsSolverTool
-from chat.application.tools.session_tools.evidence_rank_tool import EvidenceRankTool
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import (
     GetHistoricalChatMessagesTool,
 )
-from chat.application.tools.session_tools.tool_content_batch_read_tool import ToolContentBatchReadTool
+from chat.application.tools.session_tools.tool_content_sequential_read_tool import (
+    ToolContentSequentialReadTool,
+)
 from chat.application.tools.session_tools.tool_content_read_tool import ToolContentReadTool
 from chat.application.tools.skill_tools import CreateSkillTool, LoadSkillAssetTool, LoadSkillTool
 from chat.application.tools.skill_tools.create_skill.skill_publisher import SkillPublisher
@@ -75,6 +76,9 @@ from chat.application.tools.web_tools.web_fetch.fetchers.scrapling_fetcher impor
     ScraplingFetcher,
 )
 from chat.application.tools.web_tools.web_fetch_tool import WebFetchTool
+from chat.application.tools.web_tools.web_content_cache.gc import (
+    WebContentCacheGcScheduler,
+)
 from chat.application.tools.web_tools.web_search.providers.models import SearchProviderName
 from chat.application.tools.web_tools.web_search.runtime_context import (
     WebSearchRuntimeContextResolver,
@@ -395,6 +399,10 @@ class Container(containers.DeclarativeContainer):
         RedisMongoWebContentCacheRepository,
         redis_url=settings.REDIS_URL,
     )
+    web_content_cache_gc_scheduler = providers.Singleton(
+        WebContentCacheGcScheduler,
+        repository=web_content_cache_repository,
+    )
     web_content_cache_refresh_task_publisher = providers.Singleton(
         ArqWebContentCacheRefreshTaskPublisher,
         redis_url=settings.REDIS_URL,
@@ -421,6 +429,8 @@ class Container(containers.DeclarativeContainer):
         httpx_fetcher=web_fetch_httpx_fetcher,
         scrapling_fetcher=web_fetch_scrapling_fetcher,
         cleaner=web_fetch_cleaner,
+        content_cache_repository=web_content_cache_repository,
+        refresh_task_publisher=web_content_cache_refresh_task_publisher,
         min_text_length=tool_settings.WEB_FETCH_MIN_TEXT_LENGTH,
         concurrency=tool_settings.WEB_FETCH_BATCH_CONCURRENCY,
     )
@@ -472,6 +482,7 @@ class Container(containers.DeclarativeContainer):
         parse_service=document_parse_service,
         content_cache_repository=web_content_cache_repository,
         refresh_task_publisher=web_content_cache_refresh_task_publisher,
+        direct_fetcher=web_fetch_httpx_fetcher,
     )
 
     # --- Session Tools ---
@@ -484,12 +495,8 @@ class Container(containers.DeclarativeContainer):
         ToolContentReadTool,
         content_store=tool_content_store,
     )
-    tool_content_batch_read_tool = providers.Singleton(
-        ToolContentBatchReadTool,
-        content_store=tool_content_store,
-    )
-    evidence_rank_tool = providers.Singleton(
-        EvidenceRankTool,
+    tool_content_sequential_read_tool = providers.Singleton(
+        ToolContentSequentialReadTool,
         content_store=tool_content_store,
     )
 
@@ -548,8 +555,7 @@ class Container(containers.DeclarativeContainer):
         stats_solver_tool,
         expression_solver_tool,
         tool_content_read_tool,
-        tool_content_batch_read_tool,
-        evidence_rank_tool,
+        tool_content_sequential_read_tool,
         paper_hydrate_tool,
         github_hydrate_tool,
         web_search_tool,

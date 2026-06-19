@@ -26,6 +26,7 @@ class SessionResponse(BaseModel):
     id: str
     user_id: str
     title: str
+    is_pinned: bool = False
     created_at: str
     updated_at: str
     agent_id: Optional[str] = None
@@ -37,6 +38,7 @@ class SessionResponse(BaseModel):
             id=str(session.id) if session.id else "",
             user_id=session.user_id,
             title=session.title,
+            is_pinned=session.is_pinned,
             created_at=session.created_at.isoformat(),
             updated_at=session.updated_at.isoformat(),
             agent_id=session.agent_id,

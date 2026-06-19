@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from zeroentropy import APIError, AsyncZeroEntropy
 
 from chat.application.utils.ranking_engine.models import RankedCandidate, RankQuery
+from chat.core.config.app_settings import settings
 
 
 class ZeroEntropyRerankerError(RuntimeError):
@@ -17,7 +18,6 @@ class ZeroEntropyRerankerConfig:
 
     model: str  # ZeroEntropy rerank 模型名
     top_n: int | None = None  # None 表示使用当前 ranked 全量
-
 
 
 class ZeroEntropyReranker:
@@ -113,5 +113,19 @@ class ZeroEntropyReranker:
             )
 
         return tuple(reranked)
+
+
+# ── 全局单例 ──
+_default_zero_entropy_reranker = ZeroEntropyReranker(
+    client=AsyncZeroEntropy(api_key=settings.ZERO_ENTROPY_API_KEY),
+    config=ZeroEntropyRerankerConfig(
+        model=settings.EVIDENCE_RANKER_ZE_MODEL,
+        top_n=settings.EVIDENCE_RANKER_ZE_TOP_N,
+    ),
+)
+
+
+def get_default_zero_entropy_reranker() -> ZeroEntropyReranker:
+    return _default_zero_entropy_reranker
 
 

@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .models import WebContentCacheEntry, WebContentCacheMode, WebContentCacheValue
+from datetime import datetime
+
+from .models import (
+    WebContentCacheCleanupResult,
+    WebContentCacheEntry,
+    WebContentCacheMode,
+    WebContentCacheValue,
+)
 
 
 class WebContentCacheRepository(Protocol):
@@ -49,4 +56,12 @@ class WebContentCacheRepository(Protocol):
         key: str,
         ttl_seconds: int,
     ) -> bool:
+        ...
+
+    async def cleanup_inactive_values(
+        self,
+        *,
+        updated_before: datetime,
+        batch_size: int,
+    ) -> WebContentCacheCleanupResult:
         ...

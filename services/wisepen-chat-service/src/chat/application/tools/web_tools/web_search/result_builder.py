@@ -77,22 +77,37 @@ def build_web_search_tool_return(
     - supplier_answers：供应商对 query 的直答（去重），仅作为检索提示。
     - final_query：多跳最终使用的查询词。
     - recommended_ids：按优先级排序的候选编号，最多 5 个。
+    - warning：多跳未收敛时的警告，触发降级策略。
     """
     supplier_answers = tuple(dict.fromkeys(r.answer for r in responses if r.answer))
 
-    visible_result: dict[str, object] = {
-        "query": result.query,
-        "candidates": tuple(
-            VisibleWebSearchCandidate(
-                search_ref=candidate.search_ref,
-                title=candidate.title,
-                overview=candidate.overview,
-                highlights=candidate.highlights,
-            )
-            for candidate in candidates
-        ),
-        "recommended_ids": recommended_ids,
-        "suggested_actions": SuggestedActions(
+    # 根据是否存在 warning 构建不同的建议行为
+    if warning:
+        suggested_actions = SuggestedActions(
+            suggested_actions=(
+                SuggestedAction(
+                    tool_name="web_search",
+                    reason=(
+                        f"Previous search did not converge: {warning} "
+                        "You SHOULD rephrase the query, narrow the scope, or split into "
+                        "multiple more specific parallel searches to improve coverage."
+                    ),
+                    priority=SuggestedActionPriority.HIGH,
+                ),
+                SuggestedAction(
+                    tool_name="web_fetch",
+                    mode="from_search_results",
+                    reason=(
+                        "Fetch selected search refs before using them as evidence. "
+                        "Priority lowered because search did not fully converge — "
+                        "consider re-searching first."
+                    ),
+                    priority=SuggestedActionPriority.MEDIUM,
+                ),
+            ),
+        )
+    else:
+        suggested_actions = SuggestedActions(
             suggested_actions=(
                 SuggestedAction(
                     tool_name="web_fetch",
@@ -120,7 +135,21 @@ def build_web_search_tool_return(
                     priority=SuggestedActionPriority.LOW,
                 ),
             ),
+        )
+
+    visible_result: dict[str, object] = {
+        "query": result.query,
+        "candidates": tuple(
+            VisibleWebSearchCandidate(
+                search_ref=candidate.search_ref,
+                title=candidate.title,
+                overview=candidate.overview,
+                highlights=candidate.highlights,
+            )
+            for candidate in candidates
         ),
+        "recommended_ids": recommended_ids,
+        "suggested_actions": suggested_actions,
     }
     if final_query and final_query != result.query:
         visible_result["final_query"] = final_query

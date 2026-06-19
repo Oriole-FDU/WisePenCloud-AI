@@ -5,9 +5,10 @@ import re
 from chat.application.tools.common.tool_content_store import ToolContentStore
 from chat.application.tools.common.tool_content_store.models import StoredToolContent, ToolContentChunk
 from chat.application.tools.session_tools.tool_content_read.models import (
-    ToolContentReadItemResult,
+    ToolContentReadMatch,
     ToolContentReadMode,
     ToolContentReadRequest,
+    ToolContentReadResult,
     ToolContentSelector,
     ToolContentWindow,
 )
@@ -21,12 +22,15 @@ from chat.application.utils.ranking_engine import (
 )
 from chat.application.utils.ranking_engine import get_ranking_engine
 
-# 正则模式串最大字符数限制，防止 DoS 攻击引发灾难性回溯
 MAX_REGEX_PATTERN_CHARS = tool_settings.TOOL_CONTENT_READ_MAX_REGEX_PATTERN_CHARS
 
 
+class _RegexLimitReached(Exception):
+    pass
+
+
 class ToolContentReadService:
-    """工具内容分流读取服务，支持连续切片、重排检索与正则匹配三种模式。"""
+    """跨文档内容检索服务，支持 ranked_expand 与 regex_match。"""
 
     __slots__ = ("_store", "_ranking_engine")
 
@@ -44,20 +48,40 @@ class ToolContentReadService:
             *,
             request: ToolContentReadRequest,
             session_id: str,
-    ) -> tuple[ToolContentReadItemResult, ...]:
-        """批量读取工具内容并构建对应的上下文文本窗口。"""
+    ) -> ToolContentReadResult:
         self._validate_request(request)
 
-        items = []
+        stored_items: list[tuple[str, StoredToolContent]] = []
+        failed: list[ToolContentReadMatch] = []
         for content_id in request.content_ids:
-            item = await self._read_one(content_id=content_id, request=request, session_id=session_id)
-            items.append(item)
+            # 先把每个 content_id 解析为可读正文；单项失败保留在 failed，不拖垮整次检索。
+            loaded = await self._load_one(content_id=content_id, session_id=session_id)
+            if isinstance(loaded, ToolContentReadMatch):
+                failed.append(loaded)
+                continue
+            stored_items.append(loaded)
 
-        return tuple(items)
+        if request.mode == ToolContentReadMode.RANKED_EXPAND:
+            matches = await self._read_ranked_expand_across_contents(
+                stored_items=tuple(stored_items),
+                request=request,
+            )
+        elif request.mode == ToolContentReadMode.REGEX_MATCH:
+            matches = self._read_regex_match_across_contents(
+                stored_items=tuple(stored_items),
+                request=request,
+            )
+        else:
+            raise ValueError(f"Unsupported read mode: {request.mode}")
+
+        return ToolContentReadResult(
+            mode=request.mode,
+            matches=matches,
+            failed=tuple(failed),
+        )
 
     @staticmethod
     def _validate_request(request: ToolContentReadRequest) -> None:
-        """全局参数合法性预校验。"""
         if request.mode == ToolContentReadMode.RANKED_EXPAND and not (request.query or "").strip():
             raise ValueError("ranked_expand requires query.")
 
@@ -68,184 +92,196 @@ class ToolContentReadService:
             if len(pattern) > MAX_REGEX_PATTERN_CHARS:
                 raise ValueError(f"regex pattern is too long; max {MAX_REGEX_PATTERN_CHARS} chars.")
 
-    async def _read_one(
+    async def load_stored_content(
             self,
             *,
             content_id: str,
-            request: ToolContentReadRequest,
             session_id: str,
-    ) -> ToolContentReadItemResult:
-        """处理单条内容凭证。异常捕获降级为 failed 单项，不阻塞批处理。"""
+    ) -> tuple[str, StoredToolContent] | None:
+        canonical_id, _ = await self._store.canonicalize_content_id(
+            content_id=content_id,
+            session_id=session_id,
+        )
+        stored = await self._store.get(content_id=canonical_id, session_id=session_id)
+        if stored is None:
+            return None
+        return canonical_id, stored
+
+    def build_continuous_window(
+            self,
+            *,
+            stored: StoredToolContent,
+            offset: int,
+            limit: int,
+    ) -> ToolContentWindow:
+        safe_offset = max(offset, 0)
+        safe_limit = max(limit, 0)
+        end = min(len(stored.text), safe_offset + safe_limit)
+
+        chunks = tuple(
+            chunk
+            for chunk in stored.chunks
+            if chunk.start_offset is not None
+            and chunk.end_offset is not None
+            and chunk.start_offset < end
+            and chunk.end_offset > safe_offset
+        )
+        locator = ToolContentWindowBuilder.locator(stored, chunks)
+        return ToolContentWindow(
+            text=stored.text[safe_offset:end],
+            start_offset=safe_offset,
+            end_offset=end,
+            page=locator["page"],
+            paragraph_title=locator["paragraph_title"],
+            section_path=locator["section_path"],
+            anchor_names=locator["anchor_names"],
+        )
+
+    async def _load_one(
+            self,
+            *,
+            content_id: str,
+            session_id: str,
+    ) -> tuple[str, StoredToolContent] | ToolContentReadMatch:
         try:
-            # 自动解析重定向收据以获取真实内容标识
-            canonical_id, _ = await self._store.canonicalize_content_id(
+            loaded = await self.load_stored_content(
                 content_id=content_id,
                 session_id=session_id,
             )
-            stored = await self._store.get(content_id=canonical_id, session_id=session_id)
-
-            if stored is None:
-                return ToolContentReadItemResult(
-                    content_id=canonical_id,
+            if loaded is None:
+                return ToolContentReadMatch(
+                    content_id=content_id,
                     status="failed",
                     reason="content_not_found",
                 )
-
-            # 按指定的读取模式进行核心业务流分发
-            if request.mode == ToolContentReadMode.CONTINUOUS:
-                windows = (self._read_continuous(stored, request),)
-
-            elif request.mode == ToolContentReadMode.RANKED_EXPAND:
-                chunks = self._select_chunks(stored, request.selector)
-                windows = await self._read_ranked_expand(stored, request, chunks)
-
-            elif request.mode == ToolContentReadMode.REGEX_MATCH:
-                chunks = self._select_chunks(stored, request.selector)
-                windows = self._read_regex_match(stored, request, chunks)
-
-            else:
-                raise ValueError(f"Unsupported read mode: {request.mode}")
-
-            return ToolContentReadItemResult(
-                content_id=canonical_id,
-                status="success",
-                windows=windows,
-            )
-
-        except Exception as e:
-            return ToolContentReadItemResult(
+            return loaded
+        except Exception as exc:
+            return ToolContentReadMatch(
                 content_id=content_id,
                 status="failed",
-                reason=e.__class__.__name__,
+                reason=exc.__class__.__name__,
             )
 
-    def _read_continuous(
+    async def _read_ranked_expand_across_contents(
             self,
-            stored: StoredToolContent,
+            *,
+            stored_items: tuple[tuple[str, StoredToolContent], ...],
             request: ToolContentReadRequest,
-    ) -> ToolContentWindow:
-        """连续切片模式：基于字符偏置与长度进行轻量物理切片。"""
-        offset = max(request.offset or 0, 0)
-        limit = max(request.limit or 4000, 0)
-        end = min(len(stored.text), offset + limit)
-
-        return ToolContentWindow(
-            text=stored.text[offset:end],
-            start_offset=offset,
-            end_offset=end,
-        )
-
-    async def _read_ranked_expand(
-            self,
-            stored: StoredToolContent,
-            request: ToolContentReadRequest,
-            candidate_chunks: tuple[ToolContentChunk, ...],
-    ) -> tuple[ToolContentWindow, ...]:
-        """重排扩展模式：计算分块语义相关性，并对 Top-K 命中项进行窗口包裹混叠。"""
+    ) -> tuple[ToolContentReadMatch, ...]:
         query = (request.query or "").strip()
 
-        # 构建高密度特征排序候选集（过滤空分块）
-        candidates = tuple(
-            RankCandidate(
-                candidate_id=f"{stored.content_id}:chunk:{chunk.chunk_index}",
-                text=ToolContentWindowBuilder.chunk_text(stored, chunk),
-                fields={
-                    "section": " / ".join(chunk.section_path),
-                    "anchor": " ".join(chunk.anchor_names),
-                },
-                metadata={
-                    "content_id": stored.content_id,
-                    "chunk_index": chunk.chunk_index,
-                    "section_path": chunk.section_path,
-                    "anchor_names": chunk.anchor_names,
-                },
-            )
-            for chunk in candidate_chunks
-            if ToolContentWindowBuilder.chunk_text(stored, chunk)
-        )
+        candidates: list[RankCandidate] = []
+        source_by_candidate_id: dict[str, tuple[str, StoredToolContent, int]] = {}
+        for canonical_id, stored in stored_items:
+            # 跨文档统一构建候选池，后续只做一次全局排序，保持真正的 cross-content rank 语义。
+            candidate_chunks = self._select_chunks(stored, request.selector)
+            for chunk in candidate_chunks:
+                text = ToolContentWindowBuilder.chunk_text(stored, chunk)
+                if not text:
+                    continue
+                candidate_id = f"{canonical_id}:chunk:{chunk.chunk_index}"
+                source_by_candidate_id[candidate_id] = (canonical_id, stored, chunk.chunk_index)
+                candidates.append(
+                    RankCandidate(
+                        candidate_id=candidate_id,
+                        text=text,
+                        fields={
+                            "section": " / ".join(chunk.section_path),
+                            "anchor": " ".join(chunk.anchor_names),
+                        },
+                        metadata={
+                            "content_id": canonical_id,
+                            "chunk_index": chunk.chunk_index,
+                        },
+                        group_key=canonical_id,
+                    )
+                )
+
         if not candidates:
             return ()
 
-        # 调度上游双塔重排或精排引擎
         ranked = (
-            self._ranking_engine.rank(
+            await self._ranking_engine.rank_async(
                 RankRequest(
                     query=RankQuery(text=query),
-                    candidates=candidates,
+                    candidates=tuple(candidates),
                     top_k=max(request.top_k, 0),
-                    candidate_limit=max(request.top_k, 0),
+                    candidate_limit=len(candidates),
                 )
             )
         ).ranked
 
-        # 提取重排索引并进行前后向滑动窗口合并
         return tuple(
-            ToolContentWindowBuilder.expand(
-                stored,
-                center_chunk=int(item.candidate.metadata["chunk_index"]),
-                merge_before=request.merge_before,
-                merge_after=request.merge_after,
+            ToolContentReadMatch(
+                content_id=source_by_candidate_id[item.candidate_id][0],
+                status="success",
+                window=ToolContentWindowBuilder.expand(
+                    source_by_candidate_id[item.candidate_id][1],
+                    center_chunk=source_by_candidate_id[item.candidate_id][2],
+                    merge_before=request.merge_before,
+                    merge_after=request.merge_after,
+                ),
             )
             for item in ranked
         )
 
-    def _read_regex_match(
+    def _read_regex_match_across_contents(
             self,
-            stored: StoredToolContent,
+            *,
+            stored_items: tuple[tuple[str, StoredToolContent], ...],
             request: ToolContentReadRequest,
-            candidate_chunks: tuple[ToolContentChunk, ...],
-    ) -> tuple[ToolContentWindow, ...]:
-        """正则匹配模式：利用流式迭代器定位正则关键词，并对命中分块展开上下文。"""
+    ) -> tuple[ToolContentReadMatch, ...]:
         pattern = request.pattern or ""
         regex = re.compile(pattern)
 
-        windows: list[ToolContentWindow] = []
-        seen_centers: set[int] = set()  # 去重防御：避免多词重复命中同一分块
+        matches: list[ToolContentReadMatch] = []
+        try:
+            for canonical_id, stored in stored_items:
+                # regex_match 保持输入文档顺序扫描，但输出仍归一到同一个全局 matches 列表。
+                candidate_chunks = self._select_chunks(stored, request.selector)
+                seen_centers: set[int] = set()
+                for chunk in candidate_chunks:
+                    text = ToolContentWindowBuilder.chunk_text(stored, chunk)
+                    for _ in regex.finditer(text):
+                        if chunk.chunk_index in seen_centers:
+                            continue
+                        seen_centers.add(chunk.chunk_index)
+                        matches.append(
+                            ToolContentReadMatch(
+                                content_id=canonical_id,
+                                status="success",
+                                window=ToolContentWindowBuilder.expand(
+                                    stored,
+                                    center_chunk=chunk.chunk_index,
+                                    merge_before=request.merge_before,
+                                    merge_after=request.merge_after,
+                                ),
+                            )
+                        )
+                        if len(matches) >= max(request.max_matches, 0):
+                            raise _RegexLimitReached
+        except _RegexLimitReached:
+            pass
 
-        for chunk in candidate_chunks:
-            text = ToolContentWindowBuilder.chunk_text(stored, chunk)
-
-            for _ in regex.finditer(text):
-                if chunk.chunk_index in seen_centers:
-                    continue
-
-                seen_centers.add(chunk.chunk_index)
-                windows.append(
-                    ToolContentWindowBuilder.expand(
-                        stored,
-                        center_chunk=chunk.chunk_index,
-                        merge_before=request.merge_before,
-                        merge_after=request.merge_after,
-                    )
-                )
-
-                if len(windows) >= max(request.max_matches, 0):
-                    return tuple(windows)
-
-        return tuple(windows)
+        return tuple(matches)
 
     def _select_chunks(
             self,
             stored: StoredToolContent,
             selector: ToolContentSelector | None,
     ) -> tuple[ToolContentChunk, ...]:
-        """基于选择器策略降级筛选候选数据分块。"""
         chunks = tuple(sorted(stored.chunks, key=lambda c: c.chunk_index))
         if selector is None:
             return chunks
 
         selected: set[int] | None = None
-
-        # 策略 1：显式索引切片匹配
         if selector.chunk_indices:
             selected = set(selector.chunk_indices)
 
-        # 策略 2：基于逻辑目录、页面或锚点索引的多路交集计算
         indexed = self._index_selected_chunks(stored, selector)
         if indexed is not None:
             selected = indexed if selected is None else selected & indexed
 
-        # 策略 3：基于单元特定文本类型的映射提取
         if selected is None and selector.unit_types:
             selected = {
                 c.chunk_index
@@ -253,11 +289,9 @@ class ToolContentReadService:
                 if set(selector.unit_types) & set(c.unit_types)
             }
 
-        # 策略 4：未设置有效过滤域时，默认回退至全量块匹配
         if selected is None:
             selected = {c.chunk_index for c in chunks}
 
-        # 基于未知数据源标识符 (unknown_type) 进行终期过滤
         result = []
         for chunk in chunks:
             if chunk.chunk_index not in selected:
@@ -273,7 +307,6 @@ class ToolContentReadService:
             stored: StoredToolContent,
             selector: ToolContentSelector,
     ) -> set[int] | None:
-        """基于目录结构多级条目进行严苛交集（AND）剪枝过滤。"""
         selected: set[int] | None = None
 
         for prefix, values in (
@@ -289,7 +322,6 @@ class ToolContentReadService:
                 name = entry.name
                 bare_name = name.split(":", 1)[1] if ":" in name else name
 
-                # 支持命名空间全匹配、纯标签短名匹配及子串匹配
                 if any(v == name or v == bare_name or v in bare_name for v in values):
                     if name.startswith(f"{prefix}:") or prefix in name:
                         matched.update(entry.chunk_indices)

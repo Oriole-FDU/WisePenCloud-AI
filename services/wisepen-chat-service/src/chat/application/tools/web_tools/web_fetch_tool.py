@@ -4,6 +4,7 @@ from typing import Any
 
 from common.logger import warn
 
+from chat.application.tools.common.batching import batched
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -14,18 +15,21 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.core.tool_return import (
     SuggestedAction,
+    SuggestedActions,
     SuggestedActionPriority,
     ToolReturn,
 )
 from chat.application.tools.tool_settings import tool_settings
 from chat.application.tools.web_tools.web_fetch import FetchCoordinator
 from chat.application.tools.web_tools.web_fetch.errors import WebFetchError
+from chat.application.tools.web_tools.web_fetch.models import WebFetchBatchResult
 from chat.application.tools.web_tools.web_search.candidate_store.repository import (
     WebSearchCandidateRepository,
 )
 
 # --- 全局常量定义 ---
-MAX_URLS = 8
+MAX_URLS = 64
+SERVICE_BATCH_SIZE = 8
 
 PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -40,14 +44,20 @@ PARAMETERS_SCHEMA: dict[str, Any] = {
             "items": {"type": "string", "minLength": 1},
             "minItems": 1,
             "maxItems": MAX_URLS,
-            "description": "Required. Target URLs to fetch. Each MUST be a full http(s) URL.",
+            "description": (
+                "Required. Target URLs to fetch. Each MUST be a full http(s) URL. "
+                "Large sets are automatically split into internal batches."
+            ),
         },
         "search_refs": {
             "type": "array",
             "items": {"type": "string", "minLength": 1},
             "minItems": 1,
             "maxItems": MAX_URLS,
-            "description": "Alternative to urls. Search refs returned by web_search.",
+            "description": (
+                "Alternative to urls. Search refs returned by web_search. "
+                "Large sets are automatically split into internal batches."
+            ),
         },
     },
     "required": ["mode"],
@@ -87,21 +97,23 @@ class WebFetchTool:
                     "WHEN TO TRIGGER:\n"
                     "  - MUST trigger when the user provides specific URL(s) and wants their content.\n"
                     "  - SHOULD trigger when search results surface concrete URLs that need to be read.\n"
-                    "  - SHOULD trigger when the target is a known non-HTML file (PDF/image/office doc) — the tool will hand it off and return a file_ref for document_parse.\n"
+                    "  - SHOULD trigger for normal HTML pages or when you are unsure whether a URL is HTML or a file.\n"
                     "DO NOT TRIGGER when:\n"
                     "  - The user only needs search candidates — use web_search instead.\n"
                     "  - Multiple related pages on the same site are needed — use web_crawl instead.\n"
+                    "  - The target is an obvious direct file URL (PDF/image/Office/spreadsheet/etc.) and the user needs document content — call document_parse with mode='from_direct_urls' instead.\n"
                     "  - The URL is already fetched in this session — reuse the cached result instead of re-fetching.\n"
                     "\n"
                     "INPUT RULES:\n"
                     "  - mode='from_direct_urls' => provide urls.\n"
                     "  - mode='from_search_results' => provide search_refs.\n"
-                    "  - urls MUST be full http(s) URLs, 1~8 items.\n"
-                    "  - search_refs MUST come from a prior web_search result in this session.\n"
+                    "  - urls MUST be full http(s) URLs; large sets are auto-batched internally.\n"
+                    "  - search_refs MUST come from a prior web_search result in this session; large sets are auto-batched internally.\n"
                     "\n"
                     "OUTPUT RULES:\n"
                     "  - HTML page: returns title and cleaned markdown.\n"
                     "  - Non-HTML file: returns file_ref (tfile_*) and file_label; pass file_ref to document_parse to extract content.\n"
+                    "  - Avoid producing this file_ref handoff when the original user input was already an obvious direct file URL; document_parse can parse those URLs directly.\n"
                     "  - Per-URL failure is returned in the failed list with a reason; do NOT silently drop failed URLs.\n"
                     "  - Within one session, do NOT re-fetch the same url unless new information is required.\n"
                 ),
@@ -173,8 +185,8 @@ class WebFetchTool:
         session_id = str(context["session_id"])
 
         try:
-            batch = await self._service.fetch_many(
-                urls,
+            batch = await self._fetch_batched(
+                urls=tuple(urls),
                 user_id=user_id,
                 session_id=session_id,
                 source_scope=source_scope,
@@ -283,3 +295,30 @@ class WebFetchTool:
                 )
 
         return urls, source_scope or "web_public"
+
+    async def _fetch_batched(
+        self,
+        *,
+        urls: tuple[str, ...],
+        user_id: str,
+        session_id: str,
+        source_scope: str,
+    ) -> WebFetchBatchResult:
+        items = []
+        failed = []
+        warnings: list[str] = []
+        for url_batch in batched(urls, batch_size=SERVICE_BATCH_SIZE):
+            batch = await self._service.fetch_many(
+                list(url_batch),
+                user_id=user_id,
+                session_id=session_id,
+                source_scope=source_scope,
+            )
+            items.extend(batch.items)
+            failed.extend(batch.failed)
+            warnings.extend(batch.warnings)
+        return WebFetchBatchResult(
+            items=tuple(items),
+            failed=tuple(failed),
+            warnings=tuple(warnings),
+        )

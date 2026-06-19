@@ -124,7 +124,6 @@ class ToolOutputCache:
             tool_name=rendered.tool_name,
             persisted_output_placeholder=persisted_output_placeholder,
             tool_output=model_text,
-            debug_output=rendered.visible_result,
         )
 
 
@@ -132,11 +131,9 @@ def _content_receipt_payload(receipt: ToolContentReceipt) -> dict[str, Any]:
     """将底层的 ToolContentReceipt 核心实体拍平为对模型可见的 XML 清晰字典载荷。"""
     return {
         "content_id": receipt.content_id,
-        "read_action": "tool_content_read",
         "content_role": receipt.content_role,
         "content_type": receipt.content_type,
         "original_length": receipt.original_length,
         "chunk_count": receipt.chunk_count,
-        "read_modes": list(receipt.read_modes),
         "selectors": list(receipt.selectors),
     }

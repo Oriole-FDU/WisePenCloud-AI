@@ -7,7 +7,6 @@ from enum import StrEnum
 class ToolContentReadMode(StrEnum):
     """ToolContentRead 支持的读取模式（字符串枚举）。"""
 
-    CONTINUOUS = "continuous"      # 按字符 offset 连续读取
     RANKED_EXPAND = "ranked_expand"  # 在候选 chunk 内排序后展开窗口
     REGEX_MATCH = "regex_match"    # 在候选 chunk 内正则匹配后展开窗口
 
@@ -36,10 +35,8 @@ class ToolContentReadRequest:
     """ToolContentRead 内部请求，包含所有读取参数。"""
 
     content_ids: tuple[str, ...]                                           # 要批量读取的内容 ID 集合
-    mode: ToolContentReadMode = ToolContentReadMode.CONTINUOUS             # 读取模式
+    mode: ToolContentReadMode = ToolContentReadMode.RANKED_EXPAND          # 读取模式
     selector: ToolContentSelector | None = None                            # 前置过滤器
-    offset: int | None = None                                              # continuous 模式：字符偏移起点
-    limit: int | None = None                                               # continuous 模式：最大字符数
     query: str | None = None                                               # ranked_expand 模式：排序查询文本
     top_k: int = 5                                                         # ranked_expand 模式：返回 Top-K
     pattern: str | None = None                                             # regex_match 模式：正则模式串
@@ -62,13 +59,26 @@ class ToolContentWindow:
     center_chunk: int | None = None         # 中心 chunk 序号
     chunk_start: int | None = None          # 窗口起始 chunk 序号
     chunk_end: int | None = None            # 窗口结束 chunk 序号
+    page: str | None = None                 # 页码
+    paragraph_title: str | None = None      # 段落标题
+    section_path: tuple[str, ...] = ()      # 小节路径
+    anchor_names: tuple[str, ...] = ()      # 锚点名称
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentReadItemResult:
-    """单个 ToolContent 的读取结果。"""
+class ToolContentReadMatch:
+    """跨文档读取后的单条全局命中结果。"""
 
     content_id: str                          # 实际读取的内容 ID（可能经过重定向）
     status: str                              # success 或 failed
-    windows: tuple[ToolContentWindow, ...] = ()  # 读取产生的窗口列表
+    window: ToolContentWindow | None = None  # 匹配到的窗口
     reason: str | None = None                # 单项失败原因
+
+
+@dataclass(frozen=True, slots=True)
+class ToolContentReadResult:
+    """tool_content_read 的全局有序结果。"""
+
+    mode: ToolContentReadMode
+    matches: tuple[ToolContentReadMatch, ...] = ()
+    failed: tuple[ToolContentReadMatch, ...] = ()

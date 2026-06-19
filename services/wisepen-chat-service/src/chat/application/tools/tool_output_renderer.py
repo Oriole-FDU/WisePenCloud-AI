@@ -90,7 +90,6 @@ class ToolOutputRenderer:
                 root_tag=_DEFAULT_ROOT_TAG,
                 payload=_error_payload(tool_result),
             ),
-            debug_output=_error_payload(tool_result),
         )
 
 

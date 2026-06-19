@@ -2,6 +2,7 @@ from .models import (
     WebContentCacheMode,
     WebContentCacheEntry,
     WebContentCacheValue,
+    WebContentCacheCleanupResult,
 )
 from .repository import WebContentCacheRepository
 from .refresh_queue import (
@@ -16,6 +17,7 @@ __all__ = [
     "WEB_FETCH_REFRESH_JOB",
     "WebContentCacheMode",
     "WebContentCacheEntry",
+    "WebContentCacheCleanupResult",
     "WebContentCacheRefreshJob",
     "WebContentCacheRefreshTaskPublisher",
     "WebContentCacheRepository",

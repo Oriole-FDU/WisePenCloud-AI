@@ -136,7 +136,6 @@ class ToolContentStore:
             content_role=stored.content_role,
             original_length=len(stored.text),
             chunk_count=len(stored.chunks),
-            read_modes=_read_modes(stored),
             selectors=_selectors(stored),
         )
 
@@ -194,13 +193,6 @@ def _first_section_path(value: object) -> tuple[str, ...]:
     first = value[0]
     items = first if isinstance(first, list | tuple) else value
     return tuple(str(item) for item in items)
-
-
-def _read_modes(stored: StoredToolContent) -> tuple[str, ...]:
-    if not stored.chunks:
-        return ("continuous",)
-    return "continuous", "ranked_expand", "regex_match"
-
 
 def _selectors(stored: StoredToolContent) -> tuple[str, ...]:
     selectors: list[str] = []

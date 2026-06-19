@@ -183,7 +183,7 @@ class MongoModelRepository(ModelRepository):
         if provider is None:
             raise ServiceException(ChatErrorCode.PROVIDER_NOT_FOUND)
 
-        if provider.type != ProviderType.OPENAI_COMPATIBLE_LLM:
+        if provider.type != ProviderType.OPENAI_COMPATIBLE:
             raise ServiceException(ChatErrorCode.MODEL_PROVIDER_TYPE_UNSUPPORTED)
 
         mapping = await ModelProviderMapping.find_one(

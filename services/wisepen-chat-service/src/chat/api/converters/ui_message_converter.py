@@ -110,10 +110,7 @@ def _build_assistant_ui_message(group: List[ChatMessage]) -> Optional[Dict[str, 
                         "toolCallId": tool_call_id,
                         "state": "output-available",
                         "input": parsed_input,
-                        "output": {
-                            "debug_output": tool_output,
-                            "model_consumed_xml": tool_output,
-                        },
+                        "output": tool_output
                     })
 
             if msg.content:

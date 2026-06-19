@@ -21,4 +21,3 @@ class RenderToolResult:
     tool_name: str
     persisted_output_placeholder: str | None
     tool_output: Any | None
-    debug_output: Any | None = None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Sequence
 
 import litellm
@@ -130,9 +131,11 @@ def _get_value(source: Any, key: str, default: Any = None) -> Any:
     return source.get(key, default) if isinstance(source, dict) else getattr(source, key, default)
 
 
-embedding_client = LiteLLMEmbeddingClient(
-    model=settings.EMBEDDING_MODEL,
-    api_base=settings.LLM_BASE_URL,
-    api_key=settings.LLM_API_KEY,
-    dimensions=settings.EMBEDDING_DIMENSIONS,
-)
+@lru_cache(maxsize=1)
+def build_embedding_client() -> LiteLLMEmbeddingClient:
+    return LiteLLMEmbeddingClient(
+        model=settings.EMBEDDING_MODEL,
+        api_base=settings.LLM_BASE_URL,
+        api_key=settings.LLM_API_KEY,
+        dimensions=settings.EMBEDDING_DIMENSIONS,
+    )

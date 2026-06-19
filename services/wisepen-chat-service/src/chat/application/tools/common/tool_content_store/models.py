@@ -64,5 +64,4 @@ class ToolContentReceipt:
     content_role: str  # 与 StoredToolContent.content_role 保持一致
     original_length: int  # 入库正文长度
     chunk_count: int  # 已生成的 chunk 数量
-    read_modes: tuple[str, ...] = ()  # 后续 services 可支持的读取模式
     selectors: tuple[str, ...] = ()  # 后续 services 可支持的 selector 类型

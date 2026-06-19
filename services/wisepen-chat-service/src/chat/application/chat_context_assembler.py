@@ -1,11 +1,16 @@
 ﻿from dataclasses import field, dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role, ChatSession
 from chat.domain.entities.skill import SkillMeta
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
 from common.logger import error, warn
+
+# IANA 时区数据库中 "Asia/Shanghai" 即中国标准时间（北京时间），无 "Asia/Beijing" 条目
+_BJT = ZoneInfo("Asia/Shanghai")
 
 
 @dataclass
@@ -113,9 +118,13 @@ class ChatContextAssembler:
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表"""
 
+        # 动态注入当前日期（北京时间）
+        current_date = datetime.now(_BJT).strftime("%Y-%m-%d %A")
+        system_prompt_with_date = f"{system_prompt}\n\nCurrent date: {current_date} (Beijing Time, UTC+8)"
+
         # Message 列表初始化并加入 System Prompt
         messages: List[ChatMessage] = [
-            ChatMessage(session_id=session_id, role=Role.SYSTEM, content=system_prompt)
+            ChatMessage(session_id=session_id, role=Role.SYSTEM, content=system_prompt_with_date)
         ]
 
         # 如果有摘要，将其注入为 user 消息，位于明细上下文之前

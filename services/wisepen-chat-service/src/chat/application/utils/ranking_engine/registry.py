@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from zeroentropy import AsyncZeroEntropy
-
-from chat.core.config.app_settings import settings
 from .engine import RankingEngine
 from .fusion import WeightedRrfFusion
 from .pipeline import RankingPipeline
-from .rerankers import ZeroEntropyReranker, ZeroEntropyRerankerConfig
+from .rerankers import get_default_zero_entropy_reranker
 from .scorers import BM25Scorer, FieldedBM25Scorer, FieldedBM25ScorerConfig
 from .text import RankingTokenizer
 
@@ -18,6 +15,7 @@ class RankingEngineRegistry:
 
     def __init__(self) -> None:
         tokenizer = RankingTokenizer()
+        reranker = get_default_zero_entropy_reranker()
         self._engines = {
             "services.ranked_expand": RankingEngine(
                 pipeline=RankingPipeline(
@@ -32,18 +30,7 @@ class RankingEngineRegistry:
                         ),
                     ),
                     fusion=WeightedRrfFusion(),
-                )
-            ),
-            "session.evidence_rank": RankingEngine(
-                pipeline=RankingPipeline(
-                    name="session.evidence_rank",
-                    reranker=ZeroEntropyReranker(
-                        client=AsyncZeroEntropy(api_key=settings.ZERO_ENTROPY_API_KEY),
-                        config=ZeroEntropyRerankerConfig(
-                            model=settings.EVIDENCE_RANKER_ZE_MODEL,
-                            top_n=settings.EVIDENCE_RANKER_ZE_TOP_N,
-                        ),
-                    ),
+                    reranker=reranker,
                 )
             ),
         }

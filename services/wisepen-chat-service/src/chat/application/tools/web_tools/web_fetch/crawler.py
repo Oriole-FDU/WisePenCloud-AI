@@ -2,16 +2,36 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
 from lxml import html as lxml_html
 
 from common.logger import info, warn
+from chat.application.tools.web_tools.web_content_cache.refresh_queue import (
+    WEB_FETCH_REFRESH_JOB,
+    WebContentCacheRefreshTaskPublisher,
+)
+from chat.application.tools.web_tools.web_content_cache.repository import (
+    WebContentCacheRepository,
+)
+from chat.application.tools.web_tools.web_content_cache.service import (
+    HtmlCacheWrite,
+    WebContentCacheService,
+)
 from .cleaners.base import BaseCleaner
 from .errors import WebFetchError
 from .fetchers.base import BaseFetcher, RawFetchOutput
 from .models import WebFetchResult
 from .utils import judge_quality
+
+_REFRESH_LOCK_TTL_SECONDS = 300
+
+
+@dataclass(frozen=True, slots=True)
+class _CrawlPage:
+    result: WebFetchResult
+    raw_html: str | None
 
 
 class WebCrawlService:
@@ -33,6 +53,7 @@ class WebCrawlService:
         "_httpx_fetcher",
         "_scrapling_fetcher",
         "_cleaner",
+        "_content_cache_service",
         "_min_text_length",
         "_concurrency",
     )
@@ -43,12 +64,18 @@ class WebCrawlService:
         httpx_fetcher: BaseFetcher,
         scrapling_fetcher: BaseFetcher,
         cleaner: BaseCleaner,
+        content_cache_repository: WebContentCacheRepository | None = None,
+        refresh_task_publisher: WebContentCacheRefreshTaskPublisher | None = None,
         min_text_length: int = 200,
         concurrency: int = 5,
     ) -> None:
         self._httpx_fetcher = httpx_fetcher
         self._scrapling_fetcher = scrapling_fetcher
         self._cleaner = cleaner
+        self._content_cache_service = WebContentCacheService(
+            repository=content_cache_repository,
+            refresh_task_publisher=refresh_task_publisher,
+        )
         self._min_text_length = min_text_length
         self._concurrency = concurrency
 
@@ -56,6 +83,9 @@ class WebCrawlService:
         self,
         seed_url: str,
         *,
+        user_id: str,
+        session_id: str,
+        source_scope: str = "web_public",
         max_pages: int = 100,
         max_depth: int = 3,
         same_domain: bool = True,
@@ -82,33 +112,32 @@ class WebCrawlService:
 
             # 并发抓取本批
             tasks = [
-                self._fetch_one_for_crawl(url, semaphore=semaphore)
+                self._fetch_one_for_crawl(
+                    url,
+                    semaphore=semaphore,
+                    user_id=user_id,
+                    session_id=session_id,
+                    source_scope=source_scope,
+                )
                 for url, _ in batch
             ]
-            raws = await asyncio.gather(*tasks, return_exceptions=True)
+            pages = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for (url, depth), raw in zip(batch, raws, strict=True):
-                if isinstance(raw, Exception):
-                    warn("web_crawl fetch failed", url=url, reason=str(raw))
+            for (url, depth), page in zip(batch, pages, strict=True):
+                if isinstance(page, Exception):
+                    warn("web_crawl fetch failed", url=url, reason=str(page))
                     continue
-                if raw is None:
-                    continue
-
-                # 非 HTML 文件跳过（不递归，不 handoff）
-                if raw.raw_html is None:
-                    info("web_crawl skip non-html", url=url, label=raw.file_label)
+                if page is None:
                     continue
 
-                # 清洗 + 构造结果
-                result = self._build_result(raw)
-                results.append(result)
+                results.append(page.result)
 
                 # 达到深度或页面数上限，不再扩展
-                if depth >= max_depth or len(results) >= max_pages:
+                if depth >= max_depth or len(results) >= max_pages or page.raw_html is None:
                     continue
 
                 # 提取链接入队
-                child_urls = _extract_links(raw.raw_html, url, base_domain, same_domain)
+                child_urls = _extract_links(page.raw_html, url, base_domain, same_domain)
                 for child_url in child_urls:
                     if child_url not in visited:
                         queue.append((child_url, depth + 1))
@@ -120,9 +149,21 @@ class WebCrawlService:
         url: str,
         *,
         semaphore: asyncio.Semaphore,
-    ) -> RawFetchOutput | None:
+        user_id: str,
+        session_id: str,
+        source_scope: str,
+    ) -> _CrawlPage | None:
         """单个 URL 抓取，httpx → scrapling fallback。"""
         async with semaphore:
+            cached = await self._read_cached_page(
+                url=url,
+                user_id=user_id,
+                session_id=session_id,
+                source_scope=source_scope,
+            )
+            if cached is not None:
+                return cached
+
             try:
                 raw = await self._httpx_fetcher.fetch(url)
             except WebFetchError as exc:
@@ -133,20 +174,34 @@ class WebCrawlService:
                     warn("web_crawl scrapling failed", url=url, reason=exc2.reason)
                     return None
 
+            if raw.raw_html is None:
+                info("web_crawl skip non-html", url=url, label=raw.file_label)
+                return None
+
             # 质量判断：httpx 结果若质量不足，尝试 scrapling
-            if raw.raw_html is not None:
-                cleaned = self._cleaner.clean(raw.raw_html, url=raw.final_url or url)
-                quality = judge_quality(raw=raw, cleaned=cleaned, min_text_length=self._min_text_length)
-                if quality.should_fallback:
-                    warn("web_crawl httpx quality insufficient, fallback to scrapling", url=url, reason=quality.reason)
-                    try:
-                        raw = await self._scrapling_fetcher.fetch(url)
-                    except WebFetchError as exc2:
-                        warn("web_crawl scrapling failed, using httpx result", url=url, reason=exc2.reason)
+            cleaned = self._cleaner.clean(raw.raw_html, url=raw.final_url or url)
+            quality = judge_quality(raw=raw, cleaned=cleaned, min_text_length=self._min_text_length)
+            if quality.should_fallback:
+                warn("web_crawl httpx quality insufficient, fallback to scrapling", url=url, reason=quality.reason)
+                try:
+                    fallback_raw = await self._scrapling_fetcher.fetch(url)
+                    if fallback_raw.raw_html is not None:
+                        raw = fallback_raw
+                except WebFetchError as exc2:
+                    warn("web_crawl scrapling failed, using httpx result", url=url, reason=exc2.reason)
 
-            return raw
+            page = self._build_page(raw, source_scope=source_scope)
+            if not page.result.warnings:
+                await self._write_html_cache(
+                    url=url,
+                    user_id=user_id,
+                    source_scope=source_scope,
+                    raw=raw,
+                    result=page.result,
+                )
+            return page
 
-    def _build_result(self, raw: RawFetchOutput) -> WebFetchResult:
+    def _build_page(self, raw: RawFetchOutput, *, source_scope: str) -> _CrawlPage:
         """将 RawFetchOutput 清洗为 WebFetchResult。"""
         warnings: list[str] = []
         cleaned = self._cleaner.clean(raw.raw_html or "", url=raw.final_url or raw.source_url)
@@ -154,14 +209,78 @@ class WebCrawlService:
         if quality.should_fallback:
             warnings.append(f"content quality insufficient: {quality.reason}")
 
-        return WebFetchResult(
-            source_url=raw.source_url,
-            final_url=raw.final_url,
-            status_code=raw.status_code,
-            content_type=raw.content_type,
-            title=cleaned.title,
-            markdown=cleaned.markdown,
-            warnings=tuple(warnings),
+        return _CrawlPage(
+            result=WebFetchResult(
+                source_url=raw.source_url,
+                final_url=raw.final_url,
+                status_code=raw.status_code,
+                content_type=raw.content_type,
+                title=cleaned.title,
+                markdown=cleaned.markdown,
+                warnings=tuple(warnings),
+                source_scope=source_scope,
+            ),
+            raw_html=raw.raw_html,
+        )
+
+    async def _read_cached_page(
+        self,
+        *,
+        url: str,
+        user_id: str,
+        session_id: str,
+        source_scope: str,
+    ) -> _CrawlPage | None:
+        cached = await self._content_cache_service.read_markdown_page(
+            url=url,
+            user_id=user_id,
+            session_id=session_id,
+            source_scope=source_scope,
+            refresh_job_prefix="web_crawl",
+            refresh_task_name=WEB_FETCH_REFRESH_JOB,
+            refresh_lock_ttl_seconds=_REFRESH_LOCK_TTL_SECONDS,
+        )
+        if cached is None:
+            return None
+
+        return _CrawlPage(
+            result=WebFetchResult(
+                source_url=cached.source_url,
+                final_url=cached.final_url,
+                status_code=cached.status_code,
+                content_type=cached.content_type,
+                title=cached.title,
+                markdown=cached.markdown,
+                source_scope=source_scope,
+            ),
+            raw_html=cached.raw_html,
+        )
+
+    async def _write_html_cache(
+        self,
+        *,
+        url: str,
+        user_id: str,
+        source_scope: str,
+        raw: RawFetchOutput,
+        result: WebFetchResult,
+    ) -> None:
+        await self._content_cache_service.write_html_markdown(
+            HtmlCacheWrite(
+                url=url,
+                user_id=user_id,
+                source_scope=source_scope,
+                final_url=result.final_url,
+                status_code=result.status_code,
+                content_type=result.content_type,
+                raw_html=raw.raw_html,
+                markdown=result.markdown,
+                title=result.title,
+                headers=raw.headers,
+                fetcher=raw.fetcher,
+                cleaner=self._cleaner.name,
+                producer="web_crawl",
+            )
         )
 
 

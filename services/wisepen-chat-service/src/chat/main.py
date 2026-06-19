@@ -99,6 +99,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         error("tool run file store gc scheduler start failed.", e=e)
 
+    # 启动 WebContentCache Mongo 后台 GC
+    try:
+        await container.web_content_cache_gc_scheduler().start()
+    except Exception as e:
+        error("web content cache gc scheduler start failed.", e=e)
+
     info("service ready.", service=bootstrap_settings.SERVICE_NAME, port=bootstrap_settings.SERVICE_PORT)
 
     # --- 运行阶段 ---
@@ -142,6 +148,12 @@ async def lifespan(app: FastAPI):
         await container.web_content_cache_refresh_task_publisher().close()
     except Exception as e:
         error("web content cache refresh task publisher close failed.", e=e)
+
+    # 停止 WebContentCache Mongo 后台 GC
+    try:
+        await container.web_content_cache_gc_scheduler().stop()
+    except Exception as e:
+        error("web content cache gc scheduler stop failed.", e=e)
 
     # 停止 ToolRunFileStore 后台 GC
     try:

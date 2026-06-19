@@ -50,3 +50,13 @@ class WebContentCacheValue:
     content_hash: str | None = None
     fetched_at: datetime | None = None
     metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class WebContentCacheCleanupResult:
+    """Mongo 正文缓存清理结果。"""
+
+    scanned: int = 0
+    deleted: int = 0
+    active: int = 0
+    failed: int = 0

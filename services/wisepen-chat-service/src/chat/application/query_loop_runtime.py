@@ -298,10 +298,7 @@ class QueryLoopRuntime:
         for result in tool_outputs.results:
             yield ToolOutputAvailableEvent(
                 call_id=result.tool_call_id,
-                output={
-                    "debug_output": result.debug_output,
-                    "model_consumed_xml": result.tool_output,
-                },
+                output=result.tool_output,
             )
             new_messages.append(
                 ChatMessage(

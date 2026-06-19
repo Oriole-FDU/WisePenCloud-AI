@@ -28,6 +28,7 @@ from chat.application.tools.web_tools.web_search.multi_hop import (
     judge_answer_sufficiency,
     rank_candidate_ids,
 )
+from chat.application.tools.web_tools.web_search.prompts import WEB_SEARCH_TOOL_DESCRIPTION
 from chat.application.tools.web_tools.web_search.providers.models import (
     ProviderSearchResponse,
 )
@@ -132,35 +133,7 @@ class WebSearchTool:
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="web_search",
-                description=(
-                    "Search the web for candidate pages and return ranked candidates.\n"
-                    "\n"
-                    "WHEN TO TRIGGER:\n"
-                    "  - MUST trigger when the user needs real-time or external information not present in context.\n"
-                    "  - SHOULD trigger for fact-checking or verifying claims against external sources.\n"
-                    "  - SHOULD trigger when the user explicitly asks to search or browse the web.\n"
-                    "DO NOT TRIGGER when:\n"
-                    "  - The answer is already available in the conversation context or attached knowledge base.\n"
-                    "  - The question is pure common knowledge with no time-sensitivity and the user does not request a source.\n"
-                    "\n"
-                    "INTERNAL FLOW (you do not control this, but it affects how you SHOULD construct inputs):\n"
-                    "  1. first_query is executed first.\n"
-                    "  2. If insufficient, a small internal model rewrites the query for the next hop.\n"
-                    "  3. If still insufficient and no rewrite is produced, fallback_query is used once.\n"
-                    "  4. After up to 3 hops, candidates are ranked: if sufficient, a small model returns up to 5 ranked ids; otherwise the first 3 candidates in original order are returned.\n"
-                    "  => Therefore first_query and fallback_query MUST cover different angles or languages so the multi-hop has real coverage to work with.\n"
-                    "\n"
-                    "INPUT RULES:\n"
-                    "  - first_query and fallback_query MUST NOT be identical or near-identical strings.\n"
-                    "  - fallback_query MUST differ from first_query in interpretation angle OR language.\n"
-                    "  - Do NOT pass question text verbatim as both queries; rephrase for each.\n"
-                    "\n"
-                    "OUTPUT RULES:\n"
-                    "  - supplier_answers is ONLY a retrieval hint; you MUST fetch URLs via web_fetch before using any result as evidence.\n"
-                    "  - recommended_ids is a priority hint, not a guarantee of correctness; verify by fetching.\n"
-                    "  - If web_search fails (network/quota/empty), inform the user; do NOT silently answer from parametric memory.\n"
-                    "  - Within one session, do NOT re-issue web_search for the same question unless new information is required.\n"
-                ),
+                description=WEB_SEARCH_TOOL_DESCRIPTION,
                 parameters_schema=ToolParametersSchema(PARAMETERS_SCHEMA),
             ),
             policy=ToolPolicy(
@@ -258,7 +231,7 @@ class WebSearchTool:
 
         # 4. 交叉计算推荐展示结果
         recommended_ids = await self._select_recommended_ids(
-            question=question,
+            first_query=first_query,
             candidates=candidates,
             responses=merged_result.responses,
             sufficiency=sufficiency,
@@ -301,7 +274,7 @@ class WebSearchTool:
 
             # 判断当前累积上下文的信息充足度
             sufficiency = await judge_answer_sufficiency(
-                question=question,
+                search_query=query,
                 current_text=_search_context_text(results),
             )
 
@@ -325,7 +298,7 @@ class WebSearchTool:
     async def _select_recommended_ids(
         self,
         *,
-        question: str,
+        first_query: str,
         candidates: tuple[WebSearchCandidate, ...],
         responses: tuple[ProviderSearchResponse, ...],
         sufficiency: AnswerSufficiency | None,
@@ -337,7 +310,7 @@ class WebSearchTool:
         # 主干路径：若多跳信息充足，调度微型模型计算相关性精排，截取前 5
         if sufficiency and sufficiency.sufficient:
             ranked = await rank_candidate_ids(
-                question=question,
+                search_query=first_query,
                 candidates_text=_candidates_text(candidates, responses=responses),
             )
             if ranked:

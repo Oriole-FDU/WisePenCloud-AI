@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from chat.application.tools.common.batching import batched
 from chat.application.tools.common.tool_content_store import ToolContentStore
 from chat.application.tools.core import (
     ToolDefinition,
@@ -12,15 +13,17 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 from chat.application.tools.session_tools.tool_content_read.models import (
-    ToolContentReadItemResult,
     ToolContentReadMode,
     ToolContentReadRequest,
+    ToolContentReadResult,
     ToolContentSelector,
 )
 from chat.application.tools.session_tools.tool_content_read.service import ToolContentReadService
 from chat.application.tools.tool_settings import tool_settings
+from chat.application.utils.chunking_engine import UnitType
 
-# JSON Schema：定义 LLM 可调用的 tool_content_read 工具参数
+_UNIT_TYPE_ENUM = [unit_type.value for unit_type in UnitType]
+
 PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -31,175 +34,117 @@ PARAMETERS_SCHEMA: dict[str, Any] = {
                 "minLength": 1,
             },
             "minItems": 1,
-            "maxItems": 8,
+            "maxItems": 64,
             "description": (
-                "Required. One to eight cnt_* ids from previous <content_receipt> values. "
-                "The same mode, selector, offset, and window parameters apply to every content_id."
+                "Required. One or more cnt_* ids from previous <content_receipt> values. "
+                "Large sets are automatically split into internal batches."
             ),
         },
         "mode": {
             "type": "string",
-            "enum": [
-                "continuous",       # 按字符偏移连续读取
-                "ranked_expand",    # 按相关性排序后展开窗口
-                "regex_match",      # 正则匹配后展开窗口
-            ],
+            "enum": ["ranked_expand", "regex_match"],
             "description": (
-                "How to read the cached content. Use continuous to read by character offset, "
-                "ranked_expand to search the content "
-                "by a natural-language query, and regex_match to find exact patterns such as names, "
-                "URLs, IDs, headings, or quoted phrases. Use tool_content_batch_read when you already "
-                "have exact chunk_index values to expand."
+                "How to search cached content across one or more content_ids. "
+                "Use ranked_expand for natural-language retrieval across documents, and "
+                "regex_match for exact pattern matching across documents."
             ),
         },
         "selector": {
             "type": "object",
             "description": (
                 "Optional chunk prefilter applied before ranked_expand or regex_match. "
-                "Use it only when the receipt or previous read result exposed useful structure. "
-                "Multiple selector groups are intersected: for example sections plus unit_types means "
-                "chunks in those sections AND with those unit types."
+                "Multiple selector groups are intersected."
             ),
             "properties": {
                 "unit_types": {
                     "type": "array",
                     "items": {
                         "type": "string",
-                        "minLength": 1,
+                        "enum": _UNIT_TYPE_ENUM,
+                        "description": "One structural unit type value from the chunking engine UnitType enum.",
                     },
-                    "description": (
-                        "Restrict to chunks with these structural unit types, such as paragraph, "
-                        "heading, list, table, code, image, or quote when available."
-                    ),
+                    "description": "Optional. Restrict search to chunks carrying these structural unit types.",
                 },
                 "sections": {
                     "type": "array",
                     "items": {
                         "type": "string",
                         "minLength": 1,
+                        "description": "One section name or section path fragment.",
                     },
-                    "description": (
-                        "Restrict to matching section names or section path fragments. "
-                        "Use visible headings from previous read results or known document sections."
-                    ),
+                    "description": "Optional. Restrict search to matching section names or section path fragments.",
                 },
                 "pages": {
                     "type": "array",
                     "items": {
                         "type": "string",
                         "minLength": 1,
+                        "description": "One page label such as '3'.",
                     },
-                    "description": (
-                        "Restrict to page names or page labels when the cached content has page metadata."
-                    ),
+                    "description": "Optional. Restrict search to matching page labels when page metadata exists.",
                 },
                 "anchors": {
                     "type": "array",
                     "items": {
                         "type": "string",
                         "minLength": 1,
+                        "description": "One anchor name such as a table, figure, or equation label.",
                     },
-                    "description": (
-                        "Restrict to named anchors such as table, figure, code block, or extracted "
-                        "object names when available."
-                    ),
+                    "description": "Optional. Restrict search to matching anchor names.",
                 },
                 "chunk_indices": {
                     "type": "array",
                     "items": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "One chunk index within a content_id.",
                     },
-                    "description": (
-                        "Restrict to exact chunk indices reported by an earlier read result. "
-                        "This is only a prefilter for ranked_expand or regex_match. Use "
-                        "tool_content_batch_read to directly expand known chunk indices."
-                    ),
+                    "description": "Optional prefilter to restrict search to known chunk indices.",
                 },
-                "include_unknown": {  # 是否保留缺少结构元数据的 chunk
+                "include_unknown": {
                     "type": "boolean",
-                    "description": (
-                        "When selecting by unit_types, keep chunks that do not have unit_type metadata. "
-                        "Usually leave false to avoid broad noisy matches."
-                    ),
                     "default": False,
+                    "description": "Optional. When unit_types is used, keep chunks that do not carry unit_type metadata.",
                 },
             },
         },
-        "offset": {
-            "type": "integer",
-            "description": (
-                "For continuous mode only. Character offset to start reading from. "
-                "Use 0 for the beginning, or a start_offset from a previous window to continue."
-            ),
-        },
-        "limit": {
-            "type": "integer",
-            "description": (
-                "For continuous mode only. Maximum number of characters to read. "
-                "Use a focused value when you only need nearby context."
-            ),
-        },
         "query": {
             "type": "string",
-            "description": (
-                "Required for ranked_expand. A natural-language query describing the information "
-                "to find inside the cached content. Reuse the user's real information need, not "
-                "generic words like 'details'."
-            ),
+            "description": "Required for ranked_expand.",
         },
         "top_k": {
             "type": "integer",
-            "description": (
-                "For ranked_expand. Number of relevant windows to return before merge_before/"
-                "merge_after expansion. Use a small value when you need focused evidence."
-            ),
-            "default": 5
+            "default": 5,
+            "description": "For ranked_expand. Maximum number of globally ranked matches.",
         },
         "pattern": {
             "type": "string",
-            "description": (
-                "Required for regex_match. Python regular expression used to locate exact text "
-                "patterns. Write the exact regex directly, including inline modifiers such as "
-                "(?i) when needed. Do not use regex_match for vague keyword search; use ranked_expand."
-            ),
+            "description": "Required for regex_match.",
         },
         "max_matches": {
             "type": "integer",
-            "description": "For regex_match. Maximum number of matching windows to return.",
-            "default": 10
+            "default": 10,
+            "description": "For regex_match. Maximum number of matches across all content_ids.",
         },
-        "merge_before": {  # 以 center_chunk 为中心，向前扩展的 chunk 数
+        "merge_before": {
             "type": "integer",
-            "description": (
-                "For ranked_expand and regex_match. Number of chunks to include before "
-                "each selected center chunk. Increase when the answer depends on preceding context."
-            ),
-            "default": 0
+            "default": 0,
+            "description": "For ranked_expand and regex_match. Number of chunks to include before each matched center chunk.",
         },
-        "merge_after": {  # 以 center_chunk 为中心，向后扩展的 chunk 数
+        "merge_after": {
             "type": "integer",
-            "description": (
-                "For ranked_expand and regex_match. Number of chunks to include after "
-                "each selected center chunk. Increase when definitions, tables, or explanations continue."
-            ),
-            "default": 0
+            "default": 0,
+            "description": "For ranked_expand and regex_match. Number of chunks to include after each matched center chunk.",
         },
     },
-    "required": [
-        "content_ids",
-        "mode",
-    ],
+    "required": ["content_ids", "mode"],
+    "additionalProperties": False,
 }
 
 MAX_CONTENT_IDS = tool_settings.TOOL_CONTENT_READ_MAX_CONTENT_IDS
 
 
 class ToolContentReadTool:
-    """读取 ToolContentStore 中已缓存工具内容的统一工具。
-
-    对外暴露为 LLM 可调用的 tool（tool_content_read），
-    支持三种读取模式：continuous / ranked_expand / regex_match。
-    """
+    """跨文档检索已有 cnt_* 内容。"""
 
     __slots__ = ("_service", "_definition")
 
@@ -213,49 +158,45 @@ class ToolContentReadTool:
             llm_spec=ToolLLMSpec(
                 name="tool_content_read",
                 description=(
-                    "Read focused windows from cached tool output by content_ids.\n"
+                    "Search focused windows from cached tool output across one or more content_ids.\n"
                     "\n"
                     "WHEN TO TRIGGER:\n"
                     "  - MUST trigger when a previous tool returned a <content_receipt> instead of full inline content.\n"
-                    "  - SHOULD trigger when you need to inspect specific sections of cached content.\n"
+                    "  - SHOULD trigger when you need to find evidence across one or more cached documents.\n"
                     "DO NOT TRIGGER when:\n"
-                    "  - You already have exact chunk_index values — use tool_content_batch_read instead.\n"
-                    "  - You need to rerank cached chunks with a narrower query — use evidence_rank first.\n"
+                    "  - You need sequential offset-based reading from one content_id — use tool_content_sequential_read instead.\n"
                     "  - You need new content from the web — use web_fetch or web_crawl instead.\n"
                     "\n"
                     "INPUT RULES:\n"
-                    "  - content_ids MUST be 1~8 cnt_* ids from previous content receipts.\n"
-                    "  - mode MUST be one of: continuous (offset read), ranked_expand (semantic search), regex_match (exact pattern).\n"
-                    "  - query is required for ranked_expand; pattern is required for regex_match; offset/limit apply to continuous only.\n"
+                    "  - content_ids MUST be cnt_* ids from previous content receipts; large sets are auto-batched internally.\n"
+                    "  - mode MUST be one of: ranked_expand (semantic search), regex_match (exact pattern).\n"
+                    "  - query is required for ranked_expand; pattern is required for regex_match.\n"
                     "  - selector optionally prefilters chunks by unit_types, sections, pages, anchors, or chunk_indices.\n"
-                    "  - merge_before/merge_after expand windows around center chunks in ranked_expand and regex_match.\n"
+                    "  - merge_before/merge_after expand windows around center chunks.\n"
                     "\n"
                     "OUTPUT RULES:\n"
-                    "  - Returns window metadata plus readable text inline in each window.\n"
+                    "  - Returns globally ordered matches across content_ids, each carrying its content_id and readable window.\n"
                     "  - This tool reads existing cnt_* content and never creates another content receipt.\n"
                 ),
                 parameters_schema=ToolParametersSchema(PARAMETERS_SCHEMA),
             ),
             policy=ToolPolicy(
-                expose_by_default=True,      # 默认向 LLM 暴露
-                persist_output=True,         # 输出需要持久化到会话记录
-                risk_level=ToolRiskLevel.LOW,  # 低风险
-                required_context_keys=("session_id",),  # 执行上下文必须包含 session_id
+                expose_by_default=True,
+                persist_output=True,
+                risk_level=ToolRiskLevel.LOW,
+                required_context_keys=("session_id",),
                 timeout_seconds=tool_settings.TOOL_CONTENT_READ_TIMEOUT_SECONDS,
             ),
         )
 
     @property
     def definition(self) -> ToolDefinition:
-        """返回工具的元定义（供框架注册使用）。"""
         return self._definition
 
-    async def execute(self, context: dict[str, Any], **kwargs: Any) -> tuple[ToolContentReadItemResult, ...]:
-        """执行工具读取操作：解析请求 → 调用 Service → 返回普通结构化结果。"""
+    async def execute(self, context: dict[str, Any], **kwargs: Any) -> ToolContentReadResult:
         session_id = context["session_id"]
 
         try:
-            # 解析 selector 负载：从 kwargs 的 selector dict 转为 Typed 的 ToolContentSelector
             selector_payload = kwargs.get("selector") or {}
             selector = ToolContentSelector(
                 unit_types=tuple(selector_payload.get("unit_types") or ()),
@@ -265,15 +206,10 @@ class ToolContentReadTool:
                 chunk_indices=tuple(int(value) for value in (selector_payload.get("chunk_indices") or ())),
                 include_unknown=bool(selector_payload.get("include_unknown", False)),
             )
-            # 组装内部请求对象
-            content_ids = tuple(str(value) for value in kwargs["content_ids"])
-
             request = ToolContentReadRequest(
-                content_ids=content_ids,
+                content_ids=tuple(str(value) for value in kwargs["content_ids"]),
                 mode=ToolContentReadMode(str(kwargs["mode"])),
                 selector=selector,
-                offset=kwargs.get("offset"),
-                limit=kwargs.get("limit"),
                 query=kwargs.get("query"),
                 top_k=int(kwargs.get("top_k") or 5),
                 pattern=kwargs.get("pattern"),
@@ -281,16 +217,38 @@ class ToolContentReadTool:
                 merge_before=int(kwargs.get("merge_before") or 0),
                 merge_after=int(kwargs.get("merge_after") or 0),
             )
-            # 调用 Service 执行读取
-            return await self._service.read(request=request, session_id=session_id)
 
+            batch_size = max(1, int(MAX_CONTENT_IDS))
+            all_matches = []
+            all_failed = []
+            for batch_content_ids in batched(request.content_ids, batch_size=batch_size):
+                batch_result = await self._service.read(
+                    request=ToolContentReadRequest(
+                        content_ids=batch_content_ids,
+                        mode=request.mode,
+                        selector=request.selector,
+                        query=request.query,
+                        top_k=request.top_k,
+                        pattern=request.pattern,
+                        max_matches=request.max_matches,
+                        merge_before=request.merge_before,
+                        merge_after=request.merge_after,
+                    ),
+                    session_id=session_id,
+                )
+                all_matches.extend(batch_result.matches)
+                all_failed.extend(batch_result.failed)
+
+            return ToolContentReadResult(
+                mode=request.mode,
+                matches=tuple(all_matches),
+                failed=tuple(all_failed),
+            )
         except ToolExecutionError:
             raise
-
-        except Exception as e:
-            # 所有非 ToolExecutionError 异常统一包装为工具执行错误
+        except Exception as exc:
             raise ToolExecutionError(
                 reason="tool_content_read_failed",
-                detail_reason=str(e),
+                detail_reason=str(exc),
                 retryable=False,
-            ) from e
+            ) from exc

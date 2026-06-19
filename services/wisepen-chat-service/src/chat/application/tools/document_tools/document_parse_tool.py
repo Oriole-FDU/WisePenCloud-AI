@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
 from common.logger import warn
 
+from chat.application.tools.common.batching import batched
 from chat.application.tools.common.tool_run_file_store import ToolRunFileStore
 from chat.application.tools.common.tool_run_file_store.errors import (
     InvalidToolFileRefError,
@@ -16,6 +19,7 @@ from chat.application.tools.common.tool_run_file_store.errors import (
 )
 from chat.application.tools.core import (
     ToolDefinition,
+    ToolExecutionError,
     ToolLLMSpec,
     ToolParametersSchema,
     ToolPolicy,
@@ -36,6 +40,9 @@ from chat.application.tools.web_tools.web_content_cache.models import (
 from chat.application.tools.web_tools.web_content_cache.repository import (
     WebContentCacheRepository,
 )
+from chat.application.tools.web_tools.web_fetch.fetchers.base import BaseFetcher, RawFetchOutput
+from chat.application.tools.web_tools.web_fetch.errors import WebFetchError
+from chat.application.tools.web_tools.web_fetch.utils import filename_from_url
 from chat.application.tools.web_tools.web_content_cache.refresh_queue import (
     DOCUMENT_PARSE_REFRESH_JOB,
     WebContentCacheRefreshJob,
@@ -44,7 +51,8 @@ from chat.application.tools.web_tools.web_content_cache.refresh_queue import (
 from chat.application.tools.web_tools.web_content_cache.cache_ttl import compute_ttl
 from chat.application.tools.tool_settings import tool_settings
 
-MAX_DOCUMENT_PARSE_FILE_REFS = tool_settings.DOCUMENT_PARSE_MAX_FILE_REFS
+MAX_DOCUMENT_PARSE_FILE_REFS = 64
+SERVICE_BATCH_SIZE = tool_settings.DOCUMENT_PARSE_MAX_FILE_REFS
 DOCUMENT_PARSE_CONCURRENCY = tool_settings.DOCUMENT_PARSE_CONCURRENCY
 _DOCUMENT_PARSE_CACHE_PARSER_VERSION = "document_parse:v1"
 _REFRESH_LOCK_TTL_SECONDS = tool_settings.DOCUMENT_PARSE_REFRESH_LOCK_TTL_SECONDS
@@ -73,6 +81,7 @@ class DocumentParseTool:
     __slots__ = (
         "_content_cache_repository",
         "_definition",
+        "_direct_fetcher",
         "_file_store",
         "_parse_service",
         "_refresh_task_publisher",
@@ -85,31 +94,37 @@ class DocumentParseTool:
         parse_service: DocumentParseService,
         content_cache_repository: WebContentCacheRepository | None = None,
         refresh_task_publisher: WebContentCacheRefreshTaskPublisher | None = None,
+        direct_fetcher: BaseFetcher | None = None,
     ) -> None:
         self._file_store = file_store
         self._parse_service = parse_service
         self._content_cache_repository = content_cache_repository
         self._refresh_task_publisher = refresh_task_publisher
+        self._direct_fetcher = direct_fetcher
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="document_parse",
                 description=(
-                    "Parse temporary document files referenced by file_refs into Markdown.\n"
+                    "Parse temporary document files or direct file URLs into Markdown.\n"
                     "\n"
                     "WHEN TO TRIGGER:\n"
                     "  - MUST trigger when previous tools returned tfile_* references (e.g. from web_fetch, web_crawl, or uploads) and you need their textual content.\n"
+                    "  - MUST trigger directly when the user provides obvious file URLs (PDF, image, Office, spreadsheet, or similar non-HTML files) and asks for their content.\n"
                     "  - SHOULD trigger when the user asks to read, summarize, or answer questions about an attached document.\n"
                     "DO NOT TRIGGER when:\n"
-                    "  - You need to fetch URLs — use web_fetch or web_crawl instead.\n"
-                    "  - You already have content_ids from a previous parse — use tool_content_read or tool_content_batch_read instead.\n"
-                    "  - The file_ref is not a tfile_* value — never invent references.\n"
+                    "  - You need to read normal HTML pages — use web_fetch or web_crawl instead.\n"
+                    "  - You already have content_ids from a previous parse — use tool_content_read or tool_content_sequential_read instead.\n"
+                    "  - You only have a non-file web page URL; mode='from_direct_urls' is only for direct file URLs.\n"
                     "\n"
                     "INPUT RULES:\n"
-                    "  - file_refs MUST be 1~8 tfile_* values returned by previous tools in this session.\n"
-                    "  - Pass all selected file_refs in one array; the tool parses files concurrently.\n"
+                    "  - mode='from_web_fetch' => provide file_refs with tfile_* values returned by web_fetch or another previous tool.\n"
+                    "  - mode='from_direct_urls' => provide direct_urls with full http(s) file URLs.\n"
+                    "  - file_refs and direct_urls are mutually exclusive; never provide both.\n"
+                    "  - Pass all selected files in one array; the tool auto-batches large sets and parses files concurrently within each batch.\n"
+                    "  - Do not wrap obvious direct file URLs through web_fetch first; use mode='from_direct_urls' directly.\n"
                     "\n"
                     "OUTPUT RULES:\n"
-                    "  - Returns one item per file_ref with status success or failed.\n"
+                    "  - Returns one item per input file with status success or failed.\n"
                     "  - Each successfully parsed file produces a cacheable content unit; failed files return a reason code.\n"
                     "  - Use the suggested tool_content_read action to locate answer-relevant windows in the parsed Markdown."
                 ),
@@ -117,6 +132,14 @@ class DocumentParseTool:
                     {
                         "type": "object",
                         "properties": {
+                            "mode": {
+                                "type": "string",
+                                "enum": ["from_web_fetch", "from_direct_urls"],
+                                "description": (
+                                    "Required. Use from_web_fetch for tfile_* file_refs; "
+                                    "use from_direct_urls for obvious direct file URLs."
+                                ),
+                            },
                             "file_refs": {
                                 "type": "array",
                                 "items": {
@@ -126,12 +149,26 @@ class DocumentParseTool:
                                 "minItems": 1,
                                 "maxItems": MAX_DOCUMENT_PARSE_FILE_REFS,
                                 "description": (
-                                    "Required. One to eight tfile_* references produced by previous tools. "
-                                    "Pass all files for the same task in one call."
+                                    "Required when mode='from_web_fetch'. tfile_* references produced by previous tools. "
+                                    "Large sets are automatically split into internal batches."
+                                ),
+                            },
+                            "direct_urls": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                },
+                                "minItems": 1,
+                                "maxItems": MAX_DOCUMENT_PARSE_FILE_REFS,
+                                "description": (
+                                    "Required when mode='from_direct_urls'. Full http(s) direct file URLs. "
+                                    "Large sets are automatically split into internal batches. "
+                                    "Use this for obvious non-HTML file links instead of calling web_fetch first."
                                 ),
                             },
                         },
-                        "required": ["file_refs"],
+                        "required": ["mode"],
                         "additionalProperties": False,
                     }
                 ),
@@ -155,21 +192,53 @@ class DocumentParseTool:
         """批量解析文件引用，单项失败不影响其它文件。"""
         user_id = str(context["user_id"])
         session_id = str(context["session_id"])
-        file_refs = tuple(str(value) for value in kwargs["file_refs"])
+        mode = str(kwargs["mode"])
+        file_refs = tuple(str(value) for value in kwargs.get("file_refs", ()))
+        direct_urls = tuple(str(value) for value in kwargs.get("direct_urls", ()))
 
-        semaphore = asyncio.Semaphore(DOCUMENT_PARSE_CONCURRENCY)
-        item_results = await asyncio.gather(
-            *[
-                self._parse_one(
-                    semaphore=semaphore,
+        match mode:
+            case "from_web_fetch":
+                if not file_refs:
+                    raise ToolExecutionError(
+                        reason="missing_file_refs",
+                        detail_reason="file_refs is required when mode='from_web_fetch'.",
+                        retryable=False,
+                    )
+                if direct_urls:
+                    raise ToolExecutionError(
+                        reason="mixed_document_parse_inputs",
+                        detail_reason="direct_urls must not be provided when mode='from_web_fetch'.",
+                        retryable=False,
+                    )
+                item_results = await self._parse_file_ref_batches(
                     user_id=user_id,
                     session_id=session_id,
-                    file_ref=file_ref,
+                    file_refs=file_refs,
                 )
-                for file_ref in file_refs
-            ],
-            return_exceptions=False,
-        )
+            case "from_direct_urls":
+                if not direct_urls:
+                    raise ToolExecutionError(
+                        reason="missing_direct_urls",
+                        detail_reason="direct_urls is required when mode='from_direct_urls'.",
+                        retryable=False,
+                    )
+                if file_refs:
+                    raise ToolExecutionError(
+                        reason="mixed_document_parse_inputs",
+                        detail_reason="file_refs must not be provided when mode='from_direct_urls'.",
+                        retryable=False,
+                    )
+                item_results = await self._parse_direct_url_batches(
+                    user_id=user_id,
+                    session_id=session_id,
+                    direct_urls=direct_urls,
+                )
+            case _:
+                raise ToolExecutionError(
+                    reason="invalid_mode",
+                    detail_reason="mode must be 'from_web_fetch' or 'from_direct_urls'.",
+                    retryable=False,
+                )
 
         cacheable_texts: list[str] = []
         items: list[DocumentParseToolItem] = []
@@ -198,6 +267,50 @@ class DocumentParseTool:
             },
             cacheable_texts=tuple(cacheable_texts),
         )
+
+    async def _parse_file_ref_batches(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        file_refs: tuple[str, ...],
+    ) -> list[tuple[DocumentParseToolItem, str | None]]:
+        semaphore = asyncio.Semaphore(DOCUMENT_PARSE_CONCURRENCY)
+        results: list[tuple[DocumentParseToolItem, str | None]] = []
+        for batch_file_refs in batched(file_refs, batch_size=max(1, int(SERVICE_BATCH_SIZE))):
+            parse_inputs = [
+                self._parse_one(
+                    semaphore=semaphore,
+                    user_id=user_id,
+                    session_id=session_id,
+                    file_ref=file_ref,
+                )
+                for file_ref in batch_file_refs
+            ]
+            results.extend(await asyncio.gather(*parse_inputs, return_exceptions=False))
+        return results
+
+    async def _parse_direct_url_batches(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        direct_urls: tuple[str, ...],
+    ) -> list[tuple[DocumentParseToolItem, str | None]]:
+        semaphore = asyncio.Semaphore(DOCUMENT_PARSE_CONCURRENCY)
+        results: list[tuple[DocumentParseToolItem, str | None]] = []
+        for batch_direct_urls in batched(direct_urls, batch_size=max(1, int(SERVICE_BATCH_SIZE))):
+            parse_inputs = [
+                self._parse_direct_url(
+                    semaphore=semaphore,
+                    user_id=user_id,
+                    session_id=session_id,
+                    direct_url=direct_url,
+                )
+                for direct_url in batch_direct_urls
+            ]
+            results.extend(await asyncio.gather(*parse_inputs, return_exceptions=False))
+        return results
 
     async def _parse_one(
         self,
@@ -276,6 +389,182 @@ class DocumentParseTool:
                     ),
                     None,
                 )
+
+    async def _parse_direct_url(
+        self,
+        *,
+        semaphore: asyncio.Semaphore,
+        user_id: str,
+        session_id: str,
+        direct_url: str,
+    ) -> tuple[DocumentParseToolItem, str | None]:
+        """下载明显文件直链并复用 tfile 解析链路。"""
+        if self._direct_fetcher is None:
+            return (
+                DocumentParseToolItem(
+                    file_ref=direct_url,
+                    status="failed",
+                    reason="direct_url_fetch_unavailable",
+                ),
+                None,
+            )
+
+        url = direct_url.strip()
+        if not url.startswith(("http://", "https://")):
+            return (
+                DocumentParseToolItem(
+                    file_ref=direct_url,
+                    status="failed",
+                    reason="invalid_direct_url",
+                ),
+                None,
+            )
+
+        raw: RawFetchOutput | None = None
+        try:
+            metadata = _direct_url_metadata(url=url, final_url=url, content_type=None)
+            cache_hit = await self._read_parsed_web_cache(
+                user_id=user_id,
+                metadata=metadata,
+            )
+            if cache_hit is not None:
+                return (
+                    DocumentParseToolItem(
+                        file_ref=direct_url,
+                        status="success",
+                        file_name=filename_from_url(url),
+                        source_scope="web_public",
+                    ),
+                    cache_hit.markdown,
+                )
+
+            raw = await self._direct_fetcher.fetch(url)
+            if raw.file_path is None:
+                return (
+                    DocumentParseToolItem(
+                        file_ref=direct_url,
+                        status="failed",
+                        reason="direct_url_not_file",
+                    ),
+                    None,
+                )
+
+            cache_doc_id = await self._write_direct_url_cache_stub(
+                user_id=user_id,
+                raw=raw,
+            )
+            metadata = _direct_url_metadata(
+                url=raw.source_url,
+                final_url=raw.final_url or raw.source_url,
+                content_type=raw.content_type,
+                cache_doc_id=cache_doc_id,
+            )
+            record = await self._file_store.publish_file(
+                user_id=user_id,
+                session_id=session_id,
+                producer="document_parse",
+                path=raw.file_path,
+                filename=filename_from_url(raw.final_url or raw.source_url)
+                or f"download.{raw.file_label or 'bin'}",
+                content_type=raw.content_type,
+                ref_prefix="web_public",
+                metadata=metadata,
+            )
+            return await self._parse_one(
+                semaphore=semaphore,
+                user_id=user_id,
+                session_id=session_id,
+                file_ref=record.ref_id,
+            )
+        except WebFetchError as e:
+            return (
+                DocumentParseToolItem(
+                    file_ref=direct_url,
+                    status="failed",
+                    reason=f"direct_url_fetch_failed:{e.reason}",
+                ),
+                None,
+            )
+        except Exception:
+            return (
+                DocumentParseToolItem(
+                    file_ref=direct_url,
+                    status="failed",
+                    reason="direct_url_parse_failed",
+                ),
+                None,
+            )
+        finally:
+            if raw is not None and raw.file_path is not None:
+                with contextlib.suppress(OSError):
+                    Path(raw.file_path).unlink(missing_ok=True)
+
+    async def _write_direct_url_cache_stub(
+        self,
+        *,
+        user_id: str,
+        raw: RawFetchOutput,
+    ) -> str | None:
+        """为直链解析预创建 URL 缓存文档，后续解析结果回填 markdown。"""
+        repository = self._content_cache_repository
+        if repository is None:
+            return None
+
+        try:
+            now = datetime.now(timezone.utc)
+            ttl = compute_ttl(
+                headers=raw.headers,
+                now=now,
+                is_shared_cache=True,
+                status_code=raw.status_code or 200,
+            )
+            if ttl.no_store:
+                return None
+
+            canonical_url = raw.source_url.strip()
+            value = WebContentCacheValue(
+                id=None,
+                user_id=user_id,
+                canonical_url=canonical_url,
+                final_url=raw.final_url,
+                cache_mode=WebContentCacheMode.PUBLIC,
+                status_code=raw.status_code,
+                content_type=raw.content_type,
+                raw_html=None,
+                markdown=None,
+                fetched_at=now,
+                metadata={
+                    "source_kind": "web_fetch",
+                    "source_scope": "web_public",
+                    "source_url": raw.source_url,
+                    "final_url": raw.final_url,
+                    "fetcher": raw.fetcher,
+                    "file_label": raw.file_label,
+                    "cache_control": raw.headers.get("cache-control"),
+                },
+            )
+            doc_id = await repository.save_value(value)
+            await repository.set_entry(
+                WebContentCacheEntry(
+                    user_id=user_id,
+                    url_hash=sha256(canonical_url.encode("utf-8")).hexdigest(),
+                    canonical_url=canonical_url,
+                    mongo_doc_id=doc_id,
+                    cache_mode=WebContentCacheMode.PUBLIC,
+                    soft_expire_at=ttl.soft_expire_at,
+                    hard_expire_at=ttl.hard_expire_at,
+                    etag=raw.headers.get("etag"),
+                    last_modified=raw.headers.get("last-modified"),
+                )
+            )
+            return doc_id
+        except Exception:
+            warn(
+                "文档解析直链缓存占位写入失败",
+                source_url=raw.source_url,
+                audit_message="文档解析直链缓存占位写入失败，不影响本次解析结果返回。",
+            )
+            return None
 
     async def _read_parsed_web_cache(
         self,
@@ -559,3 +848,22 @@ def _source_scope_from_metadata(metadata: dict[str, object]) -> str | None:
 def _string_metadata(metadata: dict[str, object], key: str) -> str | None:
     value = metadata.get(key)
     return str(value) if isinstance(value, str) and value else None
+
+
+def _direct_url_metadata(
+    *,
+    url: str,
+    final_url: str | None,
+    content_type: str | None,
+    cache_doc_id: str | None = None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "source_kind": "web_fetch",
+        "source_scope": "web_public",
+        "source_url": url,
+        "final_url": final_url,
+        "content_type": content_type,
+    }
+    if cache_doc_id:
+        metadata["source_cache_doc_id"] = cache_doc_id
+    return metadata
