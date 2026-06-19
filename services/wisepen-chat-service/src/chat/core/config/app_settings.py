@@ -91,7 +91,7 @@ class AppSettings(BaseModel):
     # ── Third-Party Credentials (三方垂直领域鉴权) ─────────────────────
     OPENALEX_BASE_URL: str = "https://api.openalex.org"
     OPENALEX_API_KEY: str = "XgpyHsvgfEbhTmZ9E8rAFO"
-    GITHUB_TOKEN: str = "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"
+    GITHUB_TOKEN: str
 
     # ── Skill (技能召回) ───────────────────────────────────────────────
     SKILL_MATCH_TOP_K: int = 20                                          # 默认召回数量
