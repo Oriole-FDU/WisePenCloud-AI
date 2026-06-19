@@ -9,10 +9,9 @@ from typing import Dict, Optional
 
 import httpx
 
+from chat.domain.interfaces.file_loader import FileLoader
 from chat.service_client.file_storage_service_client import FileStorageClient
 from common.logger import error, info, warn
-
-from chat.domain.interfaces.file_loader import FileLoader
 
 
 class OssFileLoader(FileLoader):
@@ -22,14 +21,14 @@ class OssFileLoader(FileLoader):
     """
 
     def __init__(
-        self,
-        file_storage_client: FileStorageClient,
-        *,
-        cache_dir: Path,
-        download_duration_seconds: int = 900,
-        http_timeout: float = 10.0,
-        cache_ttl_seconds: int = 6 * 3600,
-        gc_interval_seconds: int = 30 * 60,
+            self,
+            file_storage_client: FileStorageClient,
+            *,
+            cache_dir: Path,
+            download_duration_seconds: int = 900,
+            http_timeout: float = 10.0,
+            cache_ttl_seconds: int = 6 * 3600,
+            gc_interval_seconds: int = 30 * 60,
     ) -> None:
         self._fsc = file_storage_client
         self._duration = int(download_duration_seconds)
@@ -61,7 +60,6 @@ class OssFileLoader(FileLoader):
                 pass
             self._gc_task = None
         await self._http.aclose()
-
 
     async def load_by_object_key(self, object_key: str) -> bytes:
         if not object_key:
@@ -102,7 +100,7 @@ class OssFileLoader(FileLoader):
             # 按字节读，资产可能是 .py/.md 文本，也可能是 .png/.pdf/.wasm 等二进制
             return cache_path.read_bytes()
         except OSError as e:
-            warn("oss object disk cache read failed.", cache_path=str(cache_path), exc=e)
+            warn("oss object disk cache read failed.", cache_path=str(cache_path), e=e)
             return None
 
     def _atomic_write(self, cache_path: Path, content: bytes) -> None:
@@ -127,7 +125,7 @@ class OssFileLoader(FileLoader):
             resp = await self._http.get(url)
             resp.raise_for_status()
         except httpx.HTTPError as e:
-            error("oss object download failed.", object_key=object_key, exc=e)
+            error("oss object download failed.", object_key=object_key, e=e)
             raise
         content = resp.content
         info("oss object written to disk cache.", object_key=object_key, bytes=len(content))
@@ -149,7 +147,7 @@ class OssFileLoader(FileLoader):
                             p.unlink(missing_ok=True)
                             removed += 1
                     except OSError as e:
-                        warn("oss object disk cache gc failed.", path=str(p), exc=e)
+                        warn("oss object disk cache gc failed.", path=str(p), e=e)
                 if removed:
                     info("oss object disk cache gc finished.", removed=removed, ttl_seconds=int(self._cache_ttl))
         except asyncio.CancelledError:

@@ -7,7 +7,6 @@ from __future__ import annotations
 from common.core.exceptions import RpcError
 from common.http.rpc_client import RpcClient
 
-
 _DEFAULT_SERVICE_NAME = "wisepen-file-storage-service"
 _GET_DOWNLOAD_URL_PATH = "/internal/storage/getDownloadUrl"
 _DEFAULT_DOWNLOAD_DURATION_SECONDS = 900

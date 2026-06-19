@@ -1,11 +1,7 @@
 from typing import Any, Dict
 
-from chat.application.tools.core.execution.hooks.base import ToolPreflightHook, ToolPreflightResult
-from chat.application.tools.core.llm.invocation import ToolInvocation
-from chat.service_client import AIAssetClient
-from chat.service_client.resource_service_client import ResourceClient
+from common.logger import warn
 
-from chat.core.config.app_settings import settings
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -14,9 +10,15 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
+from chat.application.tools.core.execution.hooks.base import ToolPreflightHook, ToolPreflightResult
+from chat.application.tools.core.llm.invocation import ToolInvocation
+from chat.application.tools.core.tool_return import ToolReturn
 from chat.application.tools.skill_tools.common import AllowedSkillIdCheck, build_skill_asset_output_placeholder, \
     SkillPermissionCheck
+from chat.application.tools.tool_settings import tool_settings
 from chat.domain.interfaces.file_loader import FileLoader
+from chat.service_client import AIAssetClient
+from chat.service_client.resource_service_client import ResourceClient
 
 
 class ValidSkillAssetPathCheck(ToolPreflightHook):
@@ -64,6 +66,7 @@ class LoadSkillAssetTool:
         file_loader: FileLoader,
         ai_asset_client: AIAssetClient,
         resource_client: ResourceClient,
+        max_output_chars: int,
     ) -> None:
         self._file_loader = file_loader
         parameters_schema: Dict[str, Any] = {
@@ -97,8 +100,8 @@ class LoadSkillAssetTool:
                 persisted_output_placeholder_factory=build_skill_asset_output_placeholder,
                 risk_level=ToolRiskLevel.MEDIUM,
                 required_context_keys=("allowed_skill_ids",),
-                timeout_seconds=8.0,
-                max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+                timeout_seconds=tool_settings.LOAD_SKILL_ASSET_TOOL_TIMEOUT_SECONDS,
+                max_output_chars=max_output_chars,
             ),
             preflight_hooks=(AllowedSkillIdCheck(), SkillPermissionCheck(resource_client), ValidSkillAssetPathCheck(ai_asset_client)),
         )
@@ -107,7 +110,7 @@ class LoadSkillAssetTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
-    async def execute(self, context: dict[str, Any], **kwargs: Any) -> str:
+    async def execute(self, context: dict[str, Any], **kwargs: Any) -> ToolReturn:
         skill_id = (kwargs.get("skill_id") or "").strip()
         path = (kwargs.get("path") or "").strip()
 
@@ -115,6 +118,15 @@ class LoadSkillAssetTool:
         try:
             raw = await self._file_loader.load_by_object_key(object_key)
         except Exception as e:
+            warn(
+                "skill asset load failed.",
+                e=e,
+                skill_id=skill_id,
+                path=path,
+                object_key=object_key,
+                reason="skill_asset_load_failed",
+                audit_message="技能资产对象读取失败，已包装为可重试工具错误。",
+            )
             raise ToolExecutionError(
                 reason="Skill Asset Load Failed",
                 detail_reason=f"Failed to load skill asset: {type(e).__name__}",
@@ -137,9 +149,11 @@ class LoadSkillAssetTool:
                 metadata={"skill_id": skill_id, "path": path, "bytes": len(raw)},
             )
 
-        return (
-            f"[Loaded Skill Asset] skill_id={skill_id} path={path}\n"
-            f"<skill_asset>\n"
-            f"{content}\n"
-            f"</skill_asset>"
+        return ToolReturn(
+            tag="loaded_skill_asset",
+            visible_result={
+                "skill_id": skill_id,
+                "path": path,
+                "content": content,
+            },
         )

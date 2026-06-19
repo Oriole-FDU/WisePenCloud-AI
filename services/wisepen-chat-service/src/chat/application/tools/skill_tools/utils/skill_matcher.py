@@ -1,11 +1,10 @@
 ﻿from abc import ABC, abstractmethod
 from typing import List, Set, Optional
 
-from common.logger import error
-
 from chat.core.config.app_settings import settings
-from chat.service_client import AIAssetClient
 from chat.domain.entities.skill import SkillMeta
+from chat.service_client import AIAssetClient
+from common.logger import error
 
 
 class SkillMatcher(ABC):
@@ -43,7 +42,7 @@ class DefaultSkillMatcher(SkillMatcher):
         try:
             skill_meta_list = await self._ai_asset_client.list_published_skills_meta(on_demand_skill_ids)
         except Exception as e:
-            error("skill metadata resolve failed.", count=len(on_demand_skill_ids), exc=e)
+            error("skill metadata resolve failed.", count=len(on_demand_skill_ids), e=e)
 
         top_k = max(1, skill_match_top_k or settings.SKILL_MATCH_TOP_K)
         return skill_meta_list[:top_k]

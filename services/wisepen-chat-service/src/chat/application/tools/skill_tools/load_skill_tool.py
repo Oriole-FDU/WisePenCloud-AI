@@ -1,11 +1,7 @@
 from typing import Any, Dict
 
-from chat.domain.entities import Skill
-from chat.domain.interfaces import FileLoader
-from chat.service_client import AIAssetClient
-from chat.service_client.resource_service_client import ResourceClient
+from common.logger import warn
 
-from chat.core.config.app_settings import settings
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -14,7 +10,13 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
-from chat.application.tools.skill_tools.common import AllowedSkillIdCheck, build_skill_output_placeholder, SkillPermissionCheck
+from chat.application.tools.skill_tools.common import AllowedSkillIdCheck, build_skill_output_placeholder, \
+    SkillPermissionCheck
+from chat.application.tools.tool_settings import tool_settings
+from chat.domain.entities import Skill
+from chat.domain.interfaces import FileLoader
+from chat.service_client import AIAssetClient
+from chat.service_client.resource_service_client import ResourceClient
 
 
 class LoadSkillTool:
@@ -28,6 +30,7 @@ class LoadSkillTool:
         file_loader: FileLoader,
         ai_asset_client: AIAssetClient,
         resource_client: ResourceClient,
+        max_output_chars: int,
     ) -> None:
         self._file_loader = file_loader
         self._ai_asset_client = ai_asset_client
@@ -58,8 +61,8 @@ class LoadSkillTool:
                 persisted_output_placeholder_factory=build_skill_output_placeholder,
                 risk_level=ToolRiskLevel.MEDIUM,
                 required_context_keys=("allowed_skill_ids",),
-                timeout_seconds=8.0,
-                max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+                timeout_seconds=tool_settings.LOAD_SKILL_TOOL_TIMEOUT_SECONDS,
+                max_output_chars=max_output_chars,
             ),
             preflight_hooks=(AllowedSkillIdCheck(), SkillPermissionCheck(resource_client)),
         )
@@ -111,6 +114,14 @@ class LoadSkillTool:
         try:
             raw = await self._file_loader.load_by_object_key(skill.skill_md_object_key)
         except Exception as e:
+            warn(
+                "skill load failed.",
+                e=e,
+                skill_id=skill.skill_id,
+                object_key=skill.skill_md_object_key,
+                reason="skill_md_load_failed",
+                audit_message="Skill.md 对象读取失败，已包装为可重试工具错误。",
+            )
             raise ToolExecutionError(
                 reason="Skill.md Load Failed",
                 detail_reason=f"Failed to load asset: {type(e).__name__}",

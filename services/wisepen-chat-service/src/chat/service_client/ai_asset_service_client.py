@@ -6,7 +6,6 @@ from chat.domain.entities import SkillMeta, Skill
 from common.core.exceptions import RpcError
 from common.http.rpc_client import RpcClient
 
-
 _DEFAULT_SERVICE_NAME = "wisepen-ai-asset-service"
 _GET_SKILL_PATH = "/internal/skill/getSkillByResourceId"
 _LIST_PUBLISHED_SKILLS_META_PATH = "/internal/skill/listPublishedSkillsMetaByResourceIds"
