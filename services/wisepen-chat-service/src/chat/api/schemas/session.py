@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
 from typing import List, Optional, Any
+
+from pydantic import BaseModel, Field
 
 from chat.domain.entities import ChatSession
 
@@ -8,11 +9,14 @@ class CreateSessionRequest(BaseModel):
     title: Optional[str] = Field(default="New Chat", description="会话标题")
     agent_id: Optional[str] = Field(default=None, description="绑定的 Agent 资源 ID")
 
+
 class SetSessionAgentRequest(BaseModel):
     agent_id: Optional[str] = Field(default=None, description="绑定的 Agent 资源 ID")
 
+
 class RenameSessionRequest(BaseModel):
     new_title: Optional[str] = Field(default=None, description="新会话标题")
+
 
 class PinSessionRequest(BaseModel):
     set_pin: bool = Field(default=False, description="是否置顶")
@@ -22,6 +26,7 @@ class SessionResponse(BaseModel):
     id: str
     user_id: str
     title: str
+    is_pinned: bool = False
     created_at: str
     updated_at: str
     agent_id: Optional[str] = None
@@ -33,6 +38,7 @@ class SessionResponse(BaseModel):
             id=str(session.id) if session.id else "",
             user_id=session.user_id,
             title=session.title,
+            is_pinned=session.is_pinned,
             created_at=session.created_at.isoformat(),
             updated_at=session.updated_at.isoformat(),
             agent_id=session.agent_id,

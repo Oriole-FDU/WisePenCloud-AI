@@ -1,15 +1,15 @@
-from typing import List, Any, Dict
-from fastapi import APIRouter, Depends
+from typing import List
+
 from dependency_injector.wiring import inject, Provide
+from fastapi import APIRouter, Depends
 
 from chat.api.schemas.memory import MemoryItemResponse
+from chat.container import Container
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import MemoryProvider
-from chat.container import Container
-
-from common.security import require_login
-from common.core.exceptions import ServiceException
 from common.core.domain import R
+from common.core.exceptions import ServiceException
+from common.security import require_login
 
 router = APIRouter()
 
@@ -17,8 +17,8 @@ router = APIRouter()
 @router.get("/listMemories", response_model=R[List[MemoryItemResponse]])
 @inject
 async def list_memories(
-    user_id: str = Depends(require_login),
-    memory: MemoryProvider = Depends(Provide[Container.memory_provider]),
+        user_id: str = Depends(require_login),
+        memory: MemoryProvider = Depends(Provide[Container.memory_provider]),
 ):
     """GET /chat/memories — 返回当前用户的全部长期记忆条目，供记忆管理面板展示。"""
     try:
@@ -38,9 +38,9 @@ async def list_memories(
 @router.post("/deleteMemory", response_model=R, status_code=200)
 @inject
 async def delete_memory(
-    memory_id: str,
-    user_id: str = Depends(require_login),
-    memory: MemoryProvider = Depends(Provide[Container.memory_provider]),
+        memory_id: str,
+        user_id: str = Depends(require_login),
+        memory: MemoryProvider = Depends(Provide[Container.memory_provider]),
 ):
     """DELETE /chat/memories/{memory_id} — 删除单条长期记忆，用于用户主动纠错（幻觉修正）场景。"""
     try:
@@ -55,8 +55,8 @@ async def delete_memory(
 @router.delete("/deleteAllMemories", response_model=R, status_code=200)
 @inject
 async def delete_all_memories(
-    user_id: str = Depends(require_login),
-    memory: MemoryProvider = Depends(Provide[Container.memory_provider]),
+        user_id: str = Depends(require_login),
+        memory: MemoryProvider = Depends(Provide[Container.memory_provider]),
 ):
     """DELETE /chat/memories — 清空当前用户的全部长期记忆，满足 GDPR 等隐私合规注销需求。"""
     try:

@@ -1,22 +1,22 @@
-﻿import asyncio
+import asyncio
+import traceback
 import uuid
 
 from beanie import PydanticObjectId
+from dependency_injector.wiring import inject, Provide
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
-from dependency_injector.wiring import inject, Provide
 
+from chat.api.schemas.chat import ChatRequest
 from chat.api.vercel_formats import (
     message_start, message_finish, stream_done, abort, error as sse_error,
 )
-
-from common.security import require_login
-from common.logger import error, info
-from chat.api.schemas.chat import ChatRequest
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.container import Container
 from chat.core.config.app_settings import settings
 from chat.domain.repositories import SessionRepository
+from common.logger import error, info
+from common.security import require_login
 
 router = APIRouter()
 
@@ -33,14 +33,21 @@ async def _vercel_generator(chat_gen, model_name: str):
         yield message_finish()
         yield stream_done()
 
-    except asyncio.CancelledError:
-        info("chat stream generation cancelled.")
+    except asyncio.CancelledError as e:
+        info(
+            "chat stream generation cancelled.",
+            model=model_name,
+            message_id=message_id,
+            exc_type=type(e).__name__,
+            exc_str=str(e) if str(e) else "(no message)",
+            traceback=traceback.format_exc(),
+        )
         yield abort(reason="user_cancelled")
         yield stream_done()
         raise
 
     except Exception as e:
-        error("chat stream generation failed.", exc=e)
+        error("chat stream generation failed.", e=e)
         yield sse_error(error_text=str(e))
         yield stream_done()
 
@@ -102,4 +109,3 @@ async def chat_completions(
             "x-vercel-ai-ui-message-stream": "v1",
         },
     )
-

@@ -1,22 +1,22 @@
-from fastapi import APIRouter, Depends, Query
 from dependency_injector.wiring import inject, Provide
+from fastapi import APIRouter, Depends, Query
 
+from chat.api.converters import convert_to_ui_messages
 from chat.api.schemas.session import (
     SessionResponse, CreateSessionRequest, RenameSessionRequest,
     PinSessionRequest, SetSessionAgentRequest, UIMessageResponse,
 )
-from chat.api.converters import convert_to_ui_messages
 from chat.application.agents import AgentResolver
+from chat.container import Container
 from chat.domain.entities import ChatSession
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.repositories import SessionRepository, MessageRepository
-from chat.container import Container
-
-from common.security import require_login
 from common.core.domain import R, PageResult
 from common.core.exceptions import ServiceException
+from common.security import require_login
 
 router = APIRouter()
+
 
 @router.post("/createSession", response_model=R[SessionResponse], status_code=200)
 @inject
@@ -94,6 +94,7 @@ async def rename_session(
 ):
     session = await session_repo.rename_session(session_id, user_id, req.new_title or "New Chat")
     return R.success(data=SessionResponse.from_entity(session))
+
 
 @router.post("/pinSession", response_model=R[SessionResponse], status_code=200)
 @inject

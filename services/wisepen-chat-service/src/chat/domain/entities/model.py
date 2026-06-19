@@ -6,6 +6,7 @@ from beanie import Document, PydanticObjectId
 from pydantic import Field
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
+
 class ModelScope(str, Enum):
     SYSTEM = "SYSTEM"  # 平台内置模型
     USER = "USER"      # 用户自定义模型

@@ -62,7 +62,7 @@ class CreateUserProviderRequest(BaseModel):
     name: str
     api_base_url: str
     api_key: str
-    type: ProviderType = ProviderType.OPENAI_COMPATIBLE_LLM
+    type: ProviderType = ProviderType.OPENAI_COMPATIBLE
 
 
 class UpdateUserProviderRequest(BaseModel):
@@ -76,6 +76,7 @@ class UpdateUserProviderRequest(BaseModel):
 
 class DeleteUserProviderRequest(BaseModel):
     provider_id: str
+
 
 class CreateUserModelRequest(BaseModel):
     display_name: str

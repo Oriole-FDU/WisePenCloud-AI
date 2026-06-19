@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import AsyncGenerator, List, Dict, Optional, Any
+
 from chat.domain.entities import ChatMessage
+
 
 @dataclass
 class LLMStreamChunk:

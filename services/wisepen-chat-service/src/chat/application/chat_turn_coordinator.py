@@ -1,28 +1,32 @@
 ﻿from typing import Optional, List, Dict, Any, Set
+
 from beanie import PydanticObjectId
 from fastapi import BackgroundTasks
 
-from common.logger import error
-
-from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role
-from chat.domain.interfaces.llm import LLMProvider
-from chat.domain.interfaces.memory import MemoryProvider
-from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, ProviderRepository
-from common.core.exceptions import ServiceException
-from chat.application.chat_context_assembler import ChatContextAssembler
-from chat.application.query_loop_runtime import QueryLoopRuntime
+from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.agents import (
     AgentResolver,
     DefaultAgentResolver,
 )
-from chat.application.events import StepFinishEvent, ErrorEvent
-from chat.api.vercel_sse_mapper import to_vercel_sse
+from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
-from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
+from chat.application.events import StepFinishEvent, ErrorEvent
+from chat.application.query_loop_runtime import QueryLoopRuntime
 from chat.application.tools.core import ToolRegistry
+from chat.application.tools.core.execution.dispatcher import ToolDispatcher
+from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
+from chat.application.tools.web_tools.web_search.runtime_context import (
+    WebSearchRuntimeContextResolver,
+)
+from chat.core.config.app_settings import settings
+from chat.domain.entities import ChatMessage, Role
+from chat.domain.interfaces.llm import LLMProvider
+from chat.domain.interfaces.memory import MemoryProvider
+from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, \
+    ProviderRepository
+from common.core.exceptions import ServiceException
 from common.kafka.producer import KafkaProducerClient
-
+from common.logger import error
 
 # Skill 工具默认不暴露；仅在本轮存在可展示 Skill 时整体解禁
 _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
@@ -45,8 +49,10 @@ class ChatTurnCoordinator:
             message_repo: MessageRepository,
             hot_context_repo: HotContextRepository,
             tool_registry: ToolRegistry,
+            tool_dispatcher: ToolDispatcher,
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
+            web_search_runtime_context_resolver: WebSearchRuntimeContextResolver,
             agent_resolver: AgentResolver | None = None,
     ):
         self._memory = memory
@@ -56,7 +62,10 @@ class ChatTurnCoordinator:
             message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo
         )
         self._tool_registry = tool_registry
-        self._query_loop_runtime = QueryLoopRuntime(llm=llm)
+        self._query_loop_runtime = QueryLoopRuntime(
+            llm=llm,
+            tool_dispatcher=tool_dispatcher,
+        )
         self._turn_finalizer = ChatTurnFinalizer(
             llm=llm, memory=memory,
             message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo,
@@ -64,6 +73,7 @@ class ChatTurnCoordinator:
             kafka_producer=kafka_producer
         )
         self._skill_matcher = skill_matcher
+        self._web_search_runtime_context_resolver = web_search_runtime_context_resolver
         self._agent_resolver = agent_resolver or DefaultAgentResolver()
 
     # -------------------------------------------------------------------------
@@ -149,10 +159,16 @@ class ChatTurnCoordinator:
                 low_watermark_ratio=memory_policy.low_watermark_ratio,
             )
 
+        search_config = await self._web_search_runtime_context_resolver.resolve(
+            user_id=user_id,
+            session_id=session_id,
+        )
+
         # 构建工具上下文
         tool_context: dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
+            "search_config": search_config
         }
 
         # 构建Skill视图
@@ -247,7 +263,7 @@ class ChatTurnCoordinator:
                         chat_record_messages.append(event.final_assistant_message)
                 yield to_vercel_sse(event)
         except ServiceException as e:
-            error("chat stream generation failed.", session_id=session_id, exc=e)
+            error("chat stream generation failed.", session_id=session_id, e=e)
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
 

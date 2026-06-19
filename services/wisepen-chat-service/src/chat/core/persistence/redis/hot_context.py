@@ -1,9 +1,11 @@
 import json
-import redis.asyncio as redis
 from typing import List
-from chat.domain.repositories import HotContextRepository
-from chat.domain.entities import ChatMessage
+
+import redis.asyncio as redis
+
 from chat.core.config.app_settings import settings
+from chat.domain.entities import ChatMessage
+from chat.domain.repositories import HotContextRepository
 
 
 class RedisHotContext(HotContextRepository):
@@ -45,5 +47,3 @@ class RedisHotContext(HotContextRepository):
             await pipe.rpush(key, *serialized)
             await pipe.expire(key, self.ttl)
             await pipe.execute()
-
-

@@ -4,16 +4,6 @@ from typing import Dict, List, Optional, Iterator, AsyncIterator, Union
 
 from beanie import PydanticObjectId
 
-from chat.application.tools import ToolScope
-from chat.application.tools.core.execution.dispatcher import ToolDispatcher
-from chat.application.tools.core.llm.invocation import ToolCallMessageAccumulator, tool_call_parse
-from chat.application.tools.core.llm.renderer import tool_result_renderer
-from common.logger import warn
-from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role
-from chat.domain.interfaces import LLMProvider
-from chat.domain.error_codes import ChatErrorCode
-from common.core.exceptions import ServiceException
 from chat.application.events import (
     ReasoningDeltaEvent,
     ReasoningEndEvent,
@@ -28,6 +18,16 @@ from chat.application.events import (
     ToolInputStartEvent,
     ToolOutputAvailableEvent,
 )
+from chat.application.tools import ToolScope
+from chat.application.tools.core.execution.dispatcher import ToolDispatcher
+from chat.application.tools.core.llm.invocation import ToolCallMessageAccumulator, tool_call_parse
+from chat.core.config.app_settings import settings
+from chat.domain.entities import ChatMessage, Role
+from chat.domain.error_codes import ChatErrorCode
+from chat.domain.interfaces import LLMProvider
+from common.core.exceptions import ServiceException
+from common.logger import warn
+
 
 class _StepDeltaInterpreter:
     """
@@ -119,9 +119,13 @@ class QueryLoopRuntime:
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
     """
 
-    def __init__(self, llm: LLMProvider) -> None:
+    def __init__(
+        self,
+        llm: LLMProvider,
+        tool_dispatcher: ToolDispatcher,
+    ) -> None:
         self.llm = llm
-        self._tool_dispatcher = ToolDispatcher()
+        self._tool_dispatcher = tool_dispatcher
 
     """
     ReAct 循环主入口 (QueryLoop)
@@ -292,9 +296,6 @@ class QueryLoopRuntime:
         tool_outputs = await self._tool_dispatcher.dispatch(invocations, tool_scope)
 
         for result in tool_outputs.results:
-            tool = tool_scope.get(result.tool_invocation.tool_name)
-            result = tool_result_renderer(result, tool.definition if tool else None)
-
             yield ToolOutputAvailableEvent(
                 call_id=result.tool_call_id,
                 output=result.tool_output,

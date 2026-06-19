@@ -1,12 +1,10 @@
-﻿from copy import deepcopy
-from typing import List, Optional
+﻿import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
-import uuid
+from typing import List, Optional
 
 from chat.application.agents import AgentMemoryPolicy
 from chat.application.chat_context_assembler import WindowedMessages
-from common.logger import error
-
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.model import ModelScope
@@ -15,6 +13,7 @@ from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository, ProviderRepository
 from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.kafka.producer import KafkaProducerClient
+from common.logger import error
 
 
 class ChatTurnFinalizer:
@@ -100,7 +99,7 @@ class ChatTurnFinalizer:
             try:
                 await self.hot_context_repo.append_messages(session_id, chat_record_messages)
             except Exception as e:
-                error("chat record message hot-context append failed.", session_id=session_id, exc=e)
+                error("chat record message hot-context append failed.", session_id=session_id, e=e)
 
         # 处理持久化占位符，如果有占位符应使用占位符替换原本的内容
         chat_record_messages = self.messages_placeholder_handler(chat_record_messages)
@@ -113,14 +112,14 @@ class ChatTurnFinalizer:
 
                 await self.message_repo.save_messages(chat_record_messages)
             except Exception as e:
-                error("chat record message archive failed.", session_id=session_id, exc=e)
+                error("chat record message archive failed.", session_id=session_id, e=e)
 
         # Memory 摄入 (摄入占位符处理的消息内容)
         if memory_policy.enable_long_term_memory:
             try:
                 await self.memory.add_interaction(user_id=user_id, messages=chat_record_messages)
             except Exception as e:
-                error("chat record message write long-term memory failed.", user_id=user_id, exc=e)
+                error("chat record message write long-term memory failed.", user_id=user_id, e=e)
 
 
     async def auto_generate_title(self, session_id: str, user_id: str, user_query: str) -> None:
@@ -157,7 +156,7 @@ class ChatTurnFinalizer:
 
             await self.session_repo.rename_session(session_id, user_id, new_title)
         except Exception as e:
-            error("chat title generation failed.", session_id=session_id, exc=e)
+            error("chat title generation failed.", session_id=session_id, e=e)
 
     async def summarize_and_compress(
         self,
@@ -221,7 +220,7 @@ class ChatTurnFinalizer:
             )
             new_summary = message_response.raw.choices[0].message.content or ""
         except Exception as e:
-            error("chat summary generation failed.", session_id=session_id, exc=e)
+            error("chat summary generation failed.", session_id=session_id, e=e)
             return
 
         if not new_summary.strip():
@@ -232,7 +231,7 @@ class ChatTurnFinalizer:
             await self.session_repo.update_session_summary(session_id=session_id, current_summary=new_summary,
                                                            summary_updated_at=datetime.now(timezone.utc))
         except Exception as e:
-            error("chat summary persist failed.", session_id=session_id, exc=e)
+            error("chat summary persist failed.", session_id=session_id, e=e)
 
         # Redis 重载 messages_keep
         try:
@@ -241,5 +240,5 @@ class ChatTurnFinalizer:
                 messages=windowed_history_messages.messages_keep + chat_record_messages,
             )
         except Exception as e:
-            error("redis hot context reload failed.", session_id=session_id, exc=e)
+            error("redis hot context reload failed.", session_id=session_id, e=e)
 
