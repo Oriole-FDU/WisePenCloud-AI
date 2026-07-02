@@ -13,7 +13,7 @@ from chat.core.providers import (
     OssFileLoader,
     NullMemoryAdapter,
 )
-from chat.core.providers.sandbox import AioGatewayProvider
+from chat.core.providers.sandbox import SandboxProvider
 from chat.core.persistence import (
     MongoSessionRepository,
     MongoMessageRepository,
@@ -166,36 +166,18 @@ class Container(containers.DeclarativeContainer):
         from_source=settings.SANDBOX_FROM_SOURCE,
     )
 
-    # AIO Gateway 文件操作工具
-    aio_gateway_provider = providers.Singleton(
-        AioGatewayProvider,
-        base_url=settings.AIO_GATEWAY_URL,
+    # Sandbox Provider（File/Shell 操作直连 sandbox 服务队列）
+    sandbox_provider = providers.Singleton(
+        SandboxProvider,
+        base_url=settings.SANDBOX_BASE_URL,
         from_source=settings.FROM_SOURCE_SECRET,
     )
-    read_file_tool = providers.Singleton(
-        ReadFileTool,
-        aio_gateway=aio_gateway_provider,
-    )
-    write_file_tool = providers.Singleton(
-        WriteFileTool,
-        aio_gateway=aio_gateway_provider,
-    )
-    list_directory_tool = providers.Singleton(
-        ListDirectoryTool,
-        aio_gateway=aio_gateway_provider,
-    )
-    grep_files_tool = providers.Singleton(
-        GrepFilesTool,
-        aio_gateway=aio_gateway_provider,
-    )
-    edit_file_tool = providers.Singleton(
-        EditFileTool,
-        aio_gateway=aio_gateway_provider,
-    )
-    shell_exec_tool = providers.Singleton(
-        ShellExecTool,
-        aio_gateway=aio_gateway_provider,
-    )
+    read_file_tool = providers.Singleton(ReadFileTool, fs_provider=sandbox_provider)
+    write_file_tool = providers.Singleton(WriteFileTool, fs_provider=sandbox_provider)
+    list_directory_tool = providers.Singleton(ListDirectoryTool, fs_provider=sandbox_provider)
+    grep_files_tool = providers.Singleton(GrepFilesTool, fs_provider=sandbox_provider)
+    edit_file_tool = providers.Singleton(EditFileTool, fs_provider=sandbox_provider)
+    shell_exec_tool = providers.Singleton(ShellExecTool, fs_provider=sandbox_provider)
 
     # Attachment reading tools — 使用 SessionRepository 鉴权附件归属
     read_text_attachment_tool = providers.Singleton(

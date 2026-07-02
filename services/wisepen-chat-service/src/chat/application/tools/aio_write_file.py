@@ -1,13 +1,13 @@
 from typing import Any, Dict
-from chat.core.providers.sandbox.aio_gateway_provider import AioGatewayProvider
+from chat.core.providers.sandbox.base import FileSystemProvider
 from chat.application.tools.core.definition import (
     ToolDefinition, ToolLLMSpec, ToolParametersSchema, ToolPolicy,
 )
 
 
 class WriteFileTool:
-    def __init__(self, aio_gateway: AioGatewayProvider) -> None:
-        self._gateway = aio_gateway
+    def __init__(self, fs_provider: FileSystemProvider) -> None:
+        self._fs = fs_provider
 
     @property
     def definition(self) -> ToolDefinition:
@@ -35,7 +35,7 @@ class WriteFileTool:
         uid = str(context.get("user_id") or "")
         sid = str(context.get("session_id") or "")
         try:
-            r = await self._gateway.write_file(fp, ct, user_id=uid, session_id=sid)
+            r = await self._fs.write_file(fp, ct, user_id=uid, session_id=sid)
         except Exception as e:
             return f"[Tool Error] write_file failed: {type(e).__name__}: {e}"
         return f"Successfully wrote {r.get('bytes_written', len(ct.encode('utf-8')))} bytes to {fp}"

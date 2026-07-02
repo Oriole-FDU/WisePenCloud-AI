@@ -1,14 +1,14 @@
 from typing import Any, Dict
 from chat.core.config.app_settings import settings
-from chat.core.providers.sandbox.aio_gateway_provider import AioGatewayProvider
+from chat.core.providers.sandbox.base import FileSystemProvider
 from chat.application.tools.core.definition import (
     ToolDefinition, ToolLLMSpec, ToolParametersSchema, ToolPolicy,
 )
 
 
 class GrepFilesTool:
-    def __init__(self, aio_gateway: AioGatewayProvider) -> None:
-        self._gateway = aio_gateway
+    def __init__(self, fs_provider: FileSystemProvider) -> None:
+        self._fs = fs_provider
 
     @property
     def definition(self) -> ToolDefinition:
@@ -43,7 +43,7 @@ class GrepFilesTool:
         uid = str(context.get("user_id") or "")
         sid = str(context.get("session_id") or "")
         try:
-            matches = await self._gateway.grep_files(
+            matches = await self._fs.grep_files(
                 path, pattern,
                 recursive=recursive if recursive is not None else True,
                 ignore_case=ignore_case if ignore_case is not None else False,

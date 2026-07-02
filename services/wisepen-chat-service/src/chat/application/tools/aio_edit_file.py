@@ -1,13 +1,13 @@
 from typing import Any, Dict
-from chat.core.providers.sandbox.aio_gateway_provider import AioGatewayProvider
+from chat.core.providers.sandbox.base import FileSystemProvider
 from chat.application.tools.core.definition import (
     ToolDefinition, ToolLLMSpec, ToolParametersSchema, ToolPolicy,
 )
 
 
 class EditFileTool:
-    def __init__(self, aio_gateway: AioGatewayProvider) -> None:
-        self._gateway = aio_gateway
+    def __init__(self, fs_provider: FileSystemProvider) -> None:
+        self._fs = fs_provider
 
     @property
     def definition(self) -> ToolDefinition:
@@ -40,7 +40,7 @@ class EditFileTool:
         uid = str(context.get("user_id") or "")
         sid = str(context.get("session_id") or "")
         try:
-            r = await self._gateway.replace_in_file(fp, old, new, user_id=uid, session_id=sid)
+            r = await self._fs.replace_in_file(fp, old, new, user_id=uid, session_id=sid)
         except Exception as e:
             return f"[Tool Error] edit_file failed: {type(e).__name__}: {e}"
         bw = r.get("bytes_written", 0) if isinstance(r, dict) else 0

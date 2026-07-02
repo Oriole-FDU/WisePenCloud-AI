@@ -1,7 +1,7 @@
 from typing import Any, Dict
 
 from chat.core.config.app_settings import settings
-from chat.core.providers.sandbox.aio_gateway_provider import AioGatewayProvider
+from chat.core.providers.sandbox.base import FileSystemProvider
 from chat.application.tools.core.definition import (
     Tool, ToolDefinition, ToolLLMSpec, ToolParametersSchema, ToolPolicy,
 )
@@ -10,8 +10,8 @@ from chat.application.tools.core.definition import (
 class ReadFileTool:
     """Read a file from the AIO sandbox workspace."""
 
-    def __init__(self, aio_gateway: AioGatewayProvider) -> None:
-        self._gateway = aio_gateway
+    def __init__(self, fs_provider: FileSystemProvider) -> None:
+        self._fs = fs_provider
 
     @property
     def definition(self) -> ToolDefinition:
@@ -48,7 +48,7 @@ class ReadFileTool:
         session_id = str(context.get("session_id") or "")
 
         try:
-            content = await self._gateway.read_file(
+            content = await self._fs.read_file(
                 file_path, max_chars=max_chars,
                 user_id=user_id, session_id=session_id,
             )

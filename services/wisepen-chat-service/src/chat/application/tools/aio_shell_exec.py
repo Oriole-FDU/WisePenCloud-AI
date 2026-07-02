@@ -1,6 +1,6 @@
 from typing import Any, Dict
 from chat.core.config.app_settings import settings
-from chat.core.providers.sandbox.aio_gateway_provider import AioGatewayProvider
+from chat.core.providers.sandbox.base import FileSystemProvider
 from chat.application.tools.core.definition import (
     ToolDefinition, ToolLLMSpec, ToolParametersSchema, ToolPolicy,
     ToolRiskLevel,
@@ -8,8 +8,8 @@ from chat.application.tools.core.definition import (
 
 
 class ShellExecTool:
-    def __init__(self, aio_gateway: AioGatewayProvider) -> None:
-        self._gateway = aio_gateway
+    def __init__(self, fs_provider: FileSystemProvider) -> None:
+        self._fs = fs_provider
 
     @property
     def definition(self) -> ToolDefinition:
@@ -41,7 +41,7 @@ class ShellExecTool:
         uid = str(context.get("user_id") or "")
         sid = str(context.get("session_id") or "")
         try:
-            r = await self._gateway.shell_exec(cmd, exec_dir=exec_dir, user_id=uid, session_id=sid)
+            r = await self._fs.shell_exec(cmd, exec_dir=exec_dir, user_id=uid, session_id=sid)
         except Exception as e:
             return f"[Tool Error] shell_exec failed: {type(e).__name__}: {e}"
         if not isinstance(r, dict):
