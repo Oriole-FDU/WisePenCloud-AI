@@ -20,6 +20,8 @@ from sandbox.ScriptExecutor.scriptExecutor import ExecutionResult
 from sandbox.ScriptExecutor.scriptReader import ScriptPackageRepository
 from sandbox.service.sandbox_service import DefaultSandboxExecutionService
 from sandbox.transport.http.schemas import ExecuteRequestDTO, ExecuteResponseDTO
+from sandbox.Queue.container_queue import ContainerQueue
+from sandbox.Queue.watcher import Watcher
 
 _DEBUG = (os.getenv("SANDBOX_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -63,16 +65,21 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
         *args: Any,
         execute_fn: Callable[[Dict[str, Any]], Dict[str, Any]],
         get_result_fn: Optional[Callable[[str], Dict[str, Any]]] = None,
+        health_fn: Optional[Callable[[], Dict[str, Any]]] = None,
         **kwargs: Any,
     ) -> None:
         self._execute_fn = execute_fn
         self._get_result_fn = get_result_fn
+        self._health_fn = health_fn
         super().__init__(*args, **kwargs)
 
     def do_GET(self) -> None:
         _dbg("http_get", path=self.path)
         if self.path == "/v1/sandbox/health":
-            self._send_json(HTTPStatus.OK, {"status": "ok"})
+            payload = {"status": "ok"}
+            if self._health_fn:
+                payload["queue"] = self._health_fn()
+            self._send_json(HTTPStatus.OK, payload)
             return
 
         if self.path.startswith("/v1/sandbox/result/"):
@@ -142,9 +149,11 @@ def build_sandbox_http_handler(
     *,
     execute: Callable[[Dict[str, Any]], Dict[str, Any]],
     get_result: Optional[Callable[[str], Dict[str, Any]]] = None,
+    health: Optional[Callable[[], Dict[str, Any]]] = None,
 ) -> type[BaseHTTPRequestHandler]:
     def _handler(*args: Any, **kwargs: Any) -> SandboxHttpHandler:
-        return SandboxHttpHandler(*args, execute_fn=execute, get_result_fn=get_result, **kwargs)
+        return SandboxHttpHandler(*args, execute_fn=execute, get_result_fn=get_result,
+                                 health_fn=health, **kwargs)
 
     return _handler  # type: ignore[return-value]
 
@@ -154,8 +163,10 @@ class SandboxHttpApp:
         self,
         *,
         package_repo: ScriptPackageRepository,
+        container_queue: ContainerQueue | None = None,
     ) -> None:
         self._package_repo = package_repo
+        self._queue = container_queue
         self._result_repo = InMemoryExecutionResultRepository()
         self._result = Result(result_repo=self._result_repo)
 
@@ -220,6 +231,11 @@ class SandboxHttpApp:
         result = self._result_repo.get(request_id)
         return self._to_response_dto(result).to_dict()
 
+    def health_check(self) -> Dict[str, Any]:
+        if self._queue:
+            return self._queue.health_check()
+        return {"queue": "disabled"}
+
     def _to_response_dto(self, result: ExecutionResult) -> ExecuteResponseDTO:
         artifacts = []
         if result.artifacts:
@@ -237,18 +253,55 @@ class SandboxHttpApp:
         )
 
 
-def build_default_http_server(*, host: str, port: int, packages_base_dir: str) -> StdHttpServer:
+def build_default_http_server(*, host: str, port: int, packages_base_dir: str,
+                             container_queue: ContainerQueue | None = None) -> StdHttpServer:
     repo = LocalFsScriptPackageRepository(packages_base_dir)
-    app = SandboxHttpApp(package_repo=repo)
-    handler_cls = build_sandbox_http_handler(execute=app.execute, get_result=app.get_result)
+    app = SandboxHttpApp(package_repo=repo, container_queue=container_queue)
+    handler_cls = build_sandbox_http_handler(
+        execute=app.execute, get_result=app.get_result, health=app.health_check,
+    )
     return StdHttpServer(host=host, port=port, handler_factory=handler_cls)
 
 
 if __name__ == "__main__":
+    import signal
+    import sys
+
     host = os.getenv("SANDBOX_HOST", "127.0.0.1").strip() or "127.0.0.1"
     port_raw = os.getenv("SANDBOX_PORT", "9001").strip() or "9001"
     packages_dir = os.getenv("SANDBOX_PACKAGES_DIR", "./packages").strip() or "./packages"
-    server = build_default_http_server(host=host, port=int(port_raw), packages_base_dir=packages_dir)
+
+    use_queue = os.getenv("SANDBOX_QUEUE_ENABLE", "").strip().lower() in ("1", "true", "yes")
+    queue = None
+    watcher = None
+
+    if use_queue:
+        queue = ContainerQueue(
+            image=os.getenv("SANDBOX_QUEUE_IMAGE", "ghcr.io/agent-infra/sandbox:latest"),
+            min_idle=int(os.getenv("SANDBOX_QUEUE_MIN_IDLE", "2")),
+            max_total=int(os.getenv("SANDBOX_QUEUE_MAX_TOTAL", "8")),
+            workspace_cache=os.getenv("SANDBOX_WORKSPACE_CACHE", "/workspaces"),
+        )
+        print(f"[sandbox] pre-fetching {queue._min_idle} containers...")
+        queue.ensure_idle_count()
+
+        watcher = Watcher(queue)
+        watcher.start()
+        print("[sandbox] container queue watcher started.")
+
+    def _shutdown(signum=None, frame=None):
+        print("[sandbox] shutting down...")
+        if watcher:
+            watcher.stop()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    server = build_default_http_server(
+        host=host, port=int(port_raw), packages_base_dir=packages_dir,
+        container_queue=queue,
+    )
     server.start()
 
 
