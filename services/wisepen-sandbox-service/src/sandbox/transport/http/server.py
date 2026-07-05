@@ -333,13 +333,13 @@ class SandboxHttpApp:
     def queue_drain(self) -> Dict[str, Any]:
         if not self._queue:
             return {"error": "queue not enabled"}
+        # 快照所有 cid，释放锁后在锁外逐个 recycle（recycle 内部获取 _lock，防止死锁）
+        cids = list(self._queue._containers.keys())
         recycled = 0
-        with self._queue._lock:
-            for cid, info in list(self._queue._containers.items()):
-                if info.state.value == "dirty":
-                    new_cid = self._queue.recycle(cid)
-                    if new_cid:
-                        recycled += 1
+        for cid in cids:
+            new_cid = self._queue.recycle(cid)
+            if new_cid:
+                recycled += 1
         return {"drained": recycled}
 
     # ---- Internal ----
@@ -475,6 +475,14 @@ if __name__ == "__main__":
         print("[sandbox] shutting down...")
         if watcher:
             watcher.stop()
+        if queue:
+            print("[sandbox] removing containers...")
+            for cid in list(queue._containers.keys()):
+                try:
+                    queue._rm_container(cid)
+                except Exception:
+                    pass
+            print("[sandbox] containers removed.")
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)

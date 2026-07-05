@@ -209,7 +209,7 @@ class ContainerQueue:
     def _start_container(self) -> str:
         name = f"aio-worker-{uuid.uuid4().hex[:8]}"
         args = [
-            "docker", "run", "-d",
+            "run", "-d",
             "--name", name,
             "--label", "wisepen.role=aio-worker",
             "--security-opt", "seccomp=unconfined",
