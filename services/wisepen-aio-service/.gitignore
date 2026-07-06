@@ -15,3 +15,13 @@ doc_build/
 .history
 
 CLAUDE.md
+
+# ============================================================
+# AIO Sandbox — 从容器注册表部署，不提交源码
+# 仅允许: deploy-aio-worker.* 和 pyproject.toml
+# ============================================================
+*
+!deploy-aio-worker.ps1
+!deploy-aio-worker.sh
+!pyproject.toml
+!.gitignore
