@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 import subprocess
 
+from common.sandbox import SandboxException
+
 
 class FileManager:
     """Host <-> container workspace file sync for AIO sandbox containers."""
@@ -37,15 +39,14 @@ class FileManager:
         os.makedirs(host, exist_ok=True)
         try:
             self._docker_cp(f"{container_id}:/workspace/.", f"{host}/")
-        except RuntimeError:
+        except (RuntimeError, SandboxException):
             pass  # non-fatal: container will be recycled, partial data acceptable
 
-    def _docker_cp(self, source: str, dest: str) -> None:
+    @staticmethod
+    def _docker_cp(source: str, dest: str) -> None:
         completed = subprocess.run(
             ["docker", "cp", source, dest],
             capture_output=True, text=True, timeout=30,
         )
         if completed.returncode != 0:
-            raise RuntimeError(
-                f"docker cp failed: {completed.stderr.strip()[:500]}"
-            )
+            raise SandboxException.file_sync_failed(completed.stderr.strip()[:500])

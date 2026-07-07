@@ -14,6 +14,8 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 
+from common.sandbox import SandboxException
+
 _DEBUG = (os.getenv("SANDBOX_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
@@ -98,8 +100,8 @@ class ContainerQueue:
                 _dbg("acquired_new", cid=cid[:12], user=user_id, session=session_id)
                 return cid
 
-        raise RuntimeError(
-            f"no idle containers available (total={len(self._containers)}, max={self._max_total})"
+        raise SandboxException.queue_no_idle(
+            total=len(self._containers), max_total=self._max_total,
         )
 
     def release(self, container_id: str) -> None:
@@ -134,7 +136,7 @@ class ContainerQueue:
             info.container_id = new_cid
             info.container_name = old_name
             info.state = ContainerState.IDLE
-            info.allocated_at = 0.0
+            info.allocated_at = time.time()
 
             # Update key since container_id changed
             del self._containers[container_id]
@@ -144,12 +146,12 @@ class ContainerQueue:
 
     def ensure_idle_count(self) -> int:
         """Ensure at least min_idle containers exist. Returns number created."""
-        created = 0
+        created_containers = 0
         with self._lock:
             idle_count = sum(1 for c in self._containers.values() if c.state == ContainerState.IDLE)
-            total = len(self._containers)
-            needed = self._min_idle - idle_count
-            while needed > 0 and total + created < self._max_total:
+            total_containers = len(self._containers)
+            needed_containers = self._min_idle - idle_count
+            while needed_containers> 0 and total_containers + created_containers < self._max_total:
                 cid = self._start_container()
                 info = ContainerInfo(
                     container_id=cid,
@@ -157,10 +159,10 @@ class ContainerQueue:
                     state=ContainerState.IDLE,
                 )
                 self._containers[cid] = info
-                created += 1
-                needed -= 1
-                _dbg("prefetch", cid=cid[:12], idle_after=idle_count + created)
-        return created
+                created_containers += 1
+                needed_containers -= 1
+                _dbg("prefetch", cid=cid[:12], idle_after=idle_count + created_containers)
+        return created_containers
 
     def health_check(self) -> dict:
         """Check all containers, mark dead ones. Returns health summary."""
@@ -185,7 +187,7 @@ class ContainerQueue:
 
     def remove_dead(self) -> int:
         """Remove dead containers from tracking. Returns count removed."""
-        removed = 0
+        removed_containers = 0
         with self._lock:
             for cid in list(self._containers.keys()):
                 if self._containers[cid].state == ContainerState.DEAD:
@@ -194,8 +196,8 @@ class ContainerQueue:
                     except Exception:
                         pass
                     del self._containers[cid]
-                    removed += 1
-        return removed
+                    removed_containers += 1
+        return removed_containers
 
     def get_container_info(self, container_id: str) -> ContainerInfo | None:
         return self._containers.get(container_id)
@@ -221,9 +223,9 @@ class ContainerQueue:
         raw = self._run_docker(args)
         cid = raw.strip()
         if not cid:
-            raise RuntimeError("docker run returned empty container id")
+            raise SandboxException.container_start_failed("empty container id")
         # Wait briefly for container to be ready
-        time.sleep(1)
+        time.sleep(5)
         return cid
 
     def _rm_container(self, container_id: str) -> None:
@@ -232,7 +234,8 @@ class ContainerQueue:
         except Exception:
             pass
 
-    def _is_running(self, container_id: str) -> bool:
+    @staticmethod
+    def _is_running(container_id: str) -> bool:
         try:
             raw = subprocess.run(
                 ["docker", "inspect", "-f", "{{.State.Running}}", container_id],
@@ -242,13 +245,12 @@ class ContainerQueue:
         except Exception:
             return False
 
-    def _run_docker(self, args: list[str]) -> str:
+    @staticmethod
+    def _run_docker(args: list[str]) -> str:
         completed = subprocess.run(
             ["docker", *args], capture_output=True, text=True, timeout=60,
         )
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or "").strip()
-            raise RuntimeError(
-                f"docker {' '.join(args[:2])} failed: {detail[:500]}"
-            )
+            raise SandboxException.docker_error(" ".join(args[:2]), detail[:500])
         return (completed.stdout or "").strip()
