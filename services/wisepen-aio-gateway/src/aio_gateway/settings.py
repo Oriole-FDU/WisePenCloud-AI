@@ -18,11 +18,13 @@ class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     FROM_SOURCE_SECRET: str
-    AIO_BASE_URL: str = "http://127.0.0.1:8080"
 
-    # 工作域清理配置
-    WORKSPACE_CLEANUP_TTL_SECONDS: int = 7 * 24 * 3600   # 7 天未访问 → 清理
-    WORKSPACE_CLEANUP_INTERVAL_SECONDS: int = 3600        # 每小时扫描一次
+    # 容器队列配置
+    AIO_WORKER_IMAGE: str = "ghcr.io/agent-infra/sandbox:latest"
+    AIO_WORKER_MIN_IDLE: int = 2
+    AIO_WORKER_MAX_TOTAL: int = 8
+    AIO_WORKER_DIRTY_TTL: int = 60
+    AIO_WORKSPACE_CACHE_DIR: str = "/workspaces"
 
 
 def _load_local() -> dict:
