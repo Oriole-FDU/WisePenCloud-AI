@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Any
+from sandbox.core.lazy import make_getattr
 
 __all__ = [
     "DefaultToolTextFormatter",
@@ -12,25 +10,14 @@ __all__ = [
     "ToolTextFormatterConfig",
 ]
 
+_LAZY = {
+    "DefaultToolTextFormatter": "sandbox.ResultReturn.formatters.tool_text_formatter",
+    "ToolTextFormatter": "sandbox.ResultReturn.formatters.tool_text_formatter",
+    "ToolTextFormatterConfig": "sandbox.ResultReturn.formatters.tool_text_formatter",
+    "ExecutionResultRepository": "sandbox.ResultReturn.returnResult",
+    "InMemoryExecutionResultRepository": "sandbox.ResultReturn.returnResult",
+    "Result": "sandbox.ResultReturn.returnResult",
+    "ResultSinkAdapter": "sandbox.ResultReturn.returnResult",
+}
 
-def __getattr__(name: str) -> Any:
-    if name in ("DefaultToolTextFormatter", "ToolTextFormatter", "ToolTextFormatterConfig"):
-        from sandbox.ResultReturn.formatters.tool_text_formatter import (
-            DefaultToolTextFormatter,
-            ToolTextFormatter,
-            ToolTextFormatterConfig,
-        )
-
-        return locals()[name]
-
-    if name in ("ExecutionResultRepository", "InMemoryExecutionResultRepository", "Result", "ResultSinkAdapter"):
-        from sandbox.ResultReturn.returnResult import (
-            ExecutionResultRepository,
-            InMemoryExecutionResultRepository,
-            Result,
-            ResultSinkAdapter,
-        )
-
-        return locals()[name]
-
-    raise AttributeError(name)
+__getattr__ = make_getattr(_LAZY)

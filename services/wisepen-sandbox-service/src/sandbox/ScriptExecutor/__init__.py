@@ -1,123 +1,43 @@
-from __future__ import annotations
-
-from typing import Any
+from sandbox.core.lazy import make_getattr
 
 __all__ = [
-    "BatRunner",
-    "BatScriptParser",
-    "DefaultExecutionRequestParser",
-    "DefaultScriptParserFactory",
-    "DefaultScriptsExecutor",
-    "ExecutionArtifact",
-    "ExecutionContext",
-    "ExecutionRequest",
-    "ExecutionResult",
-    "ExecutionStatus",
-    "InputScripts",
-    "LocalFsScriptPackageRepository",
-    "PythonRunner",
-    "PythonScriptParser",
-    "ResultSinkSpec",
-    "SandboxExecutionService",
-    "SandboxSpec",
-    "ScriptFile",
-    "ScriptPackage",
-    "ScriptPackageRepository",
-    "ScriptParser",
-    "ScriptParserFactory",
-    "ScriptSpec",
-    "ScriptType",
-    "ScriptsExecutor",
+    "BatRunner", "BatScriptParser", "DefaultExecutionRequestParser",
+    "DefaultScriptParserFactory", "DefaultScriptsExecutor",
+    "ExecutionArtifact", "ExecutionContext", "ExecutionRequest",
+    "ExecutionResult", "ExecutionStatus", "InputScripts",
+    "LocalFsScriptPackageRepository", "PythonRunner", "PythonScriptParser",
+    "ResultSinkSpec", "SandboxExecutionService", "SandboxSpec",
+    "ScriptFile", "ScriptPackage", "ScriptPackageRepository",
+    "ScriptParser", "ScriptParserFactory", "ScriptSpec",
+    "ScriptType", "ScriptsExecutor",
 ]
 
+_LAZY = {
+    "ExecutionArtifact": "sandbox.ScriptExecutor.scriptExecutor",
+    "ExecutionContext": "sandbox.ScriptExecutor.scriptExecutor",
+    "ExecutionRequest": "sandbox.ScriptExecutor.scriptExecutor",
+    "ExecutionResult": "sandbox.ScriptExecutor.scriptExecutor",
+    "ExecutionStatus": "sandbox.ScriptExecutor.scriptExecutor",
+    "ResultSinkSpec": "sandbox.ScriptExecutor.scriptExecutor",
+    "SandboxExecutionService": "sandbox.ScriptExecutor.scriptExecutor",
+    "SandboxSpec": "sandbox.ScriptExecutor.scriptExecutor",
+    "ScriptsExecutor": "sandbox.ScriptExecutor.scriptExecutor",
+    "InputScripts": "sandbox.ScriptExecutor.scriptReader",
+    "ScriptFile": "sandbox.ScriptExecutor.scriptReader",
+    "ScriptPackage": "sandbox.ScriptExecutor.scriptReader",
+    "ScriptPackageRepository": "sandbox.ScriptExecutor.scriptReader",
+    "ScriptParser": "sandbox.ScriptExecutor.scriptReader",
+    "ScriptParserFactory": "sandbox.ScriptExecutor.scriptReader",
+    "ScriptSpec": "sandbox.ScriptExecutor.scriptReader",
+    "ScriptType": "sandbox.ScriptExecutor.scriptReader",
+    "DefaultExecutionRequestParser": "sandbox.ScriptExecutor.execution.request_parser",
+    "DefaultScriptsExecutor": "sandbox.ScriptExecutor.execution.executor_impl",
+    "DefaultScriptParserFactory": "sandbox.ScriptExecutor.parsers.factory",
+    "PythonScriptParser": "sandbox.ScriptExecutor.parsers.python_parser",
+    "BatScriptParser": "sandbox.ScriptExecutor.parsers.bat_parser",
+    "PythonRunner": "sandbox.ScriptExecutor.execution.runners.python_runner",
+    "BatRunner": "sandbox.ScriptExecutor.execution.runners.bat_runner",
+    "LocalFsScriptPackageRepository": "sandbox.ScriptExecutor.package_repo.local_fs_repo",
+}
 
-def __getattr__(name: str) -> Any:
-    if name in (
-        "ExecutionArtifact",
-        "ExecutionContext",
-        "ExecutionRequest",
-        "ExecutionResult",
-        "ExecutionStatus",
-        "ResultSinkSpec",
-        "SandboxExecutionService",
-        "SandboxSpec",
-        "ScriptsExecutor",
-    ):
-        from sandbox.ScriptExecutor.scriptExecutor import (
-            ExecutionArtifact,
-            ExecutionContext,
-            ExecutionRequest,
-            ExecutionResult,
-            ExecutionStatus,
-            ResultSinkSpec,
-            SandboxExecutionService,
-            SandboxSpec,
-            ScriptsExecutor,
-        )
-
-        return locals()[name]
-
-    if name in (
-        "InputScripts",
-        "ScriptFile",
-        "ScriptPackage",
-        "ScriptPackageRepository",
-        "ScriptParser",
-        "ScriptParserFactory",
-        "ScriptSpec",
-        "ScriptType",
-    ):
-        from sandbox.ScriptExecutor.scriptReader import (
-            InputScripts,
-            ScriptFile,
-            ScriptPackage,
-            ScriptPackageRepository,
-            ScriptParser,
-            ScriptParserFactory,
-            ScriptSpec,
-            ScriptType,
-        )
-
-        return locals()[name]
-
-    if name == "DefaultExecutionRequestParser":
-        from sandbox.ScriptExecutor.execution.request_parser import DefaultExecutionRequestParser
-
-        return DefaultExecutionRequestParser
-
-    if name == "DefaultScriptsExecutor":
-        from sandbox.ScriptExecutor.execution.executor_impl import DefaultScriptsExecutor
-
-        return DefaultScriptsExecutor
-
-    if name == "DefaultScriptParserFactory":
-        from sandbox.ScriptExecutor.parsers.factory import DefaultScriptParserFactory
-
-        return DefaultScriptParserFactory
-
-    if name == "PythonScriptParser":
-        from sandbox.ScriptExecutor.parsers.python_parser import PythonScriptParser
-
-        return PythonScriptParser
-
-    if name == "BatScriptParser":
-        from sandbox.ScriptExecutor.parsers.bat_parser import BatScriptParser
-
-        return BatScriptParser
-
-    if name == "PythonRunner":
-        from sandbox.ScriptExecutor.execution.runners.python_runner import PythonRunner
-
-        return PythonRunner
-
-    if name == "BatRunner":
-        from sandbox.ScriptExecutor.execution.runners.bat_runner import BatRunner
-
-        return BatRunner
-
-    if name == "LocalFsScriptPackageRepository":
-        from sandbox.ScriptExecutor.package_repo.local_fs_repo import LocalFsScriptPackageRepository
-
-        return LocalFsScriptPackageRepository
-
-    raise AttributeError(name)
+__getattr__ = make_getattr(_LAZY)

@@ -255,3 +255,11 @@ class ContainerQueue:
     @property
     def lock(self):
         return self._lock
+
+    @property
+    def min_idle(self):
+        return self._min_idle
+
+    @property
+    def max_total(self):
+        return self._max_total

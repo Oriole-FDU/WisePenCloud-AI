@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Any
+from sandbox.core.lazy import make_getattr
 
 __all__ = [
     "ExecuteRequestDTO",
@@ -12,28 +10,14 @@ __all__ = [
     "build_sandbox_http_handler",
 ]
 
+_LAZY = {
+    "ExecuteRequestDTO": "sandbox.transport.http.schemas",
+    "ExecuteResponseDTO": "sandbox.transport.http.schemas",
+    "HttpServer": "sandbox.transport.http.server",
+    "SandboxHttpApp": "sandbox.transport.http.server",
+    "StdHttpServer": "sandbox.transport.http.server",
+    "build_default_http_server": "sandbox.transport.http.server",
+    "build_sandbox_http_handler": "sandbox.transport.http.server",
+}
 
-def __getattr__(name: str) -> Any:
-    if name in ("ExecuteRequestDTO", "ExecuteResponseDTO"):
-        from sandbox.transport.http.schemas import ExecuteRequestDTO, ExecuteResponseDTO
-
-        return locals()[name]
-
-    if name in (
-        "HttpServer",
-        "SandboxHttpApp",
-        "StdHttpServer",
-        "build_default_http_server",
-        "build_sandbox_http_handler",
-    ):
-        from sandbox.transport.http.server import (
-            HttpServer,
-            SandboxHttpApp,
-            StdHttpServer,
-            build_default_http_server,
-            build_sandbox_http_handler,
-        )
-
-        return locals()[name]
-
-    raise AttributeError(name)
+__getattr__ = make_getattr(_LAZY)
