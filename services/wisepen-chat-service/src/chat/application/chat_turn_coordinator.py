@@ -1,35 +1,43 @@
-﻿from typing import Optional, List, Dict, Any, Set
+from typing import Optional, List, Dict, Any, Set
+
 from beanie import PydanticObjectId
 from fastapi import BackgroundTasks
 
-from common.logger import error
-
+from chat.api.vercel_sse_mapper import to_vercel_sse
+from chat.application.agents import AgentResolver, DefaultAgentResolver
+from chat.application.chat_context_assembler import ChatContextAssembler
+from chat.application.chat_turn_finalizer import ChatTurnFinalizer
+from chat.application.events import ErrorEvent, StepFinishEvent
+from chat.application.llm_provider_resolver import LLMProviderResolver
+from chat.application.query_loop_runtime import QueryLoopRuntime
+from chat.application.token_counter import TokenCounter
+from chat.application.tools.core import ToolRegistry
+from chat.application.tools.core.execution.dispatcher import ToolDispatcher
+from chat.application.tools.search_tools.exposure import (
+    WebSearchCredentialExposureRepository,
+    active_search_tool_names,
+)
+from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
-from chat.application.llm_provider_resolver import LLMProviderResolver
-from chat.application.token_counter import TokenCounter
 from chat.domain.interfaces.llm import TextCompletionProvider
 from chat.domain.interfaces.memory import MemoryProvider
-from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, ProviderRepository
-from common.core.exceptions import ServiceException
-from chat.application.chat_context_assembler import ChatContextAssembler
-from chat.application.query_loop_runtime import QueryLoopRuntime
-from chat.application.agents import (
-    AgentResolver,
-    DefaultAgentResolver,
+from chat.domain.repositories import (
+    HotContextRepository,
+    MessageRepository,
+    ModelRepository,
+    ProviderRepository,
+    SessionRepository,
 )
-from chat.application.events import StepFinishEvent, ErrorEvent
-from chat.api.vercel_sse_mapper import to_vercel_sse
-from chat.application.chat_turn_finalizer import ChatTurnFinalizer
-from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
-from chat.application.tools.core import ToolRegistry
+from common.core.exceptions import ServiceException
 from common.kafka.producer import KafkaProducerClient
-
+from common.logger import error
 
 # Skill 工具默认不暴露；仅在本轮存在可展示 Skill 时整体解禁
 _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
 # Session 工具默认不暴露；仅在本轮存在存在不可见的上下文历史时解禁（有summary）
 _SESSION_TOOL_NAMES = frozenset({"get_historical_chat_messages"})
+
 
 class ChatTurnCoordinator:
     """
@@ -49,6 +57,8 @@ class ChatTurnCoordinator:
             message_repo: MessageRepository,
             hot_context_repo: HotContextRepository,
             tool_registry: ToolRegistry,
+            tool_dispatcher: ToolDispatcher,
+            web_search_credential_repo: WebSearchCredentialExposureRepository,
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
             agent_resolver: AgentResolver | None = None,
@@ -60,9 +70,11 @@ class ChatTurnCoordinator:
             message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo
         )
         self._tool_registry = tool_registry
+        self._web_search_credential_repo = web_search_credential_repo
         self._query_loop_runtime = QueryLoopRuntime(
             llm_provider_resolver=llm_provider_resolver,
             token_counter=token_counter,
+            tool_dispatcher=tool_dispatcher,
         )
         self._turn_finalizer = ChatTurnFinalizer(
             text_llm=text_llm,
@@ -170,7 +182,7 @@ class ChatTurnCoordinator:
         available_skills = []
         if tool_and_skill_policy.enable_use_tool and tool_and_skill_policy.enable_use_skill:
             # 若用户指定了 user_defined_on_demand_skill_ids，则覆盖 agent 预设的 on_demand_skill_ids
-            on_demand_skill_ids = (user_defined_on_demand_skill_ids if user_defined_on_demand_skill_ids is not None else tool_and_skill_policy.on_demand_skill_ids) or set()
+            on_demand_skill_ids = user_defined_on_demand_skill_ids or tool_and_skill_policy.on_demand_skill_ids or set()
             # 构建 available_skills
             available_skills = await self._skill_matcher.match(
                 on_demand_skill_ids=on_demand_skill_ids,
@@ -188,12 +200,18 @@ class ChatTurnCoordinator:
             expose_tool_name_set.update(_SESSION_TOOL_NAMES)
 
         # 构建工具视图
-        # expose_tool_name_set 仅在有可展示 Skill 时解禁 Skill 工具
+        # expose_tool_name_set 仅用于按运行期事实解禁默认隐藏工具
 
         if not tool_and_skill_policy.enable_use_tool:
             # 若不启用Tool，则allow_tool_name_set为空
-            allow_tool_name_set:Set[str] = set()
+            allow_tool_name_set: Set[str] = set()
         else:
+            expose_tool_name_set.update(
+                await active_search_tool_names(
+                    user_id=user_id,
+                    credential_repository=self._web_search_credential_repo,
+                )
+            )
             # 若用户指定了 user_defined_allow_tool_names，则覆盖 agent 预设的 allow_tool_names
             allow_tool_name_set = user_defined_allow_tool_names or tool_and_skill_policy.allow_tool_names or None
 
@@ -217,13 +235,13 @@ class ChatTurnCoordinator:
             user_query=user_query,
             system_prompt=agent_spec.system_prompt,  # 系统提示词
             session_summary=session_summary,  # 会话的历史摘要
-            history_messages=chat_history_record_messages, # 会话历史
-            relevant_facts=relevant_facts, # 长期记忆检索的事实
-            frontend_states=frontend_states, # 用户前端状态
-            available_skills=available_skills or None, # 可用技能
-            temp_attachments=temp_attachments, # 对话中的全部临时附件
-            resource_attachments=resource_attachments, # 对话中的全部资源附件
-            user_defined_attachment_ids=user_defined_attachment_ids, # 用户指定的附件
+            history_messages=chat_history_record_messages,  # 会话历史
+            relevant_facts=relevant_facts,  # 长期记忆检索的事实
+            frontend_states=frontend_states,  # 用户前端状态
+            available_skills=available_skills or None,  # 可用技能
+            temp_attachments=temp_attachments,  # 对话中的全部临时附件
+            resource_attachments=resource_attachments,  # 对话中的全部资源附件
+            user_defined_attachment_ids=user_defined_attachment_ids,  # 用户指定的附件
         )
 
         # 构造 chat_record_messages
@@ -245,15 +263,15 @@ class ChatTurnCoordinator:
         # 流式推理
         try:
             async for event in self._query_loop_runtime.stream_chat_with_tool_calling(
-                messages=messages_for_llm,
-                tool_scope=tool_scope,
-                session_id=session_id,
-                agent_max_iterations=agent_spec.agent_max_iterations,
-                model_info=resolved_model_info,
+                    messages=messages_for_llm,
+                    tool_scope=tool_scope,
+                    session_id=session_id,
+                    agent_max_iterations=agent_spec.agent_max_iterations,
+                    model_info=resolved_model_info,
             ):
                 # QueryLoopRuntime 产出的事件如果是 StepFinishEvent 额外处理消息累积
                 if isinstance(event, StepFinishEvent):
-                    token_usage += event.token_usage # 计费
+                    token_usage += event.token_usage  # 计费
                     if not event.is_finished:
                         # 向 chat_record_messages 追加中间消息（Tool Calls）
                         chat_record_messages.extend(event.intermediate_messages)

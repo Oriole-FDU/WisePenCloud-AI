@@ -102,7 +102,7 @@ class ModelProviderMapping(Document):
             IndexModel(
                 [("model_id", ASCENDING), ("provider_id", ASCENDING), ("owner_user_id", ASCENDING)],
                 unique=True,
-                name="uniq_mapping_model_provider_owner",
+                name="uniq_model_provider_owner",
             ),
             IndexModel(
                 [("model_id", ASCENDING), ("owner_user_id", ASCENDING), ("is_preferred", ASCENDING)],

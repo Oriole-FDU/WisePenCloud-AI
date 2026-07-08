@@ -1,10 +1,12 @@
 ﻿# 屏蔽 websockets.legacy 第三方弃用提示
 import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"websockets\.legacy",)
+
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"websockets\.legacy", )
 
 from common.logger import setup_logging_intercept, info, error
 from common.observability import setup_observability
 from chat.core.config.bootstrap_settings import bootstrap_settings
+
 # 在任何其他 import 之前完成日志桥接与 OTel SDK 初始化。
 # LOG_LEVEL 和服务名来自 bootstrap_settings（.env），无需等待 Nacos
 setup_logging_intercept(bootstrap_settings.LOG_LEVEL)
@@ -34,8 +36,9 @@ from chat.api.endpoints import chat as chat_endpoints
 from chat.api.endpoints import session as session_endpoints
 from chat.api.endpoints import memory as memory_endpoints
 from chat.api.endpoints import model as model_endpoints
+from chat.api.endpoints import web_search as web_search_endpoints
 from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping
-
+from chat.domain.entities.web_search_credential import WebSearchCredential
 
 # 避免 HTTP 代理拦截内部中间件请求。
 no_proxy = ",".join(filter(None, [
@@ -44,6 +47,7 @@ no_proxy = ",".join(filter(None, [
 ]))
 os.environ["no_proxy"] = no_proxy
 os.environ["NO_PROXY"] = no_proxy
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -55,7 +59,14 @@ async def lifespan(app: FastAPI):
     mongo_client = AsyncMongoClient(settings.MONGODB_URL)
     await init_beanie(
         database=mongo_client[settings.MONGODB_DB_NAME],
-        document_models=[ChatSession, ChatMessage, Provider, Model, ModelProviderMapping],
+        document_models=[
+            ChatSession,
+            ChatMessage,
+            Provider,
+            Model,
+            ModelProviderMapping,
+            WebSearchCredential,
+        ],
     )
     info("beanie initialized.", db=settings.MONGODB_DB_NAME)
 
@@ -64,7 +75,7 @@ async def lifespan(app: FastAPI):
         await nacos_client_manager.register_instance()
     except Exception as e:
         error("nacos instance register failed.", exc=e)
-    
+
     # 启动 Kafka Producer
     kafka_producer = container.kafka_producer()
     await kafka_producer.start()
@@ -100,6 +111,7 @@ async def lifespan(app: FastAPI):
         await container.rpc_client().aclose()
     except Exception as e:
         error("rpc client close failed.", exc=e)
+    await _close_redis_repositories()
     try:
         await container.service_discovery().close()
     except Exception as e:
@@ -110,7 +122,29 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         error("nacos instance deregister failed.", exc=e)
 
-container.wire(modules=[attachment_endpoints, chat_endpoints, session_endpoints, memory_endpoints, model_endpoints])  # 注入依赖到路由模块
+
+async def _close_redis_repositories() -> None:
+    redis_repositories = (
+        ("hot context redis", container.hot_context_repo()),
+        ("tool content redis", container.tool_content_repository()),
+    )
+    for name, repository in redis_repositories:
+        try:
+            await repository.aclose()
+        except Exception as e:
+            error(f"{name} close failed.", exc=e)
+
+
+container.wire(
+    modules=[
+        attachment_endpoints,
+        chat_endpoints,
+        session_endpoints,
+        memory_endpoints,
+        model_endpoints,
+        web_search_endpoints,
+    ]
+)  # 注入依赖到路由模块
 app = FastAPI(title=bootstrap_settings.APP_NAME, lifespan=lifespan, docs_url="/docs")
 instrument_fastapi_app(app)
 
@@ -140,5 +174,3 @@ if __name__ == "__main__":
         reload=False,
         workers=1,
     )
-
-

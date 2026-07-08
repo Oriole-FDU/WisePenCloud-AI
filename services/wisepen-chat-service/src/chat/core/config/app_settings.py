@@ -26,6 +26,13 @@ class AppSettings(BaseModel):
     MEMORY_EMBEDDING_MODEL: str
     MEMORY_RERANKER_ZE_MODEL: str
     ZERO_ENTROPY_API_KEY: str
+    TOOL_CONTENT_RERANKER_ZE_MODEL: str
+    TOOL_CONTENT_RERANKER_ZE_TOP_N: int | None = None
+    EVIDENCE_RANKER_ZE_MODEL: str
+    EVIDENCE_RANKER_ZE_TOP_N: int | None = None
+
+    # 工具内部轻量模型
+    QUERY_MODEL: str
 
     # 摘要模型
     SUMMARY_MODEL: str
@@ -33,6 +40,8 @@ class AppSettings(BaseModel):
     # 安全配置
     # 与 APISIX 网关约定的请求来源 token
     FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
+    # 用户搜索凭证等敏感字段的 Fernet 加密主密钥
+    SECRET_ENCRYPTION_KEY: str
 
     # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str
@@ -82,6 +91,20 @@ class AppSettings(BaseModel):
 
     # 默认召回数量
     SKILL_MATCH_TOP_K: int = 20
+
+    # Web Search 网关配置
+    WEB_SEARCH_FOURGET_BASE_URL: str = "http://127.0.0.1:8088"
+    WEB_SEARCH_EXA_BASE_URL: str = "https://api.exa.ai"
+    WEB_SEARCH_TAVILY_BASE_URL: str = "https://api.tavily.com"
+    WEB_SEARCH_ANYSEARCH_BASE_URL: str = "https://api.anysearch.com"
+    WEB_SEARCH_BAIDU_QIANFAN_BASE_URL: str = "https://qianfan.baidubce.com"
+    WEB_SEARCH_PLATFORM_MEMBER_PROVIDER: Literal[
+        "exa",
+        "tavily",
+        "anysearch",
+        "baidu_qianfan",
+    ] | None = None
+    WEB_SEARCH_PLATFORM_MEMBER_API_KEY: str | None = None
 
     # 内部 RPC / 服务发现 配置
     # Nacos 服务发现客户端侧负载均衡策略：weighted_random | round_robin | random

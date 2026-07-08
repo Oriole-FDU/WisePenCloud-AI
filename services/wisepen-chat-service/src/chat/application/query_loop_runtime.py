@@ -1,4 +1,3 @@
-import json
 import uuid
 from typing import AsyncIterator, Iterator, List, Optional, Union
 
@@ -23,7 +22,6 @@ from chat.application.token_counter import TokenCounter
 from chat.application.tools import ToolScope
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.llm.invocation import ToolInvocation
-from chat.application.tools.core.llm.renderer import tool_result_renderer
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.message import MessageModelInfo, ToolCallMessage
@@ -43,6 +41,7 @@ class _StepEventInterpreter:
     - 收集 tool_call
     - 向外产出 StreamEvent
     """
+
     def __init__(self) -> None:
         self.text_id = f"txt_{uuid.uuid4().hex}"
         self.reasoning_id = f"rsn_{uuid.uuid4().hex}"
@@ -126,26 +125,33 @@ def _merge_runtime_options(defaults: dict, overrides: dict) -> dict:
             result[key] = value
     return result
 
+
 class QueryLoopRuntime:
     """
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
     """
 
-    def __init__(self, llm_provider_resolver: LLMProviderResolver, token_counter: TokenCounter) -> None:
+    def __init__(
+            self,
+            llm_provider_resolver: LLMProviderResolver,
+            token_counter: TokenCounter,
+            tool_dispatcher: ToolDispatcher,
+    ) -> None:
         self._llm_provider_resolver = llm_provider_resolver
         self._token_counter = token_counter
-        self._tool_dispatcher = ToolDispatcher()
+        self._tool_dispatcher = tool_dispatcher
 
     """
     ReAct 循环主入口 (QueryLoop)
     """
+
     async def stream_chat_with_tool_calling(
-        self,
-        messages: List[ChatMessage],
-        tool_scope: ToolScope,
-        session_id: str,
-        agent_max_iterations: Optional[int],
-        model_info: ModelRequestInfo,
+            self,
+            messages: List[ChatMessage],
+            tool_scope: ToolScope,
+            session_id: str,
+            agent_max_iterations: Optional[int],
+            model_info: ModelRequestInfo,
     ) -> AsyncIterator[StreamEvent]:
         # 解析获取当前模型的 LLMProvider
         llm_provider = self._llm_provider_resolver.resolve(model_info)
@@ -167,12 +173,12 @@ class QueryLoopRuntime:
             # 把当前 messages、模型参数 和 tool_scope 委派给 _run_single_step()
             # 然后异步消费它的产出
             async for item in self._run_single_step(
-                messages=messages,
-                session_id=session_id,
-                model_info=model_info,
-                llm_provider=llm_provider,
-                iteration=iteration,
-                tool_scope=tool_scope,
+                    messages=messages,
+                    session_id=session_id,
+                    model_info=model_info,
+                    llm_provider=llm_provider,
+                    iteration=iteration,
+                    tool_scope=tool_scope,
             ):
                 # 如果拿到的是 StepFinishEvent 就存到 step_finish_event；否则直接 yield
                 if isinstance(item, StepFinishEvent):
@@ -193,14 +199,15 @@ class QueryLoopRuntime:
     """
     Agent Step：发起一次流式推理 → 解析 → 若需要则执行工具
     """
+
     async def _run_single_step(
-        self,
-        messages: List[ChatMessage],
-        session_id: str,
-        model_info: ModelRequestInfo,
-        llm_provider: LLMProvider,
-        iteration: int,
-        tool_scope: ToolScope,
+            self,
+            messages: List[ChatMessage],
+            session_id: str,
+            model_info: ModelRequestInfo,
+            llm_provider: LLMProvider,
+            iteration: int,
+            tool_scope: ToolScope,
     ) -> AsyncIterator[Union[StreamEvent, StepFinishEvent]]:
         # 发 step 开始事件
         yield StepStartEvent()
@@ -216,9 +223,9 @@ class QueryLoopRuntime:
         try:
             # 调用模型流式接口，Provider 内部负责原生协议解析并产出 LLMStreamEvent 事件
             async for llm_provider_event in llm_provider.stream_chat_completion(
-                messages=messages,
-                model_request=model_info,
-                tools=tool_schemas or None,
+                    messages=messages,
+                    model_request=model_info,
+                    tools=tool_schemas or None,
             ):
                 if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
                     token_usage += llm_provider_event.usage.total_tokens
@@ -244,7 +251,7 @@ class QueryLoopRuntime:
             model_info=MessageModelInfo.from_model_request(model_info),
             content=event_interpreter.assistant_content or "",
             reasoning_content=event_interpreter.assistant_reasoning or None,
-            provider_payload=event_interpreter.provider_payload, # 原生载荷
+            provider_payload=event_interpreter.provider_payload,  # 原生载荷
             tool_calls=event_interpreter.tool_calls
         )
 
@@ -254,11 +261,11 @@ class QueryLoopRuntime:
                 messages=messages,
                 model_name=model_info.model_name,
                 tools=tool_schemas or None,
-            ) # 统计输入 tokens
+            )  # 统计输入 tokens
             token_usage += await self._token_counter.count_messages(
                 messages=[assistant_msg],
                 model_name=model_info.model_name,
-            ) # 统计输出 tokens
+            )  # 统计输出 tokens
 
         assistant_msg.token_usage = token_usage
 
@@ -298,9 +305,6 @@ class QueryLoopRuntime:
         tool_outputs = await self._tool_dispatcher.dispatch(invocations, tool_scope)
 
         for result in tool_outputs.results:
-            tool = tool_scope.get(result.tool_invocation.tool_name)
-            result = tool_result_renderer(result, tool.definition if tool else None)
-
             yield ToolOutputAvailableEvent(
                 call_id=result.tool_call_id,
                 output=result.tool_output,
@@ -320,7 +324,7 @@ class QueryLoopRuntime:
         yield StepFinishEvent(is_finished=False, intermediate_messages=new_messages, token_usage=token_usage)
 
     async def _emit_exhausted_warning(
-        self, session_id: str
+            self, session_id: str
     ) -> AsyncIterator[StreamEvent]:
         """Agent 循环超出最大迭代次数时的兜底文本输出"""
         warning_text = f"Agent 推理超出最大迭代次数{settings.AGENT_MAX_ITERATIONS}，未能生成最终答案"

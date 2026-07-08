@@ -8,23 +8,84 @@ authors = [
     { name = "Jiazheng Sun", email = "jzsun24@m.fudan.edu.cn" }
 ]
 dependencies = [
-    "fastapi",
-    "pydantic",
-    "pydantic-settings",
-    "uvicorn[standard]",
-    "dependency_injector",
-    "litellm",
-    "mem0ai",
-    "openai",
-    "anthropic",
-    "google-genai",
-    "dashscope",
-    "jsonschema",
-    "beanie",
-    "redis[asyncio]",
-    "nacos-sdk-python",
-    "pyyaml",
-    "jieba",
-    "zeroentropy",
-    "wisepen-common",
+    # 1. INFRASTRUCTURE & WEB (底层架构、网络与微服务基础)
+    "fastapi",            # 异步 Web API 框架
+    "uvicorn[standard]",  # ASGI 服务运行时
+    "pydantic",           # 数据校验与序列化
+    "pydantic-settings",  # 配置与环境变量加载
+    "dependency_injector",# 依赖注入容器
+    "nacos-sdk-python",   # Nacos 注册与配置客户端
+    "pyyaml",             # YAML 配置解析
+    "httpx",              # 异步 HTTP 客户端
+    "dnspython",          # DNS 解析与 DoH 查询
+    "arq>=0.28.0",        # Redis 异步任务队列
+    "tenacity",           # 强大的异常重试策略
+
+
+    # 2. DATA & STORAGE (持久化、消息队列与多级缓存)
+    "beanie",             # MongoDB ODM (异步对象文档映射)
+    "redis",              # Redis 客户端 (缓存与分布式锁)
+    "aiokafka",           # Kafka 异步生产者/消费者客户端
+    "hishel[async]",      # 异步 HTTP 网络层缓存
+    "async_lru",          # 异步内存级 LRU 缓存
+
+
+    # 3. AI & CORE RAG (LLM路由、文本解析、向量与知识图谱检索)
+    # --- LLM & Agent Core ---
+    "litellm",            # OpenAI-compatible LLM 统一路由与兼容层
+    "openai",             # OpenAI 官方 SDK
+    "anthropic",          # Anthropic 官方 SDK
+    "google-genai",       # Google Gemini SDK
+    "dashscope",          # 阿里 DashScope SDK
+    "mem0ai",             # 长期记忆服务客户端
+
+    # --- Document & Multimodal Parsing (文档与网页多模态解析) ---
+    "docling",            # PDF/Office 等复杂文档解析
+    "pymupdf4llm",        # PDF 转 LLM 友好 Markdown
+    "markitdown",         # 多格式文件转 Markdown
+    "trafilatura",        # 网页正文高率抽取
+    "scrapling[fetchers]",  # 动态网页抓取（支持反爬与 JS 渲染，含 playwright/curl_cffi 等完整依赖）
+    "beautifulsoup4",     # HTML/XML 结构化解析
+    "markdownify",        # HTML 转 Markdown
+    "magika",             # 基于 AI 的文件类型深度识别
+
+    # --- Text Chunking & Retrieval (分词、切分与多路检索) ---
+    "langchain_text_splitters", # 文本智能分块工具
+    "bm25s>=0.3.9",       # BM25 稀疏向量检索 (全文检索)
+    "jieba",              # 中文分词 (BM25 基础)
+    "thulac",             # 中文分词补充词表与词性标注
+    "zeroentropy",        # ZeroEntropy 重排 (Rerank) / SDK 能力
+
+    # --- Vector & Graph Databases (向量库与图数据库) ---
+    "qdrant-client",      # Qdrant 密集向量数据库客户端
+    "elasticsearch[async]", # Elasticsearch 异步高级检索客户端
+    "neo4j",              # Neo4j 图数据库基础客户端
+    "neo4j-graphrag",     # Neo4j GraphRAG 知识图谱构建与检索
+
+
+    # 4. UTILITIES & COMPUTE (数值计算、格式化、加密与内部库)
+    # --- Math & Data Compute (数学与数据计算) ---
+    "pandas",             # 表格与结构化数据处理
+    "openpyxl",           # Excel xlsx 读写支持
+    "numpy>=2.4.6",       # 基础数值计算
+    "scipy>=1.17.1",      # 科学计算与统计分析
+    "sympy>=1.14.0",      # 符号数学与代数方程求解
+
+    # --- Serialization & Rendering (高效序列化与输出渲染) ---
+    "orjson",             # C 语言编写的高性能 JSON 序列化
+    "dicttoxml",          # dict/list 转 XML 格式
+    "jsonschema",         # JSON Schema 格式校验
+    "markdown-it-py",     # 高性能 Markdown 解析器
+    "mdit-py-plugins",    # Markdown-it 扩展插件
+
+    # --- Internal & Security (内部共享库与安全凭证) ---
+    "wisepen-common",     # WisePen 公共基础公共库 (内部依赖)
+    "cryptography",       # 密钥加密、解密与凭证安全保护
+    "ddgs>=9.14.4",       # DuckDuckGo 外部搜索联网能力客户端
+]
+
+[dependency-groups]
+dev = [
+    "pytest",             # 单元测试框架
+    "pytest-asyncio",     # 异步测试支持
 ]
