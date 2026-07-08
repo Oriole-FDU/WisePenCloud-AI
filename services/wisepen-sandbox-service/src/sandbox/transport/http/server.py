@@ -9,7 +9,7 @@ import tempfile
 import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict
 
 from sandbox.ResultReturn.returnResult import InMemoryExecutionResultRepository, Result
 from sandbox.ScriptExecutor.execution.executor_impl import DefaultScriptsExecutor
@@ -58,7 +58,7 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
         self._app = app
         super().__init__(*args, **kwargs)
 
-    def do_GET(self) -> None:
+    def do_http_get(self) -> None:
         _dbg("http_get", path=self.path)
 
         if self.path == "/v1/sandbox/health":
@@ -75,7 +75,7 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
 
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
-    def do_POST(self) -> None:
+    def do_http_post(self) -> None:
         _dbg("http_post", path=self.path)
         try:
             raw = self._read_json()
@@ -83,23 +83,23 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(e)})
             return
 
-        hdrs = {k: v for k, v in self.headers.items()}
+        http_headers = {k: v for k, v in self.headers.items()}
 
         try:
             if self.path == "/v1/sandbox/execute":
                 payload = self._app.execute(raw)
             elif self.path == "/v1/sandbox/file/read":
-                payload = self._app.file_read(raw, hdrs)
+                payload = self._app.file_read(raw, http_headers)
             elif self.path == "/v1/sandbox/file/write":
-                payload = self._app.file_write(raw, hdrs)
+                payload = self._app.file_write(raw, http_headers)
             elif self.path == "/v1/sandbox/file/list":
-                payload = self._app.file_list(raw, hdrs)
+                payload = self._app.file_list(raw, http_headers)
             elif self.path == "/v1/sandbox/file/grep":
-                payload = self._app.file_grep(raw, hdrs)
+                payload = self._app.file_grep(raw, http_headers)
             elif self.path == "/v1/sandbox/file/replace":
-                payload = self._app.file_replace(raw, hdrs)
+                payload = self._app.file_replace(raw, http_headers)
             elif self.path == "/v1/sandbox/shell/exec":
-                payload = self._app.shell_exec(raw, hdrs)
+                payload = self._app.shell_exec(raw, http_headers)
             elif self.path == "/v1/sandbox/queue/drain":
                 payload = self._app.queue_drain()
             else:
@@ -246,7 +246,7 @@ class SandboxHttpApp:
         cid = None
         try:
             cid = self._acquire(uid, sid)
-            cmd = f"find {_sh(path)} -maxdepth {1 if not recursive else 10} -mindepth 1 -printf '%y %s %f\\n' 2>/dev/null"
+            cmd = f"find {_sh(path)} -max_depth {1 if not recursive else 10} -min_depth 1 -printf '%y %s %f\\n' 2>/dev/null"
             stdout, _, _ = self._container_exec(cid, cmd)
             files = []
             for line in stdout.strip().split("\n"):
@@ -368,7 +368,8 @@ class SandboxHttpApp:
         finally:
             os.unlink(tmp.name)
 
-    def _container_exec(self, cid: str, command: str, exec_dir: str = "",
+    @staticmethod
+    def _container_exec(cid: str, command: str, exec_dir: str = "",
                         timeout: int = 30) -> tuple[str, str, int]:
         args = ["docker", "exec"]
         if exec_dir:
@@ -380,7 +381,8 @@ class SandboxHttpApp:
             return "", "timeout", -1
         return completed.stdout or "", completed.stderr or "", completed.returncode
 
-    def _to_response_dto(self, result: ExecutionResult) -> ExecuteResponseDTO:
+    @staticmethod
+    def _to_response_dto(result: ExecutionResult) -> ExecuteResponseDTO:
         artifacts = []
         if result.artifacts:
             for a in result.artifacts:
@@ -409,7 +411,7 @@ def _sh(s: str) -> str:
     return f"'{escaped}'"
 
 
-def build_sandbox_http_handler(*, app: SandboxHttpApp) -> type[BaseHTTPRequestHandler]:
+def build_sandbox_http_handler(*, app: SandboxHttpApp) -> Callable[[], BaseHTTPRequestHandler]:
     def _handler(*args: Any, **kwargs: Any) -> SandboxHttpHandler:
         return SandboxHttpHandler(*args, app=app, **kwargs)
     return _handler  # type: ignore[return-value]
@@ -428,35 +430,34 @@ def build_default_http_server(*, host: str, port: int, packages_base_dir: str,
 if __name__ == "__main__":
     import signal, sys
 
-    host = os.getenv("SANDBOX_HOST", "127.0.0.1").strip() or "127.0.0.1"
-    port_raw = os.getenv("SANDBOX_PORT", "9001").strip() or "9001"
-    packages_dir = os.getenv("SANDBOX_PACKAGES_DIR", "./packages").strip() or "./packages"
+    _listen_host = os.getenv("SANDBOX_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    _listen_port = int((os.getenv("SANDBOX_PORT", "9001").strip() or "9001"))
+    _packages_dir = os.getenv("SANDBOX_PACKAGES_DIR", "./packages").strip() or "./packages"
+    _use_queue = os.getenv("SANDBOX_QUEUE_ENABLE", "").strip().lower() in ("1", "true", "yes")
 
-    use_queue = os.getenv("SANDBOX_QUEUE_ENABLE", "").strip().lower() in ("1", "true", "yes")
-    pool = None
-
-    if use_queue:
-        pool = ContainerPoolManager(PoolConfig(
+    _pool = None
+    if _use_queue:
+        _pool = ContainerPoolManager(PoolConfig(
             image=os.getenv("AIO_WORKER_IMAGE", "ghcr.io/agent-infra/sandbox:latest"),
             min_idle=int(os.getenv("AIO_WORKER_MIN_IDLE", "2")),
             max_total=int(os.getenv("AIO_WORKER_MAX_TOTAL", "8")),
             workspace_cache=os.getenv("AIO_WORKSPACE_CACHE_DIR", "/workspaces"),
             dirty_ttl=float(os.getenv("AIO_WORKER_DIRTY_TTL", "60")),
         ))
-        pool.start()
-        print(f"[sandbox] container pool started (min_idle={pool.queue._min_idle}, max_total={pool.queue._max_total}).")
+        _pool.start()
+        print(f"[sandbox] container pool started (min_idle={_pool.queue.min_idle}, max_total={_pool.queue.max_total}).")
 
     def _shutdown(signum=None, frame=None):
         print("[sandbox] shutting down...")
-        if pool:
-            pool.stop()
+        if _pool:
+            _pool.stop()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    server = build_default_http_server(
-        host=host, port=int(port_raw), packages_base_dir=packages_dir,
-        pool=pool,
+    _server = build_default_http_server(
+        host=_listen_host, port=_listen_port, packages_base_dir=_packages_dir,
+        pool=_pool,
     )
-    server.start()
+    _server.start()
