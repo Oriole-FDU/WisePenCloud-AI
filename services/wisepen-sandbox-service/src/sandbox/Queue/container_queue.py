@@ -223,6 +223,9 @@ class ContainerQueue:
         except SandboxException:
             pass
 
+    def remove_container(self, container_id: str) -> None:
+        self._rm_container(container_id)
+
     @staticmethod
     def _is_running(container_id: str) -> bool:
         try:

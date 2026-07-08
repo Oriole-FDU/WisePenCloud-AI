@@ -23,10 +23,7 @@ from sandbox.ScriptExecutor.scriptReader import ScriptPackageRepository
 from sandbox.service.sandbox_service import DefaultSandboxExecutionService
 from sandbox.transport.http.schemas import ExecuteRequestDTO, ExecuteResponseDTO
 from common.sandbox import SandboxException
-from sandbox.Queue.container_queue import ContainerQueue
-from sandbox.Queue.file_manager import FileManager
-from sandbox.Queue.scheduler import Scheduler
-from sandbox.Queue.watcher import Watcher
+from sandbox.Queue.pool_manager import PoolConfig, ContainerPoolManager
 from sandbox.core.debug import debug
 
 _dbg = debug("[SANDBOX][http]")
@@ -165,9 +162,7 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
 
 class SandboxHttpApp:
     def __init__(self, *, package_repo: ScriptPackageRepository,
-                 container_queue: ContainerQueue | None = None,
-                 scheduler: Scheduler | None = None,
-                 file_manager: FileManager | None = None) -> None:
+                 pool: ContainerPoolManager | None = None) -> None:
         self._package_repo = package_repo
         self._result_repo = InMemoryExecutionResultRepository()
         self._result = Result(result_repo=self._result_repo)
@@ -180,9 +175,7 @@ class SandboxHttpApp:
         self._executor = DefaultScriptsExecutor(parser_factory=parser_factory)
         self._service = DefaultSandboxExecutionService(executor=self._executor, result_return=self._result)
 
-        self._queue = container_queue
-        self._scheduler = scheduler
-        self._file_manager = file_manager or FileManager()
+        self._pool = pool
 
     # ---- Legacy script-package execution ----
 
@@ -206,8 +199,8 @@ class SandboxHttpApp:
 
     def health_check(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"status": "ok"}
-        if self._queue:
-            payload["queue"] = self._queue.health_check()
+        if self._pool:
+            payload["queue"] = self._pool.health_check()
         return payload
 
     # ---- File operations (queue lifecycle) ----
@@ -334,35 +327,20 @@ class SandboxHttpApp:
                 self._release(cid, uid, sid)
 
     def queue_drain(self) -> Dict[str, Any]:
-        if not self._queue:
+        if not self._pool:
             return {"error": "queue not enabled"}
-        # 快照所有 cid，释放锁后在锁外逐个 recycle（recycle 内部获取 _lock，防止死锁）
-        cids = list(self._queue._containers.keys())
-        recycled = 0
-        for cid in cids:
-            new_cid = self._queue.recycle(cid)
-            if new_cid:
-                recycled += 1
-        return {"drained": recycled}
+        return {"drained": self._pool.drain()}
 
     # ---- Internal ----
 
     def _acquire(self, uid: str, sid: str) -> str:
-        if not self._queue:
+        if not self._pool:
             raise SandboxException.queue_not_enabled()
-        if self._scheduler:
-            cid = self._scheduler.acquire(uid, sid)
-        else:
-            cid = self._queue.acquire(uid, sid)
-        self._file_manager.pull(cid, uid, sid)
-        return cid
+        return self._pool.acquire(uid, sid)
 
     def _release(self, cid: str, uid: str, sid: str) -> None:
-        self._file_manager.push(cid, uid, sid)
-        if self._scheduler:
-            self._scheduler.release(cid)
-        else:
-            self._queue.release(cid)
+        if self._pool:
+            self._pool.release(cid, uid, sid)
 
     # ---- Docker exec helpers ----
 
@@ -438,12 +416,9 @@ def build_sandbox_http_handler(*, app: SandboxHttpApp) -> type[BaseHTTPRequestHa
 
 
 def build_default_http_server(*, host: str, port: int, packages_base_dir: str,
-                              container_queue: ContainerQueue | None = None,
-                              scheduler: Scheduler | None = None,
-                              file_manager: FileManager | None = None) -> StdHttpServer:
+                              pool: ContainerPoolManager | None = None) -> StdHttpServer:
     repo = LocalFsScriptPackageRepository(packages_base_dir)
-    app = SandboxHttpApp(package_repo=repo, container_queue=container_queue,
-                         scheduler=scheduler, file_manager=file_manager)
+    app = SandboxHttpApp(package_repo=repo, pool=pool)
     handler_cls = build_sandbox_http_handler(app=app)
     return StdHttpServer(host=host, port=port, handler_factory=handler_cls)
 
@@ -458,43 +433,23 @@ if __name__ == "__main__":
     packages_dir = os.getenv("SANDBOX_PACKAGES_DIR", "./packages").strip() or "./packages"
 
     use_queue = os.getenv("SANDBOX_QUEUE_ENABLE", "").strip().lower() in ("1", "true", "yes")
-    queue = None
-    file_mgr = None
-    watcher = None
+    pool = None
 
     if use_queue:
-        workspace_cache = os.getenv("AIO_WORKSPACE_CACHE_DIR", "/workspaces")
-        queue = ContainerQueue(
+        pool = ContainerPoolManager(PoolConfig(
             image=os.getenv("AIO_WORKER_IMAGE", "ghcr.io/agent-infra/sandbox:latest"),
             min_idle=int(os.getenv("AIO_WORKER_MIN_IDLE", "2")),
             max_total=int(os.getenv("AIO_WORKER_MAX_TOTAL", "8")),
-            workspace_cache=workspace_cache,
-        )
-        file_mgr = FileManager(workspace_cache=workspace_cache)
-        print(f"[sandbox] pre-fetching {queue._min_idle} containers...")
-        queue.ensure_idle_count()
-
-        scheduler = Scheduler(queue, allocation_timeout=5.0, session_max=3)
-
-        watcher = Watcher(
-            queue,
+            workspace_cache=os.getenv("AIO_WORKSPACE_CACHE_DIR", "/workspaces"),
             dirty_ttl=float(os.getenv("AIO_WORKER_DIRTY_TTL", "60")),
-        )
-        watcher.start()
-        print("[sandbox] container queue watcher started.")
+        ))
+        pool.start()
+        print(f"[sandbox] container pool started (min_idle={pool.queue._min_idle}, max_total={pool.queue._max_total}).")
 
     def _shutdown(signum=None, frame=None):
         print("[sandbox] shutting down...")
-        if watcher:
-            watcher.stop()
-        if queue:
-            print("[sandbox] removing containers...")
-            for cid in list(queue._containers.keys()):
-                try:
-                    queue._rm_container(cid)
-                except Exception:
-                    pass
-            print("[sandbox] containers removed.")
+        if pool:
+            pool.stop()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
@@ -502,6 +457,6 @@ if __name__ == "__main__":
 
     server = build_default_http_server(
         host=host, port=int(port_raw), packages_base_dir=packages_dir,
-        container_queue=queue, scheduler=scheduler, file_manager=file_mgr,
+        pool=pool,
     )
     server.start()
