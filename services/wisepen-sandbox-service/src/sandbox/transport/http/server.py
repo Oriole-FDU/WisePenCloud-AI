@@ -116,6 +116,10 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
+        except SandboxException as e:
+            _dbg("sandbox_error", code=e.code.value, msg=e.message, detail=e.detail)
+            self._send_json(HTTPStatus(e.http_status), e.to_dict())
+            return
         except Exception as e:
             _dbg("handler_error", error_type=type(e).__name__, error=str(e))
             self._send_json(HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -128,6 +132,10 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
             payload = fn()
         except KeyError:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "result not found"})
+            return
+        except SandboxException as e:
+            _dbg("sandbox_error", code=e.code.value, msg=e.message, detail=e.detail)
+            self._send_json(HTTPStatus(e.http_status), e.to_dict())
             return
         except Exception as e:
             _dbg("handle_error", error_type=type(e).__name__, error=str(e))

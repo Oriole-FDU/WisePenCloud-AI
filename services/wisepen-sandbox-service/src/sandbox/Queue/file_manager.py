@@ -39,7 +39,7 @@ class FileManager:
         os.makedirs(host, exist_ok=True)
         try:
             self._docker_cp(f"{container_id}:/workspace/.", f"{host}/")
-        except (RuntimeError, SandboxException):
+        except SandboxException:
             pass  # non-fatal: container will be recycled, partial data acceptable
 
     @staticmethod
