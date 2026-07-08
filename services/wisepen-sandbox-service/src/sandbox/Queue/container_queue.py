@@ -193,7 +193,7 @@ class ContainerQueue:
                 if self._containers[cid].state == ContainerState.DEAD:
                     try:
                         self._rm_container(cid)
-                    except Exception:
+                    except SandboxException:
                         pass
                     del self._containers[cid]
                     removed_containers += 1
@@ -231,7 +231,7 @@ class ContainerQueue:
     def _rm_container(self, container_id: str) -> None:
         try:
             self._run_docker(["rm", "-f", container_id])
-        except Exception:
+        except SandboxException:
             pass
 
     @staticmethod
@@ -254,3 +254,11 @@ class ContainerQueue:
             detail = (completed.stderr or completed.stdout or "").strip()
             raise SandboxException.docker_error(" ".join(args[:2]), detail[:500])
         return (completed.stdout or "").strip()
+
+    @property
+    def containers(self):
+        return self._containers
+
+    @property
+    def lock(self):
+        return self._lock
