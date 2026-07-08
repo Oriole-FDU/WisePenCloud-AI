@@ -25,6 +25,7 @@ from sandbox.transport.http.schemas import ExecuteRequestDTO, ExecuteResponseDTO
 from common.sandbox import SandboxException
 from sandbox.Queue.container_queue import ContainerQueue
 from sandbox.Queue.file_manager import FileManager
+from sandbox.Queue.scheduler import Scheduler
 from sandbox.Queue.watcher import Watcher
 from sandbox.core.debug import debug
 
@@ -165,6 +166,7 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
 class SandboxHttpApp:
     def __init__(self, *, package_repo: ScriptPackageRepository,
                  container_queue: ContainerQueue | None = None,
+                 scheduler: Scheduler | None = None,
                  file_manager: FileManager | None = None) -> None:
         self._package_repo = package_repo
         self._result_repo = InMemoryExecutionResultRepository()
@@ -179,6 +181,7 @@ class SandboxHttpApp:
         self._service = DefaultSandboxExecutionService(executor=self._executor, result_return=self._result)
 
         self._queue = container_queue
+        self._scheduler = scheduler
         self._file_manager = file_manager or FileManager()
 
     # ---- Legacy script-package execution ----
@@ -347,13 +350,19 @@ class SandboxHttpApp:
     def _acquire(self, uid: str, sid: str) -> str:
         if not self._queue:
             raise SandboxException.queue_not_enabled()
-        cid = self._queue.acquire(uid, sid)
+        if self._scheduler:
+            cid = self._scheduler.acquire(uid, sid)
+        else:
+            cid = self._queue.acquire(uid, sid)
         self._file_manager.pull(cid, uid, sid)
         return cid
 
     def _release(self, cid: str, uid: str, sid: str) -> None:
         self._file_manager.push(cid, uid, sid)
-        self._queue.release(cid)
+        if self._scheduler:
+            self._scheduler.release(cid)
+        else:
+            self._queue.release(cid)
 
     # ---- Docker exec helpers ----
 
@@ -430,10 +439,11 @@ def build_sandbox_http_handler(*, app: SandboxHttpApp) -> type[BaseHTTPRequestHa
 
 def build_default_http_server(*, host: str, port: int, packages_base_dir: str,
                               container_queue: ContainerQueue | None = None,
+                              scheduler: Scheduler | None = None,
                               file_manager: FileManager | None = None) -> StdHttpServer:
     repo = LocalFsScriptPackageRepository(packages_base_dir)
     app = SandboxHttpApp(package_repo=repo, container_queue=container_queue,
-                         file_manager=file_manager)
+                         scheduler=scheduler, file_manager=file_manager)
     handler_cls = build_sandbox_http_handler(app=app)
     return StdHttpServer(host=host, port=port, handler_factory=handler_cls)
 
@@ -464,6 +474,8 @@ if __name__ == "__main__":
         print(f"[sandbox] pre-fetching {queue._min_idle} containers...")
         queue.ensure_idle_count()
 
+        scheduler = Scheduler(queue, allocation_timeout=5.0, session_max=3)
+
         watcher = Watcher(
             queue,
             dirty_ttl=float(os.getenv("AIO_WORKER_DIRTY_TTL", "60")),
@@ -490,6 +502,6 @@ if __name__ == "__main__":
 
     server = build_default_http_server(
         host=host, port=int(port_raw), packages_base_dir=packages_dir,
-        container_queue=queue, file_manager=file_mgr,
+        container_queue=queue, scheduler=scheduler, file_manager=file_mgr,
     )
     server.start()
