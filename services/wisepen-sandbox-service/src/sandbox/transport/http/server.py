@@ -58,7 +58,7 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
         self._app = app
         super().__init__(*args, **kwargs)
 
-    def do_http_get(self) -> None:
+    def do_GET(self) -> None:
         _dbg("http_get", path=self.path)
 
         if self.path == "/v1/sandbox/health":
@@ -73,9 +73,17 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
             self._handle(lambda: self._app.get_result(request_id))
             return
 
+        if self.path == "/v1/sandbox/queue/drain":
+            self._handle(lambda: self._app.queue_drain())
+            return
+
+        if self.path == "/v1/sandbox/queue/containers":
+            self._handle(lambda: self._app.list_containers())
+            return
+
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
-    def do_http_post(self) -> None:
+    def do_POST(self) -> None:
         _dbg("http_post", path=self.path)
         try:
             raw = self._read_json()
@@ -100,8 +108,6 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
                 payload = self._app.file_replace(raw, http_headers)
             elif self.path == "/v1/sandbox/shell/exec":
                 payload = self._app.shell_exec(raw, http_headers)
-            elif self.path == "/v1/sandbox/queue/drain":
-                payload = self._app.queue_drain()
             else:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
@@ -330,6 +336,22 @@ class SandboxHttpApp:
         if not self._pool:
             return {"error": "queue not enabled"}
         return {"drained": self._pool.drain()}
+
+    def list_containers(self) -> Dict[str, Any]:
+        if not self._pool:
+            return {"error": "queue not enabled"}
+        containers = []
+        for cid, info in self._pool.queue.containers.items():
+            containers.append({
+                "container_id": info.container_id[:12],
+                "container_name": info.container_name,
+                "state": info.state.value,
+                "user_id": info.user_id or "",
+                "session_id": info.session_id or "",
+                "allocated_at": info.allocated_at,
+                "created_at": info.created_at,
+            })
+        return {"containers": containers, "total": len(containers)}
 
     # ---- Internal ----
 
