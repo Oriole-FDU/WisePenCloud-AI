@@ -22,6 +22,7 @@ from sandbox.ScriptExecutor.scriptExecutor import ExecutionResult
 from sandbox.ScriptExecutor.scriptReader import ScriptPackageRepository
 from sandbox.service.sandbox_service import DefaultSandboxExecutionService
 from sandbox.transport.http.schemas import ExecuteRequestDTO, ExecuteResponseDTO
+from common.sandbox import SandboxException
 from sandbox.Queue.container_queue import ContainerQueue
 from sandbox.Queue.file_manager import FileManager
 from sandbox.Queue.watcher import Watcher
@@ -346,7 +347,7 @@ class SandboxHttpApp:
 
     def _acquire(self, uid: str, sid: str) -> str:
         if not self._queue:
-            raise RuntimeError("container queue not enabled (set SANDBOX_QUEUE_ENABLE=1)")
+            raise SandboxException.queue_not_enabled()
         cid = self._queue.acquire(uid, sid)
         self._file_manager.pull(cid, uid, sid)
         return cid
@@ -376,7 +377,7 @@ class SandboxHttpApp:
                 capture_output=True, text=True, timeout=10,
             )
             if result.returncode != 0:
-                raise RuntimeError(f"docker cp failed: {result.stderr.strip()[:200]}")
+                raise SandboxException.file_sync_failed(result.stderr.strip()[:200])
             return len(data)
         finally:
             os.unlink(tmp.name)
@@ -412,7 +413,7 @@ def _extract_tenant(headers: Dict[str, str]) -> tuple[str, str]:
     uid = (headers.get("X-User-Id") or headers.get("x-user-id") or "").strip()
     sid = (headers.get("X-Session-Id") or headers.get("x-session-id") or "").strip()
     if not uid or not sid:
-        raise RuntimeError("missing X-User-Id or X-Session-Id header")
+        raise SandboxException.missing_tenant()
     return uid, sid
 
 

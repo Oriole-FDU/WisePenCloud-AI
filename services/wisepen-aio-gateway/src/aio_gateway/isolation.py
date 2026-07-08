@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from common.sandbox import SandboxException
+
 SANDBOX_ROOT = "/home/gem/workspaces"
 VIRTUAL_ROOT = "/workspace"
 _ALLOWED_CHARS = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -51,8 +53,12 @@ def _join(a: str, b: str) -> str:
     return f"{a}{SEP}{b}"
 
 
-class PathValidationError(ValueError):
-    """Raised when a path violates isolation rules. Does NOT leak physical paths."""
+class PathValidationError(SandboxException):
+    """Raised when a path violates isolation rules. Inherits SandboxException."""
+
+    def __init__(self, message: str, code=None):
+        from common.sandbox import SandboxErrorCode
+        super().__init__(code=code or SandboxErrorCode.PATH_TRAVERSAL, message=message)
 
 
 @dataclass(frozen=True)
