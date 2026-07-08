@@ -6,9 +6,12 @@ Runs in a daemon thread alongside the HTTP server:
 - Removes dead containers from queue
 - Ensures minimum idle count (prefetch)
 - Recycles dirty containers after TTL
+- Cleans stale workspace cache directories on host
 """
 from __future__ import annotations
 
+import os
+import shutil
 import threading
 import time
 
@@ -19,14 +22,7 @@ _dbg = debug("[SANDBOX][watcher]")
 
 
 class Watcher:
-    """
-    Background maintainer for the container queue.
-
-    Runs three loops on configurable intervals:
-    - health_interval:  check running state, mark dead
-    - prefetch_interval: ensure idle pool size
-    - recycle_interval:  clean dirty containers
-    """
+    """Background maintainer for the container queue."""
 
     def __init__(
         self,
@@ -35,12 +31,18 @@ class Watcher:
         prefetch_interval: float = 5.0,
         recycle_interval: float = 30.0,
         dirty_ttl: float = 60.0,
+        workspace_cache: str = "/workspaces",
+        workspace_cleanup_ttl: float = 7 * 24 * 3600,
+        workspace_cleanup_interval: float = 3600.0,
     ):
         self._queue = queue
         self._health_interval = health_interval
         self._prefetch_interval = prefetch_interval
         self._recycle_interval = recycle_interval
         self._dirty_ttl = dirty_ttl
+        self._workspace_cache = workspace_cache
+        self._workspace_cleanup_ttl = workspace_cleanup_ttl
+        self._workspace_cleanup_interval = workspace_cleanup_interval
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -64,24 +66,26 @@ class Watcher:
         last_health = 0.0
         last_prefetch = 0.0
         last_recycle = 0.0
+        last_workspace_cleanup = 0.0
 
         while not self._stop_event.is_set():
             now = time.time()
 
-            # 1. Health check
             if now - last_health >= self._health_interval:
                 self._do_health()
                 last_health = now
 
-            # 2. Ensure idle pool
             if now - last_prefetch >= self._prefetch_interval:
                 self._do_prefetch()
                 last_prefetch = now
 
-            # 3. Recycle dirty
             if now - last_recycle >= self._recycle_interval:
                 self._do_recycle()
                 last_recycle = now
+
+            if now - last_workspace_cleanup >= self._workspace_cleanup_interval:
+                self._do_workspace_cleanup()
+                last_workspace_cleanup = now
 
             time.sleep(1)
 
@@ -92,8 +96,8 @@ class Watcher:
             if dead > 0:
                 removed = self._queue.remove_dead()
                 _dbg("health_removed_dead", dead_found=dead, removed=removed)
-            elif _DEBUG:
-                _dbg("health_ok", **summary)
+            #elif _DEBUG:
+            #    _dbg("health_ok", **summary)
         except Exception as e:
             _dbg("health_error", error=str(e))
 
@@ -123,3 +127,40 @@ class Watcher:
                     _dbg("recycled", old_cid=cid[:12], new_cid=new_cid[:12])
         except Exception as e:
             _dbg("recycle_error", error=str(e))
+
+    def _do_workspace_cleanup(self) -> None:
+        """Remove stale workspace cache directories older than TTL."""
+        try:
+            root = self._workspace_cache
+            if not os.path.isdir(root):
+                return
+            now = time.time()
+            removed = 0
+            for entry in os.listdir(root):
+                user_dir = os.path.join(root, entry)
+                if not os.path.isdir(user_dir):
+                    continue
+                for sess_name in os.listdir(user_dir):
+                    sess_dir = os.path.join(user_dir, sess_name)
+                    if not os.path.isdir(sess_dir):
+                        continue
+                    try:
+                        mtime = os.path.getmtime(sess_dir)
+                        if now - mtime >= self._workspace_cleanup_ttl:
+                            shutil.rmtree(sess_dir, ignore_errors=True)
+                            removed += 1
+                            _dbg("workspace_removed", path=sess_dir)
+                    except OSError:
+                        pass
+            # Clean trailing empty user dirs
+            for entry in os.listdir(root):
+                user_dir = os.path.join(root, entry)
+                try:
+                    if os.path.isdir(user_dir) and not os.listdir(user_dir):
+                        os.rmdir(user_dir)
+                except OSError:
+                    pass
+            if removed > 0:
+                _dbg("workspace_cleanup_done", removed=removed)
+        except Exception as e:
+            _dbg("workspace_cleanup_error", error=str(e))
