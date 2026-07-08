@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Dict
 
 from sandbox.ScriptExecutor.scriptExecutor import ExecutionRequest, ExecutionRequestParser
@@ -9,20 +8,9 @@ from sandbox.ScriptExecutor.scriptReader import ScriptPackage
 from sandbox.ScriptExecutor.scriptReader import ScriptParserFactory, ScriptSpec
 from sandbox.core.errors import SandboxError, SandboxErrorCode
 from sandbox.LifeSpan.sandboxLifespan import SandboxLimits
+from sandbox.core.debug import debug
 
-import os
-
-_DEBUG = (os.getenv("SANDBOX_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _dbg(event: str, **fields: object) -> None:
-    if not _DEBUG:
-        return
-    try:
-        payload = json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
-        payload = str(fields)
-    print(f"[SANDBOX][request_parser] {event} | {payload}")
+_dbg = debug("[SANDBOX][request_parser]")
 
 
 class DefaultExecutionRequestParser(ExecutionRequestParser):

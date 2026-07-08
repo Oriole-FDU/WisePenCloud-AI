@@ -9,24 +9,13 @@ Runs in a daemon thread alongside the HTTP server:
 """
 from __future__ import annotations
 
-import json
-import os
 import threading
 import time
 
 from sandbox.Queue.container_queue import ContainerQueue, ContainerState
+from sandbox.core.debug import debug
 
-_DEBUG = (os.getenv("SANDBOX_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _dbg(event: str, **fields: object) -> None:
-    if not _DEBUG:
-        return
-    try:
-        payload = json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
-        payload = str(fields)
-    print(f"[SANDBOX][watcher] {event} | {payload}")
+_dbg = debug("[SANDBOX][watcher]")
 
 
 class Watcher:
@@ -110,9 +99,9 @@ class Watcher:
 
     def _do_prefetch(self) -> None:
         try:
-            created = self._queue.ensure_idle_count()
-            if created > 0:
-                _dbg("prefetch_created", count=created, total=self._queue.total_containers)
+            created_containers = self._queue.ensure_idle_count()
+            if created_containers > 0:
+                _dbg("prefetch_created", count=created_containers, total=self._queue.total_containers)
         except Exception as e:
             _dbg("prefetch_error", error=str(e))
 
@@ -121,8 +110,8 @@ class Watcher:
             # Find dirty containers older than TTL
             now = time.time()
             dirty_cids = []
-            with self._queue._lock:
-                for cid, info in self._queue._containers.items():
+            with self._queue.lock:
+                for cid, info in self._queue.containers.items():
                     if info.state == ContainerState.DIRTY:
                         age = now - info.allocated_at if info.allocated_at else 999
                         if age >= self._dirty_ttl:

@@ -1,24 +1,14 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import uuid
 
 from sandbox.ScriptExecutor.scriptReader import ScriptFile, ScriptPackage, ScriptPackageRepository
 from sandbox.core.errors import SandboxError, SandboxErrorCode
+from sandbox.core.debug import debug
 
-_DEBUG = (os.getenv("SANDBOX_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _dbg(event: str, **fields: object) -> None:
-    if not _DEBUG:
-        return
-    try:
-        payload = json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
-        payload = str(fields)
-    print(f"[SANDBOX][package_repo] {event} | {payload}")
+_dbg = debug("[SANDBOX][package_repo]")
 
 
 class LocalFsScriptPackageRepository(ScriptPackageRepository):

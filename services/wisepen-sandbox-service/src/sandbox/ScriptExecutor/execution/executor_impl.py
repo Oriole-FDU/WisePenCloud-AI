@@ -23,18 +23,9 @@ from sandbox.ScriptExecutor.scriptReader import ScriptFile, ScriptPackage, Scrip
 from sandbox.core.errors import SandboxError, SandboxErrorCode
 from sandbox.ResultReturn.formatters.tool_text_formatter import DefaultToolTextFormatter, ToolTextFormatter
 from sandbox.ScriptExecutor.scriptReader import ScriptParserFactory
+from sandbox.core.debug import debug
 
-_DEBUG = (os.getenv("SANDBOX_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _dbg(event: str, **fields: object) -> None:
-    if not _DEBUG:
-        return
-    try:
-        payload = json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
-        payload = str(fields)
-    print(f"[SANDBOX][executor] {event} | {payload}")
+_dbg = debug("[SANDBOX][executor]")
 
 
 class DefaultScriptsExecutor(ScriptsExecutor):

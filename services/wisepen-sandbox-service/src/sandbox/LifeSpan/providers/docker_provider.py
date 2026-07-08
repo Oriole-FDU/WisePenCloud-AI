@@ -9,18 +9,9 @@ from typing import Any, Dict, List, Optional
 
 from sandbox.core.errors import SandboxError, SandboxErrorCode
 from sandbox.LifeSpan.sandboxLifespan import DockerSandboxProvider, SandboxCreateRequest, SandboxInfo, SandboxState
+from sandbox.core.debug import debug
 
-_DEBUG = (os.getenv("SANDBOX_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _dbg(event: str, **fields: object) -> None:
-    if not _DEBUG:
-        return
-    try:
-        payload = json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
-        payload = str(fields)
-    print(f"[SANDBOX][docker_provider] {event} | {payload}")
+_dbg = debug("[SANDBOX][docker_provider]")
 
 
 class DockerSandboxProviderImpl(DockerSandboxProvider):

@@ -26,18 +26,9 @@ from common.sandbox import SandboxException
 from sandbox.Queue.container_queue import ContainerQueue
 from sandbox.Queue.file_manager import FileManager
 from sandbox.Queue.watcher import Watcher
+from sandbox.core.debug import debug
 
-_DEBUG = (os.getenv("SANDBOX_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _dbg(event: str, **fields: Any) -> None:
-    if not _DEBUG:
-        return
-    try:
-        payload = json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
-        payload = str(fields)
-    print(f"[SANDBOX][http] {event} | {payload}")
+_dbg = debug("[SANDBOX][http]")
 
 
 # ---- HTTP Server infrastructure ----

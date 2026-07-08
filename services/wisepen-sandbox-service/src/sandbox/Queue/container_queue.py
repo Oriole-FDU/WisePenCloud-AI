@@ -5,8 +5,6 @@ States: idle → busy → dirty → (recycle) → idle
 """
 from __future__ import annotations
 
-import json
-import os
 import subprocess
 import threading
 import time
@@ -15,18 +13,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from common.sandbox import SandboxException
+from sandbox.core.debug import debug
 
-_DEBUG = (os.getenv("SANDBOX_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _dbg(event: str, **fields: object) -> None:
-    if not _DEBUG:
-        return
-    try:
-        payload = json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
-        payload = str(fields)
-    print(f"[SANDBOX][queue] {event} | {payload}")
+_dbg = debug("[SANDBOX][queue]")
 
 
 class ContainerState(str, Enum):
@@ -243,6 +232,7 @@ class ContainerQueue:
             )
             return raw.stdout.strip().lower() == "true"
         except Exception:
+            _dbg("docker_run", container_id=container_id)
             return False
 
     @staticmethod

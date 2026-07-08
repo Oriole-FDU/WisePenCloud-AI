@@ -11,18 +11,9 @@ from sandbox.LifeSpan.sandboxLifespan import Sandbox as LifeSpanSandbox
 from sandbox.LifeSpan.sandboxLifespan import SandboxInfo
 from sandbox.ResultReturn.formatters.tool_text_formatter import DefaultToolTextFormatter, ToolTextFormatter
 from sandbox.ScriptExecutor.scriptExecutor import ExecutionResult
+from sandbox.core.debug import debug
 
-_DEBUG = (os.getenv("SANDBOX_DEBUG") or "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _dbg(event: str, **fields: object) -> None:
-    if not _DEBUG:
-        return
-    try:
-        payload = json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
-        payload = str(fields)
-    print(f"[SANDBOX][result] {event} | {payload}")
+_dbg = debug("[SANDBOX][result]")
 
 
 class ResultSinkAdapter(ABC):
