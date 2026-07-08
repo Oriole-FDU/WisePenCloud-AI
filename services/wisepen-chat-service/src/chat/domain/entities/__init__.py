@@ -1,10 +1,10 @@
 # src/chat/domain/entities/__init__.py
-from .message import ChatMessage, MessageModelInfo, Role, ToolCallMessage
-from .session import AttachmentRef, ChatSession, ResourceAttachmentRef, TemporaryAttachmentRef
 from .file_storage import StorageRecord, UploadInitResponse
+from .message import ChatMessage, MessageModelInfo, Role, ToolCallMessage
 from .model import ModelType, ModelFamily, ModelScope, Model, ModelProviderMapping
 from .provider import Provider, ProviderScope, ProviderType
 from .resource import ResourceItemInfo, ResourcePermission
+from .session import AttachmentRef, ChatSession, ResourceAttachmentRef, TemporaryAttachmentRef
 from .skill import Skill, SkillMeta, SkillAssetMeta
 
 __all__ = [
