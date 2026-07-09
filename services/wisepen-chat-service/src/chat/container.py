@@ -2,6 +2,7 @@
 
 from typing import List
 
+import redis.asyncio as redis
 from dependency_injector import containers, providers
 from v2.nacos import NacosNamingService
 
@@ -37,12 +38,26 @@ from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.skill_tools import UpdateSkillInfoTool
 from chat.application.tools.skill_tools import UploadSkillDraftAssetTool
 from chat.application.tools.core import ToolRegistry
+from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
+from chat.application.tools.session_tools import (
+    ToolContentRegexReadTool,
+    ToolContentRerankReadTool,
+    ToolContentSequentialReadTool,
+)
+from chat.application.tools.common.tool_content_store.store import ToolContentStore
+from chat.application.tools.tool_output_cache import ToolOutputCache
+from chat.application.tools.tool_output_renderer import ToolOutputRenderer
 from chat.core.config.nacos import nacos_client_manager
+from chat.core.persistence.redis.tool_content_repository import RedisToolContentRepository
 from chat.service_client import FileStorageClient, AIAssetClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
 from common.kafka.producer import KafkaProducerClient
+
+
+def _build_redis_client() -> redis.Redis:
+    return redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
 async def _provide_nacos_naming() -> NacosNamingService:
@@ -80,7 +95,11 @@ class Container(containers.DeclarativeContainer):
     message_repo = providers.Singleton(MongoMessageRepository)
     model_repo = providers.Singleton(MongoModelRepository)
     provider_repo = providers.Singleton(MongoProviderRepository)
-    hot_context_repo = providers.Singleton(RedisHotContext)
+    redis_client = providers.Singleton(_build_redis_client)
+    hot_context_repo = providers.Singleton(
+        RedisHotContext,
+        redis_client=redis_client,
+    )
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
     service_discovery = providers.Singleton(
@@ -133,11 +152,49 @@ class Container(containers.DeclarativeContainer):
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
     )
 
+    tool_content_repository = providers.Singleton(
+        RedisToolContentRepository,
+        redis_client=redis_client,
+        ttl_seconds=settings.TOOL_CONTENT_DEFAULT_TTL_SECONDS,
+    )
+    tool_content_store = providers.Singleton(
+        ToolContentStore,
+        repository=tool_content_repository,
+        max_chars=settings.TOOL_CONTENT_MAX_CHARS,
+    )
+    tool_output_renderer = providers.Singleton(ToolOutputRenderer)
+    tool_output_cache = providers.Singleton(
+        ToolOutputCache,
+        content_store=tool_content_store,
+        inline_max_chars=settings.TOOL_RESULT_MAX_CHARS,
+    )
+    tool_dispatcher = providers.Singleton(
+        ToolDispatcher,
+        output_renderer=tool_output_renderer,
+        output_cache=tool_output_cache,
+    )
+
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期
     # GetHistoricalChatMessagesTool
     search_history_tool = providers.Singleton(
         GetHistoricalChatMessagesTool,
         message_repo=message_repo,
+        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+    )
+    tool_content_rerank_read_tool = providers.Singleton(
+        ToolContentRerankReadTool,
+        content_store=tool_content_store,
+        max_window_chars=settings.TOOL_CONTENT_WINDOW_MAX_CHARS,
+    )
+    tool_content_regex_read_tool = providers.Singleton(
+        ToolContentRegexReadTool,
+        content_store=tool_content_store,
+        max_window_chars=settings.TOOL_CONTENT_WINDOW_MAX_CHARS,
+    )
+    tool_content_sequential_read_tool = providers.Singleton(
+        ToolContentSequentialReadTool,
+        content_store=tool_content_store,
+        max_window_chars=settings.TOOL_CONTENT_WINDOW_MAX_CHARS,
     )
     # LoadSkillTool / LoadSkillAssetTool
     load_skill_tool = providers.Singleton(
@@ -171,6 +228,9 @@ class Container(containers.DeclarativeContainer):
 
     tool_providers = providers.List(
         search_history_tool,
+        tool_content_rerank_read_tool,
+        tool_content_regex_read_tool,
+        tool_content_sequential_read_tool,
         load_skill_tool,
         load_skill_asset_tool,
         create_skill_info_tool,
@@ -197,6 +257,7 @@ class Container(containers.DeclarativeContainer):
         message_repo=message_repo,
         hot_context_repo=hot_context_repo,
         tool_registry=tool_registry,
+        tool_dispatcher=tool_dispatcher,
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
         agent_resolver=agent_resolver,

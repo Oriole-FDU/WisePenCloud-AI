@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, Dict, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from chat.application.tools.core.execution.hooks.base import ToolPreflightHook
+
+ToolOutput = Any
 
 
 class ToolTimeoutStrategy(StrEnum):
@@ -15,6 +19,7 @@ class ToolRiskLevel(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+
 
 @dataclass(frozen=True)
 class ToolParametersSchema:
@@ -42,16 +47,20 @@ class ToolParametersSchema:
         if schema.get("type") != "object":
             raise ValueError("parameters_schema.type must be 'object'.")
 
+        ToolParametersSchema._validate_schema_node(schema, path="parameters_schema")
+
+    @staticmethod
+    def _validate_schema_node(schema: dict[str, Any], *, path: str) -> None:
         properties = schema.get("properties", {})
         if not isinstance(properties, dict):
-            raise ValueError("parameters_schema.properties must be a dict.")
+            raise ValueError(f"{path}.properties must be a dict.")
 
         required = schema.get("required", [])
         if not isinstance(required, (list, tuple)):
-            raise ValueError("parameters_schema.required must be a list or tuple.")
+            raise ValueError(f"{path}.required must be a list or tuple.")
 
         if not all(isinstance(item, str) for item in required):
-            raise ValueError("parameters_schema.required must contain only strings.")
+            raise ValueError(f"{path}.required must contain only strings.")
 
         unknown_required = [
             item for item in required
@@ -60,8 +69,23 @@ class ToolParametersSchema:
 
         if unknown_required:
             raise ValueError(
-                f"parameters_schema.required contains keys not defined in properties: {unknown_required}"
+                f"{path}.required contains keys not defined in properties: {unknown_required}"
             )
+
+        items = schema.get("items")
+        if items is not None and not isinstance(items, dict):
+            raise ValueError(f"{path}.items must be a dict.")
+
+        for key, property_schema in properties.items():
+            if not isinstance(property_schema, dict):
+                raise ValueError(f"{path}.properties.{key} must be a dict.")
+            ToolParametersSchema._validate_schema_node(
+                property_schema,
+                path=f"{path}.properties.{key}",
+            )
+
+        if isinstance(items, dict):
+            ToolParametersSchema._validate_schema_node(items, path=f"{path}.items")
 
 @dataclass(frozen=True)
 class ToolLLMSpec:
@@ -69,24 +93,28 @@ class ToolLLMSpec:
     description: str
     parameters_schema: ToolParametersSchema
 
+
 @dataclass(frozen=True)
 class ToolPolicy:
     """工具策略"""
-    expose_by_default: bool = False # 是否默认暴露给模型
+    expose_by_default: bool = False  # 是否默认暴露给模型
 
-    timeout_seconds: float | None = None # 超时时间
-    timeout_strategy: ToolTimeoutStrategy = ToolTimeoutStrategy.CANCEL_TASK # 超时后策略
+    timeout_seconds: float | None = None  # 超时时间
+    timeout_strategy: ToolTimeoutStrategy = ToolTimeoutStrategy.CANCEL_TASK  # 超时后策略
 
-    persist_output: bool = False # 是否持久化输出 (如果不持久化则需要生成占位符)
-    persisted_output_placeholder_factory: Callable[[dict, Any], str | None] = lambda tool_call_arguments, output: None # 持久化输出的占位生成器
+    persist_output: bool = False  # 是否持久化输出 (如果不持久化则需要生成占位符)
+    persisted_output_placeholder_factory: Callable[[dict, Any], str | None] = (
+        lambda tool_call_arguments, output: None
+    )  # 持久化输出的占位生成器
 
-    risk_level: ToolRiskLevel = ToolRiskLevel.LOW # 风险级别
+    cache_chunked: bool = True  # cacheable_texts 入库时是否生成 chunks/index
 
-    required_context_keys: tuple[str, ...] = () # 需要的上下文 Key
-    required_allowed_builtin_skill_ids: tuple[str, ...] = () # 需要的内置 Skill
+    risk_level: ToolRiskLevel = ToolRiskLevel.LOW  # 风险级别
 
-    max_output_chars: int | None = None # 输出最大字符数（超过后截断）
-    allow_parallel: bool = False # 允许并行
+    required_context_keys: tuple[str, ...] = ()  # 需要的上下文Key
+
+    max_output_chars: int | None = None  # 输出最大字符数（超过后截断）
+    allow_parallel: bool = False  # 允许并行
 
 
 @dataclass(frozen=True)
@@ -101,5 +129,5 @@ class Tool(Protocol):
     def definition(self) -> ToolDefinition:
         ...
 
-    async def execute(self, context: Dict[str, Any], **kwargs) -> Any:
+    async def execute(self, context: Dict[str, Any], **kwargs) -> ToolOutput:
         ...

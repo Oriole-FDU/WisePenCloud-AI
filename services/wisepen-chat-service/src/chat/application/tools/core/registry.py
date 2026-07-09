@@ -1,8 +1,8 @@
-from collections.abc import Iterable
 from typing import Any
 
 from chat.application.tools.core.definition import Tool
 from chat.application.tools.core.llm.renderer import schema_renderer
+
 
 class ToolScope:
     """一次请求内的工具可见性和可信上下文快照"""
@@ -10,7 +10,8 @@ class ToolScope:
     def __init__(self, *, tools: dict[str, Tool], context: dict[str, Any] | None) -> None:
         self._tools = dict(tools)
         self._context = dict(context or {})
-        self._schemas: list[dict[str, Any]] = [schema_renderer(tool.definition.llm_spec) for tool in self._tools.values()]
+        self._schemas: list[dict[str, Any]] = [schema_renderer(tool.definition.llm_spec) for tool in
+                                               self._tools.values()]
 
     def schemas(self) -> list[dict[str, Any]]:
         return list(self._schemas)
@@ -24,6 +25,7 @@ class ToolScope:
 
     def __len__(self) -> int:
         return len(self._tools)
+
 
 class ToolRegistry:
     """全局工具注册表，负责派生请求级工具视图"""
@@ -46,14 +48,13 @@ class ToolRegistry:
         return [schema_renderer(tool.definition.llm_spec) for tool in self._tools.values()]
 
     def derive(
-        self,
-        *,
-        tool_context: dict[str, Any] | None = None,
-        expose_tool_name_set: set[str] | None = None,
-        allow_tool_name_set: set[str] | None = None,
-        deny_tool_name_set: set[str] | None = None,
+            self,
+            *,
+            tool_context: dict[str, Any] | None = None,
+            expose_tool_name_set: set[str] | None = None,
+            allow_tool_name_set: set[str] | None = None,
+            deny_tool_name_set: set[str] | None = None,
     ) -> ToolScope:
-        context = dict(tool_context or {})
         expose_tool_name_set = expose_tool_name_set or set()
         deny_tool_name_set = deny_tool_name_set or set()
 
@@ -63,15 +64,10 @@ class ToolRegistry:
         for name, tool in tools.items():
             policy = tool.definition.policy
 
-            explicitly_exposed = name in expose_tool_name_set
-            skill_exposed = (policy.required_allowed_builtin_skill_ids and
-                             set(policy.required_allowed_builtin_skill_ids).issubset(set(context.get("allowed_skill_ids") or [])))
-
             if not policy.expose_by_default:
-                if explicitly_exposed or skill_exposed:
+                if name in expose_tool_name_set:
                     filtered_tools[name] = tool
                 continue
-
             if allow_tool_name_set is not None and name not in allow_tool_name_set:
                 continue
             if policy.expose_by_default and name in deny_tool_name_set:
@@ -79,6 +75,7 @@ class ToolRegistry:
 
             filtered_tools[name] = tool
 
+        context = dict(tool_context or {})
 
         return ToolScope(tools=filtered_tools, context=context)
 

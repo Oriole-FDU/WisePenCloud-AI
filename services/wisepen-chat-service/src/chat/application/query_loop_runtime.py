@@ -1,4 +1,3 @@
-import json
 import uuid
 from typing import AsyncIterator, Iterator, List, Optional, Union
 
@@ -23,7 +22,6 @@ from chat.application.token_counter import TokenCounter
 from chat.application.tools import ToolScope
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.llm.invocation import ToolInvocation
-from chat.application.tools.core.llm.renderer import tool_result_renderer
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.message import MessageModelInfo, ToolCallMessage
@@ -131,10 +129,15 @@ class QueryLoopRuntime:
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
     """
 
-    def __init__(self, llm_provider_resolver: LLMProviderResolver, token_counter: TokenCounter) -> None:
+    def __init__(
+            self,
+            llm_provider_resolver: LLMProviderResolver,
+            token_counter: TokenCounter,
+            tool_dispatcher: ToolDispatcher,
+    ) -> None:
         self._llm_provider_resolver = llm_provider_resolver
         self._token_counter = token_counter
-        self._tool_dispatcher = ToolDispatcher()
+        self._tool_dispatcher = tool_dispatcher
 
     """
     ReAct 循环主入口 (QueryLoop)
@@ -298,9 +301,6 @@ class QueryLoopRuntime:
         tool_outputs = await self._tool_dispatcher.dispatch(invocations, tool_scope)
 
         for result in tool_outputs.results:
-            tool = tool_scope.get(result.tool_invocation.tool_name)
-            result = tool_result_renderer(result, tool.definition if tool else None)
-
             yield ToolOutputAvailableEvent(
                 call_id=result.tool_call_id,
                 output=result.tool_output,
