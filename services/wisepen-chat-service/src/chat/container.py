@@ -32,10 +32,11 @@ from chat.application.agents import (
 from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
 from chat.application.tools.skill_tools import LoadSkillAssetTool
 from chat.application.tools.skill_tools import LoadSkillTool
+from chat.application.tools.note_tools import ApplyCurrentNoteAiDiffPlanTool, ReadNoteAixmlTool
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.core.config.nacos import nacos_client_manager
-from chat.service_client import FileStorageClient, AIAssetClient, ResourceClient
+from chat.service_client import FileStorageClient, AIAssetClient, NoteCollabClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
 from common.kafka.producer import KafkaProducerClient
@@ -106,6 +107,14 @@ class Container(containers.DeclarativeContainer):
         ResourceClient,
         rpc=rpc_client,
     )
+    note_collab_client = providers.Singleton(
+        NoteCollabClient,
+        rpc=rpc_client,
+        service_name=settings.NOTE_COLLAB_SERVICE_NAME,
+        gateway_base_url=settings.NOTE_COLLAB_GATEWAY_BASE_URL,
+        read_timeout_seconds=settings.NOTE_AI_DIFF_READ_TIMEOUT_SECONDS,
+        apply_timeout_seconds=settings.NOTE_AI_DIFF_APPLY_TIMEOUT_SECONDS,
+    )
 
     # OssFileLoader
     oss_file_loader = providers.Singleton(
@@ -148,11 +157,24 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
+    read_note_aixml_tool = providers.Singleton(
+        ReadNoteAixmlTool,
+        note_collab_client=note_collab_client,
+        max_xml_chars=settings.NOTE_AI_DIFF_MAX_XML_CHARS,
+        timeout_seconds=settings.NOTE_AI_DIFF_READ_TIMEOUT_SECONDS,
+    )
+    apply_current_note_ai_diff_plan_tool = providers.Singleton(
+        ApplyCurrentNoteAiDiffPlanTool,
+        note_collab_client=note_collab_client,
+        timeout_seconds=settings.NOTE_AI_DIFF_APPLY_TIMEOUT_SECONDS,
+    )
 
     tool_providers = providers.List(
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
+        read_note_aixml_tool,
+        apply_current_note_ai_diff_plan_tool,
     )
 
     tool_registry = providers.Singleton(

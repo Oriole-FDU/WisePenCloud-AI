@@ -42,5 +42,5 @@ class ChatRequest(BaseModel):
     )
     user_defined_force_enabled_skill_ids: Optional[Set[str]] = Field(
         default=None,
-        description="预留字段；当前入口接收并透传，但现有 coordinator 尚未消费该字段，不应依赖其强制启用 Skill。",
+        description="本轮强制展示的 Skill ID 集合；传入时覆盖 Agent force_enabled_skill_ids，命中的 Skill 不受普通候选 top-k 挤出。",
     )

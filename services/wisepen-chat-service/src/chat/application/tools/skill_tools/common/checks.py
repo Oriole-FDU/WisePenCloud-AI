@@ -3,6 +3,7 @@ from typing import Any
 from chat.application.tools.core.definition import ToolParametersSchema, ToolPolicy
 from chat.application.tools.core.execution.hooks.base import ToolPreflightHook, ToolPreflightResult
 from chat.application.tools.core.llm.invocation import ToolInvocation
+from chat.core.config.app_settings import settings
 from chat.service_client import ResourceClient
 from common.security import SecurityContextHolder
 
@@ -44,6 +45,9 @@ class SkillPermissionCheck(ToolPreflightHook):
         context: dict[str, Any],
     ) -> ToolPreflightResult:
         skill_id = invocation.tool_call_arguments.get("skill_id")
+        if skill_id == settings.NOTE_AI_DIFF_SKILL_ID:
+            return ToolPreflightResult(ok=True)
+
         try:
             res_check_permission_res = await self._resource_client.check_res_permission(
                 resource_id=skill_id,

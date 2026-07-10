@@ -1,14 +1,17 @@
 ﻿import yaml
 import asyncio
+import os
 import threading
 from pathlib import Path
 from typing import Literal
+from dotenv import dotenv_values, find_dotenv
 from pydantic import BaseModel, ConfigDict
 
 from chat.core.config.nacos import nacos_client_manager
 from common.logger import error, info
 
 SERVICE_ROOT = Path(__file__).resolve().parents[4]
+_LOCAL_ENV_OVERRIDE_KEYS = ("NOTE_COLLAB_GATEWAY_BASE_URL",)
 
 
 class AppSettings(BaseModel):
@@ -88,6 +91,15 @@ class AppSettings(BaseModel):
     SKILL_MATCH_TOP_K: int = 20
 
     # 内部 RPC / 服务发现 配置
+    # Node 协同服务，用于 AI-Diff read/apply 工具
+    NOTE_COLLAB_SERVICE_NAME: str = "wisepen-note-collab-service"
+    # 可选：配置后 AI-Diff read/apply 通过 APISIX 访问协同服务，确保与前端 WebSocket 使用同一 resourceId 路由规则
+    NOTE_COLLAB_GATEWAY_BASE_URL: str = ""
+    NOTE_AI_DIFF_READ_TIMEOUT_SECONDS: float = 8.0
+    NOTE_AI_DIFF_APPLY_TIMEOUT_SECONDS: float = 10.0
+    NOTE_AI_DIFF_MAX_XML_CHARS: int = 30000
+    NOTE_AI_DIFF_SKILL_ID: str = "wisepen-note-ai-diff"
+
     # Nacos 服务发现客户端侧负载均衡策略：weighted_random | round_robin | random
     RPC_LB_STRATEGY: Literal["weighted_random", "round_robin", "random"] = "weighted_random"
     # 单次请求超时（秒）
@@ -129,10 +141,29 @@ def load_settings() -> AppSettings:
         info("nacos app config pulling.")
         raw_yaml = _run_async(nacos_client_manager.pull_config())
         config_dict = yaml.safe_load(raw_yaml) if raw_yaml else {}
+        _apply_local_env_overrides(config_dict)
         return AppSettings(**(config_dict or {}))
     except Exception as e:
         error("nacos app config pull failed.", exc=e)
         raise
+
+
+def _apply_local_env_overrides(config_dict: dict) -> None:
+    local_env = _load_local_env_file()
+    for key in _LOCAL_ENV_OVERRIDE_KEYS:
+        value = os.getenv(key)
+        if value is None:
+            value = local_env.get(key)
+        if value is not None:
+            config_dict[key] = str(value).strip()
+
+
+def _load_local_env_file() -> dict[str, str]:
+    env_path = find_dotenv(usecwd=True)
+    if not env_path:
+        return {}
+    values = dotenv_values(env_path)
+    return {key: str(value) for key, value in values.items() if value is not None}
 
 
 settings = load_settings()

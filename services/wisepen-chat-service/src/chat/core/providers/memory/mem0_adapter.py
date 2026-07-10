@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 from typing import List, Dict, Any, Optional
 from mem0 import Memory
 
@@ -65,7 +65,7 @@ class Mem0Adapter(MemoryProvider):
     ) -> List[str]:
 
         def _sync_search():
-            raw_results = self.client.search(query, user_id=user_id, limit=limit)
+            raw_results = self.client.search(query, filters={"user_id": user_id}, limit=limit)
             debug("mem0 raw search results returned.", query=query, user_id=user_id, raw_results=raw_results)
 
             # 兼容 Mem0 返回字典 {"results": [...]} 或直接返回列表的情况

@@ -3,6 +3,7 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Mapping, Optional
 
 import httpx
@@ -68,6 +69,8 @@ class RpcClient:
         params: Optional[Mapping[str, Any]] = None,
         json: Any = None,
         headers: Optional[Mapping[str, str]] = None,
+        base_url: Optional[str] = None,
+        affinity_key: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> Any:
         """
@@ -90,8 +93,12 @@ class RpcClient:
         user_id = SecurityContextHolder.get_user_id()
         if user_id:
             merged_headers[SecurityConstants.HEADER_USER_ID] = user_id
-            merged_headers[SecurityConstants.HEADER_IDENTITY_TYPE] = str(SecurityContextHolder.get_identity_type().code)
-            merged_headers[SecurityConstants.HEADER_GROUP_ROLE_MAP] = str(SecurityContextHolder.get_group_role_map())
+            identity_type = SecurityContextHolder.get_identity_type()
+            if identity_type is not None:
+                merged_headers[SecurityConstants.HEADER_IDENTITY_TYPE] = str(identity_type.code)
+            merged_headers[SecurityConstants.HEADER_GROUP_ROLE_MAP] = self._serialize_group_role_map(
+                SecurityContextHolder.get_group_role_map()
+            )
 
         # 传递 developer 头
         developer = GrayContextHolder.get_developer_tag()
@@ -100,18 +107,29 @@ class RpcClient:
 
         req_timeout = httpx.Timeout(timeout) if timeout is not None else None
 
-        for attempt in range(attempts):
-            try:
-                instance = await self._discovery.pick(
-                    service_name, strategy=self._strategy, exclude=tried_instances
-                )
-            except ServiceUnavailableError as e:
-                last_exc = e
-                break
+        direct_url = self._join_base_url(base_url, path) if base_url else None
+        if direct_url:
+            attempts = 1
 
-            addr = f"{instance.ip}:{instance.port}"
-            tried_instances.add(addr)
-            url = f"http://{addr}{path}"
+        for attempt in range(attempts):
+            if direct_url:
+                addr = base_url or ""
+                url = direct_url
+            else:
+                try:
+                    instance = await self._discovery.pick(
+                        service_name,
+                        strategy=self._strategy,
+                        affinity_key=affinity_key,
+                        exclude=tried_instances,
+                    )
+                except ServiceUnavailableError as e:
+                    last_exc = e
+                    break
+
+                addr = f"{instance.ip}:{instance.port}"
+                tried_instances.add(addr)
+                url = f"http://{addr}{path}"
 
             try:
                 resp = await self._client.request(
@@ -183,3 +201,22 @@ class RpcClient:
             msg=last_msg,
             cause=last_exc,
         )
+
+    @staticmethod
+    def _serialize_group_role_map(group_role_map: Mapping[str, Any]) -> str:
+        serialized: dict[str, int] = {}
+        for group_id, role in (group_role_map or {}).items():
+            try:
+                serialized[str(group_id)] = int(role.code)
+            except AttributeError:
+                try:
+                    serialized[str(group_id)] = int(role)
+                except (TypeError, ValueError):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        return json.dumps(serialized, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def _join_base_url(base_url: str, path: str) -> str:
+        return f"{base_url.rstrip('/')}/{path.lstrip('/')}"

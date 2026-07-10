@@ -102,6 +102,9 @@ class LoadSkillTool:
         return "\n".join(lines)
 
     async def _load_skill_md(self, skill:Skill) -> str:
+        if skill.skill_md:
+            return skill.skill_md
+
         skill_md_asset = next((asset for asset in skill.assets_manifest if asset.path == "/SKILL.md"), None)
 
         if not skill_md_asset:

@@ -29,17 +29,19 @@ class Skill(BaseModel):
     name: str = Field(default="")
     description: str = Field(default="")
     source_type: str = Field(default="")
+    skill_md: str | None = Field(default=None)
     assets_manifest: List[SkillAssetMeta] = Field(default_factory=list)
     version: int = Field(default=0)
 
     @classmethod
     def from_response(cls, payload: Mapping[str, Any]) -> "Skill":
-        latest_published_skill = payload.get("skillVersionBundle")
+        latest_published_skill = payload.get("skillVersionBundle") or {}
         return cls(
             skill_id=str(payload.get("resourceId")),
             name=str(payload.get("name") or ""),
             description=str(payload.get("description") or ""),
             source_type=str(payload.get("sourceType")),
+            skill_md=str(latest_published_skill.get("skillMd") or payload.get("skillMd") or "") or None,
             assets_manifest=[
                 SkillAssetMeta.from_response(item)
                 for item in (latest_published_skill.get("assets") or [])

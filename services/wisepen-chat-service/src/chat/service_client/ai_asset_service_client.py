@@ -3,6 +3,11 @@ from __future__ import annotations
 from typing import List, Optional, Set
 
 from chat.domain.entities import SkillMeta, Skill
+from chat.domain.entities.builtin_skills import (
+    NOTE_AI_DIFF_SKILL_ID,
+    build_note_ai_diff_skill,
+    build_note_ai_diff_skill_meta,
+)
 from common.core.exceptions import RpcError
 from common.http.rpc_client import RpcClient
 
@@ -23,8 +28,18 @@ class AIAssetClient:
         self._service_name = service_name
 
     async def list_published_skills_meta(self, skill_ids: Set[str]) -> List[SkillMeta]:
-        payloads = await self._list_published_skills_meta_by_resource_ids(skill_ids)
+        requested_ids = set(skill_ids or set())
+        try:
+            payloads = await self._list_published_skills_meta_by_resource_ids(requested_ids)
+        except RpcError:
+            if NOTE_AI_DIFF_SKILL_ID in requested_ids:
+                return [build_note_ai_diff_skill_meta()]
+            raise
+
         metas = [SkillMeta.from_response(item) for item in payloads]
+        returned_ids = {meta.skill_id for meta in metas}
+        if NOTE_AI_DIFF_SKILL_ID in requested_ids and NOTE_AI_DIFF_SKILL_ID not in returned_ids:
+            metas.append(build_note_ai_diff_skill_meta())
         return [meta for meta in metas if meta.skill_id]
 
     async def get_skill_with_version(self, skill_id: str, skill_version: int) -> Optional[Skill]:
@@ -32,7 +47,13 @@ class AIAssetClient:
         return Skill.from_response(published_skill_res)
 
     async def get_published_skill(self, skill_id: str) -> Optional[Skill]:
-        published_skill_res = await self._get_skill_by_resource_id(skill_id)
+        normalized_skill_id = (skill_id or "").strip()
+        try:
+            published_skill_res = await self._get_skill_by_resource_id(normalized_skill_id)
+        except RpcError:
+            if normalized_skill_id == NOTE_AI_DIFF_SKILL_ID:
+                return build_note_ai_diff_skill()
+            raise
         return Skill.from_response(published_skill_res)
 
     async def _get_skill_by_resource_id(self, resource_id: str, skill_version: int = None) -> dict:
