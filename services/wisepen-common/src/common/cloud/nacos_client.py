@@ -12,6 +12,7 @@ from v2.nacos import (
 )
 
 from common.core.config.bootstrap_settings import BootstrapSettings
+from common.gray.context import GrayContextHolder
 
 _config_client: NacosConfigService | None = None
 _naming_client: NacosNamingService | None = None
@@ -89,9 +90,16 @@ class NacosClientManager:
         client = await self.get_naming_client()
         host = self._resolve_host()
 
-        metadata = {"preserved.register.source": "PYTHON_FASTAPI"}
-        if self.bootstrap_settings.DEVELOPER_ENABLE and self.bootstrap_settings.DEVELOPER_NAME:
-            metadata["developer"] = self.bootstrap_settings.DEVELOPER_NAME
+        developer = (
+            self.bootstrap_settings.DEVELOPER_NAME
+            if self.bootstrap_settings.DEVELOPER_ENABLE
+            else None
+        )
+        GrayContextHolder.set_process_default_developer_tag(developer)
+        metadata = GrayContextHolder.build_nacos_metadata(
+            {"preserved.register.source": "PYTHON_FASTAPI"},
+            developer_tag=developer,
+        )
 
         try:
             await client.register_instance(

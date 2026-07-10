@@ -12,7 +12,7 @@ from chat.api.vercel_formats import (
 
 from common.security import require_login
 from common.security.context import _security_context
-from common.gray.context import _gray_context
+from common.gray.context import GrayContextHolder
 from common.logger import error, info
 from chat.api.schemas.chat import ChatRequest
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
@@ -33,7 +33,7 @@ async def _vercel_generator(
     """将 coordinator 的 AsyncGenerator 包装成 AI SDK 6.x SSE 格式"""
     message_id = f"msg_{uuid.uuid4().hex}"
     _security_context.set(dict(security_context or {}))
-    _gray_context.set(gray_context or "")
+    GrayContextHolder.restore(gray_context)
     try:
         yield message_start(message_id)
 
@@ -53,7 +53,7 @@ async def _vercel_generator(
         yield stream_done()
     finally:
         _security_context.set({})
-        _gray_context.set("")
+        GrayContextHolder.clear()
 
 
 @router.post(
@@ -87,7 +87,7 @@ async def chat_completions(
 
     await session_repo.get_session_for_user(req.session_id, user_id)
     stream_security_context = _security_context.get().copy()
-    stream_gray_context = _gray_context.get()
+    stream_gray_context = GrayContextHolder.capture()
 
     chat_gen = coordinator.handle_chat(
         user_id=user_id,

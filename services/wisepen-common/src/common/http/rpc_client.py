@@ -9,7 +9,7 @@ from typing import Any, Dict, Mapping, Optional
 import httpx
 
 from common.cloud.service_discovery import ServiceDiscovery, LoadBalancingStrategy
-from common.core.constants import SecurityConstants, CommonConstants
+from common.core.constants import SecurityConstants
 from common.security.context import SecurityContextHolder
 from common.gray.context import GrayContextHolder
 from common.core.exceptions import RpcError, ServiceUnavailableError
@@ -100,10 +100,7 @@ class RpcClient:
                 SecurityContextHolder.get_group_role_map()
             )
 
-        # 传递 developer 头
-        developer = GrayContextHolder.get_developer_tag()
-        if developer:
-            merged_headers[CommonConstants.GRAY_HEADER_DEV_KEY] = developer
+        merged_headers.update(GrayContextHolder.build_outbound_headers())
 
         req_timeout = httpx.Timeout(timeout) if timeout is not None else None
 

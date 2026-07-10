@@ -16,7 +16,6 @@ from v2.nacos import (
     SubscribeServiceParam,
 )
 
-from common.core.constants import CommonConstants
 from common.core.exceptions import ServiceUnavailableError
 from common.gray.context import GrayContextHolder
 from common.logger import error, info, warn
@@ -74,27 +73,11 @@ class ServiceDiscovery:
             return self._naming
 
 
-    @staticmethod
-    def _developer_of(instance: Instance) -> str:
-        metadata = getattr(instance, "metadata", None) or {}
-        return str(metadata.get(CommonConstants.GRAY_METADATA_DEV_KEY) or "").strip()
-
     # 选择灰度池（开发者隔离）
     def _select_gray_pool(self, service_name: str, instances: List[Instance]) -> List[Instance]:
-        developer = (GrayContextHolder.get_developer_tag() or "").strip()
-
-        baseline = [i for i in instances if not self._developer_of(i)]
-
-        if developer:
-            matched = [i for i in instances if self._developer_of(i) == developer]
-            if matched:
-                return matched
-            if baseline:
-                return baseline
-            raise ServiceUnavailableError(service_name, self._group)
-
-        if baseline:
-            return baseline
+        selected = GrayContextHolder.select_instance_pool(instances)
+        if selected:
+            return selected
 
         raise ServiceUnavailableError(service_name, self._group)
 
