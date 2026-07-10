@@ -92,31 +92,11 @@ SELECTOR_SCHEMA: dict[str, Any] = {
 def selector_from_payload(payload: dict[str, Any] | None) -> ToolContentSelector:
     payload = payload or {}
     return ToolContentSelector(
-        block_kinds=_read_str_tuple(payload.get("block_kinds")),
-        sections=_read_str_tuple(payload.get("sections")),
-        page_labels=_read_str_tuple(payload.get("page_labels")),
-        anchor_labels=_read_str_tuple(payload.get("anchor_labels")),
-        chunk_indices=_read_int_tuple(payload.get("chunk_indices")),
-    )
-
-
-def _read_str_tuple(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, list | tuple):
-        return ()
-    return tuple(
-        item.strip()
-        for item in value
-        if isinstance(item, str) and item.strip()
-    )
-
-
-def _read_int_tuple(value: Any) -> tuple[int, ...]:
-    if not isinstance(value, list | tuple):
-        return ()
-    return tuple(
-        item
-        for item in value
-        if isinstance(item, int) and not isinstance(item, bool)
+        block_kinds=tuple(payload.get("block_kinds", ())),
+        sections=tuple(payload.get("sections", ())),
+        page_labels=tuple(payload.get("page_labels", ())),
+        anchor_labels=tuple(payload.get("anchor_labels", ())),
+        chunk_indices=tuple(payload.get("chunk_indices", ())),
     )
 
 

@@ -13,7 +13,7 @@ class SizeBoundedBlockPackerConfig:
     role: ChunkRole = ChunkRole.FLAT  # 输出 chunk 的结构角色
     separator: str = "\n\n"  # chunk 内多个 block 文本之间的连接符
     chunk_id_prefix: str = "chunk"  # chunk ID 前缀（会被 normalizer 覆盖）
-    hard_boundary_block_kinds: tuple[BlockKind, ...] = ()  # 这些 block 永远开启新 chunk
+    split_on_page_markers: bool = False  # page marker 作为内部控制块，不进入最终 chunk 文本
 
 
 class SizeBoundedBlockPacker:
@@ -51,25 +51,7 @@ class SizeBoundedBlockPacker:
 
         for block in blocks:
             block_chars = len(block.text)
-            if block.block_kind in self.config.hard_boundary_block_kinds:
-                if block.block_kind == BlockKind.PAGE_MARKER:
-                    if block.block_index > chunk_start and chunk_chars > 0:
-                        chunks.append(
-                            self._build_chunk(
-                                blocks,
-                                chunk_start,
-                                block.block_index - 1,
-                                len(chunks),
-                                page_label=chunk_page_label,
-                            )
-                        )
-                    if page_label := _extract_page_label(block):
-                        active_page_label = page_label
-                    chunk_page_label = active_page_label
-                    chunk_start = block.block_index + 1
-                    chunk_chars = 0
-                    continue
-
+            if self.config.split_on_page_markers and block.block_kind == BlockKind.PAGE_MARKER:
                 if block.block_index > chunk_start and chunk_chars > 0:
                     chunks.append(
                         self._build_chunk(
@@ -83,8 +65,9 @@ class SizeBoundedBlockPacker:
                 if page_label := _extract_page_label(block):
                     active_page_label = page_label
                 chunk_page_label = active_page_label
-                chunk_start = block.block_index
+                chunk_start = block.block_index + 1
                 chunk_chars = 0
+                continue
 
             # 如果加入当前 block 会超限，且当前 chunk 不为空，则切分
             if block.block_index > chunk_start and chunk_chars + block_chars > chunk_size:

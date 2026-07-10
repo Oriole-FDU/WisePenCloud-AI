@@ -8,7 +8,7 @@ from .chunk_locators.markdown_chunk_locator import MarkdownChunkLocator
 from .chunk_normalizers.flat_chunk_normalizer import FlatChunkNormalizer
 from .chunk_normalizers.parent_child_chunk_normalizer import ParentChildChunkNormalizer
 from .engine import ChunkingEngine
-from .models import BlockKind, ChunkRole
+from .models import ChunkRole
 from .pipeline import ChunkingPipeline
 
 DEFAULT_CHUNK_SIZE: int = 6000
@@ -29,10 +29,14 @@ class ChunkingEngineRegistry:
                         SizeBoundedBlockPackerConfig(
                             chunk_size=DEFAULT_CHUNK_SIZE,
                             role=ChunkRole.FLAT,
-                            hard_boundary_block_kinds=(BlockKind.PAGE_MARKER,),
+                            split_on_page_markers=True,
                         )
                     ),
-                    chunk_normalizers=(FlatChunkNormalizer(),),
+                    chunk_normalizers=(
+                        FlatChunkNormalizer(
+                            respect_page_boundaries=True,
+                        ),
+                    ),
                     chunk_locator=MarkdownChunkLocator(),
                 )
             ),
@@ -72,7 +76,7 @@ class ChunkingEngineRegistry:
                             chunk_size=DEFAULT_CHUNK_SIZE,
                             role=ChunkRole.PARENT,
                             # RAG 父子块首选；父块不跨页，子块继承父块页码 metadata。
-                            hard_boundary_block_kinds=(BlockKind.PAGE_MARKER,),
+                            split_on_page_markers=True,
                         )
                     ),
                     chunk_derivers=(
@@ -84,7 +88,9 @@ class ChunkingEngineRegistry:
                         ),
                     ),
                     chunk_normalizers=(
-                        ParentChildChunkNormalizer(),
+                        ParentChildChunkNormalizer(
+                            respect_page_boundaries=True,
+                        ),
                     ),
                     chunk_locator=MarkdownChunkLocator(),
                 )

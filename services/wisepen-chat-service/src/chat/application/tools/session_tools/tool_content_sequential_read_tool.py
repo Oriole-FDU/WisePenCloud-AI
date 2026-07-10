@@ -14,7 +14,13 @@ from chat.application.tools.core import (
 from chat.application.tools.session_tools.tool_content_read.models import (
     ToolContentSequentialReadResult,
 )
-from chat.application.tools.session_tools.tool_content_read.service import ToolContentReadService
+from chat.application.tools.session_tools.tool_content_read.content_loader import (
+    ToolContentLoader,
+)
+from chat.application.tools.session_tools.tool_content_read.content_window_builder import (
+    ToolContentWindowBuilder,
+)
+from chat.application.tools.session_tools.tool_content_read.readers import SequentialReader
 
 TOOL_CONTENT_READ_TIMEOUT_SECONDS = 300.0
 
@@ -45,7 +51,7 @@ PARAMETERS_SCHEMA: dict[str, Any] = {
 class ToolContentSequentialReadTool:
     """单文档顺序读取工具。"""
 
-    __slots__ = ("_definition", "_service")
+    __slots__ = ("_definition", "_reader")
 
     def __init__(
             self,
@@ -53,9 +59,9 @@ class ToolContentSequentialReadTool:
             content_store: ToolContentStore,
             max_window_chars: int | None = None,
     ) -> None:
-        self._service = ToolContentReadService(
-            store=content_store,
-            max_window_chars=max_window_chars,
+        self._reader = SequentialReader(
+            loader=ToolContentLoader(store=content_store),
+            window_builder=ToolContentWindowBuilder(max_window_chars=max_window_chars),
         )
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
@@ -92,27 +98,11 @@ class ToolContentSequentialReadTool:
         limit = int(kwargs.get("limit") or 4000)
 
         try:
-            # 顺序读取明确只接受单个 content_id；跨文档查找统一走专用读取工具。
-            loaded = await self._service.load_stored_content(
+            return await self._reader.read(
                 content_id=content_id,
                 session_id=str(context["session_id"]),
-            )
-            if loaded is None:
-                return ToolContentSequentialReadResult(
-                    content_id=content_id,
-                    status="failed",
-                    reason="content_not_found",
-                )
-
-            canonical_id, stored = loaded
-            return ToolContentSequentialReadResult(
-                content_id=canonical_id,
-                status="success",
-                window=self._service.build_continuous_window(
-                    stored=stored,
-                    offset=offset,
-                    limit=limit,
-                ),
+                offset=offset,
+                limit=limit,
             )
         except ToolExecutionError:
             raise

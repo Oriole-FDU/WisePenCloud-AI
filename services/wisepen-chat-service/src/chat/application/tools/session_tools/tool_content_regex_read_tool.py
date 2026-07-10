@@ -12,7 +12,7 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
-from chat.application.tools.session_tools._tool_content_read_common import (
+from chat.application.tools.session_tools.tool_content_read.tool_common import (
     CONTENT_IDS_SCHEMA,
     SELECTOR_SCHEMA,
     read_content_id_batches,
@@ -22,7 +22,15 @@ from chat.application.tools.session_tools.tool_content_read.models import (
     ToolContentRegexReadRequest,
     ToolContentReadResult,
 )
-from chat.application.tools.session_tools.tool_content_read.service import ToolContentReadService
+from chat.application.tools.session_tools.tool_content_read.content_loader import (
+    ToolContentLoader,
+)
+from chat.application.tools.session_tools.tool_content_read.content_window_builder import (
+    ToolContentWindowBuilder,
+)
+from chat.application.tools.session_tools.tool_content_read.readers import (
+    RegexMatchReader,
+)
 
 
 MAX_CONTENT_IDS = 16
@@ -65,7 +73,7 @@ PARAMETERS_SCHEMA: dict[str, Any] = {
 class ToolContentRegexReadTool:
     """跨文档正则读取已有 cnt_* 内容。"""
 
-    __slots__ = ("_definition", "_service")
+    __slots__ = ("_definition", "_reader")
 
     def __init__(
             self,
@@ -73,9 +81,9 @@ class ToolContentRegexReadTool:
             content_store: ToolContentStore,
             max_window_chars: int | None = None,
     ) -> None:
-        self._service = ToolContentReadService(
-            store=content_store,
-            max_window_chars=max_window_chars,
+        self._reader = RegexMatchReader(
+            loader=ToolContentLoader(store=content_store),
+            window_builder=ToolContentWindowBuilder(max_window_chars=max_window_chars),
         )
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
@@ -152,7 +160,7 @@ class ToolContentRegexReadTool:
             return await read_content_id_batches(
                 request=request,
                 batch_size=MAX_CONTENT_IDS,
-                read_batch=lambda batch_request: self._service.read_regex_match(
+                read_batch=lambda batch_request: self._reader.read(
                     request=batch_request,
                     session_id=str(context["session_id"]),
                 ),

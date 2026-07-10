@@ -85,6 +85,7 @@ class ToolContentWindowBuilder:
         )
 
     def truncate(self, text: str) -> str:
+        """只限制工具本次返回的窗口文本，不修改 ToolContentStore 中的缓存正文。"""
         if len(text) <= self._max_window_chars:
             return text
         return text[:self._max_window_chars].rstrip() + "\n...[truncated]"

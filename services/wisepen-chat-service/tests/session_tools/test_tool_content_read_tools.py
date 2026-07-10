@@ -45,33 +45,42 @@ from chat.application.tools.common.tool_content_store.core.models import (
     ToolContentIndexEntry,
 )
 from chat.application.tools.core import ToolExecutionError
-from chat.application.tools.session_tools._tool_content_read_common import read_content_id_batches
-from chat.application.tools.session_tools._tool_content_read_common import selector_from_payload
+from chat.application.tools.session_tools.tool_content_read.tool_common import (
+    read_content_id_batches,
+    selector_from_payload,
+)
 from chat.application.tools.session_tools.tool_content_regex_read_tool import ToolContentRegexReadTool
 from chat.application.tools.session_tools.tool_content_rerank_read_tool import ToolContentRerankReadTool
-from chat.application.tools.session_tools.tool_content_read.service import ToolContentReadService
+from chat.application.tools.session_tools.tool_content_read.content_loader import ToolContentLoader
+from chat.application.tools.session_tools.tool_content_read.content_window_builder import (
+    ToolContentWindowBuilder,
+)
+from chat.application.tools.session_tools.tool_content_read.readers import (
+    RankedExpandReader,
+    RegexMatchReader,
+)
+from chat.application.tools.session_tools.tool_content_read.chunk_selector import (
+    select_chunks,
+)
 from chat.application.utils.ranking_engine.models import RankRequest, RankResult, RankedCandidate
 
 
-class _FakeReadService:
+class _FakeReader:
     def __init__(self) -> None:
-        self.called: str | None = None
+        self.called = False
 
-    async def read_ranked_expand(self, **_: object) -> ToolContentReadResult:
-        self.called = "ranked_expand"
-        return ToolContentReadResult()
-
-    async def read_regex_match(self, **_: object) -> ToolContentReadResult:
-        self.called = "regex_match"
+    async def read(self, **_: object) -> ToolContentReadResult:
+        self.called = True
         return ToolContentReadResult()
 
 
-class _FakeSequentialReadService:
-    async def load_stored_content(self, **_: object) -> tuple[str, object]:
-        return "cnt_1", object()
-
-    def build_continuous_window(self, **_: object) -> ToolContentWindow:
-        return ToolContentWindow(text="hello", start_offset=0, end_offset=5)
+class _FakeSequentialReader:
+    async def read(self, **_: object) -> ToolContentSequentialReadResult:
+        return ToolContentSequentialReadResult(
+            content_id="cnt_1",
+            status="success",
+            window=ToolContentWindow(text="hello", start_offset=0, end_offset=5),
+        )
 
 
 class _StoredContentStore:
@@ -133,9 +142,9 @@ def test_tool_content_regex_read_schema_uses_default_max_matches() -> None:
 
 @pytest.mark.asyncio
 async def test_tool_content_rerank_read_dispatches_ranked_expand() -> None:
-    service = _FakeReadService()
+    reader = _FakeReader()
     tool = ToolContentRerankReadTool(content_store=object())
-    tool._service = service
+    tool._reader = reader
 
     await tool.execute(
         {"session_id": "s1"},
@@ -143,14 +152,14 @@ async def test_tool_content_rerank_read_dispatches_ranked_expand() -> None:
         query="what matters",
     )
 
-    assert service.called == "ranked_expand"
+    assert reader.called
 
 
 @pytest.mark.asyncio
 async def test_tool_content_regex_read_dispatches_regex_match() -> None:
-    service = _FakeReadService()
+    reader = _FakeReader()
     tool = ToolContentRegexReadTool(content_store=object())
-    tool._service = service
+    tool._reader = reader
 
     await tool.execute(
         {"session_id": "s1"},
@@ -158,13 +167,13 @@ async def test_tool_content_regex_read_dispatches_regex_match() -> None:
         pattern="what.*",
     )
 
-    assert service.called == "regex_match"
+    assert reader.called
 
 
 @pytest.mark.asyncio
 async def test_tool_content_sequential_read_returns_dataclass_result() -> None:
     tool = ToolContentSequentialReadTool(content_store=object())
-    tool._service = _FakeSequentialReadService()
+    tool._reader = _FakeSequentialReader()
 
     result = await tool.execute(
         {"session_id": "s1"},
@@ -196,12 +205,12 @@ async def test_tool_content_regex_read_reports_invalid_regex_pattern() -> None:
 
 @pytest.mark.asyncio
 async def test_tool_content_regex_read_deduplicates_matches_by_chunk() -> None:
-    service = ToolContentReadService(
-        store=_StoredContentStore(_stored_content()),
-        ranking_engine=object(),
+    reader = RegexMatchReader(
+        loader=ToolContentLoader(store=_StoredContentStore(_stored_content())),
+        window_builder=ToolContentWindowBuilder(),
     )
 
-    result = await service.read_regex_match(
+    result = await reader.read(
         request=ToolContentRegexReadRequest(
             content_ids=("cnt_1",),
             pattern="alpha",
@@ -231,12 +240,12 @@ async def test_tool_content_regex_read_matches_markdown_emphasis_variants() -> N
             ),
         ),
     )
-    service = ToolContentReadService(
-        store=_StoredContentStore(stored),
-        ranking_engine=object(),
+    reader = RegexMatchReader(
+        loader=ToolContentLoader(store=_StoredContentStore(stored)),
+        window_builder=ToolContentWindowBuilder(),
     )
 
-    result = await service.read_regex_match(
+    result = await reader.read(
         request=ToolContentRegexReadRequest(
             content_ids=("cnt_1",),
             pattern="BRCA1",
@@ -283,12 +292,12 @@ async def test_tool_content_regex_read_matches_markdown_rendered_identifier_vari
             ),
         ),
     )
-    service = ToolContentReadService(
-        store=_StoredContentStore(stored),
-        ranking_engine=object(),
+    reader = RegexMatchReader(
+        loader=ToolContentLoader(store=_StoredContentStore(stored)),
+        window_builder=ToolContentWindowBuilder(),
     )
 
-    result = await service.read_regex_match(
+    result = await reader.read(
         request=ToolContentRegexReadRequest(
             content_ids=("cnt_1",),
             pattern=r"d_model\s*=\s*\d+",
@@ -357,12 +366,13 @@ async def test_tool_content_selector_bounds_expanded_ranked_window() -> None:
             )
         ),
     )
-    service = ToolContentReadService(
-        store=_StoredContentStore(stored),
+    reader = RankedExpandReader(
+        loader=ToolContentLoader(store=_StoredContentStore(stored)),
         ranking_engine=_InputOrderRankingEngine(),
+        window_builder=ToolContentWindowBuilder(),
     )
 
-    result = await service.read_ranked_expand(
+    result = await reader.read(
         request=ToolContentRerankReadRequest(
             content_ids=("cnt_1",),
             query="target",
@@ -408,12 +418,7 @@ def test_tool_content_selector_page_label_requires_exact_match() -> None:
             )
         ),
     )
-    service = ToolContentReadService(
-        store=_StoredContentStore(stored),
-        ranking_engine=object(),
-    )
-
-    selected = service._select_chunks(
+    selected = select_chunks(
         stored,
         ToolContentSelector(page_labels=("4",)),
     )
@@ -438,12 +443,7 @@ def test_tool_content_selector_page_label_can_use_page_locator_name() -> None:
             )
         ),
     )
-    service = ToolContentReadService(
-        store=_StoredContentStore(stored),
-        ranking_engine=object(),
-    )
-
-    selected = service._select_chunks(
+    selected = select_chunks(
         stored,
         ToolContentSelector(page_labels=("4",)),
     )
@@ -452,11 +452,7 @@ def test_tool_content_selector_page_label_can_use_page_locator_name() -> None:
 
 
 def test_tool_content_selector_intersects_chunk_indices_and_block_kinds() -> None:
-    service = ToolContentReadService(
-        store=_StoredContentStore(_stored_content()),
-        ranking_engine=object(),
-    )
-    selected = service._select_chunks(
+    selected = select_chunks(
         _stored_content(),
         ToolContentSelector(
             chunk_indices=(0, 1),
@@ -492,12 +488,7 @@ def test_tool_content_selector_matches_parent_heading_in_nested_section_path() -
             ),
         ),
     )
-    service = ToolContentReadService(
-        store=_StoredContentStore(stored),
-        ranking_engine=object(),
-    )
-
-    selected = service._select_chunks(
+    selected = select_chunks(
         stored,
         ToolContentSelector(sections=("一级",)),
     )
@@ -505,16 +496,16 @@ def test_tool_content_selector_matches_parent_heading_in_nested_section_path() -
     assert [chunk.chunk_index for chunk in selected] == [0]
 
 
-def test_tool_content_selector_payload_ignores_invalid_coercions() -> None:
+def test_tool_content_selector_payload_uses_prevalidated_values() -> None:
     selector = selector_from_payload(
         {
-            "block_kinds": "code",
-            "sections": [" Intro ", "", 123, True],
-            "chunk_indices": [0, "1", True, 2],
+            "block_kinds": ["code"],
+            "sections": ["Intro"],
+            "chunk_indices": [0, 2],
         }
     )
 
-    assert selector.block_kinds == ()
+    assert selector.block_kinds == ("code",)
     assert selector.sections == ("Intro",)
     assert selector.chunk_indices == (0, 2)
 

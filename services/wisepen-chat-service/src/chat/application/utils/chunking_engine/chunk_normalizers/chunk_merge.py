@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, replace
 
 from ..models import Chunk
+
+_MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}\s+\S")
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +60,11 @@ def assign_chunk_ids(chunks: tuple[Chunk, ...], *, id_prefix: str = "") -> tuple
     )
 
 
-def merge_heading_only(chunks: tuple[Chunk, ...]) -> ChunkMergeResult:
+def merge_heading_only(
+    chunks: tuple[Chunk, ...],
+    *,
+    respect_page_boundaries: bool = True,
+) -> ChunkMergeResult:
     """纯标题合并：把只有标题上下文的 chunk 并入相邻正文 chunk。
 
     返回 ChunkMergeResult，remapped_ids 记录被合并 chunk 的 ID 映射。
@@ -70,13 +77,18 @@ def merge_heading_only(chunks: tuple[Chunk, ...]) -> ChunkMergeResult:
     pending: Chunk | None = None  # 等待合并的纯标题 chunk
 
     for chunk in chunks:
-        if _is_heading_only(chunk.text):
+        lines = tuple(line.strip() for line in chunk.text.splitlines() if line.strip())
+        if lines and all(_MARKDOWN_HEADING_RE.match(line) for line in lines):
             pending = _merge_pair(pending, chunk) if pending else chunk
             continue
         if pending is not None:
             # heading-only 合并到正文 chunk 前面，继承 pending 的 ID
             # 正文 chunk 的 ID 消失 → 映射到 pending 的 ID
-            if _can_merge_chunks(pending, chunk):
+            if _same_page_scope(
+                pending,
+                chunk,
+                respect_page_boundaries=respect_page_boundaries,
+            ):
                 remapped[chunk.chunk_id] = pending.chunk_id
                 merged.append(_merge_pair(pending, chunk))
             else:
@@ -89,9 +101,14 @@ def merge_heading_only(chunks: tuple[Chunk, ...]) -> ChunkMergeResult:
     if pending is not None:
         if merged:
             # 末尾 heading-only 合并到前一个，继承前一个的 ID
-            if _can_merge_chunks(merged[-1], pending):
+            prev = merged[-1]
+            if _same_page_scope(
+                prev,
+                pending,
+                respect_page_boundaries=respect_page_boundaries,
+            ):
                 remapped[pending.chunk_id] = merged[-1].chunk_id
-                merged[-1] = _merge_pair(merged[-1], pending)
+                merged[-1] = _merge_pair(prev, pending)
             else:
                 merged.append(pending)
         else:
@@ -100,7 +117,12 @@ def merge_heading_only(chunks: tuple[Chunk, ...]) -> ChunkMergeResult:
     return ChunkMergeResult(tuple(merged), remapped)
 
 
-def merge_short_tails(chunks: tuple[Chunk, ...], *, min_size: int) -> ChunkMergeResult:
+def merge_short_tails(
+    chunks: tuple[Chunk, ...],
+    *,
+    min_size: int,
+    respect_page_boundaries: bool = True,
+) -> ChunkMergeResult:
     """短尾合并：把过短的 chunk（< min_size）并入前一个 chunk。
 
     返回 ChunkMergeResult，remapped_ids 记录被合并 chunk 的 ID 映射。
@@ -112,17 +134,19 @@ def merge_short_tails(chunks: tuple[Chunk, ...], *, min_size: int) -> ChunkMerge
     remapped: dict[str, str] = {}
 
     for chunk in chunks:
-        if merged and len(chunk.text) < min_size and _can_merge_chunks(merged[-1], chunk):
-            prev = merged[-1]
+        if not merged or len(chunk.text) >= min_size:
+            merged.append(chunk)
+            continue
+
+        prev = merged[-1]
+        if _same_page_scope(
+            prev,
+            chunk,
+            respect_page_boundaries=respect_page_boundaries,
+        ):
             # 短 chunk 合并到前一个，继承前一个的 ID
             remapped[chunk.chunk_id] = prev.chunk_id
-            merged[-1] = replace(
-                prev,
-                text=f"{prev.text}\n\n{chunk.text}",
-                end_offset=chunk.end_offset,
-                end_block=chunk.end_block,
-                content_hash="",
-            )
+            merged[-1] = _merge_pair(prev, chunk)
         else:
             merged.append(chunk)
 
@@ -130,33 +154,27 @@ def merge_short_tails(chunks: tuple[Chunk, ...], *, min_size: int) -> ChunkMerge
 
 
 def _merge_pair(head: Chunk, body: Chunk) -> Chunk:
-    """把 head 并入 body 前面，拼接文本并扩展 offset 范围。"""
+    """保留 head 的 ID，将 body 拼到 head 后面并扩展 offset 范围。"""
     return replace(
         head,
-        text=f"{head.text}\n{body.text}",
+        text=f"{head.text}\n\n{body.text}",
         end_offset=body.end_offset,
         end_block=body.end_block,
         content_hash="",
     )
 
 
-def _can_merge_chunks(left: Chunk, right: Chunk) -> bool:
+def _same_page_scope(
+    left: Chunk,
+    right: Chunk,
+    *,
+    respect_page_boundaries: bool,
+) -> bool:
+    if not respect_page_boundaries:
+        return True
+
     left_page_label = left.metadata.get("page_label")
     right_page_label = right.metadata.get("page_label")
     if left_page_label is None and right_page_label is None:
         return True
     return left_page_label == right_page_label
-
-
-def _is_heading_only(text: str) -> bool:
-    """判断 chunk 是否只包含标题行。"""
-    lines = tuple(line.strip() for line in text.splitlines() if line.strip())
-    return bool(lines) and all(
-        line.startswith("Section: ") or _is_markdown_heading(line)
-        for line in lines
-    )
-
-
-def _is_markdown_heading(line: str) -> bool:
-    stripped = line.strip()
-    return stripped.startswith("#") and stripped.lstrip("#").startswith(" ")

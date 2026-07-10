@@ -10,6 +10,8 @@ from ..models import ChunkDocument, TextBlock, BlockKind
 
 # 统一页码标记格式：<!-- page N -->
 _PAGE_MARKER_RE = re.compile(r"^<!--\s*page\s+(\d+)\s*-->\s*$")
+# PDF/Docling 导出的表题常是普通段落，如 "· Table 1: ..."，后面才跟 Markdown 表格。
+# 这里先识别表题编号，后续把紧邻的表题段落和表格块合并为同一个 TABLE block。
 _TABLE_CAPTION_RE = re.compile(
     r"^(?:[·•]\s*|[-*+]\s+)?[*_`~\s]*(?:Table|表格|表)\s+(\d+(?:\.\d+)*)",
     re.IGNORECASE,
@@ -145,6 +147,8 @@ class MarkdownBlockSplitter:
                 if not block_text:
                     continue
 
+            # markdown-it 的 table rule 覆盖 pipe table；原始 HTML 表格会落到 html_block。
+            # 非 table 的 HTML 块不是当前结构语义，直接跳过，避免误标为普通段落。
             if token.type == "html_block":
                 if not block_text.lstrip().lower().startswith("<table"):
                     continue
@@ -211,6 +215,7 @@ class MarkdownBlockSplitter:
 
 
 def _merge_captioned_tables(blocks: list[TextBlock], text: str) -> list[TextBlock]:
+    """将“表题段落 + 紧邻表格”收敛为一个 TABLE block。"""
     merged: list[TextBlock] = []
     i = 0
 
@@ -218,6 +223,7 @@ def _merge_captioned_tables(blocks: list[TextBlock], text: str) -> list[TextBloc
         caption = blocks[i]
         table = blocks[i + 1] if i + 1 < len(blocks) else None
         anchor_label = _table_caption_label(caption.text)
+        # 表题和表格必须在原文中只隔空白；如果中间有正文，就不能把它吞进表格。
         if (
             table is None
             or caption.block_kind != BlockKind.PARAGRAPH

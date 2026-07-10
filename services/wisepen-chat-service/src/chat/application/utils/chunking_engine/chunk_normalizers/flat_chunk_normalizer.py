@@ -7,7 +7,7 @@ from ..models import Chunk
 class FlatChunkNormalizer:
     """单层 chunk 规范化器，按序执行三步修正：
 
-    1. 纯标题合并 — 把只有 "Section: ..." 行的 chunk 并入相邻正文 chunk
+    1. 纯标题合并 — 把只有 Markdown heading 行的 chunk 并入相邻正文 chunk
     2. 短尾合并 — 把过短的 chunk（< min_size）并入前一个 chunk
     3. ID 生成 — 计算 content hash 并生成稳定的 chunk ID
 
@@ -16,14 +16,28 @@ class FlatChunkNormalizer:
     通过 remapped_ids 更新子 chunk 的 parent_chunk_id，避免引用悬空。
     """
 
-    __slots__ = ("name", "id_prefix", "min_size")
+    __slots__ = ("name", "id_prefix", "min_size", "respect_page_boundaries")
 
-    def __init__(self, *, id_prefix: str = "", min_size: int = 320) -> None:
+    def __init__(
+        self,
+        *,
+        id_prefix: str = "",
+        min_size: int = 320,
+        respect_page_boundaries: bool = True,
+    ) -> None:
         self.name = "flat_chunk_normalizer"
         self.id_prefix = id_prefix
         self.min_size = min_size
+        self.respect_page_boundaries = respect_page_boundaries
 
     def process(self, *, chunks: tuple[Chunk, ...]) -> tuple[Chunk, ...]:
-        result = merge_heading_only(chunks)
-        result = merge_short_tails(result.chunks, min_size=self.min_size)
+        result = merge_heading_only(
+            chunks,
+            respect_page_boundaries=self.respect_page_boundaries,
+        )
+        result = merge_short_tails(
+            result.chunks,
+            min_size=self.min_size,
+            respect_page_boundaries=self.respect_page_boundaries,
+        )
         return assign_chunk_ids(result.chunks, id_prefix=self.id_prefix)

@@ -7,6 +7,10 @@ from chat.application.utils.chunking_engine.block_splitters.recursive_text_block
 from chat.application.utils.chunking_engine.chunk_normalizers.parent_child_chunk_normalizer import (
     ParentChildChunkNormalizer,
 )
+from chat.application.utils.chunking_engine.chunk_normalizers.chunk_merge import (
+    merge_heading_only,
+    merge_short_tails,
+)
 from chat.application.utils.chunking_engine.registry import get_chunking_engine
 
 
@@ -121,6 +125,91 @@ def test_parent_child_normalizer_remaps_children_after_heading_only_merge() -> N
 
     assert children
     assert all(child.parent_chunk_id in parent_ids for child in children)
+
+
+def test_heading_only_merge_only_treats_markdown_headings_as_headings() -> None:
+    chunks = (
+        Chunk(
+            chunk_id="section-label",
+            text="Section: Intro",
+            chunk_index=0,
+        ),
+        Chunk(
+            chunk_id="body",
+            text="正文内容。",
+            chunk_index=1,
+        ),
+    )
+
+    result = merge_heading_only(chunks)
+
+    assert result.chunks == chunks
+    assert result.remapped_ids == {}
+
+
+def test_short_tail_merge_uses_pair_merge_contract() -> None:
+    chunks = (
+        Chunk(
+            chunk_id="body",
+            text="正文内容。",
+            chunk_index=0,
+            start_offset=0,
+            end_offset=5,
+            start_block=0,
+            end_block=0,
+            content_hash="old-hash",
+        ),
+        Chunk(
+            chunk_id="tail",
+            text="短尾。",
+            chunk_index=1,
+            start_offset=7,
+            end_offset=10,
+            start_block=1,
+            end_block=1,
+            content_hash="tail-hash",
+        ),
+    )
+
+    result = merge_short_tails(chunks, min_size=10)
+
+    assert len(result.chunks) == 1
+    assert result.chunks[0].chunk_id == "body"
+    assert result.chunks[0].text == "正文内容。\n\n短尾。"
+    assert result.chunks[0].end_offset == 10
+    assert result.chunks[0].end_block == 1
+    assert result.chunks[0].content_hash == ""
+    assert result.remapped_ids == {"tail": "body"}
+
+
+def test_short_tail_merge_can_cross_pages_when_page_boundary_is_disabled() -> None:
+    chunks = (
+        Chunk(
+            chunk_id="page-1",
+            text="第一页正文。",
+            chunk_index=0,
+            metadata={"page_label": "1"},
+        ),
+        Chunk(
+            chunk_id="page-2-tail",
+            text="第二页短尾。",
+            chunk_index=1,
+            metadata={"page_label": "2"},
+        ),
+    )
+
+    blocked = merge_short_tails(chunks, min_size=20)
+    allowed = merge_short_tails(
+        chunks,
+        min_size=20,
+        respect_page_boundaries=False,
+    )
+
+    assert blocked.chunks == chunks
+    assert blocked.remapped_ids == {}
+    assert len(allowed.chunks) == 1
+    assert allowed.chunks[0].text == "第一页正文。\n\n第二页短尾。"
+    assert allowed.remapped_ids == {"page-2-tail": "page-1"}
 
 
 def test_recursive_splitter_offsets_handle_overlap() -> None:

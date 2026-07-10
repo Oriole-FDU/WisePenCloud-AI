@@ -28,20 +28,34 @@ class ParentChildChunkNormalizer:
        并基于 old_id → new_id 映射再次重写 parent_chunk_id
     """
 
-    __slots__ = ("name", "id_prefix", "min_size")
+    __slots__ = ("name", "id_prefix", "min_size", "respect_page_boundaries")
 
-    def __init__(self, *, id_prefix: str = "", min_size: int = 320) -> None:
+    def __init__(
+        self,
+        *,
+        id_prefix: str = "",
+        min_size: int = 320,
+        respect_page_boundaries: bool = True,
+    ) -> None:
         self.name = "parent_child_chunk_normalizer"
         self.id_prefix = id_prefix
         self.min_size = min_size
+        self.respect_page_boundaries = respect_page_boundaries
 
     def process(self, *, chunks: tuple[Chunk, ...]) -> tuple[Chunk, ...]:
         parents = tuple(c for c in chunks if c.parent_chunk_id is None)
         children = tuple(c for c in chunks if c.parent_chunk_id is not None)
 
         # 1. 对父 chunk 做合并，收集 remapped_ids
-        heading_result = merge_heading_only(parents)
-        tail_result = merge_short_tails(heading_result.chunks, min_size=self.min_size)
+        heading_result = merge_heading_only(
+            parents,
+            respect_page_boundaries=self.respect_page_boundaries,
+        )
+        tail_result = merge_short_tails(
+            heading_result.chunks,
+            min_size=self.min_size,
+            respect_page_boundaries=self.respect_page_boundaries,
+        )
         remapped_ids = _merge_remapped_ids(
             heading_result.remapped_ids,
             tail_result.remapped_ids,
