@@ -14,6 +14,8 @@ COPY pyproject.toml uv.lock ./
 # workspace 成员的 pyproject 预拷（仅为 layer cache）；新增 service 时在下方追加一行
 COPY services/wisepen-common/pyproject.toml         services/wisepen-common/pyproject.toml
 COPY services/wisepen-chat-service/pyproject.toml   services/wisepen-chat-service/pyproject.toml
+COPY services/wisepen-sandbox-service/pyproject.toml services/wisepen-sandbox-service/pyproject.toml
+COPY services/wisepen-aio-adapter/pyproject.toml    services/wisepen-aio-adapter/pyproject.toml
 
 # 预装第三方依赖（不安装 workspace 包本身，纯缓存层）
 RUN uv sync --frozen --no-dev --no-install-workspace
