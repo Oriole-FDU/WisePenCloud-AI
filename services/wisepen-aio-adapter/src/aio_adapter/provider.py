@@ -7,6 +7,7 @@ from sandbox.models import (
     Endpoint,
     ExecutionRequest,
     ExecutionResult,
+    Health,
     SandboxLease,
     SandboxRef,
     SandboxSpec,
@@ -45,6 +46,9 @@ class AioSandboxProvider(SandboxProvider):
             warmup_timeout_seconds=float(
                 os.getenv("SANDBOX_WARMUP_TIMEOUT_SECONDS", "60")
             ),
+            command_timeout_seconds=float(
+                os.getenv("SANDBOX_DOCKER_COMMAND_TIMEOUT_SECONDS", "30")
+            ),
         )
         return cls(DockerRuntime(config), request_timeout_seconds=config.request_timeout_seconds)
 
@@ -57,14 +61,18 @@ class AioSandboxProvider(SandboxProvider):
             metadata={"image": spec.image},
         )
 
-    async def wait_ready(self, sandbox: SandboxRef, timeout_seconds: float) -> None:
+    async def wait_ready(self, sandbox: SandboxRef, timeout_seconds: float) -> Health:
         client = self._client(sandbox)
         deadline = asyncio.get_running_loop().time() + timeout_seconds
         while asyncio.get_running_loop().time() < deadline:
             if await client.health():
-                return
+                return Health(True, "ready")
             await asyncio.sleep(1)
         raise TimeoutError(f"sandbox {sandbox.sandbox_id} did not become ready")
+
+    async def health(self, sandbox: SandboxRef) -> Health:
+        healthy = await self._client(sandbox).health()
+        return Health(healthy, "ready" if healthy else "unhealthy")
 
     async def prepare_workspace(
         self, sandbox: SandboxRef, workspace: WorkspaceSnapshot
@@ -154,6 +162,10 @@ class AioSandboxProvider(SandboxProvider):
             raise RuntimeError("sandbox has no endpoint")
         client = self._clients.get(sandbox.sandbox_id)
         if client is None:
-            client = AioClient(sandbox.endpoint.base_url, self._request_timeout)
+            client = AioClient(
+                sandbox.endpoint.base_url,
+                self._request_timeout,
+                sandbox.endpoint.token,
+            )
             self._clients[sandbox.sandbox_id] = client
         return client

@@ -58,4 +58,13 @@ class PathPolicy:
         return resolved
 
     def reverse(self, path: str) -> str:
-        return path
+        value = (path or "").replace("\\", "/")
+        if any(part in ("", ".", "..") for part in value.split("/")):
+            raise PathPolicyError("invalid workspace path")
+        if value == _ROOT:
+            return _ROOT
+        prefix = f"{_ROOT}/"
+        if not value.startswith(prefix):
+            raise PathPolicyError("path outside workspace denied")
+        relative = value[len(prefix):]
+        return f"{_ROOT}/{relative}"

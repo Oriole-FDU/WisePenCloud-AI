@@ -6,6 +6,7 @@ from sandbox.models import (
     Endpoint,
     ExecutionRequest,
     ExecutionResult,
+    Health,
     SandboxLease,
     SandboxRef,
     SandboxSpec,
@@ -17,7 +18,10 @@ class SandboxProvider(Protocol):
     async def create(self, spec: SandboxSpec) -> SandboxRef:
         ...
 
-    async def wait_ready(self, sandbox: SandboxRef, timeout_seconds: float) -> None:
+    async def wait_ready(self, sandbox: SandboxRef, timeout_seconds: float) -> Health:
+        ...
+
+    async def health(self, sandbox: SandboxRef) -> Health:
         ...
 
     async def prepare_workspace(
@@ -48,5 +52,10 @@ class WorkspaceStore(Protocol):
     ) -> WorkspaceSnapshot:
         ...
 
-    async def commit(self, snapshot: WorkspaceSnapshot, lease_id: str) -> None:
+    async def commit(
+        self,
+        snapshot: WorkspaceSnapshot,
+        lease_id: str,
+        fencing_token: int = 0,
+    ) -> None:
         ...

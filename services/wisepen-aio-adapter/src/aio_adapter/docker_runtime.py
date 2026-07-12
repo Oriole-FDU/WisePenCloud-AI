@@ -76,11 +76,19 @@ class DockerRuntime:
 
     def _run(self, args: Sequence[str]) -> str:
         try:
-            result = self._runner(list(args), capture_output=True, text=True, check=False)
+            result = self._runner(
+                list(args),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=self._config.command_timeout_seconds,
+            )
         except FileNotFoundError as exc:
             raise ContainerError("docker binary not found") from exc
         except OSError as exc:
             raise ContainerError("docker command could not be started", retryable=True) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ContainerError("docker command timed out", retryable=True) from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()
             raise ContainerError(
