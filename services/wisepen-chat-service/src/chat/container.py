@@ -29,6 +29,7 @@ from chat.core.persistence import (
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
+from chat.core.providers.sandbox_client import SandboxClient
 from chat.application.agents import (
     DefaultAgentResolver,
 )
@@ -40,6 +41,15 @@ from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.skill_tools import UpdateSkillInfoTool
 from chat.application.tools.skill_tools import UploadSkillDraftAssetTool
 from chat.application.tools.core import ToolRegistry
+from chat.application.tools import (
+    EditFileTool,
+    GrepFilesTool,
+    ListDirectoryTool,
+    ReadFileTool,
+    RunSandboxScriptTool,
+    ShellExecTool,
+    WriteFileTool,
+)
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, ResourceClient
@@ -128,6 +138,13 @@ class Container(containers.DeclarativeContainer):
         rpc=rpc_client,
     )
 
+    sandbox_client = providers.Singleton(
+        SandboxClient,
+        base_url=settings.SANDBOX_SERVICE_URL,
+        from_source=settings.SANDBOX_FROM_SOURCE,
+        timeout_seconds=settings.SANDBOX_TIMEOUT_SECONDS,
+    )
+
     # OssFileLoader
     oss_file_loader = providers.Singleton(
         OssFileLoader,
@@ -186,6 +203,16 @@ class Container(containers.DeclarativeContainer):
         ai_asset_client=ai_asset_client,
     )
 
+    read_file_tool = providers.Singleton(ReadFileTool, sandbox=sandbox_client)
+    write_file_tool = providers.Singleton(WriteFileTool, sandbox=sandbox_client)
+    list_directory_tool = providers.Singleton(ListDirectoryTool, sandbox=sandbox_client)
+    grep_files_tool = providers.Singleton(GrepFilesTool, sandbox=sandbox_client)
+    edit_file_tool = providers.Singleton(EditFileTool, sandbox=sandbox_client)
+    shell_exec_tool = providers.Singleton(ShellExecTool, sandbox=sandbox_client)
+    run_sandbox_script_tool = providers.Singleton(
+        RunSandboxScriptTool, sandbox=sandbox_client
+    )
+
     tool_providers = providers.List(
         search_history_tool,
         load_skill_tool,
@@ -194,6 +221,13 @@ class Container(containers.DeclarativeContainer):
         get_skill_info_tool,
         update_skill_info_tool,
         upload_skill_draft_asset_tool,
+        read_file_tool,
+        write_file_tool,
+        list_directory_tool,
+        grep_files_tool,
+        edit_file_tool,
+        shell_exec_tool,
+        run_sandbox_script_tool,
     )
 
     tool_registry = providers.Singleton(
@@ -218,6 +252,7 @@ class Container(containers.DeclarativeContainer):
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
         agent_resolver=agent_resolver,
+        sandbox_client=sandbox_client,
     )
 
 

@@ -10,8 +10,10 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "wisepen-aio-adapter",
     "wisepen-chat-service",
     "wisepen-common",
+    "wisepen-sandbox-service",
     "wisepen-server-py",
 ]
 
@@ -3448,6 +3450,7 @@ dependencies = [
     { name = "dependency-injector" },
     { name = "fastapi" },
     { name = "google-genai" },
+    { name = "httpx" },
     { name = "jieba" },
     { name = "jsonschema" },
     { name = "litellm" },
@@ -3471,6 +3474,7 @@ requires-dist = [
     { name = "dependency-injector" },
     { name = "fastapi" },
     { name = "google-genai" },
+    { name = "httpx" },
     { name = "jieba" },
     { name = "jsonschema" },
     { name = "litellm" },
@@ -3484,6 +3488,23 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"] },
     { name = "wisepen-common", editable = "services/wisepen-common" },
     { name = "zeroentropy" },
+]
+
+[[package]]
+name = "wisepen-aio-adapter"
+version = "0.2.0"
+source = { editable = "services/wisepen-aio-adapter" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "wisepen-sandbox-service" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "wisepen-sandbox-service", editable = "services/wisepen-sandbox-service" },
 ]
 
 [[package]]
@@ -3526,20 +3547,43 @@ requires-dist = [
 ]
 
 [[package]]
-name = "wisepen-server-py"
-version = "0.1.0"
-source = { virtual = "." }
+name = "wisepen-sandbox-service"
+version = "0.2.0"
+source = { editable = "services/wisepen-sandbox-service" }
 dependencies = [
-    { name = "litellm" },
-    { name = "wisepen-chat-service" },
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "uvicorn", extra = ["standard"] },
     { name = "wisepen-common" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "uvicorn", extras = ["standard"] },
+    { name = "wisepen-common", editable = "services/wisepen-common" },
+]
+
+[[package]]
+name = "wisepen-server-py"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "litellm" },
+    { name = "wisepen-aio-adapter" },
+    { name = "wisepen-chat-service" },
+    { name = "wisepen-common" },
+    { name = "wisepen-sandbox-service" },
+]
+
+[package.metadata]
+requires-dist = [
     { name = "litellm", specifier = ">=1.81.3" },
+    { name = "wisepen-aio-adapter", editable = "services/wisepen-aio-adapter" },
     { name = "wisepen-chat-service", editable = "services/wisepen-chat-service" },
     { name = "wisepen-common", editable = "services/wisepen-common" },
+    { name = "wisepen-sandbox-service", editable = "services/wisepen-sandbox-service" },
 ]
 
 [[package]]

@@ -12,6 +12,7 @@ dependencies = [
     "pydantic",
     "pydantic-settings",
     "uvicorn[standard]",
+    "httpx",
     "dependency_injector",
     "litellm",
     "mem0ai",
