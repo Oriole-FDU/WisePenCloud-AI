@@ -1,0 +1,18 @@
+[project]
+name = "wisepen-sandbox-service"
+version = "0.2.0"
+description = "Platform-independent sandbox lifecycle and scheduling service"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "pydantic",
+    "uvicorn[standard]",
+    "wisepen-common",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-asyncio", "httpx"]
+
+[tool.uv.sources]
+wisepen-common = { workspace = true }
