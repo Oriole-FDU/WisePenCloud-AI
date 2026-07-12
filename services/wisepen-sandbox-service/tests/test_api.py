@@ -32,7 +32,9 @@ async def test_internal_api_requires_fencing_and_exposes_metrics():
             json={"request_id": "req-api", "tenant_id": "tenant", "workspace_id": "workspace"},
         )
         assert allocated.status_code == 200
-        lease = allocated.json()
+        allocated_body = allocated.json()
+        assert allocated_body["code"] == 200
+        lease = allocated_body["data"]
         invalid = await client.post(
             f"/internal/leases/{lease['lease_id']}/execute",
             json={
@@ -43,8 +45,12 @@ async def test_internal_api_requires_fencing_and_exposes_metrics():
                 "operation": "shell_exec",
             },
         )
-        assert invalid.status_code == 409
-        assert invalid.json()["detail"] == "FENCING_REJECTED"
+        assert invalid.status_code == 200
+        invalid_body = invalid.json()
+        assert invalid_body["code"] == 46004
+        assert invalid_body["data"] is None
         metrics = await client.get("/internal/pool/metrics")
         assert metrics.status_code == 200
-        assert metrics.json()["generation"] > 0
+        metrics_body = metrics.json()
+        assert metrics_body["code"] == 200
+        assert metrics_body["data"]["generation"] > 0

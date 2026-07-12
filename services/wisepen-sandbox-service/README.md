@@ -167,7 +167,122 @@ LocalWorkspaceStore 会校验 tenant/workspace 标识、相对路径、符号链
 
 ## 6. 生命周期流程
 
-### 6.1 Watcher 预热与恢复
+### 6.1 服务启动与预热队列初始化
+
+标准进程入口是 `sandbox.main:app`。启动时先加载引导配置和 Sandbox 业务配置，创建 Repository、Pool、Provider、Scheduler、WorkspaceStore、LeaderLease 和 Watcher，再把 Watcher 作为 FastAPI 后台任务启动。标准启动方式会在配置加载阶段从 Nacos 拉取业务配置，并在应用 startup/shutdown 阶段注册和注销服务；无 Nacos 的开发演示可以使用 README 前文描述的直接组装 launcher，但生命周期顺序不变。
+
+服务启动阶段只负责把 AIO 容器预热到 READY Pool，不会创建用户 lease，也不会执行用户工具。`/healthz` 只表示进程已存活，Watcher 可能仍在创建容器；只有 READY 数达到 `min_ready` 后，`/readyz` 才返回 200，Chat 的 allocate 才能取得可用实例。
+
+#### 6.1.1 UML 泳道图
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant OS as 进程/启动命令
+    participant CFG as Bootstrap/AppSettings
+    participant N as Nacos
+    participant APP as FastAPI 应用
+    participant R as Repository
+    participant P as Pool
+    participant S as Scheduler
+    participant A as AIO Adapter
+    participant D as DockerRuntime
+    participant C as AIO Container
+    participant L as LeaderLease
+    participant W as Watcher
+    participant Q as readiness 探针
+
+    OS->>CFG: 导入 sandbox.main:app
+    CFG->>CFG: 加载 SERVICE_HOST、SERVICE_PORT、PROFILE
+    CFG->>N: pull_config()
+    N-->>CFG: Sandbox 镜像、Pool、租约、超时配置
+    CFG-->>OS: 完成 settings 初始化
+
+    OS->>R: 创建 InMemorySandboxRepository
+    OS->>P: 创建 SandboxPool(repository)
+    OS->>A: 创建 AioSandboxProvider.from_environment()
+    OS->>S: 创建 SandboxScheduler(pool, repository, provider, workspace)
+    OS->>L: 创建 InMemoryLeaderLease
+    OS->>W: 创建 Watcher(pool, repository, provider, scheduler, leader)
+    OS->>APP: create_app(scheduler, pool)
+    APP-->>OS: FastAPI app ready
+
+    APP->>APP: startup event
+    APP->>N: register_instance()
+    N-->>APP: 注册结果
+    APP->>W: asyncio.create_task(watcher.run())
+    APP-->>Q: /healthz = 200
+
+    loop 每轮 reconcile，直到服务停止
+        W->>L: acquire(key, owner, ttl)
+        alt 未获得 LeaderLease
+            L-->>W: false
+            W->>R: watcher_not_leader += 1
+        else 获得 LeaderLease
+            L-->>W: true
+            W->>S: recover_expired()
+            S->>R: 查找过期 ALLOCATED/RUNNING lease
+            S->>A: 销毁过期用户实例
+            W->>R: 清理 CREATING/WARMING/DESTROYING 超时实例
+            W->>P: snapshot()
+            P-->>W: ready、warming、creating、generation
+            W->>W: 计算 target_ready + reserve - ready - warming - creating
+
+            alt READY 缺口大于 0
+                W->>A: create(SandboxSpec)
+                A->>D: docker run -d -it -p 127.0.0.1::8080
+                D-->>A: container_id、动态 endpoint
+                A-->>W: SandboxRef
+                W->>R: save(state=CREATING)
+                W->>R: CAS CREATING -> WARMING
+                W->>A: wait_ready(ref, warmup_timeout)
+                A->>C: GET /v1/sandbox 轮询
+                C-->>A: HTTP 200
+                W->>A: health(ref)
+                A->>C: GET /v1/sandbox 二次确认
+                C-->>A: healthy
+                W->>P: prepare_readiness(record)
+                P->>R: 生成 health_token 和 expected_generation
+                W->>P: return_ready(sandbox_id, health_token, generation)
+                P->>R: 校验状态、token、generation、无 lease
+                R-->>P: CAS WARMING -> READY
+                P-->>W: 预热实例可分配
+            else 没有缺口
+                W->>W: 不创建新容器
+            end
+            W->>L: release(key, owner)
+        end
+        W->>W: 等待 interval_seconds 后进入下一轮
+    end
+
+    Q->>APP: GET /readyz
+    APP->>P: snapshot()
+    alt ready_count < min_ready
+        P-->>APP: readiness=degraded
+        APP-->>Q: HTTP 503 MIN_READY_NOT_REACHED
+    else ready_count >= min_ready
+        P-->>APP: readiness=ready
+        APP-->>Q: HTTP 200 ready
+    end
+
+    OS->>APP: shutdown signal
+    APP->>W: stop()
+    APP->>W: cancel watcher task
+    APP->>N: deregister_instance()
+    N-->>APP: 注销结果
+```
+
+#### 6.1.2 启动阶段的状态和可用性
+
+1. **配置和装配**：配置加载完成后才创建运行时对象。Repository 和 LeaderLease 当前是进程内实现；服务重启后 Pool、generation 和 lease 映射会重新开始。
+2. **应用存活**：FastAPI startup 创建 Watcher 任务后，`/healthz` 即可返回 200。这个返回值不代表已有 READY 容器。
+3. **Watcher 首轮 reconcile**：Watcher 先获取 LeaderLease，再调用 `Scheduler.recover_expired()`，清理旧状态，最后根据 `ready + warming + creating` 计算缺口。
+4. **容器预热**：新容器先保存为 `CREATING`，然后进入 `WARMING`。只有 Docker 创建成功、动态 endpoint 可访问、`GET /v1/sandbox` 健康检查成功，并且 `return_ready()` 的 health token 和 generation 校验通过，实例才进入 `READY`。
+5. **对 Chat 开放**：`/readyz` 在 READY 数量达到 `min_ready` 后变为 200。Chat 请求随后调用 allocate，从 READY Pool checkout，而不是在 Chat 工具调用时临时创建容器。
+6. **预热失败**：健康检查、generation 或 `return_ready()` 失败时，实例进入销毁流程；销毁失败或无法确认时进入 `LOST`，不会进入 READY。Watcher 记录失败指标并按配置退避重试。
+7. **服务停止**：停止时取消 Watcher 后台任务并注销服务。当前内存 Repository 不负责跨进程恢复，未完成实例的外部收敛需要后续接入持久化 Repository。
+
+### 6.2 Watcher 预热与恢复
 
 每轮 Watcher 执行：
 
@@ -191,7 +306,7 @@ create_count = min(deficit, max_create_batch)
 
 Watcher 会排除 CREATING/WARMING 实例，避免并发重复创建；预热失败使用有限重试和退避。warmup timeout 或 destroy failure 后实例进入 LOST。两个 Watcher 在同一进程共享 LeaderLease 时只有一个可以执行补池决策；内存实现不宣称跨进程选主能力。
 
-### 6.2 allocate、execute、release
+### 6.3 allocate、execute、release
 
 1. allocate 校验字段并按 request_id 查询幂等记录。
 2. Pool 原子 checkout READY，生成 lease 和 fencing token。
@@ -239,7 +354,161 @@ sequenceDiagram
     W->>A: create replacement
 ```
 
-### 6.3 失败补偿
+### 6.4 Chat 调用沙箱工具的完整请求链路
+
+Chat 的沙箱租约边界是“一轮 Chat Turn”，不是一次工具调用。`ChatTurnCoordinator` 在进入 LLM 流式推理前创建本轮 `sandbox_request_id`，先调用 `SandboxClient.allocate_request()` 获取租约；本轮后续的文件、Shell 和脚本工具都复用这个租约。无论模型正常结束、工具执行失败、LLM 流异常还是客户端断开，最终都会在 `finally` 中调用 `release_request()`。
+
+#### 6.4.1 请求标识映射
+
+| Chat 标识 | Sandbox Service 标识 | 用途 |
+| --- | --- | --- |
+| `user_id` | `tenant_id` | 租户隔离和工作区路径隔离 |
+| `session_id` | `workspace_id` | 当前会话对应的持久化工作区 |
+| `sandbox_request_id` | allocate 的 `request_id` | 一轮 Chat 的幂等分配键 |
+| `lease_id` | lease URL 路径参数 | execute/release 的唯一租约入口 |
+| `fencing_token` | execute/release 请求字段 | 拒绝旧租约或并发失效请求 |
+| 工具调用 ID | execute 的 `request_id` | 一次具体工具操作的请求标识 |
+
+Chat 的 `SandboxClient` 有两种寻址方式：配置 `SANDBOX_SERVICE_URL` 时直接通过 HTTP 调用 Sandbox Service；未配置时使用 `RpcClient` 按 `wisepen-sandbox-service` 服务名访问。两种方式使用相同的内部 API 和租约语义。HTTP 直连时会携带 `X-From-Source: APISIX-wX0iR6tY`。
+
+#### 6.4.2 UML 泳道图
+
+下图中的每个 participant 都是一个泳道。Watcher 是后台并行泳道，不参与用户请求的同步返回，但会在 READY 数量下降后补充新的预热实例。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 用户/前端
+    participant CA as Chat API
+    participant CC as ChatTurnCoordinator
+    participant QR as QueryLoopRuntime/ToolDispatcher
+    participant SC as Chat SandboxClient
+    participant SA as Sandbox Service API
+    participant SS as SandboxScheduler
+    participant PR as Pool/Repository
+    participant WS as WorkspaceStore
+    participant AD as AIO Adapter
+    participant DR as DockerRuntime
+    participant C as AIO Container
+    participant W as Watcher
+
+    Note over W,PR: 后台持续运行：预热、恢复过期租约、补充 READY
+    W->>PR: snapshot() 读取 READY、WARMING、CREATING
+    W->>SS: recover_expired()
+    W->>AD: create(spec) + wait_ready()
+    AD->>DR: docker run -d -it -p 127.0.0.1::8080
+    DR-->>AD: sandbox_id、动态 endpoint
+    AD->>C: GET /v1/sandbox 轮询健康状态
+    C-->>AD: HTTP 200
+    W->>PR: return_ready(health_token, generation)
+    PR-->>W: WARMING -> READY
+
+    U->>CA: POST /chat/completions
+    CA->>CC: handle_chat(user_id, session_id, query)
+    CC->>CC: 创建 sandbox_request_id 和 tool_context
+    CC->>SC: allocate_request(tool_context)
+    SC->>SA: POST /internal/sandboxes/allocate
+    SA->>SS: allocate(request_id, tenant_id, workspace_id)
+    SS->>PR: request_id 幂等查询 + 原子 checkout READY
+    PR-->>SS: READY -> ALLOCATED，生成 lease/fencing
+    SS->>WS: snapshot(tenant_id, workspace_id)
+    WS-->>SS: WorkspaceSnapshot 或空快照
+    SS->>AD: prepare_workspace(snapshot)
+    AD->>C: POST /v1/file/write 写入工作区文件
+    SS->>AD: activate(sandbox, lease)
+    AD->>C: GET /v1/sandbox 确认实例可用
+    SS->>PR: CAS ALLOCATED -> RUNNING
+    SS-->>SA: lease_id、endpoint、expires_at、fencing_token
+    SA-->>SC: R.data(lease)
+    SC->>SC: 缓存 LeaseContext
+    CC-->>QR: 启动 LLM 流式推理和工具循环
+
+    QR->>QR: LLM 返回 tool_call
+    QR->>SC: write_file/read_file/shell_exec/execute
+    SC->>SC: 复用已有 LeaseContext
+    SC->>SA: POST /internal/leases/{lease_id}/execute
+    SA->>SS: execute(lease_id, ExecutionRequest)
+    SS->>PR: 校验租户、workspace、状态、过期时间、fencing
+    PR-->>SS: RUNNING 且租约有效
+    SS->>AD: forward(operation, payload)
+    AD->>C: /v1/file/*、/v1/shell/exec 或 /v1/code/execute
+    C-->>AD: AIO data 响应
+    AD-->>SS: ExecutionResult
+    SS-->>SA: R.data(result)
+    SA-->>SC: 工具结果
+    SC-->>QR: 工具输出
+    QR-->>CC: ToolOutputAvailableEvent
+    CC-->>U: 流式返回工具状态/最终文本
+
+    Note over QR,CC: 还有工具调用时重复 execute；始终复用同一 lease
+    QR->>QR: 将工具结果加入上下文并继续下一轮 LLM
+
+    alt 正常结束、异常或客户端断开
+        CC->>SC: finally: release_request(sandbox_request_id)
+        SC->>SA: POST /internal/leases/{lease_id}/release
+        SA->>SS: release(lease_id, fencing_token)
+        SS->>PR: 原子关闭租约入口
+        PR-->>SS: RUNNING -> SYNCING
+        SS->>AD: export_workspace(sandbox, tenant, workspace)
+        AD->>C: POST /v1/file/list + POST /v1/file/read
+        C-->>AD: 工作区文件快照
+        AD-->>SS: WorkspaceSnapshot
+        SS->>WS: commit(snapshot, lease_id, fencing_token)
+        alt commit 成功
+            WS-->>SS: commit success
+        else commit 失败
+            WS-->>SS: WORKSPACE_SYNC_FAILED
+            Note over SS,AD: 仍然继续销毁，实例不回 READY
+        end
+        SS->>AD: destroy(reason, timeout/retry)
+        AD->>DR: docker rm -f provider_id
+        DR->>C: 销毁用户实例
+        alt destroy 成功
+            SS->>PR: DESTROYING -> DESTROYED，清理 lease/request 映射
+        else 超时或连续失败
+            SS->>PR: DESTROYING -> LOST
+        end
+        SA-->>SC: released 或稳定领域错误
+        SC->>SC: 清理本地 LeaseContext
+    end
+
+    par 用户实例释放后，Watcher 补池
+        W->>PR: 读取 READY 数量下降
+        W->>W: 计算 target_ready + reserve - ready - warming - creating
+        W->>AD: 创建替代预热实例
+        AD->>C: docker run + GET /v1/sandbox
+        W->>PR: generation 校验后 return_ready()
+        PR-->>W: 新实例进入 READY
+    and 运行期间的后台恢复
+        W->>SS: recover_expired()
+        SS->>PR: 查找 ALLOCATED/RUNNING 过期租约
+        SS->>AD: 关闭并销毁过期用户实例
+    end
+```
+
+#### 6.4.3 分阶段行为
+
+1. **Chat 建立租约**：Chat API 校验会话后进入 `ChatTurnCoordinator`。协调器根据 `user_id`、`session_id` 和本轮随机生成的 `sandbox_request_id` 构造工具上下文，并在 LLM 调用前完成 allocate。此时没有 READY 实例会直接阻止本轮进入工具推理，返回 `POOL_EMPTY`。
+2. **Sandbox 原子分配**：API 只接收 `request_id`、`tenant_id` 和 `workspace_id`。Scheduler 通过 Repository 在同一把锁内完成 request_id 幂等查询、READY checkout、租约绑定和 fencing token 生成，状态从 `READY` 进入 `ALLOCATED`。
+3. **工作区准备和激活**：Scheduler 从 WorkspaceStore 读取持久化快照。Adapter 将文件写入 AIO 工作区，然后通过 `/v1/sandbox` 确认实例可用，状态从 `ALLOCATED` 进入 `RUNNING`。allocate 返回的 endpoint 只属于本次 lease，Chat 不直接使用 AIO token 或 Docker container ID。
+4. **工具调用复用租约**：LLM 返回工具调用后，QueryLoopRuntime 通过 ToolDispatcher 执行 `read_file`、`write_file`、`list_directory`、`grep_files`、`edit_file`、`shell_exec` 或 `run_sandbox_script`。每个工具都调用同一个 SandboxClient，SandboxClient 根据 Chat 请求的 `request_id` 命中缓存的 LeaseContext，不会重复 allocate。
+5. **执行请求校验**：每次 execute 都携带租约上下文。Sandbox Service 校验 lease_id、tenant_id、workspace_id、fencing token、租约有效期和 `RUNNING` 状态；校验失败时拒绝请求，防止旧 Chat 请求或旧租约继续操作容器。
+6. **Adapter 协议转换**：Sandbox Service 只看到 `SandboxProvider`。Adapter 将领域操作转换成 AIO HTTP 请求，使用 `/v1/file/search`、`/v1/shell/exec`、`/v1/code/execute` 等实际路径，并通过 PathPolicy 将工作区映射到 `/home/gem/{tenant_id}/{workspace_id}`。Chat 工具说明中的 `/workspace` 是逻辑路径，演示时应优先使用相对路径。
+7. **释放与持久化**：Chat 的 `finally` 调用 release。Scheduler 先关闭租约入口，因此 release 开始后新的 execute 会被拒绝；随后导出容器工作区、提交 WorkspaceStore，并无条件进入销毁流程。commit 失败只影响持久化结果，不允许实例回 READY。
+8. **销毁和补池**：销毁成功后用户实例进入 `DESTROYED`，失败或超时进入 `LOST`。Watcher 发现 READY 缺口后创建新的实例，只有健康检查和 `return_ready()` 成功的新实例才能进入 READY。用户实例和替代预热实例不会复用同一个 sandbox_id。
+
+#### 6.4.4 请求边界与失败返回
+
+| 阶段 | 调用边界 | 失败表现 |
+| --- | --- | --- |
+| Chat allocate | Chat `SandboxClient` -> Sandbox API | `POOL_EMPTY`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE`，本轮 Chat 不进入工具循环 |
+| 工具 execute | Tool -> SandboxClient -> lease execute API | 工具包装为 `[Tool Error]`，QueryLoopRuntime 可将错误作为工具结果继续推理 |
+| release | Chat `finally` -> lease release API | `LEASE_NOT_FOUND` 和 `LEASE_EXPIRED` 视为可清理状态，其他错误继续上抛 |
+| workspace commit | Scheduler -> WorkspaceStore | 返回 `WORKSPACE_SYNC_FAILED`，但仍销毁用户实例 |
+| AIO destroy | Scheduler -> Adapter -> DockerRuntime | 404 幂等成功；超时/连续失败进入 `LOST`，不回 READY |
+| Watcher recovery | Watcher -> Scheduler.recover_expired | 过期 `ALLOCATED/RUNNING` 实例走关闭、同步和销毁流程，不直接回池 |
+
+### 6.5 失败补偿
 
 | 失败点 | 处理 |
 | --- | --- |

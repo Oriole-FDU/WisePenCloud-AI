@@ -122,9 +122,10 @@ class AppSettings(BaseModel):
     OSS_CACHE_GC_INTERVAL_SECONDS: int = 30 * 60
 
     # Sandbox Service 配置
-    SANDBOX_SERVICE_URL: str = "http://127.0.0.1:9001"
+    SANDBOX_SERVICE_NAME: str = "wisepen-sandbox-service"
+    SANDBOX_SERVICE_URL: str = ""
     SANDBOX_FROM_SOURCE: str = ""
-    SANDBOX_TIMEOUT_SECONDS: int = 30
+    SANDBOX_TIMEOUT_SECONDS: float = 30.0
 
 
 def _run_async(coro):

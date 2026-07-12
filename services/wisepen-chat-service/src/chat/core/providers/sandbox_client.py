@@ -7,9 +7,27 @@ from typing import Any
 
 import httpx
 
+from common.core.exceptions import RpcError
+from common.http.rpc_client import RpcClient
+
+
+_DEFAULT_SERVICE_NAME = "wisepen-sandbox-service"
+_R_SUCCESS_CODE = 200
+_SANDBOX_ERROR_NAMES_BY_CODE = {
+    46001: "POOL_EMPTY",
+    46002: "LEASE_NOT_FOUND",
+    46003: "LEASE_EXPIRED",
+    46004: "FENCING_REJECTED",
+    46005: "REQUEST_CONFLICT",
+    46006: "INVALID_STATE_TRANSITION",
+    46007: "WORKSPACE_PATH_INVALID",
+    46008: "WORKSPACE_SYNC_FAILED",
+    46009: "SANDBOX_UNAVAILABLE",
+}
+
 
 class SandboxClientError(Exception):
-    def __init__(self, code: str, message: str = "sandbox request failed") -> None:
+    def __init__(self, code: str, message: str = "沙箱请求失败") -> None:
         super().__init__(message)
         self.code = code
 
@@ -27,10 +45,15 @@ class LeaseContext:
 class SandboxClient:
     def __init__(
         self,
-        base_url: str,
+        *,
+        rpc: RpcClient | None = None,
+        service_name: str = _DEFAULT_SERVICE_NAME,
+        base_url: str = "",
         from_source: str = "",
         timeout_seconds: float = 30.0,
     ) -> None:
+        self._rpc = rpc
+        self._service_name = service_name
         self._base_url = base_url.rstrip("/")
         self._from_source = from_source
         self._timeout = timeout_seconds
@@ -187,6 +210,30 @@ class SandboxClient:
     async def _request(
         self, method: str, path: str, body: dict[str, Any]
     ) -> dict[str, Any]:
+        if self._base_url:
+            return await self._http_request(method, path, body)
+        if self._rpc is None:
+            raise SandboxClientError(
+                "SANDBOX_UNAVAILABLE",
+                "沙箱 RPC 客户端未配置",
+            )
+        try:
+            data = await self._rpc.request(
+                method,
+                self._service_name,
+                path,
+                json=body,
+                timeout=self._timeout,
+            )
+        except RpcError as exc:
+            raise SandboxClientError(_sandbox_code_from_rpc(exc)) from exc
+        if not isinstance(data, dict):
+            raise SandboxClientError("SANDBOX_UNAVAILABLE")
+        return data
+
+    async def _http_request(
+        self, method: str, path: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if self._from_source:
             headers["X-From-Source"] = self._from_source
@@ -206,4 +253,21 @@ class SandboxClient:
             raise SandboxClientError(code)
         if not isinstance(payload, dict):
             raise SandboxClientError("SANDBOX_UNAVAILABLE")
+        if "code" in payload:
+            try:
+                code = int(payload.get("code"))
+            except (TypeError, ValueError):
+                raise SandboxClientError("SANDBOX_UNAVAILABLE")
+            if code == _R_SUCCESS_CODE:
+                data = payload.get("data")
+                return data if isinstance(data, dict) else {}
+            raise SandboxClientError(_sandbox_code_from_number(code))
         return payload
+
+
+def _sandbox_code_from_number(code: int | None) -> str:
+    return _SANDBOX_ERROR_NAMES_BY_CODE.get(code or 0, "SANDBOX_UNAVAILABLE")
+
+
+def _sandbox_code_from_rpc(exc: RpcError) -> str:
+    return _sandbox_code_from_number(exc.code)
