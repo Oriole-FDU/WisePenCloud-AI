@@ -4,6 +4,7 @@ class SecurityConstants:
     HEADER_IDENTITY_TYPE = "X-Identity-Type"
     HEADER_GROUP_ROLE_MAP = "X-Group-Role-Map"
     HEADER_FROM_SOURCE = "X-From-Source"
+    HEADER_SESSION_ID = "X-Session-Id"
 
 class CommonConstants:
     GRAY_METADATA_DEV_KEY = "developer"

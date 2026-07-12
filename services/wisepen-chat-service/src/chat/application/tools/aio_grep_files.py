@@ -1,14 +1,14 @@
 from typing import Any, Dict
 from chat.core.config.app_settings import settings
-from chat.core.providers.sandbox_client import SandboxClient
+from chat.core.providers.sandbox.base import FileSystemProvider
 from chat.application.tools.core.definition import (
     ToolDefinition, ToolLLMSpec, ToolParametersSchema, ToolPolicy,
 )
 
 
 class GrepFilesTool:
-    def __init__(self, sandbox: SandboxClient) -> None:
-        self._sandbox = sandbox
+    def __init__(self, fs_provider: FileSystemProvider) -> None:
+        self._fs = fs_provider
 
     @property
     def definition(self) -> ToolDefinition:
@@ -40,12 +40,14 @@ class GrepFilesTool:
         if not pattern: return "[Tool Error] missing 'pattern'"
         recursive = kwargs.get("recursive", True)
         ignore_case = kwargs.get("ignore_case", False)
+        uid = str(context.get("user_id") or "")
+        sid = str(context.get("session_id") or "")
         try:
-            matches = await self._sandbox.grep_files(
-                context,
+            matches = await self._fs.grep_files(
                 path, pattern,
                 recursive=recursive if recursive is not None else True,
                 ignore_case=ignore_case if ignore_case is not None else False,
+                user_id=uid, session_id=sid,
             )
         except Exception as e:
             return f"[Tool Error] grep_files failed: {type(e).__name__}: {e}"

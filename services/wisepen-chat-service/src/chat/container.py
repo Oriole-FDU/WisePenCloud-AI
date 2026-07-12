@@ -9,53 +9,47 @@ from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings
 from chat.core.providers import (
     LiteLLMAdapter,
-    AnthropicAdapter,
-    GeminiAdapter,
-    OpenAIAdapter,
-    QwenAdapter,
     Mem0Adapter,
     OssFileLoader,
-    IflytekSpeechProvider,
+    NullMemoryAdapter,
 )
-from chat.application.llm_provider_resolver import LLMProviderResolver
-from chat.application.token_counter import TokenCounter
+from chat.core.providers.sandbox import SandboxProvider
 from chat.core.persistence import (
     MongoSessionRepository,
     MongoMessageRepository,
     MongoModelRepository,
     MongoProviderRepository,
-    MongoToolConfigRepository,
     RedisHotContext,
 )
-from chat.domain.repositories import ToolConfigRepository
+from chat.application.attachment_service import AttachmentService
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
-from chat.core.providers.sandbox_client import SandboxClient
 from chat.application.agents import (
     DefaultAgentResolver,
 )
-from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
-from chat.application.tools.skill_tools import CreateSkillInfoTool
-from chat.application.tools.skill_tools import GetSkillInfoTool
-from chat.application.tools.skill_tools import LoadSkillAssetTool
-from chat.application.tools.skill_tools import LoadSkillTool
-from chat.application.tools.skill_tools import UpdateSkillInfoTool
-from chat.application.tools.skill_tools import UploadSkillDraftAssetTool
-from chat.application.tools.core import ToolRegistry
 from chat.application.tools import (
-    EditFileTool,
-    GrepFilesTool,
-    ListDirectoryTool,
-    ReadFileTool,
+    ToolRegistry,
+    ReadTextAttachmentTool,
+    ReadPdfAttachmentTool,
+    ReadWordAttachmentTool,
+    ReadPptAttachmentTool,
+    ReadExcelAttachmentTool,
     RunSandboxScriptTool,
-    ShellExecTool,
+    ReadFileTool,
     WriteFileTool,
+    ListDirectoryTool,
+    GrepFilesTool,
+    EditFileTool,
+    ShellExecTool,
 )
+from chat.application.tools.skill_tools import LoadSkillAssetTool, LoadSkillTool
+from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
 from common.kafka.producer import KafkaProducerClient
+from chat.core.kafka import FileUploadedConsumer
 
 
 async def _provide_nacos_naming() -> NacosNamingService:
@@ -63,50 +57,27 @@ async def _provide_nacos_naming() -> NacosNamingService:
     return await nacos_client_manager.get_naming_client()
 
 
-def _build_registry(
-        tool_providers: List[providers.Provider],
-        tool_config_repo: ToolConfigRepository,
-) -> ToolRegistry:
+def _build_registry(tool_providers: List[providers.Provider]) -> ToolRegistry:
     """工厂函数：组装并返回已注册所有工具的 ToolRegistry 实例。"""
-    registry = ToolRegistry(tool_config_repo=tool_config_repo)
+    registry = ToolRegistry()
     for provider in tool_providers:
         registry.register(provider)
     return registry
 
 
-def _get_iflytek_speech_config():
-    if settings.SPEECH_CONFIG is None:
-        return None
-    return settings.SPEECH_CONFIG.IFLYTEK
-
-
 class Container(containers.DeclarativeContainer):
     """依赖注入容器，管理单例对象的生命周期。"""
-    qwen_adapter = providers.Singleton(QwenAdapter)
-    openai_adapter = providers.Singleton(OpenAIAdapter)
-    anthropic_adapter = providers.Singleton(AnthropicAdapter)
-    gemini_adapter = providers.Singleton(GeminiAdapter)
-    litellm_adapter = providers.Singleton(LiteLLMAdapter)
-    llm_provider_resolver = providers.Singleton(
-        LLMProviderResolver,
-        qwen_adapter=qwen_adapter,
-        openai_adapter=openai_adapter,
-        anthropic_adapter=anthropic_adapter,
-        gemini_adapter=gemini_adapter,
-        litellm_adapter=litellm_adapter,
-    )
-    token_counter = providers.Singleton(TokenCounter)
-    memory_provider = providers.Singleton(Mem0Adapter)
-    iflytek_speech_provider = providers.Singleton(
-        IflytekSpeechProvider,
-        config=providers.Callable(_get_iflytek_speech_config),
-    )
+    llm_provider = providers.Singleton(LiteLLMAdapter)
+
+    if (settings.QDRANT_HOST or "").strip().lower() in ("", "memory"):
+        memory_provider = providers.Singleton(NullMemoryAdapter)
+    else:
+        memory_provider = providers.Singleton(Mem0Adapter)
 
     session_repo = providers.Singleton(MongoSessionRepository)
     message_repo = providers.Singleton(MongoMessageRepository)
     model_repo = providers.Singleton(MongoModelRepository)
     provider_repo = providers.Singleton(MongoProviderRepository)
-    tool_config_repo = providers.Singleton(MongoToolConfigRepository)
     hot_context_repo = providers.Singleton(RedisHotContext)
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
@@ -125,6 +96,7 @@ class Container(containers.DeclarativeContainer):
         retries=settings.RPC_DEFAULT_RETRIES,
         default_strategy=settings.RPC_LB_STRATEGY,
     )
+    # 文件存储服务
     file_storage_client = providers.Singleton(
         FileStorageClient,
         rpc=rpc_client,
@@ -136,15 +108,6 @@ class Container(containers.DeclarativeContainer):
     resource_client = providers.Singleton(
         ResourceClient,
         rpc=rpc_client,
-    )
-
-    sandbox_client = providers.Singleton(
-        SandboxClient,
-        rpc=rpc_client,
-        service_name=settings.SANDBOX_SERVICE_NAME,
-        base_url=settings.SANDBOX_SERVICE_URL,
-        from_source=settings.SANDBOX_FROM_SOURCE or settings.FROM_SOURCE_SECRET,
-        timeout_seconds=settings.SANDBOX_TIMEOUT_SECONDS,
     )
 
     # OssFileLoader
@@ -169,13 +132,20 @@ class Container(containers.DeclarativeContainer):
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
     )
 
+    kafka_consumer = providers.Singleton(
+        FileUploadedConsumer,
+        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+        topic="wisepen-storage-file-uploaded-topic",
+        group_id="wisepen-chat-upload-callback-group",
+        session_repo=session_repo,
+    )
+
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期
     # GetHistoricalChatMessagesTool
     search_history_tool = providers.Singleton(
         GetHistoricalChatMessagesTool,
         message_repo=message_repo,
     )
-    # LoadSkillTool / LoadSkillAssetTool
     load_skill_tool = providers.Singleton(
         LoadSkillTool,
         ai_asset_client=ai_asset_client,
@@ -188,62 +158,87 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
-    create_skill_info_tool = providers.Singleton(
-        CreateSkillInfoTool,
-        ai_asset_client=ai_asset_client,
-    )
-    get_skill_info_tool = providers.Singleton(
-        GetSkillInfoTool,
-        ai_asset_client=ai_asset_client,
-    )
-    update_skill_info_tool = providers.Singleton(
-        UpdateSkillInfoTool,
-        ai_asset_client=ai_asset_client,
-    )
-    upload_skill_draft_asset_tool = providers.Singleton(
-        UploadSkillDraftAssetTool,
-        ai_asset_client=ai_asset_client,
+
+    # 沙箱脚本执行工具
+    run_sandbox_script_tool = providers.Singleton(
+        RunSandboxScriptTool,
+        base_url=settings.SANDBOX_BASE_URL,
+        from_source=settings.SANDBOX_FROM_SOURCE,
     )
 
-    read_file_tool = providers.Singleton(ReadFileTool, sandbox=sandbox_client)
-    write_file_tool = providers.Singleton(WriteFileTool, sandbox=sandbox_client)
-    list_directory_tool = providers.Singleton(ListDirectoryTool, sandbox=sandbox_client)
-    grep_files_tool = providers.Singleton(GrepFilesTool, sandbox=sandbox_client)
-    edit_file_tool = providers.Singleton(EditFileTool, sandbox=sandbox_client)
-    shell_exec_tool = providers.Singleton(ShellExecTool, sandbox=sandbox_client)
-    run_sandbox_script_tool = providers.Singleton(
-        RunSandboxScriptTool, sandbox=sandbox_client
+    # Sandbox Provider（File/Shell 操作直连 sandbox 服务队列）
+    sandbox_provider = providers.Singleton(
+        SandboxProvider,
+        base_url=settings.SANDBOX_BASE_URL,
+        from_source=settings.FROM_SOURCE_SECRET,
+    )
+    read_file_tool = providers.Singleton(ReadFileTool, fs_provider=sandbox_provider)
+    write_file_tool = providers.Singleton(WriteFileTool, fs_provider=sandbox_provider)
+    list_directory_tool = providers.Singleton(ListDirectoryTool, fs_provider=sandbox_provider)
+    grep_files_tool = providers.Singleton(GrepFilesTool, fs_provider=sandbox_provider)
+    edit_file_tool = providers.Singleton(EditFileTool, fs_provider=sandbox_provider)
+    shell_exec_tool = providers.Singleton(ShellExecTool, fs_provider=sandbox_provider)
+
+    # Attachment reading tools — 使用 SessionRepository 鉴权附件归属
+    read_text_attachment_tool = providers.Singleton(
+        ReadTextAttachmentTool,
+        file_storage_client=file_storage_client,
+        session_repo=session_repo,
+    )
+    read_pdf_attachment_tool = providers.Singleton(
+        ReadPdfAttachmentTool,
+        file_storage_client=file_storage_client,
+        session_repo=session_repo,
+    )
+    read_word_attachment_tool = providers.Singleton(
+        ReadWordAttachmentTool,
+        file_storage_client=file_storage_client,
+        session_repo=session_repo,
+    )
+    read_ppt_attachment_tool = providers.Singleton(
+        ReadPptAttachmentTool,
+        file_storage_client=file_storage_client,
+        session_repo=session_repo,
+    )
+    read_excel_attachment_tool = providers.Singleton(
+        ReadExcelAttachmentTool,
+        file_storage_client=file_storage_client,
+        session_repo=session_repo,
     )
 
     tool_providers = providers.List(
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
-        create_skill_info_tool,
-        get_skill_info_tool,
-        update_skill_info_tool,
-        upload_skill_draft_asset_tool,
+        run_sandbox_script_tool,
         read_file_tool,
         write_file_tool,
         list_directory_tool,
         grep_files_tool,
         edit_file_tool,
         shell_exec_tool,
-        run_sandbox_script_tool,
+        read_text_attachment_tool,
+        read_pdf_attachment_tool,
+        read_word_attachment_tool,
+        read_ppt_attachment_tool,
+        read_excel_attachment_tool,
     )
 
     tool_registry = providers.Singleton(
         _build_registry,
         tool_providers=tool_providers,
-        tool_config_repo=tool_config_repo,
+    )
+
+    attachment_service = providers.Factory(
+        AttachmentService,
+        file_storage_client=file_storage_client,
+        session_repo=session_repo,
     )
 
     # Application 层组件
     chat_turn_coordinator = providers.Factory(
         ChatTurnCoordinator,
-        llm_provider_resolver=llm_provider_resolver,
-        text_llm=litellm_adapter,
-        token_counter=token_counter,
+        llm=llm_provider,
         memory=memory_provider,
         model_repo=model_repo,
         provider_repo=provider_repo,
@@ -254,7 +249,6 @@ class Container(containers.DeclarativeContainer):
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
         agent_resolver=agent_resolver,
-        sandbox_client=sandbox_client,
     )
 
 

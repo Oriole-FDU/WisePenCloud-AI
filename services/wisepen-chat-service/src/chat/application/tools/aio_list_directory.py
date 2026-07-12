@@ -1,13 +1,13 @@
 from typing import Any, Dict
-from chat.core.providers.sandbox_client import SandboxClient
+from chat.core.providers.sandbox.base import FileSystemProvider
 from chat.application.tools.core.definition import (
     ToolDefinition, ToolLLMSpec, ToolParametersSchema, ToolPolicy,
 )
 
 
 class ListDirectoryTool:
-    def __init__(self, sandbox: SandboxClient) -> None:
-        self._sandbox = sandbox
+    def __init__(self, fs_provider: FileSystemProvider) -> None:
+        self._fs = fs_provider
 
     @property
     def definition(self) -> ToolDefinition:
@@ -30,8 +30,10 @@ class ListDirectoryTool:
     async def execute(self, context: Dict[str, Any], **kwargs) -> str:
         path = str(kwargs.get("path") or "/workspace").strip()
         recursive = bool(kwargs.get("recursive"))
+        uid = str(context.get("user_id") or "")
+        sid = str(context.get("session_id") or "")
         try:
-            files = await self._sandbox.list_directory(context, path, recursive=recursive)
+            files = await self._fs.list_directory(path, recursive=recursive, user_id=uid, session_id=sid)
         except Exception as e:
             return f"[Tool Error] list_directory failed: {type(e).__name__}: {e}"
         if not files:

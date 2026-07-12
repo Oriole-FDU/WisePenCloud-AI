@@ -1,13 +1,13 @@
 from typing import Any, Dict
-from chat.core.providers.sandbox_client import SandboxClient
+from chat.core.providers.sandbox.base import FileSystemProvider
 from chat.application.tools.core.definition import (
     ToolDefinition, ToolLLMSpec, ToolParametersSchema, ToolPolicy,
 )
 
 
 class WriteFileTool:
-    def __init__(self, sandbox: SandboxClient) -> None:
-        self._sandbox = sandbox
+    def __init__(self, fs_provider: FileSystemProvider) -> None:
+        self._fs = fs_provider
 
     @property
     def definition(self) -> ToolDefinition:
@@ -32,8 +32,10 @@ class WriteFileTool:
         ct = str(kwargs.get("content") or "")
         if not fp: return "[Tool Error] missing 'file'"
         if not ct: return "[Tool Error] missing 'content'"
+        uid = str(context.get("user_id") or "")
+        sid = str(context.get("session_id") or "")
         try:
-            r = await self._sandbox.write_file(context, fp, ct)
+            r = await self._fs.write_file(fp, ct, user_id=uid, session_id=sid)
         except Exception as e:
             return f"[Tool Error] write_file failed: {type(e).__name__}: {e}"
         return f"Successfully wrote {r.get('bytes_written', len(ct.encode('utf-8')))} bytes to {fp}"

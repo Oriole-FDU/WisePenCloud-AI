@@ -1,13 +1,13 @@
 from typing import Any, Dict
-from chat.core.providers.sandbox_client import SandboxClient
+from chat.core.providers.sandbox.base import FileSystemProvider
 from chat.application.tools.core.definition import (
     ToolDefinition, ToolLLMSpec, ToolParametersSchema, ToolPolicy,
 )
 
 
 class EditFileTool:
-    def __init__(self, sandbox: SandboxClient) -> None:
-        self._sandbox = sandbox
+    def __init__(self, fs_provider: FileSystemProvider) -> None:
+        self._fs = fs_provider
 
     @property
     def definition(self) -> ToolDefinition:
@@ -37,8 +37,10 @@ class EditFileTool:
         new = str(kwargs.get("new_str") or "")
         if not fp: return "[Tool Error] missing 'file'"
         if not old: return "[Tool Error] missing 'old_str'"
+        uid = str(context.get("user_id") or "")
+        sid = str(context.get("session_id") or "")
         try:
-            r = await self._sandbox.replace_in_file(context, fp, old, new)
+            r = await self._fs.replace_in_file(fp, old, new, user_id=uid, session_id=sid)
         except Exception as e:
             return f"[Tool Error] edit_file failed: {type(e).__name__}: {e}"
         bw = r.get("bytes_written", 0) if isinstance(r, dict) else 0
