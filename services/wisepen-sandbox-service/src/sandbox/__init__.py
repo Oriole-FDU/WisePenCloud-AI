@@ -18,6 +18,8 @@ from sandbox.repository import InMemorySandboxRepository
 from sandbox.scheduler import SandboxScheduler
 from sandbox.watcher import Watcher
 from sandbox.workspace import LocalWorkspaceStore
+from sandbox.leader import InMemoryLeaderLease
+from sandbox.metrics import MetricsCollector
 
 __all__ = [
     "Endpoint",
@@ -37,6 +39,8 @@ __all__ = [
     "SandboxState",
     "Watcher",
     "LocalWorkspaceStore",
+    "InMemoryLeaderLease",
+    "MetricsCollector",
     "WorkspaceSnapshot",
     "WorkspaceStore",
 ]

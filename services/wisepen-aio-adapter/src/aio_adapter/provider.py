@@ -17,6 +17,7 @@ from sandbox.ports import SandboxProvider
 
 from aio_adapter.client import AioClient
 from aio_adapter.docker_runtime import DockerRuntime
+from aio_adapter.errors import AioNotFoundError
 from aio_adapter.models import AdapterConfig
 from aio_adapter.path_policy import PathPolicy, TenantScope
 
@@ -49,6 +50,9 @@ class AioSandboxProvider(SandboxProvider):
             command_timeout_seconds=float(
                 os.getenv("SANDBOX_DOCKER_COMMAND_TIMEOUT_SECONDS", "30")
             ),
+            workdir=os.getenv("SANDBOX_AIO_WORKDIR", "/home/gem"),
+            e2e_label=os.getenv("SANDBOX_E2E_LABEL", "false").lower() == "true",
+            tty=os.getenv("SANDBOX_DOCKER_TTY", "true").lower() == "true",
         )
         return cls(DockerRuntime(config), request_timeout_seconds=config.request_timeout_seconds)
 
@@ -78,7 +82,11 @@ class AioSandboxProvider(SandboxProvider):
         self, sandbox: SandboxRef, workspace: WorkspaceSnapshot
     ) -> None:
         client = self._client(sandbox)
-        policy = PathPolicy(TenantScope(workspace.tenant_id, workspace.workspace_id))
+        policy = PathPolicy(
+            TenantScope(workspace.tenant_id, workspace.workspace_id),
+            self._runtime.workdir,
+            isolate_scope=True,
+        )
         for path, content in workspace.files.items():
             await client.file_write(policy.translate(path), content)
 
@@ -92,7 +100,11 @@ class AioSandboxProvider(SandboxProvider):
         self, sandbox: SandboxRef, request: ExecutionRequest
     ) -> ExecutionResult:
         client = self._client(sandbox)
-        policy = PathPolicy(TenantScope(request.tenant_id, request.workspace_id))
+        policy = PathPolicy(
+            TenantScope(request.tenant_id, request.workspace_id),
+            self._runtime.workdir,
+            isolate_scope=True,
+        )
         payload = request.payload
         operation = request.operation
         if operation == "read_file":
@@ -106,12 +118,12 @@ class AioSandboxProvider(SandboxProvider):
             )
         elif operation == "list_directory":
             data = await client.file_list(
-                policy.translate(str(payload.get("path", "/workspace"))),
+                policy.translate(str(payload.get("path", "."))),
                 bool(payload.get("recursive", False)),
             )
         elif operation == "grep_files":
             data = await client.file_grep(
-                policy.translate(str(payload.get("path", "/workspace"))),
+                policy.translate(str(payload.get("path", "."))),
                 str(payload.get("pattern", "")),
                 bool(payload.get("recursive", True)),
                 bool(payload.get("ignore_case", False)),
@@ -125,11 +137,15 @@ class AioSandboxProvider(SandboxProvider):
         elif operation == "shell_exec":
             data = await client.shell_exec(
                 str(payload.get("command", "")),
-                policy.translate(str(payload.get("exec_dir", "/workspace"))),
+                policy.translate(str(payload.get("exec_dir", "."))),
                 int(payload.get("timeout_ms", 30000)),
             )
         elif operation == "execute":
-            data = await client.request("/v1/code/execute", payload)
+            data = await client.code_execute(
+                str(payload.get("language", "python")),
+                str(payload.get("code", "")),
+                payload,
+            )
         else:
             raise ValueError(f"unsupported sandbox operation: {operation}")
         return ExecutionResult(request.request_id, "succeeded", data)
@@ -138,8 +154,16 @@ class AioSandboxProvider(SandboxProvider):
         self, sandbox: SandboxRef, tenant_id: str, workspace_id: str
     ) -> WorkspaceSnapshot:
         client = self._client(sandbox)
-        policy = PathPolicy(TenantScope(tenant_id, workspace_id))
-        listing = await client.file_list("/workspace", recursive=True)
+        policy = PathPolicy(
+            TenantScope(tenant_id, workspace_id),
+            self._runtime.workdir,
+            isolate_scope=True,
+        )
+        try:
+            listing = await client.file_list(policy.root, recursive=True)
+        except AioNotFoundError:
+            # An untouched workspace has no directory yet; it is an empty snapshot.
+            return WorkspaceSnapshot(tenant_id, workspace_id)
         files: dict[str, str] = {}
         entries = listing.get("files", []) if isinstance(listing, dict) else []
         for entry in entries:
@@ -148,7 +172,7 @@ class AioSandboxProvider(SandboxProvider):
             path = str(entry.get("path") or entry.get("name") or "")
             virtual = policy.reverse(path)
             content = await client.file_read(policy.translate(virtual))
-            files[virtual.removeprefix("/workspace/")] = str(
+            files[virtual.removeprefix(f"{policy.root}/")] = str(
                 content.get("content", "")
             )
         return WorkspaceSnapshot(tenant_id, workspace_id, files)

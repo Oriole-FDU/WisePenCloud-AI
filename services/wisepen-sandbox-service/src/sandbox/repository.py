@@ -19,6 +19,7 @@ from sandbox.models import (
     PoolSnapshot,
     utc_now,
 )
+from sandbox.metrics import MetricsCollector
 
 
 _ALLOWED_TRANSITIONS: dict[SandboxState, frozenset[SandboxState]] = {
@@ -37,7 +38,7 @@ _ALLOWED_TRANSITIONS: dict[SandboxState, frozenset[SandboxState]] = {
 class InMemorySandboxRepository:
     """Atomic in-process repository; external stores can implement the same port."""
 
-    def __init__(self) -> None:
+    def __init__(self, metrics: MetricsCollector | None = None) -> None:
         self._records: dict[str, SandboxRecord] = {}
         self._leases: dict[str, str] = {}
         self._requests: dict[str, str] = {}
@@ -45,6 +46,7 @@ class InMemorySandboxRepository:
         self._empty_checkouts = 0
         self._next_fencing_token = 0
         self._lock = asyncio.Lock()
+        self.metrics = metrics or MetricsCollector()
 
     async def save(self, record: SandboxRecord) -> None:
         async with self._lock:
@@ -85,12 +87,31 @@ class InMemorySandboxRepository:
                 counts[record.state] += 1
             return counts
 
-    async def snapshot(self) -> PoolSnapshot:
+    async def snapshot(self, *, min_ready: int = 0, target_ready: int = 0) -> PoolSnapshot:
         async with self._lock:
             counts = {state: 0 for state in SandboxState}
             for record in self._records.values():
                 counts[record.state] += 1
-            return PoolSnapshot(self._generation, counts, self._empty_checkouts)
+            ready = counts[SandboxState.READY]
+            now = utc_now()
+            self.metrics.set_value(
+                "zombie_leases",
+                sum(
+                    1
+                    for record in self._records.values()
+                    if record.state in (SandboxState.ALLOCATED, SandboxState.RUNNING)
+                    and record.lease_expires_at is not None
+                    and record.lease_expires_at <= now
+                ),
+            )
+            return PoolSnapshot(
+                self._generation,
+                counts,
+                self._empty_checkouts,
+                self.metrics.snapshot(ready, min_ready, target_ready),
+                min_ready,
+                target_ready,
+            )
 
     async def transition(
         self,
@@ -140,6 +161,7 @@ class InMemorySandboxRepository:
             )
             if ready is None:
                 self._empty_checkouts += 1
+                self.metrics.increment("pool_empty_checkouts")
                 raise PoolEmptyError("no ready sandbox is available")
             self._next_fencing_token += 1
             now = utc_now()
@@ -152,6 +174,8 @@ class InMemorySandboxRepository:
             ready.workspace_id = workspace_id
             ready.lease_expires_at = now + timedelta(seconds=lease_ttl_seconds)
             ready.fencing_token = self._next_fencing_token
+            self.metrics.lease_started(tenant_id)
+            self.metrics.increment("allocate_successes")
             self._leases[ready.lease_id] = ready.ref.sandbox_id
             self._requests[request_id] = ready.ref.sandbox_id
             self._generation += 1
@@ -217,6 +241,7 @@ class InMemorySandboxRepository:
 
     async def clear_lease(self, record: SandboxRecord) -> None:
         async with self._lock:
+            tenant_id = record.tenant_id
             if record.lease_id:
                 self._leases.pop(record.lease_id, None)
             if record.request_id:
@@ -226,7 +251,49 @@ class InMemorySandboxRepository:
             record.tenant_id = None
             record.workspace_id = None
             record.lease_expires_at = None
+            if tenant_id:
+                self.metrics.lease_finished(tenant_id)
             self._generation += 1
+
+    async def prepare_ready(
+        self, record: SandboxRecord, readiness_token: str
+    ) -> int:
+        async with self._lock:
+            current = self._records.get(record.ref.sandbox_id)
+            if current is None or current.state != SandboxState.WARMING:
+                raise InvalidStateTransition(
+                    "only warming sandboxes can prepare readiness"
+                )
+            record.readiness_token = readiness_token
+            self._records[record.ref.sandbox_id] = record
+            self._generation += 1
+            return self._generation
+
+    async def return_ready(
+        self,
+        sandbox_id: str,
+        health_token: str,
+        expected_generation: int,
+    ) -> SandboxRecord:
+        async with self._lock:
+            record = self._records.get(sandbox_id)
+            if record is None:
+                raise LeaseNotFoundError(f"sandbox {sandbox_id} was not found")
+            if self._generation != expected_generation:
+                raise FencingRejectedError("pool generation is stale")
+            if record.state != SandboxState.WARMING:
+                raise InvalidStateTransition("only warming sandboxes can return ready")
+            if any((record.lease_id, record.request_id, record.tenant_id, record.workspace_id)):
+                raise FencingRejectedError("sandbox still has an active lease")
+            if not record.readiness_token or record.readiness_token != health_token:
+                raise FencingRejectedError("sandbox health token is invalid")
+            record.state = SandboxState.READY
+            record.readiness_token = None
+            record.state_version += 1
+            record.updated_at = utc_now()
+            self._generation += 1
+            self.metrics.increment("ready_returns")
+            return record
 
     async def expired_leases(self, now: datetime | None = None) -> list[SandboxRecord]:
         current = now or utc_now()

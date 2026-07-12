@@ -12,5 +12,8 @@ class AdapterConfig:
     network: str | None = None
     request_timeout_seconds: float = 30.0
     warmup_timeout_seconds: float = 60.0
-    workdir: str = "/workspace"
+    # all-in-one-sandbox exposes /home/gem as its writable user home
+    workdir: str = "/home/gem"
     command_timeout_seconds: float = 30.0
+    e2e_label: bool = False
+    tty: bool = True

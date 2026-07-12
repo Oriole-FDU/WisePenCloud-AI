@@ -78,6 +78,7 @@ class SandboxRecord:
     fencing_token: int = 0
     state_version: int = 0
     last_error: str | None = None
+    readiness_token: str | None = None
 
 
 @dataclass(frozen=True)
@@ -147,10 +148,16 @@ class PoolSnapshot:
     generation: int
     counts: dict[SandboxState, int]
     empty_checkouts: int = 0
+    metrics: dict[str, Any] = field(default_factory=dict)
+    min_ready: int = 0
+    target_ready: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "generation": self.generation,
             "empty_checkouts": self.empty_checkouts,
+            "min_ready": self.min_ready,
+            "target_ready": self.target_ready,
+            **self.metrics,
             **{state.value: self.counts.get(state, 0) for state in SandboxState},
         }

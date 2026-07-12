@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from time import monotonic
 
 from sandbox.errors import (
     LeaseNotFoundError,
@@ -30,6 +31,9 @@ class SandboxScheduler:
         repository: InMemorySandboxRepository,
         provider: SandboxProvider,
         workspace_store: WorkspaceStore,
+        destroy_timeout_seconds: float = 30.0,
+        destroy_max_retries: int = 3,
+        destroy_backoff_seconds: float = 0.1,
     ) -> None:
         self._pool = pool
         self._repository = repository
@@ -37,6 +41,9 @@ class SandboxScheduler:
         self._workspace_store = workspace_store
         self._lifecycle_lock = asyncio.Lock()
         self._released_leases: set[str] = set()
+        self._destroy_timeout = destroy_timeout_seconds
+        self._destroy_max_retries = max(1, destroy_max_retries)
+        self._destroy_backoff = destroy_backoff_seconds
 
     async def allocate(
         self, request_id: str, tenant_id: str, workspace_id: str
@@ -112,7 +119,9 @@ class SandboxScheduler:
                     record.lease_id or lease_id,
                     record.fencing_token,
                 )
+                self._repository.metrics.increment("workspace_commit_successes")
             except Exception as exc:
+                self._repository.metrics.increment("workspace_commit_failures")
                 commit_error = WorkspaceSyncError("workspace commit failed")
                 commit_error.__cause__ = exc
             finally:
@@ -132,6 +141,7 @@ class SandboxScheduler:
                     await self._repository.close_lease(lease_id, record.fencing_token)
                     await self._destroy_record(record, DestroyReason.LEASE_EXPIRED)
                     self._released_leases.add(lease_id)
+                    self._repository.metrics.increment("expired_lease_recoveries")
                 except Exception:
                     recovered += 1
                 else:
@@ -167,16 +177,37 @@ class SandboxScheduler:
                 record.state,
                 SandboxState.DESTROYING,
             )
-        try:
-            await self._provider.destroy(record.ref, reason.value)
-        except Exception as exc:
+        last_error: Exception | None = None
+        for attempt in range(self._destroy_max_retries):
+            self._repository.metrics.increment("destroy_attempts")
+            started = monotonic()
+            try:
+                await asyncio.wait_for(
+                    self._provider.destroy(record.ref, reason.value),
+                    timeout=self._destroy_timeout,
+                )
+                self._repository.metrics.observe_ms(
+                    "destroy", (monotonic() - started) * 1000
+                )
+                self._repository.metrics.increment("destroy_successes")
+                last_error = None
+                break
+            except Exception as exc:
+                self._repository.metrics.observe_ms(
+                    "destroy", (monotonic() - started) * 1000
+                )
+                last_error = exc
+                if attempt + 1 < self._destroy_max_retries:
+                    await asyncio.sleep(self._destroy_backoff * (2**attempt))
+        if last_error is not None:
             await self._repository.transition(
                 record.ref.sandbox_id,
                 SandboxState.DESTROYING,
                 SandboxState.LOST,
-                error=str(exc)[:200],
+                error=str(last_error)[:200],
             )
-            raise SandboxUnavailableError("sandbox destroy failed") from exc
+            self._repository.metrics.increment("destroy_failures")
+            raise SandboxUnavailableError("sandbox destroy failed") from last_error
         await self._repository.transition(
             record.ref.sandbox_id,
             SandboxState.DESTROYING,
