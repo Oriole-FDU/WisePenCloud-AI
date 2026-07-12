@@ -12,6 +12,7 @@ from sandbox.repository import InMemorySandboxRepository
 from sandbox.scheduler import SandboxScheduler
 from sandbox.watcher import Watcher
 from sandbox.workspace import LocalWorkspaceStore
+from sandbox.leader import InMemoryLeaderLease
 
 
 def _load_provider() -> object:
@@ -26,21 +27,33 @@ def _load_provider() -> object:
 
 
 repository = InMemorySandboxRepository()
-pool = SandboxPool(repository, int(os.getenv("SANDBOX_LEASE_TTL_SECONDS", "1800")))
+min_ready = int(os.getenv("SANDBOX_MIN_READY", "1"))
+target_ready = int(os.getenv("SANDBOX_TARGET_READY", "2"))
+pool = SandboxPool(
+    repository,
+    int(os.getenv("SANDBOX_LEASE_TTL_SECONDS", "1800")),
+    min_ready=min_ready,
+    target_ready=target_ready,
+)
 provider = _load_provider()
 scheduler = SandboxScheduler(
     pool,
     repository,
     provider,
     LocalWorkspaceStore(os.getenv("SANDBOX_WORKSPACE_ROOT", "/tmp/wisepen-workspaces")),
+    destroy_timeout_seconds=float(os.getenv("SANDBOX_DESTROY_TIMEOUT_SECONDS", "30")),
+    destroy_max_retries=int(os.getenv("SANDBOX_DESTROY_MAX_RETRIES", "3")),
 )
+leader_lease = InMemoryLeaderLease()
 watcher = Watcher(
     pool,
     repository,
     provider,
     SandboxSpec(image=os.getenv("SANDBOX_IMAGE", "ghcr.io/agent-infra/sandbox:latest")),
-    target_ready=int(os.getenv("SANDBOX_TARGET_READY", "2")),
-    min_ready=int(os.getenv("SANDBOX_MIN_READY", "1")),
+    scheduler=scheduler,
+    leader_lease=leader_lease,
+    target_ready=target_ready,
+    min_ready=min_ready,
     reserve=int(os.getenv("SANDBOX_READY_RESERVE", "0")),
     max_create_batch=int(os.getenv("SANDBOX_MAX_CREATE_BATCH", "2")),
     warmup_timeout_seconds=float(os.getenv("SANDBOX_WARMUP_TIMEOUT_SECONDS", "60")),
