@@ -140,8 +140,10 @@ class Container(containers.DeclarativeContainer):
 
     sandbox_client = providers.Singleton(
         SandboxClient,
+        rpc=rpc_client,
+        service_name=settings.SANDBOX_SERVICE_NAME,
         base_url=settings.SANDBOX_SERVICE_URL,
-        from_source=settings.SANDBOX_FROM_SOURCE,
+        from_source=settings.SANDBOX_FROM_SOURCE or settings.FROM_SOURCE_SECRET,
         timeout_seconds=settings.SANDBOX_TIMEOUT_SECONDS,
     )
 

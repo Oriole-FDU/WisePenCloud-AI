@@ -3553,6 +3553,8 @@ source = { editable = "services/wisepen-sandbox-service" }
 dependencies = [
     { name = "fastapi" },
     { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "wisepen-common" },
 ]
@@ -3561,6 +3563,8 @@ dependencies = [
 requires-dist = [
     { name = "fastapi" },
     { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "uvicorn", extras = ["standard"] },
     { name = "wisepen-common", editable = "services/wisepen-common" },
 ]
