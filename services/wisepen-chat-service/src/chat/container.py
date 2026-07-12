@@ -31,6 +31,7 @@ from chat.core.persistence import (
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
+from chat.core.providers.sandbox_client import SandboxClient
 from chat.application.agents import (
     DefaultAgentResolver,
 )
@@ -156,6 +157,13 @@ class Container(containers.DeclarativeContainer):
         mcp_service_client=mcp_service_client,
     )
 
+    sandbox_client = providers.Singleton(
+        SandboxClient,
+        base_url=settings.SANDBOX_SERVICE_URL,
+        from_source=settings.SANDBOX_FROM_SOURCE,
+        timeout_seconds=settings.SANDBOX_TIMEOUT_SECONDS,
+    )
+
     # OssFileLoader
     oss_file_loader = providers.Singleton(
         OssFileLoader,
@@ -227,6 +235,7 @@ class Container(containers.DeclarativeContainer):
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
         agent_resolver=agent_resolver,
+        sandbox_client=sandbox_client,
     )
 
 
