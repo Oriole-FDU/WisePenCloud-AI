@@ -58,7 +58,12 @@ class GetSkillInfoTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
-    async def execute(self, context: dict[str, Any], **kwargs: Any) -> str:
+    async def execute(
+        self,
+        context: dict[str, Any],
+        config: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> str:
         resource_id = str(kwargs.get("resource_id"))
         try:
             skill_info = await self._ai_asset_client.get_skill_info(resource_id)

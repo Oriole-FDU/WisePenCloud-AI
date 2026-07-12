@@ -23,8 +23,10 @@ from chat.core.persistence import (
     MongoMessageRepository,
     MongoModelRepository,
     MongoProviderRepository,
+    MongoToolConfigRepository,
     RedisHotContext,
 )
+from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.agents import (
     DefaultAgentResolver,
@@ -50,9 +52,12 @@ async def _provide_nacos_naming() -> NacosNamingService:
     return await nacos_client_manager.get_naming_client()
 
 
-def _build_registry(tool_providers: List[providers.Provider]) -> ToolRegistry:
+def _build_registry(
+        tool_providers: List[providers.Provider],
+        tool_config_repo: ToolConfigRepository,
+) -> ToolRegistry:
     """工厂函数：组装并返回已注册所有工具的 ToolRegistry 实例。"""
-    registry = ToolRegistry()
+    registry = ToolRegistry(tool_config_repo=tool_config_repo)
     for provider in tool_providers:
         registry.register(provider)
     return registry
@@ -80,6 +85,7 @@ class Container(containers.DeclarativeContainer):
     message_repo = providers.Singleton(MongoMessageRepository)
     model_repo = providers.Singleton(MongoModelRepository)
     provider_repo = providers.Singleton(MongoProviderRepository)
+    tool_config_repo = providers.Singleton(MongoToolConfigRepository)
     hot_context_repo = providers.Singleton(RedisHotContext)
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
@@ -182,6 +188,7 @@ class Container(containers.DeclarativeContainer):
     tool_registry = providers.Singleton(
         _build_registry,
         tool_providers=tool_providers,
+        tool_config_repo=tool_config_repo,
     )
 
     # Application 层组件

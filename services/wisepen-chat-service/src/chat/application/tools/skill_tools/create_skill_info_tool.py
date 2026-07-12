@@ -72,7 +72,12 @@ class CreateSkillInfoTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
-    async def execute(self, context: dict[str, Any], **kwargs: Any) -> str:
+    async def execute(
+        self,
+        context: dict[str, Any],
+        config: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> str:
         try:
             title = _required_text(kwargs.get("title"), "title")
             name = _required_text(kwargs.get("name"), "name")

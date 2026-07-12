@@ -34,7 +34,8 @@ from chat.api.endpoints import chat as chat_endpoints
 from chat.api.endpoints import session as session_endpoints
 from chat.api.endpoints import memory as memory_endpoints
 from chat.api.endpoints import model as model_endpoints
-from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping
+from chat.api.endpoints import tool as tool_endpoints
+from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig
 
 
 # 避免 HTTP 代理拦截内部中间件请求。
@@ -55,7 +56,7 @@ async def lifespan(app: FastAPI):
     mongo_client = AsyncMongoClient(settings.MONGODB_URL)
     await init_beanie(
         database=mongo_client[settings.MONGODB_DB_NAME],
-        document_models=[ChatSession, ChatMessage, Provider, Model, ModelProviderMapping],
+        document_models=[ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig],
     )
     info("beanie initialized.", db=settings.MONGODB_DB_NAME)
 
@@ -110,7 +111,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         error("nacos instance deregister failed.", exc=e)
 
-container.wire(modules=[attachment_endpoints, chat_endpoints, session_endpoints, memory_endpoints, model_endpoints])  # 注入依赖到路由模块
+container.wire(modules=[attachment_endpoints, chat_endpoints, session_endpoints, memory_endpoints, model_endpoints, tool_endpoints])  # 注入依赖到路由模块
 app = FastAPI(title=bootstrap_settings.APP_NAME, lifespan=lifespan, docs_url="/docs")
 instrument_fastapi_app(app)
 

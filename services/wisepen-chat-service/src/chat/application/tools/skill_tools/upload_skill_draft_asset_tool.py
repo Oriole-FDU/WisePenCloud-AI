@@ -93,7 +93,12 @@ class UploadSkillDraftAssetTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
-    async def execute(self, context: dict[str, Any], **kwargs: Any) -> str:
+    async def execute(
+        self,
+        context: dict[str, Any],
+        config: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> str:
         try:
             resource_id = str(kwargs.get("resource_id"))
             draft_version = kwargs.get("draft_version")

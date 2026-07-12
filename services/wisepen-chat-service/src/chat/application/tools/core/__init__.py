@@ -1,5 +1,6 @@
 from chat.application.tools.core.definition import (
     Tool,
+    ToolConfigSpec,
     ToolDefinition,
     ToolLLMSpec,
     ToolParametersSchema,
@@ -53,6 +54,7 @@ from chat.application.tools.core.execution.hooks.builtin import (
 __all__ = [
     # definition
     "Tool",
+    "ToolConfigSpec",
     "ToolDefinition",
     "ToolLLMSpec",
     "ToolParametersSchema",

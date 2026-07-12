@@ -6,6 +6,7 @@ from .model import ModelType, ModelFamily, ModelScope, Model, ModelProviderMappi
 from .provider import Provider, ProviderScope, ProviderType
 from .resource import ResourceItemInfo, ResourcePermission
 from .skill import Skill, SkillMeta, SkillAssetMeta
+from .tool_config import UserToolConfig
 
 __all__ = [
     "ChatMessage", "MessageModelInfo", "Role", "ToolCallMessage",
@@ -15,4 +16,5 @@ __all__ = [
     "Provider", "ProviderScope", "ProviderType",
     "ResourceItemInfo", "ResourcePermission",
     "Skill", "SkillMeta", "SkillAssetMeta",
+    "UserToolConfig"
 ]

@@ -70,6 +70,45 @@ class ToolLLMSpec:
     parameters_schema: ToolParametersSchema
 
 @dataclass(frozen=True)
+class ToolConfigSpec:
+    schema: dict[str, Any] # 前端表单 schema
+    required_keys: tuple[str, ...] = () # 哪些配置项必须有值这个 Tool 才可用
+    secret_keys: tuple[str, ...] = () # 哪些字段是密钥
+    version: int = 1 # 配置 schema 版本，未来 Tool 配置结构升级时用
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.schema, dict): # schema 必须是 dict
+            raise TypeError("config_spec.schema must be a dict.")
+        if self.schema.get("type") != "object": # schema type 必须是 object
+            raise ValueError("config_spec.schema.type must be 'object'.")
+
+        properties = self.schema.get("properties", {})
+        if not isinstance(properties, dict): # schema properties type 必须是 object
+            raise ValueError("config_spec.schema.properties must be a dict.")
+
+        # required_keys / secret_keys 改为 tuple 且由字符串组成
+        required_keys = tuple(self.required_keys or ())
+        secret_keys = tuple(self.secret_keys or ())
+        if not all(isinstance(item, str) for item in required_keys):
+            raise ValueError("config_spec.required_keys must contain only strings.")
+        if not all(isinstance(item, str) for item in secret_keys):
+            raise ValueError("config_spec.secret_keys must contain only strings.")
+
+        # required_keys 和 secret_keys 中的 key 必须存在于 schema properties
+        unknown_required = [item for item in required_keys if item not in properties]
+        unknown_secret = [item for item in secret_keys if item not in properties]
+        if unknown_required:
+            raise ValueError(f"config_spec.required_keys contains unknown keys: {unknown_required}")
+        if unknown_secret:
+            raise ValueError(f"config_spec.secret_keys contains unknown keys: {unknown_secret}")
+
+        if self.version < 1: # version 必须大于等于 1
+            raise ValueError("config_spec.version must be positive.")
+
+        object.__setattr__(self, "required_keys", required_keys)
+        object.__setattr__(self, "secret_keys", secret_keys)
+
+@dataclass(frozen=True)
 class ToolPolicy:
     """工具策略"""
     expose_by_default: bool = False # 是否默认暴露给模型
@@ -93,6 +132,7 @@ class ToolPolicy:
 class ToolDefinition:
     llm_spec: ToolLLMSpec
     policy: ToolPolicy = field(default_factory=ToolPolicy)
+    config_spec: ToolConfigSpec | None = None
     preflight_hooks: tuple['ToolPreflightHook', ...] = ()
 
 
@@ -101,5 +141,10 @@ class Tool(Protocol):
     def definition(self) -> ToolDefinition:
         ...
 
-    async def execute(self, context: Dict[str, Any], **kwargs) -> Any:
+    async def execute(
+        self,
+        context: Dict[str, Any],
+        config: Dict[str, Any] | None = None,
+        **kwargs,
+    ) -> Any:
         ...

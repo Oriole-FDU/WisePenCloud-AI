@@ -111,7 +111,12 @@ class LoadSkillAssetTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
-    async def execute(self, context: dict[str, Any], **kwargs: Any) -> str:
+    async def execute(
+        self,
+        context: dict[str, Any],
+        config: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> str:
         skill_id = (kwargs.get("skill_id") or "").strip()
         path = (kwargs.get("path") or "").strip()
 

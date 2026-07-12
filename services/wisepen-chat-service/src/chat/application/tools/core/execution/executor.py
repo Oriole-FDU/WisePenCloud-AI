@@ -25,6 +25,14 @@ class ToolExecutor:
                     retryable=False,
                 )
 
+            tool_config = self._tool_scope.config_for(invocation.tool_name)
+            if tool.definition.config_spec is not None and tool_config is None:
+                raise ToolExecutionError(
+                    reason="Tool Config Missing",
+                    detail_reason=f"Tool '{invocation.tool_name}' requires user configuration.",
+                    retryable=False,
+                )
+
             preflight_hooks = [
                 JsonSchemaCheck(),
                 RequiredContextCheck(),
@@ -49,10 +57,14 @@ class ToolExecutor:
                     preflight_metadata.update(output.metadata)
 
             output = await self._run(
-                tool.execute({
-                    **self._tool_scope.context,
-                    **preflight_metadata,
-                }, **invocation.tool_call_arguments),
+                tool.execute(
+                    context={
+                        **self._tool_scope.context,
+                        **preflight_metadata,
+                    },
+                    config=tool_config,
+                    **invocation.tool_call_arguments,
+                ),
                 timeout_seconds=tool.definition.policy.timeout_seconds,
                 tool_name=invocation.tool_name,
             )

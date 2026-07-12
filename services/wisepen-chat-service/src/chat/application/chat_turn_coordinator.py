@@ -200,11 +200,12 @@ class ChatTurnCoordinator:
         # 若用户指定了 user_defined_deny_tool_names，则覆盖 agent 预设的 deny_tool_names
         deny_tool_name_set = user_defined_deny_tool_names or tool_and_skill_policy.deny_tool_names or None
 
-        tool_scope = self._tool_registry.derive(
+        tool_scope = await self._tool_registry.derive(
             tool_context=tool_context,
             expose_tool_name_set=expose_tool_name_set,
             allow_tool_name_set=allow_tool_name_set,
             deny_tool_name_set=deny_tool_name_set,
+            user_id=user_id
         )
 
         # 对话中的全部附件

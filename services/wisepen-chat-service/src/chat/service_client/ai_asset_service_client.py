@@ -101,6 +101,7 @@ class AIAssetClient:
             )
         except RpcError as e:
             raise e
+
     async def get_skill_info(self, resource_id: str) -> Optional[SkillInfo]:
         try:
             data = await self._rpc.post(
