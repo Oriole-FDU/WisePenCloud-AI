@@ -12,10 +12,16 @@ from sandbox.errors import (
 )
 from sandbox.models import (
     ExecutionRequest,
+    SandboxRecord,
+    SandboxRef,
+    SandboxSpec,
     SandboxState,
     WorkspaceSnapshot,
     utc_now,
 )
+from sandbox.pool import SandboxPool
+from sandbox.repository import InMemorySandboxRepository
+from sandbox.watcher import Watcher
 from sandbox.scheduler import SandboxScheduler
 from sandbox.workspace import LocalWorkspaceStore, WorkspacePathError
 
@@ -101,3 +107,77 @@ async def test_workspace_store_rejects_traversal_and_symlink(tmp_path):
     store = LocalWorkspaceStore(str(tmp_path))
     with pytest.raises(WorkspacePathError):
         await store.commit(WorkspaceSnapshot("tenant", "workspace", {"../escape": "x"}), "lease", 1)
+
+
+@pytest.mark.asyncio
+async def test_return_ready_requires_health_token_and_current_generation():
+    repository = InMemorySandboxRepository()
+    pool = SandboxPool(repository)
+    record = SandboxRecord(SandboxRef("warming", "provider"), SandboxState.WARMING)
+    await repository.save(record)
+    token, generation = await pool.prepare_readiness(record)
+
+    with pytest.raises(FencingRejectedError):
+        await pool.return_ready(record.ref.sandbox_id, "wrong", generation)
+    assert (await repository.get(record.ref.sandbox_id)).state == SandboxState.WARMING
+
+    await pool.return_ready(record.ref.sandbox_id, token, generation)
+    assert (await repository.get(record.ref.sandbox_id)).state == SandboxState.READY
+
+
+@pytest.mark.asyncio
+async def test_return_ready_rejects_active_lease():
+    repository = InMemorySandboxRepository()
+    pool = SandboxPool(repository)
+    record = SandboxRecord(
+        SandboxRef("warming-leased", "provider"),
+        SandboxState.WARMING,
+        lease_id="lease-1",
+        request_id="request-1",
+        tenant_id="tenant",
+        workspace_id="workspace",
+    )
+    await repository.save(record)
+    token, generation = await pool.prepare_readiness(record)
+
+    with pytest.raises(FencingRejectedError):
+        await pool.return_ready("warming-leased", token, generation)
+
+
+@pytest.mark.asyncio
+async def test_watcher_recovers_expired_lease_before_replenishing():
+    provider = FakeProvider()
+    repository, pool = await ready_pool(provider)
+    scheduler = SandboxScheduler(pool, repository, provider, FakeWorkspace())
+    lease = await scheduler.allocate("expired-watcher", "tenant", "workspace")
+    record = await repository.find_lease(lease.lease_id)
+    record.lease_expires_at = utc_now() - timedelta(seconds=1)
+
+    watcher = Watcher(
+        pool,
+        repository,
+        provider,
+        SandboxSpec("test"),
+        scheduler=scheduler,
+        target_ready=1,
+        min_ready=1,
+    )
+    await watcher.reconcile()
+
+    assert provider.destroyed == [lease.sandbox_id]
+    assert (await scheduler.status(lease.sandbox_id)).state == SandboxState.DESTROYED
+    assert (await pool.snapshot()).counts[SandboxState.READY] == 1
+
+
+@pytest.mark.asyncio
+async def test_metrics_expose_readiness_and_lifecycle_fields():
+    repository = InMemorySandboxRepository()
+    pool = SandboxPool(repository, min_ready=2, target_ready=3)
+    metrics = (await pool.snapshot()).as_dict()
+    assert metrics["ready_count"] == 0
+    assert metrics["min_ready"] == 2
+    assert metrics["target_ready"] == 3
+    assert "warmup_failure_rate" in metrics
+    assert "destroy_failure_rate" in metrics
+    assert "active_leases_by_tenant" in metrics
+    assert "zombie_leases" in metrics
