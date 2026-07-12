@@ -7,6 +7,8 @@ dependencies = [
     "litellm>=1.81.3",
     "wisepen-chat-service",
     "wisepen-common",
+    "wisepen-sandbox-service",
+    "wisepen-aio-adapter",
 ]
 
 [tool.uv.workspace]
@@ -17,3 +19,5 @@ members = [
 [tool.uv.sources]
 wisepen-chat-service = { workspace = true }
 wisepen-common = { workspace = true }
+wisepen-sandbox-service = { workspace = true }
+wisepen-aio-adapter = { workspace = true }

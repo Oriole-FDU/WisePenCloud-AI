@@ -114,6 +114,11 @@ class AppSettings(BaseModel):
     # GC 扫描周期（秒）
     OSS_CACHE_GC_INTERVAL_SECONDS: int = 30 * 60
 
+    # Sandbox Service 配置
+    SANDBOX_SERVICE_URL: str = "http://127.0.0.1:9001"
+    SANDBOX_FROM_SOURCE: str = ""
+    SANDBOX_TIMEOUT_SECONDS: int = 30
+
 
 def _run_async(coro):
     """在新线程的独立事件循环中执行协程，兼容 uvicorn 启动时已有运行中事件循环的场景。"""
@@ -146,4 +151,3 @@ def load_settings() -> AppSettings:
 
 
 settings = load_settings()
-
