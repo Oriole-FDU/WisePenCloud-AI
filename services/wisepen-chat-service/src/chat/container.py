@@ -8,13 +8,14 @@ from v2.nacos import NacosNamingService
 from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings
 from chat.core.providers import (
+    LiteLLMAdapter,
     AnthropicAdapter,
     GeminiAdapter,
-    LiteLLMAdapter,
-    Mem0Adapter,
     OpenAIAdapter,
-    OssFileLoader,
     QwenAdapter,
+    Mem0Adapter,
+    OssFileLoader,
+    IflytekSpeechProvider,
 )
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
@@ -63,6 +64,12 @@ def _build_registry(
     return registry
 
 
+def _get_iflytek_speech_config():
+    if settings.SPEECH_CONFIG is None:
+        return None
+    return settings.SPEECH_CONFIG.IFLYTEK
+
+
 class Container(containers.DeclarativeContainer):
     """依赖注入容器，管理单例对象的生命周期。"""
     qwen_adapter = providers.Singleton(QwenAdapter)
@@ -80,6 +87,10 @@ class Container(containers.DeclarativeContainer):
     )
     token_counter = providers.Singleton(TokenCounter)
     memory_provider = providers.Singleton(Mem0Adapter)
+    iflytek_speech_provider = providers.Singleton(
+        IflytekSpeechProvider,
+        config=providers.Callable(_get_iflytek_speech_config),
+    )
 
     session_repo = providers.Singleton(MongoSessionRepository)
     message_repo = providers.Singleton(MongoMessageRepository)

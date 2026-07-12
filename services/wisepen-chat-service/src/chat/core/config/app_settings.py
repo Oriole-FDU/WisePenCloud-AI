@@ -2,10 +2,21 @@
 import asyncio
 import threading
 from typing import Literal
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from chat.core.config.nacos import nacos_client_manager
 from common.logger import error, info
+
+
+class IflytekSpeechConfig(BaseModel):
+    APP_ID: str = Field(..., min_length=1)
+    API_KEY: str = Field(..., min_length=1)
+    API_SECRET: str = Field(..., min_length=1)
+
+
+class SpeechConfig(BaseModel):
+    IFLYTEK: IflytekSpeechConfig | None = None
+
 
 class AppSettings(BaseModel):
     """
@@ -29,6 +40,9 @@ class AppSettings(BaseModel):
 
     # 摘要模型
     SUMMARY_MODEL: str
+
+    # 语音识别配置
+    SPEECH_CONFIG: SpeechConfig | None = None
 
     # 安全配置
     # 与 APISIX 网关约定的请求来源 token

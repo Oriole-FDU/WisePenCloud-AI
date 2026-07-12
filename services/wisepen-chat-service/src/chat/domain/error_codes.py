@@ -27,6 +27,10 @@ class ChatErrorCode(IErrorCode):
     TOOL_NOT_FOUND = (40031, "工具不存在")
     TOOL_CONFIG_INVALID = (40032, "工具配置不合法")
 
+    # --- 语音相关 ---
+    SPEECH_PROVIDER_NOT_CONFIGURED = (40041, "语音识别 Provider 未配置")
+    SPEECH_PROVIDER_UNSUPPORTED = (40042, "语音识别 Provider 不支持")
+
     # --- 模型相关 ---
     LLM_GENERATION_FAILED = (50011, "大模型生成失败")
 
