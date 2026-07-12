@@ -10,3 +10,7 @@ class ContainerError(AdapterError):
 
 class AioRequestError(AdapterError):
     pass
+
+
+class AioNotFoundError(AioRequestError):
+    pass

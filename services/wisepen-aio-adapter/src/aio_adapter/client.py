@@ -8,14 +8,25 @@ from aio_adapter.errors import AioRequestError
 
 
 class AioClient:
-    def __init__(self, base_url: str, timeout_seconds: float = 30.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_seconds: float = 30.0,
+        token: str | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_seconds
+        self._token = token
+
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
     async def health(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.get(f"{self._base_url}/v1/sandbox")
+                response = await client.get(
+                    f"{self._base_url}/v1/sandbox", headers=self._headers()
+                )
             return response.is_success
         except httpx.TimeoutException as exc:
             raise AioRequestError("AIO health check timed out", retryable=True) from exc
@@ -27,8 +38,16 @@ class AioClient:
     ) -> dict[str, Any]:
         try:
             async with httpx.AsyncClient(timeout=timeout or self._timeout) as client:
-                response = await client.post(f"{self._base_url}{path}", json=body)
+                response = await client.post(
+                    f"{self._base_url}{path}",
+                    json=body,
+                    headers=self._headers(),
+                )
             if not response.is_success:
+                if response.status_code == 404:
+                    from aio_adapter.errors import AioNotFoundError
+
+                    raise AioNotFoundError("AIO resource was not found")
                 raise AioRequestError(
                     f"AIO request failed with status {response.status_code}",
                     retryable=response.status_code >= 500,

@@ -1,10 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import uuid
 from typing import Any
 
 import httpx
+
+
+class SandboxClientError(Exception):
+    def __init__(self, code: str, message: str = "sandbox request failed") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class LeaseContext:
+    lease_id: str
+    request_id: str
+    tenant_id: str
+    workspace_id: str
+    fencing_token: int
+    expires_at: str | None = None
 
 
 class SandboxClient:
@@ -17,7 +34,7 @@ class SandboxClient:
         self._base_url = base_url.rstrip("/")
         self._from_source = from_source
         self._timeout = timeout_seconds
-        self._leases: dict[str, str] = {}
+        self._leases: dict[str, LeaseContext] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
     async def read_file(
@@ -88,55 +105,84 @@ class SandboxClient:
     ) -> dict[str, Any]:
         return await self._execute(context, "execute", payload)
 
-    async def allocate_request(self, context: dict[str, Any]) -> str:
-        """Reserve one sandbox for the whole Chat request before tool execution."""
-        request_id = str(context.get("request_id") or uuid.uuid4().hex)
-        self._leases[request_id] = await self._ensure_lease(context, request_id)
-        return self._leases[request_id]
+    async def allocate_request(self, context: dict[str, Any]) -> LeaseContext:
+        request_id = self._request_id(context)
+        lease = await self._ensure_lease(context, request_id)
+        return lease
 
     async def release_request(self, request_id: str) -> None:
-        lease_id = self._leases.pop(request_id, None)
-        self._locks.pop(request_id, None)
-        if not lease_id:
+        lease = self._leases.get(request_id)
+        if not lease:
             return
-        await self._request("POST", f"/internal/leases/{lease_id}/release", {})
+        try:
+            await self._request(
+                "POST",
+                f"/internal/leases/{lease.lease_id}/release",
+                {"fencing_token": lease.fencing_token},
+            )
+        except SandboxClientError as exc:
+            if exc.code not in {"LEASE_NOT_FOUND", "LEASE_EXPIRED"}:
+                raise
+        self._leases.pop(request_id, None)
+        self._locks.pop(request_id, None)
 
     async def _execute(
         self, context: dict[str, Any], operation: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
-        request_id = str(context.get("request_id") or uuid.uuid4().hex)
-        lease_id = await self._ensure_lease(context, request_id)
+        request_id = self._request_id(context)
+        lease = await self._ensure_lease(context, request_id)
         body = {
             "request_id": f"{request_id}_{uuid.uuid4().hex}",
-            "tenant_id": str(context.get("user_id") or context.get("tenant_id") or ""),
-            "workspace_id": str(context.get("session_id") or context.get("workspace_id") or ""),
+            "tenant_id": lease.tenant_id,
+            "workspace_id": lease.workspace_id,
+            "fencing_token": lease.fencing_token,
             "operation": operation,
             "payload": payload,
         }
         result = await self._request(
-            "POST", f"/internal/leases/{lease_id}/execute", body
+            "POST", f"/internal/leases/{lease.lease_id}/execute", body
         )
         return result.get("data", result) if isinstance(result, dict) else {}
 
-    async def _ensure_lease(self, context: dict[str, Any], request_id: str) -> str:
-        if request_id in self._leases:
-            return self._leases[request_id]
+    async def _ensure_lease(
+        self, context: dict[str, Any], request_id: str
+    ) -> LeaseContext:
+        existing = self._leases.get(request_id)
+        if existing:
+            return existing
         lock = self._locks.setdefault(request_id, asyncio.Lock())
         async with lock:
-            if request_id not in self._leases:
-                result = await self._request(
-                    "POST",
-                    "/internal/sandboxes/allocate",
-                    {
-                        "request_id": request_id,
-                        "tenant_id": str(context.get("user_id") or context.get("tenant_id") or ""),
-                        "workspace_id": str(
-                            context.get("session_id") or context.get("workspace_id") or ""
-                        ),
-                    },
-                )
-                self._leases[request_id] = str(result["lease_id"])
-        return self._leases[request_id]
+            existing = self._leases.get(request_id)
+            if existing:
+                return existing
+            tenant_id = str(context.get("user_id") or context.get("tenant_id") or "")
+            workspace_id = str(
+                context.get("session_id") or context.get("workspace_id") or ""
+            )
+            result = await self._request(
+                "POST",
+                "/internal/sandboxes/allocate",
+                {
+                    "request_id": request_id,
+                    "tenant_id": tenant_id,
+                    "workspace_id": workspace_id,
+                },
+            )
+            lease = LeaseContext(
+                lease_id=str(result["lease_id"]),
+                request_id=request_id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                fencing_token=int(result["fencing_token"]),
+                expires_at=result.get("expires_at"),
+            )
+            self._leases[request_id] = lease
+            return lease
+
+    def _request_id(self, context: dict[str, Any]) -> str:
+        request_id = str(context.get("request_id") or uuid.uuid4().hex)
+        context.setdefault("request_id", request_id)
+        return request_id
 
     async def _request(
         self, method: str, path: str, body: dict[str, Any]
@@ -144,12 +190,20 @@ class SandboxClient:
         headers = {"Content-Type": "application/json"}
         if self._from_source:
             headers["X-From-Source"] = self._from_source
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.request(
-                method, f"{self._base_url}{path}", json=body, headers=headers
-            )
-        response.raise_for_status()
-        payload = response.json()
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.request(
+                    method, f"{self._base_url}{path}", json=body, headers=headers
+                )
+            payload = response.json()
+        except httpx.TimeoutException as exc:
+            raise SandboxClientError("SANDBOX_TIMEOUT") from exc
+        except (httpx.HTTPError, ValueError) as exc:
+            raise SandboxClientError("SANDBOX_UNAVAILABLE") from exc
+        if not response.is_success:
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            code = str(detail or "SANDBOX_UNAVAILABLE")
+            raise SandboxClientError(code)
         if not isinstance(payload, dict):
-            raise ValueError("sandbox service returned a non-object response")
+            raise SandboxClientError("SANDBOX_UNAVAILABLE")
         return payload

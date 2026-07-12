@@ -13,3 +13,4 @@ class AdapterConfig:
     request_timeout_seconds: float = 30.0
     warmup_timeout_seconds: float = 60.0
     workdir: str = "/workspace"
+    command_timeout_seconds: float = 30.0

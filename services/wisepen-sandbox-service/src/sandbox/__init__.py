@@ -1,7 +1,11 @@
 from sandbox.models import (
+    DestroyReason,
     Endpoint,
     ExecutionRequest,
     ExecutionResult,
+    Health,
+    LeaseRecord,
+    PoolSnapshot,
     SandboxLease,
     SandboxRef,
     SandboxSpec,
@@ -17,9 +21,13 @@ from sandbox.workspace import LocalWorkspaceStore
 
 __all__ = [
     "Endpoint",
+    "DestroyReason",
     "ExecutionRequest",
     "ExecutionResult",
+    "Health",
     "InMemorySandboxRepository",
+    "LeaseRecord",
+    "PoolSnapshot",
     "SandboxLease",
     "SandboxPool",
     "SandboxProvider",
