@@ -22,12 +22,17 @@ class DockerRuntime:
         self._config = config
         self._runner = runner
 
+    @property
+    def workdir(self) -> str:
+        return self._config.workdir
+
     def create(self, spec: SandboxSpec) -> ContainerHandle:
         name = f"wisepen-aio-{uuid.uuid4().hex[:12]}"
         args: list[str] = [
             self._config.docker_bin,
             "run",
             "-d",
+            *( ["-i", "-t"] if self._config.tty else [] ),
             "--name",
             name,
             "--label",
@@ -36,9 +41,12 @@ class DockerRuntime:
             f"wisepen.sandbox_id={name}",
             "-p",
             f"{self._config.host}::{self._config.api_port}",
-            "-w",
-            self._config.workdir,
         ]
+        if self._config.e2e_label:
+            args[args.index("--label") + 2:args.index("--label") + 2] = [
+                "--label",
+                "wisepen.e2e=true",
+            ]
         if self._config.network:
             args.extend(["--network", self._config.network])
         if spec.cpu_cores is not None:

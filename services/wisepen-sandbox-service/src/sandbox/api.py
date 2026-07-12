@@ -13,7 +13,7 @@ from sandbox.errors import (
     SandboxDomainError,
     WorkspaceSyncError,
 )
-from sandbox.models import ExecutionRequest
+from sandbox.models import ExecutionRequest, SandboxState
 from sandbox.pool import SandboxPool
 from sandbox.scheduler import SandboxScheduler
 
@@ -55,6 +55,21 @@ def create_app(scheduler: SandboxScheduler, pool: SandboxPool) -> FastAPI:
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/readyz")
+    async def readyz() -> dict[str, Any]:
+        snapshot = await pool.snapshot()
+        ready = snapshot.counts[SandboxState.READY]
+        if ready < snapshot.min_ready:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "MIN_READY_NOT_REACHED",
+                    "ready": ready,
+                    "min_ready": snapshot.min_ready,
+                },
+            )
+        return {"status": "ready", "ready": ready, "min_ready": snapshot.min_ready}
 
     @router.post("/sandboxes/allocate")
     async def allocate(body: AllocateBody) -> dict[str, Any]:

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+import uuid
+from time import monotonic
 
 from sandbox.errors import SandboxDomainError
+from sandbox.leader import InMemoryLeaderLease
 from sandbox.models import SandboxRecord, SandboxSpec, SandboxState, utc_now
-from sandbox.ports import SandboxProvider
+from sandbox.ports import LeaderLease, SandboxProvider
 from sandbox.pool import SandboxPool
 from sandbox.repository import InMemorySandboxRepository
 from sandbox.scheduler import SandboxScheduler
@@ -18,6 +21,9 @@ class Watcher:
         repository: InMemorySandboxRepository,
         provider: SandboxProvider,
         spec: SandboxSpec,
+        scheduler: SandboxScheduler | None = None,
+        leader_lease: LeaderLease | None = None,
+        leader_key: str = "sandbox-watcher",
         target_ready: int = 2,
         min_ready: int = 1,
         reserve: int = 0,
@@ -31,55 +37,76 @@ class Watcher:
         self._repository = repository
         self._provider = provider
         self._spec = spec
-        self._target_ready = target_ready
-        self._min_ready = min_ready
-        self._reserve = reserve
-        self._max_create_batch = max_create_batch
+        self._scheduler = scheduler
+        self._leader_lease = leader_lease
+        self._leader_key = leader_key
+        self._owner = f"watcher-{uuid.uuid4().hex}"
+        self._target_ready = max(0, target_ready)
+        self._min_ready = max(0, min_ready)
+        self._reserve = max(0, reserve)
+        self._max_create_batch = max(1, max_create_batch)
         self._warmup_timeout = warmup_timeout_seconds
         self._destroy_timeout = destroy_timeout_seconds
         self._interval = interval_seconds
-        self._max_retries = max_retries
+        self._max_retries = max(1, max_retries)
         self._stop = asyncio.Event()
         self._reconcile_lock = asyncio.Lock()
         self._retry_count = 0
-        self._warmup_failures = 0
-        self._destroy_failures = 0
 
     async def reconcile(self) -> int:
         async with self._reconcile_lock:
-            await self._recover_stale()
-            snapshot = await self._pool.snapshot()
-            ready = snapshot.counts[SandboxState.READY]
-            warming = snapshot.counts[SandboxState.WARMING]
-            creating = snapshot.counts[SandboxState.CREATING]
-            deficit = max(0, self._target_ready + self._reserve - ready - warming - creating)
-            create_count = min(deficit, self._max_create_batch)
-            if create_count == 0:
+            if self._leader_lease and not await self._leader_lease.acquire(
+                self._leader_key, self._owner, max(self._interval * 3, 1)
+            ):
+                self._repository.metrics.increment("watcher_not_leader")
                 return 0
-            if self._retry_count >= self._max_retries:
-                return 0
-            created = 0
-            for _ in range(create_count):
-                try:
-                    await self._warm_one()
-                except Exception:
-                    self._retry_count += 1
-                    self._warmup_failures += 1
-                    break
-                else:
-                    self._retry_count = 0
-                    created += 1
-            return created
+            try:
+                self._repository.metrics.increment("watcher_reconciles")
+                if self._scheduler:
+                    await self._scheduler.recover_expired()
+                await self._recover_stale()
+                snapshot = await self._pool.snapshot()
+                ready = snapshot.counts[SandboxState.READY]
+                warming = snapshot.counts[SandboxState.WARMING]
+                creating = snapshot.counts[SandboxState.CREATING]
+                self._repository.metrics.readiness(ready, self._min_ready)
+                deficit = max(
+                    0,
+                    self._target_ready + self._reserve - ready - warming - creating,
+                )
+                create_count = min(deficit, self._max_create_batch)
+                if create_count == 0 or self._retry_count >= self._max_retries:
+                    return 0
+                created = 0
+                for _ in range(create_count):
+                    try:
+                        await self._warm_one()
+                    except Exception:
+                        self._retry_count += 1
+                        self._repository.metrics.increment("warmup_failures")
+                        break
+                    else:
+                        self._retry_count = 0
+                        created += 1
+                return created
+            finally:
+                if self._leader_lease:
+                    await self._leader_lease.release(self._leader_key, self._owner)
 
     async def _warm_one(self) -> None:
-        ref = await self._provider.create(self._spec)
+        started = monotonic()
+        self._repository.metrics.increment("warmup_attempts")
+        try:
+            ref = await self._provider.create(self._spec)
+        except Exception:
+            self._repository.metrics.increment("create_failures")
+            raise
         record = SandboxRecord(ref=ref, state=SandboxState.CREATING)
         await self._repository.save(record)
+        self._repository.metrics.increment("create_successes")
         try:
             await self._repository.transition(
-                ref.sandbox_id,
-                SandboxState.CREATING,
-                SandboxState.WARMING,
+                ref.sandbox_id, SandboxState.CREATING, SandboxState.WARMING
             )
             health = await asyncio.wait_for(
                 self._provider.wait_ready(ref, self._warmup_timeout),
@@ -88,11 +115,16 @@ class Watcher:
             if not health.healthy:
                 raise RuntimeError("sandbox health check failed")
             health_fn = getattr(self._provider, "health", None)
-            if health_fn is not None:
-                health = await health_fn(ref)
-                if not health.healthy:
-                    raise RuntimeError("sandbox health check failed")
-            await self._pool.add_ready(record)
+            if health_fn is not None and not (await health_fn(ref)).healthy:
+                raise RuntimeError("sandbox health check failed")
+            health_token, generation = await self._pool.prepare_readiness(record)
+            await self._pool.return_ready(
+                record.ref.sandbox_id, health_token, generation
+            )
+            self._repository.metrics.increment("warmup_successes")
+            self._repository.metrics.observe_ms(
+                "warmup", (monotonic() - started) * 1000
+            )
         except Exception as exc:
             current = await self._repository.get(ref.sandbox_id)
             if current and current.state in (SandboxState.CREATING, SandboxState.WARMING):
@@ -103,10 +135,12 @@ class Watcher:
                     error=str(exc)[:200],
                 )
             try:
+                started = monotonic()
                 await asyncio.wait_for(
                     self._provider.destroy(ref, "warmup_failed"),
                     timeout=self._destroy_timeout,
                 )
+                self._repository.metrics.observe_ms("destroy", (monotonic() - started) * 1000)
             finally:
                 current = await self._repository.get(ref.sandbox_id)
                 if current and current.state == SandboxState.DESTROYING:
@@ -121,24 +155,16 @@ class Watcher:
     async def _recover_stale(self) -> None:
         now = utc_now()
         cutoff = now - timedelta(seconds=self._warmup_timeout)
-        stale_records = await self._repository.records_older_than(SandboxState.CREATING, cutoff)
-        stale_records += await self._repository.records_older_than(SandboxState.WARMING, cutoff)
-        for record in stale_records:
+        stale = await self._repository.records_older_than(SandboxState.CREATING, cutoff)
+        stale += await self._repository.records_older_than(SandboxState.WARMING, cutoff)
+        for record in stale:
             try:
-                if record.state == SandboxState.CREATING:
-                    await self._repository.transition(
-                        record.ref.sandbox_id,
-                        SandboxState.CREATING,
-                        SandboxState.DESTROYING,
-                        error="create timeout",
-                    )
-                else:
-                    await self._repository.transition(
-                        record.ref.sandbox_id,
-                        SandboxState.WARMING,
-                        SandboxState.DESTROYING,
-                        error="warmup timeout",
-                    )
+                await self._repository.transition(
+                    record.ref.sandbox_id,
+                    record.state,
+                    SandboxState.DESTROYING,
+                    error="warmup timeout",
+                )
                 await asyncio.wait_for(
                     self._provider.destroy(record.ref, "warmup_timeout"),
                     timeout=self._destroy_timeout,
@@ -150,13 +176,21 @@ class Watcher:
                     error="warmup timeout",
                 )
             except Exception:
-                self._destroy_failures += 1
-                continue
+                self._repository.metrics.increment("destroy_failures")
+                current = await self._repository.get(record.ref.sandbox_id)
+                if current and current.state == SandboxState.DESTROYING:
+                    await self._repository.transition(
+                        record.ref.sandbox_id,
+                        SandboxState.DESTROYING,
+                        SandboxState.LOST,
+                        error="warmup destroy failed",
+                    )
 
-        for record in await self._repository.records_older_than(
+        stale_destroying = await self._repository.records_older_than(
             SandboxState.DESTROYING,
             now - timedelta(seconds=self._destroy_timeout),
-        ):
+        )
+        for record in stale_destroying:
             try:
                 await self._repository.transition(
                     record.ref.sandbox_id,
@@ -165,7 +199,7 @@ class Watcher:
                     error="destroy timeout",
                 )
             except SandboxDomainError:
-                self._destroy_failures += 1
+                self._repository.metrics.increment("destroy_failures")
 
     async def run(self) -> None:
         while not self._stop.is_set():

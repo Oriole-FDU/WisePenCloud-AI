@@ -79,8 +79,11 @@ class AioClient:
         self, path: str, pattern: str, recursive: bool, ignore_case: bool
     ) -> dict[str, Any]:
         return await self.request(
-            "/v1/file/grep",
-            {"path": path, "pattern": pattern, "recursive": recursive, "ignore_case": ignore_case},
+            "/v1/file/search",
+            {
+                "file": path,
+                "regex": ("(?i)" if ignore_case else "") + pattern,
+            },
         )
 
     async def file_replace(self, path: str, old_str: str, new_str: str) -> dict[str, Any]:
@@ -94,3 +97,10 @@ class AioClient:
             "/v1/shell/exec",
             {"command": command, "exec_dir": exec_dir, "timeout": max(1, timeout_ms // 1000)},
         )
+
+    async def code_execute(
+        self, language: str, code: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        body = dict(payload or {})
+        body.update({"language": language, "code": code})
+        return await self.request("/v1/code/execute", body)
