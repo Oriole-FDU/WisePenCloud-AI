@@ -40,7 +40,12 @@ watcher = Watcher(
     provider,
     SandboxSpec(image=os.getenv("SANDBOX_IMAGE", "ghcr.io/agent-infra/sandbox:latest")),
     target_ready=int(os.getenv("SANDBOX_TARGET_READY", "2")),
+    min_ready=int(os.getenv("SANDBOX_MIN_READY", "1")),
+    reserve=int(os.getenv("SANDBOX_READY_RESERVE", "0")),
+    max_create_batch=int(os.getenv("SANDBOX_MAX_CREATE_BATCH", "2")),
     warmup_timeout_seconds=float(os.getenv("SANDBOX_WARMUP_TIMEOUT_SECONDS", "60")),
+    destroy_timeout_seconds=float(os.getenv("SANDBOX_DESTROY_TIMEOUT_SECONDS", "60")),
+    max_retries=int(os.getenv("SANDBOX_WARMUP_MAX_RETRIES", "3")),
 )
 app = create_app(scheduler, pool)
 
