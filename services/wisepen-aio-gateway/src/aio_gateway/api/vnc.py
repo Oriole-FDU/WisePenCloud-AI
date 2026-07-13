@@ -1,0 +1,153 @@
+"""VNC proxy endpoints — route browser traffic to user-specific AIO containers."""
+from __future__ import annotations
+
+import asyncio
+import subprocess
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, Query
+from fastapi.responses import RedirectResponse
+
+from common.security.context import SecurityContextHolder
+from aio_gateway.api import deps
+
+router = APIRouter()
+
+
+def _container_ip(cid: str) -> str:
+    raw = subprocess.run(
+        ["docker", "inspect", "-f", "{{.NetworkSettings.IPAddress}}", cid],
+        capture_output=True, text=True, timeout=5,
+    )
+    return raw.stdout.strip()
+
+
+def _extract_tenant_from_headers(req: Request) -> tuple[str, str]:
+    uid = (req.headers.get("X-User-Id") or
+           SecurityContextHolder.get_user_id() or "").strip()
+    sid = (req.headers.get("X-Session-Id") or
+           SecurityContextHolder.get_session_id() or "").strip()
+    return uid, sid
+
+
+# ---- HTTP proxy for /vnc/ static assets ----
+
+@router.get("/vnc")
+async def vnc_page(req: Request):
+    """Redirect VNC page to user's dedicated container."""
+    uid, sid = _extract_tenant_from_headers(req)
+    if not uid or not sid:
+        return {"error": "missing X-User-Id or X-Session-Id"}
+
+    binding = deps._vnc_binding
+    if not binding:
+        return {"error": "VNC binding not initialized"}
+
+    cid = binding.get_or_acquire(uid, sid)
+    ip = _container_ip(cid)
+    return RedirectResponse(
+        url=f"http://{ip}:8080/vnc/index.html?autoconnect=true&path=v1/aio/websockify%3Fsession_id%3D{sid}"
+    )
+
+
+@router.get("/vnc/{path:path}")
+async def vnc_static(path: str, req: Request):
+    """Proxy /vnc/ static assets from user's container."""
+    import httpx
+    uid, sid = _extract_tenant_from_headers(req)
+    binding = deps._vnc_binding
+    if not binding:
+        return {"error": "VNC binding not initialized"}
+
+    cid = binding.lookup(uid, sid)
+    if not cid:
+        return {"error": "no VNC session — visit /v1/aio/vnc first"}, 404
+
+    ip = _container_ip(cid)
+    url = f"http://{ip}:8080/vnc/{path}?{req.query_params}"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(url)
+    return resp.content, resp.status_code, dict(resp.headers)
+
+
+# ---- WebSocket proxy for /websockify ----
+
+@router.websocket("/websockify")
+async def vnc_websocket(ws: WebSocket, session_id: str = Query(...)):
+    """Bidirectional WebSocket relay: browser ↔ container Websockify (6080)."""
+    import aiohttp
+    from aiohttp import WSMsgType
+
+    # Get user_id from WebSocket headers
+    uid = (ws.headers.get("x-user-id") or
+           ws.headers.get("X-User-Id") or "").strip()
+    sid = session_id.strip()
+    if not uid or not sid:
+        await ws.close(code=4000, reason="missing user_id or session_id")
+        return
+
+    binding = deps._vnc_binding
+    if not binding:
+        await ws.close(code=4000, reason="VNC binding not initialized")
+        return
+
+    cid = binding.lookup(uid, sid)
+    if not cid:
+        await ws.close(code=4000, reason="no VNC session for this user")
+        return
+
+    await ws.accept()
+    ip = _container_ip(cid)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(f"ws://{ip}:6080") as container_ws:
+
+                async def browser_to_container():
+                    try:
+                        async for msg in ws.iter_text():
+                            await container_ws.send_str(msg)
+                    except WebSocketDisconnect:
+                        pass
+                    except Exception:
+                        pass
+
+                async def container_to_browser():
+                    try:
+                        async for msg in container_ws:
+                            if msg.type == WSMsgType.TEXT:
+                                await ws.send_text(msg.data)
+                            elif msg.type == WSMsgType.BINARY:
+                                await ws.send_bytes(msg.data)
+                    except Exception:
+                        pass
+
+                binding.heartbeat(uid, sid)
+                await asyncio.gather(
+                    browser_to_container(),
+                    container_to_browser(),
+                    return_exceptions=True,
+                )
+    except Exception:
+        pass
+    finally:
+        # WebSocket 断开不立即释放 — 用户可能刷新页面
+        # cleanup_idle 会处理超时
+        binding.heartbeat(uid, sid)
+
+
+# ---- Manage VNC session lifecycle ----
+
+@router.post("/vnc/release")
+async def vnc_release(req: Request):
+    """Release VNC binding, return container to pool."""
+    uid, sid = _extract_tenant_from_headers(req)
+    binding = deps._vnc_binding
+    if binding:
+        binding.release(uid, sid)
+    return {"status": "released"}
+
+
+@router.get("/vnc/status")
+async def vnc_status(req: Request):
+    """Show all active VNC bindings."""
+    binding = deps._vnc_binding
+    return binding.stats() if binding else {"active_bindings": 0}

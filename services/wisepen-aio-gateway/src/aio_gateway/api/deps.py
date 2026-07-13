@@ -5,6 +5,7 @@ from aio_gateway.isolation import PathTranslator, TenantScope, PathValidationErr
 # 由 main.py lifespan 在启动时注入
 _queue = None
 _file_manager = None
+_vnc_binding = None
 
 
 def set_queue(queue):
@@ -15,6 +16,11 @@ def set_queue(queue):
 def set_file_manager(fm):
     global _file_manager
     _file_manager = fm
+
+
+def set_vnc_binding(binding):
+    global _vnc_binding
+    _vnc_binding = binding
 
 
 async def get_path_translator(request: Request) -> PathTranslator:

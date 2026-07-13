@@ -13,9 +13,8 @@ from aio_gateway.nacos import nacos_client_manager
 from aio_gateway.settings import settings
 from aio_gateway.api.router import api_router
 from aio_gateway.api import deps
-from sandbox.Queue.container_queue import ContainerQueue
-from sandbox.Queue.file_manager import FileManager
-from sandbox.Queue.watcher import Watcher
+from aio_gateway.api.vnc_binding import ContainerBinding
+from sandbox.Queue.pool_manager import PoolConfig, ContainerPoolManager
 from common.web.middleware import SecurityHeaderMiddleware
 from common.web.exception_handlers import setup_global_exception_handlers
 from common.core.domain.responses import R
@@ -32,23 +31,34 @@ os.environ["NO_PROXY"] = no_proxy
 async def lifespan(app: FastAPI):
     info("starting.", service=bootstrap_settings.APP_NAME)
 
-    # 容器队列：预热 AIO worker 池
-    queue = ContainerQueue(
+    # 容器池管理
+    pool = ContainerPoolManager(PoolConfig(
         image=settings.AIO_WORKER_IMAGE,
         min_idle=settings.AIO_WORKER_MIN_IDLE,
         max_total=settings.AIO_WORKER_MAX_TOTAL,
         workspace_cache=settings.AIO_WORKSPACE_CACHE_DIR,
-    )
-    file_mgr = FileManager(workspace_cache=settings.AIO_WORKSPACE_CACHE_DIR)
-    deps.set_queue(queue)
-    deps.set_file_manager(file_mgr)
+        dirty_ttl=settings.AIO_WORKER_DIRTY_TTL,
+    ))
+    pool.start()
+    deps.set_queue(pool.queue)
+    deps.set_file_manager(pool.file_manager)
 
-    info("prefetching workers.", min_idle=settings.AIO_WORKER_MIN_IDLE)
-    queue.ensure_idle_count()
+    # VNC 绑定管理器
+    vnc_binding = ContainerBinding(pool)
+    deps.set_vnc_binding(vnc_binding)
 
-    watcher = Watcher(queue, dirty_ttl=settings.AIO_WORKER_DIRTY_TTL)
-    watcher.start()
-    info("watcher started.")
+    shutdown_event = asyncio.Event()
+
+    async def _vnc_cleanup_loop():
+        while not shutdown_event.is_set():
+            try:
+                await asyncio.sleep(300)  # 每 5 分钟扫描
+                released = vnc_binding.cleanup_idle()
+                if released:
+                    info("vnc idle cleanup.", released=released)
+            except asyncio.CancelledError:
+                break
+    vnc_cleanup_task = asyncio.create_task(_vnc_cleanup_loop())
 
     try:
         await nacos_client_manager.register_instance()
@@ -59,13 +69,9 @@ async def lifespan(app: FastAPI):
     yield
     info("stopping.", service=bootstrap_settings.SERVICE_NAME)
 
-    watcher.stop()
-    # 清理所有容器
-    for cid in list(queue._containers.keys()):
-        try:
-            queue._rm_container(cid)
-        except Exception:
-            pass
+    shutdown_event.set()
+    vnc_cleanup_task.cancel()
+    pool.stop()
     info("stopped.", service=bootstrap_settings.SERVICE_NAME)
 
     try:
@@ -85,16 +91,10 @@ app.include_router(api_router, prefix="/v1/aio")
 # 手动 drain 端点
 @app.post("/v1/aio/admin/drain")
 async def admin_drain():
-    queue = deps._queue
-    if not queue:
-        return R(code=503, msg="queue not initialized", data=None)
-    cids = list(queue._containers.keys())
-    recycled = 0
-    for cid in cids:
-        new_cid = queue.recycle(cid)
-        if new_cid:
-            recycled += 1
-    return R.success({"drained": recycled})
+    binding = deps._vnc_binding
+    if binding:
+        return R.success(binding.stats())
+    return R(code=503, msg="vnc binding not initialized", data=None)
 
 if __name__ == "__main__":
     uvicorn.run(

@@ -11,8 +11,10 @@ dependencies = [
     "pydantic-settings",
     "uvicorn[standard]",
     "httpx",
+    "aiohttp",
     "nacos-sdk-python",
     "wisepen-common",
+    "wisepen-sandbox-service",
 ]
 
 [project.optional-dependencies]
