@@ -9,6 +9,12 @@ from chat.domain.entities import ChatMessage, Role, ChatSession, TemporaryAttach
 from chat.domain.entities.skill import SkillMeta
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
 
+@dataclass(frozen=True)
+class PreloadedSkillInstruction:
+    skill_id: str
+    name: str
+    content: str
+
 @dataclass
 class WindowedMessages:
     messages_keep: List[ChatMessage] = field(default_factory=list)
@@ -111,6 +117,7 @@ class ChatContextAssembler:
         relevant_facts: List[str],
         frontend_states: Optional[List[Dict[str, Any]]] = None,
         available_skills: Optional[List[SkillMeta]] = None,
+        preloaded_skill_instructions: Optional[List[PreloadedSkillInstruction]] = None,
         temp_attachments: Optional[List[TemporaryAttachmentRef]] = None,
         resource_attachments: Optional[List[ResourceAttachmentRef]] = None,
         user_defined_attachment_ids: Optional[List[str]] = None,
@@ -118,8 +125,14 @@ class ChatContextAssembler:
         """组装最终发往 LLM 的消息列表"""
 
         # Message 列表初始化并加入 System Prompt
+        system_content = system_prompt
+        if preloaded_skill_instructions:
+            system_content = (
+                f"{system_prompt.rstrip()}\n\n"
+                f"{self._format_preloaded_skill_instructions(preloaded_skill_instructions)}"
+            )
         messages: List[ChatMessage] = [
-            ChatMessage(session_id=session_id, role=Role.SYSTEM, content=system_prompt)
+            ChatMessage(session_id=session_id, role=Role.SYSTEM, content=system_content)
         ]
 
         # 如果有摘要，将其注入为 user 消息，位于明细上下文之前
@@ -145,7 +158,14 @@ class ChatContextAssembler:
 
         # Skill 提示
         # 披露轻量 metadata，由 LLM 判断是否需要加载完整 SKILL.md
-        if available_skills:
+        preloaded_skill_ids = {
+            item.skill_id for item in (preloaded_skill_instructions or []) if item.skill_id
+        }
+        loadable_skills = [
+            skill for skill in (available_skills or [])
+            if skill.skill_id not in preloaded_skill_ids
+        ]
+        if loadable_skills:
             context_blocks['available_skills'] = {
                 'note': "The following skills are available in this turn as lightweight metadata. "
                         "Each skill contains detailed domain instructions in SKILL.md and may include supporting assets.\n"
@@ -160,7 +180,7 @@ class ChatContextAssembler:
                     'id': skill.skill_id,
                     'name': skill.name,
                     'description': skill.description,
-                } for skill in available_skills]
+                } for skill in loadable_skills]
             }
 
         # 前端上下文
@@ -212,5 +232,25 @@ class ChatContextAssembler:
         ))
 
         return messages
+
+    @staticmethod
+    def _format_preloaded_skill_instructions(
+        preloaded_skill_instructions: List[PreloadedSkillInstruction],
+    ) -> str:
+        lines = [
+            "[System-managed skills]",
+            "The following skills are already loaded by the application for this turn.",
+            "Follow these instructions when they are relevant, and do not call `load_skill` for these skill ids.",
+        ]
+        for skill in preloaded_skill_instructions:
+            lines.extend(
+                [
+                    "",
+                    f"<loaded_skill id=\"{skill.skill_id}\" name=\"{skill.name}\">",
+                    skill.content.rstrip(),
+                    "</loaded_skill>",
+                ]
+            )
+        return "\n".join(lines)
 
 

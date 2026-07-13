@@ -4,8 +4,8 @@ from typing import Any, List, Mapping, Optional, Set
 
 import httpx
 
-from chat.domain.entities import SkillMeta, Skill
-from chat.domain.entities.skill import SkillInfo, SkillAssetUploadInitResult, SkillAssetUploadInitAsset
+from chat.domain.entities import Skill, SkillMeta
+from chat.domain.entities.skill import SkillAssetUploadInitAsset, SkillAssetUploadInitResult, SkillInfo
 from common.core.exceptions import RpcError
 from common.http.rpc_client import RpcClient
 
@@ -53,7 +53,8 @@ class AIAssetClient:
             raise e
         if not isinstance(data, dict):
             raise RpcError(
-                service_name=self._service_name, path=_GET_SKILL_PATH,
+                service_name=self._service_name,
+                path=_GET_SKILL_PATH,
                 msg=f"unexpected data payload: {data!r}",
             )
         return Skill.from_response(data)
@@ -69,11 +70,11 @@ class AIAssetClient:
             raise e
         if not isinstance(data, list):
             raise RpcError(
-                service_name=self._service_name, path=_LIST_PUBLISHED_SKILLS_META_PATH,
+                service_name=self._service_name,
+                path=_LIST_PUBLISHED_SKILLS_META_PATH,
                 msg=f"unexpected data payload: {data!r}",
             )
         return [SkillMeta.from_response(item) for item in data]
-
 
     async def create_skill_by_agent(self, title: str, name: str, description: str) -> str:
         try:
@@ -119,12 +120,21 @@ class AIAssetClient:
             )
         return SkillInfo.from_response(data)
 
-    async def init_upload_skill_assets(self, resource_id: str, draft_version: int, assets: list[SkillAssetUploadInitAsset]) -> Optional[SkillAssetUploadInitResult]:
+    async def init_upload_skill_assets(
+        self,
+        resource_id: str,
+        draft_version: int,
+        assets: list[SkillAssetUploadInitAsset],
+    ) -> Optional[SkillAssetUploadInitResult]:
         try:
             data = await self._rpc.post(
                 self._service_name,
                 _INIT_UPLOAD_SKILL_ASSETS_PATH,
-                json={"resourceId": resource_id, "draftVersion": draft_version, "assets": [asset.to_request() for asset in assets]},
+                json={
+                    "resourceId": resource_id,
+                    "draftVersion": draft_version,
+                    "assets": [asset.to_request() for asset in assets],
+                },
             )
         except RpcError as e:
             raise e
@@ -136,7 +146,13 @@ class AIAssetClient:
             )
         return SkillAssetUploadInitResult.from_response(data)
 
-    async def upload_skill_asset_content(self, put_url: str, content: bytes, *, callback_header: str | None = None) -> None:
+    async def upload_skill_asset_content(
+        self,
+        put_url: str,
+        content: bytes,
+        *,
+        callback_header: str | None = None,
+    ) -> None:
         headers = {"Content-Type": "application/octet-stream"}
         if callback_header:
             headers[_OSS_CALLBACK_HEADER] = callback_header

@@ -1,8 +1,8 @@
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from common.core.constants import SecurityConstants, CommonConstants
+from common.core.constants import SecurityConstants
 from common.security.context import SecurityContextHolder, _security_context
-from common.gray.context import GrayContextHolder, _gray_context
+from common.gray.context import GrayContextHolder
 
 
 class SecurityHeaderMiddleware(BaseHTTPMiddleware):
@@ -29,7 +29,7 @@ class SecurityHeaderMiddleware(BaseHTTPMiddleware):
                 SecurityContextHolder.set_group_role_map(group_role_map)
 
         # 提取灰度上下文
-        developer = request.headers.get(CommonConstants.GRAY_HEADER_DEV_KEY)
+        developer = GrayContextHolder.extract_developer_tag(request.headers)
         if developer:
             GrayContextHolder.set_developer_tag(developer)
 
@@ -38,6 +38,6 @@ class SecurityHeaderMiddleware(BaseHTTPMiddleware):
         finally:
             # 请求结束后清理上下文，防止协程复用时用户信息泄漏到下一个请求
             _security_context.set({})
-            _gray_context.set("")
+            GrayContextHolder.clear()
 
         return response

@@ -25,7 +25,7 @@ class RenderToolResult:
 def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: ToolDefinition | None) -> RenderToolResult:
     if tool_result.tool_execution_error is not None:
         error = tool_result.tool_execution_error
-        output = f"[Tool Error] {error.reason}"
+        output = f"[Tool Error] {error.reason} retryable={str(error.retryable).lower()}"
         if error.detail_reason:
             output = f"{output}: {error.detail_reason}"
     else:

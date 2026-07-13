@@ -3,19 +3,19 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Mapping, Optional
 
 import httpx
-import json as jsonlib
 
-from common.cloud.service_discovery import ServiceDiscovery, LoadBalancingStrategy
-from common.core.constants import SecurityConstants, CommonConstants
-from common.security.context import SecurityContextHolder
-from common.gray.context import GrayContextHolder
+from common.cloud.service_discovery import LoadBalancingStrategy, ServiceDiscovery
+from common.core.constants import SecurityConstants
 from common.core.exceptions import RpcError, ServiceUnavailableError
+from common.gray.context import GrayContextHolder
 from common.logger import error, warn
+from common.security.context import SecurityContextHolder
 
-# Java 端 R<T> 的成功 code；与 ResultCode.SUCCESS 对齐（200）
+
 _R_SUCCESS_CODE = 200
 
 
@@ -47,8 +47,6 @@ class RpcClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    # ---------- 便捷方法 ----------
-
     async def get(self, service_name: str, path: str, **kwargs: Any) -> Any:
         return await self.request("GET", service_name, path, **kwargs)
 
@@ -57,8 +55,6 @@ class RpcClient:
 
     async def delete(self, service_name: str, path: str, **kwargs: Any) -> Any:
         return await self.request("DELETE", service_name, path, **kwargs)
-
-    # ---------- 核心请求 ----------
 
     async def request(
         self,
@@ -69,11 +65,10 @@ class RpcClient:
         params: Optional[Mapping[str, Any]] = None,
         json: Any = None,
         headers: Optional[Mapping[str, str]] = None,
+        base_url: Optional[str] = None,
+        affinity_key: Optional[str] = None,
         timeout: Optional[float] = None,
     ) -> Any:
-        """
-        发起到内部服务的 HTTP 调用并解包
-        """
         attempts = self._retries + 1
         tried_instances: set[str] = set()
 
@@ -91,30 +86,40 @@ class RpcClient:
         user_id = SecurityContextHolder.get_user_id()
         if user_id:
             merged_headers[SecurityConstants.HEADER_USER_ID] = user_id
-            merged_headers[SecurityConstants.HEADER_IDENTITY_TYPE] = str(SecurityContextHolder.get_identity_type().code)
-            merged_headers[SecurityConstants.HEADER_GROUP_ROLE_MAP] = jsonlib.dumps({
-                str(group_id): role.code for group_id, role in SecurityContextHolder.get_group_role_map().items()
-            }, ensure_ascii=False)
+            identity_type = SecurityContextHolder.get_identity_type()
+            if identity_type is not None:
+                merged_headers[SecurityConstants.HEADER_IDENTITY_TYPE] = str(identity_type.code)
+            merged_headers[SecurityConstants.HEADER_GROUP_ROLE_MAP] = self._serialize_group_role_map(
+                SecurityContextHolder.get_group_role_map()
+            )
 
-        # 传递 developer 头
-        developer = GrayContextHolder.get_developer_tag()
-        if developer:
-            merged_headers[CommonConstants.GRAY_HEADER_DEV_KEY] = developer
+        merged_headers.update(GrayContextHolder.build_outbound_headers())
 
         req_timeout = httpx.Timeout(timeout) if timeout is not None else None
 
-        for attempt in range(attempts):
-            try:
-                instance = await self._discovery.pick(
-                    service_name, strategy=self._strategy, exclude=tried_instances
-                )
-            except ServiceUnavailableError as e:
-                last_exc = e
-                break
+        direct_url = self._join_base_url(base_url, path) if base_url else None
+        if direct_url:
+            attempts = 1
 
-            addr = f"{instance.ip}:{instance.port}"
-            tried_instances.add(addr)
-            url = f"http://{addr}{path}"
+        for attempt in range(attempts):
+            if direct_url:
+                addr = base_url or ""
+                url = direct_url
+            else:
+                try:
+                    instance = await self._discovery.pick(
+                        service_name,
+                        strategy=self._strategy,
+                        affinity_key=affinity_key,
+                        exclude=tried_instances,
+                    )
+                except ServiceUnavailableError as e:
+                    last_exc = e
+                    break
+
+                addr = f"{instance.ip}:{instance.port}"
+                tried_instances.add(addr)
+                url = f"http://{addr}{path}"
 
             try:
                 resp = await self._client.request(
@@ -138,9 +143,8 @@ class RpcClient:
                         status=resp.status_code,
                         attempt=attempt + 1,
                     )
-                    continue  # 5xx 换实例重试
+                    continue
 
-                # 非 5xx 就尝试解 R<T>；4xx / 200 失败都直接不重试
                 try:
                     body = resp.json()
                 except Exception as e:
@@ -157,7 +161,6 @@ class RpcClient:
                 if last_code == _R_SUCCESS_CODE:
                     return body.get("data")
 
-                # 业务错误不做跨实例重试
                 break
 
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
@@ -169,7 +172,7 @@ class RpcClient:
                     path=path,
                     addr=addr,
                     attempt=attempt + 1,
-                    exc=e
+                    exc=e,
                 )
                 continue
             except Exception as e:
@@ -186,3 +189,22 @@ class RpcClient:
             msg=last_msg,
             cause=last_exc,
         )
+
+    @staticmethod
+    def _serialize_group_role_map(group_role_map: Mapping[str, Any]) -> str:
+        serialized: dict[str, int] = {}
+        for group_id, role in (group_role_map or {}).items():
+            try:
+                serialized[str(group_id)] = int(role.code)
+            except AttributeError:
+                try:
+                    serialized[str(group_id)] = int(role)
+                except (TypeError, ValueError):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        return json.dumps(serialized, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def _join_base_url(base_url: str, path: str) -> str:
+        return f"{base_url.rstrip('/')}/{path.lstrip('/')}"

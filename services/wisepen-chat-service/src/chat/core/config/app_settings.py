@@ -1,11 +1,17 @@
-﻿import yaml
 import asyncio
+import os
 import threading
 from typing import Literal
+
+import yaml
+from dotenv import dotenv_values, find_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
 from chat.core.config.nacos import nacos_client_manager
 from common.logger import error, info
+
+
+_LOCAL_ENV_OVERRIDE_KEYS = ("NOTE_COLLAB_GATEWAY_BASE_URL",)
 
 
 class IflytekSpeechConfig(BaseModel):
@@ -32,7 +38,7 @@ class AppSettings(BaseModel):
     DEFAULT_MODEL_ID: str
 
     # 模型配置 (请求依赖 LLM 默认网关配置)
-    # Memory相关模型
+    # Memory 相关模型
     MEMORY_LLM_MODEL: str
     MEMORY_EMBEDDING_MODEL: str
     MEMORY_RERANKER_ZE_MODEL: str
@@ -59,8 +65,6 @@ class AppSettings(BaseModel):
     QDRANT_HOST: str
     QDRANT_PORT: int = 6333
     QDRANT_PASSWORD: str
-
-    # 参数配置
 
     # 模型 prompt budget
     # 默认模型上下文窗口大小，对齐 gpt-4o 的 128k 上下文
@@ -93,9 +97,16 @@ class AppSettings(BaseModel):
     TOOL_RESULT_MAX_CHARS: int = 4000
 
     # Skill 配置
-
     # 默认召回数量
     SKILL_MATCH_TOP_K: int = 20
+
+    # Note AI-Diff 配置
+    NOTE_COLLAB_SERVICE_NAME: str = "wisepen-note-collab-service"
+    NOTE_COLLAB_GATEWAY_BASE_URL: str = ""
+    NOTE_AI_DIFF_READ_TIMEOUT_SECONDS: float = 8.0
+    NOTE_AI_DIFF_APPLY_TIMEOUT_SECONDS: float = 10.0
+    NOTE_AI_DIFF_MAX_XML_CHARS: int = 30000
+    NOTE_AI_DIFF_SKILL_ID: str = "builtin:wisepen-note-ai-diff"
 
     # 内部 RPC / 服务发现 配置
     # Nacos 服务发现客户端侧负载均衡策略：weighted_random | round_robin | random
@@ -139,11 +150,29 @@ def load_settings() -> AppSettings:
         info("nacos app config pulling.")
         raw_yaml = _run_async(nacos_client_manager.pull_config())
         config_dict = yaml.safe_load(raw_yaml) if raw_yaml else {}
+        _apply_local_env_overrides(config_dict)
         return AppSettings(**(config_dict or {}))
     except Exception as e:
         error("nacos app config pull failed.", exc=e)
         raise
 
 
-settings = load_settings()
+def _apply_local_env_overrides(config_dict: dict) -> None:
+    local_env = _load_local_env_file()
+    for key in _LOCAL_ENV_OVERRIDE_KEYS:
+        value = os.getenv(key)
+        if value is None:
+            value = local_env.get(key)
+        if value is not None:
+            config_dict[key] = str(value).strip()
 
+
+def _load_local_env_file() -> dict[str, str]:
+    env_path = find_dotenv(usecwd=True)
+    if not env_path:
+        return {}
+    values = dotenv_values(env_path)
+    return {key: str(value) for key, value in values.items() if value is not None}
+
+
+settings = load_settings()

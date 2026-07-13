@@ -12,7 +12,7 @@ from chat.domain.interfaces.llm import TextCompletionProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, ProviderRepository
 from common.core.exceptions import ServiceException
-from chat.application.chat_context_assembler import ChatContextAssembler
+from chat.application.chat_context_assembler import ChatContextAssembler, PreloadedSkillInstruction
 from chat.application.query_loop_runtime import QueryLoopRuntime
 from chat.application.agents import (
     AgentResolver,
@@ -21,15 +21,36 @@ from chat.application.agents import (
 from chat.application.events import StepFinishEvent, ErrorEvent
 from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
+from chat.application.skill_exposure import merge_skill_meta, normalize_skill_id, resolve_requested_ids
 from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
+from chat.application.tools.skill_tools.utils.builtin_skills import read_builtin_skill_asset
 from chat.application.tools.core import ToolRegistry
+from chat.application.tools.note_tools import NOTE_AI_DIFF_TOOL_NAMES, resolve_note_tool_context
 from common.kafka.producer import KafkaProducerClient
+from common.security.context import SecurityContextHolder
 
 
 # Skill 工具默认不暴露；仅在本轮存在可展示 Skill 时整体解禁
 _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
 # Session 工具默认不暴露；仅在本轮存在存在不可见的上下文历史时解禁（有summary）
 _SESSION_TOOL_NAMES = frozenset({"get_historical_chat_messages"})
+
+def _build_note_ai_diff_preloaded_skill(
+    skill_id: str,
+    available_skills: list,
+) -> PreloadedSkillInstruction | None:
+    try:
+        content = read_builtin_skill_asset(skill_id, "/SKILL.md").decode("utf-8")
+    except Exception as e:
+        error("builtin note AI-Diff skill preload failed.", skill_id=skill_id, exc=e)
+        return None
+
+    skill_meta = next((skill for skill in available_skills if skill.skill_id == skill_id), None)
+    return PreloadedSkillInstruction(
+        skill_id=skill_id,
+        name=skill_meta.name if skill_meta else "WisePen Note AI-Diff",
+        content=content,
+    )
 
 class ChatTurnCoordinator:
     """
@@ -163,20 +184,59 @@ class ChatTurnCoordinator:
         tool_context: dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
+            "active_user_query": user_query,
+            "group_role_map": SecurityContextHolder.get_group_role_map(),
         }
+        note_context = resolve_note_tool_context(frontend_states)
+        if note_context is not None:
+            tool_context["active_note_resource_id"] = note_context.resource_id
+            if note_context.selected_text:
+                tool_context["active_note_selected_text"] = note_context.selected_text
+            if note_context.selected_scope:
+                tool_context["active_note_selected_scope"] = note_context.selected_scope
+            if note_context.client_state_vector:
+                tool_context["active_note_client_state_vector"] = note_context.client_state_vector
+            if note_context.client_content_signature:
+                tool_context["active_note_client_content_signature"] = note_context.client_content_signature
 
         # 构建Skill视图
         # 返回本轮可展示给 LLM 的 Skill metadata，由 LLM 判断是否加载
         available_skills = []
+        note_ai_diff_skill_id = normalize_skill_id(settings.NOTE_AI_DIFF_SKILL_ID)
         if tool_and_skill_policy.enable_use_tool and tool_and_skill_policy.enable_use_skill:
             # 若用户指定了 user_defined_on_demand_skill_ids，则覆盖 agent 预设的 on_demand_skill_ids
-            on_demand_skill_ids = (user_defined_on_demand_skill_ids if user_defined_on_demand_skill_ids is not None else tool_and_skill_policy.on_demand_skill_ids) or set()
-            # 构建 available_skills
-            available_skills = await self._skill_matcher.match(
+            on_demand_skill_ids = resolve_requested_ids(
+                user_defined_on_demand_skill_ids,
+                tool_and_skill_policy.on_demand_skill_ids,
+            )
+            force_enabled_skill_ids = resolve_requested_ids(
+                user_defined_force_enabled_skill_ids,
+                tool_and_skill_policy.force_enabled_skill_ids,
+            )
+            if note_context is not None:
+                force_enabled_skill_ids.add(note_ai_diff_skill_id)
+            matched_skills = await self._skill_matcher.match(
                 on_demand_skill_ids=on_demand_skill_ids,
                 user_query=user_query,
                 skill_match_top_k=tool_and_skill_policy.skill_match_top_k,
             )
+            forced_skills = []
+            if force_enabled_skill_ids:
+                forced_skills = await self._skill_matcher.match(
+                    on_demand_skill_ids=force_enabled_skill_ids,
+                    user_query=user_query,
+                    skill_match_top_k=max(len(force_enabled_skill_ids), tool_and_skill_policy.skill_match_top_k or 0),
+                )
+            available_skills = merge_skill_meta(forced_skills, matched_skills)
+        available_skill_ids = {skill.skill_id for skill in available_skills}
+        preloaded_skill_instructions: list[PreloadedSkillInstruction] = []
+        if note_context is not None and note_ai_diff_skill_id in available_skill_ids:
+            note_ai_diff_skill = _build_note_ai_diff_preloaded_skill(
+                note_ai_diff_skill_id,
+                available_skills,
+            )
+            if note_ai_diff_skill is not None:
+                preloaded_skill_instructions.append(note_ai_diff_skill)
 
         expose_tool_name_set = set()
         if available_skills:
@@ -187,6 +247,17 @@ class ChatTurnCoordinator:
         if session_summary is not None:
             expose_tool_name_set.update(_SESSION_TOOL_NAMES)
 
+        requested_tool_names = (
+            set(user_defined_allow_tool_names)
+            if user_defined_allow_tool_names is not None
+            else set(tool_and_skill_policy.allow_tool_names or set())
+        )
+        if note_context is not None and (
+            note_ai_diff_skill_id in available_skill_ids
+            or NOTE_AI_DIFF_TOOL_NAMES.intersection(requested_tool_names)
+        ):
+            expose_tool_name_set.update(NOTE_AI_DIFF_TOOL_NAMES)
+
         # 构建工具视图
         # expose_tool_name_set 仅在有可展示 Skill 时解禁 Skill 工具
 
@@ -195,10 +266,18 @@ class ChatTurnCoordinator:
             allow_tool_name_set:Set[str] = set()
         else:
             # 若用户指定了 user_defined_allow_tool_names，则覆盖 agent 预设的 allow_tool_names
-            allow_tool_name_set = user_defined_allow_tool_names or tool_and_skill_policy.allow_tool_names or None
+            allow_tool_name_set = (
+                set(user_defined_allow_tool_names)
+                if user_defined_allow_tool_names is not None
+                else tool_and_skill_policy.allow_tool_names or None
+            )
 
         # 若用户指定了 user_defined_deny_tool_names，则覆盖 agent 预设的 deny_tool_names
-        deny_tool_name_set = user_defined_deny_tool_names or tool_and_skill_policy.deny_tool_names or None
+        deny_tool_name_set = (
+            set(user_defined_deny_tool_names)
+            if user_defined_deny_tool_names is not None
+            else tool_and_skill_policy.deny_tool_names or None
+        )
 
         tool_scope = await self._tool_registry.derive(
             tool_context=tool_context,
@@ -222,6 +301,7 @@ class ChatTurnCoordinator:
             relevant_facts=relevant_facts, # 长期记忆检索的事实
             frontend_states=frontend_states, # 用户前端状态
             available_skills=available_skills or None, # 可用技能
+            preloaded_skill_instructions=preloaded_skill_instructions or None, # 已由系统注入的常驻技能
             temp_attachments=temp_attachments, # 对话中的全部临时附件
             resource_attachments=resource_attachments, # 对话中的全部资源附件
             user_defined_attachment_ids=user_defined_attachment_ids, # 用户指定的附件

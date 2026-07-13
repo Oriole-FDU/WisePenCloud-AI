@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import random
 import time
 from typing import Awaitable, Callable, Dict, Iterable, List, Literal, Optional
@@ -15,7 +16,6 @@ from v2.nacos import (
     SubscribeServiceParam,
 )
 
-from common.core.constants import CommonConstants
 from common.core.exceptions import ServiceUnavailableError
 from common.gray.context import GrayContextHolder
 from common.logger import error, info, warn
@@ -73,27 +73,11 @@ class ServiceDiscovery:
             return self._naming
 
 
-    @staticmethod
-    def _developer_of(instance: Instance) -> str:
-        metadata = getattr(instance, "metadata", None) or {}
-        return str(metadata.get(CommonConstants.GRAY_METADATA_DEV_KEY) or "").strip()
-
     # 选择灰度池（开发者隔离）
     def _select_gray_pool(self, service_name: str, instances: List[Instance]) -> List[Instance]:
-        developer = (GrayContextHolder.get_developer_tag() or "").strip()
-
-        baseline = [i for i in instances if not self._developer_of(i)]
-
-        if developer:
-            matched = [i for i in instances if self._developer_of(i) == developer]
-            if matched:
-                return matched
-            if baseline:
-                return baseline
-            raise ServiceUnavailableError(service_name, self._group)
-
-        if baseline:
-            return baseline
+        selected = GrayContextHolder.select_instance_pool(instances)
+        if selected:
+            return selected
 
         raise ServiceUnavailableError(service_name, self._group)
 
@@ -103,11 +87,13 @@ class ServiceDiscovery:
         service_name: str,
         *,
         strategy: Optional[LoadBalancingStrategy] = None,
+        affinity_key: Optional[str] = None,
         exclude: Optional[Iterable[str]] = None,
     ) -> Instance:
         """
         从本地缓存挑一个可用实例
         strategy: 覆盖默认策略
+        affinity_key: 相同 key 会稳定选择同一实例，用于按资源定位有状态服务实例
         exclude: {ip:port} 集合，用于故障转移时跳过已失败的实例
         """
         await self._ensure_ready(service_name)
@@ -121,6 +107,9 @@ class ServiceDiscovery:
 
         if not instances:
             raise ServiceUnavailableError(service_name, self._group)
+
+        if affinity_key:
+            return self._pick_by_affinity_key(instances, affinity_key)
 
         chosen_strategy = strategy or self._default_strategy
         if chosen_strategy == "round_robin":
@@ -244,4 +233,11 @@ class ServiceDiscovery:
         cursor = self._rr_cursor.get(service_name, 0) % len(instances)
         self._rr_cursor[service_name] = cursor + 1
         return instances[cursor]
+
+    @staticmethod
+    def _pick_by_affinity_key(instances: List[Instance], affinity_key: str) -> Instance:
+        ordered = sorted(instances, key=lambda i: f"{i.ip}:{i.port}")
+        digest = hashlib.sha256(affinity_key.encode("utf-8")).digest()
+        index = int.from_bytes(digest[:8], "big") % len(ordered)
+        return ordered[index]
 

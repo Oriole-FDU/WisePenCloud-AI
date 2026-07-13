@@ -1,4 +1,5 @@
 from typing import Any, List, Mapping
+
 from pydantic import BaseModel, Field
 
 
@@ -23,6 +24,7 @@ class SkillAssetMeta(BaseModel):
             size_bytes=int(payload.get("size") or 0),
         )
 
+
 class Skill(BaseModel):
     skill_id: str = Field(...)
     name: str = Field(default="")
@@ -33,7 +35,7 @@ class Skill(BaseModel):
 
     @classmethod
     def from_response(cls, payload: Mapping[str, Any]) -> "Skill":
-        latest_published_skill = payload.get("skillVersionBundle")
+        latest_published_skill = payload.get("skillVersionBundle") or {}
         return cls(
             skill_id=str(payload.get("resourceId")),
             name=str(payload.get("name") or ""),
@@ -45,6 +47,7 @@ class Skill(BaseModel):
             ],
             version=int(payload.get("version") or 0),
         )
+
 
 class SkillMeta(BaseModel):
     skill_id: str = Field(...)
@@ -60,6 +63,7 @@ class SkillMeta(BaseModel):
             description=str(payload.get("description")),
             version=int(payload.get("version") or 0),
         )
+
 
 class SkillInfo(BaseModel):
     resource_id: str = Field(...)
@@ -80,6 +84,7 @@ class SkillInfo(BaseModel):
             source_type=str(skill_info.get("sourceType")),
         )
 
+
 class SkillAssetUploadInitAsset(BaseModel):
     name: str = Field(...)
     path: str = Field(...)
@@ -95,6 +100,7 @@ class SkillAssetUploadInitAsset(BaseModel):
             "md5": self.md5,
             "expectedSize": self.expected_size,
         }
+
 
 class SkillAssetUploadTicket(BaseModel):
     asset_id: str = Field(...)
@@ -116,6 +122,7 @@ class SkillAssetUploadTicket(BaseModel):
             callback_header=str(payload.get("callbackHeader")),
             flash_uploaded=bool(payload.get("flashUploaded")),
         )
+
 
 class SkillAssetUploadInitResult(BaseModel):
     resource_id: str = Field(...)
