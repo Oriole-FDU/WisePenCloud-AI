@@ -1,15 +1,21 @@
-"""VNC proxy endpoints — route browser traffic to user-specific AIO containers."""
+"""VNC proxy endpoints — route browser traffic to user-specific AIO containers.
+
+All content is proxied through the gateway: the browser never talks
+directly to Docker container IPs.  The gateway fetches from the
+container and returns to the browser.
+"""
 from __future__ import annotations
 
 import asyncio
 import subprocess
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, Response
 
 from common.security.context import SecurityContextHolder
 from aio_gateway.api import deps
 
 router = APIRouter()
+_http = __import__("httpx")
 
 
 def _container_ip(cid: str) -> str:
@@ -28,24 +34,45 @@ def _extract_tenant_from_headers(req: Request) -> tuple[str, str]:
     return uid, sid
 
 
-# ---- HTTP proxy for /vnc/ static assets ----
+def _get_cid(uid: str, sid: str) -> str:
+    binding = deps._vnc_binding
+    if not binding:
+        raise RuntimeError("VNC binding not initialized")
+    cid = binding.lookup(uid, sid)
+    if not cid:
+        cid = binding.acquire(uid, sid)
+    return cid
+
+
+# ---- HTTP proxy for /vnc/ (content proxy, NOT redirect) ----
 
 @router.get("/vnc")
 async def vnc_page(req: Request):
-    """Redirect VNC page to user's dedicated container."""
+    """Proxy VNC index.html from user's container."""
     uid, sid = _extract_tenant_from_headers(req)
     if not uid or not sid:
-        return {"error": "missing X-User-Id or X-Session-Id"}
+        return HTMLResponse("<h1>Missing X-User-Id or X-Session-Id</h1>", 400)
 
-    binding = deps._vnc_binding
-    if not binding:
-        return {"error": "VNC binding not initialized"}
+    try:
+        cid = _get_cid(uid, sid)
+    except RuntimeError as e:
+        return HTMLResponse(f"<h1>{e}</h1>", 503)
 
-    cid = binding.get_or_acquire(uid, sid)
     ip = _container_ip(cid)
-    return RedirectResponse(
-        url=f"http://{ip}:8080/vnc/index.html?autoconnect=true&path=v1/aio/websockify%3Fsession_id%3D{sid}"
+    url = f"http://{ip}:8080/vnc/index.html"
+
+    async with _http.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(url, params={"autoconnect": "true"})
+    html = resp.text
+
+    # Rewrite WebSocket path so noVNC connects through gateway
+    ws_path = f"/v1/aio/websockify?session_id={sid}"
+    html = html.replace(
+        "new WebSocket(", f"new WebSocket('{ws_path}',"
     )
+    html = html.replace('"websockify"', f'"{ws_path}"')
+
+    return HTMLResponse(html)
 
 
 @router.get("/vnc/{path:path}")
@@ -53,19 +80,13 @@ async def vnc_static(path: str, req: Request):
     """Proxy /vnc/ static assets from user's container."""
     import httpx
     uid, sid = _extract_tenant_from_headers(req)
-    binding = deps._vnc_binding
-    if not binding:
-        return {"error": "VNC binding not initialized"}
-
-    cid = binding.lookup(uid, sid)
-    if not cid:
-        return {"error": "no VNC session — visit /v1/aio/vnc first"}, 404
-
+    cid = _get_cid(uid, sid)
     ip = _container_ip(cid)
-    url = f"http://{ip}:8080/vnc/{path}?{req.query_params}"
+    url = f"http://{ip}:8080/vnc/{path}"
     async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(url)
-    return resp.content, resp.status_code, dict(resp.headers)
+        resp = await client.get(url, params=dict(req.query_params))
+    return Response(content=resp.content, status_code=resp.status_code,
+                    headers=dict(resp.headers))
 
 
 # ---- WebSocket proxy for /websockify ----
