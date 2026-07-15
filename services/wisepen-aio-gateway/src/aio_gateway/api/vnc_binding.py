@@ -21,7 +21,7 @@ class ContainerBinding:
         self._last_access: dict[tuple[str, str], float] = {}  # heartbeat
         self._lock = threading.Lock()
 
-    def get_or_acquire(self, user_id: str, session_id: str) -> str:
+    def acquire(self, user_id: str, session_id: str) -> str:
         """获取已有绑定或从池中分配新容器。"""
         key = (user_id, session_id)
         with self._lock:
@@ -62,14 +62,17 @@ class ContainerBinding:
     def cleanup_idle(self, idle_timeout: float = 1800.0) -> int:
         """释放所有超过 idle_timeout 秒无心跳的绑定。返回释放数。"""
         now = time.time()
-        expired: list[tuple[str, str]] = []
+        # 快照过期 key，在锁内完成以避免 TOCTOU
         with self._lock:
-            for key, last in list(self._last_access.items()):
-                if now - last >= idle_timeout:
-                    expired.append(key)
+            expired = [(k, self._bindings[k]) for k, last in self._last_access.items()
+                       if now - last >= idle_timeout and k in self._bindings]
+            for (uid, sid), _ in expired:
+                self._bindings.pop((uid, sid), None)
+                self._last_access.pop((uid, sid), None)
+        # 锁外归还容器
         released = 0
-        for uid, sid in expired:
-            self.release(uid, sid)
+        for (uid, sid), cid in expired:
+            self._pool.release(cid, uid, sid)
             released += 1
         return released
 

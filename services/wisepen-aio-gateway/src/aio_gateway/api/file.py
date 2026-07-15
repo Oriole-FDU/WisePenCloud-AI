@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import subprocess
 from typing import Any, Dict, Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Request
-import httpx
 
 from common.logger import error as log_error
 from common.core.domain.responses import R
 from common.security.context import SecurityContextHolder
 from aio_gateway.isolation import PathTranslator, PathValidationError
 from aio_gateway.api.deps import get_path_translator, acquire_container, release_container
+from aio_gateway.container_utils import execute_on_container
 
 router = APIRouter()
-_aio_client = httpx.AsyncClient(timeout=30.0)
 
 
 class FileReadRequest(BaseModel):
@@ -43,22 +41,6 @@ class FileReplaceRequest(BaseModel):
     file: str
     old_str: str
     new_str: str
-
-
-def _container_ip(cid: str) -> str:
-    raw = subprocess.run(
-        ["docker", "inspect", "-f", "{{.NetworkSettings.IPAddress}}", cid],
-        capture_output=True, text=True, timeout=5,
-    )
-    return raw.stdout.strip()
-
-
-async def _execute_on_container(cid: str, method: str, path: str, body: dict) -> dict:
-    ip = _container_ip(cid)
-    url = f"http://{ip}:8080{path}"
-    resp = await _aio_client.request(method, url, json=body)
-    resp.raise_for_status()
-    return resp.json()
 
 
 def _extract_tenant() -> tuple[str, str]:
@@ -96,7 +78,7 @@ async def file_read(request: FileReadRequest, req: Request,
         body: Dict[str, Any] = {"file": physical}
         if request.max_chars is not None:
             body["max_chars"] = request.max_chars
-        result = await _execute_on_container(cid, "POST", "/v1/file/read", body)
+        result = await execute_on_container(cid, "POST", "/v1/file/read", body)
         return R.success(_scrub_result(result, translator))
     except PathValidationError as e:
         return R(code=403, msg=str(e), data=None)
@@ -120,7 +102,7 @@ async def file_write(request: FileWriteRequest, req: Request,
             "content": request.content,
             "encoding": request.encoding,
         }
-        result = await _execute_on_container(cid, "POST", "/v1/file/write", body)
+        result = await execute_on_container(cid, "POST", "/v1/file/write", body)
         return R.success(_scrub_result(result, translator))
     except PathValidationError as e:
         return R(code=403, msg=str(e), data=None)
@@ -140,7 +122,7 @@ async def file_list(request: FileListRequest, req: Request,
     try:
         cid = acquire_container(uid, sid)
         body = {"path": translator.translate(request.path), "recursive": request.recursive}
-        result = await _execute_on_container(cid, "POST", "/v1/file/list", body)
+        result = await execute_on_container(cid, "POST", "/v1/file/list", body)
         return R.success(_scrub_result(result, translator))
     except PathValidationError as e:
         return R(code=403, msg=str(e), data=None)
@@ -165,7 +147,7 @@ async def file_grep(request: FileGrepRequest, req: Request,
             "recursive": request.recursive,
             "ignore_case": request.ignore_case,
         }
-        result = await _execute_on_container(cid, "POST", "/v1/file/grep", body)
+        result = await execute_on_container(cid, "POST", "/v1/file/grep", body)
         return R.success(_scrub_result(result, translator))
     except PathValidationError as e:
         return R(code=403, msg=str(e), data=None)
@@ -189,7 +171,7 @@ async def file_replace(request: FileReplaceRequest, req: Request,
             "old_str": request.old_str,
             "new_str": request.new_str,
         }
-        result = await _execute_on_container(cid, "POST", "/v1/file/replace", body)
+        result = await execute_on_container(cid, "POST", "/v1/file/replace", body)
         return R.success(_scrub_result(result, translator))
     except PathValidationError as e:
         return R(code=403, msg=str(e), data=None)

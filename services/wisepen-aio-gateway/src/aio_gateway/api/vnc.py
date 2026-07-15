@@ -7,23 +7,15 @@ container and returns to the browser.
 from __future__ import annotations
 
 import asyncio
-import subprocess
+import httpx
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse, Response
 
 from common.security.context import SecurityContextHolder
 from aio_gateway.api import deps
+from aio_gateway.container_utils import container_ip, VNC_PORT, WEBSOCKIFY_PORT
 
 router = APIRouter()
-_http = __import__("httpx")
-
-
-def _container_ip(cid: str) -> str:
-    raw = subprocess.run(
-        ["docker", "inspect", "-f", "{{.NetworkSettings.IPAddress}}", cid],
-        capture_output=True, text=True, timeout=5,
-    )
-    return raw.stdout.strip()
 
 
 def _extract_tenant_from_headers(req: Request) -> tuple[str, str]:
@@ -38,10 +30,7 @@ def _get_cid(uid: str, sid: str) -> str:
     binding = deps._vnc_binding
     if not binding:
         raise RuntimeError("VNC binding not initialized")
-    cid = binding.lookup(uid, sid)
-    if not cid:
-        cid = binding.acquire(uid, sid)
-    return cid
+    return binding.acquire(uid, sid)  # acquire already does lookup internally
 
 
 # ---- HTTP proxy for /vnc/ (content proxy, NOT redirect) ----
@@ -58,10 +47,10 @@ async def vnc_page(req: Request):
     except RuntimeError as e:
         return HTMLResponse(f"<h1>{e}</h1>", 503)
 
-    ip = _container_ip(cid)
+    ip = container_ip(cid)
     url = f"http://{ip}:8080/vnc/index.html"
 
-    async with _http.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(url, params={"autoconnect": "true"})
     html = resp.text
 
@@ -78,10 +67,9 @@ async def vnc_page(req: Request):
 @router.get("/vnc/{path:path}")
 async def vnc_static(path: str, req: Request):
     """Proxy /vnc/ static assets from user's container."""
-    import httpx
     uid, sid = _extract_tenant_from_headers(req)
     cid = _get_cid(uid, sid)
-    ip = _container_ip(cid)
+    ip = container_ip(cid)
     url = f"http://{ip}:8080/vnc/{path}"
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(url, params=dict(req.query_params))
@@ -116,7 +104,7 @@ async def vnc_websocket(ws: WebSocket, session_id: str = Query(...)):
         return
 
     await ws.accept()
-    ip = _container_ip(cid)
+    ip = container_ip(cid)
 
     try:
         async with aiohttp.ClientSession() as session:
