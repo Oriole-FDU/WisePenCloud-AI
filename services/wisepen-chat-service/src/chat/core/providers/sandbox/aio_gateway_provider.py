@@ -29,7 +29,7 @@ class AioGatewayProvider:
         body: Dict[str, Any] = {"file": file_path}
         if max_chars is not None:
             body["max_chars"] = max_chars
-        data = await self._post("/v1/aio/file/read", body, user_id=user_id, session_id=session_id)
+        data = await self._post("/v1/sandbox/gateway/file/read", body, user_id=user_id, session_id=session_id)
         if isinstance(data, dict):
             return str(data.get("content", ""))
         return str(data)
@@ -39,7 +39,7 @@ class AioGatewayProvider:
         user_id: str = "", session_id: str = "",
     ) -> Dict[str, Any]:
         body = {"file": file_path, "content": content}
-        data = await self._post("/v1/aio/file/write", body, user_id=user_id, session_id=session_id)
+        data = await self._post("/v1/sandbox/gateway/file/write", body, user_id=user_id, session_id=session_id)
         return data if isinstance(data, dict) else {}
 
     async def list_directory(
@@ -47,7 +47,7 @@ class AioGatewayProvider:
         user_id: str = "", session_id: str = "",
     ) -> list:
         body = {"path": path, "recursive": recursive}
-        data = await self._post("/v1/aio/file/list", body, user_id=user_id, session_id=session_id)
+        data = await self._post("/v1/sandbox/gateway/file/list", body, user_id=user_id, session_id=session_id)
         files = data.get("files", []) if isinstance(data, dict) else []
         return list(files)
 
@@ -60,7 +60,7 @@ class AioGatewayProvider:
             "path": path, "pattern": pattern,
             "recursive": recursive, "ignore_case": ignore_case,
         }
-        data = await self._post("/v1/aio/file/grep", body, user_id=user_id, session_id=session_id)
+        data = await self._post("/v1/sandbox/gateway/file/grep", body, user_id=user_id, session_id=session_id)
         matches = data.get("matches", []) if isinstance(data, dict) else []
         return list(matches)
 
@@ -69,7 +69,7 @@ class AioGatewayProvider:
         user_id: str = "", session_id: str = "",
     ) -> Dict[str, Any]:
         body = {"file": file_path, "old_str": old_str, "new_str": new_str}
-        data = await self._post("/v1/aio/file/replace", body, user_id=user_id, session_id=session_id)
+        data = await self._post("/v1/sandbox/gateway/file/replace", body, user_id=user_id, session_id=session_id)
         return data if isinstance(data, dict) else {}
 
     # ---- Shell operations ----
@@ -79,7 +79,7 @@ class AioGatewayProvider:
         timeout_ms: int = 30000, user_id: str = "", session_id: str = "",
     ) -> Dict[str, Any]:
         body = {"command": command, "exec_dir": exec_dir, "timeout_ms": timeout_ms}
-        data = await self._post("/v1/aio/shell/exec", body, user_id=user_id, session_id=session_id)
+        data = await self._post("/v1/sandbox/gateway/shell/exec", body, user_id=user_id, session_id=session_id)
         return data if isinstance(data, dict) else {}
 
     # ---- Internal HTTP helpers ----
