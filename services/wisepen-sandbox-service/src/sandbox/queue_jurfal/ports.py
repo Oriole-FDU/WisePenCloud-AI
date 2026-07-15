@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from sandbox.models import (
+from sandbox.queue_jurfal.models import (
     Endpoint,
     ExecutionRequest,
     ExecutionResult,

@@ -12,14 +12,14 @@ from sandbox.errors import (
     LeaseExpiredError,
     PoolEmptyError,
 )
-from sandbox.models import (
+from sandbox.queue_jurfal.models import (
     LeaseRecord,
     SandboxRecord,
     SandboxState,
     PoolSnapshot,
     utc_now,
 )
-from sandbox.metrics import MetricsCollector
+from sandbox.queue_jurfal.metrics import MetricsCollector
 
 
 _ALLOWED_TRANSITIONS: dict[SandboxState, frozenset[SandboxState]] = {

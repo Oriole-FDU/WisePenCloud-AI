@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 from sandbox.errors import SandboxDomainError
-from sandbox.models import WorkspaceSnapshot
+from sandbox.queue_jurfal.models import WorkspaceSnapshot
 
 
 class WorkspacePathError(SandboxDomainError):

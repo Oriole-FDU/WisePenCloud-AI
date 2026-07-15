@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from sandbox.models import (
+from sandbox.queue_jurfal.models import (
     Endpoint,
     ExecutionRequest,
     ExecutionResult,
@@ -15,11 +15,11 @@ from sandbox.models import (
     WorkspaceSnapshot,
     Health,
 )
-from sandbox.errors import FencingRejectedError, SandboxUnavailableError, WorkspaceSyncError
-from sandbox.pool import SandboxPool
-from sandbox.repository import InMemorySandboxRepository
-from sandbox.scheduler import SandboxScheduler
-from sandbox.watcher import Watcher
+from sandbox.errors import SandboxUnavailableError
+from sandbox.queue_jurfal.pool import SandboxPool
+from sandbox.queue_jurfal.repository import InMemorySandboxRepository
+from sandbox.queue_jurfal.scheduler import SandboxScheduler
+from sandbox.queue_jurfal.watcher import Watcher
 
 
 class FakeWorkspace:

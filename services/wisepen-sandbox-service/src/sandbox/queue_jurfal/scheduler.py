@@ -9,7 +9,7 @@ from sandbox.errors import (
     SandboxUnavailableError,
     WorkspaceSyncError,
 )
-from sandbox.models import (
+from sandbox.queue_jurfal.models import (
     DestroyReason,
     ExecutionRequest,
     ExecutionResult,
@@ -19,9 +19,9 @@ from sandbox.models import (
     SandboxState,
     utc_now,
 )
-from sandbox.ports import SandboxProvider, WorkspaceStore
-from sandbox.pool import SandboxPool
-from sandbox.repository import InMemorySandboxRepository
+from sandbox.queue_jurfal.ports import SandboxProvider, WorkspaceStore
+from sandbox.queue_jurfal.pool import SandboxPool
+from sandbox.queue_jurfal.repository import InMemorySandboxRepository
 
 
 class SandboxScheduler:

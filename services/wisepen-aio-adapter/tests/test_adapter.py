@@ -9,7 +9,7 @@ from aio_adapter.path_policy import PathPolicy, PathPolicyError, TenantScope
 from aio_adapter.docker_runtime import DockerRuntime
 from aio_adapter.client import AioClient
 from aio_adapter.errors import AioNotFoundError, AioRequestError
-from sandbox.models import SandboxSpec
+from sandbox.queue_jurfal.models import SandboxSpec
 
 
 def test_path_policy_rejects_escape():

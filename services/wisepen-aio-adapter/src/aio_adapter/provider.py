@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from sandbox.models import (
+from sandbox.queue_jurfal.models import (
     Endpoint,
     ExecutionRequest,
     ExecutionResult,
@@ -13,7 +13,7 @@ from sandbox.models import (
     SandboxSpec,
     WorkspaceSnapshot,
 )
-from sandbox.ports import SandboxProvider
+from sandbox.queue_jurfal.ports import SandboxProvider
 
 from aio_adapter.client import AioClient
 from aio_adapter.docker_runtime import DockerRuntime

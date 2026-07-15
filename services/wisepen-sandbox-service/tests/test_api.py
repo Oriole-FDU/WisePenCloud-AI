@@ -4,11 +4,11 @@ import httpx
 import pytest
 
 from sandbox.api import create_app
-from sandbox.models import SandboxSpec
-from sandbox.pool import SandboxPool
-from sandbox.repository import InMemorySandboxRepository
-from sandbox.scheduler import SandboxScheduler
-from sandbox.watcher import Watcher
+from sandbox.queue_jurfal.models import SandboxSpec
+from sandbox.queue_jurfal.pool import SandboxPool
+from sandbox.queue_jurfal.repository import InMemorySandboxRepository
+from sandbox.queue_jurfal.scheduler import SandboxScheduler
+from sandbox.queue_jurfal.watcher import Watcher
 
 from test_lifecycle import FakeProvider, FakeWorkspace
 

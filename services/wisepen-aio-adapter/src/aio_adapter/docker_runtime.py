@@ -8,7 +8,7 @@ from typing import Sequence
 
 from aio_adapter.errors import ContainerError
 from aio_adapter.models import AdapterConfig
-from sandbox.models import SandboxSpec
+from sandbox.queue_jurfal.models import SandboxSpec
 
 
 @dataclass(frozen=True)

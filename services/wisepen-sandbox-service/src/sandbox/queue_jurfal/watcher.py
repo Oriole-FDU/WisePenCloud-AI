@@ -6,12 +6,11 @@ import uuid
 from time import monotonic
 
 from sandbox.errors import SandboxDomainError
-from sandbox.leader import InMemoryLeaderLease
-from sandbox.models import SandboxRecord, SandboxSpec, SandboxState, utc_now
-from sandbox.ports import LeaderLease, SandboxProvider
-from sandbox.pool import SandboxPool
-from sandbox.repository import InMemorySandboxRepository
-from sandbox.scheduler import SandboxScheduler
+from sandbox.queue_jurfal.models import SandboxRecord, SandboxSpec, SandboxState, utc_now
+from sandbox.queue_jurfal.ports import LeaderLease, SandboxProvider
+from sandbox.queue_jurfal.pool import SandboxPool
+from sandbox.queue_jurfal.repository import InMemorySandboxRepository
+from sandbox.queue_jurfal.scheduler import SandboxScheduler
 
 
 class Watcher:

@@ -12,9 +12,9 @@ from common.core.domain import R
 
 from sandbox.error_codes import sandbox_error_code
 from sandbox.errors import SandboxDomainError
-from sandbox.models import ExecutionRequest, SandboxState
-from sandbox.pool import SandboxPool
-from sandbox.scheduler import SandboxScheduler
+from sandbox.queue_jurfal.models import ExecutionRequest, SandboxState
+from sandbox.queue_jurfal.pool import SandboxPool
+from sandbox.queue_jurfal.scheduler import SandboxScheduler
 
 
 class AllocateBody(BaseModel):

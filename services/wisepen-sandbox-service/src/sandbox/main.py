@@ -14,12 +14,12 @@ from sandbox.core.config.app_settings import settings
 from sandbox.core.config.bootstrap_settings import bootstrap_settings
 from sandbox.core.config.nacos import nacos_client_manager
 from sandbox.leader import InMemoryLeaderLease
-from sandbox.models import SandboxSpec
-from sandbox.pool import SandboxPool
-from sandbox.repository import InMemorySandboxRepository
-from sandbox.scheduler import SandboxScheduler
-from sandbox.watcher import Watcher
-from sandbox.workspace import LocalWorkspaceStore
+from sandbox.queue_jurfal.models import SandboxSpec
+from sandbox.queue_jurfal.pool import SandboxPool
+from sandbox.queue_jurfal.repository import InMemorySandboxRepository
+from sandbox.queue_jurfal.scheduler import SandboxScheduler
+from sandbox.queue_jurfal.watcher import Watcher
+from sandbox.queue_jurfal.workspace import LocalWorkspaceStore
 
 
 setup_logging_intercept(bootstrap_settings.LOG_LEVEL)

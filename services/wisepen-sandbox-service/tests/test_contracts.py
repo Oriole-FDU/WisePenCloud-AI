@@ -10,7 +10,7 @@ from sandbox.errors import (
     LeaseConflictError,
     WorkspaceSyncError,
 )
-from sandbox.models import (
+from sandbox.queue_jurfal.models import (
     ExecutionRequest,
     SandboxRecord,
     SandboxRef,
@@ -19,11 +19,11 @@ from sandbox.models import (
     WorkspaceSnapshot,
     utc_now,
 )
-from sandbox.pool import SandboxPool
-from sandbox.repository import InMemorySandboxRepository
-from sandbox.watcher import Watcher
-from sandbox.scheduler import SandboxScheduler
-from sandbox.workspace import LocalWorkspaceStore, WorkspacePathError
+from sandbox.queue_jurfal.pool import SandboxPool
+from sandbox.queue_jurfal.repository import InMemorySandboxRepository
+from sandbox.queue_jurfal.watcher import Watcher
+from sandbox.queue_jurfal.scheduler import SandboxScheduler
+from sandbox.queue_jurfal.workspace import LocalWorkspaceStore, WorkspacePathError
 
 from test_lifecycle import FakeProvider, FakeWorkspace, ready_pool
 

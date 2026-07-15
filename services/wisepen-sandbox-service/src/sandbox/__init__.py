@@ -1,4 +1,4 @@
-from sandbox.models import (
+from sandbox.queue_jurfal.models import (
     DestroyReason,
     Endpoint,
     ExecutionRequest,
@@ -12,14 +12,14 @@ from sandbox.models import (
     SandboxState,
     WorkspaceSnapshot,
 )
-from sandbox.ports import SandboxProvider, WorkspaceStore
-from sandbox.pool import SandboxPool
-from sandbox.repository import InMemorySandboxRepository
-from sandbox.scheduler import SandboxScheduler
-from sandbox.watcher import Watcher
-from sandbox.workspace import LocalWorkspaceStore
+from sandbox.queue_jurfal.ports import SandboxProvider, WorkspaceStore
+from sandbox.queue_jurfal.pool import SandboxPool
+from sandbox.queue_jurfal.repository import InMemorySandboxRepository
+from sandbox.queue_jurfal.scheduler import SandboxScheduler
+from sandbox.queue_jurfal.watcher import Watcher
+from sandbox.queue_jurfal.workspace import LocalWorkspaceStore
 from sandbox.leader import InMemoryLeaderLease
-from sandbox.metrics import MetricsCollector
+from sandbox.queue_jurfal.metrics import MetricsCollector
 
 __all__ = [
     "Endpoint",

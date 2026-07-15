@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from sandbox.models import PoolSnapshot, SandboxLease, SandboxRecord, SandboxState
-from sandbox.repository import InMemorySandboxRepository
+from sandbox.queue_jurfal.models import PoolSnapshot, SandboxLease, SandboxRecord
+from sandbox.queue_jurfal.repository import InMemorySandboxRepository
 
 
 class SandboxPool:

@@ -49,7 +49,7 @@ class ContainerQueue:
         self._image = image
         self._min_idle = min_idle
         self._max_total = max_total
-        self._workspace_cache = workspace_cache
+        self._workspace_cache = workspace_cache.replace("\\", "/")
         self._containers: dict[str, ContainerInfo] = {}
         self._lock = threading.Lock()
 
@@ -205,7 +205,9 @@ class ContainerQueue:
             "--label", "wisepen.role=aio-worker",
             "--security-opt", "seccomp=unconfined",
             "--shm-size", "2gb",
-            "-v", f"{self._workspace_cache}:{self._workspace_cache}",
+            "-v", f"{self._workspace_cache}:/workspaces",
+            "-p", "127.0.0.1::8080",
+            "-p", "127.0.0.1::6080",
             self._image,
         ]
         _dbg("docker_run", name=name, image=self._image)
