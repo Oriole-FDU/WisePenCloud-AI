@@ -4,7 +4,7 @@ import asyncio
 from time import monotonic
 
 
-class InMemoryLeaderLease:
+class MemoryLeaderLease:
     def __init__(self) -> None:
         self._leases: dict[str, tuple[str, float]] = {}
         self._lock = asyncio.Lock()

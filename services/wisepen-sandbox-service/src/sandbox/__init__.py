@@ -1,4 +1,4 @@
-from sandbox.models import (
+from sandbox.domain.entities import (
     DestroyReason,
     Endpoint,
     ExecutionRequest,
@@ -12,14 +12,10 @@ from sandbox.models import (
     SandboxState,
     WorkspaceSnapshot,
 )
-from sandbox.ports import SandboxProvider, WorkspaceStore
-from sandbox.pool import SandboxPool
-from sandbox.repository import InMemorySandboxRepository
-from sandbox.scheduler import SandboxScheduler
-from sandbox.watcher import Watcher
-from sandbox.workspace import LocalWorkspaceStore
-from sandbox.leader import InMemoryLeaderLease
-from sandbox.metrics import MetricsCollector
+from sandbox.domain.interfaces import LeaderLease, MetricsPort, SandboxProvider, WorkspaceStore
+from sandbox.application.services import SandboxPool, SandboxScheduler, Watcher
+from sandbox.core.storage import LocalWorkspaceStore, MemoryLeaderLease, MemorySandboxRepository
+from sandbox.core.observability import MetricsCollector
 
 __all__ = [
     "Endpoint",
@@ -27,7 +23,7 @@ __all__ = [
     "ExecutionRequest",
     "ExecutionResult",
     "Health",
-    "InMemorySandboxRepository",
+    "MemorySandboxRepository",
     "LeaseRecord",
     "PoolSnapshot",
     "SandboxLease",
@@ -39,8 +35,10 @@ __all__ = [
     "SandboxState",
     "Watcher",
     "LocalWorkspaceStore",
-    "InMemoryLeaderLease",
+    "MemoryLeaderLease",
     "MetricsCollector",
+    "MetricsPort",
+    "LeaderLease",
     "WorkspaceSnapshot",
     "WorkspaceStore",
 ]

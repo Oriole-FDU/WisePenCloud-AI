@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from sandbox.models import (
+from sandbox.domain.entities import (
     Endpoint,
     ExecutionRequest,
     ExecutionResult,
@@ -43,27 +43,4 @@ class SandboxProvider(Protocol):
         ...
 
     async def destroy(self, sandbox: SandboxRef, reason: str) -> None:
-        ...
-
-
-class WorkspaceStore(Protocol):
-    async def snapshot(
-        self, tenant_id: str, workspace_id: str
-    ) -> WorkspaceSnapshot:
-        ...
-
-    async def commit(
-        self,
-        snapshot: WorkspaceSnapshot,
-        lease_id: str,
-        fencing_token: int = 0,
-    ) -> None:
-        ...
-
-
-class LeaderLease(Protocol):
-    async def acquire(self, key: str, owner: str, ttl_seconds: float) -> bool:
-        ...
-
-    async def release(self, key: str, owner: str) -> None:
         ...

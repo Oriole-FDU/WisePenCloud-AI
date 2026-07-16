@@ -8,7 +8,6 @@ dependencies = [
     "wisepen-chat-service",
     "wisepen-common",
     "wisepen-sandbox-service",
-    "wisepen-aio-adapter",
 ]
 
 [tool.uv.workspace]
@@ -20,4 +19,3 @@ members = [
 wisepen-chat-service = { workspace = true }
 wisepen-common = { workspace = true }
 wisepen-sandbox-service = { workspace = true }
-wisepen-aio-adapter = { workspace = true }

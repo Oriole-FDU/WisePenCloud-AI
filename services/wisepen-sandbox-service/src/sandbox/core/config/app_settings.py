@@ -15,7 +15,7 @@ class AppSettings(BaseModel):
 
     FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
 
-    SANDBOX_PROVIDER_FACTORY: str = "aio_adapter.provider:AioSandboxProvider"
+    SANDBOX_PROVIDER_FACTORY: str = "sandbox.core.providers.aio_adapter.provider:AioSandboxProvider"
     SANDBOX_WORKSPACE_ROOT: str = "/tmp/wisepen-workspaces"
     SANDBOX_IMAGE: str = "ghcr.io/agent-infra/sandbox:latest"
 

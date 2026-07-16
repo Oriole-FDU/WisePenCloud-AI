@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx
 
-from aio_adapter.errors import AioRequestError
+from sandbox.core.providers.aio_adapter.errors import AioRequestError
 
 
 class AioClient:
@@ -45,7 +45,7 @@ class AioClient:
                 )
             if not response.is_success:
                 if response.status_code == 404:
-                    from aio_adapter.errors import AioNotFoundError
+                    from sandbox.core.providers.aio_adapter.errors import AioNotFoundError
 
                     raise AioNotFoundError("AIO resource was not found")
                 raise AioRequestError(

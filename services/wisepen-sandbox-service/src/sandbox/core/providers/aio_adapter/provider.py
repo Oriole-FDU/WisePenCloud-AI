@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from sandbox.models import (
+from sandbox.domain.entities import (
     Endpoint,
     ExecutionRequest,
     ExecutionResult,
@@ -13,13 +13,13 @@ from sandbox.models import (
     SandboxSpec,
     WorkspaceSnapshot,
 )
-from sandbox.ports import SandboxProvider
+from sandbox.domain.interfaces.sandbox_provider import SandboxProvider
 
-from aio_adapter.client import AioClient
-from aio_adapter.docker_runtime import DockerRuntime
-from aio_adapter.errors import AioNotFoundError
-from aio_adapter.models import AdapterConfig
-from aio_adapter.path_policy import PathPolicy, TenantScope
+from sandbox.core.providers.aio_adapter.client import AioClient
+from sandbox.core.providers.aio_adapter.docker_runtime import DockerRuntime
+from sandbox.core.providers.aio_adapter.errors import AioNotFoundError
+from sandbox.core.providers.aio_adapter.models import AdapterConfig
+from sandbox.core.providers.aio_adapter.path_policy import PathPolicy, TenantScope
 
 
 class AioSandboxProvider(SandboxProvider):

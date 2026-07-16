@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from sandbox.models import PoolSnapshot, SandboxLease, SandboxRecord, SandboxState
-from sandbox.repository import InMemorySandboxRepository
+from sandbox.domain.entities import PoolSnapshot, SandboxLease, SandboxRecord, SandboxState
+from sandbox.domain.repositories import SandboxRepository
 
 
 class SandboxPool:
     def __init__(
         self,
-        repository: InMemorySandboxRepository,
+        repository: SandboxRepository,
         lease_ttl_seconds: int = 1800,
         min_ready: int = 1,
         target_ready: int = 2,
