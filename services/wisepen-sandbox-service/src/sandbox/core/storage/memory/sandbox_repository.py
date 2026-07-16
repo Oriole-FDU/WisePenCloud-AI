@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Iterable
 
-from sandbox.errors import (
+from sandbox.domain.errors import (
     FencingRejectedError,
     InvalidStateTransition,
     LeaseConflictError,
@@ -12,14 +12,15 @@ from sandbox.errors import (
     LeaseExpiredError,
     PoolEmptyError,
 )
-from sandbox.models import (
+from sandbox.domain.entities import (
     LeaseRecord,
     SandboxRecord,
     SandboxState,
     PoolSnapshot,
     utc_now,
 )
-from sandbox.metrics import MetricsCollector
+from sandbox.core.observability.metrics import MetricsCollector
+from sandbox.domain.interfaces.metrics import MetricsPort
 
 
 _ALLOWED_TRANSITIONS: dict[SandboxState, frozenset[SandboxState]] = {
@@ -35,10 +36,10 @@ _ALLOWED_TRANSITIONS: dict[SandboxState, frozenset[SandboxState]] = {
 }
 
 
-class InMemorySandboxRepository:
+class MemorySandboxRepository:
     """Atomic in-process repository; external stores can implement the same port."""
 
-    def __init__(self, metrics: MetricsCollector | None = None) -> None:
+    def __init__(self, metrics: MetricsPort | None = None) -> None:
         self._records: dict[str, SandboxRecord] = {}
         self._leases: dict[str, str] = {}
         self._requests: dict[str, str] = {}

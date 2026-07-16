@@ -3,8 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from sandbox.errors import SandboxDomainError
-from sandbox.models import WorkspaceSnapshot
+from sandbox.domain.errors import SandboxDomainError
+from sandbox.domain.entities import WorkspaceSnapshot
 
 
 class WorkspacePathError(SandboxDomainError):

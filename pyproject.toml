@@ -22,4 +22,3 @@ wisepen-chat-service = { workspace = true }
 wisepen-mcp-service = { workspace = true }
 wisepen-common = { workspace = true }
 wisepen-sandbox-service = { workspace = true }
-wisepen-aio-adapter = { workspace = true }

@@ -6,9 +6,9 @@ import uuid
 from dataclasses import dataclass
 from typing import Sequence
 
-from aio_adapter.errors import ContainerError
-from aio_adapter.models import AdapterConfig
-from sandbox.models import SandboxSpec
+from sandbox.domain.entities import SandboxSpec
+from sandbox.core.providers.aio_adapter.errors import ContainerError
+from sandbox.core.providers.aio_adapter.models import AdapterConfig
 
 
 @dataclass(frozen=True)

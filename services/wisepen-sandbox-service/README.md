@@ -8,12 +8,13 @@
 
 ```text
 wisepen-sandbox-service
-    -> SandboxProvider
-        -> wisepen-aio-adapter
+    -> application services
+        -> domain interfaces
+            -> core.providers.aio_adapter
             -> AIO Sandbox Container
 ```
 
-`wisepen-sandbox-service` 只依赖平台无关的 `SandboxProvider`、`WorkspaceStore` 和 `LeaderLease` 端口，不导入 Docker、httpx 或 AIO DTO。所有 AIO 协议、Docker CLI 和平台路径差异都封装在 `wisepen-aio-adapter` 中。
+`wisepen-sandbox-service` 通过 `domain.interfaces` 暴露平台无关的 `SandboxProvider`、`WorkspaceStore` 和 `LeaderLease` 端口；AIO 协议、Docker CLI 和平台路径差异封装在 `core.providers.aio_adapter` 中。
 
 当前实现采用进程内 Repository、WorkspaceStore 和 LeaderLease，便于开发和测试；后续可以替换为 Redis、Mongo 或对象存储实现，而不改变调度核心规则。
 
@@ -53,16 +54,13 @@ flowchart LR
 
 ### 3.1 `wisepen-sandbox-service`
 
-- `SandboxPool`：维护 READY 沙箱，提供原子 checkout、快照和 `return_ready`。
-- `SandboxScheduler`：负责 allocate、execute、release、过期租约恢复和销毁补偿。
-- `Watcher`：周期性获取 Pool 快照，执行 LeaderLease 选主、恢复任务、预热和容量补充。
-- `InMemorySandboxRepository`：以锁保护实例、租约、request 映射、状态转换、generation 和指标。
-- `LocalWorkspaceStore`：开发/测试用本地工作区实现，校验租户、工作区和文件路径。
-- `InMemoryLeaderLease`：同进程内的租约选主实现，作为未来分布式锁的端口示例。
-- `MetricsCollector`：收集生命周期计数、耗时、readiness、租户活跃租约和失败率。
-- `api.py` / `main.py`：提供内部 API 和进程启动时的 Watcher 后台任务。
+- `application/services`：维护 Pool、Scheduler 和 Watcher 的生命周期用例。
+- `domain`：保存领域实体、错误、端口和 Repository 协议。
+- `core/storage/memory`：提供内存 Repository 和 LeaderLease 实现。
+- `core/storage/local` / `core/observability`：提供本地 Workspace Store 和 Metrics 实现。
+- `apis` / `main.py`：提供内部 API、路由和进程启动时的 Watcher 后台任务。
 
-### 3.2 `wisepen-aio-adapter`
+### 3.2 `core.providers.aio_adapter`
 
 - `DockerRuntime`：使用 Docker CLI 创建、inspect、获取动态端口和删除容器。
 - `AioClient`：使用 httpx 调用最小 AIO HTTP API，统一处理响应包装、超时和错误。
@@ -198,11 +196,11 @@ sequenceDiagram
     N-->>CFG: Sandbox 镜像、Pool、租约、超时配置
     CFG-->>OS: 完成 settings 初始化
 
-    OS->>R: 创建 InMemorySandboxRepository
+    OS->>R: 创建 MemorySandboxRepository
     OS->>P: 创建 SandboxPool(repository)
     OS->>A: 创建 AioSandboxProvider.from_environment()
     OS->>S: 创建 SandboxScheduler(pool, repository, provider, workspace)
-    OS->>L: 创建 InMemoryLeaderLease
+    OS->>L: 创建 MemoryLeaderLease
     OS->>W: 创建 Watcher(pool, repository, provider, scheduler, leader)
     OS->>APP: create_app(scheduler, pool)
     APP-->>OS: FastAPI app ready
@@ -594,11 +592,7 @@ metrics、状态查询和错误响应不返回 AIO token、workspace 内容、Do
 ```bash
 cd services/wisepen-sandbox-service
 PYTHONPATH=src pytest -q
-# 14 passed
-
-cd services/wisepen-aio-adapter
-PYTHONPATH=src:../wisepen-sandbox-service/src pytest -q
-# 7 passed
+# 21 passed
 ```
 
 覆盖内容包括并发 checkout、非法状态、request_id 幂等、租户冲突、租约过期、fencing、return_ready、工作区路径、commit 失败销毁、release 幂等、Watcher 补池和 readiness metrics，以及 AIO HTTP、错误映射、真实 search/execute 字段、路径隔离、TTY 和 Docker 参数。
