@@ -147,10 +147,18 @@ async def get_session_messages(
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
         message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
 ):
-    await session_repo.get_session_for_user(session_id, user_id)
+    session = await session_repo.get_session_for_user(session_id, user_id)
 
     page_messages, total_turns = await message_repo.list_session_message_turns_page(session_id, page=page, size=size)
-    ui_messages = convert_to_ui_messages(page_messages)
+    available_attachment_ids = {
+        ref.attachment_id
+        for ref in [*session.temporary_attachment_refs, *session.resource_attachment_refs]
+        if not ref.deleted
+    }
+    ui_messages = convert_to_ui_messages(
+        page_messages,
+        available_attachment_ids=available_attachment_ids,
+    )
 
     return R.success(data=PageResult.of(
         items=ui_messages,

@@ -3,12 +3,26 @@
 Vercel AI SDK 6.x UIMessage 格式（带 parts 数组），供前端 useChat 的 initialMessages 使用。
 """
 import json
-from typing import Any, Dict, List, Optional
+from collections.abc import Mapping
+from typing import AbstractSet, Any, Dict, List, Literal, Optional, TypedDict
+
+from pydantic import BaseModel
 
 from chat.domain.entities import ChatMessage, Role
 
 
-def convert_to_ui_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
+class SelectedAttachment(TypedDict):
+    attachmentId: str
+    filename: str
+    kind: Literal["temporary", "resource"]
+    available: bool
+
+
+def convert_to_ui_messages(
+    messages: List[ChatMessage],
+    *,
+    available_attachment_ids: AbstractSet[str],
+) -> List[Dict[str, Any]]:
     """
     将按 created_at 排序的 ChatMessage[] 分组并转换为 UIMessage[]。
 
@@ -39,7 +53,7 @@ def convert_to_ui_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     for group in groups:
         first = group[0]
         if first.role == Role.USER:
-            result.append(_build_user_ui_message(first))
+            result.append(_build_user_ui_message(first, available_attachment_ids))
         else:
             ui_msg = _build_assistant_ui_message(group)
             if ui_msg:
@@ -48,16 +62,82 @@ def convert_to_ui_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     return result
 
 
-def _build_user_ui_message(msg: ChatMessage) -> Dict[str, Any]:
+def _build_user_ui_message(
+    msg: ChatMessage,
+    available_attachment_ids: AbstractSet[str],
+) -> Dict[str, Any]:
     parts: List[Dict[str, Any]] = []
     if msg.content:
         parts.append({"type": "text", "text": msg.content, "state": "done"})
-    return {
+    selected_attachments = _build_selected_attachments(msg.metadata, available_attachment_ids)
+    ui_message: Dict[str, Any] = {
         "id": str(msg.id) if msg.id else "",
         "role": "user",
         "parts": parts,
         "createdAt": msg.created_at.isoformat(),
     }
+    if selected_attachments:
+        ui_message["metadata"] = {"selectedAttachments": selected_attachments}
+    return ui_message
+
+
+def _build_selected_attachments(
+    metadata: Mapping[str, Any],
+    available_attachment_ids: AbstractSet[str],
+) -> List[SelectedAttachment]:
+    selected_ids = metadata.get("user_defined_attachment_ids")
+    if not isinstance(selected_ids, list):
+        return []
+
+    snapshots: Dict[str, tuple[str, Literal["temporary", "resource"]]] = {}
+    _collect_attachment_snapshots(snapshots, metadata.get("temp_attachments"), "temporary")
+    _collect_attachment_snapshots(snapshots, metadata.get("resource_attachments"), "resource")
+
+    result: List[SelectedAttachment] = []
+    seen_ids: set[str] = set()
+    for attachment_id in selected_ids:
+        if not isinstance(attachment_id, str) or not attachment_id or attachment_id in seen_ids:
+            continue
+        snapshot = snapshots.get(attachment_id)
+        if snapshot is None:
+            continue
+        seen_ids.add(attachment_id)
+        filename, kind = snapshot
+        result.append({
+            "attachmentId": attachment_id,
+            "filename": filename,
+            "kind": kind,
+            "available": attachment_id in available_attachment_ids,
+        })
+    return result
+
+
+def _collect_attachment_snapshots(
+    target: Dict[str, tuple[str, Literal["temporary", "resource"]]],
+    values: Any,
+    kind: Literal["temporary", "resource"],
+) -> None:
+    if not isinstance(values, list):
+        return
+    for value in values:
+        snapshot = _to_mapping(value)
+        if snapshot is None:
+            continue
+        attachment_id = snapshot.get("attachment_id")
+        filename = snapshot.get("attachment_name")
+        if not isinstance(attachment_id, str) or not attachment_id:
+            continue
+        if not isinstance(filename, str) or not filename:
+            continue
+        target.setdefault(attachment_id, (filename, kind))
+
+
+def _to_mapping(value: Any) -> Optional[Mapping[str, Any]]:
+    if isinstance(value, BaseModel):
+        return value.model_dump()
+    if isinstance(value, Mapping):
+        return value
+    return None
 
 
 def _build_assistant_ui_message(group: List[ChatMessage]) -> Optional[Dict[str, Any]]:

@@ -1,5 +1,6 @@
+from typing import Any, List, Literal, Optional
+
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any
 
 from chat.domain.entities import ChatSession, ResourceAttachmentRef, TemporaryAttachmentRef
 
@@ -20,7 +21,7 @@ class PinSessionRequest(BaseModel):
 
 class TemporaryAttachmentRefResponse(BaseModel):
     attachment_id: str
-    attachment_type: str
+    attachment_type: Literal["temporary"] = "temporary"
     attachment_name: str
     object_key: str
     extension: str
@@ -31,7 +32,6 @@ class TemporaryAttachmentRefResponse(BaseModel):
     def from_entity(cls, ref: TemporaryAttachmentRef) -> "TemporaryAttachmentRefResponse":
         return cls(
             attachment_id=ref.attachment_id,
-            attachment_type=ref.attachment_type,
             attachment_name=ref.attachment_name,
             object_key=ref.object_key,
             extension=ref.extension,
@@ -42,7 +42,7 @@ class TemporaryAttachmentRefResponse(BaseModel):
 
 class ResourceAttachmentRefResponse(BaseModel):
     attachment_id: str
-    attachment_type: str
+    attachment_type: Literal["resource"] = "resource"
     attachment_name: str
     resource_id: str
     resource_type: str
@@ -51,7 +51,6 @@ class ResourceAttachmentRefResponse(BaseModel):
     def from_entity(cls, ref: ResourceAttachmentRef) -> "ResourceAttachmentRefResponse":
         return cls(
             attachment_id=ref.attachment_id,
-            attachment_type=ref.attachment_type,
             attachment_name=ref.attachment_name,
             resource_id=ref.resource_id,
             resource_type=ref.resource_type,
@@ -102,6 +101,19 @@ class UIMessagePartResponse(BaseModel):
     output: Optional[Any] = None
 
 
+class UIMessageAttachmentResponse(BaseModel):
+    """用户发送消息时选中的附件快照。"""
+    attachmentId: str
+    filename: str
+    kind: Literal["temporary", "resource"]
+    available: bool
+
+
+class UIMessageMetadataResponse(BaseModel):
+    """允许返回给前端的消息元数据白名单。"""
+    selectedAttachments: List[UIMessageAttachmentResponse] = Field(default_factory=list)
+
+
 class UIMessageResponse(BaseModel):
     """
     Vercel AI SDK 6.x UIMessage 格式，用于 initialMessages。
@@ -110,4 +122,5 @@ class UIMessageResponse(BaseModel):
     id: str
     role: str
     parts: List[UIMessagePartResponse]
+    metadata: Optional[UIMessageMetadataResponse] = None
     createdAt: Optional[str] = None
