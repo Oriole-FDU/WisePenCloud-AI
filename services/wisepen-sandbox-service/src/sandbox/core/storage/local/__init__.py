@@ -1,3 +1,3 @@
-from sandbox.core.storage.local.workspace_store import LocalWorkspaceStore, WorkspacePathError
+from sandbox.core.storage.local.workspace_store import LocalWorkspaceStore
 
-__all__ = ["LocalWorkspaceStore", "WorkspacePathError"]
+__all__ = ["LocalWorkspaceStore"]

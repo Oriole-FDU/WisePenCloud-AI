@@ -4,7 +4,9 @@ from typing import Any
 
 import httpx
 
-from sandbox.core.providers.aio_adapter.errors import AioRequestError
+from common.core.exceptions import ServiceException
+
+from sandbox.domain.error_codes import SandboxErrorCode
 
 
 class AioClient:
@@ -29,9 +31,15 @@ class AioClient:
                 )
             return response.is_success
         except httpx.TimeoutException as exc:
-            raise AioRequestError("AIO health check timed out", retryable=True) from exc
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "AIO health check timed out",
+            ) from exc
         except httpx.HTTPError as exc:
-            raise AioRequestError("AIO health check failed", retryable=True) from exc
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "AIO health check failed",
+            ) from exc
 
     async def request(
         self, path: str, body: dict[str, Any], *, timeout: float | None = None
@@ -45,23 +53,30 @@ class AioClient:
                 )
             if not response.is_success:
                 if response.status_code == 404:
-                    from sandbox.core.providers.aio_adapter.errors import AioNotFoundError
-
-                    raise AioNotFoundError("AIO resource was not found")
-                raise AioRequestError(
+                    raise ServiceException(
+                        SandboxErrorCode.AIO_RESOURCE_NOT_FOUND,
+                        "AIO resource was not found",
+                    )
+                raise ServiceException(
+                    SandboxErrorCode.SANDBOX_UNAVAILABLE,
                     f"AIO request failed with status {response.status_code}",
-                    retryable=response.status_code >= 500,
                 )
             payload = response.json()
             if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
                 return payload["data"]
             return payload if isinstance(payload, dict) else {"data": payload}
-        except AioRequestError:
+        except ServiceException:
             raise
         except httpx.TimeoutException as exc:
-            raise AioRequestError("AIO request timed out", retryable=True) from exc
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "AIO request timed out",
+            ) from exc
         except (httpx.HTTPError, ValueError) as exc:
-            raise AioRequestError("AIO request failed", retryable=True) from exc
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "AIO request failed",
+            ) from exc
 
     async def file_read(self, path: str, max_chars: int | None = None) -> dict[str, Any]:
         body: dict[str, Any] = {"file": path}

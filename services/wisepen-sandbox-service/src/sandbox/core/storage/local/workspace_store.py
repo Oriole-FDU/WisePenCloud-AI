@@ -3,12 +3,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from sandbox.domain.errors import SandboxDomainError
+from common.core.exceptions import ServiceException
+
 from sandbox.domain.entities import WorkspaceSnapshot
-
-
-class WorkspacePathError(SandboxDomainError):
-    code = "WORKSPACE_PATH_INVALID"
+from sandbox.domain.error_codes import SandboxErrorCode
 
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
@@ -16,7 +14,10 @@ _ID = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
 
 def validate_workspace_id(value: str) -> str:
     if not _ID.fullmatch(value or ""):
-        raise WorkspacePathError("invalid tenant or workspace identifier")
+        raise ServiceException(
+            SandboxErrorCode.WORKSPACE_PATH_INVALID,
+            "invalid tenant or workspace identifier",
+        )
     return value
 
 
@@ -24,7 +25,10 @@ def normalize_relative_path(value: str) -> str:
     path = (value or "").replace("\\", "/")
     candidate = Path(path)
     if not path or candidate.is_absolute() or any(part in ("", ".", "..") for part in candidate.parts):
-        raise WorkspacePathError("workspace paths must be relative and cannot traverse")
+        raise ServiceException(
+            SandboxErrorCode.WORKSPACE_PATH_INVALID,
+            "workspace paths must be relative and cannot traverse",
+        )
     return "/".join(candidate.parts)
 
 
@@ -42,10 +46,16 @@ class LocalWorkspaceStore:
         files: dict[str, str] = {}
         if root.exists():
             if root.is_symlink():
-                raise WorkspacePathError("workspace root cannot be a symlink")
+                raise ServiceException(
+                    SandboxErrorCode.WORKSPACE_PATH_INVALID,
+                    "workspace root cannot be a symlink",
+                )
             for path in root.rglob("*"):
                 if path.is_symlink():
-                    raise WorkspacePathError("workspace symlinks are not allowed")
+                    raise ServiceException(
+                        SandboxErrorCode.WORKSPACE_PATH_INVALID,
+                        "workspace symlinks are not allowed",
+                    )
                 if path.is_file():
                     files[normalize_relative_path(str(path.relative_to(root)))] = path.read_text(
                         encoding="utf-8", errors="replace"
@@ -68,5 +78,8 @@ class LocalWorkspaceStore:
             path = root / normalize_relative_path(relative)
             path.parent.mkdir(parents=True, exist_ok=True)
             if path.is_symlink():
-                raise WorkspacePathError("workspace symlinks are not allowed")
+                raise ServiceException(
+                    SandboxErrorCode.WORKSPACE_PATH_INVALID,
+                    "workspace symlinks are not allowed",
+                )
             path.write_text(content, encoding="utf-8")

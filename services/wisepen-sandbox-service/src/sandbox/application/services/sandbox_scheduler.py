@@ -3,12 +3,8 @@ from __future__ import annotations
 import asyncio
 from time import monotonic
 
-from sandbox.domain.errors import (
-    LeaseNotFoundError,
-    SandboxDomainError,
-    SandboxUnavailableError,
-    WorkspaceSyncError,
-)
+from common.core.exceptions import ServiceException
+
 from sandbox.domain.entities import (
     DestroyReason,
     ExecutionRequest,
@@ -24,6 +20,7 @@ from sandbox.domain.interfaces.workspace_store import WorkspaceStore
 from sandbox.domain.interfaces.metrics import MetricsPort
 from sandbox.application.services.sandbox_pool import SandboxPool
 from sandbox.domain.repositories import SandboxRepository
+from sandbox.domain.error_codes import SandboxErrorCode
 
 
 class SandboxScheduler:
@@ -53,7 +50,10 @@ class SandboxScheduler:
         self, request_id: str, tenant_id: str, workspace_id: str
     ) -> SandboxLease:
         if not request_id or not tenant_id or not workspace_id:
-            raise SandboxDomainError("request, tenant and workspace are required")
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "request, tenant and workspace are required",
+            )
         async with self._lifecycle_lock:
             record, lease = await self._pool.checkout(request_id, tenant_id, workspace_id)
             if record.state == SandboxState.RUNNING:
@@ -79,9 +79,12 @@ class SandboxScheduler:
                 return self._lease(record)
             except Exception as exc:
                 await self._destroy_record(record, DestroyReason.ALLOCATION_FAILED)
-                if isinstance(exc, SandboxDomainError):
+                if isinstance(exc, ServiceException):
                     raise
-                raise SandboxUnavailableError("sandbox allocation failed") from exc
+                raise ServiceException(
+                    SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                    "sandbox allocation failed",
+                ) from exc
 
     async def execute(
         self, lease_id: str, request: ExecutionRequest
@@ -94,13 +97,19 @@ class SandboxScheduler:
                 request.fencing_token,
             )
             if record.state != SandboxState.RUNNING:
-                raise SandboxUnavailableError("sandbox lease is not running")
+                raise ServiceException(
+                    SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                    "sandbox lease is not running",
+                )
             try:
                 return await self._provider.forward(record.ref, request)
-            except SandboxDomainError:
+            except ServiceException:
                 raise
             except Exception as exc:
-                raise SandboxUnavailableError("sandbox execution failed") from exc
+                raise ServiceException(
+                    SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                    "sandbox execution failed",
+                ) from exc
 
     async def release(self, lease_id: str, fencing_token: int) -> None:
         async with self._lifecycle_lock:
@@ -126,7 +135,10 @@ class SandboxScheduler:
                 self._metrics.increment("workspace_commit_successes")
             except Exception as exc:
                 self._metrics.increment("workspace_commit_failures")
-                commit_error = WorkspaceSyncError("workspace commit failed")
+                commit_error = ServiceException(
+                    SandboxErrorCode.WORKSPACE_SYNC_FAILED,
+                    "workspace commit failed",
+                )
                 commit_error.__cause__ = exc
             finally:
                 await self._destroy_record(record, DestroyReason.LEASE_RELEASED)
@@ -155,7 +167,10 @@ class SandboxScheduler:
     async def status(self, sandbox_id: str) -> SandboxRecord:
         record = await self._repository.get(sandbox_id)
         if record is None:
-            raise LeaseNotFoundError(f"sandbox {sandbox_id} was not found")
+            raise ServiceException(
+                SandboxErrorCode.LEASE_NOT_FOUND,
+                f"sandbox {sandbox_id} was not found",
+            )
         return record
 
     def _lease(self, record: SandboxRecord) -> SandboxLease:
@@ -211,7 +226,10 @@ class SandboxScheduler:
                 error=str(last_error)[:200],
             )
             self._metrics.increment("destroy_failures")
-            raise SandboxUnavailableError("sandbox destroy failed") from last_error
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "sandbox destroy failed",
+            ) from last_error
         await self._repository.transition(
             record.ref.sandbox_id,
             SandboxState.DESTROYING,

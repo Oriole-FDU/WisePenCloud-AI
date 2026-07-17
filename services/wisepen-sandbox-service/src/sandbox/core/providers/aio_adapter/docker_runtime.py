@@ -6,8 +6,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Sequence
 
+from common.core.exceptions import ServiceException
+
 from sandbox.domain.entities import SandboxSpec
-from sandbox.core.providers.aio_adapter.errors import ContainerError
+from sandbox.domain.error_codes import SandboxErrorCode
 from sandbox.core.providers.aio_adapter.models import AdapterConfig
 
 
@@ -58,7 +60,10 @@ class DockerRuntime:
         args.append(spec.image or self._config.image)
         container_id = self._run(args).strip()
         if not container_id:
-            raise ContainerError("container creation returned an empty id", retryable=True)
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "container creation returned an empty id",
+            )
         port = self._run(
             [self._config.docker_bin, "port", container_id, f"{self._config.api_port}/tcp"]
         ).strip()
@@ -68,7 +73,7 @@ class DockerRuntime:
     def remove(self, container_id: str) -> None:
         try:
             self._run([self._config.docker_bin, "rm", "-f", container_id])
-        except ContainerError as exc:
+        except ServiceException as exc:
             if "No such container" not in str(exc):
                 raise
 
@@ -77,9 +82,15 @@ class DockerRuntime:
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise ContainerError("docker inspect returned invalid JSON") from exc
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "docker inspect returned invalid JSON",
+            ) from exc
         if not isinstance(payload, list) or not payload or not isinstance(payload[0], dict):
-            raise ContainerError("docker inspect returned no container")
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "docker inspect returned no container",
+            )
         return payload[0]
 
     def _run(self, args: Sequence[str]) -> str:
@@ -92,15 +103,24 @@ class DockerRuntime:
                 timeout=self._config.command_timeout_seconds,
             )
         except FileNotFoundError as exc:
-            raise ContainerError("docker binary not found") from exc
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "docker binary not found",
+            ) from exc
         except OSError as exc:
-            raise ContainerError("docker command could not be started", retryable=True) from exc
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "docker command could not be started",
+            ) from exc
         except subprocess.TimeoutExpired as exc:
-            raise ContainerError("docker command timed out", retryable=True) from exc
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "docker command timed out",
+            ) from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()
-            raise ContainerError(
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
                 f"docker command failed: {' '.join(args[1:3])}: {detail[:500]}",
-                retryable=True,
             )
         return result.stdout or ""
