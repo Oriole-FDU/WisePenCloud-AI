@@ -3,20 +3,22 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from common.core.exceptions import ServiceException
 
 from sandbox.domain.entities import SandboxSpec
+from sandbox.domain.error_codes import SandboxErrorCode
 from sandbox.core.providers.aio_adapter.models import AdapterConfig
-from sandbox.core.providers.aio_adapter.path_policy import PathPolicy, PathPolicyError, TenantScope
+from sandbox.core.providers.aio_adapter.path_policy import PathPolicy, TenantScope
 from sandbox.core.providers.aio_adapter.docker_runtime import DockerRuntime
 from sandbox.core.providers.aio_adapter.client import AioClient
-from sandbox.core.providers.aio_adapter.errors import AioNotFoundError, AioRequestError
 
 
 def test_path_policy_rejects_escape():
     policy = PathPolicy(TenantScope("user_1", "session_1"))
     assert policy.translate("main.py") == "/workspace/main.py"
-    with pytest.raises(PathPolicyError):
+    with pytest.raises(ServiceException) as exc_info:
         policy.translate("/workspace/../../etc/passwd")
+    assert exc_info.value.code == SandboxErrorCode.WORKSPACE_PATH_INVALID.code
 
 
 def test_path_policy_can_isolate_a_tenant_workspace():
@@ -29,8 +31,9 @@ def test_path_policy_can_isolate_a_tenant_workspace():
     assert policy.reverse("/home/gem/tenant_1/workspace_1/probe.txt") == (
         "/home/gem/tenant_1/workspace_1/probe.txt"
     )
-    with pytest.raises(PathPolicyError):
+    with pytest.raises(ServiceException) as exc_info:
         policy.reverse("/home/gem/tenant_2/workspace_1/probe.txt")
+    assert exc_info.value.code == SandboxErrorCode.WORKSPACE_PATH_INVALID.code
 
 
 def test_docker_runtime_builds_managed_container_commands():
@@ -68,6 +71,16 @@ def test_docker_runtime_can_mark_e2e_containers():
     assert "wisepen.e2e=true" in calls[0]
 
 
+def test_docker_runtime_maps_command_failure_to_service_error():
+    def runner(args, **kwargs):
+        return SimpleNamespace(returncode=1, stdout="", stderr="daemon unavailable")
+
+    runtime = DockerRuntime(AdapterConfig(image="test-image"), runner=runner)
+    with pytest.raises(ServiceException) as exc_info:
+        runtime.inspect("container-id")
+    assert exc_info.value.code == SandboxErrorCode.SANDBOX_UNAVAILABLE.code
+
+
 @pytest.mark.asyncio
 async def test_aio_client_sends_token_and_maps_not_found(monkeypatch):
     calls = []
@@ -94,13 +107,14 @@ async def test_aio_client_sends_token_and_maps_not_found(monkeypatch):
             return Response()
 
     monkeypatch.setattr("sandbox.core.providers.aio_adapter.client.httpx.AsyncClient", Client)
-    with pytest.raises(AioNotFoundError):
+    with pytest.raises(ServiceException) as exc_info:
         await AioClient("http://sandbox", token="secret").request("/v1/test", {})
+    assert exc_info.value.code == SandboxErrorCode.AIO_RESOURCE_NOT_FOUND.code
     assert calls[0][1]["headers"]["Authorization"] == "Bearer secret"
 
 
 @pytest.mark.asyncio
-async def test_aio_client_maps_server_failure_as_retryable(monkeypatch):
+async def test_aio_client_maps_server_failure(monkeypatch):
     class Response:
         status_code = 503
         is_success = False
@@ -122,9 +136,9 @@ async def test_aio_client_maps_server_failure_as_retryable(monkeypatch):
             return Response()
 
     monkeypatch.setattr("sandbox.core.providers.aio_adapter.client.httpx.AsyncClient", Client)
-    with pytest.raises(AioRequestError) as exc_info:
+    with pytest.raises(ServiceException) as exc_info:
         await AioClient("http://sandbox").request("/v1/test", {})
-    assert exc_info.value.retryable is True
+    assert exc_info.value.code == SandboxErrorCode.SANDBOX_UNAVAILABLE.code
 
 
 @pytest.mark.asyncio

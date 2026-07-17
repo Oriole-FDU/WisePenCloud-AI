@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from common.core.exceptions import ServiceException
 
 from sandbox.domain.entities import (
     Endpoint,
@@ -15,7 +16,7 @@ from sandbox.domain.entities import (
     WorkspaceSnapshot,
     Health,
 )
-from sandbox.domain.errors import FencingRejectedError, SandboxUnavailableError, WorkspaceSyncError
+from sandbox.domain.error_codes import SandboxErrorCode
 from sandbox.application.services import SandboxPool, SandboxScheduler, Watcher
 from sandbox.core.storage.memory import MemorySandboxRepository
 
@@ -122,8 +123,9 @@ async def test_allocation_failure_destroys_sandbox():
     repository, pool = await ready_pool(provider)
     scheduler = SandboxScheduler(pool, repository, provider, FakeWorkspace())
 
-    with pytest.raises(SandboxUnavailableError):
+    with pytest.raises(ServiceException) as exc_info:
         await scheduler.allocate("req-2", "tenant", "workspace")
+    assert exc_info.value.code == SandboxErrorCode.SANDBOX_UNAVAILABLE.code
     assert provider.destroyed
 
 

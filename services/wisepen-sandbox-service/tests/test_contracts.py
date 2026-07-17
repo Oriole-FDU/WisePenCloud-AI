@@ -3,13 +3,9 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
+from common.core.exceptions import ServiceException
 
-from sandbox.domain.errors import (
-    FencingRejectedError,
-    InvalidStateTransition,
-    LeaseConflictError,
-    WorkspaceSyncError,
-)
+from sandbox.domain.error_codes import SandboxErrorCode
 from sandbox.domain.entities import (
     ExecutionRequest,
     SandboxRecord,
@@ -20,7 +16,7 @@ from sandbox.domain.entities import (
     utc_now,
 )
 from sandbox.application.services import SandboxPool, SandboxScheduler, Watcher
-from sandbox.core.storage.local import LocalWorkspaceStore, WorkspacePathError
+from sandbox.core.storage.local import LocalWorkspaceStore
 from sandbox.core.storage.memory import MemorySandboxRepository
 
 from test_lifecycle import FakeProvider, FakeWorkspace, ready_pool
@@ -36,9 +32,10 @@ async def test_request_id_is_idempotent_and_context_is_fenced():
     second = await scheduler.allocate("req-1", "tenant", "workspace")
     assert second == first
 
-    with pytest.raises(LeaseConflictError):
+    with pytest.raises(ServiceException) as exc_info:
         await scheduler.allocate("req-1", "other-tenant", "workspace")
-    with pytest.raises(FencingRejectedError):
+    assert exc_info.value.code == SandboxErrorCode.REQUEST_CONFLICT.code
+    with pytest.raises(ServiceException) as exc_info:
         await scheduler.execute(
             first.lease_id,
             ExecutionRequest(
@@ -49,6 +46,7 @@ async def test_request_id_is_idempotent_and_context_is_fenced():
                 fencing_token=first.fencing_token - 1,
             ),
         )
+    assert exc_info.value.code == SandboxErrorCode.FENCING_REJECTED.code
 
 
 @pytest.mark.asyncio
@@ -67,7 +65,7 @@ async def test_expired_lease_is_rejected_and_recovered():
                 "exec-1", "tenant", "workspace", "shell_exec", fencing_token=lease.fencing_token
             ),
         )
-    assert exc_info.value.code == "LEASE_EXPIRED"
+    assert exc_info.value.code == SandboxErrorCode.LEASE_EXPIRED.code
     assert await scheduler.recover_expired() == 1
     assert provider.destroyed == [lease.sandbox_id]
 
@@ -83,8 +81,9 @@ async def test_release_is_idempotent_and_commit_failure_still_destroys():
 
     scheduler = SandboxScheduler(pool, repository, provider, FailingWorkspace())
     lease = await scheduler.allocate("req-release", "tenant", "workspace")
-    with pytest.raises(WorkspaceSyncError):
+    with pytest.raises(ServiceException) as exc_info:
         await scheduler.release(lease.lease_id, lease.fencing_token)
+    assert exc_info.value.code == SandboxErrorCode.WORKSPACE_SYNC_FAILED.code
     await scheduler.release(lease.lease_id, lease.fencing_token)
     assert provider.destroyed == [lease.sandbox_id]
     assert (await scheduler.status(lease.sandbox_id)).state == SandboxState.DESTROYED
@@ -96,15 +95,17 @@ async def test_state_machine_rejects_invalid_transition():
     repository, pool = await ready_pool(provider)
     record = await repository.get("sb-1")
     assert record is not None
-    with pytest.raises(InvalidStateTransition):
+    with pytest.raises(ServiceException) as exc_info:
         await repository.transition("sb-1", SandboxState.READY, SandboxState.DESTROYED)
+    assert exc_info.value.code == SandboxErrorCode.INVALID_STATE_TRANSITION.code
 
 
 @pytest.mark.asyncio
 async def test_workspace_store_rejects_traversal_and_symlink(tmp_path):
     store = LocalWorkspaceStore(str(tmp_path))
-    with pytest.raises(WorkspacePathError):
+    with pytest.raises(ServiceException) as exc_info:
         await store.commit(WorkspaceSnapshot("tenant", "workspace", {"../escape": "x"}), "lease", 1)
+    assert exc_info.value.code == SandboxErrorCode.WORKSPACE_PATH_INVALID.code
 
 
 @pytest.mark.asyncio
@@ -115,8 +116,9 @@ async def test_return_ready_requires_health_token_and_current_generation():
     await repository.save(record)
     token, generation = await pool.prepare_readiness(record)
 
-    with pytest.raises(FencingRejectedError):
+    with pytest.raises(ServiceException) as exc_info:
         await pool.return_ready(record.ref.sandbox_id, "wrong", generation)
+    assert exc_info.value.code == SandboxErrorCode.FENCING_REJECTED.code
     assert (await repository.get(record.ref.sandbox_id)).state == SandboxState.WARMING
 
     await pool.return_ready(record.ref.sandbox_id, token, generation)
@@ -138,8 +140,9 @@ async def test_return_ready_rejects_active_lease():
     await repository.save(record)
     token, generation = await pool.prepare_readiness(record)
 
-    with pytest.raises(FencingRejectedError):
+    with pytest.raises(ServiceException) as exc_info:
         await pool.return_ready("warming-leased", token, generation)
+    assert exc_info.value.code == SandboxErrorCode.FENCING_REJECTED.code
 
 
 @pytest.mark.asyncio
