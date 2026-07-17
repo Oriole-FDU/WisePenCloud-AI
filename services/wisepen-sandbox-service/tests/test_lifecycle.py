@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from sandbox.models import (
+from sandbox.domain.entities import (
     Endpoint,
     ExecutionRequest,
     ExecutionResult,
@@ -15,11 +15,9 @@ from sandbox.models import (
     WorkspaceSnapshot,
     Health,
 )
-from sandbox.errors import FencingRejectedError, SandboxUnavailableError, WorkspaceSyncError
-from sandbox.pool import SandboxPool
-from sandbox.repository import InMemorySandboxRepository
-from sandbox.scheduler import SandboxScheduler
-from sandbox.watcher import Watcher
+from sandbox.domain.errors import FencingRejectedError, SandboxUnavailableError, WorkspaceSyncError
+from sandbox.application.services import SandboxPool, SandboxScheduler, Watcher
+from sandbox.core.storage.memory import MemorySandboxRepository
 
 
 class FakeWorkspace:
@@ -73,7 +71,7 @@ class FakeProvider:
 
 
 async def ready_pool(provider: FakeProvider):
-    repository = InMemorySandboxRepository()
+    repository = MemorySandboxRepository()
     pool = SandboxPool(repository)
     record = SandboxRecord(
         ref=await provider.create(SandboxSpec("test")),
@@ -132,7 +130,7 @@ async def test_allocation_failure_destroys_sandbox():
 @pytest.mark.asyncio
 async def test_watcher_fills_only_the_ready_deficit():
     provider = FakeProvider()
-    repository = InMemorySandboxRepository()
+    repository = MemorySandboxRepository()
     pool = SandboxPool(repository)
     watcher = Watcher(
         pool,

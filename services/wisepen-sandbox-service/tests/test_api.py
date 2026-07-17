@@ -4,11 +4,9 @@ import httpx
 import pytest
 
 from sandbox.api import create_app
-from sandbox.models import SandboxSpec
-from sandbox.pool import SandboxPool
-from sandbox.repository import InMemorySandboxRepository
-from sandbox.scheduler import SandboxScheduler
-from sandbox.watcher import Watcher
+from sandbox.domain.entities import SandboxSpec
+from sandbox.application.services import SandboxPool, SandboxScheduler, Watcher
+from sandbox.core.storage.memory import MemorySandboxRepository
 
 from test_lifecycle import FakeProvider, FakeWorkspace
 
@@ -16,7 +14,7 @@ from test_lifecycle import FakeProvider, FakeWorkspace
 @pytest.mark.asyncio
 async def test_internal_api_requires_fencing_and_exposes_metrics():
     provider = FakeProvider()
-    repository = InMemorySandboxRepository()
+    repository = MemorySandboxRepository()
     pool = SandboxPool(repository)
     watcher = Watcher(pool, repository, provider, SandboxSpec("test"), target_ready=1)
     await watcher.reconcile()
