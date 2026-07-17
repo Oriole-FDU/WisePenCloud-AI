@@ -11,10 +11,4 @@ class SandboxErrorCode(IErrorCode):
     WORKSPACE_PATH_INVALID = (46007, "工作区路径不合法")
     WORKSPACE_SYNC_FAILED = (46008, "沙箱工作区同步失败")
     SANDBOX_UNAVAILABLE = (46009, "沙箱服务暂不可用")
-
-
-_BY_DOMAIN_CODE = {item.name: item for item in SandboxErrorCode}
-
-
-def sandbox_error_code(domain_code: str) -> SandboxErrorCode:
-    return _BY_DOMAIN_CODE.get(domain_code, SandboxErrorCode.SANDBOX_UNAVAILABLE)
+    AIO_RESOURCE_NOT_FOUND = (46010, "AIO 资源不存在")

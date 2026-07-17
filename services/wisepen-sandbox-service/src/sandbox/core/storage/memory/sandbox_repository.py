@@ -4,14 +4,8 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Iterable
 
-from sandbox.domain.errors import (
-    FencingRejectedError,
-    InvalidStateTransition,
-    LeaseConflictError,
-    LeaseNotFoundError,
-    LeaseExpiredError,
-    PoolEmptyError,
-)
+from common.core.exceptions import ServiceException
+
 from sandbox.domain.entities import (
     LeaseRecord,
     SandboxRecord,
@@ -21,6 +15,7 @@ from sandbox.domain.entities import (
 )
 from sandbox.core.observability.metrics import MetricsCollector
 from sandbox.domain.interfaces.metrics import MetricsPort
+from sandbox.domain.error_codes import SandboxErrorCode
 
 
 _ALLOWED_TRANSITIONS: dict[SandboxState, frozenset[SandboxState]] = {
@@ -67,7 +62,10 @@ class MemorySandboxRepository:
         async with self._lock:
             existing = self._requests.get(request_id)
             if existing and existing != sandbox_id:
-                raise LeaseConflictError("request_id is already bound to another sandbox")
+                raise ServiceException(
+                    SandboxErrorCode.REQUEST_CONFLICT,
+                    "request_id is already bound to another sandbox",
+                )
             self._requests[request_id] = sandbox_id
             self._generation += 1
 
@@ -125,13 +123,18 @@ class MemorySandboxRepository:
         async with self._lock:
             record = self._records.get(sandbox_id)
             if record is None:
-                raise LeaseNotFoundError(f"sandbox {sandbox_id} was not found")
+                raise ServiceException(
+                    SandboxErrorCode.LEASE_NOT_FOUND,
+                    f"sandbox {sandbox_id} was not found",
+                )
             if record.state != expected:
-                raise InvalidStateTransition(
+                raise ServiceException(
+                    SandboxErrorCode.INVALID_STATE_TRANSITION,
                     f"expected {expected.value}, got {record.state.value}"
                 )
             if state not in _ALLOWED_TRANSITIONS[expected]:
-                raise InvalidStateTransition(
+                raise ServiceException(
+                    SandboxErrorCode.INVALID_STATE_TRANSITION,
                     f"cannot transition {expected.value} to {state.value}"
                 )
             record.state = state
@@ -153,7 +156,10 @@ class MemorySandboxRepository:
             if existing_id:
                 existing = self._records[existing_id]
                 if existing.tenant_id != tenant_id or existing.workspace_id != workspace_id:
-                    raise LeaseConflictError("request_id context does not match existing lease")
+                    raise ServiceException(
+                        SandboxErrorCode.REQUEST_CONFLICT,
+                        "request_id context does not match existing lease",
+                    )
                 return existing, self._lease_for(existing)
 
             ready = next(
@@ -163,7 +169,10 @@ class MemorySandboxRepository:
             if ready is None:
                 self._empty_checkouts += 1
                 self.metrics.increment("pool_empty_checkouts")
-                raise PoolEmptyError("no ready sandbox is available")
+                raise ServiceException(
+                    SandboxErrorCode.POOL_EMPTY,
+                    "no ready sandbox is available",
+                )
             self._next_fencing_token += 1
             now = utc_now()
             ready.state = SandboxState.ALLOCATED
@@ -199,7 +208,10 @@ class MemorySandboxRepository:
             sandbox_id = self._leases.get(lease_id)
             record = self._records.get(sandbox_id) if sandbox_id else None
             if record is None:
-                raise LeaseNotFoundError(f"lease {lease_id} was not found")
+                raise ServiceException(
+                    SandboxErrorCode.LEASE_NOT_FOUND,
+                    f"lease {lease_id} was not found",
+                )
             return record
 
     async def close_lease(self, lease_id: str, fencing_token: int) -> SandboxRecord:
@@ -207,15 +219,24 @@ class MemorySandboxRepository:
             sandbox_id = self._leases.get(lease_id)
             record = self._records.get(sandbox_id) if sandbox_id else None
             if record is None:
-                raise LeaseNotFoundError(f"lease {lease_id} was not found")
+                raise ServiceException(
+                    SandboxErrorCode.LEASE_NOT_FOUND,
+                    f"lease {lease_id} was not found",
+                )
             if record.fencing_token != fencing_token:
-                raise FencingRejectedError("lease fencing token is stale")
+                raise ServiceException(
+                    SandboxErrorCode.FENCING_REJECTED,
+                    "lease fencing token is stale",
+                )
             if record.state == SandboxState.DESTROYED:
                 return record
             if record.state in (SandboxState.SYNCING, SandboxState.DESTROYING, SandboxState.LOST):
                 return record
             if record.state not in (SandboxState.ALLOCATED, SandboxState.RUNNING):
-                raise InvalidStateTransition(f"cannot release {record.state.value} sandbox")
+                raise ServiceException(
+                    SandboxErrorCode.INVALID_STATE_TRANSITION,
+                    f"cannot release {record.state.value} sandbox",
+                )
             record.state = SandboxState.SYNCING
             record.state_version += 1
             record.updated_at = utc_now()
@@ -233,11 +254,20 @@ class MemorySandboxRepository:
     ) -> SandboxRecord:
         record = await self.find_lease(lease_id)
         if record.tenant_id != tenant_id or record.workspace_id != workspace_id:
-            raise FencingRejectedError("lease context does not match")
+            raise ServiceException(
+                SandboxErrorCode.FENCING_REJECTED,
+                "lease context does not match",
+            )
         if record.fencing_token != fencing_token:
-            raise FencingRejectedError("lease fencing token is stale")
+            raise ServiceException(
+                SandboxErrorCode.FENCING_REJECTED,
+                "lease fencing token is stale",
+            )
         if record.lease_expires_at and record.lease_expires_at <= (now or utc_now()):
-            raise LeaseExpiredError("sandbox lease has expired")
+            raise ServiceException(
+                SandboxErrorCode.LEASE_EXPIRED,
+                "sandbox lease has expired",
+            )
         return record
 
     async def clear_lease(self, record: SandboxRecord) -> None:
@@ -262,7 +292,8 @@ class MemorySandboxRepository:
         async with self._lock:
             current = self._records.get(record.ref.sandbox_id)
             if current is None or current.state != SandboxState.WARMING:
-                raise InvalidStateTransition(
+                raise ServiceException(
+                    SandboxErrorCode.INVALID_STATE_TRANSITION,
                     "only warming sandboxes can prepare readiness"
                 )
             record.readiness_token = readiness_token
@@ -279,15 +310,30 @@ class MemorySandboxRepository:
         async with self._lock:
             record = self._records.get(sandbox_id)
             if record is None:
-                raise LeaseNotFoundError(f"sandbox {sandbox_id} was not found")
+                raise ServiceException(
+                    SandboxErrorCode.LEASE_NOT_FOUND,
+                    f"sandbox {sandbox_id} was not found",
+                )
             if self._generation != expected_generation:
-                raise FencingRejectedError("pool generation is stale")
+                raise ServiceException(
+                    SandboxErrorCode.FENCING_REJECTED,
+                    "pool generation is stale",
+                )
             if record.state != SandboxState.WARMING:
-                raise InvalidStateTransition("only warming sandboxes can return ready")
+                raise ServiceException(
+                    SandboxErrorCode.INVALID_STATE_TRANSITION,
+                    "only warming sandboxes can return ready",
+                )
             if any((record.lease_id, record.request_id, record.tenant_id, record.workspace_id)):
-                raise FencingRejectedError("sandbox still has an active lease")
+                raise ServiceException(
+                    SandboxErrorCode.FENCING_REJECTED,
+                    "sandbox still has an active lease",
+                )
             if not record.readiness_token or record.readiness_token != health_token:
-                raise FencingRejectedError("sandbox health token is invalid")
+                raise ServiceException(
+                    SandboxErrorCode.FENCING_REJECTED,
+                    "sandbox health token is invalid",
+                )
             record.state = SandboxState.READY
             record.readiness_token = None
             record.state_version += 1

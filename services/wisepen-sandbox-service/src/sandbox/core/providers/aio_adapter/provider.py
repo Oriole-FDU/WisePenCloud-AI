@@ -17,9 +17,10 @@ from sandbox.domain.interfaces.sandbox_provider import SandboxProvider
 
 from sandbox.core.providers.aio_adapter.client import AioClient
 from sandbox.core.providers.aio_adapter.docker_runtime import DockerRuntime
-from sandbox.core.providers.aio_adapter.errors import AioNotFoundError
 from sandbox.core.providers.aio_adapter.models import AdapterConfig
 from sandbox.core.providers.aio_adapter.path_policy import PathPolicy, TenantScope
+from common.core.exceptions import ServiceException
+from sandbox.domain.error_codes import SandboxErrorCode
 
 
 class AioSandboxProvider(SandboxProvider):
@@ -161,7 +162,9 @@ class AioSandboxProvider(SandboxProvider):
         )
         try:
             listing = await client.file_list(policy.root, recursive=True)
-        except AioNotFoundError:
+        except ServiceException as exc:
+            if exc.code != SandboxErrorCode.AIO_RESOURCE_NOT_FOUND.code:
+                raise
             # An untouched workspace has no directory yet; it is an empty snapshot.
             return WorkspaceSnapshot(tenant_id, workspace_id)
         files: dict[str, str] = {}

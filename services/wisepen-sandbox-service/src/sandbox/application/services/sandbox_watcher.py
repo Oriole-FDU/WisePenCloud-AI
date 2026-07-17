@@ -5,7 +5,8 @@ from datetime import timedelta
 import uuid
 from time import monotonic
 
-from sandbox.domain.errors import SandboxDomainError
+from common.core.exceptions import ServiceException
+
 from sandbox.domain.entities import SandboxRecord, SandboxSpec, SandboxState, utc_now
 from sandbox.domain.interfaces.metrics import MetricsPort
 from sandbox.domain.interfaces.leader_lease import LeaderLease
@@ -201,7 +202,7 @@ class Watcher:
                     SandboxState.LOST,
                     error="destroy timeout",
                 )
-            except SandboxDomainError:
+            except ServiceException:
                 self._metrics.increment("destroy_failures")
 
     async def run(self) -> None:

@@ -55,7 +55,7 @@ flowchart LR
 ### 3.1 `wisepen-sandbox-service`
 
 - `application/services`：维护 Pool、Scheduler 和 Watcher 的生命周期用例。
-- `domain`：保存领域实体、错误、端口和 Repository 协议。
+- `domain`：保存领域实体、错误码、端口和 Repository 协议。
 - `core/storage/memory`：提供内存 Repository 和 LeaderLease 实现。
 - `core/storage/local` / `core/observability`：提供本地 Workspace Store 和 Metrics 实现。
 - `apis` / `main.py`：提供内部 API、路由和进程启动时的 Watcher 后台任务。
@@ -67,7 +67,7 @@ flowchart LR
 - `AioSandboxProvider`：实现 SandboxProvider，将领域操作映射为 AIO 文件、Shell 和代码执行请求。
 - `PathPolicy`：校验绝对/相对路径、`..`、反斜杠、租户和 workspace 隔离。
 - `AdapterConfig`：配置镜像、AIO 端口、工作根目录、超时、TTY 和 e2e 标签。
-- `errors.py` / `models.py`：仅保留当前文件、Shell、执行和 Docker 生命周期所需的本地错误和配置 DTO。
+- `models.py`：保存当前文件、Shell、执行和 Docker 生命周期所需的配置 DTO；错误统一使用 common 的 `ServiceException` 和本目录的 `error_codes.py`。
 
 没有迁移完整的 TypeScript、Python 生成 SDK、Go SDK、浏览器、MCP、Jupyter、Node.js、网站、示例或评测代码。
 
