@@ -1,4 +1,4 @@
-﻿import yaml
+import yaml
 import asyncio
 import threading
 from typing import Literal
@@ -37,6 +37,8 @@ class AppSettings(BaseModel):
     MEMORY_EMBEDDING_MODEL: str
     MEMORY_RERANKER_ZE_MODEL: str
     ZERO_ENTROPY_API_KEY: str
+    EVIDENCE_RANKER_ZE_MODEL: str  # 排序预设使用的 ZeroEntropy 重排模型
+    EVIDENCE_RANKER_ZE_TOP_N: int | None = None  # 重排服务最多返回的候选数量
 
     # 摘要模型
     SUMMARY_MODEL: str
@@ -106,7 +108,9 @@ class AppSettings(BaseModel):
 
     # 内部 RPC / 服务发现 配置
     # Nacos 服务发现客户端侧负载均衡策略：weighted_random | round_robin | random
-    RPC_LB_STRATEGY: Literal["weighted_random", "round_robin", "random"] = "weighted_random"
+    RPC_LB_STRATEGY: Literal["weighted_random", "round_robin", "random"] = (
+        "weighted_random"
+    )
     # 单次请求超时（秒）
     RPC_DEFAULT_TIMEOUT: float = 5.0
     # 单次调用最多额外重试次数（故障转移跨实例）；真实请求次数 = retries + 1
@@ -153,4 +157,3 @@ def load_settings() -> AppSettings:
 
 
 settings = load_settings()
-
