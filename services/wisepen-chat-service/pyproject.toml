@@ -27,5 +27,8 @@ dependencies = [
     "pyyaml",
     "jieba",
     "zeroentropy",
+    "langchain-text-splitters>=1.0,<2",
+    "markdown-it-py>=4,<5",
+    "mdit-py-plugins>=0.5,<1",
     "wisepen-common",
 ]
