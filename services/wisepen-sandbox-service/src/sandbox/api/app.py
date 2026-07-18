@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import AsyncContextManager
+from typing import Any
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from common.core.domain import R
@@ -12,8 +15,14 @@ from sandbox.application.services.sandbox_pool import SandboxPool
 from sandbox.application.services.sandbox_scheduler import SandboxScheduler
 
 
-def create_app(scheduler: SandboxScheduler, pool: SandboxPool) -> FastAPI:
-    app = FastAPI(title="WisePen Sandbox Service")
+def create_app(
+    scheduler: SandboxScheduler,
+    pool: SandboxPool,
+    *,
+    mcp_app: Any | None = None,
+    lifespan: AsyncContextManager[Any] | None = None,
+) -> FastAPI:
+    app = FastAPI(title="WisePen Sandbox Service", lifespan=lifespan)
 
     @app.exception_handler(ServiceException)
     async def service_exception_handler(request: Request, exc: ServiceException):
@@ -25,4 +34,6 @@ def create_app(scheduler: SandboxScheduler, pool: SandboxPool) -> FastAPI:
     app.include_router(create_health_router(pool))
     app.include_router(create_sandbox_router(scheduler))
     app.include_router(create_pool_router(pool))
+    if mcp_app is not None:
+        app.mount("/mcp", mcp_app)
     return app

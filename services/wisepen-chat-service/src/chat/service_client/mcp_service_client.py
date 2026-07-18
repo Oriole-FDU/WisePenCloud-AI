@@ -63,11 +63,12 @@ class McpServiceClient:
         server: Any,
         tool_name: str,
         arguments: Mapping[str, Any],
+        context: Mapping[str, Any] | None = None,
     ) -> str:
         async with streamable_http_client(
             url=await self._resolve_url(),
             http_client=AsyncClient(
-                headers=self._build_headers(),
+                headers=self._build_headers(context),
                 timeout=self._timeout,
             ),
             terminate_on_close=True,
@@ -85,7 +86,7 @@ class McpServiceClient:
         instance = await self._discovery.pick(self._service_name, strategy=self._strategy)
         return f"http://{instance.ip}:{instance.port}{_MCP_PATH}"
 
-    def _build_headers(self) -> dict[str, str]:
+    def _build_headers(self, context: Mapping[str, Any] | None = None) -> dict[str, str]:
         headers: dict[str, str] = {}
 
         headers[SecurityConstants.HEADER_FROM_SOURCE] = self._from_source_secret
@@ -93,11 +94,15 @@ class McpServiceClient:
         identity_type = SecurityContextHolder.get_identity_type()
         if user_id:
             headers[SecurityConstants.HEADER_USER_ID] = user_id
-            headers[SecurityConstants.HEADER_IDENTITY_TYPE] = str(identity_type.code)
+            if identity_type is not None:
+                headers[SecurityConstants.HEADER_IDENTITY_TYPE] = str(identity_type.code)
             headers[SecurityConstants.HEADER_GROUP_ROLE_MAP] = json.dumps({
                 str(group_id): role.code
                 for group_id, role in SecurityContextHolder.get_group_role_map().items()
             }, ensure_ascii=False)
+        session_id = str((context or {}).get("session_id") or "").strip()
+        if session_id:
+            headers[SecurityConstants.HEADER_SESSION_ID] = session_id
         developer = GrayContextHolder.get_developer_tag()
         if developer:
             headers[CommonConstants.GRAY_HEADER_DEV_KEY] = developer
