@@ -12,6 +12,7 @@ from common.web.middleware import SecurityHeaderMiddleware
 from sandbox.api import create_app
 from sandbox.container import build_container
 from sandbox.application.services.sandbox_session import SandboxSessionService
+from sandbox.gateway.binding import VncBinding
 from sandbox.core.config.app_settings import settings
 from sandbox.core.config.bootstrap_settings import bootstrap_settings
 from sandbox.core.config.nacos import nacos_client_manager
@@ -28,11 +29,22 @@ sandbox_session = SandboxSessionService(container.scheduler)
 from sandbox.transport.mcp import build_sandbox_mcp
 
 mcp_server = build_sandbox_mcp(sandbox_session)
+vnc_binding = VncBinding(sandbox_session)
 
 
 @asynccontextmanager
 async def lifespan(app):
     async with mcp_server.session_manager.run():
+        cleanup_stop = asyncio.Event()
+
+        async def cleanup_loop() -> None:
+            while not cleanup_stop.is_set():
+                try:
+                    await asyncio.wait_for(cleanup_stop.wait(), timeout=300)
+                except asyncio.TimeoutError:
+                    await vnc_binding.cleanup_idle()
+
+        cleanup_task = asyncio.create_task(cleanup_loop())
         info("服务正在启动。", service=bootstrap_settings.SERVICE_NAME)
         try:
             await nacos_client_manager.register_instance()
@@ -52,6 +64,8 @@ async def lifespan(app):
             task = getattr(app.state, "watcher_task", None)
             if task:
                 task.cancel()
+            cleanup_stop.set()
+            cleanup_task.cancel()
             try:
                 await nacos_client_manager.deregister_instance()
             except Exception as exc:
@@ -63,6 +77,7 @@ app = create_app(
     container.pool,
     mcp_app=mcp_server.streamable_http_app(),
     lifespan=lifespan,
+    vnc_binding=vnc_binding,
 )
 instrument_fastapi_app(app)
 app.add_middleware(SecurityHeaderMiddleware, from_source_secret=settings.FROM_SOURCE_SECRET)

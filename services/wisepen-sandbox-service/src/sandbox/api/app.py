@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import AsyncContextManager
+from contextlib import AbstractAsyncContextManager
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from common.core.domain import R
 from common.core.exceptions import ServiceException
+from sandbox.gateway.api.router import create_gateway_router
+from sandbox.gateway.binding import VncBinding
 
 from sandbox.api.routers.health import create_health_router
 from sandbox.api.routers.pool import create_pool_router
@@ -20,7 +23,8 @@ def create_app(
     pool: SandboxPool,
     *,
     mcp_app: Any | None = None,
-    lifespan: AsyncContextManager[Any] | None = None,
+    lifespan: Callable[[FastAPI], AbstractAsyncContextManager[Any]] | None = None,
+    vnc_binding: VncBinding | None = None,
 ) -> FastAPI:
     app = FastAPI(title="WisePen Sandbox Service", lifespan=lifespan)
 
@@ -36,4 +40,6 @@ def create_app(
     app.include_router(create_pool_router(pool))
     if mcp_app is not None:
         app.mount("/mcp", mcp_app)
+    if vnc_binding is not None:
+        app.include_router(create_gateway_router(vnc_binding))
     return app
