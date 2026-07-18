@@ -50,10 +50,14 @@ class ToolRegistry:
         tool_config_repo: ToolConfigRepository,
         mcp_tool_catalog: McpToolCatalog | None = None,
         system_mcp_tool_catalog: SystemMcpToolCatalog | None = None,
+        system_mcp_tool_catalogs: list[SystemMcpToolCatalog] | None = None,
     ) -> None:
         self._tool_config_repo = tool_config_repo
         self._mcp_tool_catalog = mcp_tool_catalog
         self._system_mcp_tool_catalog = system_mcp_tool_catalog
+        self._system_mcp_tool_catalogs = list(system_mcp_tool_catalogs or [])
+        if system_mcp_tool_catalog is not None and system_mcp_tool_catalog not in self._system_mcp_tool_catalogs:
+            self._system_mcp_tool_catalogs.insert(0, system_mcp_tool_catalog)
         self._tools: dict[str, Tool] = {}
 
     def register(self, tool: Tool) -> None:
@@ -72,14 +76,14 @@ class ToolRegistry:
 
     async def system_tools(self) -> dict[str, Tool]:
         system_tools = dict(self._tools)
-        if self._system_mcp_tool_catalog is None:
+        if not self._system_mcp_tool_catalogs:
             return system_tools
 
-        # 收集系统内部 MCP 工具
-        system_mcp_tools = await self._system_mcp_tool_catalog.load_system_tools()
-        for name, tool in system_mcp_tools.items():
-            if name not in system_tools:
-                system_tools[name] = tool
+        for catalog in self._system_mcp_tool_catalogs:
+            system_mcp_tools = await catalog.load_system_tools()
+            for name, tool in system_mcp_tools.items():
+                if name not in system_tools:
+                    system_tools[name] = tool
         return system_tools
 
     async def derive(

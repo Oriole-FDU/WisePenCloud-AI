@@ -18,6 +18,7 @@ class SecurityHeaderMiddleware(BaseHTTPMiddleware):
 
         # 提取并设置安全上下文
         user_id = request.headers.get(SecurityConstants.HEADER_USER_ID)
+        session_id = request.headers.get(SecurityConstants.HEADER_SESSION_ID)
         identity_type = request.headers.get(SecurityConstants.HEADER_IDENTITY_TYPE)
         group_role_map = request.headers.get(SecurityConstants.HEADER_GROUP_ROLE_MAP)
 
@@ -27,6 +28,8 @@ class SecurityHeaderMiddleware(BaseHTTPMiddleware):
                 SecurityContextHolder.set_identity_type(int(identity_type))
             if group_role_map:
                 SecurityContextHolder.set_group_role_map(group_role_map)
+        if session_id:
+            SecurityContextHolder.set_session_id(session_id)
 
         # 提取灰度上下文
         developer = request.headers.get(CommonConstants.GRAY_HEADER_DEV_KEY)

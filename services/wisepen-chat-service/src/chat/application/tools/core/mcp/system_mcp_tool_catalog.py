@@ -17,7 +17,7 @@ from chat.service_client import McpServiceClient
 from common.logger import error
 
 _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
-        "tool_name": "create_skill_info",
+        "tool_name": "update_skill_info",
         "policy": ToolPolicy(
             expose_by_default=False,
             risk_level=ToolRiskLevel.HIGH,
@@ -67,10 +67,39 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
     }
 ]
 
+_SANDBOX_TOOL_CONFIGS: List[dict[str, Any]] = [
+    {
+        "tool_name": name,
+        "policy": ToolPolicy(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM if name in {"shell_exec", "run_sandbox_script"} else ToolRiskLevel.LOW,
+            timeout_seconds=settings.MCP_DEFAULT_TIMEOUT_SECONDS,
+            persist_output=True,
+            max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+        ),
+        "failure_reason": f"Sandbox {name} Failed",
+    }
+    for name in (
+        "read_file",
+        "write_file",
+        "list_directory",
+        "grep_files",
+        "edit_file",
+        "shell_exec",
+        "run_sandbox_script",
+    )
+]
+
 
 class SystemMcpToolCatalog:
-    def __init__(self, *, mcp_service_client: McpServiceClient) -> None:
+    def __init__(
+        self,
+        *,
+        mcp_service_client: McpServiceClient,
+        tool_configs: List[dict[str, Any]] | None = None,
+    ) -> None:
         self._mcp_service_client = mcp_service_client
+        self._tool_configs = tool_configs or _SYSTEM_TOOL_CONFIGS
         self._mcp_tools_cache_update_time: float | None = None
         self._mcp_tools_cache: list[McpToolDescriptor] | None = None
 
@@ -91,7 +120,7 @@ class SystemMcpToolCatalog:
 
         tools: dict[str, McpRemoteTool] = {}
         for descriptor in descriptors:
-            tool_configs = {item["tool_name"] : item for item in _SYSTEM_TOOL_CONFIGS}
+            tool_configs = {item["tool_name"]: item for item in self._tool_configs}
             overlay = tool_configs.get(descriptor.name)
             if overlay is None: # 仅加载显式声明的 Tool
                 continue

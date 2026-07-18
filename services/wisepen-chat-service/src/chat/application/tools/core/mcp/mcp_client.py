@@ -79,6 +79,7 @@ class McpClient:
         server: McpServerConnection,
         tool_name: str,
         arguments: Mapping[str, Any],
+        context: Mapping[str, Any] | None = None,
     ) -> str:
         url = await self._resolve_url(server)
 

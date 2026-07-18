@@ -40,6 +40,7 @@ from chat.application.tools.skill_tools import LoadSkillAssetTool
 from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
+from chat.application.tools.core.mcp.system_mcp_tool_catalog import _SANDBOX_TOOL_CONFIGS
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
@@ -58,12 +59,14 @@ def _build_registry(
         tool_config_repo: ToolConfigRepository,
         mcp_tool_catalog: McpToolCatalog,
         system_mcp_tool_catalog: SystemMcpToolCatalog,
+        sandbox_mcp_tool_catalog: SystemMcpToolCatalog,
 ) -> ToolRegistry:
     """工厂函数：组装并返回已注册所有工具的 ToolRegistry 实例。"""
     registry = ToolRegistry(
         tool_config_repo=tool_config_repo,
         mcp_tool_catalog=mcp_tool_catalog,
         system_mcp_tool_catalog=system_mcp_tool_catalog,
+        system_mcp_tool_catalogs=[system_mcp_tool_catalog, sandbox_mcp_tool_catalog],
     )
     for provider in tool_providers:
         registry.register(provider)
@@ -142,6 +145,14 @@ class Container(containers.DeclarativeContainer):
         timeout=settings.RPC_DEFAULT_TIMEOUT,
         default_strategy=settings.RPC_LB_STRATEGY,
     )
+    sandbox_mcp_service_client = providers.Singleton(
+        McpServiceClient,
+        discovery=service_discovery,
+        from_source_secret=settings.FROM_SOURCE_SECRET,
+        service_name="wisepen-sandbox-service",
+        timeout=settings.RPC_DEFAULT_TIMEOUT,
+        default_strategy=settings.RPC_LB_STRATEGY,
+    )
     mcp_client = providers.Singleton(
         McpClient,
         timeout=settings.MCP_DEFAULT_TIMEOUT_SECONDS,
@@ -155,6 +166,11 @@ class Container(containers.DeclarativeContainer):
     system_mcp_tool_catalog = providers.Singleton(
         SystemMcpToolCatalog,
         mcp_service_client=mcp_service_client,
+    )
+    sandbox_mcp_tool_catalog = providers.Singleton(
+        SystemMcpToolCatalog,
+        mcp_service_client=sandbox_mcp_service_client,
+        tool_configs=_SANDBOX_TOOL_CONFIGS,
     )
 
     sandbox_client = providers.Singleton(
@@ -219,6 +235,7 @@ class Container(containers.DeclarativeContainer):
         tool_config_repo=tool_config_repo,
         mcp_tool_catalog=mcp_tool_catalog,
         system_mcp_tool_catalog=system_mcp_tool_catalog,
+        sandbox_mcp_tool_catalog=sandbox_mcp_tool_catalog,
     )
 
     # Application 层组件

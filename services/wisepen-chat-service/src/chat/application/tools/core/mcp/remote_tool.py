@@ -32,7 +32,12 @@ class McpRemoteTool:
         **kwargs: Any,
     ) -> str:
         try:
-            return await self._mcp_client.call_tool(self._server, self._remote_name, kwargs)
+            return await self._mcp_client.call_tool(
+                self._server,
+                self._remote_name,
+                kwargs,
+                context=context,
+            )
         except Exception as e:
             raise ToolExecutionError(
                 reason=self._failure_reason,
