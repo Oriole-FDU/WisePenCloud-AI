@@ -42,7 +42,6 @@ from chat.application.tools import (
     ReadWordAttachmentTool,
     ReadPptAttachmentTool,
     ReadExcelAttachmentTool,
-    RunSandboxScriptTool,
 )
 from chat.application.tools.skill_tools import LoadSkillAssetTool, LoadSkillTool
 from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
@@ -227,13 +226,6 @@ class Container(containers.DeclarativeContainer):
         file_loader=oss_file_loader,
     )
 
-    # 沙箱脚本执行工具
-    run_sandbox_script_tool = providers.Singleton(
-        RunSandboxScriptTool,
-        base_url=settings.SANDBOX_BASE_URL,
-        from_source=settings.SANDBOX_FROM_SOURCE,
-    )
-
     # Attachment reading tools — 使用 SessionRepository 鉴权附件归属
     read_text_attachment_tool = providers.Singleton(
         ReadTextAttachmentTool,
@@ -265,7 +257,6 @@ class Container(containers.DeclarativeContainer):
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
-        run_sandbox_script_tool,
         read_text_attachment_tool,
         read_pdf_attachment_tool,
         read_word_attachment_tool,
