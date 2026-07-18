@@ -2,7 +2,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from chat.domain.entities.tool_config import UserToolConfig
+from chat.domain.error_codes import ChatErrorCode
 from chat.domain.repositories.tool_config_repo import ToolConfigRepository
+from common.core.exceptions import ServiceException
 
 
 class MongoToolConfigRepository(ToolConfigRepository):
@@ -50,7 +52,7 @@ class MongoToolConfigRepository(ToolConfigRepository):
         )
         entity = await self.get_tool_config(user_id, tool_name)
         if entity is None:
-            raise RuntimeError("failed to upsert tool config")
+            raise ServiceException(ChatErrorCode.TOOL_NOT_FOUND)
         return entity
 
     async def delete_tool_config(self, user_id: str, tool_name: str) -> None:

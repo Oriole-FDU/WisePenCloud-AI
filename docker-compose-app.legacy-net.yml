@@ -13,6 +13,11 @@ services:
       cloud-infra_cloud-net:
         aliases:
           - chat-service
+  mcp-service:
+    networks:
+      cloud-infra_cloud-net:
+        aliases:
+          - mcp-service
 
 networks:
   cloud-infra_cloud-net:

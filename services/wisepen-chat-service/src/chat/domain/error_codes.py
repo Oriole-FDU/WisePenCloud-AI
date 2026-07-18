@@ -26,6 +26,9 @@ class ChatErrorCode(IErrorCode):
     # --- Tool 相关 ---
     TOOL_NOT_FOUND = (40031, "工具不存在")
     TOOL_CONFIG_INVALID = (40032, "工具配置不合法")
+    MCP_TOOL_CONFIG_NOT_FOUND = (40033, "MCP 工具配置不存在")
+    MCP_TOOL_SERVER_URL_INVALID = (40034, "MCP 工具服务器不合法")
+    MCP_TOOL_SERVER_UNREACHABLE = (40035, "MCP 工具服务器不可用")
 
     # --- 语音相关 ---
     SPEECH_PROVIDER_NOT_CONFIGURED = (40041, "语音识别 Provider 未配置")
