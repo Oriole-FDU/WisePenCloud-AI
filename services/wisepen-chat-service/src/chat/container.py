@@ -17,7 +17,8 @@ from chat.core.providers import (
     OssFileLoader,
     IflytekSpeechProvider,
 )
-from chat.core.providers.sandbox import SandboxProvider
+# Sandbox tools are now loaded via SystemMcpToolCatalog (MCP)
+
 from chat.core.persistence import (
     MongoSessionRepository,
     MongoMessageRepository,
@@ -42,12 +43,6 @@ from chat.application.tools import (
     ReadPptAttachmentTool,
     ReadExcelAttachmentTool,
     RunSandboxScriptTool,
-    ReadFileTool,
-    WriteFileTool,
-    ListDirectoryTool,
-    GrepFilesTool,
-    EditFileTool,
-    ShellExecTool,
 )
 from chat.application.tools.skill_tools import LoadSkillAssetTool, LoadSkillTool
 from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
@@ -159,6 +154,14 @@ class Container(containers.DeclarativeContainer):
         timeout=settings.RPC_DEFAULT_TIMEOUT,
         default_strategy=settings.RPC_LB_STRATEGY,
     )
+    sandbox_mcp_client = providers.Singleton(
+        McpServiceClient,
+        discovery=service_discovery,
+        from_source_secret=settings.FROM_SOURCE_SECRET,
+        service_name="wisepen-sandbox-mcp-service",
+        timeout=settings.RPC_DEFAULT_TIMEOUT,
+        default_strategy=settings.RPC_LB_STRATEGY,
+    )
     mcp_client = providers.Singleton(
         McpClient,
         timeout=settings.MCP_DEFAULT_TIMEOUT_SECONDS,
@@ -172,6 +175,7 @@ class Container(containers.DeclarativeContainer):
     system_mcp_tool_catalog = providers.Singleton(
         SystemMcpToolCatalog,
         mcp_service_client=mcp_service_client,
+        sandbox_mcp_client=sandbox_mcp_client,
     )
 
     # OssFileLoader
@@ -230,19 +234,6 @@ class Container(containers.DeclarativeContainer):
         from_source=settings.SANDBOX_FROM_SOURCE,
     )
 
-    # Sandbox Provider（File/Shell 操作直连 sandbox 服务队列）
-    sandbox_provider = providers.Singleton(
-        SandboxProvider,
-        base_url=settings.SANDBOX_BASE_URL,
-        from_source=settings.FROM_SOURCE_SECRET,
-    )
-    read_file_tool = providers.Singleton(ReadFileTool, fs_provider=sandbox_provider)
-    write_file_tool = providers.Singleton(WriteFileTool, fs_provider=sandbox_provider)
-    list_directory_tool = providers.Singleton(ListDirectoryTool, fs_provider=sandbox_provider)
-    grep_files_tool = providers.Singleton(GrepFilesTool, fs_provider=sandbox_provider)
-    edit_file_tool = providers.Singleton(EditFileTool, fs_provider=sandbox_provider)
-    shell_exec_tool = providers.Singleton(ShellExecTool, fs_provider=sandbox_provider)
-
     # Attachment reading tools — 使用 SessionRepository 鉴权附件归属
     read_text_attachment_tool = providers.Singleton(
         ReadTextAttachmentTool,
@@ -275,12 +266,6 @@ class Container(containers.DeclarativeContainer):
         load_skill_tool,
         load_skill_asset_tool,
         run_sandbox_script_tool,
-        read_file_tool,
-        write_file_tool,
-        list_directory_tool,
-        grep_files_tool,
-        edit_file_tool,
-        shell_exec_tool,
         read_text_attachment_tool,
         read_pdf_attachment_tool,
         read_word_attachment_tool,

@@ -16,7 +16,7 @@ from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.service_client import McpServiceClient
 from common.logger import error
 
-_SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
+_SKILL_TOOL_CONFIGS: List[dict[str, Any]] = [{
         "tool_name": "create_skill_info",
         "policy": ToolPolicy(
             expose_by_default=False,
@@ -41,18 +41,6 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         ),
         "failure_reason": "Skill Info Load Failed",
     }, {
-        "tool_name": "create_skill_info",
-        "policy": ToolPolicy(
-            expose_by_default=False,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=15.0,
-            persist_output=True,
-            required_context_keys=("allowed_skill_ids",),
-            required_allowed_builtin_skill_ids=("builtin:skill-creator",),
-            max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
-        ),
-        "failure_reason": "Skill Info Update Failed",
-    }, {
         "tool_name": "upload_skill_draft_asset",
         "policy": ToolPolicy(
             expose_by_default=False,
@@ -67,53 +55,131 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
     }
 ]
 
+_SANDBOX_TOOL_CONFIGS: List[dict[str, Any]] = [{
+    "tool_name": "read_file",
+    "policy": ToolPolicy(
+        expose_by_default=True,
+        risk_level=ToolRiskLevel.LOW,
+        timeout_seconds=30.0,
+        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+    ),
+    "failure_reason": "Read File Failed",
+}, {
+    "tool_name": "write_file",
+    "policy": ToolPolicy(
+        expose_by_default=True,
+        risk_level=ToolRiskLevel.LOW,
+        timeout_seconds=30.0,
+        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+    ),
+    "failure_reason": "Write File Failed",
+}, {
+    "tool_name": "list_directory",
+    "policy": ToolPolicy(
+        expose_by_default=True,
+        risk_level=ToolRiskLevel.LOW,
+        timeout_seconds=30.0,
+        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+    ),
+    "failure_reason": "List Directory Failed",
+}, {
+    "tool_name": "grep_files",
+    "policy": ToolPolicy(
+        expose_by_default=True,
+        risk_level=ToolRiskLevel.LOW,
+        timeout_seconds=30.0,
+        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+    ),
+    "failure_reason": "Grep Files Failed",
+}, {
+    "tool_name": "edit_file",
+    "policy": ToolPolicy(
+        expose_by_default=True,
+        risk_level=ToolRiskLevel.MEDIUM,
+        timeout_seconds=30.0,
+        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+    ),
+    "failure_reason": "Edit File Failed",
+}, {
+    "tool_name": "shell_exec",
+    "policy": ToolPolicy(
+        expose_by_default=True,
+        risk_level=ToolRiskLevel.MEDIUM,
+        timeout_seconds=35.0,
+        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+    ),
+    "failure_reason": "Shell Exec Failed",
+}]
+
 
 class SystemMcpToolCatalog:
-    def __init__(self, *, mcp_service_client: McpServiceClient) -> None:
+    def __init__(self, *, mcp_service_client: McpServiceClient,
+                 sandbox_mcp_client: McpServiceClient | None = None) -> None:
         self._mcp_service_client = mcp_service_client
+        self._sandbox_mcp_client = sandbox_mcp_client
         self._mcp_tools_cache_update_time: float | None = None
         self._mcp_tools_cache: list[McpToolDescriptor] | None = None
 
     async def load_system_tools(self) -> dict[str, McpRemoteTool]:
         ttl = max(0.0, settings.MCP_SYSTEM_LIST_TOOLS_CACHE_TTL_SECONDS)
         now = time.monotonic()
-        # 缓存尚未过期
+
+        tools: dict[str, McpRemoteTool] = {}
+
+        # ---- Skill MCP tools ----
         if self._mcp_tools_cache is not None and self._mcp_tools_cache_update_time + ttl > now:
             descriptors = list(self._mcp_tools_cache)
         else:
-            # 重新拉取缓存
             try:
                 descriptors = await self._mcp_service_client.list_tools()
             except Exception as e:
                 error("load system mcp tools failed.", exc=e)
-                return {}
+                descriptors = []
             self._mcp_tools_cache_update_time = now
+            self._mcp_tools_cache = list(descriptors) if descriptors else None
 
-        tools: dict[str, McpRemoteTool] = {}
-        for descriptor in descriptors:
-            tool_configs = {item["tool_name"] : item for item in _SYSTEM_TOOL_CONFIGS}
-            overlay = tool_configs.get(descriptor.name)
-            if overlay is None: # 仅加载显式声明的 Tool
-                continue
+        _merge_tools(tools, descriptors, _SKILL_TOOL_CONFIGS, self._mcp_service_client)
+
+        # ---- Sandbox MCP tools ----
+        if self._sandbox_mcp_client:
             try:
-                parameters_schema = ToolParametersSchema(descriptor.input_schema)
-            except (TypeError, ValueError):
-                continue
-            description = (descriptor.description or "").strip()
+                sandbox_descriptors = await self._sandbox_mcp_client.list_tools()
+            except Exception as e:
+                error("load sandbox mcp tools failed.", exc=e)
+                sandbox_descriptors = []
+            _merge_tools(tools, sandbox_descriptors, _SANDBOX_TOOL_CONFIGS, self._sandbox_mcp_client)
 
-            tools[overlay["tool_name"]] = McpRemoteTool(
-                mcp_client=self._mcp_service_client,
-                server=None, # 内部 MCP 服务无需 server
-                remote_name=descriptor.name,
-                definition=ToolDefinition(
-                    llm_spec=ToolLLMSpec(
-                        name=overlay["tool_name"],
-                        description=description,
-                        parameters_schema=parameters_schema,
-                    ),
-                    policy=overlay["policy"],
-                    preflight_hooks=(),
-                ),
-                failure_reason=overlay["failure_reason"],
-            )
         return tools
+
+
+def _merge_tools(
+    tools: dict[str, McpRemoteTool],
+    descriptors: list[McpToolDescriptor],
+    configs: list[dict[str, Any]],
+    mcp_client: McpServiceClient,
+) -> None:
+    tool_configs = {item["tool_name"]: item for item in configs}
+    for descriptor in descriptors:
+        overlay = tool_configs.get(descriptor.name)
+        if overlay is None:
+            continue
+        try:
+            parameters_schema = ToolParametersSchema(descriptor.input_schema)
+        except (TypeError, ValueError):
+            continue
+        description = (descriptor.description or "").strip()
+        tools[overlay["tool_name"]] = McpRemoteTool(
+            mcp_client=mcp_client,
+            server=None,
+            remote_name=descriptor.name,
+            definition=ToolDefinition(
+                llm_spec=ToolLLMSpec(
+                    name=overlay["tool_name"],
+                    description=description,
+                    parameters_schema=parameters_schema,
+                ),
+                policy=overlay["policy"],
+                preflight_hooks=(),
+            ),
+            failure_reason=overlay["failure_reason"],
+        )
