@@ -9,18 +9,26 @@ from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings
 from chat.core.providers import (
     LiteLLMAdapter,
+    AnthropicAdapter,
+    GeminiAdapter,
+    OpenAIAdapter,
+    QwenAdapter,
     Mem0Adapter,
     OssFileLoader,
-    NullMemoryAdapter,
+    IflytekSpeechProvider,
 )
 from chat.core.providers.sandbox import SandboxProvider
 from chat.core.persistence import (
     MongoSessionRepository,
     MongoMessageRepository,
     MongoModelRepository,
+    MongoMcpServerConfigRepository,
     MongoProviderRepository,
+    MongoToolConfigRepository,
     RedisHotContext,
+    RedisMcpToolDiscoveryCache,
 )
+from chat.domain.repositories import ToolConfigRepository
 from chat.application.attachment_service import AttachmentService
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.agents import (
@@ -43,9 +51,13 @@ from chat.application.tools import (
 )
 from chat.application.tools.skill_tools import LoadSkillAssetTool, LoadSkillTool
 from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
+from chat.application.tools.skill_tools import LoadSkillAssetTool
+from chat.application.tools.skill_tools import LoadSkillTool
+from chat.application.tools.core import ToolRegistry
+from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.core.config.nacos import nacos_client_manager
-from chat.service_client import FileStorageClient, AIAssetClient, ResourceClient
+from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
 from common.kafka.producer import KafkaProducerClient
@@ -57,28 +69,59 @@ async def _provide_nacos_naming() -> NacosNamingService:
     return await nacos_client_manager.get_naming_client()
 
 
-def _build_registry(tool_providers: List[providers.Provider]) -> ToolRegistry:
+def _build_registry(
+        tool_providers: List[providers.Provider],
+        tool_config_repo: ToolConfigRepository,
+        mcp_tool_catalog: McpToolCatalog,
+        system_mcp_tool_catalog: SystemMcpToolCatalog,
+) -> ToolRegistry:
     """工厂函数：组装并返回已注册所有工具的 ToolRegistry 实例。"""
-    registry = ToolRegistry()
+    registry = ToolRegistry(
+        tool_config_repo=tool_config_repo,
+        mcp_tool_catalog=mcp_tool_catalog,
+        system_mcp_tool_catalog=system_mcp_tool_catalog,
+    )
     for provider in tool_providers:
         registry.register(provider)
     return registry
 
 
+def _get_iflytek_speech_config():
+    if settings.SPEECH_CONFIG is None:
+        return None
+    return settings.SPEECH_CONFIG.IFLYTEK
+
+
 class Container(containers.DeclarativeContainer):
     """依赖注入容器，管理单例对象的生命周期。"""
-    llm_provider = providers.Singleton(LiteLLMAdapter)
-
-    if (settings.QDRANT_HOST or "").strip().lower() in ("", "memory"):
-        memory_provider = providers.Singleton(NullMemoryAdapter)
-    else:
-        memory_provider = providers.Singleton(Mem0Adapter)
+    qwen_adapter = providers.Singleton(QwenAdapter)
+    openai_adapter = providers.Singleton(OpenAIAdapter)
+    anthropic_adapter = providers.Singleton(AnthropicAdapter)
+    gemini_adapter = providers.Singleton(GeminiAdapter)
+    litellm_adapter = providers.Singleton(LiteLLMAdapter)
+    llm_provider_resolver = providers.Singleton(
+        LLMProviderResolver,
+        qwen_adapter=qwen_adapter,
+        openai_adapter=openai_adapter,
+        anthropic_adapter=anthropic_adapter,
+        gemini_adapter=gemini_adapter,
+        litellm_adapter=litellm_adapter,
+    )
+    token_counter = providers.Singleton(TokenCounter)
+    memory_provider = providers.Singleton(Mem0Adapter)
+    iflytek_speech_provider = providers.Singleton(
+        IflytekSpeechProvider,
+        config=providers.Callable(_get_iflytek_speech_config),
+    )
 
     session_repo = providers.Singleton(MongoSessionRepository)
     message_repo = providers.Singleton(MongoMessageRepository)
     model_repo = providers.Singleton(MongoModelRepository)
     provider_repo = providers.Singleton(MongoProviderRepository)
+    tool_config_repo = providers.Singleton(MongoToolConfigRepository)
+    mcp_server_config_repo = providers.Singleton(MongoMcpServerConfigRepository)
     hot_context_repo = providers.Singleton(RedisHotContext)
+    mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache)
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
     service_discovery = providers.Singleton(
@@ -108,6 +151,27 @@ class Container(containers.DeclarativeContainer):
     resource_client = providers.Singleton(
         ResourceClient,
         rpc=rpc_client,
+    )
+    mcp_service_client = providers.Singleton(
+        McpServiceClient,
+        discovery=service_discovery,
+        from_source_secret=settings.FROM_SOURCE_SECRET,
+        timeout=settings.RPC_DEFAULT_TIMEOUT,
+        default_strategy=settings.RPC_LB_STRATEGY,
+    )
+    mcp_client = providers.Singleton(
+        McpClient,
+        timeout=settings.MCP_DEFAULT_TIMEOUT_SECONDS,
+    )
+    mcp_tool_catalog = providers.Singleton(
+        McpToolCatalog,
+        mcp_client=mcp_client,
+        mcp_tool_discovery_cache_repo=mcp_tool_discovery_cache_repo,
+        mcp_server_config_repo=mcp_server_config_repo,
+    )
+    system_mcp_tool_catalog = providers.Singleton(
+        SystemMcpToolCatalog,
+        mcp_service_client=mcp_service_client,
     )
 
     # OssFileLoader
@@ -227,6 +291,9 @@ class Container(containers.DeclarativeContainer):
     tool_registry = providers.Singleton(
         _build_registry,
         tool_providers=tool_providers,
+        tool_config_repo=tool_config_repo,
+        mcp_tool_catalog=mcp_tool_catalog,
+        system_mcp_tool_catalog=system_mcp_tool_catalog,
     )
 
     attachment_service = providers.Factory(

@@ -1,7 +1,7 @@
 [project]
-name = "wisepen-chat-service"
+name = "wisepen-mcp-service"
 version = "0.1.0"
-description = "WisePen Chat Microservice: RAG & LLM Orchestration"
+description = "WisePen MCP Microservice: AI capability tools"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
@@ -12,21 +12,10 @@ dependencies = [
     "pydantic",
     "pydantic-settings",
     "uvicorn[standard]",
-    "httpx",
     "dependency_injector",
-    "litellm",
-    "mem0ai",
+    "httpx",
     "mcp>=1.27,<2",
-    "openai",
-    "anthropic",
-    "google-genai",
-    "dashscope",
-    "jsonschema",
-    "beanie",
-    "redis[asyncio]",
-    "nacos-sdk-python",
     "pyyaml",
-    "jieba",
-    "zeroentropy",
+    "nacos-sdk-python",
     "wisepen-common",
 ]

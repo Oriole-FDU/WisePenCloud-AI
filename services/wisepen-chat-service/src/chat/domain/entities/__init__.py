@@ -7,6 +7,7 @@ from .provider import Provider, ProviderScope, ProviderType
 from .resource import ResourceItemInfo, ResourcePermission
 from .skill import Skill, SkillMeta, SkillAssetMeta
 from .tool_config import UserToolConfig
+from .mcp_tool_server_config import McpToolSnapshot, McpToolStatus, UserMcpServerConfig
 
 __all__ = [
     "ChatMessage", "MessageModelInfo", "Role", "ToolCallMessage",
@@ -16,5 +17,5 @@ __all__ = [
     "Provider", "ProviderScope", "ProviderType",
     "ResourceItemInfo", "ResourcePermission",
     "Skill", "SkillMeta", "SkillAssetMeta",
-    "UserToolConfig"
+    "UserToolConfig", "McpToolSnapshot", "McpToolStatus", "UserMcpServerConfig",
 ]

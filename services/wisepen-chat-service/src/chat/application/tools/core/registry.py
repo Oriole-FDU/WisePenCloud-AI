@@ -1,10 +1,16 @@
-from collections.abc import Iterable
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from chat.application.tools.core.definition import Tool, ToolConfigSpec
 from chat.application.tools.core.llm.renderer import schema_renderer
 from chat.domain.entities import UserToolConfig
 from chat.domain.repositories import ToolConfigRepository
+
+from chat.domain.repositories import ToolConfigRepository
+
+if TYPE_CHECKING:
+    from chat.application.tools.core.mcp import McpToolCatalog, SystemMcpToolCatalog
 
 
 class ToolScope:
@@ -42,8 +48,15 @@ class ToolScope:
 class ToolRegistry:
     """全局工具注册表，负责派生请求级工具视图"""
 
-    def __init__(self, tool_config_repo: ToolConfigRepository) -> None:
+    def __init__(
+        self,
+        tool_config_repo: ToolConfigRepository,
+        mcp_tool_catalog: McpToolCatalog | None = None,
+        system_mcp_tool_catalog: SystemMcpToolCatalog | None = None,
+    ) -> None:
         self._tool_config_repo = tool_config_repo
+        self._mcp_tool_catalog = mcp_tool_catalog
+        self._system_mcp_tool_catalog = system_mcp_tool_catalog
         self._tools: dict[str, Tool] = {}
 
     def register(self, tool: Tool) -> None:
@@ -63,6 +76,18 @@ class ToolRegistry:
         """
         return [schema_renderer(tool.definition.llm_spec) for tool in self._tools.values()]
 
+    async def system_tools(self) -> dict[str, Tool]:
+        system_tools = dict(self._tools)
+        if self._system_mcp_tool_catalog is None:
+            return system_tools
+
+        # 收集系统内部 MCP 工具
+        system_mcp_tools = await self._system_mcp_tool_catalog.load_system_tools()
+        for name, tool in system_mcp_tools.items():
+            if name not in system_tools:
+                system_tools[name] = tool
+        return system_tools
+
     async def derive(
         self,
         *,
@@ -76,7 +101,14 @@ class ToolRegistry:
         expose_tool_name_set = expose_tool_name_set or set()
         deny_tool_name_set = deny_tool_name_set or set()
 
-        tools: dict[str, Tool] = dict(self._tools)
+        tools = await self.system_tools()
+
+        # 收集用户配置的 MCP 工具
+        if self._mcp_tool_catalog is not None:
+            user_tools = await self._mcp_tool_catalog.load_user_mcp_tools(user_id)
+            for name, tool in user_tools.items():
+                if name not in tools:
+                    tools[name] = tool
 
         filtered_tools: dict[str, Tool] = {}
         # 处理工具配置
@@ -106,7 +138,6 @@ class ToolRegistry:
                 continue
 
             filtered_tools[name] = tool
-
 
         return ToolScope(
             tools=filtered_tools,

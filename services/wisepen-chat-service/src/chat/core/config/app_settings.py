@@ -97,6 +97,13 @@ class AppSettings(BaseModel):
     # 默认召回数量
     SKILL_MATCH_TOP_K: int = 20
 
+    # MCP Native 配置
+    MCP_SYSTEM_LIST_TOOLS_CACHE_TTL_SECONDS: float = 60.0
+    MCP_USER_LIST_TOOLS_CACHE_TTL_SECONDS: float = 60.0
+    MCP_DEFAULT_TIMEOUT_SECONDS: float = 15.0
+    MCP_MAX_USER_SERVERS: int = 10
+    MCP_MAX_TOOLS_PER_SERVER: int = 50
+
     # 内部 RPC / 服务发现 配置
     # Nacos 服务发现客户端侧负载均衡策略：weighted_random | round_robin | random
     RPC_LB_STRATEGY: Literal["weighted_random", "round_robin", "random"] = "weighted_random"

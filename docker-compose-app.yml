@@ -36,6 +36,41 @@ services:
         aliases:
           - chat-service
 
+  mcp-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: wisepen-mcp-service
+        SERVICE_PKG: wisepen_mcp
+        SERVICE_PORT: "19911"
+    image: ${DOCKER_REGISTRY}/wisepencloud-mcp:${APP_VERSION}
+    container_name: wisepen-mcp-service
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+      - PROFILE=prod
+      - NACOS_SERVER_ADDR=nacos:8848
+      - NACOS_NAMESPACE_ID=
+      - NACOS_GROUP=DEFAULT_GROUP
+      - NACOS_USERNAME=${NACOS_USERNAME}
+      - NACOS_PASSWORD=${NACOS_PASSWORD}
+      - SERVICE_HOST=0.0.0.0
+      - SERVICE_PORT=19911
+      - LOG_LEVEL=INFO
+      - OTEL_SERVICE_NAME=wisepen-mcp-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=otlp
+      - OTEL_LOGS_EXPORTER=otlp
+    volumes:
+      - ../logs/mcp:/logs
+    networks:
+      wisepen-net:
+        aliases:
+          - mcp-service
+
 networks:
   wisepen-net:
     external: true
