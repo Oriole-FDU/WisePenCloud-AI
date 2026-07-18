@@ -32,22 +32,23 @@ async def get_path_translator(request: Request) -> PathTranslator:
     return PathTranslator(scope)
 
 
-def acquire_container(user_id: str, session_id: str) -> str:
-    """Get a container from the pool. Raises if queue not enabled."""
+def acquire_container(user_id: str, session_id: str) -> tuple[str, int]:
+    """获取容器，返回 (container_id, fencing_token)。"""
     if not _queue:
         raise HTTPException(status_code=503, detail="container queue not enabled")
-    cid = _queue.acquire(user_id, session_id)
+    cid, token = _queue.acquire(user_id, session_id)
     if _file_manager:
         _file_manager.pull(cid, user_id, session_id)
-    return cid
+    return cid, token
 
 
-def release_container(cid: str, user_id: str = "", session_id: str = ""):
-    """Release container back to pool (fire-and-forget in finally block)."""
+def release_container(cid: str, user_id: str = "", session_id: str = "",
+                      fencing_token: int = 0):
+    """释放容器（携带 fencing token）。"""
     if _file_manager:
         try:
             _file_manager.push(cid, user_id, session_id)
         except Exception:
             pass
     if _queue:
-        _queue.release(cid)
+        _queue.release(cid, fencing_token)

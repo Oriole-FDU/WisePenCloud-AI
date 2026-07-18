@@ -36,9 +36,8 @@ class Scheduler:
         self._idle_order: list[str] = []
         self._condition = threading.Condition()
 
-    def acquire(self, user_id: str, session_id: str) -> str:
-        """Get a container, retrying up to allocation_timeout seconds."""
-        # 防饿死: 每用户最多 session_max 个容器
+    def acquire(self, user_id: str, session_id: str) -> tuple[str, int]:
+        """获取容器，返回 (container_id, fencing_token)。"""
         if self._user_allocations.get(user_id, set()).__len__() >= self._session_max:
             raise SandboxException(
                 code=SandboxException.queue_no_idle().code,
@@ -48,12 +47,11 @@ class Scheduler:
 
         deadline = time.time() + self._timeout
         while True:
-            cid = self._try_acquire(user_id, session_id)
-            if cid:
-                return cid
+            result = self._try_acquire(user_id, session_id)
+            if result:
+                return result
             if time.time() >= deadline:
                 break
-            # Wait for a container to become available (release/recycle signals)
             with self._condition:
                 self._condition.wait(timeout=self._retry_interval)
 
@@ -62,57 +60,25 @@ class Scheduler:
             max_total=self._queue._max_total,
         )
 
-    def release(self, container_id: str) -> None:
-        """Release a container back to the pool and signal waiters."""
+    def release(self, container_id: str, fencing_token: int = 0) -> None:
+        """释放容器并通知等待者。"""
         user_id = ""
         with self._queue.lock:
             info = self._queue.containers.get(container_id)
             if info:
                 user_id = info.user_id
-        self._queue.release(container_id)
+        self._queue.release(container_id, fencing_token)
         if user_id:
             self._user_allocations.get(user_id, set()).discard(container_id)
         with self._condition:
             self._condition.notify_all()
 
-    def _try_acquire(self, user_id: str, session_id: str) -> str | None:
-        """Attempt to get an idle container, preferring FIFO order."""
-        with self._queue.lock:
-            # Refresh idle_order list — keeps existing order, appends new idle containers
-            for cid, info in self._queue.containers.items():
-                if info.state == ContainerState.IDLE and cid not in self._idle_order:
-                    self._idle_order.append(cid)
-            # Remove containers that are no longer idle
-            self._idle_order = [
-                cid for cid in self._idle_order
-                if self._queue.containers.get(cid)
-                and self._queue.containers[cid].state == ContainerState.IDLE
-            ]
-
-            if not self._idle_order:
-                # Try prefetch if under max
-                if len(self._queue.containers) < self._queue._max_total:
-                    try:
-                        cid = self._queue._start_container()
-                        info = self._queue.containers.get(cid)
-                    except SandboxException:
-                        return None
-                else:
-                    return None
-
-            if not self._idle_order:
-                return None
-
-            # FIFO: pop from front
-            cid = self._idle_order.pop(0)
-            info = self._queue.containers[cid]
-            info.state = ContainerState.BUSY
-            info.user_id = user_id
-            info.session_id = session_id
-            info.allocated_at = time.time()
-            self._user_allocations.setdefault(user_id, set()).add(cid)
-            _dbg("acquired", cid=cid[:12], user=user_id)
-            return cid
+    def _try_acquire(self, user_id: str, session_id: str) -> tuple[str, int] | None:
+        """Attempt to get an idle container via queue.acquire (uses fencing token)."""
+        cid, token = self._queue.acquire(user_id, session_id)
+        self._user_allocations.setdefault(user_id, set()).add(cid)
+        _dbg("acquired", cid=cid[:12], token=token, user=user_id)
+        return cid, token
 
     def health_check(self) -> dict:
         return {

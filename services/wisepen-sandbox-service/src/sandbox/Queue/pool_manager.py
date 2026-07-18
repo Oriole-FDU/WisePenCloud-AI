@@ -78,16 +78,17 @@ class ContainerPoolManager:
             except Exception:
                 pass
 
-    def acquire(self, user_id: str, session_id: str) -> str:
-        """获取容器（带重试+防饿死），并同步 workspace。"""
-        cid = self._scheduler.acquire(user_id, session_id)
+    def acquire(self, user_id: str, session_id: str) -> tuple[str, int]:
+        """获取容器，返回 (container_id, fencing_token)。"""
+        cid, token = self._scheduler.acquire(user_id, session_id)
         self._file_manager.pull(cid, user_id, session_id)
-        return cid
+        return cid, token
 
-    def release(self, container_id: str, user_id: str = "", session_id: str = "") -> None:
-        """释放容器（回写 workspace + 归还池）。"""
+    def release(self, container_id: str, user_id: str = "",
+                session_id: str = "", fencing_token: int = 0) -> None:
+        """释放容器（回写 workspace + 归还池，携带 fencing token）。"""
         self._file_manager.push(container_id, user_id, session_id)
-        self._scheduler.release(container_id)
+        self._scheduler.release(container_id, fencing_token)
 
     def health_check(self) -> dict:
         return self._scheduler.health_check()

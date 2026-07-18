@@ -30,7 +30,7 @@ async def shell_exec(request: ShellExecRequest, req: Request,
     uid, sid = _extract_tenant()
     cid = None
     try:
-        cid = acquire_container(uid, sid)
+        cid, token = acquire_container(uid, sid)
         physical_cwd = translator.translate(request.exec_dir)
         body: Dict[str, Any] = {"command": request.command, "exec_dir": physical_cwd}
         if request.timeout_ms:
@@ -44,4 +44,4 @@ async def shell_exec(request: ShellExecRequest, req: Request,
         return R(code=500, msg=f"shell exec failed: {e}", data=None)
     finally:
         if cid:
-            release_container(cid, uid, sid)
+            release_container(cid, uid, sid, token)

@@ -25,6 +25,14 @@ class ContainerState(str, Enum):
     DEAD = "dead"
 
 
+# 合法状态转换表：防止非法跳转
+_ALLOWED_TRANSITIONS = {
+    ContainerState.IDLE: {ContainerState.BUSY},
+    ContainerState.BUSY: {ContainerState.DIRTY},
+    ContainerState.DIRTY: {ContainerState.IDLE, ContainerState.DEAD},
+    ContainerState.DEAD: set(),
+}
+
 @dataclass
 class ContainerInfo:
     container_id: str
@@ -34,6 +42,8 @@ class ContainerInfo:
     session_id: str = ""
     allocated_at: float = 0.0
     created_at: float = field(default_factory=time.time)
+    fencing_token: int = 0             # 每次 acquire 递增
+    lease_expires_at: float = 0.0      # UTC epoch，超时强制回收
 
 
 class ContainerQueue:
@@ -45,38 +55,40 @@ class ContainerQueue:
         min_idle: int = 2,
         max_total: int = 8,
         workspace_cache: str = "/workspaces",
+        lease_ttl: float = 1800.0,     # 租约 TTL（秒），默认 30 分钟
     ):
         self._image = image
         self._min_idle = min_idle
         self._max_total = max_total
         self._workspace_cache = workspace_cache.replace("\\", "/")
+        self._lease_ttl = lease_ttl
         self._containers: dict[str, ContainerInfo] = {}
         self._lock = threading.Lock()
+        self._next_token = 0
 
     # ---- public API ----
 
-    def acquire(self, user_id: str, session_id: str) -> str:
-        """
-        Get an idle container for the given tenant.
-        Blocks briefly if no idle containers available (prefetch triggers in bg).
-        Raises RuntimeError if no container available within timeout.
-        """
+    def acquire(self, user_id: str, session_id: str) -> tuple[str, int]:
+        """获取空闲容器，返回 (container_id, fencing_token)。"""
         with self._lock:
-            # Try direct idle container
             idle = [c for c in self._containers.values() if c.state == ContainerState.IDLE]
             if idle:
                 info = idle[0]
+                self._next_token += 1
                 info.state = ContainerState.BUSY
                 info.user_id = user_id
                 info.session_id = session_id
                 info.allocated_at = time.time()
-                _dbg("acquired", cid=info.container_id[:12], user=user_id, session=session_id)
-                return info.container_id
+                info.fencing_token = self._next_token
+                info.lease_expires_at = time.time() + self._lease_ttl
+                _dbg("acquired", cid=info.container_id[:12], token=info.fencing_token, user=user_id)
+                return info.container_id, info.fencing_token
 
-            # No idle — try immediate prefetch if under max
             if len(self._containers) < self._max_total:
                 _dbg("acquire_no_idle_prefetch", total=len(self._containers))
                 cid = self._start_container()
+                self._next_token += 1
+                token = self._next_token
                 info = ContainerInfo(
                     container_id=cid,
                     container_name=f"aio-worker-{uuid.uuid4().hex[:8]}",
@@ -84,26 +96,34 @@ class ContainerQueue:
                     user_id=user_id,
                     session_id=session_id,
                     allocated_at=time.time(),
+                    fencing_token=token,
+                    lease_expires_at=time.time() + self._lease_ttl,
                 )
                 self._containers[cid] = info
-                _dbg("acquired_new", cid=cid[:12], user=user_id, session=session_id)
-                return cid
+                _dbg("acquired_new", cid=cid[:12], token=token, user=user_id)
+                return cid, token
 
         raise SandboxException.queue_no_idle(
             total=len(self._containers), max_total=self._max_total,
         )
 
-    def release(self, container_id: str) -> None:
-        """Release a busy container back to the pool (marks dirty for recycling)."""
+    def release(self, container_id: str, fencing_token: int = 0) -> None:
+        """释放容器（必须出示正确的 fencing_token）。"""
         with self._lock:
             info = self._containers.get(container_id)
             if not info:
                 _dbg("release_unknown", cid=container_id[:12])
                 return
+            if fencing_token and info.fencing_token != fencing_token:
+                raise SandboxException(
+                    code=SandboxException.queue_no_idle().code,
+                    message=f"stale fencing token: expected {info.fencing_token}, got {fencing_token}",
+                )
             info.state = ContainerState.DIRTY
             info.user_id = ""
             info.session_id = ""
-            _dbg("released", cid=container_id[:12])
+            info.lease_expires_at = 0.0
+            _dbg("released", cid=container_id[:12], token=fencing_token)
 
     def recycle(self, container_id: str) -> str | None:
         """

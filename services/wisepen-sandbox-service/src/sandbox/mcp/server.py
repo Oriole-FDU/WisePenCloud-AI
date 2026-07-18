@@ -44,13 +44,13 @@ async def _run_on_container(
     uid: str, sid: str,
     method: str, path: str, body: dict,
 ) -> dict:
-    cid = await asyncio.to_thread(queue.acquire, uid, sid)
+    cid, token = await asyncio.to_thread(queue.acquire, uid, sid)
     file_manager.pull(cid, uid, sid)
     try:
         return await execute_on_container(cid, method, path, body)
     finally:
         file_manager.push(cid, uid, sid)
-        queue.release(cid)
+        queue.release(cid, token)
 
 
 def build_sandbox_mcp(

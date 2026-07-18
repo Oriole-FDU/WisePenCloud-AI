@@ -217,16 +217,14 @@ class SandboxHttpApp:
         if not fp: return {"error": "missing 'file'"}
         max_chars = raw.get("max_chars")
 
-        cid = None
+        cid, token = self._acquire(uid, sid)
         try:
-            cid = self._acquire(uid, sid)
             content = self._exec_read(cid, fp)
             if max_chars and len(content) > max_chars:
                 content = content[:max_chars]
             return {"content": content}
         finally:
-            if cid:
-                self._release(cid, uid, sid)
+            self._release(cid, uid, sid, token)
 
     def file_write(self, raw: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
         uid, sid = _extract_tenant(headers)
@@ -234,24 +232,19 @@ class SandboxHttpApp:
         ct = str(raw.get("content") or "")
         if not fp: return {"error": "missing 'file'"}
         if not ct: return {"error": "missing 'content'"}
-
-        cid = None
+        cid, token = self._acquire(uid, sid)
         try:
-            cid = self._acquire(uid, sid)
             n_bytes = self._exec_write(cid, fp, ct)
             return {"file": fp, "bytes_written": n_bytes}
         finally:
-            if cid:
-                self._release(cid, uid, sid)
+            self._release(cid, uid, sid, token)
 
     def file_list(self, raw: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
         uid, sid = _extract_tenant(headers)
         path = str(raw.get("path") or "/workspace").strip()
         recursive = bool(raw.get("recursive"))
-
-        cid = None
+        cid, token = self._acquire(uid, sid)
         try:
-            cid = self._acquire(uid, sid)
             cmd = f"find {_sh(path)} -max_depth {1 if not recursive else 10} -min_depth 1 -printf '%y %s %f\\n' 2>/dev/null"
             stdout, _, _ = self._container_exec(cid, cmd)
             files = []
@@ -263,8 +256,7 @@ class SandboxHttpApp:
                                   "is_directory": parts[0] == "d"})
             return {"files": files, "total_count": len(files), "path": path}
         finally:
-            if cid:
-                self._release(cid, uid, sid)
+            self._release(cid, uid, sid, token)
 
     def file_grep(self, raw: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
         uid, sid = _extract_tenant(headers)
@@ -274,10 +266,8 @@ class SandboxHttpApp:
         if not pattern: return {"error": "missing 'pattern'"}
         recursive = raw.get("recursive", True)
         ignore_case = raw.get("ignore_case", False)
-
-        cid = None
+        cid, token = self._acquire(uid, sid)
         try:
-            cid = self._acquire(uid, sid)
             flags = "-rHn" + ("i" if ignore_case else "")
             cmd = f"grep {flags} {_sh(pattern)} {_sh(path)} 2>/dev/null | head -50"
             stdout, _, _ = self._container_exec(cid, cmd)
@@ -290,8 +280,7 @@ class SandboxHttpApp:
                                     "line": parts[2]})
             return {"matches": matches, "count": len(matches)}
         finally:
-            if cid:
-                self._release(cid, uid, sid)
+            self._release(cid, uid, sid, token)
 
     def file_replace(self, raw: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
         uid, sid = _extract_tenant(headers)
@@ -300,11 +289,8 @@ class SandboxHttpApp:
         new = raw.get("new_str", "")
         if not fp: return {"error": "missing 'file'"}
         if not old: return {"error": "missing 'old_str'"}
-
-        cid = None
+        cid, token = self._acquire(uid, sid)
         try:
-            cid = self._acquire(uid, sid)
-            # Read current content
             content = self._exec_read(cid, fp)
             if old not in content:
                 return {"error": "old_str not found in file"}
@@ -312,8 +298,7 @@ class SandboxHttpApp:
             n_bytes = self._exec_write(cid, fp, new_content)
             return {"file": fp, "bytes_written": n_bytes}
         finally:
-            if cid:
-                self._release(cid, uid, sid)
+            self._release(cid, uid, sid, token)
 
     def shell_exec(self, raw: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
         uid, sid = _extract_tenant(headers)
@@ -321,16 +306,13 @@ class SandboxHttpApp:
         if not cmd: return {"error": "missing 'command'"}
         exec_dir = raw.get("exec_dir") or "/workspace"
         timeout_ms = raw.get("timeout_ms") or raw.get("timeout", 30000)
-
-        cid = None
+        cid, token = self._acquire(uid, sid)
         try:
-            cid = self._acquire(uid, sid)
             stdout, stderr, ec = self._container_exec(cid, cmd, exec_dir=exec_dir,
                                                        timeout=int(timeout_ms) // 1000)
             return {"exit_code": ec, "stdout": stdout, "stderr": stderr}
         finally:
-            if cid:
-                self._release(cid, uid, sid)
+            self._release(cid, uid, sid, token)
 
     def queue_drain(self) -> Dict[str, Any]:
         if not self._pool:
@@ -355,14 +337,14 @@ class SandboxHttpApp:
 
     # ---- Internal ----
 
-    def _acquire(self, uid: str, sid: str) -> str:
+    def _acquire(self, uid: str, sid: str) -> tuple[str, int]:
         if not self._pool:
             raise SandboxException.queue_not_enabled()
         return self._pool.acquire(uid, sid)
 
-    def _release(self, cid: str, uid: str, sid: str) -> None:
+    def _release(self, cid: str, uid: str, sid: str, token: int = 0) -> None:
         if self._pool:
-            self._pool.release(cid, uid, sid)
+            self._pool.release(cid, uid, sid, token)
 
     # ---- Docker exec helpers ----
 
