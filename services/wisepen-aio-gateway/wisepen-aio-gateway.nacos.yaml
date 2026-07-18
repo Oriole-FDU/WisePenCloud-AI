@@ -1,6 +1,0 @@
-FROM_SOURCE_SECRET: "local-dev-secret"
-AIO_WORKER_IMAGE: "ghcr.io/agent-infra/sandbox:latest"
-AIO_WORKER_MIN_IDLE: 2
-AIO_WORKER_MAX_TOTAL: 8
-AIO_WORKER_DIRTY_TTL: 60
-AIO_WORKSPACE_CACHE_DIR: "/workspaces"

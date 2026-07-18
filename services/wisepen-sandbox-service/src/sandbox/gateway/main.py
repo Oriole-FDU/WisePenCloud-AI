@@ -15,6 +15,7 @@ from sandbox.gateway.api.router import api_router
 from sandbox.gateway.api import deps
 from sandbox.gateway.api.vnc_binding import ContainerBinding
 from sandbox.Queue.pool_manager import PoolConfig, ContainerPoolManager
+from sandbox.mcp.server import build_sandbox_mcp
 from common.web.middleware import SecurityHeaderMiddleware
 from common.web.exception_handlers import setup_global_exception_handlers
 from common.core.domain.responses import R
@@ -42,6 +43,12 @@ async def lifespan(app: FastAPI):
     pool.start()
     deps.set_queue(pool.queue)
     deps.set_file_manager(pool.file_manager)
+
+    # Mount MCP server
+    mcp_server = build_sandbox_mcp(pool.queue, pool.file_manager)
+    mcp_app = mcp_server.streamable_http_app()
+    app.mount("/mcp", mcp_app)
+    info("mcp server mounted.", path="/mcp")
 
     # VNC 绑定管理器
     vnc_binding = ContainerBinding(pool)
