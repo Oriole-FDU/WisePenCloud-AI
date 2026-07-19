@@ -20,7 +20,7 @@ from ._utils import (
     as_str,
     as_str_or_none,
     dedupe_by_url,
-    has_search_result_fields,
+    is_valid_search_result,
 )
 
 
@@ -93,7 +93,7 @@ class TavilySearcher(BaseProviderSearcher):
         title = as_str(item.get("title"))
         url = as_str(item.get("url"))
 
-        if not has_search_result_fields(title=title, url=url):
+        if not is_valid_search_result(title=title, url=url):
             return None
 
         return ProviderSearchResult(
