@@ -43,14 +43,6 @@ class WebSearchCandidate:
 
 
 @dataclass(frozen=True, slots=True)
-class VisibleWebSearchCandidate:
-    url: str
-    title: str
-    overview: str | None = None
-    highlights: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class SearchPipelineResult:
     search_result: WebSearchResult
     candidates: tuple[WebSearchCandidate, ...]
