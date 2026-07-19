@@ -153,6 +153,9 @@ class InMemorySandboxRepository:
                 existing = self._records[existing_id]
                 if existing.tenant_id != tenant_id or existing.workspace_id != workspace_id:
                     raise LeaseConflictError("request_id context does not match existing lease")
+                # 验证现有租约未过期
+                if existing.lease_expires_at and existing.lease_expires_at <= utc_now():
+                    raise LeaseExpiredError(f"existing lease for request_id {request_id} has expired")
                 return existing, self._lease_for(existing)
 
             ready = next(
@@ -207,12 +210,13 @@ class InMemorySandboxRepository:
             record = self._records.get(sandbox_id) if sandbox_id else None
             if record is None:
                 raise LeaseNotFoundError(f"lease {lease_id} was not found")
-            if record.fencing_token != fencing_token:
-                raise FencingRejectedError("lease fencing token is stale")
+            # 幂等检查在前：已关闭的记录直接返回，不抛 fencing error
             if record.state == SandboxState.DESTROYED:
                 return record
             if record.state in (SandboxState.SYNCING, SandboxState.DESTROYING, SandboxState.LOST):
                 return record
+            if record.fencing_token != fencing_token:
+                raise FencingRejectedError("lease fencing token is stale")
             if record.state not in (SandboxState.ALLOCATED, SandboxState.RUNNING):
                 raise InvalidStateTransition(f"cannot release {record.state.value} sandbox")
             record.state = SandboxState.SYNCING
@@ -264,8 +268,8 @@ class InMemorySandboxRepository:
                 raise InvalidStateTransition(
                     "only warming sandboxes can prepare readiness"
                 )
-            record.readiness_token = readiness_token
-            self._records[record.ref.sandbox_id] = record
+            current.readiness_token = readiness_token
+            # 无需重新赋值：current 是同一可变对象引用
             self._generation += 1
             return self._generation
 

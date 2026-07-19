@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  sandbox-manager:
+    build: .
+    container_name: wisepen-sandbox-manager
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # Docker daemon control
+      - /workspaces:/workspaces                      # shared workspace
+    ports:
+      - "9001:9001"   # sandbox HTTP API
+      - "8001:8001"   # MCP gateway
+    environment:
+      - SANDBOX_HOST=0.0.0.0
+      - SANDBOX_PORT=9001
+      - SANDBOX_QUEUE_ENABLE=1
+      - WORKER_MIN_IDLE=2
+      - WORKER_MAX_TOTAL=8
+      - WORKER_DIRTY_TTL=60
+      - WORKSPACE_CACHE_DIR=/workspaces
+      - WORKER_IMAGE=ghcr.io/agent-infra/sandbox:latest
+      - FROM_SOURCE_SECRET=local-dev-secret
+    labels:
+      - "wisepen.role=sandbox-manager"

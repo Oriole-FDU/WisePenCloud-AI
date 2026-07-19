@@ -226,8 +226,8 @@ class ContainerQueue:
             "--security-opt", "seccomp=unconfined",
             "--shm-size", "2gb",
             "-v", f"{self._workspace_cache}:/workspaces",
-            "-p", "127.0.0.1::8080",
-            "-p", "127.0.0.1::6080",
+            "-p", "::8080",
+            "-p", "::6080",
             self._image,
         ]
         _dbg("docker_run", name=name, image=self._image)

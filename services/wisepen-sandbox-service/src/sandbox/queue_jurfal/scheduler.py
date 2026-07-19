@@ -71,7 +71,8 @@ class SandboxScheduler:
                     SandboxState.RUNNING,
                 )
                 record = await self._repository.get(record.ref.sandbox_id)
-                assert record is not None
+                if record is None:
+                    raise SandboxUnavailableError("sandbox record lost after allocation")
                 return self._lease(record)
             except Exception as exc:
                 await self._destroy_record(record, DestroyReason.ALLOCATION_FAILED)
@@ -107,7 +108,8 @@ class SandboxScheduler:
                 self._released_leases.add(lease_id)
                 return
             record = await self._repository.close_lease(lease_id, fencing_token)
-            if record.state == SandboxState.DESTROYING:
+            if record.state in (SandboxState.DESTROYING, SandboxState.DESTROYED,
+                                SandboxState.SYNCING, SandboxState.LOST):
                 return
             commit_error: Exception | None = None
             try:
@@ -142,10 +144,9 @@ class SandboxScheduler:
                     await self._destroy_record(record, DestroyReason.LEASE_EXPIRED)
                     self._released_leases.add(lease_id)
                     self._repository.metrics.increment("expired_lease_recoveries")
+                    recovered += 1
                 except Exception:
-                    recovered += 1
-                else:
-                    recovered += 1
+                    pass
         return recovered
 
     async def status(self, sandbox_id: str) -> SandboxRecord:

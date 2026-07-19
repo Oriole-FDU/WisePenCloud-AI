@@ -18,7 +18,7 @@ from sandbox.queue_jurfal.repository import InMemorySandboxRepository
 from sandbox.queue_jurfal.scheduler import SandboxScheduler
 from sandbox.queue_jurfal.watcher import Watcher
 from sandbox.queue_jurfal.workspace import LocalWorkspaceStore
-from sandbox.leader import InMemoryLeaderLease
+from sandbox.queue_jurfal.leader import InMemoryLeaderLease
 from sandbox.queue_jurfal.metrics import MetricsCollector
 
 __all__ = [

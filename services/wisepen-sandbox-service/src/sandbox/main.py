@@ -13,7 +13,7 @@ from sandbox.api import create_app
 from sandbox.core.config.app_settings import settings
 from sandbox.core.config.bootstrap_settings import bootstrap_settings
 from sandbox.core.config.nacos import nacos_client_manager
-from sandbox.leader import InMemoryLeaderLease
+from sandbox.queue_jurfal.leader import InMemoryLeaderLease
 from sandbox.queue_jurfal.models import SandboxSpec
 from sandbox.queue_jurfal.pool import SandboxPool
 from sandbox.queue_jurfal.repository import InMemorySandboxRepository
