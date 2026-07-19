@@ -22,7 +22,11 @@ from chat.application.tools.core.execution.executor import ToolExecutor
 from chat.application.tools.core.llm.invocation import ToolInvocation
 from chat.application.tools.core.output.cache import ToolOutputCache
 from chat.application.tools.core.llm.renderer import render_tool_result
-from chat.application.tools.core.output.tool_return import ToolReturn
+from chat.application.tools.core.output.tool_return import (
+    CacheableText,
+    CacheableTextContentType,
+    ToolReturn,
+)
 from chat.application.tools.core.registry import ToolScope
 
 
@@ -145,7 +149,7 @@ async def test_executor_caches_tool_return_large_text() -> None:
                 "example_tool": _ToolStub(
                     ToolReturn(
                         visible_result={"status": "ok"},
-                        cacheable_texts=("large text",),
+                        cacheable_texts=(CacheableText(text="# large text"),),
                     )
                 )
             },
@@ -163,3 +167,37 @@ async def test_executor_caches_tool_return_large_text() -> None:
     payload = json.loads(result.tool_output)
     assert payload["status"] == "ok"
     assert payload["content_receipts"][0]["content_id"] == repository.stored.content_id
+    assert repository.stored.content_type == "text/plain"
+    assert repository.stored.chunks[0].section_path == ()
+
+
+@pytest.mark.asyncio
+async def test_executor_preserves_cacheable_text_markdown_type() -> None:
+    repository = _RepositoryStub()
+    executor = ToolExecutor(
+        ToolScope(
+            tools={
+                "example_tool": _ToolStub(
+                    ToolReturn(
+                        cacheable_texts=(
+                            CacheableText(
+                                text="# Heading\n\nMarkdown body",
+                                content_type=CacheableTextContentType.MARKDOWN,
+                            ),
+                        ),
+                    )
+                )
+            },
+            context={"session_id": "session-1"},
+        ),
+        output_cache=ToolOutputCache(
+            content_store=ToolContentStore(repository=repository),
+            inline_max_chars=3,
+        ),
+    )
+
+    await executor.execute_one(_invocation())
+
+    assert repository.stored is not None
+    assert repository.stored.content_type == "text/markdown"
+    assert repository.stored.chunks[0].section_path == ("Heading",)

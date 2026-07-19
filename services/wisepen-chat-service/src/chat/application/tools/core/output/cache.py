@@ -9,7 +9,10 @@ from chat.application.tools.common.tool_content_store import (
 )
 from chat.application.tools.core.definition import ToolDefinition
 from chat.application.tools.core.llm.invocation import ToolInvocation
-from chat.application.tools.core.output.tool_return import ToolReturn
+from chat.application.tools.core.output.tool_return import (
+    CacheableText,
+    ToolReturn,
+)
 from common.logger import warn
 
 
@@ -44,16 +47,21 @@ class ToolOutputCache:
         # 与 ToolContentStore 的空文本规则保持一致，避免纯空白内容
         # 在 inline 和持久化两条路径中产生不同结果。
         cacheable_texts = tuple(
-            text
-            for text in tool_return.cacheable_texts
-            if text and not text.isspace()
+            cacheable_text
+            for cacheable_text in tool_return.cacheable_texts
+            if cacheable_text.text and not cacheable_text.text.isspace()
         )
         if not cacheable_texts:
             return payload
 
         # 总量较小时直接放入工具结果，避免一次额外的存储和读取。
-        if sum(map(len, cacheable_texts)) <= self._inline_max_chars:
-            payload["contents"] = cacheable_texts
+        if (
+                sum(len(cacheable_text.text) for cacheable_text in cacheable_texts)
+                <= self._inline_max_chars
+        ):
+            payload["contents"] = tuple(
+                cacheable_text.text for cacheable_text in cacheable_texts
+            )
             return payload
 
         # 超过内联边界后，每段文本独立入库；单段失败不影响其他文本。
@@ -79,7 +87,7 @@ class ToolOutputCache:
             self,
             *,
             invocation: ToolInvocation,
-            cacheable_texts: tuple[str, ...],
+            cacheable_texts: tuple[CacheableText, ...],
             tool_definition: ToolDefinition,
             session_id: str,
     ) -> tuple[ToolContentReceipt, ...]:
@@ -87,11 +95,12 @@ class ToolOutputCache:
         receipts: list[ToolContentReceipt] = []
         content_count = len(cacheable_texts)
 
-        for index, text in enumerate(cacheable_texts):
+        for index, cacheable_text in enumerate(cacheable_texts):
             try:
                 result = await self._content_store.put(
                     session_id=session_id,
-                    text=text,
+                    text=cacheable_text.text,
+                    content_type=cacheable_text.content_type,
                     metadata={
                         "tool": invocation.tool_name,
                         "tool_call_id": invocation.tool_call_id,
