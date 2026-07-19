@@ -12,8 +12,7 @@ _THULAC_TOKENIZER = ThuLacRankingTokenizer()
 _ZERO_ENTROPY_RERANKER = ZeroEntropyReranker(
     client=AsyncZeroEntropy(api_key=settings.ZERO_ENTROPY_API_KEY),
     config=ZeroEntropyRerankerConfig(
-        model=settings.EVIDENCE_RANKER_ZE_MODEL,
-        top_n=settings.EVIDENCE_RANKER_ZE_TOP_N,
+        model=settings.RERANKER_MODEL,
     ),
 )
 
@@ -43,4 +42,22 @@ KNOWLEDGE_SEARCH_PIPELINE = RankingPipeline(
             ),
         ),
     ),
+)
+
+WEB_SEARCH_PIPELINE = RankingPipeline(
+    scorers=(
+        FieldedBM25Scorer(
+            tokenizer=_THULAC_TOKENIZER,
+            config=FieldedBM25ScorerConfig(
+                field_weights={
+                    "title": 3.0,
+                    "overview": 1.5,
+                    "highlights": 1.0,
+                },
+                min_score=-1.0,
+            ),
+        ),
+    ),
+    fusion=WeightedRrfFusion(),
+    reranker=_ZERO_ENTROPY_RERANKER,
 )

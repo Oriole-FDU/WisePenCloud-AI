@@ -37,11 +37,11 @@ class AppSettings(BaseModel):
     MEMORY_EMBEDDING_MODEL: str
     MEMORY_RERANKER_ZE_MODEL: str
     ZERO_ENTROPY_API_KEY: str
+
     QUERY_MODEL: str  # 工具性小模型调用使用的查询模型
-    EMBEDDING_MODEL: str  # RAG 索引与检索使用的 embedding 模型
-    EMBEDDING_DIMENSIONS: int  # embedding 向量维度
-    EVIDENCE_RANKER_ZE_MODEL: str  # 排序预设使用的 ZeroEntropy 重排模型
-    EVIDENCE_RANKER_ZE_TOP_N: int | None = None  # 重排服务最多返回的候选数量
+    EMBEDDING_MODEL: str  # embedding 模型
+    EMBEDDING_DIMENSIONS: int = 4096 # embedding 向量维度
+    RERANKER_MODEL: str  # 重排模型
 
     # 摘要模型
     SUMMARY_MODEL: str

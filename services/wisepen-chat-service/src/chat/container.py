@@ -49,7 +49,7 @@ from chat.application.tools.session_tools.tool_content_read.tools import (
     ToolContentRankedExpandReadTool,
     ToolContentSequentialReadTool,
 )
-from chat.application.utils.ranking.presets import READ_RANKED_EXPAND_PIPELINE
+from chat.application.utils.ranking.presets import READ_RANKED_EXPAND_PIPELINE, WEB_SEARCH_PIPELINE
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.application.tools.search_tools.web_search import (
@@ -294,7 +294,10 @@ class Container(containers.DeclarativeContainer):
         anysearch_base_url=settings.WEB_SEARCH_ANYSEARCH_BASE_URL,
         baidu_qianfan_base_url=settings.WEB_SEARCH_BAIDU_QIANFAN_BASE_URL,
     )
-    web_search_pipeline = providers.Singleton(SearchPipeline)
+    web_search_pipeline = providers.Singleton(
+        SearchPipeline,
+        ranking_pipeline=WEB_SEARCH_PIPELINE,
+    )
     platform_search_tool = providers.Singleton(
         PlatformSearchTool,
         search_pipeline=web_search_pipeline,
