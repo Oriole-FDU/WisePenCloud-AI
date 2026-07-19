@@ -14,15 +14,15 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.utils.batching import batched
 
-from ..tool_content_read.content_loader import ToolContentLoader
-from ..tool_content_read.content_window_builder import ToolContentWindowBuilder
-from ..tool_content_read.models import (
+from ..services.content_loader import ToolContentLoader
+from ..services.content_window_builder import ToolContentWindowBuilder
+from ..services.models import (
     ToolContentReadFailure,
     ToolContentRegexReadRequest,
     ToolContentRegexReadResult,
     ToolContentSelector,
 )
-from ..tool_content_read.readers import RegexMatchReader
+from ..services.readers import RegexMatchReader
 from .common import (
     CONTENT_IDS_SCHEMA,
     SELECTOR_SCHEMA,

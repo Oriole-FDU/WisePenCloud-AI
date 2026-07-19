@@ -15,15 +15,15 @@ from chat.application.tools.core import (
 from chat.application.tools.utils.batching import batched
 from chat.application.utils.ranking.pipeline import RankingPipeline
 
-from ..tool_content_read.content_loader import ToolContentLoader
-from ..tool_content_read.content_window_builder import ToolContentWindowBuilder
-from ..tool_content_read.models import (
+from ..services.content_loader import ToolContentLoader
+from ..services.content_window_builder import ToolContentWindowBuilder
+from ..services.models import (
     ToolContentReadFailure,
     ToolContentRankedExpandReadRequest,
     ToolContentRankedExpandReadResult,
     ToolContentSelector,
 )
-from ..tool_content_read.readers import RankedExpandReader
+from ..services.readers import RankedExpandReader
 from .common import (
     CONTENT_IDS_SCHEMA,
     SELECTOR_SCHEMA,
