@@ -1,4 +1,4 @@
-from .models import (
+from .services.models import (
     ToolContentReadFailure,
     ToolContentRegexMatch,
     ToolContentRegexReadRequest,

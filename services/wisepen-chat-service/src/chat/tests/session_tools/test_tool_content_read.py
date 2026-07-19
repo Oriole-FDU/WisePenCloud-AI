@@ -18,23 +18,23 @@ from chat.application.tools.session_tools.tool_content_read import (
     ToolContentSelector,
     ToolContentWindow,
 )
-from chat.application.tools.session_tools.tool_content_read.readers._utils.chunk_selection import (
+from chat.application.tools.session_tools.tool_content_read.services.readers._utils.chunk_selection import (
     select_chunks,
 )
-from chat.application.tools.session_tools.tool_content_read.content_loader import (
+from chat.application.tools.session_tools.tool_content_read.services.content_loader import (
     ToolContentLoader,
 )
-from chat.application.tools.session_tools.tool_content_read.content_window_builder import (
+from chat.application.tools.session_tools.tool_content_read.services.content_window_builder import (
     ToolContentWindowBuilder,
 )
-from chat.application.tools.session_tools.tool_content_read.readers import RegexMatchReader
-from chat.application.tools.session_tools.tool_content_read.readers.regex_match_reader import (
+from chat.application.tools.session_tools.tool_content_read.services.readers import RegexMatchReader
+from chat.application.tools.session_tools.tool_content_read.services.readers.regex_match_reader import (
     ToolContentRegexTimeoutError,
 )
-from chat.application.tools.session_tools.tool_content_read.readers.sequential_reader import (
+from chat.application.tools.session_tools.tool_content_read.services.readers.sequential_reader import (
     SequentialReader,
 )
-from chat.application.tools.session_tools.tool_content_read_tools import (
+from chat.application.tools.session_tools.tool_content_read.tools import (
     ToolContentRegexReadTool,
     ToolContentRankedExpandReadTool,
 )
@@ -332,7 +332,7 @@ def test_regex_reader_converts_engine_timeout(monkeypatch: pytest.MonkeyPatch) -
             raise TimeoutError
 
     monkeypatch.setattr(
-        "chat.application.tools.session_tools.tool_content_read.readers.regex_match_reader.regex.compile",
+        "chat.application.tools.session_tools.tool_content_read.services.readers.regex_match_reader.regex.compile",
         lambda pattern: _TimedOutPattern(),
     )
     reader = RegexMatchReader(

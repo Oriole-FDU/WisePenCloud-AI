@@ -43,7 +43,7 @@ from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.output.cache import ToolOutputCache
 from chat.application.tools.common.tool_content_store import ToolContentStore
-from chat.application.tools.session_tools.tool_content_read_tools import (
+from chat.application.tools.session_tools.tool_content_read.tools import (
     ToolContentRegexReadTool,
     ToolContentRankedExpandReadTool,
     ToolContentSequentialReadTool,

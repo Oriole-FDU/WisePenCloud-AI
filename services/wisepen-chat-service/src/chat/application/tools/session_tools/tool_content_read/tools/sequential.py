@@ -12,10 +12,10 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 
-from ..tool_content_read.content_loader import ToolContentLoader
-from ..tool_content_read.content_window_builder import ToolContentWindowBuilder
-from ..tool_content_read.models import ToolContentSequentialReadResult
-from ..tool_content_read.readers import SequentialReader
+from ..services.content_loader import ToolContentLoader
+from ..services.content_window_builder import ToolContentWindowBuilder
+from ..services.models import ToolContentSequentialReadResult
+from ..services.readers import SequentialReader
 
 _TIMEOUT_SECONDS = 300.0
 _PARAMETERS_SCHEMA: dict[str, Any] = {
