@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from chat.application.tools.search_tools.web_search.services.providers.anysearch import (
     AnySearchSearcher,
 )
@@ -81,3 +83,21 @@ def test_anysearch_uses_data_results_snippet() -> None:
     assert response.provider is SearchProviderName.ANYSEARCH
     assert response.answer is None
     assert response.results[0].preview.snippet == "Short result preview"
+
+
+def test_anysearch_missing_snippet_fails_response_mapping() -> None:
+    with pytest.raises(KeyError, match="snippet"):
+        AnySearchSearcher.map_response(
+            {
+                "data": {
+                    "results": [
+                        {
+                            "title": "AnySearch result",
+                            "url": "https://example.com/anysearch",
+                        }
+                    ],
+                },
+            },
+            query="anysearch query",
+            max_results=10,
+        )

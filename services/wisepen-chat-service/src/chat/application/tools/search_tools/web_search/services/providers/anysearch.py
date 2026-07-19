@@ -15,13 +15,7 @@ from .core.models import (
     SearchPreview,
     SearchProviderName,
 )
-from ._utils import (
-    as_dict_tuple,
-    as_str,
-    as_str_or_none,
-    dedupe_by_url,
-    is_valid_search_result,
-)
+from ._utils import dedupe_results
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,43 +61,18 @@ class AnySearchSearcher(BaseProviderSearcher):
         query: str,
         max_results: int,
     ) -> ProviderSearchResponse:
-        payload = data.get("data")
-        if not isinstance(payload, dict):
-            return ProviderSearchResponse(
-                query=query,
-                provider=SearchProviderName.ANYSEARCH,
-            )
-
-        results = tuple(
-            result
-            for item in as_dict_tuple(payload.get("results"))
-            if (result := AnySearchSearcher._map_result(item)) is not None
-        )
-
         return ProviderSearchResponse(
             query=query,
             provider=SearchProviderName.ANYSEARCH,
-            results=dedupe_by_url(
-                results,
-                url_getter=lambda item: item.url,
+            results=dedupe_results(
+                (
+                    ProviderSearchResult(
+                        title=item["title"],
+                        url=item["url"],
+                        preview=SearchPreview(snippet=item["snippet"]),
+                    )
+                    for item in data["data"]["results"]
+                ),
                 limit=max_results,
-            ),
-        )
-
-    @staticmethod
-    def _map_result(
-        item: dict[str, object],
-    ) -> ProviderSearchResult | None:
-        title = as_str(item.get("title"))
-        url = as_str(item.get("url"))
-
-        if not is_valid_search_result(title=title, url=url):
-            return None
-
-        return ProviderSearchResult(
-            title=title,
-            url=url,
-            preview=SearchPreview(
-                snippet=as_str_or_none(item.get("snippet")),
             ),
         )

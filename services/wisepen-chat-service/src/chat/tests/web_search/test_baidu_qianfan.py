@@ -27,7 +27,7 @@ def test_baidu_qianfan_request_uses_the_ai_search_web_endpoint() -> None:
     }
 
 
-def test_baidu_qianfan_keeps_web_references_and_deduplicates_urls() -> None:
+def test_baidu_qianfan_maps_references_and_deduplicates_urls() -> None:
     response = BaiduQianfanSearcher.map_response(
         {
             "references": [
@@ -37,15 +37,29 @@ def test_baidu_qianfan_keeps_web_references_and_deduplicates_urls() -> None:
                     "url": "https://example.com/doc",
                     "snippet": "接口说明",
                 },
-                {"type": "image", "title": "图片", "url": "https://example.com/image"},
+                {
+                    "type": "image",
+                    "title": "图片",
+                    "url": "https://example.com/image",
+                    "snippet": "图片结果",
+                },
                 {
                     "type": "web",
                     "title": "网页结果",
                     "url": "https://example.com/page",
                     "snippet": "搜索摘要",
                 },
-                {"title": "未标类型网页", "url": "https://example.com/unknown"},
-                {"type": "web", "title": "重复 URL", "url": "https://example.com/page"},
+                {
+                    "title": "未标类型网页",
+                    "url": "https://example.com/unknown",
+                    "snippet": "未标类型结果",
+                },
+                {
+                    "type": "web",
+                    "title": "重复 URL",
+                    "url": "https://example.com/page",
+                    "snippet": "重复结果",
+                },
             ],
         },
         query="千帆搜索",
@@ -56,7 +70,9 @@ def test_baidu_qianfan_keeps_web_references_and_deduplicates_urls() -> None:
     assert response.answer is None
     assert [item.title for item in response.results] == [
         "千帆 API 文档",
+        "图片",
         "网页结果",
+        "未标类型网页",
     ]
     assert response.results[0].preview.snippet == "接口说明"
 

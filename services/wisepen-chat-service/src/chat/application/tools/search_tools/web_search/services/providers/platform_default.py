@@ -19,13 +19,7 @@ from .core.models import (
     SearchPreview,
 )
 from .core.protocols import ProviderSearcher
-from ._utils import (
-    as_dict_tuple,
-    as_str,
-    as_str_or_none,
-    dedupe_by_url,
-    is_valid_search_result,
-)
+from ._utils import dedupe_results
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,54 +57,33 @@ class FourGetSearcher(BaseProviderSearcher):
         query: str,
         max_results: int,
     ) -> ProviderSearchResponse:
-        results = tuple(
-            result
-            for item in as_dict_tuple(data.get("web"))
-            if (result := FourGetSearcher._map_result(item)) is not None
-        )
-
         return ProviderSearchResponse(
             query=query,
             provider=None,
-            results=dedupe_by_url(
-                results,
-                url_getter=lambda item: item.url,
+            results=dedupe_results(
+                (
+                    ProviderSearchResult(
+                        title=item["title"],
+                        url=item["url"],
+                        preview=SearchPreview(snippet=item["description"]),
+                    )
+                    for item in data["web"]
+                ),
                 limit=max_results,
             ),
-            answer=FourGetSearcher._map_answers(data.get("answer")),
+            answer=FourGetSearcher._map_answer(data["answer"]),
         )
 
     @staticmethod
-    def _map_result(
-        item: dict[str, object],
-    ) -> ProviderSearchResult | None:
-        title = as_str(item.get("title"))
-        url = as_str(item.get("url"))
-
-        if not is_valid_search_result(title=title, url=url):
-            return None
-
-        return ProviderSearchResult(
-            title=title,
-            url=url,
-            preview=SearchPreview(
-                snippet=as_str_or_none(item.get("description")),
-            ),
+    def _map_answer(answers: list[dict[str, object]]) -> str:
+        return "\n".join(
+            text
+            for answer in answers
+            for text in (
+                answer["title"],
+                *(node["value"] for node in answer["description"]),
+            )
         )
-
-    @staticmethod
-    def _map_answers(value: object) -> str | None:
-        parts: list[str] = []
-
-        for answer in as_dict_tuple(value):
-            if title := as_str(answer.get("title")):
-                parts.append(title)
-
-            for node in as_dict_tuple(answer.get("description")):
-                if text := as_str(node.get("value")):
-                    parts.append(text)
-
-        return "\n".join(parts).strip() or None
 
 
 class DdgSearcher(ProviderSearcher):
@@ -150,37 +123,19 @@ class DdgSearcher(ProviderSearcher):
         query: str,
         max_results: int,
     ) -> ProviderSearchResponse:
-        results = tuple(
-            result
-            for item in items
-            if (result := DdgSearcher._map_result(item)) is not None
-        )
-
         return ProviderSearchResponse(
             query=query,
             provider=None,
-            results=dedupe_by_url(
-                results,
-                url_getter=lambda item: item.url,
+            results=dedupe_results(
+                (
+                    ProviderSearchResult(
+                        title=item["title"],
+                        url=item["href"],
+                        preview=SearchPreview(snippet=item["body"]),
+                    )
+                    for item in items
+                ),
                 limit=max_results,
-            ),
-        )
-
-    @staticmethod
-    def _map_result(
-        item: dict[str, Any],
-    ) -> ProviderSearchResult | None:
-        title = as_str(item.get("title"))
-        url = as_str(item.get("href"))
-
-        if not is_valid_search_result(title=title, url=url):
-            return None
-
-        return ProviderSearchResult(
-            title=title,
-            url=url,
-            preview=SearchPreview(
-                snippet=as_str_or_none(item.get("body")),
             ),
         )
 
