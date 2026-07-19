@@ -169,6 +169,7 @@ async def test_executor_caches_tool_return_large_text() -> None:
     assert payload["content_receipts"][0]["content_id"] == repository.stored.content_id
     assert repository.stored.content_type == "text/plain"
     assert repository.stored.chunks[0].section_path == ()
+    assert repository.stored.metadata == {}
 
 
 @pytest.mark.asyncio
