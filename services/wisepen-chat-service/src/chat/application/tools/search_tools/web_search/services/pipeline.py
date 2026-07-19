@@ -32,10 +32,10 @@ from .sources import (
 @dataclass(frozen=True, slots=True)
 class WebSearchCandidate:
     candidate_id: str
-    title: str
-    url: str
+    title: str | None = None
+    url: str | None = None
     snippet: str | None = None
-    highlights: tuple[str, ...] = ()
+    highlights: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +61,7 @@ class SearchPipeline:
         mode: SearchMode,
     ) -> SearchPipelineResult:
         try:
-            response = await self._search_provider(
+            response = await self._request_provider_response(
                 query=search_query,
                 max_results=max_results,
                 source=source,
@@ -100,16 +100,27 @@ class SearchPipeline:
                         text="\n".join(
                             text
                             for text in (
-                                candidate.title,
-                                candidate.snippet,
-                                *candidate.highlights,
+                                (
+                                    f"Title: {candidate.title}"
+                                    if candidate.title
+                                    else ""
+                                ),
+                                (
+                                    f"Snippet: {candidate.snippet}"
+                                    if candidate.snippet
+                                    else ""
+                                ),
+                                *(
+                                    f"Highlight: {highlight}"
+                                    for highlight in candidate.highlights or ()
+                                ),
                             )
                             if text
                         ),
                         fields={
-                            "title": candidate.title,
+                            "title": candidate.title or "",
                             "snippet": candidate.snippet or "",
-                            "highlights": "\n".join(candidate.highlights),
+                            "highlights": "\n".join(candidate.highlights or ()),
                         },
                     )
                     for candidate in candidates
@@ -130,7 +141,7 @@ class SearchPipeline:
             ),
         )
 
-    async def _search_provider(
+    async def _request_provider_response(
         self,
         *,
         query: str,

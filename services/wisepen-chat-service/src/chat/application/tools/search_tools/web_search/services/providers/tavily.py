@@ -69,9 +69,9 @@ class TavilySearcher(BaseProviderSearcher):
             results=dedupe_results(
                 (
                     ProviderSearchResult(
-                        title=item["title"],
-                        url=item["url"],
-                        preview=SearchPreview(snippet=item["content"]),
+                        title=item.get("title"),
+                        url=item.get("url"),
+                        preview=SearchPreview(snippet=item.get("content")),
                     )
                     for item in data["results"]
                 ),

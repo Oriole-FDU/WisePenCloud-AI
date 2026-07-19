@@ -10,7 +10,7 @@ def dedupe_results(
     *,
     limit: int,
 ) -> tuple[ProviderSearchResult, ...]:
-    seen: set[str] = set()
+    seen: set[str | None] = set()
     deduped: list[ProviderSearchResult] = []
 
     for result in results:

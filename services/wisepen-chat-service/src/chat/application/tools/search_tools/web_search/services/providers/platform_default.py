@@ -63,9 +63,9 @@ class FourGetSearcher(BaseProviderSearcher):
             results=dedupe_results(
                 (
                     ProviderSearchResult(
-                        title=item["title"],
-                        url=item["url"],
-                        preview=SearchPreview(snippet=item["description"]),
+                        title=item.get("title"),
+                        url=item.get("url"),
+                        preview=SearchPreview(snippet=item.get("description")),
                     )
                     for item in data["web"]
                 ),
@@ -129,9 +129,9 @@ class DdgSearcher(ProviderSearcher):
             results=dedupe_results(
                 (
                     ProviderSearchResult(
-                        title=item["title"],
-                        url=item["href"],
-                        preview=SearchPreview(snippet=item["body"]),
+                        title=item.get("title"),
+                        url=item.get("href"),
+                        preview=SearchPreview(snippet=item.get("body")),
                     )
                     for item in items
                 ),

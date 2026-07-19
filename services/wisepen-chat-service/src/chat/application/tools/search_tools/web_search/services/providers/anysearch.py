@@ -67,9 +67,9 @@ class AnySearchSearcher(BaseProviderSearcher):
             results=dedupe_results(
                 (
                     ProviderSearchResult(
-                        title=item["title"],
-                        url=item["url"],
-                        preview=SearchPreview(snippet=item["snippet"]),
+                        title=item.get("title"),
+                        url=item.get("url"),
+                        preview=SearchPreview(snippet=item.get("snippet")),
                     )
                     for item in data["data"]["results"]
                 ),

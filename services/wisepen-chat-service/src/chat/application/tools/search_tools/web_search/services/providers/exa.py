@@ -78,11 +78,15 @@ class ExaSearcher(BaseProviderSearcher):
             results=dedupe_results(
                 (
                     ProviderSearchResult(
-                        title=item["title"],
-                        url=item["url"],
+                        title=item.get("title"),
+                        url=item.get("url"),
                         preview=SearchPreview(
-                            snippet=item["summary"],
-                            highlights=tuple(item["highlights"]),
+                            snippet=item.get("summary"),
+                            highlights=(
+                                tuple(highlights)
+                                if (highlights := item.get("highlights")) is not None
+                                else None
+                            ),
                         ),
                     )
                     for item in data["results"]

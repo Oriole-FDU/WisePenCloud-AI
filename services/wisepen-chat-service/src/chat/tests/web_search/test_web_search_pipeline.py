@@ -92,6 +92,9 @@ async def test_search_pipeline_ranks_provider_results_with_question() -> None:
         "snippet": "First snippet",
         "highlights": "First highlight",
     }
+    assert reranker.ranked[0].candidate.text == (
+        "Title: First result\nSnippet: First snippet\nHighlight: First highlight"
+    )
     assert [candidate.title for candidate in result.candidates] == [
         "Second result",
         "First result",

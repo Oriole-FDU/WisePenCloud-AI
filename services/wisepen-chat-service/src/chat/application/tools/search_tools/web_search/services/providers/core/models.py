@@ -38,15 +38,15 @@ class SearchPreview:
     """搜索结果预览信息。"""
 
     snippet: str | None = None
-    highlights: tuple[str, ...] = ()
+    highlights: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ProviderSearchResult:
     """单条搜索结果。"""
 
-    title: str
-    url: str
+    title: str | None = None
+    url: str | None = None
     preview: SearchPreview = field(default_factory=SearchPreview)
 
 
