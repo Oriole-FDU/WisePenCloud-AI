@@ -93,7 +93,6 @@ class ToolOutputCache:
     ) -> tuple[ToolContentReceipt, ...]:
         """逐段存储大文本，并返回成功写入的内容回执。"""
         receipts: list[ToolContentReceipt] = []
-        content_count = len(cacheable_texts)
 
         for index, cacheable_text in enumerate(cacheable_texts):
             try:
@@ -101,13 +100,6 @@ class ToolOutputCache:
                     session_id=session_id,
                     text=cacheable_text.text,
                     content_type=cacheable_text.content_type,
-                    metadata={
-                        "tool": invocation.tool_name,
-                        "tool_call_id": invocation.tool_call_id,
-                        "tool_arguments": invocation.tool_call_arguments,
-                        "cacheable_text_index": index,
-                        "cacheable_text_count": content_count,
-                    },
                     chunked=tool_definition.policy.cache_chunked,
                 )
             except Exception as exc:
