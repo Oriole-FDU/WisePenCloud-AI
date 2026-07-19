@@ -119,6 +119,8 @@ class ToolPolicy:
     persist_output: bool = False # 是否持久化输出 (如果不持久化则需要生成占位符)
     persisted_output_placeholder_factory: Callable[[dict, Any], str | None] = lambda tool_call_arguments, output: None # 持久化输出的占位生成器
 
+    cache_chunked: bool = True # cacheable_texts 入库时是否生成 chunks/index
+
     risk_level: ToolRiskLevel = ToolRiskLevel.LOW # 风险级别
 
     required_context_keys: tuple[str, ...] = () # 需要的上下文 Key

@@ -1,4 +1,3 @@
-import json
 import uuid
 from typing import AsyncIterator, Iterator, List, Optional, Union
 
@@ -23,7 +22,6 @@ from chat.application.token_counter import TokenCounter
 from chat.application.tools import ToolScope
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.llm.invocation import ToolInvocation
-from chat.application.tools.core.llm.renderer import tool_result_renderer
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.message import MessageModelInfo, ToolCallMessage
@@ -43,6 +41,7 @@ class _StepEventInterpreter:
     - 收集 tool_call
     - 向外产出 StreamEvent
     """
+
     def __init__(self) -> None:
         self.text_id = f"txt_{uuid.uuid4().hex}"
         self.reasoning_id = f"rsn_{uuid.uuid4().hex}"
@@ -117,6 +116,7 @@ class _StepEventInterpreter:
 # QueryLoopRuntime
 # =============================================================================
 
+
 def _merge_runtime_options(defaults: dict, overrides: dict) -> dict:
     result = dict(defaults or {})
     for key, value in (overrides or {}).items():
@@ -126,19 +126,26 @@ def _merge_runtime_options(defaults: dict, overrides: dict) -> dict:
             result[key] = value
     return result
 
+
 class QueryLoopRuntime:
     """
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
     """
 
-    def __init__(self, llm_provider_resolver: LLMProviderResolver, token_counter: TokenCounter) -> None:
+    def __init__(
+        self,
+        llm_provider_resolver: LLMProviderResolver,
+        token_counter: TokenCounter,
+        tool_dispatcher: ToolDispatcher,
+    ) -> None:
         self._llm_provider_resolver = llm_provider_resolver
         self._token_counter = token_counter
-        self._tool_dispatcher = ToolDispatcher()
+        self._tool_dispatcher = tool_dispatcher
 
     """
     ReAct 循环主入口 (QueryLoop)
     """
+
     async def stream_chat_with_tool_calling(
         self,
         messages: List[ChatMessage],
@@ -153,12 +160,16 @@ class QueryLoopRuntime:
         # 检查模型参数是否正确
         manifest = llm_provider.runtime_options_manifest()
         # 合并默认参数
-        runtime_options = _merge_runtime_options(manifest.get("defaults") or {}, model_info.runtime_options or {})
+        runtime_options = _merge_runtime_options(
+            manifest.get("defaults") or {}, model_info.runtime_options or {}
+        )
         try:
             Draft202012Validator.check_schema(manifest["json_schema"])
             Draft202012Validator(manifest["json_schema"]).validate(runtime_options)
         except (SchemaError, ValidationError) as e:
-            raise ServiceException(ChatErrorCode.MODEL_RUNTIME_OPTIONS_INVALID, custom_msg=str(e))
+            raise ServiceException(
+                ChatErrorCode.MODEL_RUNTIME_OPTIONS_INVALID, custom_msg=str(e)
+            )
         model_info = model_info.with_runtime_options(runtime_options)
 
         # 进入多轮循环
@@ -193,6 +204,7 @@ class QueryLoopRuntime:
     """
     Agent Step：发起一次流式推理 → 解析 → 若需要则执行工具
     """
+
     async def _run_single_step(
         self,
         messages: List[ChatMessage],
@@ -209,8 +221,11 @@ class QueryLoopRuntime:
         event_interpreter = _StepEventInterpreter()
 
         # schema 已由 ToolScope 在构造期固化；仅在模型和 LLM Provider 均声明支持工具时传给 LLM
-        tool_schemas = tool_scope.schemas() \
-            if model_info.support_tools and llm_provider.supports_tools() else []
+        tool_schemas = (
+            tool_scope.schemas()
+            if model_info.support_tools and llm_provider.supports_tools()
+            else []
+        )
 
         token_usage = 0
         try:
@@ -220,7 +235,10 @@ class QueryLoopRuntime:
                 model_request=model_info,
                 tools=tool_schemas or None,
             ):
-                if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
+                if (
+                    llm_provider_event.type == LLMEventType.USAGE
+                    and llm_provider_event.usage
+                ):
                     token_usage += llm_provider_event.usage.total_tokens
 
                 # 把 LLMStreamEvent 事件交给解释器，产出 StreamEvent
@@ -244,8 +262,8 @@ class QueryLoopRuntime:
             model_info=MessageModelInfo.from_model_request(model_info),
             content=event_interpreter.assistant_content or "",
             reasoning_content=event_interpreter.assistant_reasoning or None,
-            provider_payload=event_interpreter.provider_payload, # 原生载荷
-            tool_calls=event_interpreter.tool_calls
+            provider_payload=event_interpreter.provider_payload,  # 原生载荷
+            tool_calls=event_interpreter.tool_calls,
         )
 
         if token_usage == 0:
@@ -254,17 +272,21 @@ class QueryLoopRuntime:
                 messages=messages,
                 model_name=model_info.model_name,
                 tools=tool_schemas or None,
-            ) # 统计输入 tokens
+            )  # 统计输入 tokens
             token_usage += await self._token_counter.count_messages(
                 messages=[assistant_msg],
                 model_name=model_info.model_name,
-            ) # 统计输出 tokens
+            )  # 统计输出 tokens
 
         assistant_msg.token_usage = token_usage
 
         # 如果没有工具调用，则结束这一轮（也结束整个循环）
         if not event_interpreter.tool_calls:
-            yield StepFinishEvent(is_finished=True, final_assistant_message=assistant_msg, token_usage=token_usage)
+            yield StepFinishEvent(
+                is_finished=True,
+                final_assistant_message=assistant_msg,
+                token_usage=token_usage,
+            )
             return
 
         # 如果有工具调用，则进入工具阶段
@@ -297,10 +319,7 @@ class QueryLoopRuntime:
         # 通过工具 core 并发执行并归约结果
         tool_outputs = await self._tool_dispatcher.dispatch(invocations, tool_scope)
 
-        for result in tool_outputs.results:
-            tool = tool_scope.get(result.tool_invocation.tool_name)
-            result = tool_result_renderer(result, tool.definition if tool else None)
-
+        for result in tool_outputs:
             yield ToolOutputAvailableEvent(
                 call_id=result.tool_call_id,
                 output=result.tool_output,
@@ -317,7 +336,11 @@ class QueryLoopRuntime:
             )
 
         # 结束本轮并继续下一轮模型推理（因为调用工具）
-        yield StepFinishEvent(is_finished=False, intermediate_messages=new_messages, token_usage=token_usage)
+        yield StepFinishEvent(
+            is_finished=False,
+            intermediate_messages=new_messages,
+            token_usage=token_usage,
+        )
 
     async def _emit_exhausted_warning(
         self, session_id: str
@@ -335,4 +358,6 @@ class QueryLoopRuntime:
             role=Role.ASSISTANT,
             content=warning_text,
         )
-        yield StepFinishEvent(is_finished=True, final_assistant_message=final_message, token_usage=0)
+        yield StepFinishEvent(
+            is_finished=True, final_assistant_message=final_message, token_usage=0
+        )
