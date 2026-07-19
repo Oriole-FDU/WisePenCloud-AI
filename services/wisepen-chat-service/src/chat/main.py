@@ -106,6 +106,10 @@ async def lifespan(app: FastAPI):
         await container.service_discovery().close()
     except Exception as e:
         error("service discovery close failed.", exc=e)
+    try:
+        await container.redis_client().aclose()
+    except Exception as e:
+        error("redis client close failed.", exc=e)
 
     try:
         await nacos_client_manager.deregister_instance()

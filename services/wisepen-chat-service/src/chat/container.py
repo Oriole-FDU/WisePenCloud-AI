@@ -2,6 +2,7 @@
 
 from typing import List
 
+import redis.asyncio as redis
 from dependency_injector import containers, providers
 from v2.nacos import NacosNamingService
 
@@ -28,6 +29,7 @@ from chat.core.persistence import (
     MongoToolConfigRepository,
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
+    RedisToolContentRepository,
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
@@ -38,6 +40,9 @@ from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillM
 from chat.application.tools.skill_tools import LoadSkillAssetTool
 from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
+from chat.application.tools.core.execution.dispatcher import ToolDispatcher
+from chat.application.tools.core.output.cache import ToolOutputCache
+from chat.application.tools.common.tool_content_store import ToolContentStore
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.core.config.nacos import nacos_client_manager
@@ -75,6 +80,10 @@ def _get_iflytek_speech_config():
     return settings.SPEECH_CONFIG.IFLYTEK
 
 
+def _build_redis_client() -> redis.Redis:
+    return redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
 class Container(containers.DeclarativeContainer):
     """依赖注入容器，管理单例对象的生命周期。"""
     qwen_adapter = providers.Singleton(QwenAdapter)
@@ -103,8 +112,15 @@ class Container(containers.DeclarativeContainer):
     provider_repo = providers.Singleton(MongoProviderRepository)
     tool_config_repo = providers.Singleton(MongoToolConfigRepository)
     mcp_server_config_repo = providers.Singleton(MongoMcpServerConfigRepository)
-    hot_context_repo = providers.Singleton(RedisHotContext)
-    mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache)
+    redis_client = providers.Singleton(_build_redis_client)
+    hot_context_repo = providers.Singleton(
+        RedisHotContext,
+        redis_client=redis_client,
+    )
+    mcp_tool_discovery_cache_repo = providers.Singleton(
+        RedisMcpToolDiscoveryCache,
+        redis_client=redis_client,
+    )
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
     service_discovery = providers.Singleton(
@@ -211,6 +227,26 @@ class Container(containers.DeclarativeContainer):
         system_mcp_tool_catalog=system_mcp_tool_catalog,
     )
 
+    tool_content_repository = providers.Singleton(
+        RedisToolContentRepository,
+        redis_client=redis_client,
+        ttl_seconds=settings.TOOL_CONTENT_DEFAULT_TTL_SECONDS,
+    )
+    tool_content_store = providers.Singleton(
+        ToolContentStore,
+        repository=tool_content_repository,
+        max_chars=settings.TOOL_CONTENT_MAX_CHARS,
+    )
+    tool_output_cache = providers.Singleton(
+        ToolOutputCache,
+        content_store=tool_content_store,
+        inline_max_chars=settings.TOOL_RESULT_MAX_CHARS,
+    )
+    tool_dispatcher = providers.Singleton(
+        ToolDispatcher,
+        output_cache=tool_output_cache,
+    )
+
     # Application 层组件
     chat_turn_coordinator = providers.Factory(
         ChatTurnCoordinator,
@@ -224,6 +260,7 @@ class Container(containers.DeclarativeContainer):
         message_repo=message_repo,
         hot_context_repo=hot_context_repo,
         tool_registry=tool_registry,
+        tool_dispatcher=tool_dispatcher,
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
         agent_resolver=agent_resolver,

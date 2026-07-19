@@ -96,6 +96,8 @@ class AppSettings(BaseModel):
     AGENT_MAX_ITERATIONS: int = 5
     # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
     TOOL_RESULT_MAX_CHARS: int = 4000
+    TOOL_CONTENT_DEFAULT_TTL_SECONDS: int = 1800
+    TOOL_CONTENT_MAX_CHARS: int = 20_000_000
 
     # Skill 配置
 

@@ -20,6 +20,7 @@ dependencies = [
     "anthropic",
     "google-genai",
     "dashscope",
+    "orjson",
     "jsonschema",
     "beanie",
     "redis[asyncio]",

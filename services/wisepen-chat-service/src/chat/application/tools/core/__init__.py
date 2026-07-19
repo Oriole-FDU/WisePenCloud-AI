@@ -20,14 +20,9 @@ from chat.application.tools.core.llm.invocation import (
     tool_call_parse,
 )
 
-from chat.application.tools.core.llm.renderer import (
-    RenderToolResult,
-    schema_renderer,
-    tool_result_renderer,
-)
+from chat.application.tools.core.llm.renderer import schema_renderer, RenderToolResult, render_tool_result
 
 from chat.application.tools.core.execution.result import (
-    ToolBatchResult,
     ToolExecutionError,
     ToolExecutionResult,
 )
@@ -73,11 +68,10 @@ __all__ = [
 
     # renderer
     "RenderToolResult",
+    "render_tool_result",
     "schema_renderer",
-    "tool_result_renderer",
 
     # execution result
-    "ToolBatchResult",
     "ToolExecutionError",
     "ToolExecutionResult",
 
