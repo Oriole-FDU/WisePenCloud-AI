@@ -18,6 +18,8 @@ class SearchMode(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ProviderSearchHttpRequest:
+    """Provider HTTP 请求描述。"""
+
     method: str
     path: str
     params: dict[str, object] | None = None
@@ -25,18 +27,24 @@ class ProviderSearchHttpRequest:
 
 
 class ProviderSearchRequest:
+    """Provider 搜索请求抽象。"""
+
     def to_http_request(self) -> ProviderSearchHttpRequest:
         raise NotImplementedError
 
 
 @dataclass(frozen=True, slots=True)
 class SearchPreview:
+    """搜索结果摘要信息。"""
+
     overview: str | None = None
     highlights: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class ProviderSearchResult:
+    """单条搜索结果。"""
+
     title: str
     url: str
     preview: SearchPreview = field(default_factory=SearchPreview)
@@ -44,6 +52,8 @@ class ProviderSearchResult:
 
 @dataclass(frozen=True, slots=True)
 class ProviderSearchResponse:
+    """Provider 标准化搜索响应。"""
+
     query: str
     provider: SearchProviderName | None
     results: tuple[ProviderSearchResult, ...] = ()

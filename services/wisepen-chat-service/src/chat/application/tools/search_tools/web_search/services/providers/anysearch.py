@@ -15,7 +15,7 @@ from .core.models import (
     SearchPreview,
     SearchProviderName,
 )
-from .normalization import (
+from ._utils import (
     as_dict_tuple,
     as_str,
     as_str_or_none,

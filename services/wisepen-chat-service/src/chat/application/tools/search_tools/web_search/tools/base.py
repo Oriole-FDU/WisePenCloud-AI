@@ -147,57 +147,50 @@ class BaseWebSearchTool:
                 source=source,
                 mode=mode,
             )
+
         except WebSearchCustomApiKeyMissing as exc:
-            raise self._execution_error(
-                "api_key_missing",
-                exc,
+            raise ToolExecutionError(
+                reason=f"{self._tool_name}_api_key_missing",
+                detail_reason=str(exc),
                 retryable=False,
             ) from exc
+
         except WebSearchCustomApiKeyInvalid as exc:
-            raise self._execution_error(
-                "api_key_invalid",
-                exc,
+            raise ToolExecutionError(
+                reason=f"{self._tool_name}_api_key_invalid",
+                detail_reason=str(exc),
                 retryable=False,
             ) from exc
+
         except WebSearchNetworkError as exc:
-            raise self._execution_error(
-                "network_error",
-                exc,
+            raise ToolExecutionError(
+                reason=f"{self._tool_name}_network_error",
+                detail_reason=str(exc),
                 retryable=True,
             ) from exc
+
         except WebSearchEmptyResult as exc:
-            raise self._execution_error(
-                "empty_result",
-                exc,
+            raise ToolExecutionError(
+                reason=f"{self._tool_name}_empty_result",
+                detail_reason=str(exc),
                 retryable=True,
             ) from exc
+
         except WebSearchInternalError as exc:
-            raise self._execution_error(
-                "unavailable",
-                exc,
+            raise ToolExecutionError(
+                reason=f"{self._tool_name}_unavailable",
+                detail_reason=str(exc),
                 retryable=False,
             ) from exc
+
         except WebSearchError as exc:
-            raise self._execution_error(
-                "failed",
-                exc,
+            raise ToolExecutionError(
+                reason=f"{self._tool_name}_failed",
+                detail_reason=str(exc),
                 retryable=False,
             ) from exc
 
         return _build_tool_return(result=result, mode=mode)
-
-    def _execution_error(
-        self,
-        reason: str,
-        exc: Exception,
-        *,
-        retryable: bool,
-    ) -> ToolExecutionError:
-        return ToolExecutionError(
-            reason=f"{self._tool_name}_{reason}",
-            detail_reason=str(exc),
-            retryable=retryable,
-        )
 
 
 def _build_tool_return(
