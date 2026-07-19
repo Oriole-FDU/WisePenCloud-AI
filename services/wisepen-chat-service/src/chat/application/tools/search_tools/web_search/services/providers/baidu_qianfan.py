@@ -15,13 +15,7 @@ from .core.models import (
     SearchPreview,
     SearchProviderName,
 )
-from ._utils import (
-    as_dict_tuple,
-    as_str,
-    as_str_or_none,
-    dedupe_by_url,
-    is_valid_search_result,
-)
+from ._utils import dedupe_results
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,45 +73,18 @@ class BaiduQianfanSearcher(BaseProviderSearcher):
         query: str,
         max_results: int,
     ) -> ProviderSearchResponse:
-        results = tuple(
-            result
-            for item in as_dict_tuple(data.get("references"))
-            if (result := BaiduQianfanSearcher._map_result(item)) is not None
-        )
-
         return ProviderSearchResponse(
             query=query,
             provider=SearchProviderName.BAIDU_QIANFAN,
-            results=dedupe_by_url(
-                results,
-                url_getter=lambda item: item.url,
+            results=dedupe_results(
+                (
+                    ProviderSearchResult(
+                        title=item.get("title"),
+                        url=item.get("url"),
+                        preview=SearchPreview(snippet=item.get("snippet")),
+                    )
+                    for item in data["references"]
+                ),
                 limit=max_results,
-            ),
-            answer=(
-                as_str_or_none(data.get("answer"))
-                or as_str_or_none(data.get("content"))
-            ),
-        )
-
-    @staticmethod
-    def _map_result(
-        item: dict[str, object],
-    ) -> ProviderSearchResult | None:
-        resource_type = as_str(item.get("type") or item.get("resource_type")).lower()
-
-        if resource_type and resource_type != "web":
-            return None
-
-        title = as_str(item.get("title"))
-        url = as_str(item.get("url"))
-
-        if not is_valid_search_result(title=title, url=url):
-            return None
-
-        return ProviderSearchResult(
-            title=title,
-            url=url,
-            preview=SearchPreview(
-                overview=as_str_or_none(item.get("content") or item.get("snippet")),
             ),
         )

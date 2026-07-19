@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .candidate_selector import select_recommended_ids
+from chat.application.utils.ranking import (
+    RankCandidate,
+    RankQuery,
+    RankRequest,
+    RankingPipeline,
+)
+
 from .errors import (
     WebSearchCustomApiKeyInvalid,
     WebSearchCustomApiKeyMissing,
@@ -23,46 +29,40 @@ from .sources import (
 )
 
 
-MAX_RECOMMENDED_CANDIDATES = 5
-FALLBACK_CANDIDATES_COUNT = 3
-
-
-@dataclass(frozen=True, slots=True)
-class WebSearchResult:
-    query: str
-    responses: tuple[ProviderSearchResponse, ...]
-
-
 @dataclass(frozen=True, slots=True)
 class WebSearchCandidate:
     candidate_id: str
-    title: str
-    url: str
-    overview: str | None = None
-    highlights: tuple[str, ...] = ()
+    title: str | None = None
+    url: str | None = None
+    snippet: str | None = None
+    highlights: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class SearchPipelineResult:
-    search_result: WebSearchResult
+    search_query: str
+    response: ProviderSearchResponse | None
     candidates: tuple[WebSearchCandidate, ...]
-    recommended_ids: tuple[str, ...]
 
 
 class SearchPipeline:
-    """执行搜索、构建候选并给出后续抓取的优先顺序。"""
+    """执行搜索并按字段相关性和问句重排候选。"""
+
+    def __init__(self, *, ranking_pipeline: RankingPipeline) -> None:
+        self._ranking_pipeline = ranking_pipeline
 
     async def search(
         self,
         *,
-        query: str,
+        search_query: str,
+        ranking_query: str,
         max_results: int,
         source: PlatformDefaultSearchSource | CustomSearchSource,
         mode: SearchMode,
     ) -> SearchPipelineResult:
         try:
-            result = await self._search_provider(
-                query=query,
+            response = await self._request_provider_response(
+                query=search_query,
                 max_results=max_results,
                 source=source,
                 mode=mode,
@@ -71,26 +71,19 @@ class SearchPipeline:
             if source.scope is WebSearchSourceScope.PRIVATE:
                 raise
 
-            result = WebSearchResult(
-                query=query,
-                responses=(),
+            response = None
+
+        items = response.results if response is not None else ()
+        candidates = tuple(
+            WebSearchCandidate(
+                candidate_id=f"[{index}]",
+                title=item.title,
+                url=item.url,
+                snippet=item.preview.snippet,
+                highlights=item.preview.highlights,
             )
-
-        candidate_list: list[WebSearchCandidate] = []
-
-        for response in result.responses:
-            for item in response.results:
-                candidate_list.append(
-                    WebSearchCandidate(
-                        candidate_id=f"[{len(candidate_list) + 1}]",
-                        title=item.title,
-                        url=item.url,
-                        overview=item.preview.overview,
-                        highlights=item.preview.highlights,
-                    )
-                )
-
-        candidates = tuple(candidate_list)
+            for index, item in enumerate(items, 1)
+        )
 
         if not candidates:
             raise WebSearchEmptyResult(
@@ -98,27 +91,64 @@ class SearchPipeline:
                 reason="搜索没有返回结果",
             )
 
-        recommended_ids = await select_recommended_ids(
-            search_query=query,
-            candidates=candidates,
-            max_recommended_candidates=MAX_RECOMMENDED_CANDIDATES,
-            fallback_candidates_count=FALLBACK_CANDIDATES_COUNT,
+        ranked = await self._ranking_pipeline.arank(
+            RankRequest(
+                query=RankQuery(text=ranking_query),
+                candidates=tuple(
+                    RankCandidate(
+                        candidate_id=candidate.candidate_id,
+                        text="\n".join(
+                            text
+                            for text in (
+                                (
+                                    f"Title: {candidate.title}"
+                                    if candidate.title
+                                    else ""
+                                ),
+                                (
+                                    f"Snippet: {candidate.snippet}"
+                                    if candidate.snippet
+                                    else ""
+                                ),
+                                *(
+                                    f"Highlight: {highlight}"
+                                    for highlight in candidate.highlights or ()
+                                ),
+                            )
+                            if text
+                        ),
+                        fields={
+                            "title": candidate.title or "",
+                            "snippet": candidate.snippet or "",
+                            "highlights": "\n".join(candidate.highlights or ()),
+                        },
+                    )
+                    for candidate in candidates
+                ),
+                top_k=len(candidates),
+                candidate_limit=len(candidates),
+            )
         )
+        candidates_by_id = {
+            candidate.candidate_id: candidate for candidate in candidates
+        }
 
         return SearchPipelineResult(
-            search_result=result,
-            candidates=candidates,
-            recommended_ids=recommended_ids,
+            search_query=search_query,
+            response=response,
+            candidates=tuple(
+                candidates_by_id[item.candidate_id] for item in ranked.ranked
+            ),
         )
 
-    async def _search_provider(
+    async def _request_provider_response(
         self,
         *,
         query: str,
         max_results: int,
         source: PlatformDefaultSearchSource | CustomSearchSource,
         mode: SearchMode,
-    ) -> WebSearchResult:
+    ) -> ProviderSearchResponse:
         search = (
             source.searcher.search_academic
             if mode is SearchMode.ACADEMIC
@@ -161,7 +191,4 @@ class SearchPipeline:
                 reason="搜索源成功响应但没有返回结果",
             )
 
-        return WebSearchResult(
-            query=query,
-            responses=(response,),
-        )
+        return response

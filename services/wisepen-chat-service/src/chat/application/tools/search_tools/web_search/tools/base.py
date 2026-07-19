@@ -36,9 +36,21 @@ PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "query": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Required. A concise, search-engine-friendly query.",
+            "type": "object",
+            "properties": {
+                "search_query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Concise keywords for the search provider.",
+                },
+                "ranking_query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A complete natural-language question describing the information to rank by.",
+                },
+            },
+            "required": ["search_query", "ranking_query"],
+            "additionalProperties": False,
         },
         "mode": {
             "type": "string",
@@ -61,10 +73,10 @@ PARAMETERS_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 TOOL_DESCRIPTION = (
-    "Search external web information and return ranked candidates. "
-    "Use academic mode for literature search; sources without native academic "
-    "support fall back to web search. Call once with one clear query and fetch "
-    "selected URLs when evidence is required."
+    "Search external web information and return candidates ordered by relevance. "
+    "Provide concise provider keywords in search_query and a complete natural-"
+    "language question in ranking_query. Use academic mode for literature search; "
+    "sources without native academic support fall back to web search."
 )
 API_KEY_CONFIG_SPEC = ToolConfigSpec(
     schema={
@@ -125,7 +137,9 @@ class BaseWebSearchTool:
         config: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> ToolReturn:
-        query = kwargs["query"].strip()
+        query_payload = kwargs["query"]
+        search_query = query_payload["search_query"].strip()
+        ranking_query = query_payload["ranking_query"].strip()
         mode = SearchMode(str(kwargs.get("mode") or SearchMode.WEB.value))
         requested_results = kwargs.get("max_results") or DEFAULT_SEARCH_RESULTS
         max_results = max(1, min(requested_results, MAX_SEARCH_RESULTS))
@@ -141,7 +155,8 @@ class BaseWebSearchTool:
                 api_key=api_key,
             )
             result = await self._search_pipeline.search(
-                query=query,
+                search_query=search_query,
+                ranking_query=ranking_query,
                 max_results=max_results,
                 source=source,
                 mode=mode,
@@ -197,20 +212,13 @@ def _build_tool_return(
     result: SearchPipelineResult,
     mode: SearchMode,
 ) -> ToolReturn:
-    answers = tuple(
-        dict.fromkeys(
-            response.answer
-            for response in result.search_result.responses
-            if response.answer
-        )
-    )
     visible_result: dict[str, object] = {
-        "query": result.search_result.query,
+        "query": result.search_query,
         "mode": mode.value,
         "candidates": result.candidates,
-        "recommended_ids": result.recommended_ids,
     }
-    if answers:
-        visible_result["supplier_answers"] = answers
+    response = result.response
+    if response is not None and response.answer:
+        visible_result["supplier_answer"] = response.answer
 
     return ToolReturn(visible_result=visible_result)

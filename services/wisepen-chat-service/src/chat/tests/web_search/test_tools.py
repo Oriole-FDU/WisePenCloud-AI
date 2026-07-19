@@ -14,7 +14,6 @@ from chat.application.tools.search_tools.web_search.tools import (
 from chat.application.tools.search_tools.web_search.services.pipeline import (
     SearchPipelineResult,
     WebSearchCandidate,
-    WebSearchResult,
 )
 from chat.application.tools.search_tools.web_search.services.providers.core.models import (
     ProviderSearchResponse,
@@ -36,22 +35,17 @@ class FakeSearchPipeline:
             candidate_id="[1]",
             title="Attention Is All You Need",
             url="https://arxiv.org/abs/1706.03762",
-            overview="overview",
+            snippet="snippet",
             highlights=("highlight",),
         )
         return SearchPipelineResult(
-            search_result=WebSearchResult(
-                query=str(kwargs["query"]),
-                responses=(
-                    ProviderSearchResponse(
-                        query=str(kwargs["query"]),
-                        provider=SearchProviderName.EXA,
-                        answer="supplier answer",
-                    ),
-                ),
+            search_query=str(kwargs["search_query"]),
+            response=ProviderSearchResponse(
+                query=str(kwargs["search_query"]),
+                provider=SearchProviderName.EXA,
+                answer="supplier answer",
             ),
             candidates=(candidate,),
-            recommended_ids=(candidate.candidate_id,),
         )
 
 
@@ -124,7 +118,10 @@ async def test_exa_tool_keeps_its_own_identity_and_custom_key() -> None:
     result = await tool.execute(
         context={},
         config={"api_key": "custom-key"},
-        query="rag paper",
+        query={
+            "search_query": "rag paper",
+            "ranking_query": "Which paper introduced the Transformer architecture?",
+        },
         mode="academic",
     )
 
@@ -134,16 +131,21 @@ async def test_exa_tool_keeps_its_own_identity_and_custom_key() -> None:
         {"provider": SearchProviderName.EXA, "api_key": "custom-key"}
     ]
     assert pipeline.calls[0]["mode"] == SearchMode.ACADEMIC
-    assert result.visible_result["recommended_ids"] == ("[1]",)
+    assert pipeline.calls[0]["search_query"] == "rag paper"
+    assert (
+        pipeline.calls[0]["ranking_query"]
+        == "Which paper introduced the Transformer architecture?"
+    )
     assert result.visible_result["candidates"] == (
         WebSearchCandidate(
             candidate_id="[1]",
             url="https://arxiv.org/abs/1706.03762",
             title="Attention Is All You Need",
-            overview="overview",
+            snippet="snippet",
             highlights=("highlight",),
         ),
     )
+    assert result.visible_result["supplier_answer"] == "supplier answer"
 
 
 @pytest.mark.asyncio
@@ -152,7 +154,13 @@ async def test_platform_tool_uses_the_platform_source_without_user_config() -> N
     source_factory = FakeSearchSourceFactory()
     tool = PlatformSearchTool(search_pipeline=pipeline, source_factory=source_factory)
 
-    result = await tool.execute(context={}, query="platform query")
+    result = await tool.execute(
+        context={},
+        query={
+            "search_query": "platform query",
+            "ranking_query": "What information is relevant to this platform query?",
+        },
+    )
 
     assert tool.definition.llm_spec.name == "platform_search"
     assert tool.definition.config_spec is None

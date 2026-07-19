@@ -3,6 +3,7 @@
 from typing import List
 
 import httpx
+import redis.asyncio as redis
 from dependency_injector import containers, providers
 from v2.nacos import NacosNamingService
 
@@ -29,6 +30,7 @@ from chat.core.persistence import (
     MongoToolConfigRepository,
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
+    RedisToolContentRepository,
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
@@ -39,6 +41,15 @@ from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillM
 from chat.application.tools.skill_tools import LoadSkillAssetTool
 from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
+from chat.application.tools.core.execution.dispatcher import ToolDispatcher
+from chat.application.tools.core.output.cache import ToolOutputCache
+from chat.application.tools.common.tool_content_store import ToolContentStore
+from chat.application.tools.session_tools.tool_content_read.tools import (
+    ToolContentRegexReadTool,
+    ToolContentRankedExpandReadTool,
+    ToolContentSequentialReadTool,
+)
+from chat.application.utils.ranking.presets import READ_RANKED_EXPAND_PIPELINE, WEB_SEARCH_PIPELINE
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.application.tools.search_tools.web_search import (
@@ -93,7 +104,13 @@ def _get_iflytek_speech_config():
     return settings.SPEECH_CONFIG.IFLYTEK
 
 
-def _build_platform_default_searcher(http_client: httpx.AsyncClient) -> PlatformDefaultSearcher:
+def _build_redis_client() -> redis.Redis:
+    return redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
+def _build_platform_default_searcher(
+    http_client: httpx.AsyncClient,
+) -> PlatformDefaultSearcher:
     return PlatformDefaultSearcher(
         fourget_searcher=FourGetSearcher(
             http_client=http_client,
@@ -133,8 +150,15 @@ class Container(containers.DeclarativeContainer):
     provider_repo = providers.Singleton(MongoProviderRepository)
     tool_config_repo = providers.Singleton(MongoToolConfigRepository)
     mcp_server_config_repo = providers.Singleton(MongoMcpServerConfigRepository)
-    hot_context_repo = providers.Singleton(RedisHotContext)
-    mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache)
+    redis_client = providers.Singleton(_build_redis_client)
+    hot_context_repo = providers.Singleton(
+        RedisHotContext,
+        redis_client=redis_client,
+    )
+    mcp_tool_discovery_cache_repo = providers.Singleton(
+        RedisMcpToolDiscoveryCache,
+        redis_client=redis_client,
+    )
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
     service_discovery = providers.Singleton(
@@ -208,6 +232,16 @@ class Container(containers.DeclarativeContainer):
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
     )
 
+    tool_content_repository = providers.Singleton(
+        RedisToolContentRepository,
+        redis_client=redis_client,
+        ttl_seconds=settings.TOOL_CONTENT_DEFAULT_TTL_SECONDS,
+    )
+    tool_content_store = providers.Singleton(
+        ToolContentStore,
+        repository=tool_content_repository,
+        max_chars=settings.TOOL_CONTENT_MAX_CHARS,
+    )
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期
     # GetHistoricalChatMessagesTool
     search_history_tool = providers.Singleton(
@@ -227,6 +261,22 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
+    tool_content_sequential_read_tool = providers.Singleton(
+        ToolContentSequentialReadTool,
+        content_store=tool_content_store,
+        max_window_chars=settings.TOOL_RESULT_MAX_CHARS,
+    )
+    tool_content_regex_read_tool = providers.Singleton(
+        ToolContentRegexReadTool,
+        content_store=tool_content_store,
+        max_window_chars=settings.TOOL_RESULT_MAX_CHARS,
+    )
+    tool_content_ranked_expand_read_tool = providers.Singleton(
+        ToolContentRankedExpandReadTool,
+        content_store=tool_content_store,
+        ranking_pipeline=READ_RANKED_EXPAND_PIPELINE,
+        max_window_chars=settings.TOOL_RESULT_MAX_CHARS,
+    )
     web_search_http_client = providers.Singleton(
         httpx.AsyncClient,
         timeout=httpx.Timeout(15.0),
@@ -244,7 +294,10 @@ class Container(containers.DeclarativeContainer):
         anysearch_base_url=settings.WEB_SEARCH_ANYSEARCH_BASE_URL,
         baidu_qianfan_base_url=settings.WEB_SEARCH_BAIDU_QIANFAN_BASE_URL,
     )
-    web_search_pipeline = providers.Singleton(SearchPipeline)
+    web_search_pipeline = providers.Singleton(
+        SearchPipeline,
+        ranking_pipeline=WEB_SEARCH_PIPELINE,
+    )
     platform_search_tool = providers.Singleton(
         PlatformSearchTool,
         search_pipeline=web_search_pipeline,
@@ -274,6 +327,9 @@ class Container(containers.DeclarativeContainer):
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
+        tool_content_sequential_read_tool,
+        tool_content_regex_read_tool,
+        tool_content_ranked_expand_read_tool,
         platform_search_tool,
         exa_search_tool,
         tavily_search_tool,
@@ -289,6 +345,16 @@ class Container(containers.DeclarativeContainer):
         system_mcp_tool_catalog=system_mcp_tool_catalog,
     )
 
+    tool_output_cache = providers.Singleton(
+        ToolOutputCache,
+        content_store=tool_content_store,
+        inline_max_chars=settings.TOOL_RESULT_MAX_CHARS,
+    )
+    tool_dispatcher = providers.Singleton(
+        ToolDispatcher,
+        output_cache=tool_output_cache,
+    )
+
     # Application 层组件
     chat_turn_coordinator = providers.Factory(
         ChatTurnCoordinator,
@@ -302,6 +368,7 @@ class Container(containers.DeclarativeContainer):
         message_repo=message_repo,
         hot_context_repo=hot_context_repo,
         tool_registry=tool_registry,
+        tool_dispatcher=tool_dispatcher,
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
         agent_resolver=agent_resolver,
