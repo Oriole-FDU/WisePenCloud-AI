@@ -93,19 +93,13 @@ class BaiduQianfanSearcher(BaseProviderSearcher):
                 url_getter=lambda item: item.url,
                 limit=max_results,
             ),
-            answer=(
-                as_str_or_none(data.get("answer"))
-                or as_str_or_none(data.get("content"))
-            ),
         )
 
     @staticmethod
     def _map_result(
         item: dict[str, object],
     ) -> ProviderSearchResult | None:
-        resource_type = as_str(item.get("type") or item.get("resource_type")).lower()
-
-        if resource_type and resource_type != "web":
+        if as_str(item.get("type")).lower() != "web":
             return None
 
         title = as_str(item.get("title"))
@@ -118,6 +112,6 @@ class BaiduQianfanSearcher(BaseProviderSearcher):
             title=title,
             url=url,
             preview=SearchPreview(
-                overview=as_str_or_none(item.get("content") or item.get("snippet")),
+                snippet=as_str_or_none(item.get("snippet")),
             ),
         )

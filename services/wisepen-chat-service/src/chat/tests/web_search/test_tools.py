@@ -35,7 +35,7 @@ class FakeSearchPipeline:
             candidate_id="[1]",
             title="Attention Is All You Need",
             url="https://arxiv.org/abs/1706.03762",
-            overview="overview",
+            snippet="snippet",
             highlights=("highlight",),
         )
         return SearchPipelineResult(
@@ -141,7 +141,7 @@ async def test_exa_tool_keeps_its_own_identity_and_custom_key() -> None:
             candidate_id="[1]",
             url="https://arxiv.org/abs/1706.03762",
             title="Attention Is All You Need",
-            overview="overview",
+            snippet="snippet",
             highlights=("highlight",),
         ),
     )

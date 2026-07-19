@@ -30,20 +30,21 @@ def test_baidu_qianfan_request_uses_the_ai_search_web_endpoint() -> None:
 def test_baidu_qianfan_keeps_web_references_and_deduplicates_urls() -> None:
     response = BaiduQianfanSearcher.map_response(
         {
-            "answer": "供应商直答",
             "references": [
                 {
                     "type": "web",
                     "title": "千帆 API 文档",
                     "url": "https://example.com/doc",
-                    "content": "接口说明",
+                    "snippet": "接口说明",
                 },
                 {"type": "image", "title": "图片", "url": "https://example.com/image"},
                 {
-                    "title": "未标类型网页",
+                    "type": "web",
+                    "title": "网页结果",
                     "url": "https://example.com/page",
-                    "snippet": "兼容结果",
+                    "snippet": "搜索摘要",
                 },
+                {"title": "未标类型网页", "url": "https://example.com/unknown"},
                 {"type": "web", "title": "重复 URL", "url": "https://example.com/page"},
             ],
         },
@@ -52,11 +53,12 @@ def test_baidu_qianfan_keeps_web_references_and_deduplicates_urls() -> None:
     )
 
     assert response.provider == SearchProviderName.BAIDU_QIANFAN
-    assert response.answer == "供应商直答"
+    assert response.answer is None
     assert [item.title for item in response.results] == [
         "千帆 API 文档",
-        "未标类型网页",
+        "网页结果",
     ]
+    assert response.results[0].preview.snippet == "接口说明"
 
 
 def test_source_factory_routes_baidu_to_its_own_searcher() -> None:

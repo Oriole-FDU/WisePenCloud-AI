@@ -51,7 +51,7 @@ WEB_SEARCH_PIPELINE = RankingPipeline(
             config=FieldedBM25ScorerConfig(
                 field_weights={
                     "title": 3.0,
-                    "overview": 1.5,
+                    "snippet": 1.5,
                     "highlights": 1.0,
                 },
                 min_score=-1.0,

@@ -35,9 +35,9 @@ class ProviderSearchRequest:
 
 @dataclass(frozen=True, slots=True)
 class SearchPreview:
-    """搜索结果摘要信息。"""
+    """搜索结果预览信息。"""
 
-    overview: str | None = None
+    snippet: str | None = None
     highlights: tuple[str, ...] = ()
 
 

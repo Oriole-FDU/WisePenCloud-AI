@@ -94,7 +94,7 @@ class FourGetSearcher(BaseProviderSearcher):
             title=title,
             url=url,
             preview=SearchPreview(
-                overview=as_str_or_none(item.get("description")),
+                snippet=as_str_or_none(item.get("description")),
             ),
         )
 
@@ -180,7 +180,7 @@ class DdgSearcher(ProviderSearcher):
             title=title,
             url=url,
             preview=SearchPreview(
-                overview=as_str_or_none(item.get("body")),
+                snippet=as_str_or_none(item.get("body")),
             ),
         )
 

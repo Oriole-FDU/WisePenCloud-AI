@@ -100,6 +100,6 @@ class TavilySearcher(BaseProviderSearcher):
             title=title,
             url=url,
             preview=SearchPreview(
-                overview=as_str_or_none(item.get("content")),
+                snippet=as_str_or_none(item.get("content")),
             ),
         )

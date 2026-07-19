@@ -34,7 +34,7 @@ class WebSearchCandidate:
     candidate_id: str
     title: str
     url: str
-    overview: str | None = None
+    snippet: str | None = None
     highlights: tuple[str, ...] = ()
 
 
@@ -79,7 +79,7 @@ class SearchPipeline:
                 candidate_id=f"[{index}]",
                 title=item.title,
                 url=item.url,
-                overview=item.preview.overview,
+                snippet=item.preview.snippet,
                 highlights=item.preview.highlights,
             )
             for index, item in enumerate(items, 1)
@@ -101,14 +101,14 @@ class SearchPipeline:
                             text
                             for text in (
                                 candidate.title,
-                                candidate.overview,
+                                candidate.snippet,
                                 *candidate.highlights,
                             )
                             if text
                         ),
                         fields={
                             "title": candidate.title,
-                            "overview": candidate.overview or "",
+                            "snippet": candidate.snippet or "",
                             "highlights": "\n".join(candidate.highlights),
                         },
                     )

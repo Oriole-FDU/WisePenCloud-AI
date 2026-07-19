@@ -19,7 +19,6 @@ from ._utils import (
     as_dict_tuple,
     as_str,
     as_str_or_none,
-    as_str_tuple,
     dedupe_by_url,
     is_valid_search_result,
 )
@@ -70,7 +69,10 @@ class AnySearchSearcher(BaseProviderSearcher):
     ) -> ProviderSearchResponse:
         payload = data.get("data")
         if not isinstance(payload, dict):
-            payload = data
+            return ProviderSearchResponse(
+                query=query,
+                provider=SearchProviderName.ANYSEARCH,
+            )
 
         results = tuple(
             result
@@ -86,7 +88,6 @@ class AnySearchSearcher(BaseProviderSearcher):
                 url_getter=lambda item: item.url,
                 limit=max_results,
             ),
-            answer=as_str_or_none(payload.get("answer")),
         )
 
     @staticmethod
@@ -99,15 +100,10 @@ class AnySearchSearcher(BaseProviderSearcher):
         if not is_valid_search_result(title=title, url=url):
             return None
 
-        overview = as_str_or_none(
-            item.get("snippet") or item.get("description") or item.get("summary")
-        )
-
         return ProviderSearchResult(
             title=title,
             url=url,
             preview=SearchPreview(
-                overview=overview,
-                highlights=as_str_tuple(item.get("highlights")),
+                snippet=as_str_or_none(item.get("snippet")),
             ),
         )

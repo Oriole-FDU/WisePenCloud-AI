@@ -38,7 +38,7 @@ class FakeSearcher:
                     title="First result",
                     url="https://example.com/first",
                     preview=SearchPreview(
-                        overview="First overview",
+                        snippet="First snippet",
                         highlights=("First highlight",),
                     ),
                 ),
@@ -89,7 +89,7 @@ async def test_search_pipeline_ranks_provider_results_with_question() -> None:
     )
     assert reranker.ranked[0].candidate.fields == {
         "title": "First result",
-        "overview": "First overview",
+        "snippet": "First snippet",
         "highlights": "First highlight",
     }
     assert [candidate.title for candidate in result.candidates] == [
