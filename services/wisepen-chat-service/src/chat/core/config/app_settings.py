@@ -99,6 +99,13 @@ class AppSettings(BaseModel):
     TOOL_CONTENT_DEFAULT_TTL_SECONDS: int = 1800
     TOOL_CONTENT_MAX_CHARS: int = 20_000_000
 
+    # Web Search
+    WEB_SEARCH_FOURGET_BASE_URL: str = "http://127.0.0.1:8088"
+    WEB_SEARCH_EXA_BASE_URL: str = "https://api.exa.ai"
+    WEB_SEARCH_TAVILY_BASE_URL: str = "https://api.tavily.com"
+    WEB_SEARCH_ANYSEARCH_BASE_URL: str = "https://api.anysearch.com"
+    WEB_SEARCH_BAIDU_QIANFAN_BASE_URL: str = "https://qianfan.baidubce.com"
+
     # Skill 配置
 
     # 默认召回数量

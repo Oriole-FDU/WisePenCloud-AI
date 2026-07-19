@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import StrEnum
+
+import httpx
+
+from .errors import (
+    WebSearchCustomApiKeyInvalid,
+    WebSearchCustomApiKeyMissing,
+)
+from .providers import (
+    AnySearchSearcher,
+    BaiduQianfanSearcher,
+    ExaSearcher,
+    PlatformDefaultSearcher,
+    TavilySearcher,
+)
+from .providers.base import SearchProviderConfig
+from .providers.core.models import SearchProviderName
+from .providers.core.protocols import ProviderSearcher
+
+
+class WebSearchSourceScope(StrEnum):
+    """搜索来源的缓存隔离域。"""
+
+    PUBLIC = "public"
+    PRIVATE = "private"
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformDefaultSearchSource:
+    searcher: ProviderSearcher
+    provider: SearchProviderName | None = None
+    scope: WebSearchSourceScope = WebSearchSourceScope.PUBLIC
+    source_id: str = "platform_default"
+
+
+@dataclass(frozen=True, slots=True)
+class CustomSearchSource:
+    provider: SearchProviderName
+    searcher: ProviderSearcher
+    source_id: str
+    scope: WebSearchSourceScope = WebSearchSourceScope.PRIVATE
+
+
+@dataclass(frozen=True, slots=True)
+class SearchSourceFactory:
+    """只负责将工具配置路由为运行时搜索源。"""
+
+    http_client: httpx.AsyncClient
+    platform_default_searcher: PlatformDefaultSearcher
+    exa_base_url: str
+    tavily_base_url: str
+    anysearch_base_url: str
+    baidu_qianfan_base_url: str
+
+    def build(
+        self,
+        *,
+        provider: SearchProviderName | None,
+        api_key: str | None,
+    ) -> PlatformDefaultSearchSource | CustomSearchSource:
+        if provider is None:
+            return PlatformDefaultSearchSource(
+                searcher=self.platform_default_searcher,
+            )
+
+        if not api_key:
+            raise WebSearchCustomApiKeyMissing(
+                provider=provider,
+                reason="缺少工具配置中的 API key",
+            )
+
+        return CustomSearchSource(
+            provider=provider,
+            source_id=f"custom:{provider.value}",
+            searcher=self._build_custom_searcher(
+                provider=provider,
+                api_key=api_key,
+            ),
+        )
+
+    def _build_custom_searcher(
+        self,
+        *,
+        provider: SearchProviderName,
+        api_key: str,
+    ) -> ProviderSearcher:
+        config = SearchProviderConfig(
+            base_url=self._base_url(provider),
+            api_key=api_key,
+        )
+
+        if provider == SearchProviderName.EXA:
+            return ExaSearcher(
+                http_client=self.http_client,
+                config=config,
+            )
+
+        if provider == SearchProviderName.TAVILY:
+            return TavilySearcher(
+                http_client=self.http_client,
+                config=config,
+            )
+
+        if provider == SearchProviderName.ANYSEARCH:
+            return AnySearchSearcher(
+                http_client=self.http_client,
+                config=config,
+            )
+
+        if provider == SearchProviderName.BAIDU_QIANFAN:
+            return BaiduQianfanSearcher(
+                http_client=self.http_client,
+                config=config,
+            )
+
+        raise WebSearchCustomApiKeyInvalid(
+            provider=provider,
+            reason="不支持的搜索源",
+        )
+
+    def _base_url(
+        self,
+        provider: SearchProviderName,
+    ) -> str:
+        if provider == SearchProviderName.EXA:
+            return self.exa_base_url
+
+        if provider == SearchProviderName.TAVILY:
+            return self.tavily_base_url
+
+        if provider == SearchProviderName.ANYSEARCH:
+            return self.anysearch_base_url
+
+        if provider == SearchProviderName.BAIDU_QIANFAN:
+            return self.baidu_qianfan_base_url
+
+        raise WebSearchCustomApiKeyInvalid(
+            provider=provider,
+            reason="不支持的搜索源",
+        )

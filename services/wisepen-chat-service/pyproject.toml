@@ -37,6 +37,8 @@ dependencies = [
     "regex",
     "wisepen-common",
     "pdfminer.six",
+    "httpx",
+    "ddgs>=9.14.4",
 ]
 
 [dependency-groups]
