@@ -199,9 +199,14 @@ def _merge_captioned_tables(
     blocks: list[TextBlock],
     text: str,
 ) -> list[TextBlock]:
-    """将紧邻的普通表题段落与表格合为一个原子 TABLE block。
+    """将 PDF Markdown 中独立导出的表题段落绑定回紧随其后的表格。
 
-    page marker 会出现在两者之间，因此天然阻止跨页表题合并。
+    否则表题可能落入前一个 chunk，表格则失去表号和语义说明，后续也无法生成表格
+    anchor。这里仅合并原文中只隔空白的相邻段落与表格。
+
+    页保护不由本函数直接识别：parse() 已在 blocks 中插入 PAGE_MARKER 并按 offset
+    排序。跨页时序列会变成 ``caption -> page marker -> table``，而本函数只查看
+    caption 的下一个 block，故不会把跨页表题和表格视为候选对。
     """
     merged: list[TextBlock] = []
     index = 0
