@@ -11,8 +11,8 @@ class JiebaRankingTokenizer(RankingTokenizer):
     __slots__ = ("_jieba_tokenizer",)
 
     def __init__(
-        self,
-        stopwords: frozenset[str] | None = None,
+            self,
+            stopwords: frozenset[str] | None = None,
     ) -> None:
         super().__init__(stopwords=stopwords)
         # jieba.cut_for_search 在精确分词基础上补充粗粒度切分，

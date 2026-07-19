@@ -30,10 +30,10 @@ _MARKDOWN_SEPARATORS = (
 
 
 def split_plain_text(
-    document: ChunkDocument,
-    *,
-    chunk_size: int,
-    chunk_overlap: int,
+        document: ChunkDocument,
+        *,
+        chunk_size: int,
+        chunk_overlap: int,
 ) -> tuple[TextBlock, ...]:
     """按段落、换行、句子到字符的优先级递归切分纯文本。"""
     return _split_recursive_text(
@@ -45,10 +45,10 @@ def split_plain_text(
 
 
 def split_markdown_text(
-    document: ChunkDocument,
-    *,
-    chunk_size: int,
-    chunk_overlap: int,
+        document: ChunkDocument,
+        *,
+        chunk_size: int,
+        chunk_overlap: int,
 ) -> tuple[TextBlock, ...]:
     """为父子分块派生子块，优先在 Markdown 标题和段落边界切分。"""
     return _split_recursive_text(
@@ -60,11 +60,11 @@ def split_markdown_text(
 
 
 def _split_recursive_text(
-    document: ChunkDocument,
-    *,
-    chunk_size: int,
-    chunk_overlap: int,
-    separators: tuple[str, ...],
+        document: ChunkDocument,
+        *,
+        chunk_size: int,
+        chunk_overlap: int,
+        separators: tuple[str, ...],
 ) -> tuple[TextBlock, ...]:
     """适配第三方递归切分器，并恢复每段文本在原文中的准确位置。"""
     if not document.text:

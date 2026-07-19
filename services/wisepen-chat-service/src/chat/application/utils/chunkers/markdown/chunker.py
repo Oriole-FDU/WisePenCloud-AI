@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .locator import build_markdown_locators
+from .parser import MarkdownParser
 from .._utils.normalization import normalize_flat_chunks
 from ..models import (
     BlockKind,
@@ -12,8 +14,6 @@ from ..models import (
     ChunkingResult,
     TextBlock,
 )
-from .locator import build_markdown_locators
-from .parser import MarkdownParser
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,10 +62,10 @@ class MarkdownChunker:
         )
 
     def _build_structural_chunks(
-        self,
-        *,
-        blocks: tuple[TextBlock, ...],
-        role: ChunkRole,
+            self,
+            *,
+            blocks: tuple[TextBlock, ...],
+            role: ChunkRole,
     ) -> tuple[Chunk, ...]:
         """按结构块聚合 chunk；页码标记是不可跨越的硬边界。
 
@@ -110,11 +110,11 @@ class MarkdownChunker:
 
     @staticmethod
     def _build_chunk(
-        *,
-        selected: tuple[TextBlock, ...],
-        chunk_index: int,
-        role: ChunkRole,
-        page_label: str | None,
+            *,
+            selected: tuple[TextBlock, ...],
+            chunk_index: int,
+            role: ChunkRole,
+            page_label: str | None,
     ) -> Chunk:
         """将一组连续结构块投影为一个最终 chunk 的初始形态。"""
         block_kinds = tuple(block.block_kind for block in selected)

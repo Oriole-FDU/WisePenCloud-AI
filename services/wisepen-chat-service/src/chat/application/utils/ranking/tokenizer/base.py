@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 
+import unicodedata
 
 _TOKEN_PATTERN = re.compile(
     r"(?P<compound>[A-Za-z0-9]+(?:[._\-/][A-Za-z0-9]+)+)"
@@ -60,8 +60,8 @@ class RankingTokenizer:
     __slots__ = ("stopwords",)
 
     def __init__(
-        self,
-        stopwords: frozenset[str] | None = None,
+            self,
+            stopwords: frozenset[str] | None = None,
     ) -> None:
         self.stopwords = _DEFAULT_STOPWORDS if stopwords is None else stopwords
 

@@ -4,9 +4,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Literal
 
-from openai import AsyncOpenAI, OpenAI
-
 from chat.core.config.app_settings import settings
+from openai import AsyncOpenAI, OpenAI
 
 Message = dict[str, Any]
 ThinkingMode = Literal["disabled"]
@@ -27,12 +26,12 @@ class QueryClient:
     __slots__ = ("model", "thinking", "_async_client", "_sync_client")
 
     def __init__(
-        self,
-        model: str,
-        *,
-        api_base: str,
-        api_key: str,
-        thinking: ThinkingMode | None = None,
+            self,
+            model: str,
+            *,
+            api_base: str,
+            api_key: str,
+            thinking: ThinkingMode | None = None,
     ) -> None:
         self.model = model
         self.thinking = thinking
@@ -40,13 +39,13 @@ class QueryClient:
         self._sync_client = OpenAI(base_url=api_base, api_key=api_key)
 
     async def aquery(
-        self,
-        prompt: str,
-        *,
-        system_prompt: str | None = None,
-        messages: list[Message] | None = None,
-        max_tokens: int | None = None,
-        response_format: dict[str, Any] | None = None,
+            self,
+            prompt: str,
+            *,
+            system_prompt: str | None = None,
+            messages: list[Message] | None = None,
+            max_tokens: int | None = None,
+            response_format: dict[str, Any] | None = None,
     ) -> QueryResult:
         response = await self._async_client.chat.completions.create(
             **self._build_completion_kwargs(
@@ -60,13 +59,13 @@ class QueryClient:
         return self._parse_response(response)
 
     def query(
-        self,
-        prompt: str,
-        *,
-        system_prompt: str | None = None,
-        messages: list[Message] | None = None,
-        max_tokens: int | None = None,
-        response_format: dict[str, Any] | None = None,
+            self,
+            prompt: str,
+            *,
+            system_prompt: str | None = None,
+            messages: list[Message] | None = None,
+            max_tokens: int | None = None,
+            response_format: dict[str, Any] | None = None,
     ) -> QueryResult:
         """同步查询入口，用于不在事件循环内的少量工具调用。"""
         response = self._sync_client.chat.completions.create(
@@ -81,13 +80,13 @@ class QueryClient:
         return self._parse_response(response)
 
     def _build_completion_kwargs(
-        self,
-        *,
-        prompt: str,
-        system_prompt: str | None,
-        messages: list[Message] | None,
-        max_tokens: int | None,
-        response_format: dict[str, Any] | None,
+            self,
+            *,
+            prompt: str,
+            system_prompt: str | None,
+            messages: list[Message] | None,
+            max_tokens: int | None,
+            response_format: dict[str, Any] | None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -106,10 +105,10 @@ class QueryClient:
 
     @staticmethod
     def _build_messages(
-        *,
-        prompt: str,
-        system_prompt: str | None,
-        messages: list[Message] | None,
+            *,
+            prompt: str,
+            system_prompt: str | None,
+            messages: list[Message] | None,
     ) -> list[Message]:
         result: list[Message] = []
         if system_prompt:
@@ -134,8 +133,8 @@ class QueryClient:
 
 @lru_cache
 def build_query_client(
-    *,
-    thinking: ThinkingMode | None = None,
+        *,
+        thinking: ThinkingMode | None = None,
 ) -> QueryClient:
     return QueryClient(
         model=settings.QUERY_MODEL,

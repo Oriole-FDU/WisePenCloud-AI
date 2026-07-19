@@ -4,9 +4,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Sequence
 
-from openai import AsyncOpenAI, OpenAI
-
 from chat.core.config.app_settings import settings
+from openai import AsyncOpenAI, OpenAI
 
 EmbeddingInput = str | Sequence[str] | Sequence[int] | Sequence[Sequence[int]]
 
@@ -31,12 +30,12 @@ class EmbeddingClient:
     )
 
     def __init__(
-        self,
-        model: str,
-        *,
-        api_base: str,
-        api_key: str,
-        dimensions: int,
+            self,
+            model: str,
+            *,
+            api_base: str,
+            api_key: str,
+            dimensions: int,
     ) -> None:
         self.model = model
         self.dimensions = dimensions
@@ -44,8 +43,8 @@ class EmbeddingClient:
         self._sync_client = OpenAI(base_url=api_base, api_key=api_key)
 
     async def aembed(
-        self,
-        input: EmbeddingInput,
+            self,
+            input: EmbeddingInput,
     ) -> EmbeddingResult:
         response = await self._async_client.embeddings.create(
             model=self.model,
@@ -55,8 +54,8 @@ class EmbeddingClient:
         return self._parse_response(response)
 
     def embed(
-        self,
-        input: EmbeddingInput,
+            self,
+            input: EmbeddingInput,
     ) -> EmbeddingResult:
         response = self._sync_client.embeddings.create(
             model=self.model,

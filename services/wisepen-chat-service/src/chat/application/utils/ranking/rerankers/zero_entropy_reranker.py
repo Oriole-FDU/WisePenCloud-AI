@@ -26,19 +26,19 @@ class ZeroEntropyReranker:
     __slots__ = ("client", "config")
 
     def __init__(
-        self,
-        *,
-        client: AsyncZeroEntropy,
-        config: ZeroEntropyRerankerConfig,
+            self,
+            *,
+            client: AsyncZeroEntropy,
+            config: ZeroEntropyRerankerConfig,
     ) -> None:
         self.client = client
         self.config = config
 
     async def rerank(
-        self,
-        *,
-        query: RankQuery,
-        ranked: tuple[RankedCandidate, ...],
+            self,
+            *,
+            query: RankQuery,
+            ranked: tuple[RankedCandidate, ...],
     ) -> tuple[RankedCandidate, ...]:
 
         if not ranked:

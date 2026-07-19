@@ -16,7 +16,7 @@ def candidate_positions(candidates: tuple[RankCandidate, ...]) -> dict[str, int]
 
 
 def assign_ranks(
-    items: tuple[RankedCandidate, ...],
+        items: tuple[RankedCandidate, ...],
 ) -> tuple[RankedCandidate, ...]:
     """保留排序数据并重新分配从 1 开始的连续 rank。"""
     return tuple(replace(item, rank=index) for index, item in enumerate(items, 1))

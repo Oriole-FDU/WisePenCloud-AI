@@ -27,17 +27,17 @@ class KeywordPrefilter:
     __slots__ = ("config",)
 
     def __init__(
-        self,
-        *,
-        config: KeywordPrefilterConfig | None = None,
+            self,
+            *,
+            config: KeywordPrefilterConfig | None = None,
     ) -> None:
         self.config = config or KeywordPrefilterConfig()
 
     def prefilter(
-        self,
-        *,
-        query: RankQuery,
-        candidates: tuple[RankCandidate, ...],
+            self,
+            *,
+            query: RankQuery,
+            candidates: tuple[RankCandidate, ...],
     ) -> tuple[RankCandidate, ...]:
         if not candidates:
             return ()
@@ -76,10 +76,10 @@ class KeywordPrefilter:
         return tuple(normalized_keywords)
 
     def _matches_required_keywords(
-        self,
-        *,
-        candidate: RankCandidate,
-        keywords: tuple[str, ...],
+            self,
+            *,
+            candidate: RankCandidate,
+            keywords: tuple[str, ...],
     ) -> bool:
         matched_keywords = set[str]()
 

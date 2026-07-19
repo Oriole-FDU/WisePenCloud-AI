@@ -21,18 +21,18 @@ class MmrDiversifier:
     __slots__ = ("tokenizer", "config")
 
     def __init__(
-        self,
-        *,
-        tokenizer: RankingTokenizer,
-        config: MmrDiversifierConfig | None = None,
+            self,
+            *,
+            tokenizer: RankingTokenizer,
+            config: MmrDiversifierConfig | None = None,
     ) -> None:
         self.tokenizer = tokenizer
         self.config = config or MmrDiversifierConfig()
 
     def diversify(
-        self,
-        *,
-        ranked: tuple[RankedCandidate, ...],
+            self,
+            *,
+            ranked: tuple[RankedCandidate, ...],
     ) -> tuple[RankedCandidate, ...]:
 
         if not ranked:
@@ -90,8 +90,8 @@ class MmrDiversifier:
                         # 同 group_key 通常代表同文档/同来源/同父 chunk。
                         # 即使文本 token 不完全相同，也人为提高相似度，避免同组连续霸榜。
                         if (
-                            item.candidate.group_key
-                            and item.candidate.group_key == selected.candidate.group_key
+                                item.candidate.group_key
+                                and item.candidate.group_key == selected.candidate.group_key
                         ):
                             lexical_similarity = max(
                                 lexical_similarity,
@@ -107,8 +107,8 @@ class MmrDiversifier:
                 # mmr_score = lambda * relevance - (1 - lambda) * diversity_penalty
                 # relevance 越高越想选；和已选结果越相似，惩罚越大。
                 mmr_score = (
-                    cfg.lambda_mult * relevance_scores[item.candidate_id]
-                    - (1.0 - cfg.lambda_mult) * diversity_penalty
+                        cfg.lambda_mult * relevance_scores[item.candidate_id]
+                        - (1.0 - cfg.lambda_mult) * diversity_penalty
                 )
 
                 if best_score is None or mmr_score > best_score:

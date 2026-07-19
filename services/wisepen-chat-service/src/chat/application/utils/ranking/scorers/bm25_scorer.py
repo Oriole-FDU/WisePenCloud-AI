@@ -28,19 +28,19 @@ class BM25Scorer:
     __slots__ = ("tokenizer", "config")
 
     def __init__(
-        self,
-        *,
-        tokenizer: RankingTokenizer,
-        config: BM25ScorerConfig | None = None,
+            self,
+            *,
+            tokenizer: RankingTokenizer,
+            config: BM25ScorerConfig | None = None,
     ) -> None:
         self.tokenizer = tokenizer
         self.config = config or BM25ScorerConfig()
 
     def score(
-        self,
-        *,
-        query: RankQuery,
-        candidates: tuple[RankCandidate, ...],
+            self,
+            *,
+            query: RankQuery,
+            candidates: tuple[RankCandidate, ...],
     ) -> tuple[ScoreSignal, ...]:
         if not candidates:
             return ()
@@ -83,9 +83,9 @@ class BM25Scorer:
                 score = float(scores[query_index][rank - 1])
                 current = best.get(candidate_id)
                 if (
-                    current is None
-                    or score > current[0]
-                    or (score == current[0] and rank < current[1])
+                        current is None
+                        or score > current[0]
+                        or (score == current[0] and rank < current[1])
                 ):
                     best[candidate_id] = (score, rank)
 

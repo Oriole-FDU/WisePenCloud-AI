@@ -1,6 +1,5 @@
-from zeroentropy import AsyncZeroEntropy
-
 from chat.core.config.app_settings import settings
+from zeroentropy import AsyncZeroEntropy
 
 from .diversifiers import MmrDiversifier, MmrDiversifierConfig
 from .fusion import WeightedRrfFusion

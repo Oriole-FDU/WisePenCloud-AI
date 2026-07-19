@@ -18,10 +18,10 @@ class Prefilter(Protocol):
     """
 
     def prefilter(
-        self,
-        *,
-        query: RankQuery,
-        candidates: tuple[RankCandidate, ...],
+            self,
+            *,
+            query: RankQuery,
+            candidates: tuple[RankCandidate, ...],
     ) -> tuple[RankCandidate, ...]:
         """返回满足前置硬约束的候选集合。"""
         ...
@@ -36,10 +36,10 @@ class Scorer(Protocol):
     """
 
     def score(
-        self,
-        *,
-        query: RankQuery,
-        candidates: tuple[RankCandidate, ...],
+            self,
+            *,
+            query: RankQuery,
+            candidates: tuple[RankCandidate, ...],
     ) -> tuple[ScoreSignal, ...]:
         """计算候选排序信号。"""
         ...
@@ -53,10 +53,10 @@ class Fusion(Protocol):
     """
 
     def fuse(
-        self,
-        *,
-        candidates: tuple[RankCandidate, ...],
-        signals: tuple[ScoreSignal, ...],
+            self,
+            *,
+            candidates: tuple[RankCandidate, ...],
+            signals: tuple[ScoreSignal, ...],
     ) -> tuple[RankedCandidate, ...]:
         """融合多路排序信号，生成初始排序结果。"""
         ...
@@ -70,10 +70,10 @@ class Reranker(Protocol):
     """
 
     async def rerank(
-        self,
-        *,
-        query: RankQuery,
-        ranked: tuple[RankedCandidate, ...],
+            self,
+            *,
+            query: RankQuery,
+            ranked: tuple[RankedCandidate, ...],
     ) -> tuple[RankedCandidate, ...]:
         """对已有排序结果进行二次重排。"""
         ...
@@ -88,9 +88,9 @@ class Diversifier(Protocol):
     """
 
     def diversify(
-        self,
-        *,
-        ranked: tuple[RankedCandidate, ...],
+            self,
+            *,
+            ranked: tuple[RankedCandidate, ...],
     ) -> tuple[RankedCandidate, ...]:
         """对已有排序结果进行多样性控制。"""
         ...

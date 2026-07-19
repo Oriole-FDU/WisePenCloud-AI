@@ -71,8 +71,8 @@ class RankingPipeline:
         )
 
     def _rank_before_reranker(
-        self,
-        request: RankRequest,
+            self,
+            request: RankRequest,
     ) -> tuple[RankedCandidate, ...]:
         """执行空请求判断、优先过滤以及初始排序。"""
         if request.top_k <= 0 or not request.candidates:
@@ -90,10 +90,10 @@ class RankingPipeline:
         return self._build_initial_ranked(request=request, candidates=candidates)
 
     def _build_initial_ranked(
-        self,
-        *,
-        request: RankRequest,
-        candidates: tuple[RankCandidate, ...],
+            self,
+            *,
+            request: RankRequest,
+            candidates: tuple[RankCandidate, ...],
     ) -> tuple[RankedCandidate, ...]:
         """使用外部信号、scorer 或输入顺序构造初始排名。"""
         if request.signals:

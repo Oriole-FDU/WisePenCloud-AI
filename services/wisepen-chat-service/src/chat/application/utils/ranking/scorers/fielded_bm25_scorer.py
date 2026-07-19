@@ -35,19 +35,19 @@ class FieldedBM25Scorer:
     __slots__ = ("tokenizer", "config")
 
     def __init__(
-        self,
-        *,
-        tokenizer: RankingTokenizer,
-        config: FieldedBM25ScorerConfig | None = None,
+            self,
+            *,
+            tokenizer: RankingTokenizer,
+            config: FieldedBM25ScorerConfig | None = None,
     ) -> None:
         self.tokenizer = tokenizer
         self.config = config or FieldedBM25ScorerConfig()
 
     def score(
-        self,
-        *,
-        query: RankQuery,
-        candidates: tuple[RankCandidate, ...],
+            self,
+            *,
+            query: RankQuery,
+            candidates: tuple[RankCandidate, ...],
     ) -> tuple[ScoreSignal, ...]:
         if not candidates:
             return ()
@@ -99,9 +99,9 @@ class FieldedBM25Scorer:
                     score = float(scores[query_index][rank - 1])
                     current = best.get(candidate.candidate_id)
                     if (
-                        current is None
-                        or score > current[0]
-                        or (score == current[0] and rank < current[1])
+                            current is None
+                            or score > current[0]
+                            or (score == current[0] and rank < current[1])
                     ):
                         # 多 query 命中同一候选同一字段时，只保留该字段下最高 BM25 分和对应 rank。
                         best[candidate.candidate_id] = (score, rank)

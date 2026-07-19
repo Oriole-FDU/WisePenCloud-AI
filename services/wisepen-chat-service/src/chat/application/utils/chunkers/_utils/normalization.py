@@ -30,7 +30,7 @@ def normalize_flat_chunks(chunks: tuple[Chunk, ...]) -> tuple[Chunk, ...]:
 
 
 def normalize_parent_child_chunks(
-    chunks: tuple[Chunk, ...],
+        chunks: tuple[Chunk, ...],
 ) -> tuple[Chunk, ...]:
     """只归一化父块，并在最终定稿前维护所有子块引用。"""
     parents = tuple(chunk for chunk in chunks if chunk.role == ChunkRole.PARENT)
@@ -114,9 +114,9 @@ def merge_heading_only(chunks: tuple[Chunk, ...]) -> ChunkMergeResult:
         heading_chunks = [chunks[index]]
         index += 1
         while (
-            index < len(chunks)
-            and heading_only[index]
-            and _same_page(heading_chunks[0], chunks[index])
+                index < len(chunks)
+                and heading_only[index]
+                and _same_page(heading_chunks[0], chunks[index])
         ):
             heading_chunks.append(chunks[index])
             index += 1
@@ -127,9 +127,9 @@ def merge_heading_only(chunks: tuple[Chunk, ...]) -> ChunkMergeResult:
 
         # 同页后续正文优先承接标题，保持“标题在正文之前”的阅读顺序。
         if (
-            index < len(chunks)
-            and not heading_only[index]
-            and _same_page(heading, chunks[index])
+                index < len(chunks)
+                and not heading_only[index]
+                and _same_page(heading, chunks[index])
         ):
             body = chunks[index]
             index += 1
@@ -154,9 +154,9 @@ def merge_heading_only(chunks: tuple[Chunk, ...]) -> ChunkMergeResult:
 
 
 def merge_short_tails(
-    chunks: tuple[Chunk, ...],
-    *,
-    min_size: int,
+        chunks: tuple[Chunk, ...],
+        *,
+        min_size: int,
 ) -> ChunkMergeResult:
     """把同页内小于阈值的短尾并入前块，绝不跨页。"""
     if len(chunks) <= 1:
@@ -166,9 +166,9 @@ def merge_short_tails(
     remapped_ids: dict[str, str] = {}
     for chunk in chunks:
         if (
-            not merged
-            or len(chunk.text) >= min_size
-            or not _same_page(merged[-1], chunk)
+                not merged
+                or len(chunk.text) >= min_size
+                or not _same_page(merged[-1], chunk)
         ):
             merged.append(chunk)
             continue
@@ -201,8 +201,8 @@ def _same_page(left: Chunk, right: Chunk) -> bool:
 
 
 def _merge_remapped_ids(
-    first: dict[str, str],
-    second: dict[str, str],
+        first: dict[str, str],
+        second: dict[str, str],
 ) -> dict[str, str]:
     """合并连续两轮 ID 映射，避免子块只跳转到中间父 ID。"""
     remapped = {

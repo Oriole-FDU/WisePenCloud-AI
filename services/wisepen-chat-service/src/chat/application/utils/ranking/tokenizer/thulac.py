@@ -11,8 +11,8 @@ class ThuLacRankingTokenizer(RankingTokenizer):
     __slots__ = ("_thulac_tokenizer",)
 
     def __init__(
-        self,
-        stopwords: frozenset[str] | None = None,
+            self,
+            stopwords: frozenset[str] | None = None,
     ) -> None:
         super().__init__(stopwords=stopwords)
         # seg_only=True 表示只分词不标注词性，提高吞吐

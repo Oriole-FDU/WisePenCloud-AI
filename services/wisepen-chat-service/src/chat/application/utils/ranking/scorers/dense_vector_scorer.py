@@ -28,17 +28,17 @@ class DenseVectorScorer:
     __slots__ = ("config",)
 
     def __init__(
-        self,
-        *,
-        config: DenseVectorScorerConfig | None = None,
+            self,
+            *,
+            config: DenseVectorScorerConfig | None = None,
     ) -> None:
         self.config = config or DenseVectorScorerConfig()
 
     def score(
-        self,
-        *,
-        query: RankQuery,
-        candidates: tuple[RankCandidate, ...],
+            self,
+            *,
+            query: RankQuery,
+            candidates: tuple[RankCandidate, ...],
     ) -> tuple[ScoreSignal, ...]:
         if not candidates:
             return ()
