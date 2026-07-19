@@ -2,6 +2,7 @@
 
 from typing import List
 
+import httpx
 from dependency_injector import containers, providers
 from v2.nacos import NacosNamingService
 
@@ -40,6 +41,23 @@ from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
+from chat.application.tools.search_tools.web_search import (
+    AnySearchSearchTool,
+    BaiduQianfanSearchTool,
+    ExaSearchTool,
+    PlatformSearchTool,
+    TavilySearchTool,
+)
+from chat.application.tools.search_tools.web_search.services.pipeline import SearchPipeline
+from chat.application.tools.search_tools.web_search.services.providers import (
+    DdgSearcher,
+    FourGetSearcher,
+    PlatformDefaultSearcher,
+)
+from chat.application.tools.search_tools.web_search.services.providers.base import (
+    SearchProviderConfig,
+)
+from chat.application.tools.search_tools.web_search.services.sources import SearchSourceFactory
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
@@ -73,6 +91,18 @@ def _get_iflytek_speech_config():
     if settings.SPEECH_CONFIG is None:
         return None
     return settings.SPEECH_CONFIG.IFLYTEK
+
+
+def _build_platform_default_searcher(http_client: httpx.AsyncClient) -> PlatformDefaultSearcher:
+    return PlatformDefaultSearcher(
+        fourget_searcher=FourGetSearcher(
+            http_client=http_client,
+            config=SearchProviderConfig(
+                base_url=settings.WEB_SEARCH_FOURGET_BASE_URL,
+            ),
+        ),
+        ddg_searcher=DdgSearcher(),
+    )
 
 
 class Container(containers.DeclarativeContainer):
@@ -197,10 +227,58 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
+    web_search_http_client = providers.Singleton(
+        httpx.AsyncClient,
+        timeout=httpx.Timeout(15.0),
+    )
+    platform_default_searcher = providers.Singleton(
+        _build_platform_default_searcher,
+        http_client=web_search_http_client,
+    )
+    web_search_source_factory = providers.Singleton(
+        SearchSourceFactory,
+        http_client=web_search_http_client,
+        platform_default_searcher=platform_default_searcher,
+        exa_base_url=settings.WEB_SEARCH_EXA_BASE_URL,
+        tavily_base_url=settings.WEB_SEARCH_TAVILY_BASE_URL,
+        anysearch_base_url=settings.WEB_SEARCH_ANYSEARCH_BASE_URL,
+        baidu_qianfan_base_url=settings.WEB_SEARCH_BAIDU_QIANFAN_BASE_URL,
+    )
+    web_search_pipeline = providers.Singleton(SearchPipeline)
+    platform_search_tool = providers.Singleton(
+        PlatformSearchTool,
+        search_pipeline=web_search_pipeline,
+        source_factory=web_search_source_factory,
+    )
+    exa_search_tool = providers.Singleton(
+        ExaSearchTool,
+        search_pipeline=web_search_pipeline,
+        source_factory=web_search_source_factory,
+    )
+    tavily_search_tool = providers.Singleton(
+        TavilySearchTool,
+        search_pipeline=web_search_pipeline,
+        source_factory=web_search_source_factory,
+    )
+    anysearch_search_tool = providers.Singleton(
+        AnySearchSearchTool,
+        search_pipeline=web_search_pipeline,
+        source_factory=web_search_source_factory,
+    )
+    baidu_qianfan_search_tool = providers.Singleton(
+        BaiduQianfanSearchTool,
+        search_pipeline=web_search_pipeline,
+        source_factory=web_search_source_factory,
+    )
     tool_providers = providers.List(
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
+        platform_search_tool,
+        exa_search_tool,
+        tavily_search_tool,
+        anysearch_search_tool,
+        baidu_qianfan_search_tool,
     )
 
     tool_registry = providers.Singleton(

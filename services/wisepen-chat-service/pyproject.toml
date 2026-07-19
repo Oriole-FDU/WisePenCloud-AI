@@ -28,4 +28,6 @@ dependencies = [
     "jieba",
     "zeroentropy",
     "wisepen-common",
+    "httpx",
+    "ddgs>=9.14.4",
 ]
