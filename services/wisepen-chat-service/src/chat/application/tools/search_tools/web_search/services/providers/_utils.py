@@ -26,7 +26,7 @@ def as_dict_tuple(value: object) -> tuple[dict[str, object], ...]:
     return tuple(item for item in value if isinstance(item, dict))
 
 
-def has_search_result_fields(*, title: str, url: str) -> bool:
+def is_valid_search_result(*, title: str, url: str) -> bool:
     parsed = urlparse(url)
     return bool(title) and parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 

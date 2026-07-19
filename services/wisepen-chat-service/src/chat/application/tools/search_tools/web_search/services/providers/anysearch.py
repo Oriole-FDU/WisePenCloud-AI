@@ -21,7 +21,7 @@ from ._utils import (
     as_str_or_none,
     as_str_tuple,
     dedupe_by_url,
-    has_search_result_fields,
+    is_valid_search_result,
 )
 
 
@@ -96,7 +96,7 @@ class AnySearchSearcher(BaseProviderSearcher):
         title = as_str(item.get("title"))
         url = as_str(item.get("url"))
 
-        if not has_search_result_fields(title=title, url=url):
+        if not is_valid_search_result(title=title, url=url):
             return None
 
         overview = as_str_or_none(
