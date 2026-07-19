@@ -75,7 +75,7 @@ class ContainerQueue:
             if idle:
                 info = idle[0]
                 self._next_token += 1
-                info.state = ContainerState.BUSY
+                self._transition(info, ContainerState.BUSY)
                 info.user_id = user_id
                 info.session_id = session_id
                 info.allocated_at = time.time()
@@ -119,7 +119,7 @@ class ContainerQueue:
                     code=SandboxException.queue_no_idle().code,
                     message=f"stale fencing token: expected {info.fencing_token}, got {fencing_token}",
                 )
-            info.state = ContainerState.DIRTY
+            self._transition(info, ContainerState.DIRTY)
             info.user_id = ""
             info.session_id = ""
             info.lease_expires_at = 0.0
@@ -181,7 +181,7 @@ class ContainerQueue:
                 if self._is_running(cid):
                     alive += 1
                 else:
-                    info.state = ContainerState.DEAD
+                    self._transition(info, ContainerState.DEAD)
                     dead += 1
                     _dbg("health_dead", cid=cid[:12])
             summary = {
@@ -244,6 +244,16 @@ class ContainerQueue:
             self._run_docker(["rm", "-f", container_id])
         except SandboxException:
             pass
+
+    def _transition(self, info: ContainerInfo, target: ContainerState) -> None:
+        """验证状态转换合法性后执行。"""
+        allowed = _ALLOWED_TRANSITIONS.get(info.state, set())
+        if target not in allowed:
+            raise SandboxException(
+                code=SandboxException.docker_error("state").code,
+                message=f"invalid transition: {info.state.value} -> {target.value}",
+            )
+        info.state = target
 
     def remove_container(self, container_id: str) -> None:
         self._rm_container(container_id)

@@ -67,6 +67,7 @@ class Watcher:
         last_prefetch = 0.0
         last_recycle = 0.0
         last_workspace_cleanup = 0.0
+        last_lease_recovery = 0.0
 
         while not self._stop_event.is_set():
             now = time.time()
@@ -82,6 +83,10 @@ class Watcher:
             if now - last_recycle >= self._recycle_interval:
                 self._do_recycle()
                 last_recycle = now
+
+            if now - last_lease_recovery >= 120.0:  # 每 2 分钟检查过期租约
+                self._do_lease_recovery()
+                last_lease_recovery = now
 
             if now - last_workspace_cleanup >= self._workspace_cleanup_interval:
                 self._do_workspace_cleanup()
@@ -127,6 +132,21 @@ class Watcher:
                     _dbg("recycled", old_cid=cid[:12], new_cid=new_cid[:12])
         except Exception as e:
             _dbg("recycle_error", error=str(e))
+
+    def _do_lease_recovery(self) -> None:
+        """回收超过 TTL 仍处于 BUSY 状态的容器（调用者忘记释放）。"""
+        try:
+            now = time.time()
+            expired: list[tuple[str, int]] = []
+            with self._queue.lock:
+                for cid, info in self._queue.containers.items():
+                    if info.state == ContainerState.BUSY and info.lease_expires_at > 0 and now >= info.lease_expires_at:
+                        expired.append((cid, info.fencing_token))
+            for cid, token in expired:
+                self._queue.release(cid, token)
+                _dbg("lease_expired", cid=cid[:12], token=token)
+        except Exception as e:
+            _dbg("lease_recovery_error", error=str(e))
 
     def _do_workspace_cleanup(self) -> None:
         """Remove stale workspace cache directories older than TTL."""
