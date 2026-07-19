@@ -27,5 +27,6 @@ dependencies = [
     "pyyaml",
     "jieba",
     "zeroentropy",
+    "regex",
     "wisepen-common",
 ]
