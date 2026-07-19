@@ -13,7 +13,6 @@ from chat.application.tools.search_tools.web_search.tools import (
 )
 from chat.application.tools.search_tools.web_search.services.pipeline import (
     SearchPipelineResult,
-    VisibleWebSearchCandidate,
     WebSearchCandidate,
     WebSearchResult,
 )
@@ -137,7 +136,8 @@ async def test_exa_tool_keeps_its_own_identity_and_custom_key() -> None:
     assert pipeline.calls[0]["mode"] == SearchMode.ACADEMIC
     assert result.visible_result["recommended_ids"] == ("[1]",)
     assert result.visible_result["candidates"] == (
-        VisibleWebSearchCandidate(
+        WebSearchCandidate(
+            candidate_id="[1]",
             url="https://arxiv.org/abs/1706.03762",
             title="Attention Is All You Need",
             overview="overview",

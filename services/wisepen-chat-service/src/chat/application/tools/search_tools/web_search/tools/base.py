@@ -24,7 +24,6 @@ from ..services.errors import (
 from ..services.pipeline import (
     SearchPipeline,
     SearchPipelineResult,
-    VisibleWebSearchCandidate,
 )
 from ..services.providers.core.models import SearchMode, SearchProviderName
 from ..services.sources import SearchSourceFactory
@@ -208,15 +207,7 @@ def _build_tool_return(
     visible_result: dict[str, object] = {
         "query": result.search_result.query,
         "mode": mode.value,
-        "candidates": tuple(
-            VisibleWebSearchCandidate(
-                url=candidate.url,
-                title=candidate.title,
-                overview=candidate.overview,
-                highlights=candidate.highlights,
-            )
-            for candidate in result.candidates
-        ),
+        "candidates": result.candidates,
         "recommended_ids": result.recommended_ids,
     }
     if answers:
