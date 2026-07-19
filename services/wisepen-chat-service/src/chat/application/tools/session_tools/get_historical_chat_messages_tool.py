@@ -1,8 +1,6 @@
 ﻿from datetime import datetime
 from typing import Dict, Any, Optional
-from common.logger import error
 
-from chat.core.config.app_settings import settings
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -11,7 +9,9 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
+from chat.core.config.app_settings import settings
 from chat.domain.repositories import MessageRepository
+from common.logger import error
 
 
 class GetHistoricalChatMessagesTool:
@@ -73,10 +73,10 @@ class GetHistoricalChatMessagesTool:
         return self._definition
 
     async def execute(
-        self,
-        context: dict[str, Any],
-        config: dict[str, Any] | None = None,
-        **kwargs: Any,
+            self,
+            context: dict[str, Any],
+            config: dict[str, Any] | None = None,
+            **kwargs: Any,
     ) -> str:
         # session_id 从系统注入的 context 读取
         session_id: Optional[str] = context.get("session_id")
@@ -130,5 +130,3 @@ class GetHistoricalChatMessagesTool:
             raw = raw[:settings.TOOL_RESULT_MAX_CHARS] + "\n...[truncated]"
 
         return raw
-
-

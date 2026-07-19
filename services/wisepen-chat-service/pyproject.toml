@@ -23,7 +23,7 @@ dependencies = [
     "orjson",
     "jsonschema",
     "beanie",
-    "redis[asyncio]",
+    "redis",
     "nacos-sdk-python",
     "pyyaml",
     "jieba",
@@ -36,6 +36,7 @@ dependencies = [
     "mdit-py-plugins>=0.5,<1",
     "regex",
     "wisepen-common",
+    "pdfminer.six",
 ]
 
 [dependency-groups]
