@@ -225,6 +225,7 @@ class ContainerQueue:
             "--label", "wisepen.role=aio-worker",
             "--security-opt", "seccomp=unconfined",
             "--shm-size", "2gb",
+            "--network", "sandbox-net",
             "-v", f"{self._workspace_cache}:/workspaces",
             "-p", "::8080",
             "-p", "::6080",

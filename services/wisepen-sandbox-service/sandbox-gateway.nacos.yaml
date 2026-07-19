@@ -1,0 +1,6 @@
+FROM_SOURCE_SECRET: "local-dev-secret"
+WORKER_IMAGE: "ghcr.io/agent-infra/sandbox:latest"
+WORKER_MIN_IDLE: 2
+WORKER_MAX_TOTAL: 8
+WORKER_DIRTY_TTL: 60
+WORKSPACE_CACHE_DIR: "/workspaces"

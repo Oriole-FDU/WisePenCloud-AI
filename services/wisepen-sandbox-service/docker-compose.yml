@@ -2,7 +2,9 @@ version: "3.8"
 
 services:
   sandbox-manager:
-    build: .
+    build:
+      context: ../..          # AI/ 目录（COPY services/... 的根）
+      dockerfile: services/wisepen-sandbox-service/Dockerfile
     container_name: wisepen-sandbox-manager
     restart: unless-stopped
     volumes:
@@ -12,6 +14,10 @@ services:
       - "9001:9001"   # sandbox HTTP API
       - "8001:8001"   # MCP gateway
     environment:
+      - PROFILE=dev
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - NACOS_SERVER_ADDR=127.0.0.1:8848
+      - CHAT_USE_NACOS=0
       - SANDBOX_HOST=0.0.0.0
       - SANDBOX_PORT=9001
       - SANDBOX_QUEUE_ENABLE=1
@@ -23,3 +29,9 @@ services:
       - FROM_SOURCE_SECRET=local-dev-secret
     labels:
       - "wisepen.role=sandbox-manager"
+    networks:
+      - sandbox-net
+
+networks:
+  sandbox-net:
+    driver: bridge

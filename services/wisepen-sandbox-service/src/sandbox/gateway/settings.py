@@ -11,7 +11,7 @@ from sandbox.gateway.bootstrap import bootstrap_settings
 from sandbox.gateway.nacos import nacos_client_manager
 from common.logger import info, error
 
-SERVICE_ROOT = Path(__file__).resolve().parents[2]
+SERVICE_ROOT = Path(__file__).resolve().parents[3]  # sandbox/gateway/settings.py → 服务根
 
 
 class AppSettings(BaseModel):
@@ -24,11 +24,11 @@ class AppSettings(BaseModel):
     WORKER_MIN_IDLE: int = 2
     WORKER_MAX_TOTAL: int = 8
     WORKER_DIRTY_TTL: int = 60
-    AIO_WORKSPACE_CACHE_DIR: str = "/workspaces"
+    WORKSPACE_CACHE_DIR: str = "/workspaces"
 
 
 def _load_local() -> dict:
-    cfg_path = SERVICE_ROOT / "wisepen-aio-gateway.nacos.yaml"
+    cfg_path = SERVICE_ROOT / "sandbox-gateway.nacos.yaml"
     raw = cfg_path.read_text(encoding="utf-8")
     cfg = yaml.safe_load(raw) if raw else {}
     if not isinstance(cfg, dict):

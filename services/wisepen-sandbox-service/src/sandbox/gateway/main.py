@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
         image=settings.WORKER_IMAGE,
         min_idle=settings.WORKER_MIN_IDLE,
         max_total=settings.WORKER_MAX_TOTAL,
-        workspace_cache=settings.AIO_WORKSPACE_CACHE_DIR,
+        workspace_cache=settings.WORKSPACE_CACHE_DIR,
         dirty_ttl=settings.WORKER_DIRTY_TTL,
     ))
     pool.start()
