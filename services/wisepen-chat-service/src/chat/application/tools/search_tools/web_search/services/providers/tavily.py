@@ -5,15 +5,18 @@ from typing import Any
 
 import httpx
 
-from .base import BaseProviderSearcher, SearchProviderConfig
-from .core.errors import SearchProviderCredentialError
-from .core.models import (
-    ProviderSearchHttpRequest,
-    ProviderSearchRequest,
-    ProviderSearchResponse,
-    ProviderSearchResult,
+from ..models import (
     SearchProviderName,
+    SearchResponse,
+    SearchResult,
 )
+from .base import (
+    BaseProviderSearcher,
+    ProviderSearchRequest,
+    SearchProviderConfig,
+    SearchProviderCredentialError,
+)
+from .models import ProviderSearchHttpRequest
 from ._utils import dedupe_results
 
 
@@ -61,13 +64,13 @@ class TavilySearcher(BaseProviderSearcher):
         *,
         query: str,
         max_results: int,
-    ) -> ProviderSearchResponse:
-        return ProviderSearchResponse(
+    ) -> SearchResponse:
+        return SearchResponse(
             query=query,
             provider=SearchProviderName.TAVILY,
             results=dedupe_results(
                 (
-                    ProviderSearchResult(
+                    SearchResult(
                         title=item.get("title"),
                         url=item.get("url"),
                         snippet=item.get("content"),

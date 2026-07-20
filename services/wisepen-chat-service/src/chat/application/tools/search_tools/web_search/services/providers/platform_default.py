@@ -9,15 +9,15 @@ from ddgs import DDGS
 
 from common.logger import warn
 
-from .base import BaseProviderSearcher, SearchProviderConfig
-from .core.errors import SearchProviderError
-from .core.models import (
-    ProviderSearchHttpRequest,
+from ..models import SearchResponse, SearchResult
+from .base import (
+    BaseProviderSearcher,
     ProviderSearchRequest,
-    ProviderSearchResponse,
-    ProviderSearchResult,
+    ProviderSearcher,
+    SearchProviderConfig,
+    SearchProviderError,
 )
-from .core.protocols import ProviderSearcher
+from .models import ProviderSearchHttpRequest
 from ._utils import dedupe_results
 
 
@@ -55,13 +55,13 @@ class FourGetSearcher(BaseProviderSearcher):
         *,
         query: str,
         max_results: int,
-    ) -> ProviderSearchResponse:
-        return ProviderSearchResponse(
+    ) -> SearchResponse:
+        return SearchResponse(
             query=query,
             provider=None,
             results=dedupe_results(
                 (
-                    ProviderSearchResult(
+                    SearchResult(
                         title=item.get("title"),
                         url=item.get("url"),
                         snippet=item.get("description"),
@@ -100,7 +100,7 @@ class DdgSearcher(ProviderSearcher):
         *,
         query: str,
         max_results: int,
-    ) -> ProviderSearchResponse:
+    ) -> SearchResponse:
         ddg = DDGS(proxy=self._proxy) if self._proxy else DDGS()
 
         items = await asyncio.to_thread(
@@ -121,13 +121,13 @@ class DdgSearcher(ProviderSearcher):
         *,
         query: str,
         max_results: int,
-    ) -> ProviderSearchResponse:
-        return ProviderSearchResponse(
+    ) -> SearchResponse:
+        return SearchResponse(
             query=query,
             provider=None,
             results=dedupe_results(
                 (
-                    ProviderSearchResult(
+                    SearchResult(
                         title=item.get("title"),
                         url=item.get("href"),
                         snippet=item.get("body"),
@@ -156,7 +156,7 @@ class PlatformDefaultSearcher(ProviderSearcher):
         *,
         query: str,
         max_results: int,
-    ) -> ProviderSearchResponse:
+    ) -> SearchResponse:
         try:
             response = await self._fourget.search_web(
                 query=query,

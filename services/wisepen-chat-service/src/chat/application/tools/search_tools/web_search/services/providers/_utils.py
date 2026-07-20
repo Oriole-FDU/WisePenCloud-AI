@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .core.models import ProviderSearchResult
+from ..models import SearchResult
 
 
 def dedupe_results(
-    results: Iterable[ProviderSearchResult],
+    results: Iterable[SearchResult],
     *,
     limit: int,
-) -> tuple[ProviderSearchResult, ...]:
+) -> tuple[SearchResult, ...]:
     seen: set[str | None] = set()
-    deduped: list[ProviderSearchResult] = []
+    deduped: list[SearchResult] = []
 
     for result in results:
         if result.url in seen:

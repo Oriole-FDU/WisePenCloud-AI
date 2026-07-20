@@ -11,18 +11,16 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
-from ..services.errors import (
-    WebSearchCustomApiKeyInvalid,
-    WebSearchCustomApiKeyMissing,
-    WebSearchEmptyResult,
-    WebSearchError,
-    WebSearchInternalError,
-    WebSearchNetworkError,
+from ..services.models import (
+    SearchMode,
+    SearchProviderName,
 )
-from ..services.pipeline import (
-    SearchPipeline,
+from ..services.pipeline import SearchPipeline
+from ..services.providers.base import (
+    SearchProviderCredentialError,
+    SearchProviderError,
+    SearchProviderNetworkError,
 )
-from ..services.providers.core.models import SearchMode, SearchProviderName
 from ..services.sources import SearchSourceFactory
 
 DEFAULT_SEARCH_RESULTS = 10
@@ -140,13 +138,19 @@ class BaseWebSearchTool:
         mode = SearchMode(str(kwargs.get("mode") or SearchMode.WEB.value))
         requested_results = kwargs.get("max_results") or DEFAULT_SEARCH_RESULTS
         max_results = max(1, min(requested_results, MAX_SEARCH_RESULTS))
+        api_key = (
+            str((config or {}).get("api_key") or "").strip()
+            if self._provider is not None
+            else None
+        )
+        if self._provider is not None and not api_key:
+            raise ToolExecutionError(
+                reason=f"{self._tool_name}_api_key_missing",
+                detail_reason=f"{self._provider} 缺少工具配置中的 API key",
+                retryable=False,
+            )
 
         try:
-            api_key = (
-                str((config or {}).get("api_key") or "").strip()
-                if self._provider is not None
-                else None
-            )
             source = self._source_factory.build(
                 provider=self._provider,
                 api_key=api_key,
@@ -159,47 +163,40 @@ class BaseWebSearchTool:
                 mode=mode,
             )
 
-        except WebSearchCustomApiKeyMissing as exc:
-            raise ToolExecutionError(
-                reason=f"{self._tool_name}_api_key_missing",
-                detail_reason=str(exc),
-                retryable=False,
-            ) from exc
-
-        except WebSearchCustomApiKeyInvalid as exc:
+        except SearchProviderCredentialError as exc:
             raise ToolExecutionError(
                 reason=f"{self._tool_name}_api_key_invalid",
                 detail_reason=str(exc),
                 retryable=False,
             ) from exc
 
-        except WebSearchNetworkError as exc:
+        except SearchProviderNetworkError as exc:
             raise ToolExecutionError(
                 reason=f"{self._tool_name}_network_error",
                 detail_reason=str(exc),
                 retryable=True,
             ) from exc
 
-        except WebSearchEmptyResult as exc:
+        except SearchProviderError as exc:
             raise ToolExecutionError(
-                reason=f"{self._tool_name}_empty_result",
+                reason=f"{self._tool_name}_failed",
                 detail_reason=str(exc),
-                retryable=True,
+                retryable=False,
             ) from exc
 
-        except WebSearchInternalError as exc:
+        except Exception as exc:
             raise ToolExecutionError(
                 reason=f"{self._tool_name}_unavailable",
                 detail_reason=str(exc),
                 retryable=False,
             ) from exc
 
-        except WebSearchError as exc:
+        if not result.candidates:
             raise ToolExecutionError(
-                reason=f"{self._tool_name}_failed",
-                detail_reason=str(exc),
-                retryable=False,
-            ) from exc
+                reason=f"{self._tool_name}_empty_result",
+                detail_reason="搜索没有返回结果",
+                retryable=True,
+            )
 
         return {
             "query": result.search_query,

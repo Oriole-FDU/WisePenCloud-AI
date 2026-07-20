@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from chat.application.tools.core import ToolExecutionError
 from chat.application.tools.search_tools.web_search.tools import (
     AnySearchSearchTool,
     BaiduQianfanSearchTool,
@@ -11,17 +12,18 @@ from chat.application.tools.search_tools.web_search.tools import (
     PlatformSearchTool,
     TavilySearchTool,
 )
-from chat.application.tools.search_tools.web_search.services.pipeline import (
+from chat.application.tools.search_tools.web_search.services.models import (
+    SearchMode,
     SearchPipelineResult,
+    SearchProviderName,
+    SearchResponse,
     WebSearchCandidate,
 )
-from chat.application.tools.search_tools.web_search.services.providers.core.models import (
-    ProviderSearchResponse,
-    SearchMode,
-    SearchProviderName,
-)
-from chat.application.tools.search_tools.web_search.services.providers.core.protocols import (
+from chat.application.tools.search_tools.web_search.services.providers.base import (
     ProviderSearcher,
+    SearchProviderCredentialError,
+    SearchProviderError,
+    SearchProviderNetworkError,
 )
 
 
@@ -40,7 +42,7 @@ class FakeSearchPipeline:
         )
         return SearchPipelineResult(
             search_query=str(kwargs["search_query"]),
-            response=ProviderSearchResponse(
+            response=SearchResponse(
                 query=str(kwargs["search_query"]),
                 provider=SearchProviderName.EXA,
                 answer="supplier answer",
@@ -63,9 +65,26 @@ class FakeSearchSourceFactory:
         return SimpleNamespace(provider=provider)
 
 
+class FailingSearchPipeline:
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    async def search(self, **kwargs: object) -> SearchPipelineResult:
+        raise self._error
+
+
+class EmptySearchPipeline:
+    async def search(self, **kwargs: object) -> SearchPipelineResult:
+        return SearchPipelineResult(
+            search_query=str(kwargs["search_query"]),
+            response=None,
+            candidates=(),
+        )
+
+
 @pytest.mark.asyncio
 async def test_provider_academic_search_defaults_to_web() -> None:
-    response = ProviderSearchResponse(
+    response = SearchResponse(
         query="rag paper",
         provider=None,
     )
@@ -76,7 +95,7 @@ async def test_provider_academic_search_defaults_to_web() -> None:
             *,
             query: str,
             max_results: int,
-        ) -> ProviderSearchResponse:
+        ) -> SearchResponse:
             return response
 
     result = await WebOnlySearcher().search_academic(
@@ -167,3 +186,90 @@ async def test_platform_tool_uses_the_platform_source_without_user_config() -> N
     assert source_factory.calls == [{"provider": None, "api_key": None}]
     assert pipeline.calls[0]["mode"] == SearchMode.WEB
     assert result["mode"] == "web"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "reason", "retryable"),
+    (
+        (
+            SearchProviderCredentialError("invalid key"),
+            "exa_search_api_key_invalid",
+            False,
+        ),
+        (
+            SearchProviderNetworkError("network unavailable"),
+            "exa_search_network_error",
+            True,
+        ),
+        (
+            SearchProviderError("invalid provider response"),
+            "exa_search_failed",
+            False,
+        ),
+    ),
+)
+async def test_tool_maps_provider_errors(
+    error: Exception,
+    reason: str,
+    retryable: bool,
+) -> None:
+    tool = ExaSearchTool(
+        search_pipeline=FailingSearchPipeline(error),
+        source_factory=FakeSearchSourceFactory(),
+    )
+
+    with pytest.raises(ToolExecutionError) as exc_info:
+        await tool.execute(
+            context={},
+            config={"api_key": "custom-key"},
+            query={
+                "search_query": "rag paper",
+                "ranking_query": "Which paper introduced RAG?",
+            },
+        )
+
+    assert exc_info.value.reason == reason
+    assert exc_info.value.retryable is retryable
+
+
+@pytest.mark.asyncio
+async def test_custom_tool_requires_an_api_key_before_building_source() -> None:
+    source_factory = FakeSearchSourceFactory()
+    tool = ExaSearchTool(
+        search_pipeline=FakeSearchPipeline(),
+        source_factory=source_factory,
+    )
+
+    with pytest.raises(ToolExecutionError) as exc_info:
+        await tool.execute(
+            context={},
+            query={
+                "search_query": "rag paper",
+                "ranking_query": "Which paper introduced RAG?",
+            },
+        )
+
+    assert exc_info.value.reason == "exa_search_api_key_missing"
+    assert source_factory.calls == []
+
+
+@pytest.mark.asyncio
+async def test_tool_maps_empty_pipeline_result() -> None:
+    tool = ExaSearchTool(
+        search_pipeline=EmptySearchPipeline(),
+        source_factory=FakeSearchSourceFactory(),
+    )
+
+    with pytest.raises(ToolExecutionError) as exc_info:
+        await tool.execute(
+            context={},
+            config={"api_key": "custom-key"},
+            query={
+                "search_query": "rag paper",
+                "ranking_query": "Which paper introduced RAG?",
+            },
+        )
+
+    assert exc_info.value.reason == "exa_search_empty_result"
+    assert exc_info.value.retryable is True

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from chat.application.utils.ranking import (
     RankCandidate,
     RankQuery,
@@ -9,40 +7,18 @@ from chat.application.utils.ranking import (
     RankingPipeline,
 )
 
-from .errors import (
-    WebSearchCustomApiKeyInvalid,
-    WebSearchCustomApiKeyMissing,
-    WebSearchEmptyResult,
-    WebSearchError,
-    WebSearchInternalError,
-    WebSearchNetworkError,
+from .models import (
+    SearchMode,
+    SearchPipelineResult,
+    SearchResponse,
+    WebSearchCandidate,
 )
-from .providers.core.errors import (
-    SearchProviderCredentialError,
-    SearchProviderNetworkError,
-)
-from .providers.core.models import ProviderSearchResponse, SearchMode
+from .providers.base import SearchProviderError
 from .sources import (
     CustomSearchSource,
     PlatformDefaultSearchSource,
     WebSearchSourceScope,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class WebSearchCandidate:
-    candidate_id: str
-    title: str | None = None
-    url: str | None = None
-    snippet: str | None = None
-    highlights: tuple[str, ...] | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class SearchPipelineResult:
-    search_query: str
-    response: ProviderSearchResponse | None
-    candidates: tuple[WebSearchCandidate, ...]
 
 
 class SearchPipeline:
@@ -67,7 +43,7 @@ class SearchPipeline:
                 source=source,
                 mode=mode,
             )
-        except WebSearchError:
+        except SearchProviderError:
             if source.scope is WebSearchSourceScope.PRIVATE:
                 raise
 
@@ -84,12 +60,6 @@ class SearchPipeline:
             )
             for index, item in enumerate(items, 1)
         )
-
-        if not candidates:
-            raise WebSearchEmptyResult(
-                provider=source.provider,
-                reason="搜索没有返回结果",
-            )
 
         ranked = await self._ranking_pipeline.arank(
             RankRequest(
@@ -148,47 +118,14 @@ class SearchPipeline:
         max_results: int,
         source: PlatformDefaultSearchSource | CustomSearchSource,
         mode: SearchMode,
-    ) -> ProviderSearchResponse:
+    ) -> SearchResponse:
         search = (
             source.searcher.search_academic
             if mode is SearchMode.ACADEMIC
             else source.searcher.search_web
         )
 
-        try:
-            response = await search(
-                query=query,
-                max_results=max_results,
-            )
-
-        except SearchProviderCredentialError as exc:
-            if "required" in str(exc).lower():
-                raise WebSearchCustomApiKeyMissing(
-                    provider=source.provider,
-                    reason="不存在 API key",
-                ) from exc
-
-            raise WebSearchCustomApiKeyInvalid(
-                provider=source.provider,
-                reason="API key 无效、过期或额度不足",
-            ) from exc
-
-        except SearchProviderNetworkError as exc:
-            raise WebSearchNetworkError(
-                provider=source.provider,
-                reason="网络波动或连接失败",
-            ) from exc
-
-        except Exception as exc:
-            raise WebSearchInternalError(
-                provider=source.provider,
-                reason="内部服务错误",
-            ) from exc
-
-        if not response.results:
-            raise WebSearchEmptyResult(
-                provider=source.provider,
-                reason="搜索源成功响应但没有返回结果",
-            )
-
-        return response
+        return await search(
+            query=query,
+            max_results=max_results,
+        )

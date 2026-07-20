@@ -2,21 +2,54 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import httpx
 
-from .core.errors import (
-    SearchProviderCredentialError,
-    SearchProviderError,
-    SearchProviderNetworkError,
-)
-from .core.models import (
-    ProviderSearchRequest,
-    ProviderSearchResponse,
-    SearchProviderName,
-)
-from .core.protocols import ProviderSearcher
+from ..models import SearchProviderName, SearchResponse
+from .models import ProviderSearchHttpRequest
+
+
+class SearchProviderError(RuntimeError):
+    """搜索源请求或响应解析失败。"""
+
+
+class SearchProviderCredentialError(SearchProviderError):
+    """搜索源凭证无效、过期或额度不足。"""
+
+
+class SearchProviderNetworkError(SearchProviderError):
+    """搜索源网络不可用。"""
+
+
+@runtime_checkable
+class ProviderSearcher(Protocol):
+    """可由 Web Search 编排层调用的搜索源。"""
+
+    async def search_web(
+        self,
+        *,
+        query: str,
+        max_results: int,
+    ) -> SearchResponse: ...
+
+    async def search_academic(
+        self,
+        *,
+        query: str,
+        max_results: int,
+    ) -> SearchResponse:
+        return await self.search_web(
+            query=query,
+            max_results=max_results,
+        )
+
+
+class ProviderSearchRequest:
+    """Provider 搜索请求抽象。"""
+
+    def to_http_request(self) -> ProviderSearchHttpRequest:
+        raise NotImplementedError
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +70,7 @@ class BaseProviderSearcher(ProviderSearcher):
         *,
         query: str,
         max_results: int,
-    ) -> ProviderSearchResponse:
+    ) -> SearchResponse:
         raise NotImplementedError
 
     def __init__(
@@ -62,7 +95,7 @@ class BaseProviderSearcher(ProviderSearcher):
         *,
         query: str,
         max_results: int,
-    ) -> ProviderSearchResponse:
+    ) -> SearchResponse:
         return await self._execute_request(
             request=self.request_class(
                 query=query,
@@ -78,7 +111,7 @@ class BaseProviderSearcher(ProviderSearcher):
         request: ProviderSearchRequest,
         query: str,
         max_results: int,
-    ) -> ProviderSearchResponse:
+    ) -> SearchResponse:
         http_request = request.to_http_request()
 
         data = await self._request_json(

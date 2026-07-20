@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..services.providers.core.models import SearchProviderName
+from ..services.models import SearchProviderName
 from .base import BaseWebSearchTool
 
 
