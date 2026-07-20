@@ -136,7 +136,7 @@ async def test_exa_tool_keeps_its_own_identity_and_custom_key() -> None:
         pipeline.calls[0]["ranking_query"]
         == "Which paper introduced the Transformer architecture?"
     )
-    assert result.visible_result["candidates"] == (
+    assert result["candidates"] == (
         WebSearchCandidate(
             candidate_id="[1]",
             url="https://arxiv.org/abs/1706.03762",
@@ -145,7 +145,7 @@ async def test_exa_tool_keeps_its_own_identity_and_custom_key() -> None:
             highlights=("highlight",),
         ),
     )
-    assert result.visible_result["supplier_answer"] == "supplier answer"
+    assert result["supplier_answer"] == "supplier answer"
 
 
 @pytest.mark.asyncio
@@ -166,4 +166,4 @@ async def test_platform_tool_uses_the_platform_source_without_user_config() -> N
     assert tool.definition.config_spec is None
     assert source_factory.calls == [{"provider": None, "api_key": None}]
     assert pipeline.calls[0]["mode"] == SearchMode.WEB
-    assert result.visible_result["mode"] == "web"
+    assert result["mode"] == "web"
