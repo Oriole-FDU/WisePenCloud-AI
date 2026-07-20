@@ -4,7 +4,6 @@ from .models import (
     ProviderSearchResponse,
     ProviderSearchResult,
     SearchMode,
-    SearchPreview,
     SearchProviderName,
 )
 from .errors import (
@@ -23,7 +22,6 @@ __all__ = [
     "ProviderSearchResponse",
     "ProviderSearchResult",
     "SearchMode",
-    "SearchPreview",
     "SearchProviderCredentialError",
     "SearchProviderError",
     "SearchProviderName",

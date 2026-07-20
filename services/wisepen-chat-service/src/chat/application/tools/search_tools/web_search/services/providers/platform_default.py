@@ -16,7 +16,6 @@ from .core.models import (
     ProviderSearchRequest,
     ProviderSearchResponse,
     ProviderSearchResult,
-    SearchPreview,
 )
 from .core.protocols import ProviderSearcher
 from ._utils import dedupe_results
@@ -65,7 +64,7 @@ class FourGetSearcher(BaseProviderSearcher):
                     ProviderSearchResult(
                         title=item.get("title"),
                         url=item.get("url"),
-                        preview=SearchPreview(snippet=item.get("description")),
+                        snippet=item.get("description"),
                     )
                     for item in data["web"]
                 ),
@@ -131,7 +130,7 @@ class DdgSearcher(ProviderSearcher):
                     ProviderSearchResult(
                         title=item.get("title"),
                         url=item.get("href"),
-                        preview=SearchPreview(snippet=item.get("body")),
+                        snippet=item.get("body"),
                     )
                     for item in items
                 ),

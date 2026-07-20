@@ -79,8 +79,8 @@ class SearchPipeline:
                 candidate_id=f"[{index}]",
                 title=item.title,
                 url=item.url,
-                snippet=item.preview.snippet,
-                highlights=item.preview.highlights,
+                snippet=item.snippet,
+                highlights=item.highlights,
             )
             for index, item in enumerate(items, 1)
         )

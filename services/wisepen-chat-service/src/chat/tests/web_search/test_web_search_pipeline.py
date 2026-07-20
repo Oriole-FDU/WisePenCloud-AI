@@ -11,7 +11,6 @@ from chat.application.tools.search_tools.web_search.services.providers.core.mode
     ProviderSearchResponse,
     ProviderSearchResult,
     SearchMode,
-    SearchPreview,
 )
 from chat.application.tools.search_tools.web_search.services.sources import (
     WebSearchSourceScope,
@@ -37,10 +36,8 @@ class FakeSearcher:
                 ProviderSearchResult(
                     title="First result",
                     url="https://example.com/first",
-                    preview=SearchPreview(
-                        snippet="First snippet",
-                        highlights=("First highlight",),
-                    ),
+                    snippet="First snippet",
+                    highlights=("First highlight",),
                 ),
                 ProviderSearchResult(
                     title="Second result",

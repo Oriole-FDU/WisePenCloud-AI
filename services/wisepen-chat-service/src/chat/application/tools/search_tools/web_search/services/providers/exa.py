@@ -12,7 +12,6 @@ from .core.models import (
     ProviderSearchRequest,
     ProviderSearchResponse,
     ProviderSearchResult,
-    SearchPreview,
     SearchProviderName,
 )
 from ._utils import dedupe_results
@@ -80,13 +79,11 @@ class ExaSearcher(BaseProviderSearcher):
                     ProviderSearchResult(
                         title=item.get("title"),
                         url=item.get("url"),
-                        preview=SearchPreview(
-                            snippet=item.get("summary"),
-                            highlights=(
-                                tuple(highlights)
-                                if (highlights := item.get("highlights")) is not None
-                                else None
-                            ),
+                        snippet=item.get("summary"),
+                        highlights=(
+                            tuple(highlights)
+                            if (highlights := item.get("highlights")) is not None
+                            else None
                         ),
                     )
                     for item in data["results"]

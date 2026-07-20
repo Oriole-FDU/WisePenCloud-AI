@@ -12,7 +12,6 @@ from .core.models import (
     ProviderSearchRequest,
     ProviderSearchResponse,
     ProviderSearchResult,
-    SearchPreview,
     SearchProviderName,
 )
 from ._utils import dedupe_results
@@ -71,7 +70,7 @@ class TavilySearcher(BaseProviderSearcher):
                     ProviderSearchResult(
                         title=item.get("title"),
                         url=item.get("url"),
-                        preview=SearchPreview(snippet=item.get("content")),
+                        snippet=item.get("content"),
                     )
                     for item in data["results"]
                 ),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 
 
@@ -34,20 +34,13 @@ class ProviderSearchRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class SearchPreview:
-    """搜索结果预览信息。"""
-
-    snippet: str | None = None
-    highlights: tuple[str, ...] | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class ProviderSearchResult:
     """单条搜索结果。"""
 
     title: str | None = None
     url: str | None = None
-    preview: SearchPreview = field(default_factory=SearchPreview)
+    snippet: str | None = None
+    highlights: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
