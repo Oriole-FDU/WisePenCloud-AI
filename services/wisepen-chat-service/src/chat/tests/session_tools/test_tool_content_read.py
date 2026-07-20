@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from chat.application.tools.common.tool_content_store import (
@@ -18,23 +20,18 @@ from chat.application.tools.session_tools.tool_content_read import (
     ToolContentSelector,
     ToolContentWindow,
 )
-from chat.application.tools.session_tools.tool_content_read.services.readers._utils.chunk_selection import (
+from chat.application.tools.session_tools.tool_content_read.services.chunk_selection import (
     select_chunks,
-)
-from chat.application.tools.session_tools.tool_content_read.services.content_loader import (
-    ToolContentLoader,
 )
 from chat.application.tools.session_tools.tool_content_read.services.content_window_builder import (
     ToolContentWindowBuilder,
 )
-from chat.application.tools.session_tools.tool_content_read.services.readers import RegexMatchReader
-from chat.application.tools.session_tools.tool_content_read.services.readers.regex_match_reader import (
+from chat.application.tools.session_tools.tool_content_read.services.reader import (
+    ToolContentReader,
     ToolContentRegexTimeoutError,
 )
-from chat.application.tools.session_tools.tool_content_read.services.readers.sequential_reader import (
-    SequentialReader,
-)
 from chat.application.tools.session_tools.tool_content_read.tools import (
+    ToolContentReadTool,
     ToolContentRegexReadTool,
     ToolContentRankedExpandReadTool,
 )
@@ -53,11 +50,30 @@ class _StoreStub:
         return self._stored
 
 
+class _ConcurrentStoreStub:
+    def __init__(self, stored: tuple[StoredToolContent, ...]) -> None:
+        self._stored = {item.content_id: item for item in stored}
+        self.active = 0
+        self.max_active = 0
+
+    async def get(self, *, content_id: str, session_id: str) -> StoredToolContent | None:
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            await asyncio.sleep(0)
+            stored = self._stored.get(content_id)
+            if stored is None or stored.session_id != session_id:
+                return None
+            return stored
+        finally:
+            self.active -= 1
+
+
 class _RegexBatchReader:
     def __init__(self) -> None:
         self.batches: list[tuple[str, ...]] = []
 
-    async def read(self, *, request: ToolContentRegexReadRequest, session_id: str) -> ToolContentRegexReadResult:
+    async def read_regex(self, *, request: ToolContentRegexReadRequest, session_id: str) -> ToolContentRegexReadResult:
         self.batches.append(request.content_ids)
         if request.content_ids[0] == "cnt_16":
             raise RuntimeError("temporary failure")
@@ -76,7 +92,7 @@ class _RankedExpandBatchReader:
     def __init__(self) -> None:
         self.batches: list[tuple[str, ...]] = []
 
-    async def read(
+    async def read_ranked_expand(
             self,
             *,
             request: object,
@@ -115,14 +131,21 @@ def _markdown_content() -> StoredToolContent:
     )
 
 
-@pytest.mark.asyncio
-async def test_regex_reader_preserves_markdown_equivalent_matching() -> None:
-    reader = RegexMatchReader(
-        loader=ToolContentLoader(store=_StoreStub(_markdown_content())),
-        window_builder=ToolContentWindowBuilder(),
+def _reader(
+        stored: StoredToolContent | None = None,
+        *,
+        max_window_chars: int | None = None,
+) -> ToolContentReader:
+    return ToolContentReader(
+        max_window_chars=max_window_chars,
+        ranking_pipeline=RankingPipeline(),
+        store=_StoreStub(stored),
     )
 
-    result = await reader.read(
+
+@pytest.mark.asyncio
+async def test_regex_reader_does_not_repair_markdown_before_matching() -> None:
+    result = await _reader(_markdown_content()).read_regex(
         request=ToolContentRegexReadRequest(
             content_ids=("cnt_markdown",),
             pattern="BRCA1",
@@ -130,7 +153,77 @@ async def test_regex_reader_preserves_markdown_equivalent_matching() -> None:
         session_id="session-1",
     )
 
+    assert result.matches == ()
+
+
+@pytest.mark.asyncio
+async def test_regex_reader_accepts_broader_pattern_for_malformed_markdown() -> None:
+    result = await _reader(_markdown_content()).read_regex(
+        request=ToolContentRegexReadRequest(
+            content_ids=("cnt_markdown",),
+            pattern=r"BRCA.*?1",
+        ),
+        session_id="session-1",
+    )
+
     assert result.matches[0].window.center_chunk == 0
+
+
+@pytest.mark.asyncio
+async def test_regex_reader_returns_each_match_in_a_chunk() -> None:
+    text = "target appears once; target appears twice."
+    stored = StoredToolContent(
+        content_id="cnt_multiple_matches",
+        session_id="session-1",
+        content_type="text/plain",
+        text=text,
+        chunks=(ToolContentChunk(chunk_index=0, start_offset=0, end_offset=len(text)),),
+    )
+
+    result = await _reader(stored).read_regex(
+        request=ToolContentRegexReadRequest(
+            content_ids=(stored.content_id,),
+            pattern="target",
+        ),
+        session_id=stored.session_id,
+    )
+
+    assert len(result.matches) == 2
+    assert all(match.window.center_chunk == 0 for match in result.matches)
+
+
+@pytest.mark.asyncio
+async def test_regex_reader_loads_content_ids_concurrently() -> None:
+    stored = tuple(
+        StoredToolContent(
+            content_id=f"cnt_{index}",
+            session_id="session-1",
+            content_type="text/plain",
+            text="target",
+            chunks=(ToolContentChunk(chunk_index=0, start_offset=0, end_offset=6),),
+        )
+        for index in range(2)
+    )
+    store = _ConcurrentStoreStub(stored)
+    reader = ToolContentReader(
+        max_window_chars=None,
+        ranking_pipeline=RankingPipeline(),
+        store=store,
+    )
+
+    result = await reader.read_regex(
+        request=ToolContentRegexReadRequest(
+            content_ids=tuple(item.content_id for item in stored),
+            pattern="target",
+        ),
+        session_id="session-1",
+    )
+
+    assert store.max_active == 2
+    assert tuple(match.content_id for match in result.matches) == (
+        "cnt_0",
+        "cnt_1",
+    )
 
 
 @pytest.mark.asyncio
@@ -147,20 +240,16 @@ async def test_regex_reader_matches_markdown_split_identifier_parts() -> None:
             ToolContentChunk(chunk_index=2, start_offset=32, end_offset=len(text)),
         ),
     )
-    reader = RegexMatchReader(
-        loader=ToolContentLoader(store=_StoreStub(stored)),
-        window_builder=ToolContentWindowBuilder(),
-    )
 
-    result = await reader.read(
+    result = await _reader(stored).read_regex(
         request=ToolContentRegexReadRequest(
             content_ids=("cnt_identifiers",),
-            pattern=r"d_model\s*=\s*\d+",
+            pattern=r"d_model_?\s*=\s*\d+",
         ),
         session_id="session-1",
     )
 
-    assert tuple(match.window.center_chunk for match in result.matches) == (0, 2)
+    assert tuple(match.window.center_chunk for match in result.matches) == (2,)
 
 
 @pytest.mark.asyncio
@@ -173,12 +262,8 @@ async def test_regex_reader_does_not_relax_literal_underscore_to_whitespace() ->
         text=text,
         chunks=(ToolContentChunk(chunk_index=0, start_offset=0, end_offset=len(text)),),
     )
-    reader = RegexMatchReader(
-        loader=ToolContentLoader(store=_StoreStub(stored)),
-        window_builder=ToolContentWindowBuilder(),
-    )
 
-    result = await reader.read(
+    result = await _reader(stored).read_regex(
         request=ToolContentRegexReadRequest(
             content_ids=("cnt_plain",),
             pattern="alpha_beta",
@@ -205,12 +290,8 @@ async def test_regex_reader_preserves_literal_identifier_underscores() -> None:
             ),
         ),
     )
-    reader = RegexMatchReader(
-        loader=ToolContentLoader(store=_StoreStub(stored)),
-        window_builder=ToolContentWindowBuilder(),
-    )
 
-    result = await reader.read(
+    result = await _reader(stored).read_regex(
         request=ToolContentRegexReadRequest(
             content_ids=("cnt_identifier",),
             pattern="foobar",
@@ -224,8 +305,7 @@ async def test_regex_reader_preserves_literal_identifier_underscores() -> None:
 @pytest.mark.asyncio
 async def test_regex_tool_reads_33_content_ids_in_16_item_batches() -> None:
     reader = _RegexBatchReader()
-    tool = ToolContentRegexReadTool(content_store=_StoreStub())
-    tool._reader = reader
+    tool = ToolContentRegexReadTool(reader=reader)
     content_ids = [f"cnt_{index}" for index in range(33)]
 
     result = await tool.execute(
@@ -248,12 +328,8 @@ async def test_regex_tool_reads_33_content_ids_in_16_item_batches() -> None:
 @pytest.mark.asyncio
 async def test_ranked_expand_tool_uses_ranked_result_and_internal_batches() -> None:
     reader = _RankedExpandBatchReader()
-    tool = ToolContentRankedExpandReadTool(
-        content_store=_StoreStub(),
-        ranking_pipeline=RankingPipeline(),
-    )
+    tool = ToolContentRankedExpandReadTool(reader=reader)
     assert tool.definition.llm_spec.name == "tool_content_ranked_expand_read"
-    tool._reader = reader
     content_ids = [f"cnt_{index}" for index in range(17)]
 
     result = await tool.execute(
@@ -273,8 +349,7 @@ async def test_ranked_expand_tool_uses_ranked_result_and_internal_batches() -> N
 @pytest.mark.asyncio
 async def test_regex_tool_applies_global_max_matches_across_batches() -> None:
     reader = _RegexBatchReader()
-    tool = ToolContentRegexReadTool(content_store=_StoreStub())
-    tool._reader = reader
+    tool = ToolContentRegexReadTool(reader=reader)
 
     result = await tool.execute(
         {"session_id": "session-1"},
@@ -290,11 +365,7 @@ async def test_regex_tool_applies_global_max_matches_across_batches() -> None:
 @pytest.mark.asyncio
 async def test_ranked_expand_tool_globally_orders_and_renumbers_batches() -> None:
     reader = _RankedExpandBatchReader()
-    tool = ToolContentRankedExpandReadTool(
-        content_store=_StoreStub(),
-        ranking_pipeline=RankingPipeline(),
-    )
-    tool._reader = reader
+    tool = ToolContentRankedExpandReadTool(reader=reader)
 
     result = await tool.execute(
         {"session_id": "session-1"},
@@ -314,8 +385,7 @@ async def test_ranked_expand_tool_globally_orders_and_renumbers_batches() -> Non
 @pytest.mark.asyncio
 async def test_regex_tool_uses_regex_engine_syntax_for_validation() -> None:
     reader = _RegexBatchReader()
-    tool = ToolContentRegexReadTool(content_store=_StoreStub())
-    tool._reader = reader
+    tool = ToolContentRegexReadTool(reader=reader)
 
     await tool.execute(
         {"session_id": "session-1"},
@@ -326,49 +396,86 @@ async def test_regex_tool_uses_regex_engine_syntax_for_validation() -> None:
     assert reader.batches == [("cnt_0",)]
 
 
-def test_regex_reader_converts_engine_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_regex_reader_converts_engine_timeout(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class _TimedOutPattern:
-        def search(self, text: str, *, timeout: float) -> None:
+        def finditer(self, text: str, *, timeout: float) -> None:
             raise TimeoutError
 
     monkeypatch.setattr(
-        "chat.application.tools.session_tools.tool_content_read.services.readers.regex_match_reader.regex.compile",
+        "chat.application.tools.session_tools.tool_content_read.services.reader.regex.compile",
         lambda pattern: _TimedOutPattern(),
-    )
-    reader = RegexMatchReader(
-        loader=ToolContentLoader(store=_StoreStub()),
-        window_builder=ToolContentWindowBuilder(),
     )
 
     with pytest.raises(ToolContentRegexTimeoutError):
-        reader._read_loaded(
-            (("cnt_markdown", _markdown_content()),),
-            ToolContentRegexReadRequest(
+        await _reader(_markdown_content()).read_regex(
+            request=ToolContentRegexReadRequest(
                 content_ids=("cnt_markdown",),
                 pattern="target",
             ),
+            session_id="session-1",
         )
 
 
 @pytest.mark.asyncio
-async def test_sequential_reader_clamps_offset_to_text_end() -> None:
+async def test_range_reader_clamps_start_to_text_end() -> None:
     stored = _markdown_content()
-    reader = SequentialReader(
-        loader=ToolContentLoader(store=_StoreStub(stored)),
-        window_builder=ToolContentWindowBuilder(),
-    )
 
-    result = await reader.read(
+    result = await _reader(stored).read_range(
         content_id=stored.content_id,
         session_id=stored.session_id,
-        offset=len(stored.text) + 100,
-        limit=10,
+        start=len(stored.text) + 100,
+        end=None,
     )
 
     assert result.window is not None
     assert result.window.text == ""
     assert result.window.start_offset == len(stored.text)
     assert result.window.end_offset == len(stored.text)
+
+
+@pytest.mark.asyncio
+async def test_range_reader_supports_head_and_tail_ranges() -> None:
+    stored = _markdown_content()
+    reader = _reader(stored)
+
+    head = await reader.read_range(
+        content_id=stored.content_id,
+        session_id=stored.session_id,
+        start=0,
+        end=4,
+    )
+    tail = await reader.read_range(
+        content_id=stored.content_id,
+        session_id=stored.session_id,
+        start=-8,
+        end=None,
+    )
+
+    assert head.window is not None
+    assert head.window.text == "The "
+    assert (head.window.start_offset, head.window.end_offset) == (0, 4)
+    assert tail.window is not None
+    assert tail.window.text == "appears."
+    assert tail.window.end_offset == len(stored.text)
+
+
+@pytest.mark.asyncio
+async def test_range_tool_defaults_to_head_and_caps_requested_range() -> None:
+    stored = _markdown_content()
+    tool = ToolContentReadTool(reader=_reader(stored, max_window_chars=5))
+
+    result = await tool.execute(
+        {"session_id": stored.session_id},
+        content_id=stored.content_id,
+    )
+
+    assert tool.definition.llm_spec.name == "tool_content_read"
+    assert result.window is not None
+    assert result.window.text == stored.text[:5]
+    assert (result.window.start_offset, result.window.end_offset) == (0, 5)
 
 
 def test_page_selector_requires_exact_page_label() -> None:

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from chat.application.tools.common.tool_content_store import ToolContentStore
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -13,17 +12,14 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 from chat.application.tools.utils.batching import batched
-from chat.application.utils.ranking.pipeline import RankingPipeline
 
-from ..services.content_loader import ToolContentLoader
-from ..services.content_window_builder import ToolContentWindowBuilder
 from ..services.models import (
     ToolContentReadFailure,
     ToolContentRankedExpandReadRequest,
     ToolContentRankedExpandReadResult,
     ToolContentSelector,
 )
-from ..services.readers import RankedExpandReader
+from ..services.reader import ToolContentReader
 from .common import (
     CONTENT_IDS_SCHEMA,
     SELECTOR_SCHEMA,
@@ -39,7 +35,10 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         "query": {
             "type": "string",
             "minLength": 1,
-            "description": "Required. Natural-language query used to rank candidate chunks.",
+            "description": (
+                "Required. The complete question you want the candidate documents to answer, "
+                "for example: 'What is 2+2?'. Do not use keywords or describe the retrieval task."
+            ),
         },
         "top_k": {
             "type": "integer",
@@ -62,15 +61,9 @@ class ToolContentRankedExpandReadTool:
     def __init__(
             self,
             *,
-            content_store: ToolContentStore,
-            ranking_pipeline: RankingPipeline,
-            max_window_chars: int | None = None,
+            reader: ToolContentReader,
     ) -> None:
-        self._reader = RankedExpandReader(
-            loader=ToolContentLoader(store=content_store),
-            ranking_pipeline=ranking_pipeline,
-            window_builder=ToolContentWindowBuilder(max_chars=max_window_chars),
-        )
+        self._reader = reader
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="tool_content_ranked_expand_read",
@@ -81,10 +74,11 @@ class ToolContentRankedExpandReadTool:
                     "  - SHOULD trigger when answer-relevant evidence must be found across cached documents.\n"
                     "DO NOT TRIGGER when:\n"
                     "  - You need exact pattern matching; use tool_content_regex_read.\n"
-                    "  - You need sequential offset-based reading; use tool_content_sequential_read.\n\n"
+                    "  - You need a known character range; use tool_content_read.\n\n"
                     "INPUT RULES:\n"
                     "  - Accepts up to 64 content_ids and reads them in bounded internal batches of 16.\n"
-                    "  - query describes the evidence to retrieve.\n"
+                    "  - query is the question the candidate chunks should answer, for example: 'What is 2+2?'.\n"
+                    "  - Do not pass keywords or describe the retrieval task.\n"
                     "  - selector prefilters chunks before ranking; selector groups are intersected.\n"
                     "  - merge_before and merge_after expand windows around ranked chunks.\n\n"
                     "OUTPUT RULES:\n"
@@ -131,7 +125,7 @@ class ToolContentRankedExpandReadTool:
                 merge_after=int(kwargs.get("merge_after", 0)),
             )
             try:
-                result = await self._reader.read(
+                result = await self._reader.read_ranked_expand(
                     request=request,
                     session_id=str(context["session_id"]),
                 )

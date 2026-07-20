@@ -39,9 +39,12 @@ from chat.application.tools.skill_tools import LoadSkillAssetTool
 from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.session_tools.tool_content_read.tools import (
+    ToolContentReadTool,
     ToolContentRegexReadTool,
     ToolContentRankedExpandReadTool,
-    ToolContentSequentialReadTool,
+)
+from chat.application.tools.session_tools.tool_content_read.services.reader import (
+    ToolContentReader,
 )
 from chat.application.utils.ranking.presets import READ_RANKED_EXPAND_PIPELINE
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
@@ -203,27 +206,29 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
-    tool_content_sequential_read_tool = providers.Singleton(
-        ToolContentSequentialReadTool,
-        content_store=tool_content_store,
+    tool_content_reader = providers.Singleton(
+        ToolContentReader,
         max_window_chars=settings.TOOL_RESULT_MAX_CHARS,
+        ranking_pipeline=READ_RANKED_EXPAND_PIPELINE,
+        store=tool_content_store,
+    )
+    tool_content_read_tool = providers.Singleton(
+        ToolContentReadTool,
+        reader=tool_content_reader,
     )
     tool_content_regex_read_tool = providers.Singleton(
         ToolContentRegexReadTool,
-        content_store=tool_content_store,
-        max_window_chars=settings.TOOL_RESULT_MAX_CHARS,
+        reader=tool_content_reader,
     )
     tool_content_ranked_expand_read_tool = providers.Singleton(
         ToolContentRankedExpandReadTool,
-        content_store=tool_content_store,
-        ranking_pipeline=READ_RANKED_EXPAND_PIPELINE,
-        max_window_chars=settings.TOOL_RESULT_MAX_CHARS,
+        reader=tool_content_reader,
     )
     tool_providers = providers.List(
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
-        tool_content_sequential_read_tool,
+        tool_content_read_tool,
         tool_content_regex_read_tool,
         tool_content_ranked_expand_read_tool,
     )

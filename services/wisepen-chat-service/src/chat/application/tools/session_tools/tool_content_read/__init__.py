@@ -1,5 +1,6 @@
 from .services.models import (
     ToolContentReadFailure,
+    ToolContentReadResult,
     ToolContentRegexMatch,
     ToolContentRegexReadRequest,
     ToolContentRegexReadResult,
@@ -7,12 +8,12 @@ from .services.models import (
     ToolContentRankedExpandReadRequest,
     ToolContentRankedExpandReadResult,
     ToolContentSelector,
-    ToolContentSequentialReadResult,
     ToolContentWindow,
 )
 
 __all__ = [
     "ToolContentReadFailure",
+    "ToolContentReadResult",
     "ToolContentRegexMatch",
     "ToolContentRegexReadRequest",
     "ToolContentRegexReadResult",
@@ -20,6 +21,5 @@ __all__ = [
     "ToolContentRankedExpandReadRequest",
     "ToolContentRankedExpandReadResult",
     "ToolContentSelector",
-    "ToolContentSequentialReadResult",
     "ToolContentWindow",
 ]
