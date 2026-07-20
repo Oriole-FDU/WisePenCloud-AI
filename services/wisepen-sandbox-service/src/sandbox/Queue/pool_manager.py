@@ -73,6 +73,7 @@ class ContainerPoolManager:
             workspace_cleanup_ttl=cfg.workspace_cleanup_ttl,
             workspace_cleanup_interval=cfg.workspace_cleanup_interval,
             workspace_store=self._store,
+            file_manager=self._file_manager,
         )
 
     def start(self) -> None:

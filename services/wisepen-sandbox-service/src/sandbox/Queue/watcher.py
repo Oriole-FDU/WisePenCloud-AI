@@ -16,6 +16,7 @@ import threading
 import time
 
 from sandbox.Queue.container_queue import ContainerQueue, ContainerState
+from sandbox.Queue.file_manager import FileManager
 from sandbox.core.debug import debug
 
 _dbg = debug("[SANDBOX][watcher]")
@@ -35,6 +36,7 @@ class Watcher:
         workspace_cleanup_ttl: float = 7 * 24 * 3600,
         workspace_cleanup_interval: float = 3600.0,
         workspace_store=None,  # WorkspaceStore | None
+        file_manager: FileManager | None = None,
     ):
         self._queue = queue
         self._health_interval = health_interval
@@ -45,6 +47,7 @@ class Watcher:
         self._workspace_cleanup_ttl = workspace_cleanup_ttl
         self._workspace_cleanup_interval = workspace_cleanup_interval
         self._workspace_store = workspace_store
+        self._file_manager = file_manager
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -70,6 +73,7 @@ class Watcher:
         last_recycle = 0.0
         last_workspace_cleanup = 0.0
         last_lease_recovery = 0.0
+        last_checkpoint = 0.0
 
         while not self._stop_event.is_set():
             now = time.time()
@@ -86,9 +90,13 @@ class Watcher:
                 self._do_recycle()
                 last_recycle = now
 
-            if now - last_lease_recovery >= 120.0:  # 每 2 分钟检查过期租约
+            if now - last_lease_recovery >= 120.0:
                 self._do_lease_recovery()
                 last_lease_recovery = now
+
+            if now - last_checkpoint >= 300.0:  # 每 5 分钟检查点
+                self._do_checkpoint()
+                last_checkpoint = now
 
             if now - last_workspace_cleanup >= self._workspace_cleanup_interval:
                 self._do_workspace_cleanup()
@@ -195,3 +203,18 @@ class Watcher:
                 _dbg("workspace_cleanup_done", removed=removed)
         except Exception as e:
             _dbg("workspace_cleanup_error", error=str(e))
+
+    def _do_checkpoint(self) -> None:
+        """对活跃 BUSY 容器执行定期检查点（自动保存不释放）。"""
+        if not self._file_manager:
+            return
+        try:
+            with self._queue.lock:
+                busy = [(cid, info) for cid, info in self._queue.containers.items()
+                        if info.state == ContainerState.BUSY]
+            for cid, info in busy:
+                if self._file_manager.should_checkpoint(info.user_id, info.session_id):
+                    if self._file_manager.checkpoint(cid, info.user_id, info.session_id):
+                        _dbg("checkpoint", cid=cid[:12], user=info.user_id)
+        except Exception as e:
+            _dbg("checkpoint_error", error=str(e))
