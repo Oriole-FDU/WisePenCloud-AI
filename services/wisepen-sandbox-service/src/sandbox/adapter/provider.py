@@ -15,11 +15,11 @@ from sandbox.queue_jurfal.models import (
 )
 from sandbox.queue_jurfal.ports import SandboxProvider
 
-from aio_adapter.client import AioClient
-from aio_adapter.docker_runtime import DockerRuntime
-from aio_adapter.errors import AioNotFoundError
-from aio_adapter.models import AdapterConfig
-from aio_adapter.path_policy import PathPolicy, TenantScope
+from sandbox.adapter.client import AioClient
+from sandbox.adapter.docker_runtime import DockerRuntime
+from sandbox.adapter.errors import AioNotFoundError
+from sandbox.adapter.models import AdapterConfig
+from sandbox.adapter.path_policy import PathPolicy, TenantScope
 
 
 class AioSandboxProvider(SandboxProvider):

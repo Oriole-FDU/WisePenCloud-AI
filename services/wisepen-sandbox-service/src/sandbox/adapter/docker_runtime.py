@@ -6,8 +6,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Sequence
 
-from aio_adapter.errors import ContainerError
-from aio_adapter.models import AdapterConfig
+from sandbox.adapter.errors import ContainerError
+from sandbox.adapter.models import AdapterConfig
 from sandbox.queue_jurfal.models import SandboxSpec
 
 
