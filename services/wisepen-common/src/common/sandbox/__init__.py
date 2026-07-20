@@ -1,3 +1,3 @@
-from .exceptions import SandboxException, SandboxErrorCode
+from .exceptions import SandboxErrorCode
 
-__all__ = ["SandboxException", "SandboxErrorCode"]
+__all__ = ["SandboxErrorCode"]

@@ -12,7 +12,8 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 
-from common.sandbox import SandboxException, SandboxErrorCode
+from common.core.exceptions import ServiceException
+from common.sandbox import SandboxErrorCode
 from sandbox.core.debug import debug
 
 _dbg = debug("[SANDBOX][queue]")
@@ -105,7 +106,7 @@ class ContainerQueue:
                 self._audit("acquire_new", cid, user_id, f"token={token}")
                 return cid, token
 
-        raise SandboxException.queue_no_idle(
+        raise ServiceException(SandboxErrorCode.QUEUE_NO_IDLE, 
             total=len(self._containers), max_total=self._max_total,
         )
 
@@ -117,7 +118,7 @@ class ContainerQueue:
                 _dbg("release_unknown", cid=container_id[:12])
                 return
             if fencing_token and info.fencing_token != fencing_token:
-                raise SandboxException(
+                raise ServiceException(
                     SandboxErrorCode.QUEUE_NO_IDLE,
                     f"stale fencing token: expected {info.fencing_token}, got {fencing_token}",
                 )
@@ -206,7 +207,7 @@ class ContainerQueue:
                 if self._containers[cid].state == ContainerState.DEAD:
                     try:
                         self._rm_container(cid)
-                    except SandboxException:
+                    except ServiceException:
                         pass
                     del self._containers[cid]
                     removed_containers += 1
@@ -254,7 +255,7 @@ class ContainerQueue:
         raw = self._run_docker(args)
         cid = raw.strip()
         if not cid:
-            raise SandboxException.container_start_failed("empty container id")
+            raise ServiceException(SandboxErrorCode.CONTAINER_START_FAILED)
         # Wait briefly for container to be ready
         time.sleep(5)
         return cid
@@ -262,14 +263,14 @@ class ContainerQueue:
     def _rm_container(self, container_id: str) -> None:
         try:
             self._run_docker(["rm", "-f", container_id])
-        except SandboxException:
+        except ServiceException:
             pass
 
     def _transition(self, info: ContainerInfo, target: ContainerState) -> None:
         """验证状态转换合法性后执行。"""
         allowed = _ALLOWED_TRANSITIONS.get(info.state, set())
         if target not in allowed:
-            raise SandboxException(
+            raise ServiceException(
                 SandboxErrorCode.INTERNAL,
                 f"invalid transition: {info.state.value} -> {target.value}",
             )
@@ -297,7 +298,7 @@ class ContainerQueue:
         )
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or "").strip()
-            raise SandboxException.docker_error(" ".join(args[:2]), detail[:500])
+            raise ServiceException(SandboxErrorCode.CONTAINER_START_FAILED, ("docker " + " ".join(args[:2]))[:500])
         return (completed.stdout or "").strip()
 
     @property

@@ -1,10 +1,9 @@
 """
-统一沙箱异常体系 — 继承 common ServiceException 基类。
+沙箱错误码定义 — 实现 IErrorCode，用于 ServiceException。
 """
 from __future__ import annotations
 
 from common.core.domain.enums import IErrorCode
-from common.core.exceptions import ServiceException
 
 
 class SandboxErrorCode(IErrorCode):
@@ -42,103 +41,3 @@ class SandboxErrorCode(IErrorCode):
     PROVIDER_ERROR = (502, "sandbox provider error")
     PROVIDER_UNREACHABLE = (502, "sandbox provider unreachable")
     RPC_ERROR = (502, "sandbox rpc call failed")
-
-
-class SandboxException(ServiceException):
-    """沙箱异常，继承 ServiceException (code + msg)。"""
-
-    def __init__(self, error_code: SandboxErrorCode, custom_msg: str = None):
-        super().__init__(error_code, custom_msg)
-        self._error_code = error_code
-
-    @property
-    def error_code(self) -> SandboxErrorCode:
-        return self._error_code
-
-    @property
-    def http_status(self) -> int:
-        return self.code
-
-    def to_dict(self) -> dict:
-        d: dict = {"error": self._error_code.name, "message": self.msg}
-        return d
-
-    def __str__(self) -> str:
-        return f"[{self._error_code.name}] {self.msg}"
-
-    # ---- 工厂方法 (便捷构造) ----
-
-    @classmethod
-    def path_traversal(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.PATH_TRAVERSAL, detail or None)
-
-    @classmethod
-    def path_outside_workspace(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.PATH_OUTSIDE_WORKSPACE, detail or None)
-
-    @classmethod
-    def path_empty(cls) -> "SandboxException":
-        return cls(SandboxErrorCode.PATH_EMPTY)
-
-    @classmethod
-    def missing_tenant(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.MISSING_TENANT, detail or None)
-
-    @classmethod
-    def file_not_found(cls, path: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.FILE_NOT_FOUND, path or None)
-
-    @classmethod
-    def queue_not_enabled(cls) -> "SandboxException":
-        return cls(SandboxErrorCode.QUEUE_NOT_ENABLED)
-
-    @classmethod
-    def queue_no_idle(cls, total: int = 0, max_total: int = 0) -> "SandboxException":
-        return cls(SandboxErrorCode.QUEUE_NO_IDLE,
-                   f"total={total} max={max_total}")
-
-    @classmethod
-    def container_start_failed(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.CONTAINER_START_FAILED, detail or None)
-
-    @classmethod
-    def docker_error(cls, operation: str, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.CONTAINER_START_FAILED,
-                   f"docker {operation}: {detail}" if detail else f"docker {operation}")
-
-    @classmethod
-    def file_sync_failed(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.FILE_SYNC_FAILED, detail or None)
-
-    @classmethod
-    def shell_error(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.SHELL_EXEC_ERROR, detail or None)
-
-    @classmethod
-    def shell_timeout(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.SHELL_TIMEOUT, detail or None)
-
-    @classmethod
-    def provider_error(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.PROVIDER_ERROR, detail or None)
-
-    @classmethod
-    def provider_unreachable(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.PROVIDER_UNREACHABLE, detail or None)
-
-    @classmethod
-    def file_write_error(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.FILE_WRITE_ERROR, detail or None)
-
-    @classmethod
-    def file_read_error(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.FILE_READ_ERROR, detail or None)
-
-    @classmethod
-    def string_not_found(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.STRING_NOT_FOUND, detail or None)
-
-    @classmethod
-    def from_exc(cls, code: SandboxErrorCode, message: str,
-                 exc: BaseException) -> "SandboxException":
-        return cls(code, f"{message}: {type(exc).__name__}: {exc}")

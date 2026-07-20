@@ -15,7 +15,7 @@ import os
 import subprocess
 import time
 
-from common.sandbox import SandboxException
+from common.core.exceptions import ServiceException
 from sandbox.Queue.store.interface import WorkspaceStore, WorkspaceFile
 
 
@@ -62,7 +62,7 @@ class FileManager:
         # Step 1: 容器 → 主机缓存
         try:
             self._docker_cp(f"{container_id}:/workspace/.", f"{host}/")
-        except SandboxException:
+        except ServiceException:
             pass  # non-fatal: container will be recycled
 
         # Step 2: 主机缓存 → Store
@@ -81,7 +81,7 @@ class FileManager:
 
         try:
             self._docker_cp(f"{container_id}:/workspace/.", f"{host}/")
-        except SandboxException:
+        except ServiceException:
             return False
 
         if self._store:
@@ -123,4 +123,4 @@ class FileManager:
             capture_output=True, text=True, timeout=30,
         )
         if completed.returncode != 0:
-            raise SandboxException.file_sync_failed(completed.stderr.strip()[:500])
+            raise ServiceException(SandboxErrorCode.FILE_SYNC_FAILED, completed.stderr.strip()[:500])

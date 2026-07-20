@@ -6,7 +6,7 @@ from __future__ import annotations
 import threading
 import time
 
-from common.sandbox import SandboxException
+from common.core.exceptions import ServiceException
 from sandbox.Queue.container_queue import ContainerQueue, ContainerState
 from sandbox.core.debug import debug
 
@@ -39,7 +39,7 @@ class Scheduler:
     def acquire(self, user_id: str, session_id: str) -> tuple[str, int]:
         """获取容器，返回 (container_id, fencing_token)。"""
         if self._user_allocations.get(user_id, set()).__len__() >= self._session_max:
-            raise SandboxException(
+            raise ServiceException(
                 SandboxErrorCode.QUEUE_FULL,
                 f"user {user_id} already holds {self._session_max} containers",
             )
@@ -54,7 +54,7 @@ class Scheduler:
             with self._condition:
                 self._condition.wait(timeout=self._retry_interval)
 
-        raise SandboxException.queue_no_idle(
+        raise ServiceException(SandboxErrorCode.QUEUE_NO_IDLE, 
             total=len(self._queue.containers),
             max_total=self._queue._max_total,
         )

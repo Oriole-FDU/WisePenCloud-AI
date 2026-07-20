@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from common.sandbox import SandboxException
+from common.core.exceptions import ServiceException
 
 SANDBOX_ROOT = "/home/gem/workspaces"
 VIRTUAL_ROOT = "/workspace"
@@ -53,8 +53,8 @@ def _join(a: str, b: str) -> str:
     return f"{a}{SEP}{b}"
 
 
-class PathValidationError(SandboxException):
-    """Raised when a path violates isolation rules. Inherits SandboxException."""
+class PathValidationError(ServiceException):
+    """Raised when a path violates isolation rules. Inherits ServiceException."""
 
     def __init__(self, message: str, code=None):
         from common.sandbox import SandboxErrorCode

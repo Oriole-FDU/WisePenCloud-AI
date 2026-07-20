@@ -22,7 +22,7 @@ from sandbox.ScriptExecutor.scriptExecutor import ExecutionResult
 from sandbox.ScriptExecutor.scriptReader import ScriptPackageRepository
 from sandbox.service.sandbox_service import DefaultSandboxExecutionService
 from sandbox.transport.http.schemas import ExecuteRequestDTO, ExecuteResponseDTO
-from common.sandbox import SandboxException
+from common.core.exceptions import ServiceException
 from sandbox.Queue.pool_manager import PoolConfig, ContainerPoolManager
 from sandbox.core.debug import debug
 
@@ -111,7 +111,7 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
                 return
-        except SandboxException as e:
+        except ServiceException as e:
             _dbg("sandbox_error", code=e.code.value, msg=e.message, detail=e.detail)
             self._send_json(HTTPStatus(e.http_status), e.to_dict())
             return
@@ -128,7 +128,7 @@ class SandboxHttpHandler(BaseHTTPRequestHandler):
         except KeyError:
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "result not found"})
             return
-        except SandboxException as e:
+        except ServiceException as e:
             _dbg("sandbox_error", code=e.code.value, msg=e.message, detail=e.detail)
             self._send_json(HTTPStatus(e.http_status), e.to_dict())
             return
@@ -339,7 +339,7 @@ class SandboxHttpApp:
 
     def _acquire(self, uid: str, sid: str) -> tuple[str, int]:
         if not self._pool:
-            raise SandboxException.queue_not_enabled()
+            raise ServiceException(SandboxErrorCode.QUEUE_NOT_ENABLED)
         return self._pool.acquire(uid, sid)
 
     def _release(self, cid: str, uid: str, sid: str, token: int = 0) -> None:
@@ -367,7 +367,7 @@ class SandboxHttpApp:
                 capture_output=True, text=True, timeout=10,
             )
             if result.returncode != 0:
-                raise SandboxException.file_sync_failed(result.stderr.strip()[:200])
+                raise ServiceException(SandboxErrorCode.FILE_SYNC_FAILED, result.stderr.strip()[:200])
             return len(data)
         finally:
             os.unlink(tmp.name)
@@ -405,7 +405,7 @@ def _extract_tenant(headers: Dict[str, str]) -> tuple[str, str]:
     uid = (headers.get("X-User-Id") or headers.get("x-user-id") or "").strip()
     sid = (headers.get("X-Session-Id") or headers.get("x-session-id") or "").strip()
     if not uid or not sid:
-        raise SandboxException.missing_tenant()
+        raise ServiceException(SandboxErrorCode.MISSING_TENANT)
     return uid, sid
 
 
