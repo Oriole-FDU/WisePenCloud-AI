@@ -82,6 +82,7 @@ class ContainerQueue:
                 info.fencing_token = self._next_token
                 info.lease_expires_at = time.time() + self._lease_ttl
                 _dbg("acquired", cid=info.container_id[:12], token=info.fencing_token, user=user_id)
+                self._audit("acquire", info.container_id, user_id, f"token={info.fencing_token}")
                 return info.container_id, info.fencing_token
 
             if len(self._containers) < self._max_total:
@@ -101,6 +102,7 @@ class ContainerQueue:
                 )
                 self._containers[cid] = info
                 _dbg("acquired_new", cid=cid[:12], token=token, user=user_id)
+                self._audit("acquire_new", cid, user_id, f"token={token}")
                 return cid, token
 
         raise SandboxException.queue_no_idle(
@@ -120,10 +122,12 @@ class ContainerQueue:
                     message=f"stale fencing token: expected {info.fencing_token}, got {fencing_token}",
                 )
             self._transition(info, ContainerState.DIRTY)
+            old_user = info.user_id
             info.user_id = ""
             info.session_id = ""
             info.lease_expires_at = 0.0
             _dbg("released", cid=container_id[:12], token=fencing_token)
+            self._audit("release", container_id, old_user, f"token={fencing_token}")
 
     def recycle(self, container_id: str) -> str | None:
         """
@@ -215,6 +219,11 @@ class ContainerQueue:
     def total_containers(self) -> int:
         return len(self._containers)
 
+    @staticmethod
+    def _audit(action: str, cid: str = "", user_id: str = "", detail: str = ""):
+        _dbg("audit", action=action, container_id=cid[:12] if cid else "",
+             user=user_id, detail=detail)
+
     # ---- internal Docker operations ----
 
     def _start_container(self) -> str:
@@ -223,10 +232,20 @@ class ContainerQueue:
             "run", "-d",
             "--name", name,
             "--label", "wisepen.role=aio-worker",
+            "--label", "wisepen.manager=sandbox-manager",
+            # 资源限制 (P0)
+            "--memory", "512m",
+            "--memory-swap", "512m",
+            "--cpus", "1.0",
+            "--pids-limit", "64",
+            "--restart", "no",
+            # 安全加固 (P0)
             "--security-opt", "seccomp=unconfined",
+            "--security-opt", "no-new-privileges",
+            "--cap-drop", "ALL",
             "--shm-size", "2gb",
             "--network", "sandbox-net",
-            "-v", f"{self._workspace_cache}:/workspaces",
+            "-v", f"{self._workspace_cache}:/workspace:rw",
             "-p", "::8080",
             "-p", "::6080",
             self._image,

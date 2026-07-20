@@ -1,21 +1,40 @@
 version: "3.8"
 
 services:
+  # Docker API 权限代理 — 仅放行必要的 API（run/exec/inspect/cp/port）
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: sandbox-docker-proxy
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - CONTAINERS=1        # /containers/* (create/list/start/stop)
+      - EXEC=1              # /exec/* (docker exec)
+      - IMAGES=1            # /images/* (pull)
+      - INFO=1              # /info
+      - NETWORKS=1          # /networks/*
+      - POST=0              # 禁止创建 volumes/networks/secrets
+      - BUILD=0             # 禁止 docker build
+      - COMMIT=0            # 禁止 docker commit
+      - AUTH=0              # 禁止管理认证
+    networks:
+      - sandbox-net
+
   sandbox-manager:
     build:
-      context: ../..          # AI/ 目录（COPY services/... 的根）
+      context: ../..
       dockerfile: services/wisepen-sandbox-service/Dockerfile
     container_name: wisepen-sandbox-manager
     restart: unless-stopped
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock   # Docker daemon control
-      - /workspaces:/workspaces                      # shared workspace
+      # 不再直接挂载 docker.sock，通过 docker-proxy 访问
+      - /workspaces:/workspaces
     ports:
-      - "9001:9001"   # sandbox HTTP API
       - "8001:8001"   # MCP gateway
     environment:
       - PROFILE=dev
-      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_HOST=tcp://docker-proxy:2375
       - NACOS_SERVER_ADDR=127.0.0.1:8848
       - CHAT_USE_NACOS=0
       - SANDBOX_HOST=0.0.0.0
