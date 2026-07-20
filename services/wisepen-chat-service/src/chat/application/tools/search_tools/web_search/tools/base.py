@@ -11,8 +11,6 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
-from chat.application.tools.core.output.tool_return import ToolReturn
-
 from ..services.errors import (
     WebSearchCustomApiKeyInvalid,
     WebSearchCustomApiKeyMissing,
@@ -23,7 +21,6 @@ from ..services.errors import (
 )
 from ..services.pipeline import (
     SearchPipeline,
-    SearchPipelineResult,
 )
 from ..services.providers.core.models import SearchMode, SearchProviderName
 from ..services.sources import SearchSourceFactory
@@ -136,7 +133,7 @@ class BaseWebSearchTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> ToolReturn:
+    ) -> dict[str, object]:
         query_payload = kwargs["query"]
         search_query = query_payload["search_query"].strip()
         ranking_query = query_payload["ranking_query"].strip()
@@ -204,21 +201,9 @@ class BaseWebSearchTool:
                 retryable=False,
             ) from exc
 
-        return _build_tool_return(result=result, mode=mode)
-
-
-def _build_tool_return(
-    *,
-    result: SearchPipelineResult,
-    mode: SearchMode,
-) -> ToolReturn:
-    visible_result: dict[str, object] = {
-        "query": result.search_query,
-        "mode": mode.value,
-        "candidates": result.candidates,
-    }
-    response = result.response
-    if response is not None and response.answer:
-        visible_result["supplier_answer"] = response.answer
-
-    return ToolReturn(visible_result=visible_result)
+        return {
+            "query": result.search_query,
+            "mode": mode.value,
+            "candidates": result.candidates,
+            "supplier_answer": result.response.answer if result.response else None,
+        }
