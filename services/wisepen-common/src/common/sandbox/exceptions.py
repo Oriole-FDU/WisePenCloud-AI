@@ -1,196 +1,144 @@
 """
-统一沙箱异常体系。
-
-SandboxException 是所有沙箱相关错误的基类，同时在 sandbox-service、
-aio-gateway 和 chat-service 的 SandboxProvider/AioGatewayProvider 中使用。
+统一沙箱异常体系 — 继承 common ServiceException 基类。
 """
 from __future__ import annotations
 
-from enum import Enum
-from typing import Optional
+from common.core.domain.enums import IErrorCode
+from common.core.exceptions import ServiceException
 
 
-class SandboxErrorCode(str, Enum):
-    """沙箱错误码，字符串值直接可放入 HTTP 响应体。"""
+class SandboxErrorCode(IErrorCode):
+    """沙箱错误码。元组 (int_code, str_msg)。"""
 
-    # --- 通用 ---
-    UNKNOWN = "unknown"
-    INTERNAL = "internal_error"
-    TIMEOUT = "timeout"
+    UNKNOWN = (500, "sandbox unknown error")
+    INTERNAL = (500, "sandbox internal error")
+    TIMEOUT = (504, "sandbox operation timeout")
 
-    # --- 请求验证 ---
-    MISSING_PARAM = "missing_param"
-    INVALID_PARAM = "invalid_param"
-    MISSING_TENANT = "missing_tenant"
+    MISSING_PARAM = (400, "missing required parameter")
+    INVALID_PARAM = (400, "invalid parameter")
+    MISSING_TENANT = (401, "missing X-User-Id or X-Session-Id")
 
-    # --- 路径隔离 ---
-    PATH_TRAVERSAL = "path_traversal"
-    PATH_OUTSIDE_WORKSPACE = "path_outside_workspace"
-    PATH_EMPTY = "path_empty"
+    PATH_TRAVERSAL = (403, "path traversal denied")
+    PATH_OUTSIDE_WORKSPACE = (403, "access outside workspace denied")
+    PATH_EMPTY = (400, "empty path")
 
-    # --- 文件系统 ---
-    FILE_NOT_FOUND = "file_not_found"
-    FILE_READ_ERROR = "file_read_error"
-    FILE_WRITE_ERROR = "file_write_error"
-    DIR_NOT_FOUND = "dir_not_found"
-    STRING_NOT_FOUND = "string_not_found"
+    FILE_NOT_FOUND = (404, "file not found")
+    FILE_READ_ERROR = (500, "file read failed")
+    FILE_WRITE_ERROR = (500, "file write failed")
+    DIR_NOT_FOUND = (404, "directory not found")
+    STRING_NOT_FOUND = (400, "old_str not found in file")
 
-    # --- Shell 执行 ---
-    SHELL_EXEC_ERROR = "shell_exec_error"
-    SHELL_TIMEOUT = "shell_timeout"
-    DOCKER_NOT_FOUND = "docker_not_found"
+    SHELL_EXEC_ERROR = (500, "shell execution failed")
+    SHELL_TIMEOUT = (504, "shell execution timed out")
+    DOCKER_NOT_FOUND = (500, "docker binary not found")
 
-    # --- 容器队列 ---
-    QUEUE_NOT_ENABLED = "queue_not_enabled"
-    QUEUE_NO_IDLE = "queue_no_idle"
-    QUEUE_FULL = "queue_full"
-    CONTAINER_START_FAILED = "container_start_failed"
-    CONTAINER_UNHEALTHY = "container_unhealthy"
-    FILE_SYNC_FAILED = "file_sync_failed"
+    QUEUE_NOT_ENABLED = (503, "container queue not enabled")
+    QUEUE_NO_IDLE = (429, "no idle containers available")
+    QUEUE_FULL = (429, "container pool is full")
+    CONTAINER_START_FAILED = (500, "container start failed")
+    CONTAINER_UNHEALTHY = (500, "container unhealthy")
+    FILE_SYNC_FAILED = (500, "file sync failed")
 
-    # --- 提供者通信 ---
-    PROVIDER_ERROR = "provider_error"
-    PROVIDER_UNREACHABLE = "provider_unreachable"
-    RPC_ERROR = "rpc_error"
+    PROVIDER_ERROR = (502, "sandbox provider error")
+    PROVIDER_UNREACHABLE = (502, "sandbox provider unreachable")
+    RPC_ERROR = (502, "sandbox rpc call failed")
 
 
-# 错误码 → HTTP 状态码映射
-_ERROR_HTTP_STATUS: dict[SandboxErrorCode, int] = {
-    SandboxErrorCode.UNKNOWN: 500,
-    SandboxErrorCode.INTERNAL: 500,
-    SandboxErrorCode.TIMEOUT: 504,
-    SandboxErrorCode.MISSING_PARAM: 400,
-    SandboxErrorCode.INVALID_PARAM: 400,
-    SandboxErrorCode.MISSING_TENANT: 401,
-    SandboxErrorCode.PATH_TRAVERSAL: 403,
-    SandboxErrorCode.PATH_OUTSIDE_WORKSPACE: 403,
-    SandboxErrorCode.PATH_EMPTY: 400,
-    SandboxErrorCode.FILE_NOT_FOUND: 404,
-    SandboxErrorCode.FILE_READ_ERROR: 500,
-    SandboxErrorCode.FILE_WRITE_ERROR: 500,
-    SandboxErrorCode.DIR_NOT_FOUND: 404,
-    SandboxErrorCode.STRING_NOT_FOUND: 400,
-    SandboxErrorCode.SHELL_EXEC_ERROR: 500,
-    SandboxErrorCode.SHELL_TIMEOUT: 504,
-    SandboxErrorCode.DOCKER_NOT_FOUND: 500,
-    SandboxErrorCode.QUEUE_NOT_ENABLED: 503,
-    SandboxErrorCode.QUEUE_NO_IDLE: 429,
-    SandboxErrorCode.QUEUE_FULL: 429,
-    SandboxErrorCode.CONTAINER_START_FAILED: 500,
-    SandboxErrorCode.CONTAINER_UNHEALTHY: 500,
-    SandboxErrorCode.FILE_SYNC_FAILED: 500,
-    SandboxErrorCode.PROVIDER_ERROR: 502,
-    SandboxErrorCode.PROVIDER_UNREACHABLE: 502,
-    SandboxErrorCode.RPC_ERROR: 502,
-}
+class SandboxException(ServiceException):
+    """沙箱异常，继承 ServiceException (code + msg)。"""
 
+    def __init__(self, error_code: SandboxErrorCode, custom_msg: str = None):
+        super().__init__(error_code, custom_msg)
+        self._error_code = error_code
 
-class SandboxException(Exception):
-    """统一的沙箱异常基类，所有沙箱相关错误使用此类或其子类抛出。"""
-
-    def __init__(
-        self,
-        code: SandboxErrorCode,
-        message: str,
-        detail: Optional[str] = None,
-        retryable: bool = False,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.detail = detail
-        self.retryable = retryable
+    @property
+    def error_code(self) -> SandboxErrorCode:
+        return self._error_code
 
     @property
     def http_status(self) -> int:
-        return _ERROR_HTTP_STATUS.get(self.code, 500)
+        return self.code
 
     def to_dict(self) -> dict:
-        d: dict = {"error": self.code.value, "message": self.message}
-        if self.detail:
-            d["detail"] = self.detail
+        d: dict = {"error": self._error_code.name, "message": self.msg}
         return d
 
     def __str__(self) -> str:
-        s = f"[{self.code.value}] {self.message}"
-        if self.detail:
-            s += f" ({self.detail})"
-        return s
+        return f"[{self._error_code.name}] {self.msg}"
 
     # ---- 工厂方法 (便捷构造) ----
 
     @classmethod
     def path_traversal(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.PATH_TRAVERSAL, "path traversal denied", detail)
+        return cls(SandboxErrorCode.PATH_TRAVERSAL, detail or None)
 
     @classmethod
     def path_outside_workspace(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.PATH_OUTSIDE_WORKSPACE,
-                   "access outside workspace denied", detail)
+        return cls(SandboxErrorCode.PATH_OUTSIDE_WORKSPACE, detail or None)
 
     @classmethod
     def path_empty(cls) -> "SandboxException":
-        return cls(SandboxErrorCode.PATH_EMPTY, "empty path")
+        return cls(SandboxErrorCode.PATH_EMPTY)
 
     @classmethod
     def missing_tenant(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.MISSING_TENANT, "missing X-User-Id or X-Session-Id", detail)
+        return cls(SandboxErrorCode.MISSING_TENANT, detail or None)
 
     @classmethod
     def file_not_found(cls, path: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.FILE_NOT_FOUND, "file not found", path)
+        return cls(SandboxErrorCode.FILE_NOT_FOUND, path or None)
 
     @classmethod
     def queue_not_enabled(cls) -> "SandboxException":
-        return cls(SandboxErrorCode.QUEUE_NOT_ENABLED,
-                   "container queue not enabled (set SANDBOX_QUEUE_ENABLE=1)")
+        return cls(SandboxErrorCode.QUEUE_NOT_ENABLED)
 
     @classmethod
     def queue_no_idle(cls, total: int = 0, max_total: int = 0) -> "SandboxException":
         return cls(SandboxErrorCode.QUEUE_NO_IDLE,
-                   f"no idle containers (total={total}, max={max_total})", retryable=True)
+                   f"total={total} max={max_total}")
 
     @classmethod
     def container_start_failed(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.CONTAINER_START_FAILED, "container start failed", detail)
+        return cls(SandboxErrorCode.CONTAINER_START_FAILED, detail or None)
 
     @classmethod
     def docker_error(cls, operation: str, detail: str = "") -> "SandboxException":
         return cls(SandboxErrorCode.CONTAINER_START_FAILED,
-                   f"docker {operation} failed", detail)
+                   f"docker {operation}: {detail}" if detail else f"docker {operation}")
 
     @classmethod
     def file_sync_failed(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.FILE_SYNC_FAILED, "file sync failed", detail)
+        return cls(SandboxErrorCode.FILE_SYNC_FAILED, detail or None)
 
     @classmethod
     def shell_error(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.SHELL_EXEC_ERROR, "shell execution failed", detail)
+        return cls(SandboxErrorCode.SHELL_EXEC_ERROR, detail or None)
 
     @classmethod
     def shell_timeout(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.SHELL_TIMEOUT, "shell execution timed out", detail)
+        return cls(SandboxErrorCode.SHELL_TIMEOUT, detail or None)
 
     @classmethod
     def provider_error(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.PROVIDER_ERROR, "provider error", detail, retryable=True)
+        return cls(SandboxErrorCode.PROVIDER_ERROR, detail or None)
 
     @classmethod
     def provider_unreachable(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.PROVIDER_UNREACHABLE, "provider unreachable", detail, retryable=True)
+        return cls(SandboxErrorCode.PROVIDER_UNREACHABLE, detail or None)
 
     @classmethod
     def file_write_error(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.FILE_WRITE_ERROR, "file write failed", detail)
+        return cls(SandboxErrorCode.FILE_WRITE_ERROR, detail or None)
 
     @classmethod
     def file_read_error(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.FILE_READ_ERROR, "file read failed", detail)
+        return cls(SandboxErrorCode.FILE_READ_ERROR, detail or None)
 
     @classmethod
     def string_not_found(cls, detail: str = "") -> "SandboxException":
-        return cls(SandboxErrorCode.STRING_NOT_FOUND, "old_str not found in file", detail)
+        return cls(SandboxErrorCode.STRING_NOT_FOUND, detail or None)
 
     @classmethod
-    def from_exc(cls, code: SandboxErrorCode, message: str, exc: BaseException) -> "SandboxException":
-        return cls(code, message, f"{type(exc).__name__}: {exc}")
+    def from_exc(cls, code: SandboxErrorCode, message: str,
+                 exc: BaseException) -> "SandboxException":
+        return cls(code, f"{message}: {type(exc).__name__}: {exc}")

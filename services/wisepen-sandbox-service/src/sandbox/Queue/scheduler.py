@@ -40,9 +40,8 @@ class Scheduler:
         """获取容器，返回 (container_id, fencing_token)。"""
         if self._user_allocations.get(user_id, set()).__len__() >= self._session_max:
             raise SandboxException(
-                code=SandboxException.queue_no_idle().code,
-                message=f"user {user_id} already holds {self._session_max} containers",
-                retryable=False,
+                SandboxErrorCode.QUEUE_FULL,
+                f"user {user_id} already holds {self._session_max} containers",
             )
 
         deadline = time.time() + self._timeout

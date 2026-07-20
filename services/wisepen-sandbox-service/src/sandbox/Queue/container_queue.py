@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 
-from common.sandbox import SandboxException
+from common.sandbox import SandboxException, SandboxErrorCode
 from sandbox.core.debug import debug
 
 _dbg = debug("[SANDBOX][queue]")
@@ -118,8 +118,8 @@ class ContainerQueue:
                 return
             if fencing_token and info.fencing_token != fencing_token:
                 raise SandboxException(
-                    code=SandboxException.queue_no_idle().code,
-                    message=f"stale fencing token: expected {info.fencing_token}, got {fencing_token}",
+                    SandboxErrorCode.QUEUE_NO_IDLE,
+                    f"stale fencing token: expected {info.fencing_token}, got {fencing_token}",
                 )
             self._transition(info, ContainerState.DIRTY)
             old_user = info.user_id
@@ -270,8 +270,8 @@ class ContainerQueue:
         allowed = _ALLOWED_TRANSITIONS.get(info.state, set())
         if target not in allowed:
             raise SandboxException(
-                code=SandboxException.docker_error("state").code,
-                message=f"invalid transition: {info.state.value} -> {target.value}",
+                SandboxErrorCode.INTERNAL,
+                f"invalid transition: {info.state.value} -> {target.value}",
             )
         info.state = target
 
