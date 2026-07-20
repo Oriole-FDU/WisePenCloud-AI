@@ -3,7 +3,7 @@ from __future__ import annotations
 from chat.application.tools.search_tools.web_search.services.providers.anysearch import (
     AnySearchSearcher,
 )
-from chat.application.tools.search_tools.web_search.services.providers.core.models import (
+from chat.application.tools.search_tools.web_search.services.models import (
     SearchProviderName,
 )
 from chat.application.tools.search_tools.web_search.services.providers.exa import (

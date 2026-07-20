@@ -4,7 +4,7 @@ from chat.application.tools.search_tools.web_search.services.providers.baidu_qia
     BaiduQianfanSearchRequest,
     BaiduQianfanSearcher,
 )
-from chat.application.tools.search_tools.web_search.services.providers.core.models import (
+from chat.application.tools.search_tools.web_search.services.models import (
     SearchProviderName,
 )
 from chat.application.tools.search_tools.web_search.services.sources import (

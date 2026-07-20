@@ -5,10 +5,7 @@ from enum import StrEnum
 
 import httpx
 
-from .errors import (
-    WebSearchCustomApiKeyInvalid,
-    WebSearchCustomApiKeyMissing,
-)
+from .models import SearchProviderName
 from .providers import (
     AnySearchSearcher,
     BaiduQianfanSearcher,
@@ -16,9 +13,10 @@ from .providers import (
     PlatformDefaultSearcher,
     TavilySearcher,
 )
-from .providers.base import SearchProviderConfig
-from .providers.core.models import SearchProviderName
-from .providers.core.protocols import ProviderSearcher
+from .providers.base import (
+    ProviderSearcher,
+    SearchProviderConfig,
+)
 
 
 class WebSearchSourceScope(StrEnum):
@@ -66,12 +64,6 @@ class SearchSourceFactory:
                 searcher=self.platform_default_searcher,
             )
 
-        if not api_key:
-            raise WebSearchCustomApiKeyMissing(
-                provider=provider,
-                reason="缺少工具配置中的 API key",
-            )
-
         return CustomSearchSource(
             provider=provider,
             source_id=f"custom:{provider.value}",
@@ -116,10 +108,7 @@ class SearchSourceFactory:
                 config=config,
             )
 
-        raise WebSearchCustomApiKeyInvalid(
-            provider=provider,
-            reason="不支持的搜索源",
-        )
+        raise ValueError(f"不支持的搜索源: {provider}")
 
     def _base_url(
         self,
@@ -137,7 +126,4 @@ class SearchSourceFactory:
         if provider == SearchProviderName.BAIDU_QIANFAN:
             return self.baidu_qianfan_base_url
 
-        raise WebSearchCustomApiKeyInvalid(
-            provider=provider,
-            reason="不支持的搜索源",
-        )
+        raise ValueError(f"不支持的搜索源: {provider}")
