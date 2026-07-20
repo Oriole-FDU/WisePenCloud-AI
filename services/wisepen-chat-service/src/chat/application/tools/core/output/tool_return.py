@@ -1,23 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Any, Mapping
-
-
-class CacheableTextContentType(StrEnum):
-    """可缓存正文支持的分块格式。"""
-
-    PLAIN_TEXT = "text/plain"
-    MARKDOWN = "text/markdown"
 
 
 @dataclass(frozen=True, slots=True)
 class CacheableText:
-    """一段待治理正文及其分块所需的内容类型。"""
+    """一段待治理正文，以及正文是否为 Markdown。"""
 
     text: str
-    content_type: CacheableTextContentType = CacheableTextContentType.PLAIN_TEXT
+    is_md: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

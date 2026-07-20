@@ -94,7 +94,6 @@ class ToolContentStore:
         text: str,
         content_type: str = "text/markdown",
         metadata: dict[str, object] | None = None,
-        chunked: bool = True,
     ) -> ToolContentPutResult:
         """写入内容；空白文本跳过，超过存储边界时明确拒绝。"""
         if not text or text.isspace():
@@ -111,15 +110,11 @@ class ToolContentStore:
 
         content_metadata = dict(metadata or {})
 
-        if chunked:
-            chunks, index = self._chunk(
-                text=text,
-                content_type=content_type,
-                metadata=content_metadata,
-            )
-        else:
-            chunks = ()
-            index = ToolContentIndex()
+        chunks, index = self._chunk(
+            text=text,
+            content_type=content_type,
+            metadata=content_metadata,
+        )
 
         stored = StoredToolContent(
             content_id=f"cnt_{uuid.uuid4().hex[:16]}",

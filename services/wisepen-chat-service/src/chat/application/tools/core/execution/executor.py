@@ -56,7 +56,6 @@ class ToolExecutor:
             output = await self._output_cache.process(
                 tool_return=output,
                 invocation=invocation,
-                tool_definition=definition,
                 session_id=self._tool_scope.context["session_id"],
             )
 
