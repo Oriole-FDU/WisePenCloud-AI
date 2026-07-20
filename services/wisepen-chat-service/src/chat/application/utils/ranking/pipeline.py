@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from ._utils import assign_ranks
@@ -50,7 +51,7 @@ class RankingPipeline:
 
     async def arank(self, request: RankRequest) -> RankResult:
         """执行完整排序流程，并在融合后调用可选异步重排器。"""
-        ranked = self._rank_before_reranker(request)
+        ranked = await asyncio.to_thread(self._rank_before_reranker, request)
         if not ranked or request.candidate_limit <= 0:
             return RankResult(
                 ranked=(),
@@ -63,7 +64,9 @@ class RankingPipeline:
             ranked = assign_ranks(ranked)[: request.candidate_limit]
 
         for diversifier in self.diversifiers:
-            ranked = assign_ranks(diversifier.diversify(ranked=ranked))
+            ranked = assign_ranks(
+                await asyncio.to_thread(diversifier.diversify, ranked=ranked)
+            )
 
         return RankResult(
             ranked=assign_ranks(ranked[: request.top_k]),

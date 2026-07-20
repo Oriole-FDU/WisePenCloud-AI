@@ -24,7 +24,6 @@ from chat.application.tools.core.output.cache import ToolOutputCache
 from chat.application.tools.core.llm.renderer import render_tool_result
 from chat.application.tools.core.output.tool_return import (
     CacheableText,
-    CacheableTextContentType,
     ToolReturn,
 )
 from chat.application.tools.core.registry import ToolScope
@@ -183,7 +182,7 @@ async def test_executor_preserves_cacheable_text_markdown_type() -> None:
                         cacheable_texts=(
                             CacheableText(
                                 text="# Heading\n\nMarkdown body",
-                                content_type=CacheableTextContentType.MARKDOWN,
+                                is_md=True,
                             ),
                         ),
                     )

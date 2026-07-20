@@ -7,7 +7,6 @@ from chat.application.tools.common.tool_content_store import (
     ToolContentReceipt,
     ToolContentStore,
 )
-from chat.application.tools.core.definition import ToolDefinition
 from chat.application.tools.core.llm.invocation import ToolInvocation
 from chat.application.tools.core.output.tool_return import (
     CacheableText,
@@ -38,7 +37,6 @@ class ToolOutputCache:
             *,
             tool_return: ToolReturn,
             invocation: ToolInvocation,
-            tool_definition: ToolDefinition,
             session_id: str,
     ) -> dict[str, Any]:
         """将可缓存文本附加到可见结果，或替换为外部内容回执。"""
@@ -68,7 +66,6 @@ class ToolOutputCache:
         receipts = await self._store_contents(
             invocation=invocation,
             cacheable_texts=cacheable_texts,
-            tool_definition=tool_definition,
             session_id=session_id,
         )
         if receipts:
@@ -88,7 +85,6 @@ class ToolOutputCache:
             *,
             invocation: ToolInvocation,
             cacheable_texts: tuple[CacheableText, ...],
-            tool_definition: ToolDefinition,
             session_id: str,
     ) -> tuple[ToolContentReceipt, ...]:
         """逐段存储大文本，并返回成功写入的内容回执。"""
@@ -99,8 +95,9 @@ class ToolOutputCache:
                 result = await self._content_store.put(
                     session_id=session_id,
                     text=cacheable_text.text,
-                    content_type=cacheable_text.content_type,
-                    chunked=tool_definition.policy.cache_chunked,
+                    content_type=(
+                        "text/markdown" if cacheable_text.is_md else "text/plain"
+                    ),
                 )
             except Exception as exc:
                 # 缓存属于附加能力，单段入库失败不应中断整个工具调用。

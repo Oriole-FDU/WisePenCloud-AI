@@ -8,15 +8,18 @@ dependencies = [
     "wisepen-chat-service",
     "wisepen-mcp-service",
     "wisepen-common",
-    "mcp>=1.27,<2",
 ]
 
 [tool.uv.workspace]
 members = [
     "services/*",   # 扫描 services 下的所有子文件夹
 ]
+exclude = [
+    "services/third_party",
+]
 
 [tool.uv.sources]
 wisepen-chat-service = { workspace = true }
 wisepen-mcp-service = { workspace = true }
 wisepen-common = { workspace = true }
+pymupdf4llm = { path = "services/third_party/pymupdf4llm" }

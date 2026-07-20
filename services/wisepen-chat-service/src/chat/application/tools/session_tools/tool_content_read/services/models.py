@@ -94,7 +94,7 @@ class ToolContentRankedExpandReadResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentSequentialReadResult:
+class ToolContentReadResult:
     content_id: str
     window: ToolContentWindow | None = None
     reason: str | None = None

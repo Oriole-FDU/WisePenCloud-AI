@@ -131,3 +131,34 @@ async def test_arank_applies_reranker() -> None:
 
     assert [item.candidate_id for item in result.ranked] == ["b", "a"]
     assert [item.rank for item in result.ranked] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_arank_offloads_sync_ranking_stages(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    offloaded: list[str] = []
+
+    async def run_in_thread(function, /, *args, **kwargs):
+        offloaded.append(function.__name__)
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "chat.application.utils.ranking.pipeline.asyncio.to_thread",
+        run_in_thread,
+    )
+    pipeline = RankingPipeline(
+        scorers=(_CandidateIdScorer(),),
+        fusion=WeightedRrfFusion(),
+    )
+
+    result = await pipeline.arank(
+        RankRequest(
+            query=RankQuery(text="query"),
+            candidates=(RankCandidate(candidate_id="a"),),
+            top_k=1,
+        )
+    )
+
+    assert [item.candidate_id for item in result.ranked] == ["a"]
+    assert offloaded == ["_rank_before_reranker"]

@@ -6,7 +6,7 @@ from chat.application.tools.common.tool_content_store import (
     ToolContentIndexEntry,
 )
 
-from ...models import ToolContentSelector
+from .models import ToolContentSelector
 
 
 def select_chunks(

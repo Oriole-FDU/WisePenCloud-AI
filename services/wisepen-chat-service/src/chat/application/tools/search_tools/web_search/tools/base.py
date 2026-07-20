@@ -119,7 +119,6 @@ class BaseWebSearchTool:
                 persist_output=True,
                 risk_level=ToolRiskLevel.LOW,
                 timeout_seconds=WEB_SEARCH_TIMEOUT_SECONDS,
-                cache_chunked=False,
             ),
             config_spec=API_KEY_CONFIG_SPEC if provider is not None else None,
         )

@@ -73,29 +73,34 @@ class ToolContentWindowBuilder:
             anchor_labels=anchor_labels,
         )
 
-    def build_sequential_window(
+    def build_range_window(
             self,
             stored: StoredToolContent,
             *,
-            offset: int,
-            limit: int,
+            start: int | None,
+            end: int | None,
     ) -> ToolContentWindow:
-        start = min(max(offset, 0), len(stored.text))
-        end = min(len(stored.text), start + max(limit, 0))
+        text_length = len(stored.text)
+        normalized_start = _normalize_offset(start, text_length, default=0)
+        normalized_end = _normalize_offset(end, text_length, default=text_length)
+        if normalized_end < normalized_start:
+            raise ValueError("end must not precede start")
+
+        normalized_end = min(normalized_end, normalized_start + self._max_chars)
         chunks = tuple(
             chunk
             for chunk in stored.chunks
             if chunk.start_offset is not None
             and chunk.end_offset is not None
-            and chunk.start_offset < end
-            and chunk.end_offset > start
+            and chunk.start_offset < normalized_end
+            and chunk.end_offset > normalized_start
         )
         page_label, section_path, anchor_labels = _locate_chunks(stored, chunks)
 
         return ToolContentWindow(
-            text=self._truncate(stored.text[start:end]),
-            start_offset=start,
-            end_offset=end,
+            text=stored.text[normalized_start:normalized_end],
+            start_offset=normalized_start,
+            end_offset=normalized_end,
             page_label=page_label,
             section_path=section_path,
             anchor_labels=anchor_labels,
@@ -112,6 +117,13 @@ def chunk_text(stored: StoredToolContent, chunk: ToolContentChunk) -> str:
     if chunk.start_offset is None or chunk.end_offset is None:
         return ""
     return stored.text[chunk.start_offset: chunk.end_offset].strip()
+
+
+def _normalize_offset(value: int | None, text_length: int, *, default: int) -> int:
+    offset = default if value is None else value
+    if offset < 0:
+        offset += text_length
+    return min(max(offset, 0), text_length)
 
 
 def _locate_chunks(

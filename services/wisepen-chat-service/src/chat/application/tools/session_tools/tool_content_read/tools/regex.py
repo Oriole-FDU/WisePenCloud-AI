@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 import regex
-from chat.application.tools.common.tool_content_store import ToolContentStore
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -14,15 +13,13 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.utils.batching import batched
 
-from ..services.content_loader import ToolContentLoader
-from ..services.content_window_builder import ToolContentWindowBuilder
 from ..services.models import (
     ToolContentReadFailure,
     ToolContentRegexReadRequest,
     ToolContentRegexReadResult,
     ToolContentSelector,
 )
-from ..services.readers import RegexMatchReader
+from ..services.reader import ToolContentReader
 from .common import (
     CONTENT_IDS_SCHEMA,
     SELECTOR_SCHEMA,
@@ -40,7 +37,11 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "type": "string",
             "minLength": 1,
             "maxLength": _MAX_REGEX_CHARS,
-            "description": "Required. Python regular expression used for exact pattern matching.",
+            "description": (
+                "Required. Python regular expression matched against the stored source text. "
+                "Markdown formulas and similar content may contain malformed or unexpected markup, "
+                "so use a broader pattern when extracting them."
+            ),
         },
         "max_matches": {
             "type": "integer",
@@ -63,13 +64,9 @@ class ToolContentRegexReadTool:
     def __init__(
             self,
             *,
-            content_store: ToolContentStore,
-            max_window_chars: int | None = None,
+            reader: ToolContentReader,
     ) -> None:
-        self._reader = RegexMatchReader(
-            loader=ToolContentLoader(store=content_store),
-            window_builder=ToolContentWindowBuilder(max_chars=max_window_chars),
-        )
+        self._reader = reader
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="tool_content_regex_read",
@@ -80,11 +77,13 @@ class ToolContentRegexReadTool:
                     "  - SHOULD trigger for IDs, URLs, headings, names, citations, or other precise text.\n"
                     "DO NOT TRIGGER when:\n"
                     "  - You need natural-language retrieval; use tool_content_ranked_expand_read.\n"
-                    "  - You need sequential offset-based reading; use tool_content_sequential_read.\n\n"
+                    "  - You need a known character range; use tool_content_read.\n\n"
                     "INPUT RULES:\n"
                     "  - Accepts up to 64 content_ids and reads them in bounded internal batches of 16.\n"
                     "  - selector prefilters chunks before matching; selector groups are intersected.\n"
-                    "  - merge_before and merge_after expand windows around matched chunks.\n\n"
+                    "  - merge_before and merge_after expand windows around matched chunks.\n"
+                    "  - Matching uses the stored source text without Markdown repair or normalization.\n"
+                    "  - Markdown formulas and similar content may be malformed after parsing; use broader regex patterns for them.\n\n"
                     "OUTPUT RULES:\n"
                     "  - Returns matches and per-content failures without discarding successful batches.\n"
                     "  - This tool reads existing cnt_* content and never creates another content receipt."
@@ -141,7 +140,7 @@ class ToolContentRegexReadTool:
                 merge_after=int(kwargs.get("merge_after", 0)),
             )
             try:
-                result = await self._reader.read(
+                result = await self._reader.read_regex(
                     request=request,
                     session_id=str(context["session_id"]),
                 )
@@ -154,4 +153,7 @@ class ToolContentRegexReadTool:
             matches.extend(result.matches[:remaining_matches])
             failed.extend(result.failed)
 
-        return ToolContentRegexReadResult(matches=tuple(matches), failed=tuple(failed))
+        return ToolContentRegexReadResult(
+            matches=tuple(matches),
+            failed=tuple(failed)
+        )

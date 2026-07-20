@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from chat.application.tools.common.tool_content_store import ToolContentStore
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -12,12 +11,11 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 
-from ..services.content_loader import ToolContentLoader
-from ..services.content_window_builder import ToolContentWindowBuilder
-from ..services.models import ToolContentSequentialReadResult
-from ..services.readers import SequentialReader
+from ..services.models import ToolContentReadResult
+from ..services.reader import ToolContentReader
 
 _TIMEOUT_SECONDS = 300.0
+_DEFAULT_READ_CHARS = 4000
 _PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -26,15 +24,17 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "minLength": 1,
             "description": "Required. One cnt_* id from a previous content receipt.",
         },
-        "offset": {
+        "start": {
             "type": "integer",
-            "default": 0,
-            "description": "Optional character offset to start reading from.",
+            "description": (
+                "Optional inclusive character offset. Negative values count from the end."
+            ),
         },
-        "limit": {
+        "end": {
             "type": "integer",
-            "default": 4000,
-            "description": "Optional maximum number of characters to read.",
+            "description": (
+                "Optional exclusive character offset. Negative values count from the end."
+            ),
         },
     },
     "required": ["content_id"],
@@ -42,34 +42,36 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
 }
 
 
-class ToolContentSequentialReadTool:
-    """单文档顺序读取工具。"""
+class ToolContentReadTool:
+    """读取单文档的任意字符区间。"""
 
     __slots__ = ("_definition", "_reader")
 
     def __init__(
             self,
             *,
-            content_store: ToolContentStore,
-            max_window_chars: int | None = None,
+            reader: ToolContentReader,
     ) -> None:
-        self._reader = SequentialReader(
-            loader=ToolContentLoader(store=content_store),
-            window_builder=ToolContentWindowBuilder(max_chars=max_window_chars),
-        )
+        self._reader = reader
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
-                name="tool_content_sequential_read",
+                name="tool_content_read",
                 description=(
-                    "Read one cached content_id sequentially by offset.\n\n"
+                    "Read any character range from one cached content_id.\n\n"
                     "WHEN TO TRIGGER:\n"
-                    "  - MUST trigger when you need to continue reading a single cached content from a known offset.\n"
+                    "  - MUST trigger when you need a known range, the beginning, or the end of cached content.\n"
                     "  - SHOULD trigger when nearby context matters more than cross-document search.\n"
                     "DO NOT TRIGGER when:\n"
                     "  - You need natural-language retrieval across documents; use tool_content_ranked_expand_read.\n"
                     "  - You need exact pattern matching across documents; use tool_content_regex_read.\n\n"
+                    "INPUT RULES:\n"
+                    "  - Ranges use Python slice semantics: start is inclusive and end is exclusive.\n"
+                    "  - Negative offsets count from the end; start=-1000 reads the final 1000 characters.\n"
+                    "  - start=0,end=2000 reads the first 2000 characters.\n"
+                    "  - Omitting both offsets reads the first 4000 characters.\n\n"
                     "OUTPUT RULES:\n"
-                    "  - Returns one readable window with offsets and available structural locators.\n"
+                    "  - Returns the requested text with normalized absolute offsets and structural locators.\n"
+                    "  - Oversized ranges are capped at the configured output window.\n"
                     "  - This tool reads existing cnt_* content and never creates another content receipt."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
@@ -92,17 +94,22 @@ class ToolContentSequentialReadTool:
             context: dict[str, Any],
             config: dict[str, Any] | None = None,
             **kwargs: Any,
-    ) -> ToolContentSequentialReadResult:
+    ) -> ToolContentReadResult:
+        start = int(kwargs["start"]) if "start" in kwargs else None
+        end = int(kwargs["end"]) if "end" in kwargs else None
+        if start is None and end is None:
+            end = _DEFAULT_READ_CHARS
+
         try:
-            return await self._reader.read(
+            return await self._reader.read_range(
                 content_id=str(kwargs["content_id"]),
                 session_id=str(context["session_id"]),
-                offset=int(kwargs.get("offset", 0)),
-                limit=int(kwargs.get("limit", 4000)),
+                start=start,
+                end=end,
             )
         except Exception as exc:
             raise ToolExecutionError(
-                reason="tool_content_sequential_read_failed",
+                reason="tool_content_read_failed",
                 detail_reason=str(exc),
                 retryable=False,
             ) from exc

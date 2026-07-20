@@ -34,9 +34,9 @@ dependencies = [
     "langchain-text-splitters>=1.0,<2",
     "markdown-it-py>=4,<5",
     "mdit-py-plugins>=0.5,<1",
+    "pymupdf4llm>=1.28,<1.29",
     "regex",
     "wisepen-common",
-    "pdfminer.six",
     "httpx",
     "ddgs>=9.14.4",
 ]
