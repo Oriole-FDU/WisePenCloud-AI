@@ -74,7 +74,7 @@ def test_baidu_qianfan_maps_references_and_deduplicates_urls() -> None:
         "网页结果",
         "未标类型网页",
     ]
-    assert response.results[0].preview.snippet == "接口说明"
+    assert response.results[0].snippet == "接口说明"
 
 
 def test_source_factory_routes_baidu_to_its_own_searcher() -> None:

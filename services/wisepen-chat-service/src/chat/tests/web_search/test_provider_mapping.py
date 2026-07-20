@@ -32,8 +32,8 @@ def test_exa_maps_summary_and_highlights() -> None:
 
     assert response.provider is SearchProviderName.EXA
     assert response.answer is None
-    assert response.results[0].preview.snippet == "Generated summary"
-    assert response.results[0].preview.highlights == (
+    assert response.results[0].snippet == "Generated summary"
+    assert response.results[0].highlights == (
         "First excerpt",
         "Second excerpt",
     )
@@ -57,7 +57,7 @@ def test_tavily_maps_content_and_top_level_answer() -> None:
 
     assert response.provider is SearchProviderName.TAVILY
     assert response.answer == "Provider answer"
-    assert response.results[0].preview.snippet == "Result content"
+    assert response.results[0].snippet == "Result content"
 
 
 def test_anysearch_uses_data_results_snippet() -> None:
@@ -80,7 +80,7 @@ def test_anysearch_uses_data_results_snippet() -> None:
 
     assert response.provider is SearchProviderName.ANYSEARCH
     assert response.answer is None
-    assert response.results[0].preview.snippet == "Short result preview"
+    assert response.results[0].snippet == "Short result preview"
 
 
 def test_anysearch_allows_missing_optional_result_fields() -> None:
@@ -99,4 +99,4 @@ def test_anysearch_allows_missing_optional_result_fields() -> None:
         max_results=10,
     )
 
-    assert response.results[0].preview.snippet is None
+    assert response.results[0].snippet is None

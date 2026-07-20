@@ -12,7 +12,6 @@ from .core.models import (
     ProviderSearchRequest,
     ProviderSearchResponse,
     ProviderSearchResult,
-    SearchPreview,
     SearchProviderName,
 )
 from ._utils import dedupe_results
@@ -69,7 +68,7 @@ class AnySearchSearcher(BaseProviderSearcher):
                     ProviderSearchResult(
                         title=item.get("title"),
                         url=item.get("url"),
-                        preview=SearchPreview(snippet=item.get("snippet")),
+                        snippet=item.get("snippet"),
                     )
                     for item in data["data"]["results"]
                 ),
