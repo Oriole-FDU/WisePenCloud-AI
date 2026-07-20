@@ -10,10 +10,13 @@ from .load_balancer import (
     ServerStatus,
     NoAvailableServer,
 )
+from .store import WorkspaceStore, WorkspaceFile, WorkspaceSnapshot, LocalWorkspaceStore, MongoWorkspaceStore
 
 __all__ = [
     "ContainerQueue", "ContainerState", "ContainerInfo", "FileManager", "Scheduler",
     "PoolConfig", "ContainerPoolManager",
     "LoadBalancer", "SelectionStrategy", "ServerRegistry",
     "ServerInfo", "ServerStatus", "NoAvailableServer",
+    "WorkspaceStore", "WorkspaceFile", "WorkspaceSnapshot",
+    "LocalWorkspaceStore", "MongoWorkspaceStore",
 ]

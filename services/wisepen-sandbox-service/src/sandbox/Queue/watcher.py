@@ -34,6 +34,7 @@ class Watcher:
         workspace_cache: str = "/workspaces",
         workspace_cleanup_ttl: float = 7 * 24 * 3600,
         workspace_cleanup_interval: float = 3600.0,
+        workspace_store=None,  # WorkspaceStore | None
     ):
         self._queue = queue
         self._health_interval = health_interval
@@ -43,6 +44,7 @@ class Watcher:
         self._workspace_cache = workspace_cache
         self._workspace_cleanup_ttl = workspace_cleanup_ttl
         self._workspace_cleanup_interval = workspace_cleanup_interval
+        self._workspace_store = workspace_store
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -149,12 +151,22 @@ class Watcher:
             _dbg("lease_recovery_error", error=str(e))
 
     def _do_workspace_cleanup(self) -> None:
-        """Remove stale workspace cache directories older than TTL."""
+        """Remove stale workspace data, using store abstraction if available."""
         try:
+            if self._workspace_store:
+                stale = self._workspace_store.list_all_stale(self._workspace_cleanup_ttl)
+                removed = 0
+                for uid, sid in stale:
+                    self._workspace_store.delete(uid, sid)
+                    removed += 1
+                if removed > 0:
+                    _dbg("workspace_cleanup_done", removed=removed)
+                return
+
+            # 回退：本地文件系统直接操作
             root = self._workspace_cache
             if not os.path.isdir(root):
                 return
-            now = time.time()
             removed = 0
             for entry in os.listdir(root):
                 user_dir = os.path.join(root, entry)
@@ -166,13 +178,12 @@ class Watcher:
                         continue
                     try:
                         mtime = os.path.getmtime(sess_dir)
-                        if now - mtime >= self._workspace_cleanup_ttl:
+                        if time.time() - mtime >= self._workspace_cleanup_ttl:
                             shutil.rmtree(sess_dir, ignore_errors=True)
                             removed += 1
                             _dbg("workspace_removed", path=sess_dir)
                     except OSError:
                         pass
-            # Clean trailing empty user dirs
             for entry in os.listdir(root):
                 user_dir = os.path.join(root, entry)
                 try:

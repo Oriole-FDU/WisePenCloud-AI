@@ -12,6 +12,7 @@ from sandbox.Queue.container_queue import ContainerQueue
 from sandbox.Queue.file_manager import FileManager
 from sandbox.Queue.scheduler import Scheduler
 from sandbox.Queue.watcher import Watcher
+from sandbox.Queue.store import WorkspaceStore, LocalWorkspaceStore, MongoWorkspaceStore
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,10 @@ class PoolConfig:
     dirty_ttl: float = 60.0
     workspace_cleanup_ttl: float = 7 * 24 * 3600
     workspace_cleanup_interval: float = 3600.0
+    # 持久化后端: "local" 或 "mongo"
+    store_backend: str = "local"
+    mongo_url: str = "mongodb://127.0.0.1:27017"
+    mongo_db: str = "wisepen_sandbox"
 
 
 class ContainerPoolManager:
@@ -56,12 +61,18 @@ class ContainerPoolManager:
             session_max=cfg.session_max,
         )
         self._file_manager = FileManager(workspace_cache=cfg.workspace_cache)
+        self._store: WorkspaceStore = (
+            MongoWorkspaceStore(cfg.mongo_url, cfg.mongo_db)
+            if cfg.store_backend == "mongo"
+            else LocalWorkspaceStore(root=cfg.workspace_cache)
+        )
         self._watcher = Watcher(
             self._queue,
             dirty_ttl=cfg.dirty_ttl,
             workspace_cache=cfg.workspace_cache,
             workspace_cleanup_ttl=cfg.workspace_cleanup_ttl,
             workspace_cleanup_interval=cfg.workspace_cleanup_interval,
+            workspace_store=self._store,
         )
 
     def start(self) -> None:
@@ -116,3 +127,7 @@ class ContainerPoolManager:
     @property
     def watcher(self) -> Watcher:
         return self._watcher
+
+    @property
+    def store(self) -> WorkspaceStore:
+        return self._store
