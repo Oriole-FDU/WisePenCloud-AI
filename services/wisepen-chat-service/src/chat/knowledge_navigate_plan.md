@@ -170,7 +170,7 @@ retrieve_ircot
 
 ## 2. WisePen 现状定位
 
-调研基线：原 RAG 实现在 `WisePenCloud-AI-new` 提交 `41fc51fb20374e44d45f2cff50aa94503d7ffd62`；当前规划工作区提交为 `870741d26619e18144cde66f276fd1332ccbcb5d`。当前分支尚未包含 `application/rag`，所以实施第一步是把原 RAG 变更按当前分支架构落地并消除冲突，而不是在 formal 分支另写一套平行检索。
+调研基线：原 RAG 实现在 `WisePenCloud-AI-new` 提交 `41fc51fb20374e44d45f2cff50aa94503d7ffd62`；当前 Python 工作区提交为 `fcc9f2c3179a1d915e8c424eb469023a1b3c053b`，Java `WisePenCloud` 提交为 `f482d6f96252f378482c2a7bb712526ff10637ed`。当前 Python 分支尚未包含 `application/rag`，所以实施第一步是把原 RAG 变更按当前分支架构落地并消除冲突，而不是另写一套平行检索。
 
 ### 2.1 关键模块和调用链
 
@@ -193,6 +193,11 @@ retrieve_ircot
 | 摄入编排            | `application/rag/ingestion/ingester.py`                                                                       | chunk/context index/embed 后顺序写 Mongo、Qdrant、ES、Neo4j、ACL                                                         |
 | 内容事件            | `application/rag/kafka_consumers/document_ready_consumer.py`                                                  | `DocumentReady` 转换为 ingestion payload                                                                            |
 | ACL 事件          | `application/rag/kafka_consumers/acl_recalculate_consumer.py`                                                 | 刷新各后端 ACL 投影                                                                                                     |
+| 上游内容契约          | `WisePenCloud/wisepen-document-service/wisepen-document-api/.../DocumentReadyMessage.java`                    | Java 上游只发送 `resourceId/version/content`；`content` 是 RAG 唯一正文输入                                                     |
+| 上游内容生产          | `WisePenCloud/wisepen-document-service/wisepen-document-biz/.../DocumentServiceImpl.java`                     | 文档处理完成后发布 `DocumentReadyMessage`；chat-service 不参与文档转换/解析                                                      |
+| Resource 权威数据    | `WisePenCloud/wisepen-resource-service/wisepen-resource-biz/.../ResourceItemEntity.java`                      | `wisepen_resource_items` 是资源主档和 ACL 权威来源；本地 ACL 只允许做派生投影                                                        |
+| Resource 权威鉴权    | `WisePenCloud/wisepen-resource-service/wisepen-resource-biz/.../ResourceServiceImpl.java`                     | `checkPermission` 从资源主档实时计算，不依赖预计算 ACL；现有 Python `ResourceClient.check_res_permission` 可调用该边界                    |
+| Resource 生命周期事件 | `WisePenCloud/wisepen-resource-service/wisepen-resource-api/.../ResourceDeletedMessage.java`                  | 资源服务物理销毁后广播 `typedResourceIds`；chat-service 只能据事件清理自己的派生索引                                                   |
 | Tool schema     | `application/tools/core/definition.py`                                                                        | Draft 2020-12 JSON Schema                                                                                        |
 | preflight       | `application/tools/core/execution/hooks/base.py`、`hooks/builtin.py`、`executor.py`                             | 工具执行前 hook；仓库中没有可正确表达本动作契约的 `exactly_one_of`                                                                     |
 | 长内容缓存           | `application/tools/common/tool_content_store/store.py` 及 `application/tools/session_tools/tool_content_read/` | `ToolContentStore` 生成 `cnt_*`、分块和 locator；现有 range/regex/ranked read 负责打开内容                                      |
@@ -217,27 +222,52 @@ RagKnowledgeSearchTool
 
 `knowledge_navigate.locate` 只应复用其中“候选召回与排序”部分，不执行 answerability gate、自动图增强或回答 context 拼装。建议把这段能力收敛成一个复用服务 `RagCandidateRetriever`，由原 `RagRetrievalPipeline` 和新的 `KnowledgeLocator` 共同调用，避免复制 ES/Qdrant/ranking 逻辑。
 
-### 2.2 解析和 chunk 元数据现状
+### 2.2 真实内容、Resource 和解析边界
 
-当前 parser 已能把 PDF、DOCX/PPTX、HTML、Spreadsheet、JSON 和 plaintext 归一成 Markdown。Markdown block parser 能识别 heading、paragraph、table、code、formula、image、list、quote 和 page marker，并生成 section path、offset、page label、caption/anchor 等 locator。
+RAG 不调用 chat-service 的 `application/utils/document_parse`，也不接触原文件、MinerU、Docling、Office XML 或 HTML DOM。唯一正文入口是 Kafka `DocumentReadyMessage.content`：
 
-但现有 RAG chunking 最终只持久化 parent/child chunk、文本、offset 和 locator；MinerU `content_list` 主要用于插入 page marker，Docling 的结构模型也在 Markdown 转换后被压平。因而当前可靠可构建的是 Markdown 层级和顺序关系，不能声称已经保留：
+```text
+wisepen-document-service
+  -> 完成转换与解析
+  -> DocumentReadyMessage(resourceId, version, content)
+  -> wisepen-document-ready-topic（key=resourceId）
+  -> RagDocumentReadyConsumer
+  -> 对 content 做 RAG chunk/index，不重新做文档解析
+```
 
-- 跨页续接的原生判定；
-- 脚注与正文的精确链接；
-- 引用 mention 与参考文献条目的结构映射；
-- Office XML/HTML DOM 中所有原生链接关系。
+Java `DocumentServiceImpl.finalizeToReady` 从 `DocumentContentEntity` 选择 Markdown 或 raw text 后发布事件。`RagDocumentReadyConsumer` 只把三个消息字段映射为 `RagMarkdownIngestionPayload`。因此知识导航能使用的结构上限由 Kafka `content` 明确携带的标记决定，不能回头从 Python 文档解析器补数据。
 
-MVP 应从现有 Markdown 结构构建 `CONTAINS/PARENT_OF/NEXT/PREVIOUS/CAPTION_OF`。`CONTINUES`、`FOOTNOTE_OF`、`CITES` 和 `HYPERLINKS_TO` 只有在 converter 明确输出对应结构信号后才写入，不能按相邻页或相似文本猜测。
+Java 提交 `772377c39599f7dc8413d221d3b7deefe14868fc` 已把页标记改为：
+
+```text
+<!-- page:start page=1 -->
+...
+<!-- page:end page=1 -->
+```
+
+但 formal 分支 `application/utils/chunkers/markdown/parser.py` 的 `PAGE_MARKER_RE` 仍只识别 `<!-- page 1 -->`。RAG 虽然不负责 document parse，仍会对 Kafka 正文做 Markdown chunking；所以必须在该 chunker 中对齐新的消息内容格式，并让 page locator 按成对的 start/end 边界生成。不能把这个修复错误地描述为“接入 chat document parse”。
+
+当前 `content` 可以可靠支持 heading、段落、Markdown table、明确图片语法、顺序、offset 和新页边界。它不能证明已经携带：
+
+- 跨页语义续接；
+- 脚注 reference 与 target 的结构绑定；
+- citation mention 与 bibliography 条目的结构绑定；
+- 原始 Office/HTML 中未出现在 `content` 的链接、图片、图表或对象关系。
+
+MVP 只能从 Kafka 正文确定性构建 `CONTAINS/PARENT_OF/NEXT/PREVIOUS`，以及由正文明确编码的 table/caption/image/anchor 关系。`CONTINUES`、`FOOTNOTE_OF`、`CITES` 和 `HYPERLINKS_TO` 必须等待上游事件契约显式携带对应结构信号；chat-service 不自行重解析或猜测。
+
+Resource 边界同样明确：`wisepen_resource_items` 是资源存在性、主档和 ACL 的唯一权威数据。RAG 自己的 Mongo/ES/Qdrant/Neo4j 记录全部是可重建的派生投影，不能反向创建、更新、软删或硬删 Resource，也不能把本地 ACL projection 当成最终授权结论。
 
 ### 2.3 必须先处理的现有风险
 
 1. **ID 碰撞**：当前 chunk ID 形如 `role:index:content_hash`，Qdrant point ID 又只从 `chunk_id` 生成 UUID；相同位置和内容可能跨资源/版本碰撞。所有新投影必须使用 `resource_id + document_version + native_chunk_id` 组成存储键。
-2. **旧版本可见**：摄入删除逻辑按传入的同一 document version 删除，检索只过滤 resource，不过滤 active version。新版本写入后旧版本可能继续被召回。需要 active corpus manifest。
+2. **旧版本可见**：摄入清理逻辑按传入的同一 document version 处理，检索只过滤 resource。新 `DocumentReadyMessage.version` 到达后旧派生版本可能继续被召回；需要本地 projection checkpoint 控制派生索引可见性，但它不是 Resource 或 Document 的权威 manifest。
 3. **图清库风险**：`Neo4jWriter(clean_db=True)` 会破坏多资源增量语义，必须改为按 projection namespace upsert/delete。
-4. **多存储部分成功**：Mongo、Qdrant、ES、Neo4j 顺序写入，没有统一提交点。需要 pending revision + active manifest flip，而不是假设跨库事务。
-5. **权限上下文不完整**：原工具构造 `RagPermissionScope(group_role_map={})`，会漏掉组权限。新工具必须从可信 security context 注入完整 principal，不接受模型传入 ACL 字段。
-6. **Neo4j seed 歧义**：当前图查询只按 `chunk_id` 找 seed；ID 修复前可能跨资源命中。所有 MATCH 必须使用复合 projection key 或稳定 node ID。
+4. **多存储部分成功**：Mongo、Qdrant、ES、Neo4j 顺序写入，没有派生投影的统一可见性提交点。需要 staged projection + applied checkpoint，而不是假设跨库事务或宣称拥有上游版本控制权。
+5. **页标记契约漂移**：Java 已输出 `page:start/page:end`，Python chunker 仍识别旧 marker；不修复会直接丢失 page locator。
+6. **权限上下文不完整**：原工具构造 `RagPermissionScope(group_role_map={})`，会漏掉组权限；旧 `RagAclProjectionProjector` 还是预过滤投影，不能替代 Java 的实时 `checkPermission`。
+7. **软删除窗口**：resource-service 软删除时立即从 `wisepen_resource_items` 移除，但只在后续物理销毁时发布 `ResourceDeletedMessage`。本地索引可能暂时残留，返回前必须实时校验 Resource `VIEW`，不能只等删除事件。
+8. **Neo4j seed 歧义**：当前图查询只按 `chunk_id` 找 seed；ID 修复前可能跨资源命中。所有 MATCH 必须使用复合 projection key 或稳定 node ID。
 
 ## 3. 最终架构
 
@@ -330,20 +360,23 @@ Later Agent read:
 content_ref -> existing sequential / regex / ranked content read tools
 ```
 
-`KnowledgeNavigateTool` 只做 schema/preflight、可信上下文转换和错误映射。`KnowledgeNavigator` 是单一应用编排入口。后端具体查询留在 repository；ACL predicate 继续由现有 `RagPermissionFilterBuilder` 生成，不能在 traverser 中复制一份权限规则。
+`KnowledgeNavigateTool` 只做 schema/preflight、可信上下文转换和错误映射。`KnowledgeNavigator` 是单一应用编排入口。后端具体查询留在 repository；`RagPermissionFilterBuilder` 只负责基于派生 ACL 的候选前置过滤，最终授权统一交给现有 `ResourceClient.check_res_permission`，不能在 traverser 中复制 Java 权限算法。
 
 ### 3.4 权限边界
 
-可信调用上下文提供 `RagPermissionScope` 和 opaque `knowledge_scope_fingerprint`。这些字段不进入公开 schema，也不能由模型覆盖。
+可信调用上下文提供 principal 和 opaque `knowledge_scope_fingerprint`。这些字段不进入公开 schema，也不能由模型覆盖。Resource 是否存在以及当前用户是否拥有 `VIEW`，以 resource-service 基于 `wisepen_resource_items` 实时计算的结果为准。
 
 权限检查位置：
 
-1. locate：ES 和 Qdrant 查询都带现有 ACL 前置过滤；alias/exact graph lookup 同样带 Neo4j ACL；
-2. resolve：hydrate 节点前再次确认 source resource/version 仍有效；
-3. expand：路径中的起点、所有中间节点、终点和 edge 两端均应用 Neo4j ACL predicate，而不只过滤 candidate；
-4. source：返回前按当前权限过滤每个 `SourceRef`，没有可读来源的语义节点和边不得返回；
-5. state：校验 user、session、scope fingerprint、principal fingerprint、已涉及资源的 ACL revision 和 graph data revision；
-6. relation counts：只统计当前调用可读且版本有效的邻接关系，不能泄露不可读节点名称、数量或存在性。
+1. ingestion/ACL event：从 Resource 权威数据读取当前资源记录并生成本地 ACL projection；projection 只写入 ES/Qdrant/Neo4j，作为候选过滤缓存；
+2. locate 召回：ES、Qdrant 和 Neo4j alias lookup 使用派生 ACL 前置过滤，减少无权候选；
+3. locate 返回：按候选中的唯一 `resource_id`，有界并发调用 `ResourceClient.check_res_permission`，仅保留实时允许 `VIEW` 的节点和 source；
+4. expand 遍历：起点、所有中间节点、终点和 edge 两端先应用 Neo4j 派生 ACL predicate；遍历完成后，再对路径涉及的每个唯一 Resource 做实时 `VIEW` 校验；
+5. source：没有通过权威校验的 `SourceRef`、节点、边和整条路径全部丢弃，不能只隐藏 preview；
+6. state：校验 user、session、scope/principal fingerprint、Kafka source version 和 graph projection revision；每次 expand 都重新校验当前 focus 和返回候选的 Resource 权限，不依赖不存在的本地 ACL revision；
+7. relation counts：只在权威权限校验后统计可返回邻接，不能泄露已软删或不可读节点的名称、数量或存在性。
+
+派生 ACL 过宽时，实时校验负责 fail closed；派生 ACL 过窄时可能暂时损失 recall，应通过 ACL event lag 指标发现并修复，不能绕过权威校验补偿。为控制 RPC 数量，每次调用先按 `resource_id` 去重，并受内部 resource-check cap 限制；超出 cap 时缩小候选批次，不能跳过校验。
 
 权限或版本校验失败统一返回 `state_invalidated`，要求重新 locate；伪造 state ID、错误 user/session 与不存在 state 使用相同的 not-found 外观，避免 oracle。
 
@@ -490,7 +523,7 @@ class KnowledgeNavigationState:
     materialized_content_refs: Mapping[str, str]
     scope_fingerprint: str
     principal_fingerprint: str
-    resource_revisions: Mapping[str, str]
+    source_versions: Mapping[str, str]
     graph_schema_version: str
     graph_data_revision: str
     node_budget_remaining: int
@@ -503,7 +536,7 @@ class KnowledgeNavigationState:
 
 - 只存 Redis，opaque `kns_*` ID 至少 128 bit 随机熵；
 - 固定 TTL 建议 30 分钟，不滑动续期；state TTL 必须小于等于 ToolContentStore 内容 TTL；
-- 绑定 user/session/scope/principal，不允许跨会话复用；
+- 绑定 user/session/scope/principal，不允许跨会话复用；`source_versions` 只记录 Kafka 内容版本，不代表 Resource 主档版本；
 - 不保存完整 frontier，expand 从明确 `node_ids` 重算，避免状态爆炸和陈旧授权候选；
 - 默认上限：500 visited nodes、1000 visited edges、100 paths；超限返回 `budget_exhausted`；
 - `materialized_content_refs` 记录 source parent key 到 `cnt_*` 的映射，避免同一 state 重复写缓存；
@@ -622,8 +655,8 @@ MVP 节点集合：
 - `Document`：具体 document version 的根节点，不是跨版本抽象资源；
 - `Section`：由 heading 层级和 section path 确定；
 - `Chunk`：无法可靠提升为更具体节点时的检索/导航 fallback；
-- `Table`、`Figure`：仅当 parser block/locator 明确识别；
-- `Citation`：仅当 converter 提供显式 citation/link target；
+- `Table`、`Figure`：仅当 Kafka `content` 中存在明确 Markdown table/image block；当前 Java Office 路径未输出的图片/图表不得补造；
+- `Citation`：仅当 Kafka `content` 自身提供可配对的 citation/link target；
 - `Concept`：只来自标题、glossary、显式定义或已有可靠实体结果，不用高频词直接写正式概念。
 
 MVP 确定性关系：
@@ -633,9 +666,9 @@ MVP 确定性关系：
 | `CONTAINS` | Document/Section 包含直接子节点 | deterministic / 1.0 |
 | `PARENT_OF` | heading 层级明确 | deterministic / 1.0 |
 | `NEXT`、`PREVIOUS` | 同一父节点下的文档顺序 | deterministic / 1.0 |
-| `CAPTION_OF` | parser 明确输出 caption-target 绑定 | deterministic / 1.0 |
+| `CAPTION_OF` | Kafka 正文中的 caption 与紧邻 table/image block 可确定绑定 | deterministic / 1.0 |
 | `TABLE_CONTAINS` | 表格结构保留了 header/cell 子节点时 | deterministic / 1.0 |
-| `CONTINUES` | converter 明确输出跨页 continuation signal 时 | deterministic / 1.0 |
+| `CONTINUES` | 未来 Kafka 契约明确输出跨页 continuation signal 时 | deterministic / 1.0 |
 | `FOOTNOTE_OF` | 显式 footnote reference/target 可配对时 | deterministic / 1.0 |
 | `HYPERLINKS_TO` | 显式 URI/anchor target 可解析时 | deterministic / 1.0 |
 | `CITES` | citation mention 与 bibliography key 明确配对时 | deterministic / 1.0 |
@@ -667,62 +700,76 @@ Tier 3 的 `SEMANTICALLY_RELATED/SHARED_ENTITY/POSSIBLE_BRIDGE/POSSIBLE_DEPENDEN
 }]->(:KnowledgeNode)
 ```
 
-所有查询把 `relation_type` 作为受枚举约束的属性过滤，不把模型输入拼进 Cypher relationship syntax。结构节点和关系都带 projection revision；ACL 可按资源投影到节点，遍历时对每个 path node 复用 `RagPermissionFilterBuilder.build_neo4j_predicate`。
+所有查询把 `relation_type` 作为受枚举约束的属性过滤，不把模型输入拼进 Cypher relationship syntax。结构节点和关系都带 projection revision；ACL 可按资源投影到节点，遍历时对每个 path node 复用 `RagPermissionFilterBuilder.build_neo4j_predicate`。这些 ACL 属性是 Resource 权威数据的派生快照，只能做 traversal prefilter，不能作为最终授权依据。
 
 如果后续压测证明单一 relationship type 的索引/遍历性能不足，再基于真实 query profile 拆分结构边和语义边；MVP 不先做这种优化。
 
-### 6.3 版本化与提交点
+### 6.3 派生投影版本与提交点
 
-新增 Mongo `RagCorpusManifest`（也可作为现有 corpus domain 的同一聚合）作为跨存储唯一可见性提交点：
+chat-service 不能建立 Resource/Document 权威 manifest。为解决自身 Mongo、Qdrant、ES、Neo4j 部分写入，只新增内部 `RagProjectionCheckpoint`；名称和字段必须明确它只是可重建索引的消费进度与可见性指针：
 
 ```python
-class RagCorpusManifest:
+class RagProjectionCheckpoint:
     resource_id: str
-    active_document_version: str
-    active_projection_revision: str
-    status: Literal["ready", "updating", "failed"]
-    graph_schema_version: str
-    acl_revision: str
+    source_document_version: str
+    content_hash: str
+    applied_projection_revision: str | None
+    staged_projection_revision: str | None
+    status: ProjectionStatus  # staging / applied / failed
     updated_at: datetime
 ```
 
-摄入新版本的顺序：
+它不创建 Resource、不改变 document version、不决定业务资源是否 active，也不向外提供建立、删除或回滚接口。`source_document_version` 完全来自 Kafka 消息；Resource 存在性与 ACL 完全来自 resource-service。
+
+处理一条 `DocumentReadyMessage` 的顺序：
 
 ```text
-1. 生成 projection_revision，manifest 标记 updating，但 active revision 不变
-2. parse/chunk，生成复合 projection keys
-3. 构建 deterministic topology sidecar
-4. 写 Mongo chunks/source refs（pending revision）
-5. 写 Qdrant payload（pending revision）
-6. 写 ES documents（pending revision）
-7. Neo4j 按 revision upsert nodes/edges，禁止 clean_db
-8. 校验每个后端的 resource/version/revision 数量和关键引用完整性
-9. 原子 flip manifest.active_document_version/active_projection_revision，status=ready
-10. 旧 revision 保留短暂 grace period，可回滚；之后异步 GC
+1. 读取 resourceId/version/content，计算 content_hash
+2. 从 Resource 权威数据确认资源仍存在，并生成仅供索引前置过滤的 ACL projection
+3. 按 (resource_id, version, content_hash) 做幂等判断，生成 staged projection_revision
+4. 对 Kafka content 做 Markdown chunking；不调用 document_parse，不读取原文件
+5. 从本次 chunker 已产生的 blocks/locators 构建 deterministic topology
+6. 写 Mongo chunks/source refs（staged revision）
+7. 写 Qdrant 和 ES（staged revision）
+8. Neo4j 按 staged revision upsert nodes/edges，禁止 clean_db
+9. 校验各派生后端数量、SourceRef 和 edge endpoint 完整性
+10. 原子更新 checkpoint.applied_projection_revision
+11. 旧派生 revision 在 grace period 后由内部维护任务清理
 ```
 
-所有在线查询必须过滤 active version/revision。由于 ES、Qdrant 不适合在每次查询时远程 join Mongo，active revision 应同步投影为 payload/filter field；manifest flip 后由小型 activation step 更新可见标志或使用 active-revision filter map。具体选择由规模压测决定，但不能继续只按 `resource_id` 检索。
+所有在线查询只读取 checkpoint 标记为 applied 的 projection revision。这个过滤只保证 chat-service 自身跨存储一致性，不声明哪个业务文档版本权威；若 Kafka 的版本顺序或回放语义需要改变，必须先修改上游事件契约，不能由 chat-service 猜测。
 
-推荐优先采用“revision 字段 + 当前 scope 的 active revision 过滤”，避免批量更新全部向量 payload 的可见标志。若上游 scope 很大导致 filter map 超限，再引入独立 generation alias/collection；这属于存储容量决策，不改变应用协议。
+### 6.4 Kafka 与 Resource 权威源衔接
 
-### 6.4 Kafka 衔接
+现有跨服务契约及职责：
 
-`DocumentReady` consumer 继续是文档摄入入口，解析 payload 后调用增强后的 ingester。事件至少需要稳定的 resource ID、document version 和 content；projection revision 由本服务生成。重复事件按 `(resource_id, document_version, content_hash)` 幂等：
+| 契约 | Producer/权威方 | chat-service 行为 |
+|---|---|---|
+| `DocumentReadyMessage(resourceId, version, content)` | document-service | 消费正文并重建自己的 chunks/vector/graph 投影 |
+| `AclRecalculateMessage(resourceId, triggerSource)` | resource-service | 从 Resource 权威数据重新生成 ACL prefilter projection，并同步 ES/Qdrant/Neo4j |
+| `ResourceDeletedMessage(typedResourceIds)` | resource-service，物理销毁后发布 | 只清理消息中相关 resource IDs 的本地派生投影 |
+| `checkResPermission` | resource-service 基于主档实时计算 | locate/expand 返回前校验 `VIEW`，作为最终授权结论 |
 
-- 同内容且 active：ack/no-op；
-- 同版本不同内容：生成新 projection revision，旧 revision 在 flip 前仍 active；
-- 任一后端失败：manifest 标记 failed/updating，旧 active 不变，允许重试；
-- ACL recalculation：递增 `acl_revision`，更新 ES/Qdrant/Neo4j 投影；旧 state 在下次 expand 时失效。
+`DocumentReadyMessage` 重复消费按 `(resource_id, version, content_hash)` 幂等：同三元组 no-op；相同 source version 但 content hash 不同则建立新的派生 revision，只有全部后端写完才切换 applied checkpoint。任何失败都不提交新 applied revision，并让 Kafka 按现有重试语义处理。
 
-`RagChunkingResult` 需要保留 topology builder 所需的 block/locator sidecar，而不是只返回最终 chunk 文本。不要把完整第三方 parser object 持久化；定义 WisePen 自己的最小 `DocumentTopologyInput`，字段只包含 block kind、offset、section path、page、anchor、caption/reference IDs 和显式关系信号。
+新页标记适配发生在 `application/utils/chunkers/markdown/parser.py` 和 `locator.py`：parser 识别 start/end 类型，locator 只以正确配对的范围生成 page span。`TopologyBuilder` 直接消费同一次 chunking 的 `TextBlock/ChunkLocator` 结果，不新增第二套 Markdown parser，也不接入 `application/utils/document_parse`。
 
-### 6.5 删除和回滚
+原 RAG 配置已为 chat-service 使用独立 consumer group：`wisepen-chat-rag-document-ready-group` 和 `wisepen-chat-rag-acl-recalc-group`。实施时应保持独立 group，不能复用 Java resource-service 的 `wisepen-document-ready-group`，否则不同服务会竞争消费同一事件。
 
-- 文档删除：先把 manifest 标记不可见，再异步删除四个后端的指定 projection revision；
-- 版本回滚：原子把 manifest active 指针切回仍在 grace period 的旧 revision；
-- 图 schema 回滚：读路径支持当前和前一 schema version，feature flag 切回旧工具后再离线清理新标签；
-- 状态回滚：删除独立 Redis key namespace `knowledge_navigation:*` 即可，不影响 ToolContentStore；
-- 任何回滚都不能执行全库 `DETACH DELETE` 或 `clean_db`。
+若 Phase 2 需要 citation、footnote、hyperlink target 或 continuation 等当前 `content` 没有的结构，前置依赖是由 document-service owner 扩展 `DocumentReadyMessage`（或新增版本化事件）并由 producer 明确填充。chat-service 只能消费已发布契约，不能从源文件自行补抽取。
+
+ACL projection 的定位必须写进接口注释和测试：它是召回性能缓存，不是权限源。原 `MongoRagAclProjectionRepository.load_resource_projection` 可以只读 Resource 主档以重建投影；最终返回仍调用 Java 实时鉴权。不要新增 ACL 管理接口，也不要把 RAG 投影写回 `wisepen_resource_items`。
+
+### 6.5 生命周期清理和回滚
+
+- chat-service 不提供 Resource/Document 创建、软删、硬删、版本切换或恢复接口；
+- resource-service 软删除后 Resource 主档查询/实时鉴权会立即失败，locate/expand 必须因此隐藏仍残留在派生索引中的内容；
+- 只有收到 `ResourceDeletedMessage` 后，consumer 才按 `typedResourceIds` 清理本地 Mongo/Qdrant/ES/Neo4j 派生投影；这不是删除业务 Resource；
+- 新 source version 到达后，chat-service 只切换自己的 applied projection，并按内部保留策略清理旧派生 generation；
+- 业务版本回滚必须由上游重新发布权威内容事件或执行约定的 backfill，chat-service 无权自行把某个旧 document version 宣布为当前版本；
+- 工具回滚通过 feature flag 切回旧公开工具；图 schema 回滚只处理 chat-service 派生标签；
+- 状态回滚可清理独立 Redis namespace，不影响 Resource 数据和 ToolContentStore；
+- 任何内部清理都必须限定 resource/projection key，禁止全库 `DETACH DELETE` 或 `clean_db`。
 
 ## 7. 在线执行方案
 
@@ -741,10 +788,11 @@ class RagCorpusManifest:
 6. NodeResolver 将 chunk hit 映射到同来源的 Concept/Section/Table/Figure/Citation；没有可靠提升时返回 Chunk
 7. 按 node_id 去重；同名不同来源节点不合并
 8. FrontierRanker 结合 retrieval ranks、node type prior、source authority 和多样性选 max_results
-9. hydrate SourceRef 和仅本批节点可读的 available relation counts
-10. 对 primary parent source 在 ToolContentStore 物化一次，生成 cnt_*；失败则不返回悬空 ref
-11. 创建 Redis state，记录 root query、visited、paths、revision fingerprints 和 budgets
-12. 先按结构化 item budget 裁剪，再返回完整 JSON
+9. 按 resource_id 去重并调用 ResourceClient.check_res_permission；丢弃未实时允许 VIEW 的节点
+10. 对通过权威鉴权的节点 hydrate SourceRef，并计算仅包含可返回邻接的 available relation counts
+11. 对 primary parent source 在 ToolContentStore 物化一次，生成 cnt_*；失败则不返回悬空 ref
+12. 创建 Redis state，记录 root query、visited、paths、Kafka source versions、projection revisions 和 budgets
+13. 先按结构化 item budget 裁剪，再返回完整 JSON
 ```
 
 NodeResolver 的默认优先级不是绝对类型排序，而是“最小且可继续导航的语义单位”：
@@ -761,22 +809,25 @@ Document 节点只在 query 明确命中文档标题/元数据或作为初始结
 ```text
 1. 校验 expand 参数
 2. Redis load state，恒定时间比较 user/session/scope/principal binding
-3. 校验 graph schema/data revision 和已涉及 resource revisions；不一致即 invalidate
+3. 校验 graph schema/data revision 和已涉及 Kafka source versions/projection revisions；不一致即 invalidate
 4. 确认 node_ids 都是该 state 已返回过的节点，拒绝任意图 ID 探测
 5. 规范化 relation filter、direction、max_depth(1..2)
 6. Neo4j bounded traversal：
-   - 起点、每个中间节点和终点都带 ACL + active revision predicate
+   - 起点、每个中间节点和终点都带派生 ACL + applied projection predicate
    - 按 relation type 和 direction 过滤
    - 限制每个 seed 的内部 candidate cap 和总 path cap
-   - 不返回不可读节点的任何统计
+   - 该层只做候选 prefilter，不把派生 ACL 当最终授权
 7. 排除 visited target；保留连接新 target 所需的已访问中间节点
-8. hydrate edge evidence refs 和 node source refs；无可读来源的 Tier 2 edge 丢弃
-9. FrontierRanker 使用 root query + optional local focus + path features 排序
-10. 可选调用现有 reranker重排候选 preview；reranker 失败时保留确定性排序，不重复遍历
-11. 选择 max_results，物化本次新增 source content refs
-12. CAS 更新 state revision、focus、visited、paths、materialized refs 和 budgets
-13. CAS 冲突时重新加载一次并重算 visited 差集；仍冲突则返回可重试错误，不循环
-14. 返回增量 nodes/edges/paths 和 authorized frontier count
+8. 对 focus 及每条候选路径涉及的唯一 resource_id 调用 ResourceClient.check_res_permission
+   - focus Resource 失去 VIEW：state_invalidated
+   - 候选路径任一 Resource 无 VIEW：整条路径丢弃，不暴露节点或计数
+9. hydrate edge evidence refs 和 node source refs；无可读来源的 Tier 2 edge 丢弃
+10. FrontierRanker 使用 root query + optional local focus + path features 排序
+11. 可选调用现有 reranker 重排候选 preview；reranker 失败时保留确定性排序，不重复遍历
+12. 选择 max_results，物化本次新增 source content refs
+13. CAS 更新 state revision、focus、visited、paths、materialized refs 和 budgets
+14. CAS 冲突时重新加载一次并重算 visited 差集；仍冲突则返回可重试错误，不循环
+15. 返回增量 nodes/edges/paths 和权威鉴权后的 frontier count
 ```
 
 expand 的局部 query 只参与本轮排序并写入 `current_focus`，不能改变 `root_query`，也不能触发一套与当前 node 无关的全库 locate。Agent 想重新选入口时应重新调用 `action=locate` 创建新 state。
@@ -848,20 +899,24 @@ penalty:
 
 ### 8.1 Phase 0：前置一致性修复
 
-目标：在不暴露新工具前，建立稳定身份和版本可见性。
+目标：在不暴露新工具前，对齐真实 Kafka/Resource 契约，并建立稳定的派生索引身份与可见性。
 
 修改/新增：
 
-- `domain/entities/rag_corpus.py`：复合 projection key、manifest/revision 模型；
-- `application/rag/ingestion/models.py`、`chunking.py`、`ingester.py`：传播 projection revision 和 topology sidecar；
+- `domain/entities/rag_corpus.py`：复合 projection key 和 `RagProjectionCheckpoint`；
+- `application/rag/ingestion/models.py`、`chunking.py`、`ingester.py`：只消费 Kafka content，传播 source version 和 projection revision；
+- `application/utils/chunkers/markdown/parser.py`、`locator.py`：对齐 Java `page:start/page:end` 正文标记并生成成对 page spans；
 - `core/persistence/mongo/rag_corpus_repository.py`：按 resource/version/chunk 读取，禁止裸 chunk ID；
-- `core/persistence/qdrant/rag_repository.py`、`core/persistence/elasticsearch/rag_repository.py`：复合 ID 和 active revision；
+- `core/persistence/qdrant/rag_repository.py`、`core/persistence/elasticsearch/rag_repository.py`：复合 ID 和 applied projection revision；
 - `application/rag/graph/graphrag_builder.py`、`core/persistence/neo4j/rag_repository.py`：去除 `clean_db`，按 revision upsert/delete；
-- `application/rag/retrieval/models.py` 及各 filter：支持 active revision，修复完整 group role scope。
+- `application/rag/retrieval/models.py` 及各 filter：支持 applied revision，修复完整 group role scope；
+- `application/rag/acl/**`：明确本地 ACL 是 derived prefilter，禁止写 Resource 权威集合；
+- `application/rag/kafka_consumers/resource_deleted_consumer.py`：消费既有物理销毁事件，只清理 chat-service 派生投影；
+- `service_client/resource_service_client.py`：复用现有实时 `VIEW` 校验，不新增 Resource mutation API。
 
-测试：跨资源相同 chunk、同版本重试、新版本部分失败、manifest flip、旧版本回滚、ACL revision 更新。
+测试：新 page marker 契约、跨资源相同 chunk、同消息重试、staged 写入部分失败、applied checkpoint 切换、ACL projection 重建、Resource 软删实时拒绝、物理销毁事件清理派生数据。
 
-验收：任一后端失败不会让半成品版本变为 active；四个后端使用同一复合身份；现有 RAG 只读 active revision。
+验收：RAG 不调用 document_parse；新 page locator 正确；任一后端失败不会让 staged revision 可见；四个后端使用同一复合身份；现有 RAG 只读 applied revision；所有返回结果通过 Resource 实时 `VIEW` 校验。
 
 主要风险：存量索引迁移。采用双写/影子校验，旧 collection/index 保留到新读路径验证通过。
 
@@ -889,8 +944,9 @@ penalty:
 - `application/rag/retrieval/retrieval_pipeline.py`：抽取共享 candidate retrieval；
 - 新增或从 pipeline 提取 `application/rag/retrieval/candidate_retriever.py`；
 - `application/utils/ranking/presets.py`：注册 navigation locate/frontier preset；
-- parser/chunker 边界：保留最小 `DocumentTopologyInput`；
+- Markdown chunker 边界：TopologyBuilder 直接复用 Kafka content 本次 chunking 产生的 `TextBlock/ChunkLocator`，不新增 parser；
 - `application/rag/ingestion/ingester.py`：调用 topology builder 并写 Neo4j projection；
+- locator/traverser/result builder：返回前通过 `ResourceClient.check_res_permission` 做唯一权威 `VIEW` 校验；
 - `container.py`、`main.py`、`core/config/app_settings.py`：装配、TTL/limits 和单工具 feature flag；
 - tool providers/registry：只暴露 `knowledge_navigate`。
 
@@ -917,7 +973,7 @@ penalty:
 - `Claim`、`ClaimRole`、qualifier 和 multi-source SourceRef；
 - 离线 extraction audit dataset 和 extractor version registry；
 - Neo4j relation/claim repository 查询；
-- converter 的 citation、footnote、hyperlink 和原生 continuation sidecar。
+- 若确有来源链需求，由 document-service owner 评估扩展 `DocumentReadyMessage` 或新增版本化 Kafka 事件，显式提供 citation、footnote、hyperlink target 和 continuation 信号；chat-service 只增加对应 consumer DTO 和投影逻辑。
 
 只提升满足下列任一条件的 relation 为 Claim：有条件/时间/适用范围、作者立场、多来源支持/冲突、需要独立打开、或 subject/object 二元边不足以表达。简单且明确的 `DEFINED_IN` 等可以继续使用 evidence-backed edge。
 
@@ -947,8 +1003,10 @@ penalty:
 
 | 场景 | 核心断言 |
 |---|---|
-| 权限隔离 | locate/expand 均不返回无权节点、边、路径、relation count；每个中间节点都过滤 |
-| ACL 变化 | acl/principal revision 变化后旧 state `state_invalidated` |
+| 权限隔离 | 派生 ACL 只做 prefilter；locate/expand 返回前均通过 resource-service 实时 `VIEW`，无权节点、边、路径和 relation count 全部不返回 |
+| ACL 变化 | 即使本地 projection 尚未刷新，Java 实时鉴权拒绝后也不得返回；focus 失权时旧 state `state_invalidated` |
+| Resource 软删除 | 主档移出业务集合后实时鉴权立即拒绝，即使 ES/Qdrant/Neo4j 仍有残留 |
+| Resource 物理销毁 | 只在收到 `ResourceDeletedMessage` 后清理本地派生数据，不调用 Resource 删除接口 |
 | state 伪造 | 随机 ID、错误 user/session 返回同一 not-found 外观 |
 | state 并发 | 两次 expand CAS 不丢 visited/path 更新；最多一次有限重试 |
 | 状态体积 | 达到 node/edge/path budget 后可预测停止，不超 Redis size 门槛 |
@@ -960,8 +1018,10 @@ penalty:
 | 重复 expand | 已 visited target 不重复；连接新 target 的旧中间点不重复计 node |
 | content_ref | 每个 ref 可由现有 reader 读取，source/content offsets 对齐原文 |
 | 缓存失效 | state TTL 不长于 content TTL，不返回过期 ref |
-| 文档版本 | flip 前只见旧版，flip 后只见新版，旧 state 失效，回滚可恢复旧版 |
-| 摄入失败 | 任一后端失败不会激活部分 revision，重复事件幂等 |
+| Kafka 内容契约 | `DocumentReadyMessage` 只映射 resourceId/version/content；RAG 不调用 document_parse |
+| 页标记契约 | `page:start/page:end` 正确配对并生成 page locator；缺失/错序时 fail closed，不伪造 page span |
+| 内容版本 | staged projection 不可见，checkpoint applied 后只见新 source version，旧 state 失效 |
+| 摄入失败 | 任一后端失败不会应用部分 projection revision，重复事件按 resource/version/hash 幂等 |
 | chunk ID 碰撞 | 跨 resource/version 相同内容和 index 仍有不同 projection/node ID |
 | 高连接 hub | MENTIONS/通用实体不会挤占全部 top results，degree penalty 可观测 |
 | token budget | 输出始终是完整 JSON；裁剪设置 truncated，不切半 item |
@@ -980,7 +1040,9 @@ src/chat/tests/knowledge_navigation/test_traverser_acl.py
 src/chat/tests/knowledge_navigation/test_frontier_ranker.py
 src/chat/tests/knowledge_navigation/test_navigation_state.py
 src/chat/tests/knowledge_navigation/test_result_builder.py
-src/chat/tests/knowledge_navigation/test_ingestion_versioning.py
+src/chat/tests/knowledge_navigation/test_projection_checkpoint.py
+src/chat/tests/knowledge_navigation/test_kafka_content_contract.py
+src/chat/tests/knowledge_navigation/test_resource_authorization.py
 src/chat/tests/knowledge_navigation/test_navigation_integration.py
 ```
 
@@ -1016,7 +1078,7 @@ src/chat/tests/knowledge_navigation/test_navigation_integration.py
 
 每次调用记录不含原文的结构化 trace：action、state revision、backend latency、candidate counts、过滤 counts、rank preset/version、truncated/exhausted、content materialization count、state bytes、graph/schema/data revision。query 及 preview 是否进入日志遵循现有敏感数据策略，默认不记录全文。
 
-告警：ACL predicate 缺失、active revision mismatch、悬空 source ref、CAS 冲突率、hub concentration、Neo4j candidate cap、输出预算裁剪率和 content ref 读取失败率。
+告警：Resource 实时鉴权失败/超时、派生 ACL 与实时鉴权结果分歧率、ACL event lag、applied projection mismatch、悬空 source ref、CAS 冲突率、hub concentration、Neo4j candidate cap、输出预算裁剪率和 content ref 读取失败率。
 
 ## 10. 最终实施清单
 
@@ -1025,24 +1087,25 @@ src/chat/tests/knowledge_navigation/test_navigation_integration.py
 | # | 任务 | 涉及文件 | 前置依赖 | 验收标准 | 主要风险 |
 |---:|---|---|---|---|---|
 | 1 | 合并并基线化原 RAG | `application/rag/**`、`container.py`、现有 RAG tests | 无 | formal 分支现有测试 + RAG tests 通过 | 分支差异 |
-| 2 | 复合 chunk/projection identity | chunking、Mongo/Qdrant/ES/Neo4j repositories | 1 | 跨资源/版本无 ID 碰撞 | 存量迁移 |
-| 3 | active manifest/revision | corpus entity/repository、ingester、filters | 2 | 多库部分失败不激活；只检索 active | filter 规模 |
-| 4 | Neo4j 增量写入 | graph builder、RagNeo4jRepository | 2、3 | 无 `clean_db`；版本 upsert/delete/rollback 正确 | 旧图清理 |
-| 5 | 共享 candidate retrieval | retrieval pipeline、`candidate_retriever.py` | 1、3 | 旧 RAG 结果无回归；locator 不复制召回逻辑 | 隐式 gate 耦合 |
-| 6 | topology sidecar/model | parser/chunker boundary、projection models | 2 | block/offset/显式关系信号可重复投影 | parser 信息缺失 |
-| 7 | deterministic topology builder | `indexing/topology_builder.py` | 4、6 | gold documents 的结构节点/边 100% 可回源 | 错误结构推断 |
-| 8 | navigation domain models/protocols | `models.py`、`repository_protocols.py` | 2、7 | 类型、ID、source/edge invariants 单测通过 | 模型过宽 |
-| 9 | Neo4j traversal repository | `knowledge_navigation_repository.py` | 4、8 | direction/relation/depth/每跳 ACL 测试通过 | Cypher 膨胀 |
-| 10 | Redis state repository | `knowledge_navigation_state_repository.py` | 8 | binding、TTL、limits、CAS、失效测试通过 | 并发更新 |
-| 11 | locator/resolver | locator、node resolver、shared retriever | 5、7、8 | 原 query 保留；semantic node 优先且 Chunk fallback | 过度提升 |
-| 12 | traverser/frontier ranker | traverser、ranker、ranking registry | 9、10、11 | deterministic rank、novelty/hub penalty、no repeats | 排序偏置 |
-| 13 | result builder/content refs | result builder、ToolContentStore adapter | 8、10 | 所有 source ref 可读；无悬空 cnt_* | TTL/缓存失败 |
-| 14 | tool contract/entry | tool、action check、navigator | 10～13 | locate/expand contract 和错误语义通过 | action 歧义 |
-| 15 | 装配和单入口切换 | container、main、settings、tool registry | 14 | 模型只见 `knowledge_navigate`，flag 可回滚 | 双工具暴露 |
-| 16 | Phase 1 集成/安全评测 | tests、fixtures、benchmark harness | 15 | 自动化矩阵通过，ACL violation=0，指标过 gate | 数据集偏差 |
-| 17 | 影子流量和灰度 | metrics/config/deployment | 16 | latency、budget、state、hub 指标稳定 | 生产图规模 |
-| 18 | Phase 2 evidence relations/Claim | semantic builder、claim models | Phase 1 稳定 | 所有 Tier 2 边可回源并经审计 | 抽取幻觉 |
-| 19 | Phase 3 propagation/path 实验 | experimental ranker/path action | Phase 2 数据质量达标 | 相对 BFS 显著收益且 grounding/ACL 不下降 | hub/PPR 偏置 |
+| 2 | 对齐 Kafka page marker | Markdown chunker parser/locator、consumer contract tests | 1 | 新 `page:start/page:end` 生成正确 page spans；不调用 document_parse | 历史消息兼容 |
+| 3 | 固化 Resource 权威边界 | ACL projector/repository、`ResourceClient`、检索返回过滤 | 1 | 本地 ACL 只做 prefilter；最终结果全部通过 Java 实时 `VIEW` | RPC 延迟/可用性 |
+| 4 | 复合 chunk/projection identity | chunking、Mongo/Qdrant/ES/Neo4j repositories | 1 | 跨资源/版本无 ID 碰撞 | 存量迁移 |
+| 5 | 派生 projection checkpoint | corpus entity/repository、ingester、filters | 4 | 多库部分失败不 applied；不具备 Resource/Document mutation 能力 | filter 规模 |
+| 6 | Resource 销毁事件 consumer | Kafka consumer、四个派生 repositories | 3～5 | 只按 `ResourceDeletedMessage` 清理本地投影；无 Resource 删除调用 | 软删残留窗口 |
+| 7 | Neo4j 增量写入 | graph builder、RagNeo4jRepository | 4、5 | 无 `clean_db`；仅按 resource/projection key upsert/cleanup | 旧图清理 |
+| 8 | 共享 candidate retrieval | retrieval pipeline、`candidate_retriever.py` | 1、3、5 | 旧 RAG 结果无回归；locator 不复制召回逻辑 | 隐式 gate 耦合 |
+| 9 | Kafka 正文 topology input | chunker 输出、projection models | 2、4 | 同一次 chunking 的 block/locator 可重复投影，无第二套 parser | 上游内容信息有限 |
+| 10 | deterministic topology builder | `indexing/topology_builder.py` | 7、9 | gold content 的结构节点/边 100% 可回源 | 错误结构推断 |
+| 11 | navigation domain models/protocols | `models.py`、`repository_protocols.py` | 4、10 | 类型、ID、source/edge invariants 单测通过 | 模型过宽 |
+| 12 | Neo4j traversal repository | `knowledge_navigation_repository.py` | 3、7、11 | direction/relation/depth/派生 ACL prefilter 测试通过 | Cypher 膨胀 |
+| 13 | Redis state repository | `knowledge_navigation_state_repository.py` | 11 | binding、TTL、limits、CAS、source/projection 失效测试通过 | 并发更新 |
+| 14 | locator/resolver | locator、node resolver、shared retriever | 8、10、11 | 原 query 保留；Chunk fallback；返回前实时 `VIEW` | 过度提升/RPC 放大 |
+| 15 | traverser/frontier ranker | traverser、ranker、ranking presets | 12～14 | 路径全 Resource 实时鉴权、deterministic rank、no repeats | 排序偏置 |
+| 16 | result builder/content refs | result builder、ToolContentStore adapter | 11、13～15 | 所有 source ref 可读且已授权；无悬空 cnt_* | TTL/缓存失败 |
+| 17 | tool contract/entry | tool、action check、navigator | 13～16 | locate/expand contract 和错误语义通过 | action 歧义 |
+| 18 | 装配、集成和单入口灰度 | container、main、settings、registry、benchmark | 17 | 单一工具、ACL violation=0、指标过 gate、flag 可回滚 | 生产规模 |
+| 19 | 上游结构事件契约（条件任务） | Java `DocumentReadyMessage`/producer，由 document-service owner 实施 | Phase 1 证明当前 content 不足 | 新字段版本化且 producer/consumer contract tests 同步 | 跨服务协调 |
+| 20 | Phase 2/3 语义与传播实验 | semantic builder、Claim、experimental ranker/path | 18；需要结构字段时依赖 19 | evidence 全可回源；相对 BFS 有收益且 ACL 不下降 | 抽取幻觉/hub |
 
 ## 附录 A：20 个开放问题的明确答案
 
@@ -1056,7 +1119,7 @@ src/chat/tests/knowledge_navigation/test_navigation_integration.py
 8. **max_depth 是否限制 1～2？** 是。schema 和 repository 双重限制；三跳以上必须多次 expand，便于 ACL、预算和可解释路径控制。
 9. **路径是否保存完整节点序列？** 保存完整 node IDs + edge IDs，但只保存已返回路径，且单路径深度最多 2；不复制节点 payload。
 10. **state 是否保存完整 frontier？** 不保存。只保存 visited、paths、budgets 和 materialized refs，frontier 从调用方指定的 node IDs 重算。
-11. **state_id 绑定哪些权限和版本信息？** user、session、opaque scope fingerprint、principal fingerprint、已涉及 resource ACL/projection revisions、graph schema/data revision。
+11. **state_id 绑定哪些权限和版本信息？** user、session、opaque scope fingerprint、principal fingerprint、已涉及 Kafka source versions、chat projection revisions、graph schema/data revision；Resource 权限不依赖本地 revision，而是在每次 expand 实时重验。
 12. **图更新后旧 state 怎么处理？** revision 不一致即 `state_invalidated` 并要求重新 locate；不尝试把旧 node/path 静默迁移到新图。
 13. **content_ref 指向 Chunk、Span 还是窗口？** 指向 ToolContentStore 中物化的 parent chunk；SourceRef 另带 node span 在该 content 内的 offsets。Section 跨 parent 时有多个 refs。
 14. **一个 Claim 对应多个 source span 怎么表达？** Claim 拥有有序/去重的多个 SourceRef，可在 qualifiers 中区分 support/oppose/context 角色；Agent 投影的 edge 引用对应 ref IDs。
@@ -1071,10 +1134,13 @@ src/chat/tests/knowledge_navigation/test_navigation_integration.py
 
 | 风险 | 预防/检测 | 回滚或停止条件 |
 |---|---|---|
-| ACL 泄漏 | 每后端同语义 predicate、路径全节点过滤、负向权限测试 | 任一泄漏立即关闭新工具 |
-| ID/版本混读 | 复合 ID、active manifest、revision integration tests | 切回旧读路径，保留新索引排查 |
-| 多库部分成功 | pending revision + manifest commit point | 不 flip；重试或 GC pending |
-| 解析关系误判 | 只消费显式 sidecar，不能推断 continuation/citation | 禁用相应 builder version 并重建 |
+| ACL 泄漏 | 派生 prefilter + Resource 实时 `VIEW`、路径全 Resource 校验、负向权限测试 | 任一泄漏立即关闭新工具 |
+| 派生 ACL 陈旧 | 监控 projection 与实时鉴权分歧；实时结果始终优先 | Resource RPC 不可用时 fail closed，不降级到本地 ACL |
+| ID/版本混读 | 复合 ID、applied projection checkpoint、integration tests | 切回旧读路径，保留 staged 索引排查 |
+| 多库部分成功 | staged revision + applied checkpoint | 不切 applied；Kafka 重试或清理 staged |
+| Kafka marker 漂移 | Java/Python contract fixture 覆盖 `page:start/page:end` | page locator 测试失败即阻断摄入发布 |
+| 结构关系误判 | 只消费 Kafka content 明示结构，不能推断 continuation/citation | 禁用相应 builder version 并重建派生图 |
+| 越权修改 Resource | chat-service 无 Resource mutation client/API；只读/鉴权调用审计 | 出现 create/update/delete Resource 调用即阻断发布 |
 | 语义抽取幻觉 | evidence span mandatory、白名单、离线审计 | grounding 低于 gate 不进入 Phase 2 默认路径 |
 | Hub 垄断 | degree metrics、relation prior/cap、gold hub tasks | Top-K hub exposure 超门槛则关闭该 relation |
 | state/content 失配 | state TTL <= content TTL、写 ref 失败则整体失败 | 清理 navigation namespace，重新 locate |
@@ -1082,4 +1148,4 @@ src/chat/tests/knowledge_navigation/test_navigation_integration.py
 | latency 回归 | backend 分段 metrics、candidate/path caps | 超 SLO 切回旧工具并做索引/query tuning |
 | 双入口行为漂移 | registry 互斥 feature flag、scope snapshot test | 发现同时暴露立即阻断发布 |
 
-Phase 1 发布的硬性停止条件是：ACL violation 非零、存在不可回读 content ref、旧版本可见、输出 JSON 被截断、或工具 registry 同时暴露两个重叠入口。任何一项出现都不能以“后续优化”名义灰度上线。
+Phase 1 发布的硬性停止条件是：ACL violation 非零、最终返回绕过 Resource 实时鉴权、RAG 调用 document_parse、chat-service 出现 Resource mutation 接口、存在不可回读 content ref、非 applied projection 可见、输出 JSON 被截断、或 tool registry 同时暴露两个重叠入口。任何一项出现都不能以“后续优化”名义灰度上线。
