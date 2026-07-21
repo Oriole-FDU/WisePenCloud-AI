@@ -5,14 +5,11 @@ import pytest
 from docling_core.types.doc import ImageRefMode
 
 from chat.application.utils.document_parse.converters import (
-    fallback_converter as fallback_module,
+    generic_converter as generic_module,
     office_converter as office_module,
 )
-from chat.application.utils.document_parse.converters.fallback_converter import (
-    FallbackConverter,
-)
-from chat.application.utils.document_parse.converters.html_converter import (
-    HtmlConverter,
+from chat.application.utils.document_parse.converters.generic_converter import (
+    GenericConverter,
 )
 from chat.application.utils.document_parse.converters.office_converter import (
     OfficeConverter,
@@ -57,15 +54,15 @@ async def test_office_converter_handles_docx_and_pptx(
 
 
 @pytest.mark.asyncio
-async def test_fallback_uses_markitdown(
+async def test_generic_converter_uses_markitdown(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     file_path = tmp_path / "sample.epub"
     file_path.write_bytes(b"document")
-    monkeypatch.setattr(fallback_module, "get_markitdown", _MarkItDown)
+    monkeypatch.setattr(generic_module, "get_markitdown", _MarkItDown)
 
-    result = await FallbackConverter().convert(
+    result = await GenericConverter().convert(
         file_path,
         file_name=file_path.name,
     )
@@ -74,7 +71,7 @@ async def test_fallback_uses_markitdown(
 
 
 @pytest.mark.asyncio
-async def test_html_converter_uses_real_markitdown(tmp_path: Path) -> None:
+async def test_generic_converter_handles_html(tmp_path: Path) -> None:
     file_path = tmp_path / "sample.html"
     file_path.write_text(
         """
@@ -89,7 +86,7 @@ async def test_html_converter_uses_real_markitdown(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    result = await HtmlConverter().convert(
+    result = await GenericConverter().convert(
         file_path,
         file_name=file_path.name,
     )

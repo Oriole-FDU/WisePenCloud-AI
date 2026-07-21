@@ -47,9 +47,12 @@ class _Converter:
             "application/zip",
             "spreadsheet",
         ),
-        ("sample.html", "html", "html", "text/html", "html"),
-        ("sample.jsonl", "jsonl", "jsonl", "application/x-ndjson", "json"),
-        ("sample.py", "py", "txt", "text/plain", "plaintext"),
+        ("sample.html", "html", "html", "text/html", "generic"),
+        ("sample.epub", "epub", "epub", "application/epub+zip", "generic"),
+        ("notebook.ipynb", "ipynb", "ipynb", "application/json", "generic"),
+        ("sample.json", "json", "json", "application/json", "content"),
+        ("sample.jsonl", "jsonl", "jsonl", "application/x-ndjson", "content"),
+        ("sample.py", "py", "txt", "text/plain", "content"),
     ),
 )
 @pytest.mark.asyncio
@@ -77,10 +80,7 @@ async def test_router_uses_specific_format_before_generic_rules(
         pdf_converter=_Converter("pdf"),
         office_converter=_Converter("office"),
         spreadsheet_converter=_Converter("spreadsheet"),
-        html_converter=_Converter("html"),
-        json_converter=_Converter("json"),
-        plaintext_converter=_Converter("plaintext"),
-        fallback_converter=_Converter("fallback"),
+        generic_converter=_Converter("generic"),
     )
 
     result = await parser.parse(DocumentParseRequest(file_path=file_path))
@@ -88,30 +88,43 @@ async def test_router_uses_specific_format_before_generic_rules(
     assert result == expected
 
 
+@pytest.mark.parametrize(
+    ("file_name", "extension", "label", "mime_type"),
+    (
+        ("sample.unknown", "unknown", "unknown", "application/octet-stream"),
+        ("sample.zip", "zip", "zip", "application/zip"),
+        ("sample.png", "png", "png", "image/png"),
+        ("sample.msg", "msg", "msg", "application/vnd.ms-outlook"),
+        ("calendar.ics", "ics", "calendar", "text/calendar"),
+    ),
+)
 @pytest.mark.asyncio
-async def test_router_uses_markitdown_fallback_for_unknown_format(
+async def test_parser_rejects_unsupported_format(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    file_name: str,
+    extension: str,
+    label: str,
+    mime_type: str,
 ) -> None:
-    file_path = tmp_path / "sample.unknown"
+    file_path = tmp_path / file_name
     file_path.write_bytes(b"content")
     monkeypatch.setattr(
         parser_module,
         "detect_file_type",
         lambda *_args, **_kwargs: FileType(
-            label="unknown",
-            mime_type="application/octet-stream",
-            extension="unknown",
+            label=label,
+            mime_type=mime_type,
+            extension=extension,
         ),
     )
     parser = DocumentParser(
         pdf_converter=_Converter("pdf"),
-        fallback_converter=_Converter("fallback"),
+        generic_converter=_Converter("generic"),
     )
 
-    result = await parser.parse(DocumentParseRequest(file_path=file_path))
-
-    assert result == "fallback"
+    with pytest.raises(UnsupportedDocumentFormatError):
+        await parser.parse(DocumentParseRequest(file_path=file_path))
 
 
 @pytest.mark.asyncio
@@ -132,7 +145,7 @@ async def test_detected_binary_type_cannot_bypass_binary_block(
     )
     parser = DocumentParser(
         pdf_converter=_Converter("pdf"),
-        fallback_converter=_Converter("fallback"),
+        generic_converter=_Converter("generic"),
     )
 
     with pytest.raises(UnsupportedDocumentFormatError):

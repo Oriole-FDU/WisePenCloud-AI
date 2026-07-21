@@ -44,6 +44,13 @@ class AppSettings(BaseModel):
     # 语音识别配置
     SPEECH_CONFIG: SpeechConfig | None = None
 
+    # PaddleOCR 云端服务
+    PADDLE_OCR_TOKEN: str = ""
+    PADDLE_OCR_API_URL: str = (
+        "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
+    )
+    PADDLE_OCR_MODEL: str = "PaddleOCR-VL-1.6"
+
     # 安全配置
     # 与 APISIX 网关约定的请求来源 token
     FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"

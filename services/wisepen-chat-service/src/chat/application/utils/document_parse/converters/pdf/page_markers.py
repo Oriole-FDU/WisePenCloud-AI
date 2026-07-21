@@ -34,6 +34,7 @@ def insert_page_markers(
     content_list: object,
 ) -> str:
     """在所有正文页面都能可靠定位时插入页码标记。"""
+    # 已包含标记或缺少完整 content_list 时不猜测页码，避免产生错误定位。
     if _PAGE_MARKER_PREFIX in markdown or not isinstance(content_list, list):
         return markdown
 
@@ -77,6 +78,7 @@ def insert_page_markers(
     previous_position = -1
     for page_idx, anchors in sorted(page_anchors.items()):
         position = _find_block_start(markdown, anchors)
+        # 锚点必须能按页面顺序唯一定位；重复正文会让页码失去可信度。
         if position is None or position <= previous_position:
             return markdown
 
@@ -103,7 +105,10 @@ def _find_block_start(
     positions: list[int] = []
     for anchor in anchors:
         position = markdown.find(anchor)
-        if position >= 0 > markdown.find(anchor, position + len(anchor)):
+        if position < 0:
+            continue
+
+        if markdown.find(anchor, position + len(anchor)) < 0:
             positions.append(position)
 
     if not positions:
