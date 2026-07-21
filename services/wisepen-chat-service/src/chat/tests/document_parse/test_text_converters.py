@@ -6,7 +6,6 @@ import pytest
 from chat.application.utils.document_parse.errors import (
     DocumentDecodeError,
 )
-from chat.application.utils.document_parse.models import DocumentParseRequest
 from chat.application.utils.document_parse.parser import DocumentParser
 
 
@@ -44,9 +43,7 @@ async def test_text_documents_preserve_content(
 
     result = await DocumentParser(
         pdf_converter=_UnusedConverter(),
-    ).parse(
-        DocumentParseRequest(file_path=file_path),
-    )
+    ).parse(file_path)
 
     assert result == expected
 
@@ -61,6 +58,4 @@ async def test_text_documents_reject_binary_content(
     with pytest.raises(DocumentDecodeError):
         await DocumentParser(
             pdf_converter=_UnusedConverter(),
-        ).parse(
-            DocumentParseRequest(file_path=file_path),
-        )
+        ).parse(file_path)

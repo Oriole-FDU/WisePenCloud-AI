@@ -7,13 +7,11 @@ from .errors import (
     RemoteParserTimeoutError,
     UnsupportedDocumentFormatError,
 )
-from .models import DocumentParseRequest
 from .parser import DocumentParser
 
 __all__ = [
     "DocumentDecodeError",
     "DocumentParseError",
-    "DocumentParseRequest",
     "DocumentParser",
     "DocumentParserError",
     "DocumentTooLargeError",

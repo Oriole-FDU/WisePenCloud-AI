@@ -5,9 +5,6 @@ import pytest
 from chat.application.utils.document_parse.errors import (
     UnsupportedDocumentFormatError,
 )
-from chat.application.utils.document_parse.models import (
-    DocumentParseRequest,
-)
 from chat.application.utils.document_parse import parser as parser_module
 from chat.application.utils.document_parse.parser import DocumentParser
 from chat.application.utils.file_type_detect import FileType
@@ -83,7 +80,7 @@ async def test_router_uses_specific_format_before_generic_rules(
         generic_converter=_Converter("generic"),
     )
 
-    result = await parser.parse(DocumentParseRequest(file_path=file_path))
+    result = await parser.parse(file_path)
 
     assert result == expected
 
@@ -124,7 +121,7 @@ async def test_parser_rejects_unsupported_format(
     )
 
     with pytest.raises(UnsupportedDocumentFormatError):
-        await parser.parse(DocumentParseRequest(file_path=file_path))
+        await parser.parse(file_path)
 
 
 @pytest.mark.asyncio
@@ -149,8 +146,4 @@ async def test_detected_binary_type_cannot_bypass_binary_block(
     )
 
     with pytest.raises(UnsupportedDocumentFormatError):
-        await parser.parse(
-            DocumentParseRequest(
-                file_path=file_path,
-            )
-        )
+        await parser.parse(file_path)

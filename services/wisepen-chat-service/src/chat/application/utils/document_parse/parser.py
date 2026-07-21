@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from chat.application.utils.file_type_detect import FileType, detect_file_type
 
@@ -10,7 +11,6 @@ from .converters.office_converter import OfficeConverter
 from .converters.spreadsheet_converter import SpreadsheetConverter
 from .converters.utils import decode_text
 from .errors import UnsupportedDocumentFormatError
-from .models import DocumentParseRequest
 
 _SPREADSHEET_TYPES = frozenset({"csv", "tsv", "xls", "xlsx"})
 _SPREADSHEET_MIME_TYPES = frozenset(
@@ -106,13 +106,13 @@ class DocumentParser:
         )
         self._generic_converter = generic_converter or GenericConverter()
 
-    async def parse(self, request: DocumentParseRequest) -> str:
-        if not request.file_path.is_file():
-            raise FileNotFoundError(request.file_path)
+    async def parse(self, file_path: Path) -> str:
+        if not file_path.is_file():
+            raise FileNotFoundError(file_path)
 
-        file_name = request.display_name
+        file_name = file_path.name
         detected = detect_file_type(
-            request.file_path,
+            file_path,
             fallback_name=file_name,
         )
         # 路由只信任本地检测结果，不接受上游声明的 MIME 类型。
@@ -121,7 +121,7 @@ class DocumentParser:
         converter = self._select_converter(detected, mime_type=mime_type)
         if converter is not None:
             return await converter.convert(
-                request.file_path,
+                file_path,
                 file_name=file_name,
                 mime_type=mime_type or None,
             )
@@ -133,7 +133,7 @@ class DocumentParser:
             or mime_type in _GENERIC_MIME_TYPES
         ):
             return await self._generic_converter.convert(
-                request.file_path,
+                file_path,
                 file_name=file_name,
                 mime_type=mime_type or None,
             )
@@ -143,7 +143,7 @@ class DocumentParser:
             or detected.label in _PLAINTEXT_EXTENSIONS
             or mime_type in _PLAINTEXT_MIME_TYPES
         ):
-            raw = await asyncio.to_thread(request.file_path.read_bytes)
+            raw = await asyncio.to_thread(file_path.read_bytes)
             return decode_text(raw, file_name=file_name)
 
         raise UnsupportedDocumentFormatError(
