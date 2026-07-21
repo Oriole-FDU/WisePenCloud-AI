@@ -28,4 +28,12 @@ dependencies = [
     "jieba",
     "zeroentropy",
     "wisepen-common",
+    "httpx",
+    "pypdfium2>=5.12.1",
+    "dnspython",
+    "scrapling[fetchers]",
+    "trafilatura",
+    "charset-normalizer",
+    "lxml",
+    "hishel[async]",
 ]

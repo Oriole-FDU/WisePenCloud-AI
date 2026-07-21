@@ -6,6 +6,7 @@ from .mongo.tool_config_repository import MongoToolConfigRepository
 from .mongo.mcp_server_config_repository import MongoMcpServerConfigRepository
 from .redis.hot_context import RedisHotContext
 from .redis.mcp_tool_discovery_cache import RedisMcpToolDiscoveryCache
+from .redis.web_content_cache_repository import RedisWebContentCacheRepository
 
 __all__ = [
     "MongoMessageRepository",
@@ -16,4 +17,5 @@ __all__ = [
     "MongoMcpServerConfigRepository",
     "RedisHotContext",
     "RedisMcpToolDiscoveryCache",
+    "RedisWebContentCacheRepository",
 ]
