@@ -3,16 +3,22 @@ from pathlib import Path
 
 import pytest
 
-from chat.application.utils.document_parse.converters.json_converter import (
-    JsonConverter,
-)
-from chat.application.utils.document_parse.converters.plaintext_converter import (
-    PlaintextConverter,
-)
 from chat.application.utils.document_parse.errors import (
     DocumentDecodeError,
-    DocumentParserError,
 )
+from chat.application.utils.document_parse.models import DocumentParseRequest
+from chat.application.utils.document_parse.parser import DocumentParser
+
+
+class _UnusedConverter:
+    async def convert(
+        self,
+        file_path: Path,
+        *,
+        file_name: str,
+        mime_type: str | None = None,
+    ) -> str:
+        raise AssertionError("text documents must not use a converter")
 
 
 @pytest.mark.parametrize(
@@ -21,10 +27,13 @@ from chat.application.utils.document_parse.errors import (
         ("sample.txt", b"plain text", "plain text"),
         ("sample.txt", codecs.BOM_UTF8 + "中文".encode(), "中文"),
         ("sample.md", b"# Title\n", "# Title\n"),
+        ("sample.json", '{"key":"值"}'.encode(), '{"key":"值"}'),
+        ("sample.jsonl", b'{"a":1}\n\n[2,3]\n', '{"a":1}\n\n[2,3]\n'),
+        ("truncated.json", b'{"items":[', '{"items":['),
     ),
 )
 @pytest.mark.asyncio
-async def test_plaintext_converter_preserves_content(
+async def test_text_documents_preserve_content(
     tmp_path: Path,
     file_name: str,
     raw: bytes,
@@ -33,55 +42,25 @@ async def test_plaintext_converter_preserves_content(
     file_path = tmp_path / file_name
     file_path.write_bytes(raw)
 
-    result = await PlaintextConverter().convert(
-        file_path,
-        file_name=file_name,
+    result = await DocumentParser(
+        pdf_converter=_UnusedConverter(),
+    ).parse(
+        DocumentParseRequest(file_path=file_path),
     )
 
     assert result == expected
 
 
 @pytest.mark.asyncio
-async def test_plaintext_converter_rejects_binary_content(
+async def test_text_documents_reject_binary_content(
     tmp_path: Path,
 ) -> None:
     file_path = tmp_path / "broken.txt"
     file_path.write_bytes(b"text\x00binary\x01")
 
     with pytest.raises(DocumentDecodeError):
-        await PlaintextConverter().convert(
-            file_path,
-            file_name=file_path.name,
-        )
-
-
-@pytest.mark.asyncio
-async def test_json_and_jsonl_are_normalized(tmp_path: Path) -> None:
-    json_path = tmp_path / "sample.json"
-    json_path.write_text('{"key":"值"}', encoding="utf-8")
-    jsonl_path = tmp_path / "sample.jsonl"
-    jsonl_path.write_text('{"a":1}\n\n[2,3]\n', encoding="utf-8")
-
-    json_result = await JsonConverter().convert(
-        json_path,
-        file_name=json_path.name,
-    )
-    jsonl_result = await JsonConverter().convert(
-        jsonl_path,
-        file_name=jsonl_path.name,
-    )
-
-    assert json_result == '```json\n{\n  "key": "值"\n}\n```'
-    assert jsonl_result == '{"a": 1}\n[2, 3]'
-
-
-@pytest.mark.asyncio
-async def test_invalid_json_reports_source_location(tmp_path: Path) -> None:
-    file_path = tmp_path / "sample.json"
-    file_path.write_text('{"key":}', encoding="utf-8")
-
-    with pytest.raises(DocumentParserError, match=r"line 1, column 8"):
-        await JsonConverter().convert(
-            file_path,
-            file_name=file_path.name,
+        await DocumentParser(
+            pdf_converter=_UnusedConverter(),
+        ).parse(
+            DocumentParseRequest(file_path=file_path),
         )
