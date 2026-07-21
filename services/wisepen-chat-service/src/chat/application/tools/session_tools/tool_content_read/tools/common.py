@@ -10,42 +10,43 @@ CONTENT_IDS_SCHEMA: dict[str, Any] = {
     "minItems": 1,
     "maxItems": 64,
     "description": (
-        "Required. One or more cnt_* ids from previous content_receipts. "
-        "Multiple ids are split into bounded internal read batches."
+        "One or more cached cnt_* content IDs returned by earlier tool calls. "
+        "Pass every cached document that may contain the answer; these are content IDs, not URLs."
     ),
 }
 
 SELECTOR_SCHEMA: dict[str, Any] = {
     "type": "object",
     "description": (
-        "Optional chunk prefilter applied before reading. "
-        "Multiple selector groups are intersected."
+        "Optional structural filter for limiting retrieval to known parts of the content. "
+        "Values within one field are alternatives; different non-empty fields must all match. "
+        "Omit this unless the relevant section, page, anchor, block kind, or chunk is already known."
     ),
     "properties": {
         "block_kinds": {
             "type": "array",
             "items": {"type": "string", "enum": [block_kind.value for block_kind in BlockKind]},
-            "description": "Restrict search to chunks carrying these structural block kinds.",
+            "description": "Accept chunks containing any of these structural block kinds.",
         },
         "sections": {
             "type": "array",
             "items": {"type": "string", "minLength": 1},
-            "description": "Restrict search to matching section names or path fragments.",
+            "description": "Accept chunks from sections whose name or section path contains any value.",
         },
         "page_labels": {
             "type": "array",
             "items": {"type": "string", "minLength": 1},
-            "description": "Restrict search to exact page labels.",
+            "description": "Accept chunks from pages whose page label exactly equals any value.",
         },
         "anchor_labels": {
             "type": "array",
             "items": {"type": "string", "minLength": 1},
-            "description": "Restrict search to matching anchor labels.",
+            "description": "Accept chunks whose anchor label contains any value.",
         },
         "chunk_indices": {
             "type": "array",
             "items": {"type": "integer"},
-            "description": "Restrict search to explicit chunk indices.",
+            "description": "Accept only these exact zero-based chunk indices.",
         },
     },
     "additionalProperties": False,

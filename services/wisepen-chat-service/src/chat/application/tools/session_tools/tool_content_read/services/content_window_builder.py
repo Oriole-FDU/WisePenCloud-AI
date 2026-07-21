@@ -66,8 +66,6 @@ class ToolContentWindowBuilder:
             start_offset=min(offsets) if offsets else None,
             end_offset=max(offsets) if offsets else None,
             center_chunk=center_chunk,
-            chunk_start=start,
-            chunk_end=end,
             page_label=page_label,
             section_path=section_path,
             anchor_labels=anchor_labels,

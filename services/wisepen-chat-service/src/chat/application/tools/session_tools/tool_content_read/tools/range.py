@@ -11,7 +11,7 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 
-from ..services.models import ToolContentReadResult
+from ..services.models import ToolContentWindow
 from ..services.reader import ToolContentReader
 
 _TIMEOUT_SECONDS = 300.0
@@ -22,18 +22,20 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         "content_id": {
             "type": "string",
             "minLength": 1,
-            "description": "Required. One cnt_* id from a previous content receipt.",
+            "description": "A cached cnt_* content ID returned by an earlier tool call.",
         },
         "start": {
             "type": "integer",
             "description": (
-                "Optional inclusive character offset. Negative values count from the end."
+                "Inclusive character offset where reading begins. Negative values count from "
+                "the end; use the previous end_offset to continue reading."
             ),
         },
         "end": {
             "type": "integer",
             "description": (
-                "Optional exclusive character offset. Negative values count from the end."
+                "Exclusive character offset where reading stops. Negative values count from "
+                "the end. Omit it to read forward from start up to the output limit."
             ),
         },
     },
@@ -57,22 +59,15 @@ class ToolContentReadTool:
             llm_spec=ToolLLMSpec(
                 name="tool_content_read",
                 description=(
-                    "Read any character range from one cached content_id.\n\n"
-                    "WHEN TO TRIGGER:\n"
-                    "  - MUST trigger when you need a known range, the beginning, or the end of cached content.\n"
-                    "  - SHOULD trigger when nearby context matters more than cross-document search.\n"
-                    "DO NOT TRIGGER when:\n"
-                    "  - You need natural-language retrieval across documents; use tool_content_ranked_expand_read.\n"
-                    "  - You need exact pattern matching across documents; use tool_content_regex_read.\n\n"
-                    "INPUT RULES:\n"
-                    "  - Ranges use Python slice semantics: start is inclusive and end is exclusive.\n"
-                    "  - Negative offsets count from the end; start=-1000 reads the final 1000 characters.\n"
-                    "  - start=0,end=2000 reads the first 2000 characters.\n"
-                    "  - Omitting both offsets reads the first 4000 characters.\n\n"
-                    "OUTPUT RULES:\n"
-                    "  - Returns the requested text with normalized absolute offsets and structural locators.\n"
-                    "  - Oversized ranges are capped at the configured output window.\n"
-                    "  - This tool reads existing cnt_* content and never creates another content receipt."
+                    "Read an exact character range from one cached cnt_* content. Use this when "
+                    "you know the desired offsets, need the beginning or end, or want to continue "
+                    "from a previous end_offset. Use tool_content_regex_read when you know an exact "
+                    "pattern but not its location, and tool_content_ranked_expand_read when you know "
+                    "the question but not the wording or location. Ranges follow Python slice "
+                    "semantics: start is inclusive, end is exclusive, and negative offsets count "
+                    "from the end. Omitting both offsets returns the first 4000 characters. The "
+                    "result includes normalized absolute offsets and available structural locators; "
+                    "large ranges are capped by the output limit."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -94,20 +89,25 @@ class ToolContentReadTool:
             context: dict[str, Any],
             config: dict[str, Any] | None = None,
             **kwargs: Any,
-    ) -> ToolContentReadResult:
+    ) -> ToolContentWindow:
         start = int(kwargs["start"]) if "start" in kwargs else None
         end = int(kwargs["end"]) if "end" in kwargs else None
         if start is None and end is None:
             end = _DEFAULT_READ_CHARS
 
         try:
-            return await self._reader.read_range(
+            window = await self._reader.read_range(
                 content_id=str(kwargs["content_id"]),
                 session_id=str(context["session_id"]),
                 start=start,
                 end=end,
             )
+            if window is None:
+                raise ToolExecutionError(reason="content_not_found")
+            return window
         except Exception as exc:
+            if isinstance(exc, ToolExecutionError):
+                raise
             raise ToolExecutionError(
                 reason="tool_content_read_failed",
                 detail_reason=str(exc),

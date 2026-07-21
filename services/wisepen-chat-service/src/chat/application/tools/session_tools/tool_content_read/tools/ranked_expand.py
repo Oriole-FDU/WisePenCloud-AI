@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Any
 
 from chat.application.tools.core import (
@@ -14,9 +13,8 @@ from chat.application.tools.core import (
 from chat.application.tools.utils.batching import batched
 
 from ..services.models import (
-    ToolContentReadFailure,
+    ToolContentRankedExpandItem,
     ToolContentRankedExpandReadRequest,
-    ToolContentRankedExpandReadResult,
     ToolContentSelector,
 )
 from ..services.reader import ToolContentReader
@@ -36,17 +34,26 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "type": "string",
             "minLength": 1,
             "description": (
-                "Required. The complete question you want the candidate documents to answer, "
-                "for example: 'What is 2+2?'. Do not use keywords or describe the retrieval task."
+                "The complete question the cached contents should answer, for example: "
+                "'What is 2+2?'. Ask the question directly instead of passing keywords or "
+                "describing the retrieval task."
             ),
         },
         "top_k": {
             "type": "integer",
             "default": 10,
-            "description": "Maximum number of globally ranked windows returned.",
+            "description": "Maximum number of answer-relevant windows returned across all content_ids.",
         },
-        "merge_before": {"type": "integer", "default": 0},
-        "merge_after": {"type": "integer", "default": 0},
+        "merge_before": {
+            "type": "integer",
+            "default": 0,
+            "description": "Number of adjacent chunks before each relevant chunk to include as context.",
+        },
+        "merge_after": {
+            "type": "integer",
+            "default": 0,
+            "description": "Number of adjacent chunks after each relevant chunk to include as context.",
+        },
     },
     "required": ["content_ids", "query"],
     "additionalProperties": False,
@@ -68,23 +75,14 @@ class ToolContentRankedExpandReadTool:
             llm_spec=ToolLLMSpec(
                 name="tool_content_ranked_expand_read",
                 description=(
-                    "Rank and expand focused windows from cached tool output across one or more content_ids.\n\n"
-                    "WHEN TO TRIGGER:\n"
-                    "  - MUST trigger when previous tool calls returned content_receipts and natural-language retrieval is needed.\n"
-                    "  - SHOULD trigger when answer-relevant evidence must be found across cached documents.\n"
-                    "DO NOT TRIGGER when:\n"
-                    "  - You need exact pattern matching; use tool_content_regex_read.\n"
-                    "  - You need a known character range; use tool_content_read.\n\n"
-                    "INPUT RULES:\n"
-                    "  - Accepts up to 64 content_ids and reads them in bounded internal batches of 16.\n"
-                    "  - query is the question the candidate chunks should answer, for example: 'What is 2+2?'.\n"
-                    "  - Do not pass keywords or describe the retrieval task.\n"
-                    "  - selector prefilters chunks before ranking; selector groups are intersected.\n"
-                    "  - merge_before and merge_after expand windows around ranked chunks.\n\n"
-                    "OUTPUT RULES:\n"
-                    "  - Returns ranked windows with rank and score, plus per-content failures.\n"
-                    "  - Successful batches are retained when another internal batch fails.\n"
-                    "  - This tool reads existing cnt_* content and never creates another content receipt."
+                    "Retrieve answer-relevant passages from one or more cached cnt_* contents. Use "
+                    "this when you can state the question but do not know the exact wording or location "
+                    "of the evidence. Use tool_content_regex_read when the exact text pattern is known, "
+                    "and tool_content_read when character offsets are known. Write query as the complete "
+                    "question the candidate passages should answer, not as keywords or retrieval "
+                    "instructions. Optional selectors narrow the candidate chunks before ranking, and "
+                    "merge_before or merge_after adds neighboring chunks for context. Results are "
+                    "returned in descending relevance order."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -106,7 +104,7 @@ class ToolContentRankedExpandReadTool:
             context: dict[str, Any],
             config: dict[str, Any] | None = None,
             **kwargs: Any,
-    ) -> ToolContentRankedExpandReadResult:
+    ) -> tuple[ToolContentRankedExpandItem, ...]:
         query = str(kwargs.get("query") or "").strip()
         if not query:
             raise ToolExecutionError(reason="missing_query", detail_reason="query is required.")
@@ -114,7 +112,6 @@ class ToolContentRankedExpandReadTool:
         content_ids = tuple(str(value) for value in kwargs["content_ids"])
         top_k = max(int(kwargs.get("top_k", 10)), 0)
         ranked = []
-        failed = []
         for batch in batched(content_ids, batch_size=_INTERNAL_BATCH_SIZE):
             request = ToolContentRankedExpandReadRequest(
                 content_ids=batch,
@@ -129,23 +126,12 @@ class ToolContentRankedExpandReadTool:
                     request=request,
                     session_id=str(context["session_id"]),
                 )
-            except Exception as exc:
-                failed.extend(
-                    ToolContentReadFailure(content_id=content_id, reason=type(exc).__name__)
-                    for content_id in batch
-                )
+            except Exception:
                 continue
-            ranked.extend(result.ranked)
-            failed.extend(result.failed)
+            ranked.extend(result)
 
-        globally_ranked = tuple(
-            replace(item, rank=rank)
-            for rank, item in enumerate(
-                sorted(ranked, key=lambda item: (-item.score, item.rank)),
-                start=1,
-            )
-        )
-        return ToolContentRankedExpandReadResult(
-            ranked=globally_ranked[:top_k],
-            failed=tuple(failed),
+        ranked.sort(key=lambda candidate: -candidate.score)
+        return tuple(
+            candidate.item
+            for candidate in ranked[:top_k]
         )
