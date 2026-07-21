@@ -12,14 +12,14 @@ from chat.application.utils.chunkers import (
     PlainTextChunker,
 )
 
-from .core import (
+from .models import (
     StoredToolContent,
     ToolContentChunk,
     ToolContentIndex,
     ToolContentIndexEntry,
     ToolContentReceipt,
-    ToolContentRepository,
 )
+from .repository import ToolContentRepository
 
 _DEFAULT_MAX_CHARS = 20_000_000
 
