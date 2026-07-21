@@ -1,10 +1,12 @@
 # src/chat/container.py
 
+from collections.abc import AsyncIterator
 from typing import List
 
 import httpx
 import redis.asyncio as redis
 from dependency_injector import containers, providers
+from scrapling.fetchers import AsyncStealthySession, FetcherSession
 from v2.nacos import NacosNamingService
 
 from chat.core.config.app_settings import settings
@@ -31,6 +33,7 @@ from chat.core.persistence import (
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
     RedisToolContentRepository,
+    RedisWebContentCacheRepository,
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
@@ -72,6 +75,13 @@ from chat.application.tools.search_tools.web_search.services.providers.base impo
     SearchProviderConfig,
 )
 from chat.application.tools.search_tools.web_search.services.sources import SearchSourceFactory
+from chat.application.tools.web_tools import WebCrawlTool, WebFetchTool
+from chat.application.tools.web_tools.services.fetch import (
+    FetchCoordinator,
+    StaticPageFetcher,
+    StealthyPageFetcher,
+    WebCrawler,
+)
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
@@ -109,6 +119,35 @@ def _get_iflytek_speech_config():
 
 def _build_redis_client() -> redis.Redis:
     return redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
+async def _provide_web_fetch_static_session() -> AsyncIterator[FetcherSession]:
+    async with FetcherSession(
+        impersonate="chrome",
+        stealthy_headers=True,
+        follow_redirects=False,
+        timeout=30.0,
+        retries=1,
+    ) as session:
+        yield session
+
+
+async def _provide_web_fetch_browser_session() -> AsyncIterator[AsyncStealthySession]:
+    session = AsyncStealthySession(
+        headless=True,
+        max_pages=3,
+        timeout=30_000,
+        disable_resources=True,
+        block_ads=True,
+        network_idle=False,
+        load_dom=True,
+        retries=1,
+    )
+    await session.start()
+    try:
+        yield session
+    finally:
+        await session.close()
 
 
 def _build_platform_default_searcher(
@@ -328,6 +367,44 @@ class Container(containers.DeclarativeContainer):
         search_pipeline=web_search_pipeline,
         source_factory=web_search_source_factory,
     )
+    web_content_cache_repository = providers.Singleton(
+        RedisWebContentCacheRepository,
+        redis_client=redis_client,
+    )
+    web_fetch_static_session = providers.Resource(
+        _provide_web_fetch_static_session,
+    )
+    web_fetch_browser_session = providers.Resource(
+        _provide_web_fetch_browser_session,
+    )
+    web_static_page_fetcher = providers.Singleton(
+        StaticPageFetcher,
+        session=web_fetch_static_session,
+    )
+    web_browser_page_fetcher = providers.Singleton(
+        StealthyPageFetcher,
+        session=web_fetch_browser_session,
+    )
+    web_fetch_coordinator = providers.Singleton(
+        FetchCoordinator,
+        static_fetcher=web_static_page_fetcher,
+        stealthy_fetcher=web_browser_page_fetcher,
+        content_cache_repository=web_content_cache_repository,
+    )
+    web_crawler = providers.Singleton(
+        WebCrawler,
+        static_fetcher=web_static_page_fetcher,
+        stealthy_fetcher=web_browser_page_fetcher,
+        content_cache_repository=web_content_cache_repository,
+    )
+    web_fetch_tool = providers.Singleton(
+        WebFetchTool,
+        service=web_fetch_coordinator,
+    )
+    web_crawl_tool = providers.Singleton(
+        WebCrawlTool,
+        crawler=web_crawler,
+    )
     tool_providers = providers.List(
         search_history_tool,
         load_skill_tool,
@@ -340,6 +417,8 @@ class Container(containers.DeclarativeContainer):
         tavily_search_tool,
         anysearch_search_tool,
         baidu_qianfan_search_tool,
+        web_fetch_tool,
+        web_crawl_tool,
     )
 
     tool_registry = providers.Singleton(
