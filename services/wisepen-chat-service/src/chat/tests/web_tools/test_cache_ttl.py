@@ -4,8 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from chat.application.tools.web_tools.services.fetch.internal.cache import WebFetchCache
-from chat.application.tools.web_tools.services.fetch.core.models import (
+from chat.application.tools.web_tools.web_fetch.cache import WebFetchCache
+from chat.application.tools.web_tools.web_fetch.core.models import (
     RawFetchOutput,
     WebContentCacheMode,
     WebContentCacheValue,

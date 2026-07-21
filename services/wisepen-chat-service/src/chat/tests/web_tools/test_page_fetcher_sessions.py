@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from chat.application.tools.web_tools.services.fetch.fetchers.static_page_fetcher import (
+from chat.application.tools.web_tools.web_fetch.fetchers.static_page_fetcher import (
     StaticPageFetcher,
 )
-from chat.application.tools.web_tools.services.fetch.fetchers.stealthy_page_fetcher import (
+from chat.application.tools.web_tools.web_fetch.fetchers.stealthy_page_fetcher import (
     StealthyPageFetcher,
 )
 
@@ -20,7 +20,7 @@ async def test_static_page_fetcher_uses_injected_session(
         return url
 
     monkeypatch.setattr(
-        "chat.application.tools.web_tools.services.fetch.fetchers.static_page_fetcher.validate_public_http_url_async",
+        "chat.application.tools.web_tools.web_fetch.fetchers.static_page_fetcher.validate_public_http_url_async",
         validate,
     )
     session = _FakeStaticSession()
@@ -45,7 +45,7 @@ async def test_stealthy_page_fetcher_uses_injected_session(
         return url
 
     monkeypatch.setattr(
-        "chat.application.tools.web_tools.services.fetch.fetchers.stealthy_page_fetcher.validate_public_http_url_async",
+        "chat.application.tools.web_tools.web_fetch.fetchers.stealthy_page_fetcher.validate_public_http_url_async",
         validate,
     )
     session = _FakeStealthySession()

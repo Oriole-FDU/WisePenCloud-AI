@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from lxml import html as lxml_html
 
-from chat.application.tools.web_tools.services.fetch.internal.html_clean import (
+from chat.application.tools.web_tools.web_fetch.content.html_clean import (
     PRUNE_XPATH,
     clean_html,
 )
@@ -52,7 +52,7 @@ def test_trafilatura_cleaner_passes_prune_xpath_by_default(monkeypatch) -> None:
         return "Title\n\n\nBody"
 
     monkeypatch.setattr(
-        "chat.application.tools.web_tools.services.fetch.internal.html_clean.trafilatura.extract",
+        "chat.application.tools.web_tools.web_fetch.content.html_clean.trafilatura.extract",
         fake_extract,
     )
 

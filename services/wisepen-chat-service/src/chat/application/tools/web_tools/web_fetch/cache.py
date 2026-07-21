@@ -8,8 +8,8 @@ from hishel._core.models import Response
 
 from common.logger import info, warn
 
-from ..core.cache import WebContentCacheRepository
-from ..core.models import (
+from .core.cache import WebContentCacheRepository
+from .core.models import (
     RawFetchOutput,
     WebContentCacheMode,
     WebContentCacheValue,

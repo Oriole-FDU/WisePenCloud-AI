@@ -7,7 +7,7 @@ from hashlib import sha256
 
 from redis.asyncio import Redis
 
-from chat.application.tools.web_tools.services.fetch.core.models import (
+from chat.application.tools.web_tools.web_fetch.core.models import (
     WebContentCacheMode,
     WebContentCacheValue,
 )

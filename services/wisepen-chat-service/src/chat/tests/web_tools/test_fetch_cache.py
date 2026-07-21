@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from chat.application.tools.web_tools.services.fetch.coordinator import (
+from chat.application.tools.web_tools.web_fetch.coordinator import (
     FetchCoordinator,
 )
-from chat.application.tools.web_tools.services.fetch.core.models import (
+from chat.application.tools.web_tools.web_fetch.core.models import (
     RawFetchOutput,
     WebContentCacheMode,
     WebContentCacheValue,
@@ -66,7 +66,7 @@ async def test_html_result_hits_url_cache_on_second_fetch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "chat.application.tools.web_tools.services.fetch.coordinator.clean_html",
+        "chat.application.tools.web_tools.web_fetch.coordinator.clean_html",
         lambda raw_html, *, url=None: raw_html,
     )
     static_fetcher = _StaticFetcher()
@@ -99,7 +99,7 @@ async def test_pdf_cache_preserves_plain_text_format(
         return f"plain text from {url}"
 
     monkeypatch.setattr(
-        "chat.application.tools.web_tools.services.fetch.coordinator.extract_pdf_text",
+        "chat.application.tools.web_tools.web_fetch.coordinator.extract_pdf_text",
         extract_pdf_text,
     )
     static_fetcher = _StaticFetcher(pdf=True)

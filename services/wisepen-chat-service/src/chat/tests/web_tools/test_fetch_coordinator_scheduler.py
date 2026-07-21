@@ -4,11 +4,12 @@ import asyncio
 
 import pytest
 
-from chat.application.tools.web_tools.services.fetch.core.errors import (
+from chat.application.tools.utils.url import UrlSecurityError
+from chat.application.tools.web_tools.web_fetch.core.errors import (
     UrlFetchNetworkError,
 )
-from chat.application.tools.web_tools.services.fetch.coordinator import FetchCoordinator
-from chat.application.tools.web_tools.services.fetch.core.models import RawFetchOutput
+from chat.application.tools.web_tools.web_fetch.coordinator import FetchCoordinator
+from chat.application.tools.web_tools.web_fetch.core.models import RawFetchOutput
 
 
 @pytest.mark.asyncio
@@ -16,7 +17,7 @@ async def test_fetch_releases_file_sniff_worker_when_scrapling_page_fetch_is_pen
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "chat.application.tools.web_tools.services.fetch.coordinator.clean_html",
+        "chat.application.tools.web_tools.web_fetch.coordinator.clean_html",
         lambda raw_html, *, url=None: raw_html,
     )
     scrapling_started = asyncio.Event()
@@ -66,7 +67,7 @@ async def test_fetch_allows_each_failed_static_fetch_to_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "chat.application.tools.web_tools.services.fetch.coordinator.clean_html",
+        "chat.application.tools.web_tools.web_fetch.coordinator.clean_html",
         lambda raw_html, *, url=None: raw_html,
     )
     stealthy_fetcher = _CountingScraplingFetcher()
@@ -86,9 +87,42 @@ async def test_fetch_allows_each_failed_static_fetch_to_fallback(
     )
 
     assert len(result) == 2
-    assert stealthy_fetcher.calls == [
+    assert sorted(stealthy_fetcher.calls) == [
         "https://example.test/one",
         "https://example.test/two",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_skips_invalid_url_without_blocking_other_jobs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "chat.application.tools.web_tools.web_fetch.coordinator.clean_html",
+        lambda raw_html, *, url=None: raw_html,
+    )
+    static_fetcher = _RejectingInvalidUrlFetcher()
+    coordinator = FetchCoordinator(
+        static_fetcher=static_fetcher,
+        stealthy_fetcher=_UnusedFetcher(),
+        batch_concurrency=1,
+        min_text_length=1,
+    )
+
+    result = await coordinator.fetch(
+        [
+            "not a URL",
+            "https://example.test/valid",
+        ],
+        user_id="u1",
+    )
+
+    assert static_fetcher.calls == [
+        "not a URL",
+        "https://example.test/valid",
+    ]
+    assert [item.source_url for item in result] == [
+        "https://example.test/valid",
     ]
 
 
@@ -108,6 +142,22 @@ class _SchedulerStaticFetcher:
 class _AlwaysFailingStaticFetcher:
     async def fetch(self, url: str) -> RawFetchOutput:
         raise UrlFetchNetworkError(url=url, reason="network")
+
+
+class _RejectingInvalidUrlFetcher:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def fetch(self, url: str) -> RawFetchOutput:
+        self.calls.append(url)
+        if url == "not a URL":
+            raise UrlSecurityError("URL is malformed")
+        return _raw(url, raw_html="valid content")
+
+
+class _UnusedFetcher:
+    async def fetch(self, url: str) -> RawFetchOutput:
+        raise AssertionError(f"unexpected fallback for {url}")
 
 
 class _BlockingScraplingFetcher:

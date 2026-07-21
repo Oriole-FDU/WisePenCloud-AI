@@ -5,7 +5,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from ..core.models import WebFetchResult
+from .core.models import WebFetchResult
 
 
 FetchSlot = WebFetchResult | None

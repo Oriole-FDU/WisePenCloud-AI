@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from chat.application.tools.core import (
@@ -11,9 +10,7 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 from chat.application.tools.core.output.tool_return import CacheableText, ToolReturn
-from chat.application.tools.utils.url import validate_public_http_url_async
-
-from .services.fetch import FetchCoordinator
+from .web_fetch import FetchCoordinator
 
 MAX_URLS = 64
 
@@ -38,10 +35,14 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
 
 
 class WebFetchTool:
-    __slots__ = ("_definition", "_service")
+    __slots__ = ("_definition", "_fetch_coordinator")
 
-    def __init__(self, *, service: FetchCoordinator) -> None:
-        self._service = service
+    def __init__(
+        self,
+        *,
+        fetch_coordinator: FetchCoordinator,
+    ) -> None:
+        self._fetch_coordinator = fetch_coordinator
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="web_fetch",
@@ -77,22 +78,8 @@ class WebFetchTool:
         **kwargs: Any,
     ) -> ToolReturn:
         del config
-        requested_urls = [str(url).strip() for url in kwargs["urls"]]
-        validated = await asyncio.gather(
-            *(validate_public_http_url_async(url) for url in requested_urls),
-            return_exceptions=True,
-        )
-        urls: list[str] = []
-        for result in validated:
-            if isinstance(result, Exception):
-                continue
-            urls.append(result)
-
-        if not urls:
-            return ToolReturn(visible_result={"items": ()})
-
-        results = await self._service.fetch(
-            urls,
+        results = await self._fetch_coordinator.fetch(
+            [str(url).strip() for url in kwargs["urls"]],
             user_id=str(context["user_id"]),
         )
         visible_result = {

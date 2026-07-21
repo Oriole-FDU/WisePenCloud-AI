@@ -8,13 +8,13 @@ from chat.application.tools.core.llm.invocation import ToolInvocation
 from chat.application.tools.core.output.cache import ToolOutputCache
 from chat.application.tools.core.output.tool_return import CacheableText, ToolReturn
 from chat.application.tools.web_tools import WebCrawlTool, WebFetchTool
-from chat.application.tools.web_tools.services.fetch.internal import pdf_extract
-from chat.application.tools.web_tools.services.fetch.core.models import (
+from chat.application.tools.web_tools.web_fetch.content import pdf_extract
+from chat.application.tools.web_tools.web_fetch.core.models import (
     WebFetchResult,
 )
 
 
-class _FetchService:
+class _FetchCoordinator:
     async def fetch(
         self,
         urls: list[str],
@@ -53,16 +53,10 @@ class _Crawler:
 
 @pytest.mark.asyncio
 async def test_web_fetch_preserves_html_and_pdf_cache_formats(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def validate(url: str) -> str:
-        return url
-
-    monkeypatch.setattr(
-        "chat.application.tools.web_tools.web_fetch_tool.validate_public_http_url_async",
-        validate,
-    )
-    result = await WebFetchTool(service=_FetchService()).execute(
+    result = await WebFetchTool(
+        fetch_coordinator=_FetchCoordinator(),
+    ).execute(
         {"user_id": "u1"},
         urls=["https://example.com", "https://example.com/paper.pdf"],
     )
