@@ -12,7 +12,7 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.core.output.tool_return import CacheableText, ToolReturn
 
-from .services.fetch import WebCrawler
+from .web_fetch import WebCrawler
 
 DEFAULT_MAX_PAGES = 20
 DEFAULT_MAX_DEPTH = 2

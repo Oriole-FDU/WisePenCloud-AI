@@ -13,13 +13,13 @@ from chat.application.tools.utils.url import (
 )
 from common.logger import warn
 
+from .cache import WebFetchCache
+from .content.html_clean import clean_html
+from .content.quality import should_fallback
 from .core.cache import WebContentCacheRepository
 from .core.errors import UrlFetchError, UrlFetchUnsupportedUrlError
 from .core.models import WebFetchResult
 from .fetchers import WebFetcher
-from .internal.cache import WebFetchCache
-from .internal.html_clean import clean_html
-from .internal.quality import should_fallback
 
 
 @dataclass(frozen=True, slots=True)

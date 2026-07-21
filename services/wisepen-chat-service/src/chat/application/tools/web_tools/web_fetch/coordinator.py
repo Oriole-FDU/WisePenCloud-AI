@@ -3,11 +3,12 @@ from __future__ import annotations
 from chat.application.tools.utils.url import UrlSecurityError
 from common.logger import warn
 
+from .batch_scheduler import FetchBatchScheduler, FetchJob
+from .cache import WebFetchCache
+from .content.html_clean import clean_html
+from .content.pdf_extract import extract_pdf_text
+from .content.quality import should_fallback
 from .core.cache import WebContentCacheRepository
-from .internal.batch_scheduler import (
-    FetchBatchScheduler,
-    FetchJob,
-)
 from .core.errors import (
     UrlFetchError,
     UrlFetchHttpError,
@@ -18,10 +19,6 @@ from .core.models import (
     WebFetchResult,
 )
 from .fetchers import WebFetcher
-from .internal.cache import WebFetchCache
-from .internal.html_clean import clean_html
-from .internal.pdf_extract import extract_pdf_text
-from .internal.quality import should_fallback
 
 _NOT_RETRYABLE_HTTP_STATUS_REASONS = {"http 404", "http 410"}
 

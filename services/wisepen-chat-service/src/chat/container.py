@@ -76,7 +76,7 @@ from chat.application.tools.search_tools.web_search.services.providers.base impo
 )
 from chat.application.tools.search_tools.web_search.services.sources import SearchSourceFactory
 from chat.application.tools.web_tools import WebCrawlTool, WebFetchTool
-from chat.application.tools.web_tools.services.fetch import (
+from chat.application.tools.web_tools.web_fetch import (
     FetchCoordinator,
     StaticPageFetcher,
     StealthyPageFetcher,
@@ -399,7 +399,7 @@ class Container(containers.DeclarativeContainer):
     )
     web_fetch_tool = providers.Singleton(
         WebFetchTool,
-        service=web_fetch_coordinator,
+        fetch_coordinator=web_fetch_coordinator,
     )
     web_crawl_tool = providers.Singleton(
         WebCrawlTool,
