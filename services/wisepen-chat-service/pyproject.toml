@@ -39,6 +39,13 @@ dependencies = [
     "wisepen-common",
     "httpx",
     "ddgs>=9.14.4",
+    "pypdfium2>=5.12.1",
+    "dnspython",
+    "scrapling[fetchers]",
+    "trafilatura",
+    "charset-normalizer",
+    "lxml",
+    "hishel[async]",
 ]
 
 [dependency-groups]
