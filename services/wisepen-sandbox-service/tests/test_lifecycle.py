@@ -15,9 +15,11 @@ from sandbox.domain.entities import (
     SandboxState,
     WorkspaceSnapshot,
     Health,
+    utc_now,
 )
 from sandbox.domain.error_codes import SandboxErrorCode
 from sandbox.application.services import SandboxPool, SandboxScheduler, Watcher
+from sandbox.core.storage.local import LocalWorkspaceStore
 from sandbox.core.storage.memory import MemorySandboxRepository
 
 
@@ -37,6 +39,8 @@ class FakeProvider:
         self.created = 0
         self.destroyed: list[str] = []
         self.prepared = 0
+        self.prepared_snapshots: list[WorkspaceSnapshot] = []
+        self.exported_files: dict[str, str] = {"result.txt": "done"}
         self.fail_prepare = False
 
     async def create(self, spec: SandboxSpec) -> SandboxRef:
@@ -55,6 +59,7 @@ class FakeProvider:
 
     async def prepare_workspace(self, sandbox: SandboxRef, workspace: WorkspaceSnapshot) -> None:
         self.prepared += 1
+        self.prepared_snapshots.append(workspace)
         if self.fail_prepare:
             raise RuntimeError("prepare failed")
 
@@ -65,7 +70,7 @@ class FakeProvider:
         return ExecutionResult(request.request_id, "succeeded", {"ok": True})
 
     async def export_workspace(self, sandbox: SandboxRef, tenant_id: str, workspace_id: str) -> WorkspaceSnapshot:
-        return WorkspaceSnapshot(tenant_id, workspace_id, {"result.txt": "done"})
+        return WorkspaceSnapshot(tenant_id, workspace_id, dict(self.exported_files))
 
     async def destroy(self, sandbox: SandboxRef, reason: str) -> None:
         self.destroyed.append(sandbox.sandbox_id)
@@ -114,6 +119,74 @@ async def test_scheduler_releases_by_committing_then_destroying():
     assert result.status == "succeeded"
     assert workspace.commits[0][1] == lease.lease_id
     assert provider.destroyed == [lease.sandbox_id]
+
+
+@pytest.mark.asyncio
+async def test_expired_lease_exports_cache_before_destroying():
+    events: list[str] = []
+
+    class RecordingWorkspace(FakeWorkspace):
+        async def commit(self, snapshot, lease_id, fencing_token=0):
+            events.append("commit")
+            await super().commit(snapshot, lease_id, fencing_token)
+
+    class RecordingProvider(FakeProvider):
+        async def destroy(self, sandbox: SandboxRef, reason: str) -> None:
+            events.append("destroy")
+            await super().destroy(sandbox, reason)
+
+    provider = RecordingProvider()
+    repository, pool = await ready_pool(provider)
+    workspace = RecordingWorkspace()
+    scheduler = SandboxScheduler(pool, repository, provider, workspace)
+    lease = await scheduler.allocate("req-expired-cache", "tenant", "workspace")
+    record = await repository.find_lease(lease.lease_id)
+    record.lease_expires_at = utc_now()
+
+    assert await scheduler.recover_expired() == 1
+
+    assert events == ["commit", "destroy"]
+    assert workspace.commits[0][0].files == {"result.txt": "done"}
+    assert provider.destroyed == [lease.sandbox_id]
+
+
+@pytest.mark.asyncio
+async def test_expired_lease_destroy_continues_when_commit_fails():
+    class FailingWorkspace(FakeWorkspace):
+        async def commit(self, snapshot, lease_id, fencing_token=0):
+            raise RuntimeError("store unavailable")
+
+    provider = FakeProvider()
+    repository, pool = await ready_pool(provider)
+    scheduler = SandboxScheduler(pool, repository, provider, FailingWorkspace())
+    lease = await scheduler.allocate("req-expired-failing-cache", "tenant", "workspace")
+    record = await repository.find_lease(lease.lease_id)
+    record.lease_expires_at = utc_now()
+
+    assert await scheduler.recover_expired() == 1
+    assert provider.destroyed == [lease.sandbox_id]
+    assert (await scheduler.status(lease.sandbox_id)).state == SandboxState.DESTROYED
+
+
+@pytest.mark.asyncio
+async def test_next_allocate_prepares_cached_workspace(tmp_path):
+    provider = FakeProvider()
+    repository, pool = await ready_pool(provider)
+    store = LocalWorkspaceStore(str(tmp_path))
+    scheduler = SandboxScheduler(pool, repository, provider, store)
+    provider.exported_files = {"cached.txt": "value"}
+
+    first = await scheduler.allocate("req-cache-first", "tenant", "workspace")
+    await scheduler.release(first.lease_id, first.fencing_token)
+
+    second_record = SandboxRecord(
+        ref=await provider.create(SandboxSpec("test")),
+        state=SandboxState.WARMING,
+    )
+    await pool.add_ready(second_record)
+    await scheduler.allocate("req-cache-second", "tenant", "workspace")
+
+    assert provider.prepared_snapshots[-1].files == {"cached.txt": "value"}
 
 
 @pytest.mark.asyncio

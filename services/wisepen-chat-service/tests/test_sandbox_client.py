@@ -1,9 +1,35 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
+from pathlib import Path
+
 import pytest
 
 from common.core.exceptions import RpcError
-from chat.core.providers.sandbox_client import SandboxClient, SandboxClientError
+
+
+def _load_sandbox_client_module():
+    module_name = "sandbox_client_under_test"
+    module_path = (
+        Path(__file__).parents[1]
+        / "src"
+        / "chat"
+        / "core"
+        / "providers"
+        / "sandbox_client.py"
+    )
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_sandbox_client = _load_sandbox_client_module()
+SandboxClient = _sandbox_client.SandboxClient
+SandboxClientError = _sandbox_client.SandboxClientError
 
 
 class FakeRpc:
@@ -57,6 +83,22 @@ async def test_sandbox_client_maps_rpc_business_error_code():
 
 
 @pytest.mark.asyncio
+async def test_sandbox_client_maps_workspace_cache_limit_error_code():
+    rpc = FakeRpc(exc=RpcError(
+        service_name="wisepen-sandbox-service",
+        path="/internal/sandboxes/allocate",
+        code=46011,
+        msg="沙箱工作区缓存超出限制",
+    ))
+    client = SandboxClient(rpc=rpc, service_name="wisepen-sandbox-service")
+
+    with pytest.raises(SandboxClientError) as exc_info:
+        await client.allocate_request({"request_id": "req-cache-limit", "user_id": "u", "session_id": "s"})
+
+    assert exc_info.value.code == "WORKSPACE_CACHE_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
 async def test_sandbox_client_direct_fallback_unwraps_r_response(monkeypatch):
     calls = []
 
@@ -99,7 +141,7 @@ async def test_sandbox_client_direct_fallback_unwraps_r_response(monkeypatch):
                 "data": {"data": {"stdout": "ok", "exit_code": 0}},
             })
 
-    monkeypatch.setattr("chat.core.providers.sandbox_client.httpx.AsyncClient", Client)
+    monkeypatch.setattr(_sandbox_client.httpx, "AsyncClient", Client)
     client = SandboxClient(base_url="http://127.0.0.1:9001", from_source="secret")
 
     result = await client.shell_exec(

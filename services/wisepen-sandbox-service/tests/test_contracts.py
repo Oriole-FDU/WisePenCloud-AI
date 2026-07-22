@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 
 import pytest
@@ -106,6 +107,90 @@ async def test_workspace_store_rejects_traversal_and_symlink(tmp_path):
     with pytest.raises(ServiceException) as exc_info:
         await store.commit(WorkspaceSnapshot("tenant", "workspace", {"../escape": "x"}), "lease", 1)
     assert exc_info.value.code == SandboxErrorCode.WORKSPACE_PATH_INVALID.code
+
+
+@pytest.mark.asyncio
+async def test_workspace_commit_replaces_previous_snapshot(tmp_path):
+    store = LocalWorkspaceStore(str(tmp_path))
+    await store.commit(
+        WorkspaceSnapshot("tenant", "workspace", {"old.txt": "old", "keep.txt": "v1"}),
+        "lease-1",
+        1,
+    )
+    await store.commit(
+        WorkspaceSnapshot("tenant", "workspace", {"keep.txt": "v2", "new.txt": "new"}),
+        "lease-2",
+        2,
+    )
+
+    root = tmp_path / "tenant" / "workspace"
+    assert not (root / "old.txt").exists()
+    assert (root / "keep.txt").read_text(encoding="utf-8") == "v2"
+    assert (root / "new.txt").read_text(encoding="utf-8") == "new"
+
+
+@pytest.mark.asyncio
+async def test_workspace_snapshot_restores_committed_files_without_manifest(tmp_path):
+    store = LocalWorkspaceStore(str(tmp_path))
+    await store.commit(
+        WorkspaceSnapshot("tenant", "workspace", {"dir/main.py": "print(1)"}),
+        "lease-1",
+        7,
+    )
+
+    snapshot = await store.snapshot("tenant", "workspace")
+    manifest = json.loads(
+        (tmp_path / "tenant" / "workspace" / ".wisepen-workspace-manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert snapshot.files == {"dir/main.py": "print(1)"}
+    assert manifest["lease_id"] == "lease-1"
+    assert manifest["fencing_token"] == 7
+
+
+@pytest.mark.asyncio
+async def test_workspace_commit_is_atomic_on_invalid_snapshot(tmp_path):
+    store = LocalWorkspaceStore(str(tmp_path))
+    await store.commit(WorkspaceSnapshot("tenant", "workspace", {"keep.txt": "old"}), "lease-1", 1)
+
+    with pytest.raises(ServiceException) as exc_info:
+        await store.commit(
+            WorkspaceSnapshot("tenant", "workspace", {"../escape.txt": "bad"}),
+            "lease-2",
+            2,
+        )
+
+    assert exc_info.value.code == SandboxErrorCode.WORKSPACE_PATH_INVALID.code
+    snapshot = await store.snapshot("tenant", "workspace")
+    assert snapshot.files == {"keep.txt": "old"}
+
+
+@pytest.mark.asyncio
+async def test_workspace_cache_limits_are_enforced(tmp_path):
+    store = LocalWorkspaceStore(str(tmp_path), max_files=1)
+    with pytest.raises(ServiceException) as exc_info:
+        await store.commit(
+            WorkspaceSnapshot("tenant", "workspace", {"a.txt": "a", "b.txt": "b"}),
+            "lease-1",
+            1,
+        )
+    assert exc_info.value.code == SandboxErrorCode.WORKSPACE_CACHE_LIMIT_EXCEEDED.code
+
+    store = LocalWorkspaceStore(str(tmp_path), max_file_bytes=3)
+    with pytest.raises(ServiceException) as exc_info:
+        await store.commit(WorkspaceSnapshot("tenant", "workspace", {"a.txt": "abcd"}), "lease-1", 1)
+    assert exc_info.value.code == SandboxErrorCode.WORKSPACE_CACHE_LIMIT_EXCEEDED.code
+
+    store = LocalWorkspaceStore(str(tmp_path), max_files=10, max_total_bytes=5)
+    with pytest.raises(ServiceException) as exc_info:
+        await store.commit(
+            WorkspaceSnapshot("tenant", "workspace", {"a.txt": "abc", "b.txt": "def"}),
+            "lease-1",
+            1,
+        )
+    assert exc_info.value.code == SandboxErrorCode.WORKSPACE_CACHE_LIMIT_EXCEEDED.code
 
 
 @pytest.mark.asyncio
