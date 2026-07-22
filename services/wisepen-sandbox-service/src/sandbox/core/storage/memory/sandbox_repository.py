@@ -32,9 +32,10 @@ _ALLOWED_TRANSITIONS: dict[SandboxState, frozenset[SandboxState]] = {
 
 
 class MemorySandboxRepository:
-    """Atomic in-process repository; external stores can implement the same port."""
+    """进程内原子仓储；未来 Redis/Mongo 实现应保持同一状态机语义。"""
 
     def __init__(self, metrics: MetricsPort | None = None) -> None:
+        # _records 是状态主表；_leases/_requests 是租约和请求幂等索引。
         self._records: dict[str, SandboxRecord] = {}
         self._leases: dict[str, str] = {}
         self._requests: dict[str, str] = {}
@@ -64,7 +65,7 @@ class MemorySandboxRepository:
             if existing and existing != sandbox_id:
                 raise ServiceException(
                     SandboxErrorCode.REQUEST_CONFLICT,
-                    "request_id is already bound to another sandbox",
+                    "request_id 已绑定到其它沙箱",
                 )
             self._requests[request_id] = sandbox_id
             self._generation += 1
@@ -125,17 +126,17 @@ class MemorySandboxRepository:
             if record is None:
                 raise ServiceException(
                     SandboxErrorCode.LEASE_NOT_FOUND,
-                    f"sandbox {sandbox_id} was not found",
+                    f"沙箱 {sandbox_id} 不存在",
                 )
             if record.state != expected:
                 raise ServiceException(
                     SandboxErrorCode.INVALID_STATE_TRANSITION,
-                    f"expected {expected.value}, got {record.state.value}"
+                    f"期望状态 {expected.value}，实际状态 {record.state.value}"
                 )
             if state not in _ALLOWED_TRANSITIONS[expected]:
                 raise ServiceException(
                     SandboxErrorCode.INVALID_STATE_TRANSITION,
-                    f"cannot transition {expected.value} to {state.value}"
+                    f"不能从 {expected.value} 转换到 {state.value}"
                 )
             record.state = state
             record.state_version += 1
@@ -158,8 +159,9 @@ class MemorySandboxRepository:
                 if existing.tenant_id != tenant_id or existing.workspace_id != workspace_id:
                     raise ServiceException(
                         SandboxErrorCode.REQUEST_CONFLICT,
-                        "request_id context does not match existing lease",
+                        "request_id 上下文与已有租约不一致",
                     )
+                # 幂等重试直接返回已有租约，不重新消耗 READY 实例。
                 return existing, self._lease_for(existing)
 
             ready = next(
@@ -171,10 +173,11 @@ class MemorySandboxRepository:
                 self.metrics.increment("pool_empty_checkouts")
                 raise ServiceException(
                     SandboxErrorCode.POOL_EMPTY,
-                    "no ready sandbox is available",
+                    "沙箱池暂无可用实例",
                 )
             self._next_fencing_token += 1
             now = utc_now()
+            # 取出 READY 实例是唯一生成租约的位置，必须在同一把锁里写完状态和索引。
             ready.state = SandboxState.ALLOCATED
             ready.state_version += 1
             ready.updated_at = now
@@ -210,7 +213,7 @@ class MemorySandboxRepository:
             if record is None:
                 raise ServiceException(
                     SandboxErrorCode.LEASE_NOT_FOUND,
-                    f"lease {lease_id} was not found",
+                    f"租约 {lease_id} 不存在",
                 )
             return record
 
@@ -221,12 +224,12 @@ class MemorySandboxRepository:
             if record is None:
                 raise ServiceException(
                     SandboxErrorCode.LEASE_NOT_FOUND,
-                    f"lease {lease_id} was not found",
+                    f"租约 {lease_id} 不存在",
                 )
             if record.fencing_token != fencing_token:
                 raise ServiceException(
                     SandboxErrorCode.FENCING_REJECTED,
-                    "lease fencing token is stale",
+                    "租约 fencing token 已过期",
                 )
             if record.state == SandboxState.DESTROYED:
                 return record
@@ -235,8 +238,9 @@ class MemorySandboxRepository:
             if record.state not in (SandboxState.ALLOCATED, SandboxState.RUNNING):
                 raise ServiceException(
                     SandboxErrorCode.INVALID_STATE_TRANSITION,
-                    f"cannot release {record.state.value} sandbox",
+                    f"不能释放 {record.state.value} 状态沙箱",
                 )
+            # 先进入 SYNCING，后续 execute 会被 Scheduler 拒绝，销毁前不再接受新请求。
             record.state = SandboxState.SYNCING
             record.state_version += 1
             record.updated_at = utc_now()
@@ -256,17 +260,17 @@ class MemorySandboxRepository:
         if record.tenant_id != tenant_id or record.workspace_id != workspace_id:
             raise ServiceException(
                 SandboxErrorCode.FENCING_REJECTED,
-                "lease context does not match",
+                "租约上下文不匹配",
             )
         if record.fencing_token != fencing_token:
             raise ServiceException(
                 SandboxErrorCode.FENCING_REJECTED,
-                "lease fencing token is stale",
+                "租约 fencing token 已过期",
             )
         if record.lease_expires_at and record.lease_expires_at <= (now or utc_now()):
             raise ServiceException(
                 SandboxErrorCode.LEASE_EXPIRED,
-                "sandbox lease has expired",
+                "沙箱租约已过期",
             )
         return record
 
@@ -294,8 +298,9 @@ class MemorySandboxRepository:
             if current is None or current.state != SandboxState.WARMING:
                 raise ServiceException(
                     SandboxErrorCode.INVALID_STATE_TRANSITION,
-                    "only warming sandboxes can prepare readiness"
+                    "只有 warming 状态沙箱可以准备 readiness"
                 )
+            # 就绪 token 由当前状态版本生成，只允许同一轮健康检查放回 READY。
             record.readiness_token = readiness_token
             self._records[record.ref.sandbox_id] = record
             self._generation += 1
@@ -312,27 +317,27 @@ class MemorySandboxRepository:
             if record is None:
                 raise ServiceException(
                     SandboxErrorCode.LEASE_NOT_FOUND,
-                    f"sandbox {sandbox_id} was not found",
+                    f"沙箱 {sandbox_id} 不存在",
                 )
             if self._generation != expected_generation:
                 raise ServiceException(
                     SandboxErrorCode.FENCING_REJECTED,
-                    "pool generation is stale",
+                    "沙箱池 generation 已过期",
                 )
             if record.state != SandboxState.WARMING:
                 raise ServiceException(
                     SandboxErrorCode.INVALID_STATE_TRANSITION,
-                    "only warming sandboxes can return ready",
+                    "只有 warming 状态沙箱可以回到 ready",
                 )
             if any((record.lease_id, record.request_id, record.tenant_id, record.workspace_id)):
                 raise ServiceException(
                     SandboxErrorCode.FENCING_REJECTED,
-                    "sandbox still has an active lease",
+                    "沙箱仍有活跃租约",
                 )
             if not record.readiness_token or record.readiness_token != health_token:
                 raise ServiceException(
                     SandboxErrorCode.FENCING_REJECTED,
-                    "sandbox health token is invalid",
+                    "沙箱健康 token 非法",
                 )
             record.state = SandboxState.READY
             record.readiness_token = None

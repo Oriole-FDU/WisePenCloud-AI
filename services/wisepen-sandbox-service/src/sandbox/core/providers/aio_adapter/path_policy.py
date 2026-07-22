@@ -18,12 +18,14 @@ class TenantScope:
 
     def __post_init__(self) -> None:
         if not _SEGMENT.fullmatch(self.tenant_id):
-            raise ServiceException(SandboxErrorCode.WORKSPACE_PATH_INVALID, "invalid tenant id")
+            raise ServiceException(SandboxErrorCode.WORKSPACE_PATH_INVALID, "租户标识非法")
         if not _SEGMENT.fullmatch(self.workspace_id):
-            raise ServiceException(SandboxErrorCode.WORKSPACE_PATH_INVALID, "invalid workspace id")
+            raise ServiceException(SandboxErrorCode.WORKSPACE_PATH_INVALID, "工作区标识非法")
 
 
 class PathPolicy:
+    """用户逻辑路径与 AIO 容器绝对路径之间的映射策略。"""
+
     def __init__(
         self,
         scope: TenantScope,
@@ -36,9 +38,10 @@ class PathPolicy:
         if not root.startswith("/") or ".." in root.split("/"):
             raise ServiceException(
                 SandboxErrorCode.WORKSPACE_PATH_INVALID,
-                "invalid workspace root",
+                "工作区根目录非法",
             )
         self._root = root
+        # 开启隔离范围时，每个用户/会话落到 root/{tenant}/{workspace}，避免共享目录串写。
         self._scope_root = (
             f"{root}/{scope.tenant_id}/{scope.workspace_id}"
             if isolate_scope
@@ -50,9 +53,10 @@ class PathPolicy:
         return self._scope_root
 
     def translate(self, path: str) -> str:
+        # 入口工具接受相对路径、~ 和工作区内绝对路径，统一解析到容器内绝对路径。
         value = (path or "").strip().replace("\\", "/")
         if not value:
-            raise ServiceException(SandboxErrorCode.WORKSPACE_PATH_INVALID, "empty path")
+            raise ServiceException(SandboxErrorCode.WORKSPACE_PATH_INVALID, "路径不能为空")
         if value == "~":
             value = self._scope_root
         elif value.startswith("~/"):
@@ -62,7 +66,7 @@ class PathPolicy:
         if value != self._scope_root and not value.startswith(f"{self._scope_root}/"):
             raise ServiceException(
                 SandboxErrorCode.WORKSPACE_PATH_INVALID,
-                "absolute paths outside workspace are not allowed",
+                "不允许访问工作区外的绝对路径",
             )
 
         parts: list[str] = []
@@ -75,7 +79,7 @@ class PathPolicy:
                 else:
                     raise ServiceException(
                         SandboxErrorCode.WORKSPACE_PATH_INVALID,
-                        "path traversal denied",
+                        "拒绝目录穿越",
                     )
                 continue
             parts.append(part)
@@ -83,21 +87,22 @@ class PathPolicy:
         if resolved != self._scope_root and not resolved.startswith(f"{self._scope_root}/"):
             raise ServiceException(
                 SandboxErrorCode.WORKSPACE_PATH_INVALID,
-                "path outside workspace denied",
+                "拒绝访问工作区外路径",
             )
         return resolved
 
     def reverse(self, path: str) -> str:
+        # 导出工作区时 AIO 返回容器绝对路径，这里反向确认它仍落在当前 scope 内。
         value = (path or "").replace("\\", "/")
         if not value.startswith("/"):
             raise ServiceException(
                 SandboxErrorCode.WORKSPACE_PATH_INVALID,
-                "workspace paths must be absolute",
+                "工作区路径必须是绝对路径",
             )
         if any(part in ("", ".", "..") for part in value.split("/")[1:]):
             raise ServiceException(
                 SandboxErrorCode.WORKSPACE_PATH_INVALID,
-                "invalid workspace path",
+                "工作区路径非法",
             )
         if value == self._scope_root:
             return self._scope_root
@@ -105,7 +110,7 @@ class PathPolicy:
         if not value.startswith(prefix):
             raise ServiceException(
                 SandboxErrorCode.WORKSPACE_PATH_INVALID,
-                "path outside workspace denied",
+                "拒绝访问工作区外路径",
             )
         relative = value[len(prefix):]
         return f"{self._scope_root}/{relative}"

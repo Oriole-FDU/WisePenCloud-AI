@@ -147,7 +147,7 @@ class WorkspaceStore(Protocol):
     async def commit(self, snapshot: WorkspaceSnapshot, lease_id: str, fencing_token: int = 0) -> None: ...
 ```
 
-LocalWorkspaceStore 会校验 tenant/workspace 标识、相对路径、符号链接和路径穿越。commit 失败时 Scheduler 仍继续 destroy，实例绝不回池。未创建的 workspace 目录可表示为空快照。
+LocalWorkspaceStore 会校验 tenant/workspace 标识、相对路径、符号链接和路径穿越。缓存范围是 `tenant_id + workspace_id`；当前 Chat/VNC/MCP 入口分别将其映射为用户和会话。commit 采用完整快照替换语义：本次导出不存在的旧文件会从缓存中删除，并写入 manifest 记录 lease、fencing、文件数和字节数。commit 失败时 Scheduler 仍继续 destroy，实例绝不回池。未创建的 workspace 目录可表示为空快照。
 
 ### 5.3 内部 API
 
@@ -161,7 +161,7 @@ LocalWorkspaceStore 会校验 tenant/workspace 标识、相对路径、符号链
 | `GET /internal/sandboxes/{sandbox_id}` | 返回管理状态，不暴露 provider_id 和 token |
 | `GET /internal/pool/metrics` | 返回 generation、状态计数、readiness 和生命周期指标 |
 
-稳定错误码包括 `POOL_EMPTY`、`LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE` 和 `WORKSPACE_SYNC_FAILED`。
+稳定错误码包括 `POOL_EMPTY`、`LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE`、`WORKSPACE_SYNC_FAILED` 和 `WORKSPACE_CACHE_LIMIT_EXCEEDED`。
 
 ## 6. 生命周期流程
 
@@ -220,6 +220,7 @@ sequenceDiagram
             L-->>W: true
             W->>S: recover_expired()
             S->>R: 查找过期 ALLOCATED/RUNNING lease
+            S->>A: 导出并缓存过期用户实例工作区
             S->>A: 销毁过期用户实例
             W->>R: 清理 CREATING/WARMING/DESTROYING 超时实例
             W->>P: snapshot()
@@ -312,7 +313,7 @@ Watcher 会排除 CREATING/WARMING 实例，避免并发重复创建；预热失
 4. Provider.activate 后状态进入 RUNNING，返回短期 endpoint 和租约信息。
 5. execute 只接受 lease_id，校验租户、workspace、租约状态、有效期和 fencing token，再调用 Provider.forward。
 6. release 原子关闭租约入口，状态进入 SYNCING。
-7. Provider.export_workspace 后调用 WorkspaceStore.commit。
+7. Provider.export_workspace 后调用 WorkspaceStore.commit，将完整工作区快照缓存到 `tenant_id + workspace_id`。
 8. 无论 commit 成功或失败，都调用带超时和有限重试的 destroy。
 9. destroy 成功进入 DESTROYED；超时/连续失败进入 LOST；成功销毁后清理租约映射。
 10. Watcher 根据 READY 数量下降补充新的 WARMING 实例，健康后进入 READY。
@@ -492,7 +493,7 @@ sequenceDiagram
 4. **工具调用复用租约**：LLM 返回工具调用后，QueryLoopRuntime 通过 ToolDispatcher 执行 `read_file`、`write_file`、`list_directory`、`grep_files`、`edit_file`、`shell_exec` 或 `run_sandbox_script`。每个工具都调用同一个 SandboxClient，SandboxClient 根据 Chat 请求的 `request_id` 命中缓存的 LeaseContext，不会重复 allocate。
 5. **执行请求校验**：每次 execute 都携带租约上下文。Sandbox Service 校验 lease_id、tenant_id、workspace_id、fencing token、租约有效期和 `RUNNING` 状态；校验失败时拒绝请求，防止旧 Chat 请求或旧租约继续操作容器。
 6. **Adapter 协议转换**：Sandbox Service 只看到 `SandboxProvider`。Adapter 将领域操作转换成 AIO HTTP 请求，使用 `/v1/file/search`、`/v1/shell/exec`、`/v1/code/execute` 等实际路径，并通过 PathPolicy 将工作区映射到 `/home/gem/{tenant_id}/{workspace_id}`。Chat 工具说明中的 `/workspace` 是逻辑路径，演示时应优先使用相对路径。
-7. **释放与持久化**：Chat 的 `finally` 调用 release。Scheduler 先关闭租约入口，因此 release 开始后新的 execute 会被拒绝；随后导出容器工作区、提交 WorkspaceStore，并无条件进入销毁流程。commit 失败只影响持久化结果，不允许实例回 READY。
+7. **释放与持久化**：Chat 的 `finally` 调用 release。Scheduler 先关闭租约入口，因此 release 开始后新的 execute 会被拒绝；随后导出容器工作区、以完整替换语义提交 WorkspaceStore，并无条件进入销毁流程。commit 失败只影响持久化结果，不允许实例回 READY。下一次同 `tenant_id + workspace_id` 分配会读取该缓存并写回新沙箱。
 8. **销毁和补池**：销毁成功后用户实例进入 `DESTROYED`，失败或超时进入 `LOST`。Watcher 发现 READY 缺口后创建新的实例，只有健康检查和 `return_ready()` 成功的新实例才能进入 READY。用户实例和替代预热实例不会复用同一个 sandbox_id。
 
 #### 6.4.4 请求边界与失败返回
@@ -504,7 +505,7 @@ sequenceDiagram
 | release | Chat `finally` -> lease release API | `LEASE_NOT_FOUND` 和 `LEASE_EXPIRED` 视为可清理状态，其他错误继续上抛 |
 | workspace commit | Scheduler -> WorkspaceStore | 返回 `WORKSPACE_SYNC_FAILED`，但仍销毁用户实例 |
 | AIO destroy | Scheduler -> Adapter -> DockerRuntime | 404 幂等成功；超时/连续失败进入 `LOST`，不回 READY |
-| Watcher recovery | Watcher -> Scheduler.recover_expired | 过期 `ALLOCATED/RUNNING` 实例走关闭、同步和销毁流程，不直接回池 |
+| Watcher recovery | Watcher -> Scheduler.recover_expired | 过期 `ALLOCATED/RUNNING` 实例走关闭、导出缓存和销毁流程，不直接回池 |
 
 ### 6.5 失败补偿
 
@@ -517,7 +518,7 @@ sequenceDiagram
 | execute 期间 AIO 失联 | 拒绝后续操作，交由恢复流程销毁 |
 | workspace commit 失败 | 记录 `WORKSPACE_SYNC_FAILED`，仍继续销毁 |
 | destroy 超时 | `wait_for`、指数退避和有限重试，最终 LOST |
-| 租约过期 | Watcher 调用 Scheduler.recover_expired，不直接回 READY |
+| 租约过期 | Watcher 调用 Scheduler.recover_expired，先尝试导出并缓存工作区，再销毁；缓存失败也不直接回 READY |
 
 ## 7. AIO Adapter 实现细节
 
@@ -595,7 +596,7 @@ PYTHONPATH=src pytest -q
 # 21 passed
 ```
 
-覆盖内容包括并发 checkout、非法状态、request_id 幂等、租户冲突、租约过期、fencing、return_ready、工作区路径、commit 失败销毁、release 幂等、Watcher 补池和 readiness metrics，以及 AIO HTTP、错误映射、真实 search/execute 字段、路径隔离、TTY 和 Docker 参数。
+覆盖内容包括并发 checkout、非法状态、request_id 幂等、租户冲突、租约过期、fencing、return_ready、工作区路径、commit 失败销毁、release 幂等、销毁前缓存、下次分配恢复、完整快照替换、Watcher 补池和 readiness metrics，以及 AIO HTTP、错误映射、真实 search/execute 字段、路径隔离、TTY 和 Docker 参数。
 
 ### 10.2 手动 AIO 容器探测
 
@@ -630,8 +631,9 @@ e2e cleanup           PASS  无测试容器残留
 
 ## 11. 已知限制与后续扩展
 
-- 当前 Repository、WorkspaceStore 和 LeaderLease 是进程内实现，进程重启不会保留租约和 Pool 数据；跨进程选主需替换为外部存储/锁。
+- 当前 Repository 和 LeaderLease 是进程内实现，进程重启不会保留租约和 Pool 数据；跨进程选主需替换为外部存储/锁。LocalWorkspaceStore 已支持本地工作区缓存，但生产环境仍建议替换为对象存储或带元数据的外部持久化实现。
 - AIO 镜像的 Docker 内置 healthcheck 可能因为 browser 子进程 SIGABRT 显示 `unhealthy`，但本次验证中 `/v1/sandbox` HTTP 接口可正常返回 200；生产环境应分别监控 Docker health 和 AIO HTTP health。
 - 当前用户沙箱默认销毁，不支持 reset 后复用。
+- 当前工作区缓存按文本内容读写，二进制文件和大对象传输仍需后续扩展专用协议。
 - 尚未实现真实 Redis/Mongo Repository、跨实例 Watcher 选主、文件大对象传输、VNC/Proxy 端到端和故障注入测试。
 - AIO Adapter 只保留当前文件、Shell、代码执行和容器生命周期所需的最小协议，后续新增 AIO 能力仍应保持平台依赖在 Adapter 内部。

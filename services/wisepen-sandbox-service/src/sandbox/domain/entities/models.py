@@ -11,14 +11,18 @@ def utc_now() -> datetime:
 
 
 class SandboxState(StrEnum):
+    # 预热链路：Watcher 创建容器后等待 AIO 健康，再放回 READY 池。
     CREATING = "creating"
     WARMING = "warming"
     READY = "ready"
+    # 用户链路：READY 被租出后先分配租约，再激活并承接执行请求。
     ALLOCATED = "allocated"
     RUNNING = "running"
+    # 回收链路：关闭租约入口后同步工作区，最后销毁容器。
     SYNCING = "syncing"
     DESTROYING = "destroying"
     DESTROYED = "destroyed"
+    # 丢失状态表示销毁或预热补偿失败，后续只能由运维/恢复流程处理。
     LOST = "lost"
 
 
@@ -75,7 +79,9 @@ class SandboxRecord:
     tenant_id: str | None = None
     workspace_id: str | None = None
     lease_expires_at: datetime | None = None
+    # 防护 token 每次 checkout 单调递增，用来拒绝旧租约的执行或释放请求。
     fencing_token: int = 0
+    # 状态版本参与 readiness_token，防止旧健康检查把新状态误放回 READY。
     state_version: int = 0
     last_error: str | None = None
     readiness_token: str | None = None
@@ -119,10 +125,10 @@ class SandboxLease:
 
 @dataclass(frozen=True)
 class WorkspaceSnapshot:
+    # 工作区快照表示完整缓存快照；提交时会整体替换旧目录。
     tenant_id: str
     workspace_id: str
     files: dict[str, str] = field(default_factory=dict)
-    deleted_files: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

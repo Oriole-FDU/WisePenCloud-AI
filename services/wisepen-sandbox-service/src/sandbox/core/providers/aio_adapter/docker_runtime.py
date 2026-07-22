@@ -20,6 +20,8 @@ class ContainerHandle:
 
 
 class DockerRuntime:
+    """通过 Docker CLI 管理 all-in-one-sandbox 容器。"""
+
     def __init__(self, config: AdapterConfig, runner=subprocess.run) -> None:
         self._config = config
         self._runner = runner
@@ -42,9 +44,11 @@ class DockerRuntime:
             "--label",
             f"wisepen.sandbox_id={name}",
             "-p",
+            # 端口映射使用 host::containerPort，让 Docker 分配随机宿主机端口，避免并发预热冲突。
             f"{self._config.host}::{self._config.api_port}",
         ]
         if self._config.e2e_label:
+            # 端到端标签只在测试环境开启，方便清理测试容器。
             args[args.index("--label") + 2:args.index("--label") + 2] = [
                 "--label",
                 "wisepen.e2e=true",
@@ -62,8 +66,9 @@ class DockerRuntime:
         if not container_id:
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "container creation returned an empty id",
+                "容器创建返回了空 id",
             )
+        # 读取随机映射后的宿主机端口，作为 AIO HTTP endpoint 暴露给上层。
         port = self._run(
             [self._config.docker_bin, "port", container_id, f"{self._config.api_port}/tcp"]
         ).strip()
@@ -74,6 +79,7 @@ class DockerRuntime:
         try:
             self._run([self._config.docker_bin, "rm", "-f", container_id])
         except ServiceException as exc:
+            # 销毁按幂等语义处理，容器已不存在时视为清理成功。
             if "No such container" not in str(exc):
                 raise
 
@@ -84,12 +90,12 @@ class DockerRuntime:
         except json.JSONDecodeError as exc:
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "docker inspect returned invalid JSON",
+                "docker inspect 返回了非法 JSON",
             ) from exc
         if not isinstance(payload, list) or not payload or not isinstance(payload[0], dict):
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "docker inspect returned no container",
+                "docker inspect 未返回容器信息",
             )
         return payload[0]
 
@@ -105,22 +111,22 @@ class DockerRuntime:
         except FileNotFoundError as exc:
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "docker binary not found",
+                "未找到 docker 可执行文件",
             ) from exc
         except OSError as exc:
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "docker command could not be started",
+                "docker 命令无法启动",
             ) from exc
         except subprocess.TimeoutExpired as exc:
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "docker command timed out",
+                "docker 命令超时",
             ) from exc
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                f"docker command failed: {' '.join(args[1:3])}: {detail[:500]}",
+                f"docker 命令失败：{' '.join(args[1:3])}：{detail[:500]}",
             )
         return result.stdout or ""

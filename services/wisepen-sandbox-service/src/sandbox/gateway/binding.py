@@ -17,6 +17,7 @@ class VncBinding:
     def __init__(self, session: SandboxSessionService, idle_timeout_seconds: float = 1800.0) -> None:
         self._session = session
         self._idle_timeout = idle_timeout_seconds
+        # 绑定键使用 user_id + session_id，与 Scheduler 的 tenant/workspace 维度保持一致。
         self._bindings: dict[tuple[str, str], tuple[VncConnection, float]] = {}
         self._lock = asyncio.Lock()
 
@@ -26,6 +27,7 @@ class VncBinding:
             current = self._bindings.get(key)
             if current is not None:
                 connection, _ = current
+                # 每次访问刷新空闲时间，避免正在使用的 VNC 被 cleanup_idle 回收。
                 self._bindings[key] = (connection, time.monotonic())
                 return connection
             lease = await self._session.acquire_for(user_id, session_id)
@@ -55,6 +57,7 @@ class VncBinding:
         released = 0
         for user_id, session_id in expired:
             try:
+                # 释放放在锁外执行，避免 Scheduler/Docker 慢调用阻塞新的远程桌面获取。
                 await self._session.release_for(user_id, session_id)
             except Exception:
                 continue

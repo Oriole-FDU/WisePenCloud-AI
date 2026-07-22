@@ -20,6 +20,7 @@ def create_health_router(pool: SandboxPool) -> APIRouter:
         snapshot = await pool.snapshot()
         ready = snapshot.counts[SandboxState.READY]
         if ready < snapshot.min_ready:
+            # 就绪状态代表是否有足够预热实例承接新请求，不等同于进程存活。
             raise HTTPException(
                 status_code=503,
                 detail={

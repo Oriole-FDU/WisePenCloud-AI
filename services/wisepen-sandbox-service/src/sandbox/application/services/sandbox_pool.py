@@ -5,6 +5,12 @@ from sandbox.domain.repositories import SandboxRepository
 
 
 class SandboxPool:
+    """面向调度器的预热池门面。
+
+    Pool 不直接保存状态，所有并发控制和状态转移都落在 Repository 中；
+    这里只负责把“取 READY、放回 READY、读取快照”等用例收束成更小的接口。
+    """
+
     def __init__(
         self,
         repository: SandboxRepository,
@@ -18,7 +24,7 @@ class SandboxPool:
         self._target_ready = target_ready
 
     async def add_ready(self, record: SandboxRecord) -> None:
-        """Register a test/development warming record through the normal gate."""
+        """通过正常 readiness gate 注册测试/开发用预热实例。"""
         if await self._repository.get(record.ref.sandbox_id) is None:
             await self._repository.save(record)
         token = f"{record.ref.sandbox_id}:{record.state_version}:{record.fencing_token}"
@@ -28,6 +34,7 @@ class SandboxPool:
     async def checkout(
         self, request_id: str, tenant_id: str, workspace_id: str
     ) -> tuple[SandboxRecord, SandboxLease]:
+        # 取出 READY 实例时同时完成 request 幂等绑定、租约生成和 READY -> ALLOCATED。
         record, lease = await self._repository.checkout_ready(
             request_id,
             tenant_id,
@@ -53,6 +60,7 @@ class SandboxPool:
         await self._repository.save(record)
 
     async def health_token(self, record: SandboxRecord) -> str:
+        # 健康 token 绑定 sandbox_id、状态版本和 fencing，避免过期健康检查误放回实例。
         return f"{record.ref.sandbox_id}:{record.state_version}:{record.fencing_token}"
 
     async def prepare_readiness(self, record: SandboxRecord) -> tuple[str, int]:

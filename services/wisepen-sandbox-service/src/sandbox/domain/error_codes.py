@@ -12,3 +12,4 @@ class SandboxErrorCode(IErrorCode):
     WORKSPACE_SYNC_FAILED = (46008, "沙箱工作区同步失败")
     SANDBOX_UNAVAILABLE = (46009, "沙箱服务暂不可用")
     AIO_RESOURCE_NOT_FOUND = (46010, "AIO 资源不存在")
+    WORKSPACE_CACHE_LIMIT_EXCEEDED = (46011, "沙箱工作区缓存超出限制")

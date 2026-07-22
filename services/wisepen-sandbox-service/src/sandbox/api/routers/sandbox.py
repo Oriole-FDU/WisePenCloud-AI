@@ -43,6 +43,7 @@ def create_sandbox_router(scheduler: SandboxScheduler) -> APIRouter:
     @router.get("/sandboxes/{sandbox_id}")
     async def status(sandbox_id: str) -> R[dict[str, Any]]:
         result = asdict(await scheduler.status(sandbox_id))
+        # 管理查询不暴露 provider_id、metadata 和 endpoint token，避免泄露 Docker/AIO 内部细节。
         result.pop("provider_id", None)
         ref = result.get("ref")
         if isinstance(ref, dict):

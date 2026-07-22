@@ -24,6 +24,7 @@ setup_observability(
     environment=bootstrap_settings.PROFILE,
 )
 
+# 容器在模块加载时构建，FastAPI 路由、MCP 和 VNC 网关共享同一个 Scheduler。
 container = build_container()
 sandbox_session = SandboxSessionService(container.scheduler)
 from sandbox.transport.mcp import build_sandbox_mcp
@@ -38,6 +39,7 @@ async def lifespan(app):
         cleanup_stop = asyncio.Event()
 
         async def cleanup_loop() -> None:
+            # 远程桌面是浏览器跳转式连接，前端不一定显式释放，因此后台按空闲时间回收。
             while not cleanup_stop.is_set():
                 try:
                     await asyncio.wait_for(cleanup_stop.wait(), timeout=300)
@@ -49,6 +51,7 @@ async def lifespan(app):
         try:
             await nacos_client_manager.register_instance()
         except Exception as exc:
+            # 服务发现注册失败不阻断本地服务启动，便于开发环境和故障排查。
             error("nacos 实例注册失败。", service=bootstrap_settings.SERVICE_NAME, exc=exc)
         app.state.watcher_task = asyncio.create_task(container.watcher.run())
         info(
