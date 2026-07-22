@@ -17,6 +17,12 @@ from sandbox.application.services.sandbox_scheduler import SandboxScheduler
 
 
 class Watcher:
+    """后台预热与恢复循环。
+
+    Watcher 负责维持 READY 池容量、清理预热超时实例，并驱动过期租约回收。
+    在多实例部署时可通过 LeaderLease 保证同一时刻只有一个实例执行补池。
+    """
+
     def __init__(
         self,
         pool: SandboxPool,
@@ -43,6 +49,7 @@ class Watcher:
         self._scheduler = scheduler
         self._leader_lease = leader_lease
         self._leader_key = leader_key
+        # 持有者标识用于区分多个服务实例的 watcher，内存实现和未来外部锁都依赖它释放租约。
         self._owner = f"watcher-{uuid.uuid4().hex}"
         self._target_ready = max(0, target_ready)
         self._min_ready = max(0, min_ready)
@@ -67,6 +74,7 @@ class Watcher:
             try:
                 self._metrics.increment("watcher_reconciles")
                 if self._scheduler:
+                    # 先回收过期用户实例，再评估 READY 缺口，避免旧实例占用资源。
                     await self._scheduler.recover_expired()
                 await self._recover_stale()
                 snapshot = await self._pool.snapshot()
@@ -86,6 +94,7 @@ class Watcher:
                     try:
                         await self._warm_one()
                     except Exception:
+                        # 连续失败时先停手，避免镜像/运行时异常导致快速创建失败风暴。
                         self._retry_count += 1
                         self._metrics.increment("warmup_failures")
                         break
@@ -109,6 +118,7 @@ class Watcher:
         await self._repository.save(record)
         self._metrics.increment("create_successes")
         try:
+            # 创建状态进入 WARMING 之后才等待健康，防止半创建实例被 checkout。
             await self._repository.transition(
                 ref.sandbox_id, SandboxState.CREATING, SandboxState.WARMING
             )
@@ -117,10 +127,11 @@ class Watcher:
                 timeout=self._warmup_timeout,
             )
             if not health.healthy:
-                raise RuntimeError("sandbox health check failed")
+                raise RuntimeError("沙箱健康检查失败")
             health_fn = getattr(self._provider, "health", None)
             if health_fn is not None and not (await health_fn(ref)).healthy:
-                raise RuntimeError("sandbox health check failed")
+                raise RuntimeError("沙箱健康检查失败")
+            # 回到 READY 需要 readiness_token + generation 双重校验，避免并发状态变化后误回池。
             health_token, generation = await self._pool.prepare_readiness(record)
             await self._pool.return_ready(
                 record.ref.sandbox_id, health_token, generation
@@ -139,6 +150,7 @@ class Watcher:
                     error=str(exc)[:200],
                 )
             try:
+                # 预热失败的容器同样要销毁；失败后进入 LOST，便于指标和人工排查。
                 started = monotonic()
                 await asyncio.wait_for(
                     self._provider.destroy(ref, "warmup_failed"),
@@ -159,6 +171,7 @@ class Watcher:
     async def _recover_stale(self) -> None:
         now = utc_now()
         cutoff = now - timedelta(seconds=self._warmup_timeout)
+        # 创建/预热卡住通常意味着 Docker 或 AIO 健康检查异常，直接转 DESTROYING 清理。
         stale = await self._repository.records_older_than(SandboxState.CREATING, cutoff)
         stale += await self._repository.records_older_than(SandboxState.WARMING, cutoff)
         for record in stale:
@@ -196,6 +209,7 @@ class Watcher:
         )
         for record in stale_destroying:
             try:
+                # 销毁中超时说明前一次 destroy 已失控，标 LOST 后不再参与分配。
                 await self._repository.transition(
                     record.ref.sandbox_id,
                     SandboxState.DESTROYING,

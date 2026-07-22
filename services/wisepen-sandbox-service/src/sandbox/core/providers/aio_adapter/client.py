@@ -10,6 +10,8 @@ from sandbox.domain.error_codes import SandboxErrorCode
 
 
 class AioClient:
+    """all-in-one-sandbox HTTP API 的薄封装。"""
+
     def __init__(
         self,
         base_url: str,
@@ -33,12 +35,12 @@ class AioClient:
         except httpx.TimeoutException as exc:
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "AIO health check timed out",
+                "AIO 健康检查超时",
             ) from exc
         except httpx.HTTPError as exc:
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "AIO health check failed",
+                "AIO 健康检查失败",
             ) from exc
 
     async def request(
@@ -55,13 +57,14 @@ class AioClient:
                 if response.status_code == 404:
                     raise ServiceException(
                         SandboxErrorCode.AIO_RESOURCE_NOT_FOUND,
-                        "AIO resource was not found",
+                        "AIO 资源不存在",
                     )
                 raise ServiceException(
                     SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                    f"AIO request failed with status {response.status_code}",
+                    f"AIO 请求失败，状态码 {response.status_code}",
                 )
             payload = response.json()
+            # 部分 AIO 接口返回 R(data=...)，部分直接返回 dict；这里统一拆出业务 data。
             if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
                 return payload["data"]
             return payload if isinstance(payload, dict) else {"data": payload}
@@ -70,12 +73,12 @@ class AioClient:
         except httpx.TimeoutException as exc:
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "AIO request timed out",
+                "AIO 请求超时",
             ) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "AIO request failed",
+                "AIO 请求失败",
             ) from exc
 
     async def file_read(self, path: str, max_chars: int | None = None) -> dict[str, Any]:
@@ -93,6 +96,7 @@ class AioClient:
     async def file_grep(
         self, path: str, pattern: str, recursive: bool, ignore_case: bool
     ) -> dict[str, Any]:
+        # 当前搜索接口使用 regex 字段，recursive 参数预留给未来协议扩展。
         return await self.request(
             "/v1/file/search",
             {
@@ -110,6 +114,7 @@ class AioClient:
     async def shell_exec(self, command: str, exec_dir: str, timeout_ms: int) -> dict[str, Any]:
         return await self.request(
             "/v1/shell/exec",
+            # 命令执行接口在 AIO 侧的超时时间单位是秒，内部协议入口使用毫秒。
             {"command": command, "exec_dir": exec_dir, "timeout": max(1, timeout_ms // 1000)},
         )
 

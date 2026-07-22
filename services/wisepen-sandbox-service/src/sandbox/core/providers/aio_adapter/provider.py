@@ -24,6 +24,8 @@ from sandbox.domain.error_codes import SandboxErrorCode
 
 
 class AioSandboxProvider(SandboxProvider):
+    """SandboxProvider 到 all-in-one-sandbox 的协议适配器。"""
+
     def __init__(
         self,
         runtime: DockerRuntime,
@@ -69,11 +71,12 @@ class AioSandboxProvider(SandboxProvider):
     async def wait_ready(self, sandbox: SandboxRef, timeout_seconds: float) -> Health:
         client = self._client(sandbox)
         deadline = asyncio.get_running_loop().time() + timeout_seconds
+        # 容器启动后 AIO HTTP 服务会延迟可用，预热阶段轮询健康接口。
         while asyncio.get_running_loop().time() < deadline:
             if await client.health():
                 return Health(True, "ready")
             await asyncio.sleep(1)
-        raise TimeoutError(f"sandbox {sandbox.sandbox_id} did not become ready")
+        raise TimeoutError(f"沙箱 {sandbox.sandbox_id} 未在限定时间内就绪")
 
     async def health(self, sandbox: SandboxRef) -> Health:
         healthy = await self._client(sandbox).health()
@@ -88,13 +91,14 @@ class AioSandboxProvider(SandboxProvider):
             self._runtime.workdir,
             isolate_scope=True,
         )
+        # 缓存恢复写入 scope 根目录下，避免不同用户/会话在 AIO workdir 内互相覆盖。
         for path, content in workspace.files.items():
             await client.file_write(policy.translate(path), content)
 
     async def activate(self, sandbox: SandboxRef, lease: SandboxLease) -> Endpoint:
         await self._client(sandbox).health()
         if sandbox.endpoint is None:
-            raise RuntimeError("sandbox has no endpoint")
+            raise RuntimeError("沙箱缺少 endpoint")
         return sandbox.endpoint
 
     async def forward(
@@ -108,6 +112,7 @@ class AioSandboxProvider(SandboxProvider):
         )
         payload = request.payload
         operation = request.operation
+        # 这里是内部统一操作名到 AIO HTTP API 的唯一映射层；上层不应感知 AIO 字段名。
         if operation == "read_file":
             data = await client.file_read(
                 policy.translate(str(payload.get("file", ""))), payload.get("max_chars")
@@ -148,7 +153,7 @@ class AioSandboxProvider(SandboxProvider):
                 payload,
             )
         else:
-            raise ValueError(f"unsupported sandbox operation: {operation}")
+            raise ValueError(f"不支持的沙箱操作：{operation}")
         return ExecutionResult(request.request_id, "succeeded", data)
 
     async def export_workspace(
@@ -165,7 +170,7 @@ class AioSandboxProvider(SandboxProvider):
         except ServiceException as exc:
             if exc.code != SandboxErrorCode.AIO_RESOURCE_NOT_FOUND.code:
                 raise
-            # An untouched workspace has no directory yet; it is an empty snapshot.
+            # 从未写入过的工作区没有目录，按空快照处理。
             return WorkspaceSnapshot(tenant_id, workspace_id)
         files: dict[str, str] = {}
         entries = listing.get("files", []) if isinstance(listing, dict) else []
@@ -173,6 +178,9 @@ class AioSandboxProvider(SandboxProvider):
             if not isinstance(entry, dict) or entry.get("is_directory"):
                 continue
             path = str(entry.get("path") or entry.get("name") or "")
+            if not path:
+                continue
+            # 文件列表返回容器绝对路径，先反向校验归属，再读文件并存为工作区相对路径。
             virtual = policy.reverse(path)
             content = await client.file_read(policy.translate(virtual))
             files[virtual.removeprefix(f"{policy.root}/")] = str(
@@ -186,7 +194,7 @@ class AioSandboxProvider(SandboxProvider):
 
     def _client(self, sandbox: SandboxRef) -> AioClient:
         if sandbox.endpoint is None:
-            raise RuntimeError("sandbox has no endpoint")
+            raise RuntimeError("沙箱缺少 endpoint")
         client = self._clients.get(sandbox.sandbox_id)
         if client is None:
             client = AioClient(

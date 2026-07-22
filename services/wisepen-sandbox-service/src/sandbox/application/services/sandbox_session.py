@@ -12,13 +12,14 @@ from sandbox.domain.error_codes import SandboxErrorCode
 
 
 class SandboxSessionService:
-    """Bind trusted user/session context to the scheduler lease API."""
+    """把可信用户/会话上下文绑定到 Scheduler 租约 API。"""
 
     def __init__(self, scheduler: SandboxScheduler) -> None:
         self._scheduler = scheduler
 
     async def execute(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         lease = await self._allocate()
+        # 同一 MCP/VNC 会话复用 request_id，但每次 execute 仍生成唯一子请求，便于追踪。
         request_id = f"{lease.request_id}:{uuid.uuid4().hex}"
         result = await self._scheduler.execute(
             lease.lease_id,
@@ -53,12 +54,13 @@ class SandboxSessionService:
         await self._scheduler.release(lease.lease_id, lease.fencing_token)
 
     def _context(self) -> tuple[str, str]:
+        # 安全上下文来自网关安全中间件，不能信任用户在工具参数中传身份。
         tenant_id = (SecurityContextHolder.get_user_id() or "").strip()
         workspace_id = (SecurityContextHolder.get_session_id() or "").strip()
         if not tenant_id or not workspace_id:
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "user and session context are required",
+                "用户和会话上下文不能为空",
             )
         return tenant_id, workspace_id
 
@@ -69,5 +71,6 @@ class SandboxSessionService:
     ) -> SandboxLease:
         if not tenant_id or not workspace_id:
             tenant_id, workspace_id = self._context()
+        # 工具协议和远程桌面是长连接式入口，按 tenant/workspace 固定 request_id 复用同一租约。
         request_id = f"mcp:{tenant_id}:{workspace_id}"
         return await self._scheduler.allocate(request_id, tenant_id, workspace_id)

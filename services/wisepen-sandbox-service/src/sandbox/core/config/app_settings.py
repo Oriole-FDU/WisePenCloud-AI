@@ -13,12 +13,23 @@ class AppSettings(BaseModel):
 
     model_config = ConfigDict()
 
+    # 与网关约定的内部来源校验 token。
     FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
 
+    # 沙箱提供者通过 factory 字符串加载，便于本地/生产替换不同沙箱后端。
     SANDBOX_PROVIDER_FACTORY: str = "sandbox.core.providers.aio_adapter.provider:AioSandboxProvider"
+
+    # 工作区缓存用于沙箱销毁后的文件恢复；当前本地实现按 tenant + workspace 分目录存储。
     SANDBOX_WORKSPACE_ROOT: str = "/tmp/wisepen-workspaces"
+    SANDBOX_WORKSPACE_CACHE_MAX_FILES: int = 2000
+    SANDBOX_WORKSPACE_CACHE_MAX_FILE_BYTES: int = 2 * 1024 * 1024
+    SANDBOX_WORKSPACE_CACHE_MAX_TOTAL_BYTES: int = 64 * 1024 * 1024
+    SANDBOX_WORKSPACE_CACHE_MANIFEST_NAME: str = ".wisepen-workspace-manifest.json"
+
+    # 预热容器镜像；Provider 可在 SandboxSpec 为空时回退到该值。
     SANDBOX_IMAGE: str = "ghcr.io/agent-infra/sandbox:latest"
 
+    # 租约和预热池容量参数。reserve 会额外保持冗余 READY 实例，缓冲并发突刺。
     SANDBOX_LEASE_TTL_SECONDS: int = 1800
     SANDBOX_TARGET_READY: int = 2
     SANDBOX_MIN_READY: int = 1
