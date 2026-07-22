@@ -12,7 +12,7 @@ class AdapterConfig:
     network: str | None = None
     request_timeout_seconds: float = 30.0
     warmup_timeout_seconds: float = 60.0
-    # all-in-one-sandbox exposes /home/gem as its writable user home
+    # 沙箱镜像将 /home/gem 暴露为可写用户目录。
     workdir: str = "/home/gem"
     command_timeout_seconds: float = 30.0
     e2e_label: bool = False

@@ -6,6 +6,11 @@ from typing import Any
 
 
 class MetricsCollector:
+    """轻量进程内指标收集器。
+
+    当前用于内部 `/pool/metrics` 快照；未来接 Prometheus 时可沿用同名指标。
+    """
+
     def __init__(self) -> None:
         self._counters: Counter[str] = Counter()
         self._durations: Counter[str] = Counter()
@@ -33,6 +38,7 @@ class MetricsCollector:
             self._readiness_degraded_since = None
             return "ready"
         if self._readiness_degraded_since is None:
+            # 只在首次降级时记录时间，用于计算持续 degraded 秒数。
             self._readiness_degraded_since = monotonic()
         return "degraded"
 

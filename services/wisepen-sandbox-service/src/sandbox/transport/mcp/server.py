@@ -10,12 +10,14 @@ from sandbox.application.services.sandbox_session import SandboxSessionService
 
 
 def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
+    # 工具层保持无状态；真实租约复用、身份绑定和 fencing 校验都在 SandboxSessionService。
     mcp = FastMCP(
         "wisepen-sandbox-service",
         stateless_http=True,
         json_response=True,
         streamable_http_path="/",
         transport_security=TransportSecuritySettings(
+            # 服务挂在内部网关后，由网关负责来源校验；这里关闭 SDK 的 DNS rebinding 检查。
             enable_dns_rebinding_protection=False
         ),
     )
@@ -109,6 +111,7 @@ def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
         timeout_ms: int | None = None,
         limits: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        # 执行通道是预留的脚本/代码执行通道，payload 原样交给 Provider 做后端协议适配。
         return await session.execute(
             "execute",
             {

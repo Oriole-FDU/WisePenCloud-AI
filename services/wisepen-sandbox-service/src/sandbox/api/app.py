@@ -30,6 +30,7 @@ def create_app(
 
     @app.exception_handler(ServiceException)
     async def service_exception_handler(request: Request, exc: ServiceException):
+        # 内部微服务协议统一返回 R(code/msg/data)，业务错误不使用 HTTP 4xx/5xx。
         return JSONResponse(
             status_code=200,
             content=R(code=exc.code, msg=exc.msg, data=None).model_dump(),
@@ -39,6 +40,7 @@ def create_app(
     app.include_router(create_sandbox_router(scheduler))
     app.include_router(create_pool_router(pool))
     if mcp_app is not None:
+        # 模型上下文协议使用 streamable-http，挂载后实际工具入口为 /mcp/。
         app.mount("/mcp", mcp_app)
     if vnc_binding is not None:
         app.include_router(create_gateway_router(vnc_binding))
