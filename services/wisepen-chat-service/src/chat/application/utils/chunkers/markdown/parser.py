@@ -77,6 +77,7 @@ class MarkdownParser:
             )
         )
         blocks = _merge_captioned_tables(blocks, text)
+        blocks = _attach_page_labels(blocks)
 
         if not blocks:
             return (
@@ -100,10 +101,10 @@ class MarkdownParser:
         )
 
     def _parse_tokens(
-            self,
-            tokens: list[Token],
-            lines: list[str],
-            line_offsets: list[int],
+        self,
+        tokens: list[Token],
+        lines: list[str],
+        line_offsets: list[int],
     ) -> list[TextBlock]:
         """解析顶层 token，并维护当前标题栈形成完整 section_path。"""
         blocks: list[TextBlock] = []
@@ -141,6 +142,7 @@ class MarkdownParser:
                 headings.append((level, title))
                 section_path = tuple(value for _, value in headings)
                 metadata["title"] = title
+                metadata["heading_level"] = level
             elif image is not None:
                 metadata.update(
                     {
@@ -186,7 +188,7 @@ def _image_only(inline_token: Token | None) -> Token | None:
     image: Token | None = None
     for child in inline_token.children or ():
         if child.type == "softbreak" or (
-                child.type == "text" and not child.content.strip()
+            child.type == "text" and not child.content.strip()
         ):
             continue
         if child.type != "image":
@@ -196,8 +198,8 @@ def _image_only(inline_token: Token | None) -> Token | None:
 
 
 def _merge_captioned_tables(
-        blocks: list[TextBlock],
-        text: str,
+    blocks: list[TextBlock],
+    text: str,
 ) -> list[TextBlock]:
     """将 PDF Markdown 中独立导出的表题段落绑定回紧随其后的表格。
 
@@ -217,12 +219,12 @@ def _merge_captioned_tables(
             table = blocks[index + 1]
             match = TABLE_CAPTION_RE.match(caption.text.partition("\n")[0].strip())
             if (
-                    caption.block_kind == BlockKind.PARAGRAPH
-                    and table.block_kind == BlockKind.TABLE
-                    and match is not None
-                    and caption.end_offset is not None
-                    and table.start_offset is not None
-                    and not text[caption.end_offset: table.start_offset].strip()
+                caption.block_kind == BlockKind.PARAGRAPH
+                and table.block_kind == BlockKind.TABLE
+                and match is not None
+                and caption.end_offset is not None
+                and table.start_offset is not None
+                and not text[caption.end_offset : table.start_offset].strip()
             ):
                 start_offset = caption.start_offset
                 end_offset = table.end_offset
@@ -250,3 +252,20 @@ def _merge_captioned_tables(
         index += 1
 
     return merged
+
+
+def _attach_page_labels(blocks: list[TextBlock]) -> list[TextBlock]:
+    """把页标记投影到后续结构块，页边界策略不再负责猜测归属。"""
+    active_page_label: str | None = None
+    labeled: list[TextBlock] = []
+    for block in blocks:
+        if block.block_kind == BlockKind.PAGE_MARKER:
+            active_page_label = str(block.metadata["page_label"])
+            labeled.append(block)
+            continue
+
+        metadata = dict(block.metadata)
+        if active_page_label is not None:
+            metadata["page_label"] = active_page_label
+        labeled.append(replace(block, metadata=metadata))
+    return labeled

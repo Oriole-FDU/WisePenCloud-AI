@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .._utils.normalization import assign_chunk_ids
+from .._utils.chunk_ids import assign_chunk_ids
 from .._utils.recursive_splitter import split_plain_text
-from ..models import Chunk, ChunkDocument, ChunkerKind, ChunkingResult
+from ..models import Chunk, ChunkDocument, ChunkerKind, ChunkingResult, SourceSpan
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +44,7 @@ class PlainTextChunker:
                     chunk_index=block.block_index,
                     start_offset=block.start_offset,
                     end_offset=block.end_offset,
+                    source_spans=(SourceSpan(block.start_offset, block.end_offset),),
                     start_block=block.block_index,
                     end_block=block.block_index,
                 )

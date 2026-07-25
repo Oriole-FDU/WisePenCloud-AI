@@ -13,10 +13,10 @@ _FIGURE_RE = re.compile(r"^(?:Figure|Fig\.?|图)\s+(\d+(?:\.\d+)*)", re.IGNORECA
 
 
 def build_markdown_locators(
-        *,
-        text_length: int,
-        blocks: tuple[TextBlock, ...],
-        chunks: tuple[Chunk, ...],
+    *,
+    text_length: int,
+    blocks: tuple[TextBlock, ...],
+    chunks: tuple[Chunk, ...],
 ) -> tuple[ChunkLocator, ...]:
     """基于最终 chunk 构建章节、页码和锚点三类定位。"""
     return (
@@ -27,17 +27,17 @@ def build_markdown_locators(
 
 
 def _section_locators(
-        blocks: tuple[TextBlock, ...],
-        chunks: tuple[Chunk, ...],
-        text_length: int,
+    blocks: tuple[TextBlock, ...],
+    chunks: tuple[Chunk, ...],
+    text_length: int,
 ) -> tuple[ChunkLocator, ...]:
     """章节范围包含标题本身，并延伸到下一个标题之前。"""
     headings = [
         block
         for block in blocks
         if block.block_kind == BlockKind.HEADING
-           and block.section_path
-           and block.start_offset is not None
+        and block.section_path
+        and block.start_offset is not None
     ]
     locators: list[ChunkLocator] = []
     for index, heading in enumerate(headings):
@@ -66,18 +66,18 @@ def _section_locators(
 
 
 def _page_locators(
-        blocks: tuple[TextBlock, ...],
-        chunks: tuple[Chunk, ...],
-        text_length: int,
+    blocks: tuple[TextBlock, ...],
+    chunks: tuple[Chunk, ...],
+    text_length: int,
 ) -> tuple[ChunkLocator, ...]:
     """页定位保留 marker 范围，但关联 chunk 时排除 marker 本身。"""
     markers = [
         block
         for block in blocks
         if block.block_kind == BlockKind.PAGE_MARKER
-           and block.start_offset is not None
-           and block.end_offset is not None
-           and block.metadata.get("page_label") is not None
+        and block.start_offset is not None
+        and block.end_offset is not None
+        and block.metadata.get("page_label") is not None
     ]
     locators: list[ChunkLocator] = []
     for index, marker in enumerate(markers):
@@ -104,8 +104,8 @@ def _page_locators(
 
 
 def _anchor_locators(
-        blocks: tuple[TextBlock, ...],
-        chunks: tuple[Chunk, ...],
+    blocks: tuple[TextBlock, ...],
+    chunks: tuple[Chunk, ...],
 ) -> tuple[ChunkLocator, ...]:
     """将结构原子块的锚点绑定到单个所属 chunk。"""
     locators: list[ChunkLocator] = []
@@ -113,16 +113,22 @@ def _anchor_locators(
         anchor_label = _anchor_label(block)
         if anchor_label is None:
             continue
-        chunk = _find_block_chunk(chunks, block)
-        if chunk is None:
+        if block.start_offset is None or block.end_offset is None:
+            continue
+        covered = _overlapping_chunks(
+            chunks,
+            block.start_offset,
+            block.end_offset,
+        )
+        if not covered:
             continue
 
         locators.append(
             ChunkLocator(
                 name=f"anchor:{anchor_label}",
                 kind=LocatorKind.ANCHOR,
-                chunk_indices=(chunk.chunk_index,),
-                chunk_ids=(chunk.chunk_id,),
+                chunk_indices=tuple(chunk.chunk_index for chunk in covered),
+                chunk_ids=tuple(chunk.chunk_id for chunk in covered),
                 start_offset=block.start_offset,
                 end_offset=block.end_offset,
                 metadata={"anchor_label": anchor_label},
@@ -153,41 +159,16 @@ def _anchor_label(block: TextBlock) -> str | None:
 
 
 def _overlapping_chunks(
-        chunks: tuple[Chunk, ...],
-        start_offset: int,
-        end_offset: int,
+    chunks: tuple[Chunk, ...],
+    start_offset: int,
+    end_offset: int,
 ) -> tuple[Chunk, ...]:
     """查找与半开区间 `[start_offset, end_offset)` 相交的 chunks。"""
     return tuple(
         chunk
         for chunk in chunks
-        if chunk.start_offset is not None
-        and chunk.end_offset is not None
-        and chunk.start_offset < end_offset
-        and chunk.end_offset > start_offset
+        if any(
+            span.start_offset < end_offset and span.end_offset > start_offset
+            for span in chunk.source_spans
+        )
     )
-
-
-def _find_block_chunk(
-        chunks: tuple[Chunk, ...],
-        block: TextBlock,
-) -> Chunk | None:
-    """优先按结构块归属查找，缺少块范围时回退到完整 offset 包含。"""
-    for chunk in chunks:
-        if (
-                chunk.start_block is not None
-                and chunk.end_block is not None
-                and chunk.start_block <= block.block_index <= chunk.end_block
-        ):
-            return chunk
-
-        if (
-                chunk.start_offset is not None
-                and chunk.end_offset is not None
-                and block.start_offset is not None
-                and block.end_offset is not None
-                and chunk.start_offset <= block.start_offset
-                and chunk.end_offset >= block.end_offset
-        ):
-            return chunk
-    return None
