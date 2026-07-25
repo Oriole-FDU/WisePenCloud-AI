@@ -41,8 +41,8 @@ class ToolContentPutResult:
 class ChunkLocatorView:
     """汇总单个 chunk 对应的章节、页码和锚点定位信息。"""
 
-    section_path: tuple[str, ...] = ()
-    page_label: str | None = None
+    section_paths: list[tuple[str, ...]] = field(default_factory=list)
+    page_labels: list[str] = field(default_factory=list)
     anchor_labels: list[str] = field(default_factory=list)
 
     def add(
@@ -54,13 +54,12 @@ class ChunkLocatorView:
         anchor_label: str | None,
     ) -> None:
         if kind is LocatorKind.SECTION:
-            # 同一 chunk 可能命中多级章节，保留信息最完整的路径
-            if len(section_path) > len(self.section_path):
-                self.section_path = section_path
+            if section_path and section_path not in self.section_paths:
+                self.section_paths.append(section_path)
 
-        elif kind is LocatorKind.PAGE:
-            # 一个 chunk 跨页时暂时保留第一个页码
-            self.page_label = self.page_label or page_label
+        elif kind is LocatorKind.PAGE and page_label:
+            if page_label not in self.page_labels:
+                self.page_labels.append(page_label)
 
         elif (
             kind is LocatorKind.ANCHOR
@@ -237,13 +236,14 @@ def _to_tool_chunk(
         chunk_index=chunk.chunk_index,
         start_offset=chunk.start_offset,
         end_offset=chunk.end_offset,
+        source_spans=chunk.source_spans,
         block_kinds=(
             tuple(str(kind) for kind in block_kinds)
             if isinstance(block_kinds, (list, tuple))
             else ()
         ),
-        section_path=locator_view.section_path if locator_view else (),
-        page_label=locator_view.page_label if locator_view else None,
+        section_paths=(tuple(locator_view.section_paths) if locator_view else ()),
+        page_labels=(tuple(locator_view.page_labels) if locator_view else ()),
         anchor_labels=(tuple(locator_view.anchor_labels) if locator_view else ()),
     )
 
@@ -258,7 +258,7 @@ def _supported_selectors(
         selectors.append("chunk_indices")
 
     if any(chunk.block_kinds for chunk in stored.chunks):
-        selectors.append("block_kind")
+        selectors.append("block_kinds")
 
     locator_kinds = (
         {entry.locator_kind for entry in stored.index.entries}
@@ -267,10 +267,10 @@ def _supported_selectors(
     )
 
     if LocatorKind.SECTION.value in locator_kinds:
-        selectors.append("section")
+        selectors.append("sections")
     if LocatorKind.PAGE.value in locator_kinds:
-        selectors.append("page_label")
+        selectors.append("page_labels")
     if LocatorKind.ANCHOR.value in locator_kinds:
-        selectors.append("anchor_label")
+        selectors.append("anchor_labels")
 
     return tuple(selectors)

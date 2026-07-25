@@ -167,7 +167,7 @@ async def test_executor_caches_tool_return_large_text() -> None:
     assert payload["status"] == "ok"
     assert payload["content_receipts"][0]["content_id"] == repository.stored.content_id
     assert repository.stored.content_type == "text/plain"
-    assert repository.stored.chunks[0].section_path == ()
+    assert repository.stored.chunks[0].section_paths == ()
     assert repository.stored.metadata == {}
 
 
@@ -200,4 +200,4 @@ async def test_executor_preserves_cacheable_text_markdown_type() -> None:
 
     assert repository.stored is not None
     assert repository.stored.content_type == "text/markdown"
-    assert repository.stored.chunks[0].section_path == ("Heading",)
+    assert repository.stored.chunks[0].section_paths == (("Heading",),)

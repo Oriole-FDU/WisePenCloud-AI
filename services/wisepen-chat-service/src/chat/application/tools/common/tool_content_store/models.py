@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from chat.application.utils.chunkers import SourceSpan
+
 
 @dataclass(frozen=True, slots=True)
 class ToolContentChunk:
@@ -10,9 +12,10 @@ class ToolContentChunk:
     chunk_index: int
     start_offset: int | None = None
     end_offset: int | None = None
+    source_spans: tuple[SourceSpan, ...] = ()
     block_kinds: tuple[str, ...] = ()
-    section_path: tuple[str, ...] = ()
-    page_label: str | None = None
+    section_paths: tuple[tuple[str, ...], ...] = ()
+    page_labels: tuple[str, ...] = ()
     anchor_labels: tuple[str, ...] = ()
 
 
