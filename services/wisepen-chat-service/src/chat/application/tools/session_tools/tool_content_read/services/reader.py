@@ -113,16 +113,18 @@ class ToolContentReader:
                     matched_window = None
                     try:
                         for _matched in compiled.finditer(
-                                chunk_text(stored, chunk),
-                                timeout=_SEARCH_TIMEOUT_SECONDS,
+                            chunk_text(stored, chunk),
+                            timeout=_SEARCH_TIMEOUT_SECONDS,
                         ):
                             if matched_window is None:
-                                matched_window = self._window_builder.build_expanded_window(
-                                    stored,
-                                    chunks=chunks,
-                                    center_chunk=chunk.chunk_index,
-                                    merge_before=request.merge_before,
-                                    merge_after=request.merge_after,
+                                matched_window = (
+                                    self._window_builder.build_expanded_window(
+                                        stored,
+                                        chunks=chunks,
+                                        center_chunk=chunk.chunk_index,
+                                        merge_before=request.merge_before,
+                                        merge_after=request.merge_after,
+                                    )
                                 )
 
                             matches.append(
@@ -191,7 +193,9 @@ class ToolContentReader:
                             candidate_id=candidate_id,
                             text=text,
                             fields={
-                                "section": " / ".join(chunk.section_path),
+                                "section": " ".join(
+                                    " / ".join(path) for path in chunk.section_paths
+                                ),
                                 "anchor": " ".join(chunk.anchor_labels),
                             },
                             metadata={
@@ -262,7 +266,7 @@ class ToolContentReader:
         tuple[ToolContentReadFailure, ...],
     ]:
         async def load_one(
-                content_id: str,
+            content_id: str,
         ) -> tuple[StoredToolContent | None, ToolContentReadFailure | None]:
             try:
                 stored = await self._store.get(

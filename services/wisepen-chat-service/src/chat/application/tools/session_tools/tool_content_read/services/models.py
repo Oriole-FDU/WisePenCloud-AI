@@ -56,8 +56,8 @@ class ToolContentWindow:
     center_chunk: int | None = None
     chunk_start: int | None = None
     chunk_end: int | None = None
-    page_label: str | None = None
-    section_path: tuple[str, ...] = ()
+    page_labels: tuple[str, ...] = ()
+    section_paths: tuple[tuple[str, ...], ...] = ()
     anchor_labels: tuple[str, ...] = ()
 
 

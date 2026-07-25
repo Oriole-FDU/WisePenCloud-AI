@@ -21,20 +21,19 @@ class BlockKind(StrEnum):
     UNKNOWN = "unknown"
 
 
-class ChunkRole(StrEnum):
-    """Chunk 在普通分块或父子分块中的职责。"""
-
-    FLAT = "flat"
-    PARENT = "parent"
-    CHILD = "child"
-
-
 class ChunkerKind(StrEnum):
     """模块公开支持的固定分块设施。"""
 
     PLAIN_TEXT = "plain_text"
     MARKDOWN = "markdown"
-    PARENT_CHILD_MARKDOWN = "parent_child_markdown"
+
+
+class MarkdownChunkingStrategy(StrEnum):
+    """Markdown 结构块到检索块的路由策略。"""
+
+    AUTO = "auto"
+    BY_PAGE = "by_page"
+    BY_TITLE = "by_title"
 
 
 class LocatorKind(StrEnum):
@@ -71,16 +70,23 @@ class TextBlock:
 
 
 @dataclass(frozen=True, slots=True)
+class SourceSpan:
+    """最终 chunk 引用的原文半开区间。"""
+
+    start_offset: int
+    end_offset: int
+
+
+@dataclass(frozen=True, slots=True)
 class Chunk:
     """可持久化或索引的最终分块。"""
 
     chunk_id: str  # 归一化前为临时 ID，归一化后为稳定 ID
     text: str  # 分块正文
     chunk_index: int  # 最终结果中的连续顺序索引
-    role: ChunkRole = ChunkRole.FLAT  # 普通、父或子分块角色
-    parent_chunk_id: str | None = None  # 子块关联的最终父块 ID
     start_offset: int | None = None  # 原文起始位置，左闭
     end_offset: int | None = None  # 原文结束位置，右开
+    source_spans: tuple[SourceSpan, ...] = ()  # 实际参与该 chunk 的原文范围
     start_block: int | None = None  # 覆盖的首个结构块索引
     end_block: int | None = None  # 覆盖的末个结构块索引
     content_hash: str = ""  # 最终文本的 SHA-256

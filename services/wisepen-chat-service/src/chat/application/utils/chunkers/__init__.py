@@ -5,12 +5,12 @@ from .models import (
     ChunkDocument,
     ChunkerKind,
     ChunkLocator,
-    ChunkRole,
     ChunkingResult,
     LocatorKind,
+    MarkdownChunkingStrategy,
+    SourceSpan,
     TextBlock,
 )
-from .parent_child import ParentChildMarkdownChunker, ParentChildMarkdownChunkerConfig
 from .plain_text import PlainTextChunker, PlainTextChunkerConfig
 
 __all__ = [
@@ -19,14 +19,13 @@ __all__ = [
     "ChunkDocument",
     "ChunkerKind",
     "ChunkLocator",
-    "ChunkRole",
     "ChunkingResult",
     "LocatorKind",
+    "MarkdownChunkingStrategy",
     "MarkdownChunker",
     "MarkdownChunkerConfig",
-    "ParentChildMarkdownChunker",
-    "ParentChildMarkdownChunkerConfig",
     "PlainTextChunker",
     "PlainTextChunkerConfig",
+    "SourceSpan",
     "TextBlock",
 ]

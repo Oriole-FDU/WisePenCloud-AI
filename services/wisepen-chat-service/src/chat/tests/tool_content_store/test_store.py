@@ -35,13 +35,13 @@ async def test_markdown_store_projects_page_and_section_locators() -> None:
     assert result.status == ToolContentPutStatus.STORED
     assert result.receipt is not None
     assert repository.stored is not None
-    assert repository.stored.chunks[0].page_label == "1"
-    assert repository.stored.chunks[0].section_path == ("鉴权",)
+    assert repository.stored.chunks[0].page_labels == ("1",)
+    assert repository.stored.chunks[0].section_paths == (("鉴权",),)
     assert result.receipt.supported_selectors == (
         "chunk_indices",
-        "block_kind",
-        "section",
-        "page_label",
+        "block_kinds",
+        "sections",
+        "page_labels",
     )
     assert repository.stored.index is not None
     assert any(
@@ -50,6 +50,26 @@ async def test_markdown_store_projects_page_and_section_locators() -> None:
         and entry.chunk_indices == (0,)
         for entry in repository.stored.index.entries
     )
+
+
+@pytest.mark.asyncio
+async def test_markdown_store_routes_each_marked_page_to_one_chunk() -> None:
+    repository = _RepositoryStub()
+    result = await ToolContentStore(repository=repository).put(
+        session_id="session-1",
+        text=(
+            "<!-- page 1 -->\n\n# 第一页\n\n第一段。\n\n## 第二节\n\n第二段。\n\n"
+            "<!-- page 2 -->\n\n# 第二页\n\n第三段。"
+        ),
+    )
+
+    assert result.status == ToolContentPutStatus.STORED
+    assert repository.stored is not None
+    assert len(repository.stored.chunks) == 2
+    assert [chunk.page_labels for chunk in repository.stored.chunks] == [
+        ("1",),
+        ("2",),
+    ]
 
 
 @pytest.mark.asyncio
@@ -73,8 +93,8 @@ async def test_markdown_store_keeps_nested_section_and_table_anchor() -> None:
     table_chunk = next(
         chunk for chunk in repository.stored.chunks if "table" in chunk.block_kinds
     )
-    assert table_chunk.section_path == ("一级", "二级")
-    assert table_chunk.page_label == "4"
+    assert table_chunk.section_paths == (("一级",), ("一级", "二级"))
+    assert table_chunk.page_labels == ("4",)
     assert table_chunk.anchor_labels == ("Table 1",)
 
 
@@ -90,9 +110,9 @@ async def test_plain_text_store_uses_plain_text_chunker() -> None:
     assert result.status == ToolContentPutStatus.STORED
     assert repository.stored is not None
     assert repository.stored.index == ToolContentIndex()
-    assert "section" not in result.receipt.supported_selectors
-    assert "page_label" not in result.receipt.supported_selectors
-    assert "anchor_label" not in result.receipt.supported_selectors
+    assert "sections" not in result.receipt.supported_selectors
+    assert "page_labels" not in result.receipt.supported_selectors
+    assert "anchor_labels" not in result.receipt.supported_selectors
 
 
 @pytest.mark.asyncio

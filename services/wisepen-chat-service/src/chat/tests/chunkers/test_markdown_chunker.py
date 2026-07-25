@@ -1,6 +1,10 @@
+import pytest
+
 from chat.application.utils.chunkers import (
     BlockKind,
     ChunkDocument,
+    MarkdownChunkerConfig,
+    MarkdownChunkingStrategy,
     MarkdownChunker,
 )
 
@@ -14,6 +18,7 @@ def test_offsets_point_to_original_text() -> None:
         assert chunk.start_offset is not None
         assert chunk.end_offset is not None
         assert text[chunk.start_offset : chunk.end_offset].strip() == chunk.text
+        assert chunk.source_spans
 
 
 def test_keeps_full_section_path_and_locator() -> None:
@@ -22,6 +27,8 @@ def test_keeps_full_section_path_and_locator() -> None:
 
     paragraph = next(block for block in result.blocks if block.text == "正文。")
     assert paragraph.section_path == ("一级", "二级")
+    heading = next(block for block in result.blocks if block.text == "## 二级")
+    assert heading.metadata["heading_level"] == 2
     assert any(locator.name == "section:一级 > 二级" for locator in result.locators)
 
 
@@ -74,7 +81,11 @@ def test_page_markers_are_hard_chunk_boundaries() -> None:
     )
     result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
 
-    assert [chunk.metadata["page_label"] for chunk in result.chunks] == ["1", "2"]
+    assert result.metadata["strategy"] == "by_page"
+    assert [chunk.metadata["page_labels"] for chunk in result.chunks] == [
+        ("1",),
+        ("2",),
+    ]
     assert all("<!-- page" not in chunk.text for chunk in result.chunks)
 
 
@@ -102,3 +113,90 @@ def test_parser_keeps_image_and_page_marker_semantics() -> None:
     assert image.metadata["alt"] == "Figure 2: architecture"
     assert mixed.block_kind == BlockKind.PARAGRAPH
     assert any(locator.name == "anchor:Figure 2" for locator in result.locators)
+
+
+def test_by_page_keeps_a_normal_page_whole() -> None:
+    text = "<!-- page 1 -->\n\n# 标题\n\n第一段。\n\n第二段。"
+    result = MarkdownChunker(
+        MarkdownChunkerConfig(
+            strategy=MarkdownChunkingStrategy.BY_PAGE,
+            max_characters=100,
+            new_after_n_chars=1,
+        )
+    ).chunk(document=ChunkDocument(text=text))
+
+    assert len(result.chunks) == 1
+    assert result.chunks[0].metadata["page_labels"] == ("1",)
+
+
+def test_by_page_rejects_document_without_page_markers() -> None:
+    chunker = MarkdownChunker(
+        MarkdownChunkerConfig(strategy=MarkdownChunkingStrategy.BY_PAGE)
+    )
+
+    with pytest.raises(ValueError, match="requires page markers"):
+        chunker.chunk(document=ChunkDocument(text="# 标题\n\n正文。"))
+
+
+def test_config_rejects_string_strategy() -> None:
+    with pytest.raises(TypeError, match="MarkdownChunkingStrategy"):
+        MarkdownChunkerConfig(strategy="by_page")  # type: ignore[arg-type]
+
+
+def test_by_title_can_keep_one_section_across_pages() -> None:
+    text = "\n\n".join(
+        (
+            "<!-- page 1 -->",
+            "# 标题",
+            "第一页正文。",
+            "<!-- page 2 -->",
+            "第二页正文。",
+        )
+    )
+    result = MarkdownChunker(
+        MarkdownChunkerConfig(strategy=MarkdownChunkingStrategy.BY_TITLE)
+    ).chunk(document=ChunkDocument(text=text))
+
+    assert len(result.chunks) == 1
+    assert result.metadata["strategy"] == "by_title"
+    assert result.chunks[0].metadata["page_labels"] == ("1", "2")
+    assert len(result.chunks[0].source_spans) == 3
+    assert "<!-- page" not in result.chunks[0].text
+    assert result.chunks[0].text == "\n\n".join(
+        text[span.start_offset : span.end_offset].strip()
+        for span in result.chunks[0].source_spans
+    )
+
+
+def test_by_title_starts_a_new_chunk_for_each_section_with_body() -> None:
+    text = "# 第一节\n\n第一节正文。\n\n## 第二节\n\n第二节正文。"
+    result = MarkdownChunker(
+        MarkdownChunkerConfig(strategy=MarkdownChunkingStrategy.BY_TITLE)
+    ).chunk(document=ChunkDocument(text=text))
+
+    assert [chunk.metadata["section_paths"] for chunk in result.chunks] == [
+        (("第一节",),),
+        (("第一节", "第二节"),),
+    ]
+
+
+def test_by_page_splits_only_an_oversized_page() -> None:
+    text = "<!-- page 9 -->\n\n" + "超长正文。" * 20
+    result = MarkdownChunker(
+        MarkdownChunkerConfig(
+            strategy=MarkdownChunkingStrategy.BY_PAGE,
+            max_characters=30,
+        )
+    ).chunk(document=ChunkDocument(text=text))
+
+    assert len(result.chunks) > 1
+    assert all(len(chunk.text) <= 30 for chunk in result.chunks)
+    assert all(chunk.metadata["page_labels"] == ("9",) for chunk in result.chunks)
+    assert all(
+        chunk.text
+        == "\n\n".join(
+            text[span.start_offset : span.end_offset].strip()
+            for span in chunk.source_spans
+        )
+        for chunk in result.chunks
+    )

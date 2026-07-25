@@ -1,7 +1,7 @@
 from chat.application.utils.chunkers import (
     BlockKind,
     Chunk,
-    ChunkRole,
+    SourceSpan,
     TextBlock,
 )
 from chat.application.utils.chunkers.markdown.locator import build_markdown_locators
@@ -25,6 +25,7 @@ def test_incomplete_page_marker_is_ignored() -> None:
             chunk_index=0,
             start_offset=13,
             end_offset=15,
+            source_spans=(SourceSpan(13, 15),),
         ),
     )
 
@@ -54,9 +55,9 @@ def test_empty_stored_anchor_does_not_create_empty_locator() -> None:
             chunk_id="parent",
             text="ordinary table",
             chunk_index=0,
-            role=ChunkRole.PARENT,
             start_offset=0,
             end_offset=14,
+            source_spans=(SourceSpan(0, 14),),
             start_block=0,
             end_block=0,
         ),

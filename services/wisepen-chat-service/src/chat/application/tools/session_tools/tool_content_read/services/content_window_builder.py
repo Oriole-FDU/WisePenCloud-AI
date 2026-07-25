@@ -20,13 +20,13 @@ class ToolContentWindowBuilder:
         self._max_chars = max(1, int(effective_max))
 
     def build_expanded_window(
-            self,
-            stored: StoredToolContent,
-            *,
-            chunks: tuple[ToolContentChunk, ...],
-            center_chunk: int,
-            merge_before: int,
-            merge_after: int,
+        self,
+        stored: StoredToolContent,
+        *,
+        chunks: tuple[ToolContentChunk, ...],
+        center_chunk: int,
+        merge_before: int,
+        merge_after: int,
     ) -> ToolContentWindow:
         by_index = {chunk.chunk_index: chunk for chunk in chunks}
         start = max(center_chunk - max(merge_before, 0), 0)
@@ -35,9 +35,7 @@ class ToolContentWindowBuilder:
             max(by_index.keys(), default=0),
         )
         window_chunks = tuple(
-            by_index[index]
-            for index in range(start, end + 1)
-            if index in by_index
+            by_index[index] for index in range(start, end + 1) if index in by_index
         )
         if window_chunks:
             start = window_chunks[0].chunk_index
@@ -45,40 +43,30 @@ class ToolContentWindowBuilder:
 
         text = self._truncate(
             "\n\n".join(
-                text
-                for chunk in window_chunks
-                if (text := chunk_text(stored, chunk))
+                text for chunk in window_chunks if (text := chunk_text(stored, chunk))
             )
         )
-        offsets = tuple(
-            offset
-            for chunk in window_chunks
-            for offset in (chunk.start_offset, chunk.end_offset)
-            if offset is not None
-        )
-        page_label, section_path, anchor_labels = _locate_chunks(
-            stored,
-            window_chunks,
-        )
+        spans = tuple(span for chunk in window_chunks for span in chunk.source_spans)
+        page_labels, section_paths, anchor_labels = _locate_chunks(window_chunks)
 
         return ToolContentWindow(
             text=text,
-            start_offset=min(offsets) if offsets else None,
-            end_offset=max(offsets) if offsets else None,
+            start_offset=(min(span.start_offset for span in spans) if spans else None),
+            end_offset=(max(span.end_offset for span in spans) if spans else None),
             center_chunk=center_chunk,
             chunk_start=start,
             chunk_end=end,
-            page_label=page_label,
-            section_path=section_path,
+            page_labels=page_labels,
+            section_paths=section_paths,
             anchor_labels=anchor_labels,
         )
 
     def build_range_window(
-            self,
-            stored: StoredToolContent,
-            *,
-            start: int | None,
-            end: int | None,
+        self,
+        stored: StoredToolContent,
+        *,
+        start: int | None,
+        end: int | None,
     ) -> ToolContentWindow:
         text_length = len(stored.text)
         normalized_start = _normalize_offset(start, text_length, default=0)
@@ -90,19 +78,20 @@ class ToolContentWindowBuilder:
         chunks = tuple(
             chunk
             for chunk in stored.chunks
-            if chunk.start_offset is not None
-            and chunk.end_offset is not None
-            and chunk.start_offset < normalized_end
-            and chunk.end_offset > normalized_start
+            if any(
+                span.start_offset < normalized_end
+                and span.end_offset > normalized_start
+                for span in chunk.source_spans
+            )
         )
-        page_label, section_path, anchor_labels = _locate_chunks(stored, chunks)
+        page_labels, section_paths, anchor_labels = _locate_chunks(chunks)
 
         return ToolContentWindow(
             text=stored.text[normalized_start:normalized_end],
             start_offset=normalized_start,
             end_offset=normalized_end,
-            page_label=page_label,
-            section_path=section_path,
+            page_labels=page_labels,
+            section_paths=section_paths,
             anchor_labels=anchor_labels,
         )
 
@@ -113,10 +102,11 @@ class ToolContentWindowBuilder:
 
 
 def chunk_text(stored: StoredToolContent, chunk: ToolContentChunk) -> str:
-    """根据持久化 offset 读取单个 chunk 的正文。"""
-    if chunk.start_offset is None or chunk.end_offset is None:
-        return ""
-    return stored.text[chunk.start_offset: chunk.end_offset].strip()
+    """根据 source spans 读取单个 chunk 的证据正文。"""
+    return "\n\n".join(
+        stored.text[span.start_offset : span.end_offset].strip()
+        for span in chunk.source_spans
+    )
 
 
 def _normalize_offset(value: int | None, text_length: int, *, default: int) -> int:
@@ -127,16 +117,23 @@ def _normalize_offset(value: int | None, text_length: int, *, default: int) -> i
 
 
 def _locate_chunks(
-        stored: StoredToolContent,
-        chunks: tuple[ToolContentChunk, ...],
-) -> tuple[str | None, tuple[str, ...], tuple[str, ...]]:
-    section_path = next(
-        (
-            tuple(str(item) for item in chunk.section_path if str(item))
+    chunks: tuple[ToolContentChunk, ...],
+) -> tuple[tuple[str, ...], tuple[tuple[str, ...], ...], tuple[str, ...]]:
+    page_labels = tuple(
+        dict.fromkeys(
+            page_label
             for chunk in chunks
-            if chunk.section_path
-        ),
-        (),
+            for page_label in chunk.page_labels
+            if page_label
+        )
+    )
+    section_paths = tuple(
+        dict.fromkeys(
+            tuple(str(item) for item in section_path if str(item))
+            for chunk in chunks
+            for section_path in chunk.section_paths
+            if section_path
+        )
     )
     anchor_labels = tuple(
         dict.fromkeys(
@@ -146,35 +143,4 @@ def _locate_chunks(
             if (text := str(name).strip())
         )
     )
-    return _page_label(stored, chunks), section_path, anchor_labels
-
-
-def _page_label(
-        stored: StoredToolContent,
-        chunks: tuple[ToolContentChunk, ...],
-) -> str | None:
-    for chunk in chunks:
-        if chunk.page_label:
-            return chunk.page_label
-
-    if not chunks or stored.index is None:
-        return None
-
-    target_indices = {chunk.chunk_index for chunk in chunks}
-    candidate_page: tuple[int, str] | None = None
-    for entry in stored.index.entries:
-        if entry.locator_kind != "page":
-            continue
-        overlap = tuple(
-            index for index in entry.chunk_indices if index in target_indices
-        )
-        if not overlap:
-            continue
-        page_label = (entry.page_label or "").strip()
-        if not page_label:
-            continue
-        first_overlap = min(overlap)
-        if candidate_page is None or first_overlap < candidate_page[0]:
-            candidate_page = first_overlap, page_label
-
-    return candidate_page[1] if candidate_page is not None else None
+    return page_labels, section_paths, anchor_labels

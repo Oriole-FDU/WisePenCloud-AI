@@ -35,6 +35,7 @@ from chat.application.tools.session_tools.tool_content_read.tools import (
     ToolContentRegexReadTool,
     ToolContentRankedExpandReadTool,
 )
+from chat.application.utils.chunkers import SourceSpan
 from chat.application.utils.ranking.pipeline import RankingPipeline
 
 
@@ -42,10 +43,15 @@ class _StoreStub:
     def __init__(self, stored: StoredToolContent | None = None) -> None:
         self._stored = stored
 
-    async def get(self, *, content_id: str, session_id: str) -> StoredToolContent | None:
+    async def get(
+        self, *, content_id: str, session_id: str
+    ) -> StoredToolContent | None:
         if self._stored is None:
             return None
-        if content_id != self._stored.content_id or session_id != self._stored.session_id:
+        if (
+            content_id != self._stored.content_id
+            or session_id != self._stored.session_id
+        ):
             return None
         return self._stored
 
@@ -56,7 +62,9 @@ class _ConcurrentStoreStub:
         self.active = 0
         self.max_active = 0
 
-    async def get(self, *, content_id: str, session_id: str) -> StoredToolContent | None:
+    async def get(
+        self, *, content_id: str, session_id: str
+    ) -> StoredToolContent | None:
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
@@ -73,7 +81,9 @@ class _RegexBatchReader:
     def __init__(self) -> None:
         self.batches: list[tuple[str, ...]] = []
 
-    async def read_regex(self, *, request: ToolContentRegexReadRequest, session_id: str) -> ToolContentRegexReadResult:
+    async def read_regex(
+        self, *, request: ToolContentRegexReadRequest, session_id: str
+    ) -> ToolContentRegexReadResult:
         self.batches.append(request.content_ids)
         if request.content_ids[0] == "cnt_16":
             raise RuntimeError("temporary failure")
@@ -93,10 +103,10 @@ class _RankedExpandBatchReader:
         self.batches: list[tuple[str, ...]] = []
 
     async def read_ranked_expand(
-            self,
-            *,
-            request: object,
-            session_id: str,
+        self,
+        *,
+        request: object,
+        session_id: str,
     ) -> ToolContentRankedExpandReadResult:
         content_ids = request.content_ids
         self.batches.append(content_ids)
@@ -125,6 +135,7 @@ def _markdown_content() -> StoredToolContent:
                 chunk_index=0,
                 start_offset=0,
                 end_offset=len(text),
+                source_spans=(SourceSpan(0, len(text)),),
                 block_kinds=("paragraph",),
             ),
         ),
@@ -132,9 +143,9 @@ def _markdown_content() -> StoredToolContent:
 
 
 def _reader(
-        stored: StoredToolContent | None = None,
-        *,
-        max_window_chars: int | None = None,
+    stored: StoredToolContent | None = None,
+    *,
+    max_window_chars: int | None = None,
 ) -> ToolContentReader:
     return ToolContentReader(
         max_window_chars=max_window_chars,
@@ -177,7 +188,14 @@ async def test_regex_reader_returns_each_match_in_a_chunk() -> None:
         session_id="session-1",
         content_type="text/plain",
         text=text,
-        chunks=(ToolContentChunk(chunk_index=0, start_offset=0, end_offset=len(text)),),
+        chunks=(
+            ToolContentChunk(
+                chunk_index=0,
+                start_offset=0,
+                end_offset=len(text),
+                source_spans=(SourceSpan(0, len(text)),),
+            ),
+        ),
     )
 
     result = await _reader(stored).read_regex(
@@ -200,7 +218,14 @@ async def test_regex_reader_loads_content_ids_concurrently() -> None:
             session_id="session-1",
             content_type="text/plain",
             text="target",
-            chunks=(ToolContentChunk(chunk_index=0, start_offset=0, end_offset=6),),
+            chunks=(
+                ToolContentChunk(
+                    chunk_index=0,
+                    start_offset=0,
+                    end_offset=6,
+                    source_spans=(SourceSpan(0, 6),),
+                ),
+            ),
         )
         for index in range(2)
     )
@@ -235,9 +260,24 @@ async def test_regex_reader_matches_markdown_split_identifier_parts() -> None:
         content_type="text/markdown",
         text=text,
         chunks=(
-            ToolContentChunk(chunk_index=0, start_offset=0, end_offset=15),
-            ToolContentChunk(chunk_index=1, start_offset=17, end_offset=30),
-            ToolContentChunk(chunk_index=2, start_offset=32, end_offset=len(text)),
+            ToolContentChunk(
+                chunk_index=0,
+                start_offset=0,
+                end_offset=15,
+                source_spans=(SourceSpan(0, 15),),
+            ),
+            ToolContentChunk(
+                chunk_index=1,
+                start_offset=17,
+                end_offset=30,
+                source_spans=(SourceSpan(17, 30),),
+            ),
+            ToolContentChunk(
+                chunk_index=2,
+                start_offset=32,
+                end_offset=len(text),
+                source_spans=(SourceSpan(32, len(text)),),
+            ),
         ),
     )
 
@@ -260,7 +300,14 @@ async def test_regex_reader_does_not_relax_literal_underscore_to_whitespace() ->
         session_id="session-1",
         content_type="text/markdown",
         text=text,
-        chunks=(ToolContentChunk(chunk_index=0, start_offset=0, end_offset=len(text)),),
+        chunks=(
+            ToolContentChunk(
+                chunk_index=0,
+                start_offset=0,
+                end_offset=len(text),
+                source_spans=(SourceSpan(0, len(text)),),
+            ),
+        ),
     )
 
     result = await _reader(stored).read_regex(
@@ -287,6 +334,7 @@ async def test_regex_reader_preserves_literal_identifier_underscores() -> None:
                 chunk_index=0,
                 start_offset=0,
                 end_offset=len(text),
+                source_spans=(SourceSpan(0, len(text)),),
             ),
         ),
     )
@@ -398,7 +446,7 @@ async def test_regex_tool_uses_regex_engine_syntax_for_validation() -> None:
 
 @pytest.mark.asyncio
 async def test_regex_reader_converts_engine_timeout(
-        monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _TimedOutPattern:
         def finditer(self, text: str, *, timeout: float) -> None:
@@ -485,8 +533,8 @@ def test_page_selector_requires_exact_page_label() -> None:
         content_type="text/markdown",
         text="",
         chunks=(
-            ToolContentChunk(chunk_index=3, page_label="4"),
-            ToolContentChunk(chunk_index=13, page_label="14"),
+            ToolContentChunk(chunk_index=3, page_labels=("4",)),
+            ToolContentChunk(chunk_index=13, page_labels=("14",)),
         ),
         index=ToolContentIndex(
             entries=(
@@ -543,16 +591,18 @@ def test_window_builder_aggregates_locator_without_redundant_title() -> None:
                 chunk_index=0,
                 start_offset=0,
                 end_offset=5,
-                section_path=("Parent", "Child"),
-                page_label="7",
+                source_spans=(SourceSpan(0, 5),),
+                section_paths=(("Parent", "Child"),),
+                page_labels=("7",),
                 anchor_labels=("Table 1",),
             ),
             ToolContentChunk(
                 chunk_index=1,
                 start_offset=7,
                 end_offset=len(text),
-                section_path=("Parent", "Child"),
-                page_label="7",
+                source_spans=(SourceSpan(7, len(text)),),
+                section_paths=(("Parent", "Child"),),
+                page_labels=("7",),
                 anchor_labels=("Table 1", "Figure 2"),
             ),
         ),
@@ -567,6 +617,6 @@ def test_window_builder_aggregates_locator_without_redundant_title() -> None:
     )
 
     assert window.text == text
-    assert window.section_path == ("Parent", "Child")
-    assert window.page_label == "7"
+    assert window.section_paths == (("Parent", "Child"),)
+    assert window.page_labels == ("7",)
     assert window.anchor_labels == ("Table 1", "Figure 2")
