@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 
 import regex
 
@@ -18,9 +17,12 @@ from .content_window_builder import ToolContentWindowBuilder, chunk_text
 from .models import (
     ToolContentRankedExpandItem,
     ToolContentRankedExpandReadRequest,
+    ToolContentRankedExpandReadResult,
+    ToolContentReadFailure,
+    ToolContentReadResult,
     ToolContentRegexMatch,
     ToolContentRegexReadRequest,
-    ToolContentWindow,
+    ToolContentRegexReadResult,
 )
 
 _SEARCH_TIMEOUT_SECONDS = 0.05
@@ -32,12 +34,6 @@ class ToolContentInvalidRegexError(ValueError):
 
 class ToolContentRegexTimeoutError(TimeoutError):
     """单次正则搜索超过执行时间限制。"""
-
-
-@dataclass(frozen=True, slots=True)
-class _RankedWindow:
-    score: float
-    item: ToolContentRankedExpandItem
 
 
 class ToolContentReader:
@@ -65,19 +61,25 @@ class ToolContentReader:
         session_id: str,
         start: int | None,
         end: int | None,
-    ) -> ToolContentWindow | None:
+    ) -> ToolContentReadResult:
         stored = await self._store.get(
             content_id=content_id,
             session_id=session_id,
         )
         if stored is None:
-            return None
+            return ToolContentReadResult(
+                content_id=content_id,
+                reason="content_not_found",
+            )
 
-        return await asyncio.to_thread(
-            self._window_builder.build_range_window,
-            stored,
-            start=start,
-            end=end,
+        return ToolContentReadResult(
+            content_id=content_id,
+            window=await asyncio.to_thread(
+                self._window_builder.build_range_window,
+                stored,
+                start=start,
+                end=end,
+            ),
         )
 
     async def read_regex(
@@ -85,8 +87,8 @@ class ToolContentReader:
         *,
         request: ToolContentRegexReadRequest,
         session_id: str,
-    ) -> tuple[ToolContentRegexMatch, ...]:
-        stored_items = await self._load_many(
+    ) -> ToolContentRegexReadResult:
+        stored_items, failed = await self._load_many(
             content_ids=request.content_ids,
             session_id=session_id,
         )
@@ -106,55 +108,55 @@ class ToolContentReader:
             # regex 库支持 timeout，避免模型传入灾难性表达式拖死执行线程。
             for content_id, stored in stored_items:
                 chunks = select_chunks(stored, request.selector)
-                if not chunks:
-                    continue
 
-                try:
-                    for matched in compiled.finditer(
-                            stored.text,
+                for chunk in chunks:
+                    matched_window = None
+                    try:
+                        for _matched in compiled.finditer(
+                            chunk_text(stored, chunk),
                             timeout=_SEARCH_TIMEOUT_SECONDS,
-                    ):
-                        chunk = _find_matching_chunk(
-                            chunks,
-                            start=matched.start(),
-                            end=matched.end(),
-                        )
-                        if chunk is None:
-                            continue
+                        ):
+                            if matched_window is None:
+                                matched_window = (
+                                    self._window_builder.build_expanded_window(
+                                        stored,
+                                        chunks=chunks,
+                                        center_chunk=chunk.chunk_index,
+                                        merge_before=request.merge_before,
+                                        merge_after=request.merge_after,
+                                    )
+                                )
 
-                        matches.append(
-                            ToolContentRegexMatch(
-                                content_id=content_id,
-                                window=self._window_builder.build_expanded_window(
-                                    stored,
-                                    chunks=chunks,
-                                    center_chunk=chunk.chunk_index,
-                                    merge_before=request.merge_before,
-                                    merge_after=request.merge_after,
-                                ),
+                            matches.append(
+                                ToolContentRegexMatch(
+                                    content_id=content_id,
+                                    window=matched_window,
+                                )
                             )
-                        )
 
-                        if len(matches) >= max_matches:
-                            return tuple(matches)
-                except TimeoutError as exc:
-                    raise ToolContentRegexTimeoutError(
-                        f"regex search exceeded {_SEARCH_TIMEOUT_SECONDS}s"
-                    ) from exc
+                            if len(matches) >= max_matches:
+                                return tuple(matches)
+                    except TimeoutError as exc:
+                        raise ToolContentRegexTimeoutError(
+                            f"regex search exceeded {_SEARCH_TIMEOUT_SECONDS}s"
+                        ) from exc
 
             return tuple(matches)
 
         matches = await asyncio.to_thread(scan_loaded)
 
-        return matches
+        return ToolContentRegexReadResult(
+            matches=matches,
+            failed=failed,
+        )
 
     async def read_ranked_expand(
         self,
         *,
         request: ToolContentRankedExpandReadRequest,
         session_id: str,
-    ) -> tuple[_RankedWindow, ...]:
-        stored_items = await self._load_many(
+    ) -> ToolContentRankedExpandReadResult:
+        stored_items, failed = await self._load_many(
             content_ids=request.content_ids,
             session_id=session_id,
         )
@@ -191,8 +193,14 @@ class ToolContentReader:
                             candidate_id=candidate_id,
                             text=text,
                             fields={
-                                "section": " / ".join(chunk.section_path),
+                                "section": " ".join(
+                                    " / ".join(path) for path in chunk.section_paths
+                                ),
                                 "anchor": " ".join(chunk.anchor_labels),
+                            },
+                            metadata={
+                                "content_id": content_id,
+                                "chunk_index": chunk.chunk_index,
                             },
                             group_key=content_id,
                         )
@@ -206,7 +214,9 @@ class ToolContentReader:
         )
 
         if not candidates:
-            return ()
+            return ToolContentRankedExpandReadResult(
+                failed=failed,
+            )
 
         result = await self._ranking_pipeline.arank(
             RankRequest(
@@ -217,7 +227,7 @@ class ToolContentReader:
             )
         )
 
-        ranked: list[_RankedWindow] = []
+        ranked: list[ToolContentRankedExpandItem] = []
 
         for item in result.ranked:
             source = sources.get(item.candidate_id)
@@ -227,61 +237,66 @@ class ToolContentReader:
             content_id, stored, chunk_index = source
 
             ranked.append(
-                _RankedWindow(
+                ToolContentRankedExpandItem(
+                    content_id=content_id,
+                    rank=item.rank,
                     score=item.score,
-                    item=ToolContentRankedExpandItem(
-                        content_id=content_id,
-                        window=self._window_builder.build_expanded_window(
-                            stored,
-                            chunks=chunks_by_content_id[content_id],
-                            center_chunk=chunk_index,
-                            merge_before=request.merge_before,
-                            merge_after=request.merge_after,
-                        ),
+                    window=self._window_builder.build_expanded_window(
+                        stored,
+                        chunks=chunks_by_content_id[content_id],
+                        center_chunk=chunk_index,
+                        merge_before=request.merge_before,
+                        merge_after=request.merge_after,
                     ),
                 )
             )
 
-        return tuple(ranked)
+        return ToolContentRankedExpandReadResult(
+            ranked=tuple(ranked),
+            failed=failed,
+        )
 
     async def _load_many(
         self,
         *,
         content_ids: tuple[str, ...],
         session_id: str,
-    ) -> tuple[tuple[str, StoredToolContent], ...]:
-        async def load_one(content_id: str) -> StoredToolContent | None:
+    ) -> tuple[
+        tuple[tuple[str, StoredToolContent], ...],
+        tuple[ToolContentReadFailure, ...],
+    ]:
+        async def load_one(
+            content_id: str,
+        ) -> tuple[StoredToolContent | None, ToolContentReadFailure | None]:
             try:
-                return await self._store.get(
+                stored = await self._store.get(
                     content_id=content_id,
                     session_id=session_id,
                 )
-            except Exception:
-                return None
+            except Exception as exc:
+                return None, ToolContentReadFailure(
+                    content_id=content_id,
+                    reason=type(exc).__name__,
+                )
+
+            if stored is None:
+                return None, ToolContentReadFailure(
+                    content_id=content_id,
+                    reason="content_not_found",
+                )
+
+            return stored, None
 
         loaded_items = await asyncio.gather(
             *(load_one(content_id) for content_id in content_ids)
         )
 
-        return tuple(
-            (content_id, stored)
-            for content_id, stored in zip(content_ids, loaded_items, strict=True)
-            if stored is not None
-        )
+        stored_items: list[tuple[str, StoredToolContent]] = []
+        failed: list[ToolContentReadFailure] = []
+        for content_id, (stored, failure) in zip(content_ids, loaded_items):
+            if failure is not None:
+                failed.append(failure)
+            elif stored is not None:
+                stored_items.append((content_id, stored))
 
-
-def _find_matching_chunk(
-        chunks: tuple[ToolContentChunk, ...],
-        *,
-        start: int,
-        end: int,
-) -> ToolContentChunk | None:
-    for chunk in chunks:
-        if chunk.start_offset is None or chunk.end_offset is None:
-            continue
-        if end > start:
-            if chunk.start_offset < end and chunk.end_offset > start:
-                return chunk
-        elif chunk.start_offset <= start <= chunk.end_offset:
-            return chunk
-    return None
+        return tuple(stored_items), tuple(failed)

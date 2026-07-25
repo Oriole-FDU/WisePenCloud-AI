@@ -54,9 +54,17 @@ class ToolContentWindow:
     start_offset: int | None = None
     end_offset: int | None = None
     center_chunk: int | None = None
-    page_label: str | None = None
-    section_path: tuple[str, ...] = ()
+    chunk_start: int | None = None
+    chunk_end: int | None = None
+    page_labels: tuple[str, ...] = ()
+    section_paths: tuple[tuple[str, ...], ...] = ()
     anchor_labels: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ToolContentReadFailure:
+    content_id: str
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +74,27 @@ class ToolContentRegexMatch:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolContentRegexReadResult:
+    matches: tuple[ToolContentRegexMatch, ...] = ()
+    failed: tuple[ToolContentReadFailure, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ToolContentRankedExpandItem:
     content_id: str
+    rank: int
+    score: float
     window: ToolContentWindow
+
+
+@dataclass(frozen=True, slots=True)
+class ToolContentRankedExpandReadResult:
+    ranked: tuple[ToolContentRankedExpandItem, ...] = ()
+    failed: tuple[ToolContentReadFailure, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ToolContentReadResult:
+    content_id: str
+    window: ToolContentWindow | None = None
+    reason: str | None = None
