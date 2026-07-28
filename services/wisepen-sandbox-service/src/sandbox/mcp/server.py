@@ -9,8 +9,6 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 from common.logger import error as log_error
-from sandbox.Queue.container_queue import ContainerQueue
-from sandbox.Queue.file_manager import FileManager
 from sandbox.gateway.isolation import PathValidationError
 from sandbox.gateway.container_utils import execute_on_container
 from sandbox.mcp.context import extract_tenant, build_translator
@@ -39,24 +37,29 @@ def _scrub_result(result: Any, translator) -> Any:
 
 
 async def _run_on_container(
-    queue: ContainerQueue,
-    file_manager: FileManager,
+    session_pool,
     uid: str, sid: str,
     method: str, path: str, body: dict,
+    executor: Any = None,
 ) -> dict:
-    cid, token = await asyncio.to_thread(queue.acquire, uid, sid)
-    file_manager.pull(cid, uid, sid)
+    cid, token = await asyncio.to_thread(session_pool.acquire, uid, sid)
     try:
+        if executor is not None:
+            return await executor(cid, method, path, body)
         return await execute_on_container(cid, method, path, body)
     finally:
-        file_manager.push(cid, uid, sid)
-        queue.release(cid, token)
+        session_pool.heartbeat(uid, sid)
 
 
 def build_sandbox_mcp(
-    queue: ContainerQueue,
-    file_manager: FileManager,
+    session_pool,
+    executor: Any = None,
 ) -> FastMCP:
+    """Build the MCP server. session_pool handles container acquire + heartbeat.
+    Pass `executor` for dev mode (MockSandbox.execute)."""
+    from functools import partial
+
+    _run = partial(_run_on_container, session_pool, executor=executor)
 
     mcp = FastMCP(
         _MCP_SERVER_NAME,
@@ -85,7 +88,7 @@ def build_sandbox_mcp(
         if max_chars is not None:
             body["max_chars"] = max_chars
         try:
-            result = await _run_on_container(queue, file_manager, uid, sid, "POST", "/v1/file/read", body)
+            result = await _run(uid, sid, "POST", "/v1/file/read", body)
             return json.dumps(_scrub_result(result, translator))
         except Exception as e:
             log_error("mcp read_file failed", exc=e, file=file)
@@ -106,7 +109,7 @@ def build_sandbox_mcp(
             return json.dumps({"error": str(e)})
         body = {"file": physical, "content": content, "encoding": "utf-8"}
         try:
-            result = await _run_on_container(queue, file_manager, uid, sid, "POST", "/v1/file/write", body)
+            result = await _run(uid, sid, "POST", "/v1/file/write", body)
             return json.dumps(_scrub_result(result, translator))
         except Exception as e:
             log_error("mcp write_file failed", exc=e, file=file)
@@ -127,7 +130,7 @@ def build_sandbox_mcp(
             return json.dumps({"error": str(e)})
         body = {"path": physical, "recursive": recursive}
         try:
-            result = await _run_on_container(queue, file_manager, uid, sid, "POST", "/v1/file/list", body)
+            result = await _run(uid, sid, "POST", "/v1/file/list", body)
             return json.dumps(_scrub_result(result, translator))
         except Exception as e:
             log_error("mcp list_directory failed", exc=e, path=path)
@@ -151,7 +154,7 @@ def build_sandbox_mcp(
             return json.dumps({"error": str(e)})
         body = {"path": physical, "pattern": pattern, "recursive": recursive, "ignore_case": ignore_case}
         try:
-            result = await _run_on_container(queue, file_manager, uid, sid, "POST", "/v1/file/grep", body)
+            result = await _run(uid, sid, "POST", "/v1/file/grep", body)
             return json.dumps(_scrub_result(result, translator))
         except Exception as e:
             log_error("mcp grep_files failed", exc=e, path=path, pattern=pattern)
@@ -172,7 +175,7 @@ def build_sandbox_mcp(
             return json.dumps({"error": str(e)})
         body = {"file": physical, "old_str": old_str, "new_str": new_str}
         try:
-            result = await _run_on_container(queue, file_manager, uid, sid, "POST", "/v1/file/replace", body)
+            result = await _run(uid, sid, "POST", "/v1/file/replace", body)
             return json.dumps(_scrub_result(result, translator))
         except Exception as e:
             log_error("mcp edit_file failed", exc=e, file=file)
@@ -195,7 +198,7 @@ def build_sandbox_mcp(
         if timeout_ms:
             body["timeout"] = timeout_ms // 1000
         try:
-            result = await _run_on_container(queue, file_manager, uid, sid, "POST", "/v1/shell/exec", body)
+            result = await _run(uid, sid, "POST", "/v1/shell/exec", body)
             return json.dumps(_scrub_result(result, translator))
         except Exception as e:
             log_error("mcp shell_exec failed", exc=e, command=command)
