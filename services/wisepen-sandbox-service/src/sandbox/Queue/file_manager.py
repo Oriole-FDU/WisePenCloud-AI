@@ -16,6 +16,7 @@ import subprocess
 import time
 
 from common.core.exceptions import ServiceException
+from common.sandbox import SandboxErrorCode
 from sandbox.Queue.store.interface import WorkspaceStore, WorkspaceFile
 
 
@@ -23,24 +24,31 @@ class FileManager:
     """Host <-> container workspace file sync.  Optional WorkspaceStore for dual persistence."""
 
     def __init__(self, workspace_cache: str = "/workspaces",
-                 store: WorkspaceStore | None = None):
+                 store: WorkspaceStore | None = None,
+                 workspace_root: str = "/home/gem/workspaces",
+                 container_user: str = "gem:gem"):
         self._workspace_cache = workspace_cache
         self._store = store
-        # checkpoint tracking
-        self._last_checkpoint: dict[tuple[str, str], float] = {}  # (uid,sid) → epoch
-        self._checkpoint_interval: float = 300.0  # 5 minutes
+        self._workspace_root = workspace_root
+        self._container_user = container_user
+        self._last_checkpoint: dict[tuple[str, str], float] = {}
+        self._checkpoint_interval: float = 300.0
 
     def host_path(self, user_id: str, session_id: str) -> str:
         return f"{self._workspace_cache}/{user_id}/{session_id}"
 
+    def container_path(self, user_id: str, session_id: str) -> str:
+        """Tenant-scoped physical path on the AIO container."""
+        return f"{self._workspace_root}/{user_id}/{session_id}"
+
     # ---- acquire / release ----
 
     def pull(self, container_id: str, user_id: str, session_id: str) -> None:
-        """Restore workspace from store (if available) → host cache → docker cp to container."""
+        """Restore workspace from Store → host cache → docker cp to container + chown."""
         host = self.host_path(user_id, session_id)
         os.makedirs(host, exist_ok=True)
 
-        # Step 1: 从 Store 恢复到主机缓存
+        # Step 1: Store → host cache
         if self._store:
             snapshot = self._store.load(user_id, session_id)
             if snapshot.files:
@@ -50,37 +58,51 @@ class FileManager:
                     with open(fp, "w", encoding=f.encoding) as fh:
                         fh.write(f.content)
 
-        # Step 2: 主机缓存 → 容器
-        if os.listdir(host):
-            self._docker_cp(f"{host}/.", f"{container_id}:/workspace/")
+        # Step 2: host cache → container (tenant-scoped physical path)
+        if os.path.exists(host) and os.listdir(host):
+            ct_path = self.container_path(user_id, session_id)
+            # Ensure parent directories exist on container (docker cp may not create them)
+            subprocess.run(
+                ["docker", "exec", container_id,
+                 "mkdir", "-p", ct_path],
+                capture_output=True, timeout=10,
+            )
+            self._docker_cp(f"{host}/.", f"{container_id}:{ct_path}/")
+            # docker cp creates files as root; chown to container user for AIO access
+            subprocess.run(
+                ["docker", "exec", container_id,
+                 "chown", "-R", self._container_user, ct_path],
+                capture_output=True, timeout=10,
+            )
 
     def push(self, container_id: str, user_id: str, session_id: str) -> None:
-        """容器 → 主机缓存 → Store (双写持久化)。"""
+        """Container → host cache → Store."""
         host = self.host_path(user_id, session_id)
         os.makedirs(host, exist_ok=True)
 
-        # Step 1: 容器 → 主机缓存
+        # Step 1: container → host cache
+        ct_path = self.container_path(user_id, session_id)
         try:
-            self._docker_cp(f"{container_id}:/workspace/.", f"{host}/")
+            self._docker_cp(f"{container_id}:{ct_path}/.", f"{host}/")
         except ServiceException:
-            pass  # non-fatal: container will be recycled
+            pass  # non-fatal: container may not have workspace yet
 
-        # Step 2: 主机缓存 → Store
+        # Step 2: host cache → Store
         if self._store:
             self._save_to_store(user_id, session_id, host)
 
-        # 清理检查点记录
         self._last_checkpoint.pop((user_id, session_id), None)
 
     # ---- checkpoint (periodic auto-save without release) ----
 
     def checkpoint(self, container_id: str, user_id: str, session_id: str) -> bool:
-        """将容器工作空间增量保存到主机缓存 + Store。不同步时不写 Store。"""
+        """Container → host cache + Store."""
         host = self.host_path(user_id, session_id)
         os.makedirs(host, exist_ok=True)
 
+        ct_path = self.container_path(user_id, session_id)
         try:
-            self._docker_cp(f"{container_id}:/workspace/.", f"{host}/")
+            self._docker_cp(f"{container_id}:{ct_path}/.", f"{host}/")
         except ServiceException:
             return False
 

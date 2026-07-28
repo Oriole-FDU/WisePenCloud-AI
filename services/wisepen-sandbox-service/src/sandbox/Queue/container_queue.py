@@ -56,13 +56,17 @@ class ContainerQueue:
         min_idle: int = 2,
         max_total: int = 8,
         workspace_cache: str = "/workspaces",
-        lease_ttl: float = 1800.0,     # 租约 TTL（秒），默认 30 分钟
+        lease_ttl: float = 1800.0,
+        network: str = "sandbox-net",
+        profile = None,  # SandboxProfile — image-specific config
     ):
         self._image = image
         self._min_idle = min_idle
         self._max_total = max_total
         self._workspace_cache = workspace_cache.replace("\\", "/")
         self._lease_ttl = lease_ttl
+        self._network = network
+        self._profile = profile
         self._containers: dict[str, ContainerInfo] = {}
         self._lock = threading.Lock()
         self._next_token = 0
@@ -228,27 +232,25 @@ class ContainerQueue:
     # ---- internal Docker operations ----
 
     def _start_container(self) -> str:
+        p = self._profile
+        role_label = p.role_label if p else "wisepen.role=aio-worker"
+        mgr_label = p.manager_label if p else "wisepen.manager=sandbox-manager"
+        vnc_port = str(p.vnc_port) if p else "8080"
+        ws_port = str(p.websockify_port) if p else "6080"
+        shm = p.shm_size if p else "2gb"
+        wait = p.startup_wait_seconds if p else 5
+
         name = f"aio-worker-{uuid.uuid4().hex[:8]}"
         args = [
             "run", "-d",
             "--name", name,
-            "--label", "wisepen.role=aio-worker",
-            "--label", "wisepen.manager=sandbox-manager",
-            # 资源限制 (P0)
-            "--memory", "512m",
-            "--memory-swap", "512m",
-            "--cpus", "1.0",
-            "--pids-limit", "64",
+            "--network", self._network,
+            "--label", role_label,
+            "--label", mgr_label,
             "--restart", "no",
-            # 安全加固 (P0)
-            "--security-opt", "seccomp=unconfined",
-            "--security-opt", "no-new-privileges",
-            "--cap-drop", "ALL",
-            "--shm-size", "2gb",
-            "--network", "sandbox-net",
-            "-v", f"{self._workspace_cache}:/workspace:rw",
-            "-p", "::8080",
-            "-p", "::6080",
+            "--shm-size", shm,
+            "-p", f"::{vnc_port}",
+            "-p", f"::{ws_port}",
             self._image,
         ]
         _dbg("docker_run", name=name, image=self._image)
@@ -256,8 +258,7 @@ class ContainerQueue:
         cid = raw.strip()
         if not cid:
             raise ServiceException(SandboxErrorCode.CONTAINER_START_FAILED)
-        # Wait briefly for container to be ready
-        time.sleep(5)
+        time.sleep(wait)
         return cid
 
     def _rm_container(self, container_id: str) -> None:
@@ -298,7 +299,8 @@ class ContainerQueue:
         )
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or "").strip()
-            raise ServiceException(SandboxErrorCode.CONTAINER_START_FAILED, ("docker " + " ".join(args[:2]))[:500])
+            raise ServiceException(SandboxErrorCode.CONTAINER_START_FAILED,
+                                   f"docker {' '.join(args[:2])}: {detail[:300]}")
         return (completed.stdout or "").strip()
 
     @property
