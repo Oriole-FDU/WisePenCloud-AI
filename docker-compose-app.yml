@@ -71,6 +71,41 @@ services:
         aliases:
           - mcp-service
 
+  sandbox-gateway:
+    build:
+      context: .
+      dockerfile: services/wisepen-sandbox-service/Dockerfile
+    image: ${DOCKER_REGISTRY}/wisepencloud-sandbox-gateway:${APP_VERSION}
+    container_name: wisepen-sandbox-gateway
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+      - PROFILE=prod
+      - NACOS_SERVER_ADDR=nacos:8848
+      - NACOS_NAMESPACE_ID=
+      - NACOS_GROUP=DEFAULT_GROUP
+      - NACOS_USERNAME=${NACOS_USERNAME}
+      - NACOS_PASSWORD=${NACOS_PASSWORD}
+      - SERVICE_HOST=0.0.0.0
+      - SERVICE_PORT=8001
+      - LOG_LEVEL=INFO
+      - OTEL_SERVICE_NAME=wisepen-sandbox-gateway
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=otlp
+      - OTEL_LOGS_EXPORTER=otlp
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - sandbox-workspaces:/workspaces
+    networks:
+      wisepen-net:
+        aliases:
+          - sandbox-gateway
+
+volumes:
+  sandbox-workspaces:
+
 networks:
   wisepen-net:
     external: true

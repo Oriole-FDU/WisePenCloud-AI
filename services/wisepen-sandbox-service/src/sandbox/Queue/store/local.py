@@ -10,7 +10,7 @@ import os
 import time
 from dataclasses import asdict
 
-from sandbox.Queue.workspace_store import (
+from sandbox.Queue.store.interface import (
     WorkspaceStore, WorkspaceFile, WorkspaceSnapshot,
 )
 

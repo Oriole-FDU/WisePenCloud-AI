@@ -1,26 +1,6 @@
 version: "3.8"
 
 services:
-  # Docker API 权限代理 — 仅放行必要的 API（run/exec/inspect/cp/port）
-  docker-proxy:
-    image: tecnativa/docker-socket-proxy:latest
-    container_name: sandbox-docker-proxy
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - CONTAINERS=1        # /containers/* (create/list/start/stop)
-      - EXEC=1              # /exec/* (docker exec)
-      - IMAGES=1            # /images/* (pull)
-      - INFO=1              # /info
-      - NETWORKS=1          # /networks/*
-      - POST=0              # 禁止创建 volumes/networks/secrets
-      - BUILD=0             # 禁止 docker build
-      - COMMIT=0            # 禁止 docker commit
-      - AUTH=0              # 禁止管理认证
-    networks:
-      - sandbox-net
-
   sandbox-manager:
     build:
       context: ../..
@@ -28,17 +8,16 @@ services:
     container_name: wisepen-sandbox-manager
     restart: unless-stopped
     volumes:
-      # 不再直接挂载 docker.sock，通过 docker-proxy 访问
-      - /workspaces:/workspaces
+      - /var/run/docker.sock:/var/run/docker.sock
+      - sandbox-workspaces:/workspaces
     ports:
-      - "8001:8001"   # MCP gateway
+      - "8001:8001"
     environment:
       - PROFILE=dev
-      - DOCKER_HOST=tcp://docker-proxy:2375
+      - DOCKER_HOST=unix:///var/run/docker.sock
       - NACOS_SERVER_ADDR=127.0.0.1:8848
       - CHAT_USE_NACOS=0
       - SANDBOX_HOST=0.0.0.0
-      - SANDBOX_PORT=9001
       - SANDBOX_QUEUE_ENABLE=1
       - WORKER_MIN_IDLE=2
       - WORKER_MAX_TOTAL=8
@@ -46,11 +25,15 @@ services:
       - WORKSPACE_CACHE_DIR=/workspaces
       - WORKER_IMAGE=ghcr.io/agent-infra/sandbox:latest
       - FROM_SOURCE_SECRET=local-dev-secret
-    labels:
-      - "wisepen.role=sandbox-manager"
     networks:
       - sandbox-net
+    labels:
+      - "wisepen.role=sandbox-manager"
+
+volumes:
+  sandbox-workspaces:
 
 networks:
   sandbox-net:
     driver: bridge
+    name: sandbox-net
