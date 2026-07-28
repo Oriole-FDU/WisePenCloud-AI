@@ -98,6 +98,8 @@ class AppSettings(BaseModel):
     WEB_SEARCH_TAVILY_BASE_URL: str = "https://api.tavily.com"
     WEB_SEARCH_ANYSEARCH_BASE_URL: str = "https://api.anysearch.com"
     WEB_SEARCH_BAIDU_QIANFAN_BASE_URL: str = "https://qianfan.baidubce.com"
+    WEB_SEARCH_TINYFISH_BASE_URL: str = "https://api.search.tinyfish.ai"
+    WEB_SEARCH_FIRECRAWL_BASE_URL: str = "https://api.firecrawl.dev"
 
     # Skill 配置
 
