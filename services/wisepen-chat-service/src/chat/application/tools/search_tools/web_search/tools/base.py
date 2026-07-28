@@ -30,22 +30,15 @@ WEB_SEARCH_TIMEOUT_SECONDS = 300.0
 PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "query": {
-            "type": "object",
-            "properties": {
-                "search_query": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Concise keywords for the search provider.",
-                },
-                "ranking_query": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "A complete natural-language question describing the information to rank by.",
-                },
-            },
-            "required": ["search_query", "ranking_query"],
-            "additionalProperties": False,
+        "search_query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Concise keywords for the search provider.",
+        },
+        "ranking_query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A complete natural-language question describing the information to rank by.",
         },
         "mode": {
             "type": "string",
@@ -64,7 +57,7 @@ PARAMETERS_SCHEMA: dict[str, Any] = {
             "description": "Maximum candidate results per search request.",
         },
     },
-    "required": ["query"],
+    "required": ["search_query", "ranking_query"],
     "additionalProperties": False,
 }
 TOOL_DESCRIPTION = (
@@ -132,9 +125,8 @@ class BaseWebSearchTool:
         config: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, object]:
-        query_payload = kwargs["query"]
-        search_query = query_payload["search_query"].strip()
-        ranking_query = query_payload["ranking_query"].strip()
+        search_query = kwargs["search_query"].strip()
+        ranking_query = kwargs["ranking_query"].strip()
         mode = SearchMode(str(kwargs.get("mode") or SearchMode.WEB.value))
         requested_results = kwargs.get("max_results") or DEFAULT_SEARCH_RESULTS
         max_results = max(1, min(requested_results, MAX_SEARCH_RESULTS))

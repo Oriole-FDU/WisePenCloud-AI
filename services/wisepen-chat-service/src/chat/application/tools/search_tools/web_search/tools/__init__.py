@@ -3,8 +3,10 @@ from .provider_tools import (
     AnySearchSearchTool,
     BaiduQianfanSearchTool,
     ExaSearchTool,
+    FirecrawlSearchTool,
     PlatformSearchTool,
     TavilySearchTool,
+    TinyFishSearchTool,
 )
 
 __all__ = [
@@ -12,6 +14,8 @@ __all__ = [
     "BaiduQianfanSearchTool",
     "BaseWebSearchTool",
     "ExaSearchTool",
+    "FirecrawlSearchTool",
     "PlatformSearchTool",
     "TavilySearchTool",
+    "TinyFishSearchTool",
 ]

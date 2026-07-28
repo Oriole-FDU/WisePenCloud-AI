@@ -1,6 +1,8 @@
 ﻿import json
 from dataclasses import field, dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from common.logger import error, warn
 
@@ -116,6 +118,9 @@ class ChatContextAssembler:
         user_defined_attachment_ids: Optional[List[str]] = None,
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表"""
+
+        shanghai_now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S %Z%z")
+        system_prompt = f"{system_prompt.rstrip()}\n\nCurrent time: {shanghai_now}. Answer with this current time in mind."
 
         # Message 列表初始化并加入 System Prompt
         messages: List[ChatMessage] = [
