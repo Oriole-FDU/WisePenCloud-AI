@@ -1,0 +1,55 @@
+# Chat Service 本地开发配置 (CHAT_USE_NACOS=0 时生效)
+# 配置项与 AppSettings 对齐，值按本地环境修改
+
+LLM_BASE_URL: "http://localhost:11434"
+LLM_API_KEY: "sk-local-dev-key"
+DEFAULT_MODEL_ID: "gpt-4o"
+MEMORY_LLM_MODEL: "gpt-4o-mini"
+MEMORY_EMBEDDING_MODEL: "text-embedding-3-small"
+MEMORY_RERANKER_ZE_MODEL: "gte-multilingual-base"
+ZERO_ENTROPY_API_KEY: "ze-key-local"
+SUMMARY_MODEL: "gpt-4o-mini"
+
+# Infrastructure (按需启用)
+KAFKA_BOOTSTRAP_SERVERS: "localhost:9092"
+REDIS_URL: "redis://localhost:6379/0"
+MONGODB_URL: "mongodb://localhost:27017"
+MONGODB_DB_NAME: "wisepen_chat"
+QDRANT_HOST: ""
+QDRANT_PASSWORD: ""
+
+FROM_SOURCE_SECRET: "local-dev-secret"
+
+# Context Window
+CTX_TOKEN_LIMIT: 128000
+AGENT_MAX_ITERATIONS: 5
+TOOL_RESULT_MAX_CHARS: 20000
+
+# RPC / Service Discovery
+RPC_LB_STRATEGY: "random"
+RPC_DEFAULT_TIMEOUT: 30.0
+RPC_DEFAULT_RETRIES: 1
+SERVICE_DISCOVERY_CACHE_TTL_SECONDS: 30.0
+
+# Sandbox MCP — 直连本地 gateway，绕过 Nacos
+SANDBOX_MCP_BASE_URL: "http://localhost:8001"
+SANDBOX_MCP_SERVICE_NAME: "wisepen-sandbox-mcp-service"
+SANDBOX_TIMEOUT_SECONDS: 30.0
+
+# MCP
+MCP_DEFAULT_TIMEOUT_SECONDS: 15.0
+MCP_SYSTEM_LIST_TOOLS_CACHE_TTL_SECONDS: 60.0
+MCP_USER_LIST_TOOLS_CACHE_TTL_SECONDS: 60.0
+
+# Skills
+SKILL_MATCH_TOP_K: 3
+SKILL_CACHE_TTL_SECONDS: 300
+SKILL_ASSETS_CACHE_PATH: "/tmp/wisepen_skill_assets"
+
+# OSS Cache
+OSS_CACHE_DIR: "/tmp/wisepen_oss_cache"
+OSS_CACHE_TTL_SECONDS: 21600
+OSS_CACHE_GC_INTERVAL_SECONDS: 1800
+
+# Speech (optional, can be null)
+SPEECH_CONFIG: null

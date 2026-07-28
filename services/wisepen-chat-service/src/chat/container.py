@@ -30,8 +30,10 @@ from chat.core.persistence import (
     RedisMcpToolDiscoveryCache,
 )
 from chat.domain.repositories import ToolConfigRepository
-from chat.application.attachment_service import AttachmentService
+
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
+from chat.application.llm_provider_resolver import LLMProviderResolver
+from chat.application.token_counter import TokenCounter
 from chat.application.agents import (
     DefaultAgentResolver,
 )
@@ -45,9 +47,6 @@ from chat.application.tools import (
 )
 from chat.application.tools.skill_tools import LoadSkillAssetTool, LoadSkillTool
 from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
-from chat.application.tools.skill_tools import LoadSkillAssetTool
-from chat.application.tools.skill_tools import LoadSkillTool
-from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.core.config.nacos import nacos_client_manager
@@ -55,7 +54,6 @@ from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClie
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
 from common.kafka.producer import KafkaProducerClient
-from chat.core.kafka import FileUploadedConsumer
 
 
 async def _provide_nacos_naming() -> NacosNamingService:
@@ -157,9 +155,10 @@ class Container(containers.DeclarativeContainer):
         McpServiceClient,
         discovery=service_discovery,
         from_source_secret=settings.FROM_SOURCE_SECRET,
-        service_name="wisepen-sandbox-mcp-service",
-        timeout=settings.RPC_DEFAULT_TIMEOUT,
+        service_name=settings.SANDBOX_MCP_SERVICE_NAME,
+        timeout=settings.SANDBOX_TIMEOUT_SECONDS,
         default_strategy=settings.RPC_LB_STRATEGY,
+        base_url=settings.SANDBOX_MCP_BASE_URL,
     )
     mcp_client = providers.Singleton(
         McpClient,
@@ -197,14 +196,6 @@ class Container(containers.DeclarativeContainer):
     kafka_producer = providers.Singleton(
         KafkaProducerClient,
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
-    )
-
-    kafka_consumer = providers.Singleton(
-        FileUploadedConsumer,
-        bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
-        topic="wisepen-storage-file-uploaded-topic",
-        group_id="wisepen-chat-upload-callback-group",
-        session_repo=session_repo,
     )
 
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期
@@ -272,16 +263,12 @@ class Container(containers.DeclarativeContainer):
         system_mcp_tool_catalog=system_mcp_tool_catalog,
     )
 
-    attachment_service = providers.Factory(
-        AttachmentService,
-        file_storage_client=file_storage_client,
-        session_repo=session_repo,
-    )
-
     # Application 层组件
     chat_turn_coordinator = providers.Factory(
         ChatTurnCoordinator,
-        llm=llm_provider,
+        llm_provider_resolver=llm_provider_resolver,
+        text_llm=litellm_adapter,
+        token_counter=token_counter,
         memory=memory_provider,
         model_repo=model_repo,
         provider_repo=provider_repo,

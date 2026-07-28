@@ -1,10 +1,13 @@
-﻿import yaml
+﻿import os
+import yaml
 import asyncio
 import threading
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from chat.core.config.nacos import nacos_client_manager
+from chat.core.config.bootstrap_settings import bootstrap_settings
 from common.logger import error, info
 
 
@@ -121,10 +124,12 @@ class AppSettings(BaseModel):
     # GC 扫描周期（秒）
     OSS_CACHE_GC_INTERVAL_SECONDS: int = 30 * 60
 
-    # Sandbox Service 配置
-    SANDBOX_SERVICE_NAME: str = "wisepen-sandbox-service"
-    SANDBOX_SERVICE_URL: str = ""
-    SANDBOX_FROM_SOURCE: str = ""
+    # Sandbox MCP 配置
+    # Nacos 服务名（Chat 通过 MCP 发现沙箱工具）
+    SANDBOX_MCP_SERVICE_NAME: str = "wisepen-sandbox-mcp-service"
+    # 直连 URL 回退（DEV 模式绕过 Nacos），如 "http://localhost:8001"
+    SANDBOX_MCP_BASE_URL: str = ""
+    # Sandbox MCP 调用超时（秒）
     SANDBOX_TIMEOUT_SECONDS: float = 30.0
 
 
@@ -147,7 +152,25 @@ def _run_async(coro):
     return result
 
 
+def _load_local_config() -> dict[str, Any]:
+    """加载本地 YAML 文件作为 Nacos 配置的 fallback。"""
+    SERVICE_ROOT = Path(__file__).resolve().parents[4]
+    cfg_path = SERVICE_ROOT / "chat-service.nacos.yaml"
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"local config not found: {cfg_path}")
+    raw = cfg_path.read_text(encoding="utf-8")
+    cfg = yaml.safe_load(raw) or {}
+    if not isinstance(cfg, dict):
+        raise ValueError("local config must be a yaml mapping")
+    info("using local config file (DEV mode).", file=str(cfg_path))
+    return cfg
+
+
 def load_settings() -> AppSettings:
+    use_nacos = str(os.getenv("CHAT_USE_NACOS") or "").strip().lower() in ("1", "true", "yes")
+    if bootstrap_settings.IS_DEV and not use_nacos:
+        return AppSettings(**_load_local_config())
+
     try:
         info("nacos app config pulling.")
         raw_yaml = _run_async(nacos_client_manager.pull_config())
@@ -155,6 +178,8 @@ def load_settings() -> AppSettings:
         return AppSettings(**(config_dict or {}))
     except Exception as e:
         error("nacos app config pull failed.", exc=e)
+        if bootstrap_settings.IS_DEV:
+            return AppSettings(**_load_local_config())
         raise
 
 
