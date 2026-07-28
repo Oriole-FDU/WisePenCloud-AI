@@ -24,6 +24,7 @@ from chat.application.chat_turn_finalizer import ChatTurnFinalizer
 from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
 from chat.application.tools.core import ToolRegistry
 from common.kafka.producer import KafkaProducerClient
+from common.security import SecurityContextHolder
 
 
 # Skill 工具默认不暴露；仅在本轮存在可展示 Skill 时整体解禁
@@ -163,6 +164,7 @@ class ChatTurnCoordinator:
         tool_context: dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
+            "group_role_map": SecurityContextHolder.get_group_role_map(),
         }
 
         # 构建Skill视图
