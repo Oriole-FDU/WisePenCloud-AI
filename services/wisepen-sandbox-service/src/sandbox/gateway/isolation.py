@@ -20,6 +20,13 @@ _ALLOWED_CHARS = re.compile(r"^[a-zA-Z0-9_-]+$")
 SEP = "/"
 
 
+def configure_workspace(sandbox_root: str, virtual_root: str = "/workspace") -> None:
+    """配置沙箱工作区路径（由 main.py 从 SandboxProfile 注入）。"""
+    global SANDBOX_ROOT, VIRTUAL_ROOT
+    SANDBOX_ROOT = sandbox_root
+    VIRTUAL_ROOT = virtual_root
+
+
 def _normpath(p: str) -> str:
     """Normalize a Unix path using only forward-slash logic (no os.path)."""
     if not p:
