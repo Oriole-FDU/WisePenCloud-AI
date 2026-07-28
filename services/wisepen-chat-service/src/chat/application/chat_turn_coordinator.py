@@ -1,5 +1,4 @@
 ﻿from typing import Optional, List, Dict, Any, Set
-import uuid
 from beanie import PydanticObjectId
 from fastapi import BackgroundTasks
 
@@ -25,7 +24,6 @@ from chat.application.chat_turn_finalizer import ChatTurnFinalizer
 from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
 from chat.application.tools.core import ToolRegistry
 from common.kafka.producer import KafkaProducerClient
-from chat.core.providers.sandbox_client import SandboxClient
 
 
 # Skill 工具默认不暴露；仅在本轮存在可展示 Skill 时整体解禁
@@ -54,7 +52,6 @@ class ChatTurnCoordinator:
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
             agent_resolver: AgentResolver | None = None,
-            sandbox_client: SandboxClient | None = None,
     ):
         self._memory = memory
         self._model_repo = model_repo
@@ -77,7 +74,6 @@ class ChatTurnCoordinator:
         )
         self._skill_matcher = skill_matcher
         self._agent_resolver = agent_resolver or DefaultAgentResolver()
-        self._sandbox_client = sandbox_client
 
     # -------------------------------------------------------------------------
     # 公共入口
@@ -164,11 +160,9 @@ class ChatTurnCoordinator:
             )
 
         # 构建工具上下文
-        sandbox_request_id = f"chat_{uuid.uuid4().hex}"
         tool_context: dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
-            "request_id": sandbox_request_id,
         }
 
         # 构建Skill视图
@@ -249,8 +243,6 @@ class ChatTurnCoordinator:
         )]
 
         token_usage = 0
-        if self._sandbox_client is not None:
-            await self._sandbox_client.allocate_request(tool_context)
 
         # 流式推理
         try:
@@ -275,9 +267,6 @@ class ChatTurnCoordinator:
             error("chat stream generation failed.", session_id=session_id, exc=e)
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
-        finally:
-            if self._sandbox_client is not None:
-                await self._sandbox_client.release_request(sandbox_request_id)
 
         # 使用 FastAPI 的 BackgroundTasks 在响应返回给用户后，异步执行
         if background_tasks is not None:
