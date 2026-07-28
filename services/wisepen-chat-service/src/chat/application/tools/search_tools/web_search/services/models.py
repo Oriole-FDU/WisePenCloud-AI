@@ -9,6 +9,8 @@ class SearchProviderName(StrEnum):
     TAVILY = "tavily"
     ANYSEARCH = "anysearch"
     BAIDU_QIANFAN = "baidu_qianfan"
+    TINYFISH = "tinyfish"
+    FIRECRAWL = "firecrawl"
 
 
 class SearchMode(StrEnum):

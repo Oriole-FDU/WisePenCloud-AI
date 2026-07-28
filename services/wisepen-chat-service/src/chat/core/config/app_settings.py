@@ -40,7 +40,7 @@ class AppSettings(BaseModel):
 
     QUERY_MODEL: str  # 工具性小模型调用使用的查询模型
     EMBEDDING_MODEL: str  # embedding 模型
-    EMBEDDING_DIMENSIONS: int = 4096 # embedding 向量维度
+    EMBEDDING_DIMENSIONS: int = 4096  # embedding 向量维度
     RERANKER_MODEL: str  # 重排模型
 
     # 摘要模型
@@ -51,9 +51,7 @@ class AppSettings(BaseModel):
 
     # PaddleOCR 云端服务
     PADDLE_OCR_TOKEN: str = ""
-    PADDLE_OCR_API_URL: str = (
-        "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
-    )
+    PADDLE_OCR_API_URL: str = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
     PADDLE_OCR_MODEL: str = "PaddleOCR-VL-1.6"
 
     # 安全配置
@@ -63,14 +61,36 @@ class AppSettings(BaseModel):
     # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str
     KAFKA_TOKEN_CONSUMPTION_TOPIC: str = "wisepen-user-token-consumption-topic"
+    KAFKA_RESOURCE_ACL_RECALC_TOPIC: str = "wisepen-resource-acl-recalc-topic"
+    KAFKA_RAG_ACL_RECALC_GROUP_ID: str = "wisepen-chat-rag-acl-recalc-group"
+    KAFKA_DOCUMENT_READY_TOPIC: str = "wisepen-document-ready-topic"
+    KAFKA_RAG_DOCUMENT_READY_GROUP_ID: str = "wisepen-chat-rag-document-ready-group"
+    KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC: str = (
+        "wisepen-resource-physical-destroy-topic"
+    )
+    KAFKA_RAG_RESOURCE_DESTROY_GROUP_ID: str = "wisepen-chat-rag-resource-destroy-group"
 
     # Redis / MongoDB / Qdrant 配置
     REDIS_URL: str
     MONGODB_URL: str
     MONGODB_DB_NAME: str
+    RESOURCE_PERMISSION_MONGODB_DB_NAME: str = "wisepen_res_permission"
     QDRANT_HOST: str
     QDRANT_PORT: int = 6333
     QDRANT_PASSWORD: str
+    QDRANT_RAG_COLLECTION_NAME: str = "wisepen_rag_retrieval_chunks"
+    QDRANT_RAG_BM25_TOKENIZER: Literal[
+        "prefix",
+        "whitespace",
+        "word",
+        "multilingual",
+    ] = "multilingual"
+    NEO4J_URI: str = "bolt://127.0.0.1:7687"
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: str = "password123"
+    NEO4J_DATABASE: str = "neo4j"
+    RAG_GRAPH_EXTRACTION_CACHE_TTL_SECONDS: int = 30 * 24 * 3600
+    RAG_CONTEXT_INDEXING_CACHE_TTL_SECONDS: int = 30 * 24 * 3600
 
     # 参数配置
 
@@ -112,6 +132,8 @@ class AppSettings(BaseModel):
     WEB_SEARCH_TAVILY_BASE_URL: str = "https://api.tavily.com"
     WEB_SEARCH_ANYSEARCH_BASE_URL: str = "https://api.anysearch.com"
     WEB_SEARCH_BAIDU_QIANFAN_BASE_URL: str = "https://qianfan.baidubce.com"
+    WEB_SEARCH_TINYFISH_BASE_URL: str = "https://api.search.tinyfish.ai"
+    WEB_SEARCH_FIRECRAWL_BASE_URL: str = "https://api.firecrawl.dev"
 
     # Skill 配置
 

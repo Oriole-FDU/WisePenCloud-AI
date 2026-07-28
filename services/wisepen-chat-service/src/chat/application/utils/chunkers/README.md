@@ -79,10 +79,13 @@ source_text = "\n\n".join(
 |----------------------|---------------|-------------------------------------------|
 | 标题                   | `HEADING`     | `heading_level`、`title`、完整 `section_path` |
 | 普通段落                 | `PARAGRAPH`   | 当前 `section_path`                         |
-| pipe/HTML 表格         | `TABLE`       | 表题合并后可带 `anchor_label`                    |
+| pipe/HTML 表格         | `TABLE`       | 前置或后置表题合并后可带 `anchor_label`               |
 | fenced/indented code | `CODE`        | 当前 `section_path`                         |
-| 列表、引用、公式、独立图片        | 对应类型          | 图片保存 `alt/src`                            |
+| 列表、引用、公式             | 对应类型          | 当前 `section_path`                         |
+| 含图片的段落               | `PARAGRAPH`   | 图片语法保留在段落原文中                              |
 | `<!-- page N -->`    | `PAGE_MARKER` | `page_label`                              |
+
+`TextBlock.text` 保留对应 offset 范围内的原始文本，不裁剪首尾空白或换行。
 
 标题栈按真实层级维护。例如：
 
@@ -166,7 +169,7 @@ Markdown 分块完成后构造三类 locator：
 
 - `SECTION`：完整标题路径对应的原文范围和 chunk 集合；
 - `PAGE`：页码对应的原文范围和 chunk 集合；
-- `ANCHOR`：表格、公式、图片等可识别标签对应的 chunk 集合。
+- `ANCHOR`：表格、公式等可识别标签对应的 chunk 集合。
 
 locator 与最终 chunks 一起生成，所以不会引用分块过程中已经失效的临时 ID。一个 locator 可以指向多个 chunks，一个 chunk
 也可以属于多个 Section 或 Page locator。
@@ -186,7 +189,7 @@ Markdown 的默认结果是：带页码正文按页保存，无页码正文按�
 - `block_kinds`：按内容结构筛选；
 - `section_paths`：按章节定位；
 - `page_labels`：按页定位；
-- `anchor_labels`：按表格、公式、图片标签定位。
+- `anchor_labels`：按表格、公式标签定位。
 
 修改 chunk 契约时，必须同步检查 `tool_content_store` 与 `tool_content_read`，因为它们是当前真实调用链。
 

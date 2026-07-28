@@ -92,15 +92,15 @@ async def test_html_result_hits_url_cache_on_second_fetch(
 
 
 @pytest.mark.asyncio
-async def test_pdf_cache_preserves_plain_text_format(
+async def test_pdf_cache_preserves_markdown_format(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def extract_pdf_text(_: bytes, *, url: str) -> str:
-        return f"plain text from {url}"
+    async def extract_pdf_markdown(_: bytes, *, url: str) -> str:
+        return f"## Markdown from {url}"
 
     monkeypatch.setattr(
-        "chat.application.tools.web_tools.web_fetch.coordinator.extract_pdf_text",
-        extract_pdf_text,
+        "chat.application.tools.web_tools.web_fetch.coordinator.extract_pdf_markdown",
+        extract_pdf_markdown,
     )
     static_fetcher = _StaticFetcher(pdf=True)
     coordinator = FetchCoordinator(
@@ -119,5 +119,5 @@ async def test_pdf_cache_preserves_plain_text_format(
     )
 
     assert static_fetcher.calls == 1
-    assert first[0].is_md is False
-    assert second[0].is_md is False
+    assert first[0].is_md is True
+    assert second[0].is_md is True

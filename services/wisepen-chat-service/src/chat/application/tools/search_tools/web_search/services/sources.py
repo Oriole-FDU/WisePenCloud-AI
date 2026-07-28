@@ -10,8 +10,10 @@ from .providers import (
     AnySearchSearcher,
     BaiduQianfanSearcher,
     ExaSearcher,
+    FirecrawlSearcher,
     PlatformDefaultSearcher,
     TavilySearcher,
+    TinyFishSearcher,
 )
 from .providers.base import (
     ProviderSearcher,
@@ -52,6 +54,8 @@ class SearchSourceFactory:
     tavily_base_url: str
     anysearch_base_url: str
     baidu_qianfan_base_url: str
+    tinyfish_base_url: str
+    firecrawl_base_url: str
 
     def build(
         self,
@@ -108,6 +112,18 @@ class SearchSourceFactory:
                 config=config,
             )
 
+        if provider == SearchProviderName.TINYFISH:
+            return TinyFishSearcher(
+                http_client=self.http_client,
+                config=config,
+            )
+
+        if provider == SearchProviderName.FIRECRAWL:
+            return FirecrawlSearcher(
+                http_client=self.http_client,
+                config=config,
+            )
+
         raise ValueError(f"不支持的搜索源: {provider}")
 
     def _base_url(
@@ -125,5 +141,11 @@ class SearchSourceFactory:
 
         if provider == SearchProviderName.BAIDU_QIANFAN:
             return self.baidu_qianfan_base_url
+
+        if provider == SearchProviderName.TINYFISH:
+            return self.tinyfish_base_url
+
+        if provider == SearchProviderName.FIRECRAWL:
+            return self.firecrawl_base_url
 
         raise ValueError(f"不支持的搜索源: {provider}")

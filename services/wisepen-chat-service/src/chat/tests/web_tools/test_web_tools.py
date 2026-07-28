@@ -9,6 +9,7 @@ from chat.application.tools.core.output.cache import ToolOutputCache
 from chat.application.tools.core.output.tool_return import CacheableText, ToolReturn
 from chat.application.tools.web_tools import WebCrawlTool, WebFetchTool
 from chat.application.tools.web_tools.web_fetch.content import pdf_extract
+from chat.application.tools.web_tools.web_fetch.core.errors import UrlFetchError
 from chat.application.tools.web_tools.web_fetch.core.models import (
     WebFetchResult,
 )
@@ -29,8 +30,8 @@ class _FetchCoordinator:
                 ),
                 WebFetchResult(
                     source_url=urls[1],
-                    text="PDF text",
-                    is_md=False,
+                    text="## PDF",
+                    is_md=True,
                 ),
         )
 
@@ -52,7 +53,7 @@ class _Crawler:
 
 
 @pytest.mark.asyncio
-async def test_web_fetch_preserves_html_and_pdf_cache_formats(
+async def test_web_fetch_preserves_html_and_pdf_markdown_formats(
 ) -> None:
     result = await WebFetchTool(
         fetch_coordinator=_FetchCoordinator(),
@@ -61,7 +62,7 @@ async def test_web_fetch_preserves_html_and_pdf_cache_formats(
         urls=["https://example.com", "https://example.com/paper.pdf"],
     )
 
-    assert [content.is_md for content in result.cacheable_texts] == [True, False]
+    assert [content.is_md for content in result.cacheable_texts] == [True, True]
     assert result.visible_result["items"] == (
         {
             "source_url": "https://example.com",
@@ -86,28 +87,44 @@ async def test_web_crawl_marks_cleaned_html_as_markdown() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pdf_extraction_runs_pdfium_in_thread(
+async def test_pdf_extraction_runs_inspector_in_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     called: dict[str, object] = {}
 
-    async def fake_to_thread(function: Any, content: bytes) -> str:
+    async def fake_to_thread(function: Any, content: bytes) -> Any:
         called["function"] = function
         called["content"] = content
-        return "PDF text\n"
+        return type("PdfResult", (), {"markdown": "## PDF\n"})()
 
     monkeypatch.setattr(pdf_extract.asyncio, "to_thread", fake_to_thread)
 
-    text = await pdf_extract.extract_pdf_text(
+    markdown = await pdf_extract.extract_pdf_markdown(
         b"%PDF-1.7 fake",
         url="https://example.com/paper.pdf",
     )
 
-    assert text == "PDF text\n"
+    assert markdown == "## PDF\n"
     assert called == {
-        "function": pdf_extract._extract_pdf_text_sync,
+        "function": pdf_extract.pdf_inspector.process_pdf_bytes,
         "content": b"%PDF-1.7 fake",
     }
+
+
+@pytest.mark.asyncio
+async def test_pdf_extraction_rejects_empty_markdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_to_thread(*_: Any) -> Any:
+        return type("PdfResult", (), {"markdown": ""})()
+
+    monkeypatch.setattr(pdf_extract.asyncio, "to_thread", fake_to_thread)
+
+    with pytest.raises(UrlFetchError, match="no extractable markdown"):
+        await pdf_extract.extract_pdf_markdown(
+            b"%PDF-1.7 fake",
+            url="https://example.com/paper.pdf",
+        )
 
 
 @pytest.mark.asyncio

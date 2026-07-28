@@ -21,10 +21,10 @@ class ToolOutputCache:
     __slots__ = ("_content_store", "_inline_max_chars")
 
     def __init__(
-            self,
-            *,
-            content_store: ToolContentStore,
-            inline_max_chars: int,
+        self,
+        *,
+        content_store: ToolContentStore,
+        inline_max_chars: int,
     ) -> None:
         if inline_max_chars < 1:
             raise ValueError("inline_max_chars must be greater than 0")
@@ -33,11 +33,11 @@ class ToolOutputCache:
         self._inline_max_chars = inline_max_chars
 
     async def process(
-            self,
-            *,
-            tool_return: ToolReturn,
-            invocation: ToolInvocation,
-            session_id: str,
+        self,
+        *,
+        tool_return: ToolReturn,
+        invocation: ToolInvocation,
+        session_id: str,
     ) -> dict[str, Any]:
         """将可缓存文本附加到可见结果，或替换为外部内容回执。"""
         payload = dict(tool_return.visible_result)
@@ -54,8 +54,8 @@ class ToolOutputCache:
 
         # 总量较小时直接放入工具结果，避免一次额外的存储和读取。
         if (
-                sum(len(cacheable_text.text) for cacheable_text in cacheable_texts)
-                <= self._inline_max_chars
+            sum(len(cacheable_text.text) for cacheable_text in cacheable_texts)
+            <= self._inline_max_chars
         ):
             payload["contents"] = tuple(
                 cacheable_text.text for cacheable_text in cacheable_texts
@@ -63,32 +63,33 @@ class ToolOutputCache:
             return payload
 
         # 超过内联边界后，每段文本独立入库；单段失败不影响其他文本。
-        receipts = await self._store_contents(
+        indexed_receipts = await self._store_contents(
             invocation=invocation,
             cacheable_texts=cacheable_texts,
             session_id=session_id,
         )
-        if receipts:
+        if indexed_receipts:
             payload["content_receipts"] = tuple(
                 {
+                    "content_index": content_index,
                     "content_id": receipt.content_id,
                     "chunk_count": receipt.chunk_count,
                     "supported_selectors": receipt.supported_selectors,
                 }
-                for receipt in receipts
+                for content_index, receipt in indexed_receipts
             )
 
         return payload
 
     async def _store_contents(
-            self,
-            *,
-            invocation: ToolInvocation,
-            cacheable_texts: tuple[CacheableText, ...],
-            session_id: str,
-    ) -> tuple[ToolContentReceipt, ...]:
+        self,
+        *,
+        invocation: ToolInvocation,
+        cacheable_texts: tuple[CacheableText, ...],
+        session_id: str,
+    ) -> tuple[tuple[int, ToolContentReceipt], ...]:
         """逐段存储大文本，并返回成功写入的内容回执。"""
-        receipts: list[ToolContentReceipt] = []
+        receipts: list[tuple[int, ToolContentReceipt]] = []
 
         for index, cacheable_text in enumerate(cacheable_texts):
             try:
@@ -112,7 +113,7 @@ class ToolOutputCache:
                 continue
 
             if result.receipt is not None:
-                receipts.append(result.receipt)
+                receipts.append((index, result.receipt))
             elif result.status is ToolContentPutStatus.CONTENT_TOO_LARGE:
                 warn(
                     "tool output cache content too large.",

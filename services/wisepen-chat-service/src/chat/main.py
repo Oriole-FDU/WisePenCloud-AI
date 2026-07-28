@@ -36,13 +36,29 @@ from chat.api.endpoints import memory as memory_endpoints
 from chat.api.endpoints import model as model_endpoints
 from chat.api.endpoints import speech as speech_endpoints
 from chat.api.endpoints import tool as tool_endpoints
-from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig, UserMcpServerConfig
+from chat.domain.entities import (
+    ChatMessage,
+    ChatSession,
+    Model,
+    ModelProviderMapping,
+    Provider,
+    RagAclProjectionDocument,
+    RagContentRevisionDocument,
+    RagContentPartDocument,
+    RagSectionReadingBlockDocument,
+    RagProjectionCheckpointDocument,
+    RagSectionDocument,
+    RagSourceRefDocument,
+    UserMcpServerConfig,
+    UserToolConfig,
+)
 
 
 # 避免 HTTP 代理拦截内部中间件请求。
 no_proxy = ",".join(filter(None, [
     os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "",
-    "localhost, 127.0.0.1"
+    "localhost, 127.0.0.1",
+    settings.QDRANT_HOST,
 ]))
 os.environ["no_proxy"] = no_proxy
 os.environ["NO_PROXY"] = no_proxy
@@ -57,9 +73,29 @@ async def lifespan(app: FastAPI):
     mongo_client = AsyncMongoClient(settings.MONGODB_URL)
     await init_beanie(
         database=mongo_client[settings.MONGODB_DB_NAME],
-        document_models=[ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig, UserMcpServerConfig],
+        document_models=[
+            ChatSession,
+            ChatMessage,
+            Provider,
+            Model,
+            ModelProviderMapping,
+            UserToolConfig,
+            UserMcpServerConfig,
+            RagAclProjectionDocument,
+            RagContentRevisionDocument,
+            RagContentPartDocument,
+            RagSectionReadingBlockDocument,
+            RagProjectionCheckpointDocument,
+            RagSectionDocument,
+            RagSourceRefDocument,
+        ],
     )
     info("beanie initialized.", db=settings.MONGODB_DB_NAME)
+
+    neo4j_driver = container.neo4j_driver()
+    await neo4j_driver.verify_connectivity()
+    await container.rag_knowledge_graph_repository().initialize()
+    info("neo4j knowledge graph initialized.", db=settings.NEO4J_DATABASE)
 
     # 注册 Nacos 服务
     try:
@@ -70,6 +106,13 @@ async def lifespan(app: FastAPI):
     # 启动 Kafka Producer
     kafka_producer = container.kafka_producer()
     await kafka_producer.start()
+
+    rag_acl_consumer = container.rag_acl_kafka_consumer()
+    await rag_acl_consumer.start()
+    rag_document_consumer = container.rag_document_kafka_consumer()
+    await rag_document_consumer.start()
+    rag_resource_deleted_consumer = container.rag_resource_deleted_kafka_consumer()
+    await rag_resource_deleted_consumer.start()
 
     # 启动 Oss File 加载器
     oss_file_loader = container.oss_file_loader()
@@ -91,6 +134,13 @@ async def lifespan(app: FastAPI):
     kafka_producer = container.kafka_producer()
     await kafka_producer.stop()
 
+    rag_acl_consumer = container.rag_acl_kafka_consumer()
+    await rag_acl_consumer.stop()
+    rag_document_consumer = container.rag_document_kafka_consumer()
+    await rag_document_consumer.stop()
+    rag_resource_deleted_consumer = container.rag_resource_deleted_kafka_consumer()
+    await rag_resource_deleted_consumer.stop()
+
     # 关闭 Oss File 加载器
     oss_file_loader = container.oss_file_loader()
     if getattr(oss_file_loader, "stop", None) is not None:
@@ -110,6 +160,14 @@ async def lifespan(app: FastAPI):
         await container.redis_client().aclose()
     except Exception as e:
         error("redis client close failed.", exc=e)
+    try:
+        await container.qdrant_client().close()
+    except Exception as e:
+        error("qdrant client close failed.", exc=e)
+    try:
+        await container.neo4j_driver().close()
+    except Exception as e:
+        error("neo4j driver close failed.", exc=e)
 
     try:
         await nacos_client_manager.deregister_instance()

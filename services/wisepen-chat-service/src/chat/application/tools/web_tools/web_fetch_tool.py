@@ -24,7 +24,7 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "maxItems": MAX_URLS,
             "description": (
                 "One or more complete, publicly reachable http:// or https:// URLs. "
-                "Use a direct PDF URL when you need PDF text; ordinary HTML pages are "
+                "Use a direct PDF URL when you need PDF content; ordinary HTML pages are "
                 "cleaned to Markdown. Do not pass a search query, site name, or relative URL."
             ),
         },
@@ -49,8 +49,8 @@ class WebFetchTool:
                 description=(
                     "Fetch one or more specific public HTTP(S) URLs and return their readable "
                     "content. Use this when the exact page or PDF URL is already known, including "
-                    "several unrelated URLs. HTML is cleaned and returned as Markdown; a direct PDF "
-                    "URL is extracted and returned as plain text. Use web_crawl when you need to "
+                    "several unrelated URLs. HTML and direct PDFs are returned as Markdown. Use "
+                    "web_crawl when you need to "
                     "discover and read multiple linked HTML pages starting from one site URL. URLs "
                     "must be complete public http(s) URLs; invalid or unsupported URLs are omitted "
                     "from the returned items. Each returned item identifies its source URL and the "

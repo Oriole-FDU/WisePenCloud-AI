@@ -10,6 +10,9 @@ from pydantic import BaseModel
 
 from chat.application.tools.common.tool_content_store import (
     StoredToolContent,
+    ToolContentPutResult,
+    ToolContentPutStatus,
+    ToolContentReceipt,
     ToolContentStore,
 )
 from chat.application.tools.core.definition import (
@@ -165,6 +168,7 @@ async def test_executor_caches_tool_return_large_text() -> None:
     assert repository.stored is not None
     payload = json.loads(result.tool_output)
     assert payload["status"] == "ok"
+    assert payload["content_receipts"][0]["content_index"] == 0
     assert payload["content_receipts"][0]["content_id"] == repository.stored.content_id
     assert repository.stored.content_type == "text/plain"
     assert repository.stored.chunks[0].section_paths == ()
@@ -201,3 +205,44 @@ async def test_executor_preserves_cacheable_text_markdown_type() -> None:
     assert repository.stored is not None
     assert repository.stored.content_type == "text/markdown"
     assert repository.stored.chunks[0].section_paths == (("Heading",),)
+
+
+@pytest.mark.asyncio
+async def test_output_cache_preserves_index_after_partial_store_failure() -> None:
+    class _Store:
+        calls = 0
+
+        async def put(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("store unavailable")
+            return ToolContentPutResult(
+                status=ToolContentPutStatus.STORED,
+                receipt=ToolContentReceipt(
+                    content_id="cnt_second",
+                    chunk_count=1,
+                ),
+            )
+
+    payload = await ToolOutputCache(
+        content_store=_Store(),
+        inline_max_chars=1,
+    ).process(
+        tool_return=ToolReturn(
+            cacheable_texts=(
+                CacheableText(text="first"),
+                CacheableText(text="second"),
+            )
+        ),
+        invocation=_invocation(),
+        session_id="session-1",
+    )
+
+    assert payload["content_receipts"] == (
+        {
+            "content_index": 1,
+            "content_id": "cnt_second",
+            "chunk_count": 1,
+            "supported_selectors": (),
+        },
+    )

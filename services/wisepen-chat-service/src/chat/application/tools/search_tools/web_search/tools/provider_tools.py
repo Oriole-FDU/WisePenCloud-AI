@@ -49,3 +49,21 @@ class BaiduQianfanSearchTool(BaseWebSearchTool):
             provider=SearchProviderName.BAIDU_QIANFAN,
             **kwargs,
         )
+
+
+class TinyFishSearchTool(BaseWebSearchTool):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(
+            tool_name="tinyfish_search",
+            provider=SearchProviderName.TINYFISH,
+            **kwargs,
+        )
+
+
+class FirecrawlSearchTool(BaseWebSearchTool):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(
+            tool_name="firecrawl_search",
+            provider=SearchProviderName.FIRECRAWL,
+            **kwargs,
+        )

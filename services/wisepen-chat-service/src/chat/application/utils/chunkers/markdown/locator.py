@@ -9,7 +9,6 @@ _FORMULA_RE = re.compile(
     r"(?:Equation|Eq\.?|公式)\s+\(?(\d+(?:\.\d+)*)\)?",
     re.IGNORECASE,
 )
-_FIGURE_RE = re.compile(r"^(?:Figure|Fig\.?|图)\s+(\d+(?:\.\d+)*)", re.IGNORECASE)
 
 
 def build_markdown_locators(
@@ -31,7 +30,10 @@ def _section_locators(
     chunks: tuple[Chunk, ...],
     text_length: int,
 ) -> tuple[ChunkLocator, ...]:
-    """章节范围包含标题本身，并延伸到下一个标题之前。"""
+    """章节范围包含标题本身，并延伸到下一个同级/更高级标题之前。
+
+    例如：H1 范围从 H1 起始到下一个 H1；H2 范围从 H2 起始到下一个同级 H2。
+    """
     headings = [
         block
         for block in blocks
@@ -70,7 +72,12 @@ def _page_locators(
     chunks: tuple[Chunk, ...],
     text_length: int,
 ) -> tuple[ChunkLocator, ...]:
-    """页定位保留 marker 范围，但关联 chunk 时排除 marker 本身。"""
+    """页定位保留 marker 范围，但关联 chunk 时排除 marker 本身。
+
+    关键点：查找覆盖 chunk 时使用 marker.end_offset（而非 start_offset），
+    因为 PAGE_MARKER 自身的 offset 不属于任何 chunk，从 marker 结束处开始
+    才能正确匹配该页的第一个 chunk。
+    """
     markers = [
         block
         for block in blocks
@@ -149,9 +156,6 @@ def _anchor_label(block: TextBlock) -> str | None:
     elif block.block_kind == BlockKind.FORMULA:
         match = _FORMULA_RE.search(block.text)
         prefix = "Equation"
-    elif block.block_kind == BlockKind.IMAGE:
-        match = _FIGURE_RE.match(str(block.metadata.get("alt", "")).strip())
-        prefix = "Figure"
     else:
         return None
 
@@ -163,12 +167,16 @@ def _overlapping_chunks(
     start_offset: int,
     end_offset: int,
 ) -> tuple[Chunk, ...]:
-    """查找与半开区间 `[start_offset, end_offset)` 相交的 chunks。"""
+    """查找与半开区间 `[start_offset, end_offset)` 相交的 chunks。
+
+    使用 chunk.source_spans 而非 chunk.start/end_offset 进行相交判断，
+    因为 chunk 的 outer offset 可能包含被省略的 page marker，
+    span 才是 chunk 在原文中的实际证据范围。
+    """
     return tuple(
         chunk
         for chunk in chunks
         if any(
-            # outer offset 可能包含被省略的 page marker，span 才是实际证据范围。
             span.start_offset < end_offset and span.end_offset > start_offset
             for span in chunk.source_spans
         )
