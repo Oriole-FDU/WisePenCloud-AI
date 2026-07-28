@@ -6,7 +6,7 @@ from common.logger import warn
 from .batch_scheduler import FetchBatchScheduler, FetchJob
 from .cache import WebFetchCache
 from .content.html_clean import clean_html
-from .content.pdf_extract import extract_pdf_text
+from .content.pdf_extract import extract_pdf_markdown
 from .content.quality import should_fallback
 from .core.cache import WebContentCacheRepository
 from .core.errors import (
@@ -20,7 +20,11 @@ from .core.models import (
 )
 from .fetchers import WebFetcher
 
-_NOT_RETRYABLE_HTTP_STATUS_REASONS = {"http 404", "http 410"}
+
+_NOT_RETRYABLE_HTTP_STATUS_REASONS = {
+    "http 404",
+    "http 410",
+}
 
 
 class FetchCoordinator:
@@ -131,6 +135,7 @@ class FetchCoordinator:
                 return None, should_fallback
 
             result, should_fallback = await self._build_result(raw)
+
             if should_fallback:
                 # static 的低质量结果交给 scheduler 重新排入 stealthy；
                 # stealthy 没有后续阶段，只能把当前结果直接交给调用方。
@@ -144,12 +149,17 @@ class FetchCoordinator:
                 result=result,
             )
             return result, False
+
         except UrlSecurityError:
             return None, False
         except UrlFetchError:
             return None, False
         except Exception as exc:
-            warn("网页抓取 worker 未预期失败", url=job.url, e=exc)
+            warn(
+                "网页抓取 worker 未预期失败",
+                url=job.url,
+                e=exc,
+            )
             return None, False
 
     async def _build_result(
@@ -160,21 +170,22 @@ class FetchCoordinator:
             return (
                 WebFetchResult(
                     source_url=raw.source_url,
-                    text=await extract_pdf_text(
-                        raw.pdf_bytes,
-                        url=raw.source_url,
-                    ),
-                    is_md=False,
+                    text=await extract_pdf_markdown(raw.pdf_bytes, url=raw.source_url),
+                    is_md=True,
                 ),
                 False,
             )
 
-        markdown = clean_html(raw.raw_html or "", url=raw.source_url)
+        markdown = clean_html(
+            raw.raw_html or "",
+            url=raw.source_url,
+        )
         needs_fallback = should_fallback(
             raw=raw,
             markdown=markdown,
             min_text_length=self._min_text_length,
         )
+
         return (
             WebFetchResult(
                 source_url=raw.source_url,
