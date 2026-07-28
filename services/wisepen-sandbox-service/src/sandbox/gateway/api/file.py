@@ -8,7 +8,7 @@ from common.logger import error as log_error
 from common.core.domain.responses import R
 from common.security.context import SecurityContextHolder
 from sandbox.gateway.isolation import PathTranslator, PathValidationError
-from sandbox.gateway.api.deps import get_path_translator, acquire_container, release_container
+from sandbox.gateway.api.deps import get_path_translator, acquire_for_session, touch_session
 from sandbox.gateway.container_utils import execute_on_container
 
 router = APIRouter()
@@ -73,7 +73,7 @@ async def file_read(request: FileReadRequest, req: Request,
     uid, sid = _extract_tenant()
     cid = None
     try:
-        cid, token = acquire_container(uid, sid)
+        cid, token = acquire_for_session(uid, sid)
         physical = translator.translate(request.file)
         body: Dict[str, Any] = {"file": physical}
         if request.max_chars is not None:
@@ -87,7 +87,7 @@ async def file_read(request: FileReadRequest, req: Request,
         return R(code=500, msg=f"read failed: {e}", data=None)
     finally:
         if cid:
-            release_container(cid, uid, sid, token)
+            touch_session(uid, sid)
 
 
 @router.post("/write")
@@ -96,7 +96,7 @@ async def file_write(request: FileWriteRequest, req: Request,
     uid, sid = _extract_tenant()
     cid = None
     try:
-        cid, token = acquire_container(uid, sid)
+        cid, token = acquire_for_session(uid, sid)
         body = {
             "file": translator.translate(request.file),
             "content": request.content,
@@ -111,7 +111,7 @@ async def file_write(request: FileWriteRequest, req: Request,
         return R(code=500, msg=f"write failed: {e}", data=None)
     finally:
         if cid:
-            release_container(cid, uid, sid, token)
+            touch_session(uid, sid)
 
 
 @router.post("/list")
@@ -120,7 +120,7 @@ async def file_list(request: FileListRequest, req: Request,
     uid, sid = _extract_tenant()
     cid = None
     try:
-        cid, token = acquire_container(uid, sid)
+        cid, token = acquire_for_session(uid, sid)
         body = {"path": translator.translate(request.path), "recursive": request.recursive}
         result = await execute_on_container(cid, "POST", "/v1/file/list", body)
         return R.success(_scrub_result(result, translator))
@@ -131,7 +131,7 @@ async def file_list(request: FileListRequest, req: Request,
         return R(code=500, msg=f"list failed: {e}", data=None)
     finally:
         if cid:
-            release_container(cid, uid, sid, token)
+            touch_session(uid, sid)
 
 
 @router.post("/grep")
@@ -140,7 +140,7 @@ async def file_grep(request: FileGrepRequest, req: Request,
     uid, sid = _extract_tenant()
     cid = None
     try:
-        cid, token = acquire_container(uid, sid)
+        cid, token = acquire_for_session(uid, sid)
         body = {
             "path": translator.translate(request.path),
             "pattern": request.pattern,
@@ -156,7 +156,7 @@ async def file_grep(request: FileGrepRequest, req: Request,
         return R(code=500, msg=f"grep failed: {e}", data=None)
     finally:
         if cid:
-            release_container(cid, uid, sid, token)
+            touch_session(uid, sid)
 
 
 @router.post("/replace")
@@ -165,7 +165,7 @@ async def file_replace(request: FileReplaceRequest, req: Request,
     uid, sid = _extract_tenant()
     cid = None
     try:
-        cid, token = acquire_container(uid, sid)
+        cid, token = acquire_for_session(uid, sid)
         body = {
             "file": translator.translate(request.file),
             "old_str": request.old_str,
@@ -180,4 +180,4 @@ async def file_replace(request: FileReplaceRequest, req: Request,
         return R(code=500, msg=f"replace failed: {e}", data=None)
     finally:
         if cid:
-            release_container(cid, uid, sid, token)
+            touch_session(uid, sid)

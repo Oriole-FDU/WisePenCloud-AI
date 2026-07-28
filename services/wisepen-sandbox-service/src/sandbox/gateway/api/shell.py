@@ -6,7 +6,7 @@ from common.logger import error as log_error
 from common.core.domain.responses import R
 from common.security.context import SecurityContextHolder
 from sandbox.gateway.isolation import PathTranslator, PathValidationError
-from sandbox.gateway.api.deps import get_path_translator, acquire_container, release_container
+from sandbox.gateway.api.deps import get_path_translator, acquire_for_session, touch_session
 from sandbox.gateway.container_utils import execute_on_container
 
 router = APIRouter()
@@ -30,7 +30,7 @@ async def shell_exec(request: ShellExecRequest, req: Request,
     uid, sid = _extract_tenant()
     cid = None
     try:
-        cid, token = acquire_container(uid, sid)
+        cid, token = acquire_for_session(uid, sid)
         physical_cwd = translator.translate(request.exec_dir)
         body: Dict[str, Any] = {"command": request.command, "exec_dir": physical_cwd}
         if request.timeout_ms:
@@ -44,4 +44,4 @@ async def shell_exec(request: ShellExecRequest, req: Request,
         return R(code=500, msg=f"shell exec failed: {e}", data=None)
     finally:
         if cid:
-            release_container(cid, uid, sid, token)
+            touch_session(uid, sid)

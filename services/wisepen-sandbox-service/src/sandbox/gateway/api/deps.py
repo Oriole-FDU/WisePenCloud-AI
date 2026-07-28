@@ -6,6 +6,7 @@ from sandbox.gateway.isolation import PathTranslator, TenantScope, PathValidatio
 _queue = None
 _file_manager = None
 _vnc_binding = None
+_session_pool = None
 
 
 def set_queue(queue):
@@ -21,6 +22,11 @@ def set_file_manager(fm):
 def set_vnc_binding(binding):
     global _vnc_binding
     _vnc_binding = binding
+
+
+def set_session_pool(pool):
+    global _session_pool
+    _session_pool = pool
 
 
 async def get_path_translator(request: Request) -> PathTranslator:
@@ -52,3 +58,16 @@ def release_container(cid: str, user_id: str = "", session_id: str = "",
             pass
     if _queue:
         _queue.release(cid, fencing_token)
+
+
+def acquire_for_session(user_id: str, session_id: str) -> tuple[str, int]:
+    """获取会话绑定的容器（首次分配 + pull，后续复用）."""
+    if not _session_pool:
+        raise HTTPException(status_code=503, detail="session pool not enabled")
+    return _session_pool.acquire(user_id, session_id)
+
+
+def touch_session(user_id: str, session_id: str) -> None:
+    """更新会话心跳（每次请求调用）。"""
+    if _session_pool:
+        _session_pool.heartbeat(user_id, session_id)
