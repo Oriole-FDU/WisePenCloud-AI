@@ -36,6 +36,7 @@ class MarkdownChunkerConfig:
 
     @property
     def soft_limit(self) -> int:
+        """软上限：达到后优先在下一个 block 边界切分，避免 chunk 接近硬上限才切。"""
         if self.new_after_n_chars is None:
             return self.max_characters
         return min(self.new_after_n_chars, self.max_characters)
@@ -54,6 +55,7 @@ class MarkdownChunker:
         blocks = self._parser.parse(document.text)
         strategy = self._resolve_strategy(blocks)
 
+        # 先按物理页或标题语义构造 chunk，再统一分配稳定 ID 和 locator。
         if strategy is MarkdownChunkingStrategy.BY_PAGE:
             chunks = self._chunk_by_page(blocks)
         else:
@@ -85,12 +87,14 @@ class MarkdownChunker:
         strategy = self.config.strategy
         has_pages = any(block.block_kind is BlockKind.PAGE_MARKER for block in blocks)
         if strategy is MarkdownChunkingStrategy.AUTO:
+            # 有可信页标时，页是更强的物理边界；否则依赖标题结构。
             return (
                 MarkdownChunkingStrategy.BY_PAGE
                 if has_pages
                 else MarkdownChunkingStrategy.BY_TITLE
             )
         if strategy is MarkdownChunkingStrategy.BY_PAGE and not has_pages:
+            # 显式 by_page 不能把“没有页码”误当成只有一页。
             raise ValueError("by_page strategy requires page markers")
         return strategy
 
@@ -104,6 +108,7 @@ class MarkdownChunker:
         def flush_page() -> None:
             if not page_blocks:
                 return
+            # 正常页保持为一个 chunk；超长页才在页内拆分。
             chunks.extend(
                 self._pack_blocks(
                     tuple(page_blocks),
@@ -125,6 +130,12 @@ class MarkdownChunker:
         self,
         blocks: tuple[TextBlock, ...],
     ) -> tuple[Chunk, ...]:
+        """按标题分块：每个标题触发一次 flush，section 包含标题本身。
+
+        section_has_body 用于避免空标题块连续 flush：
+        - 连续多个标题（如 H1 后紧跟 H2）不应逐个 flush 空块
+        - 只有当 section 中已积累非标题内容时，遇到新标题才 flush
+        """
         chunks: list[Chunk] = []
         section_blocks: list[TextBlock] = []
         section_has_body = False
@@ -144,7 +155,9 @@ class MarkdownChunker:
 
         for block in blocks:
             if block.block_kind is BlockKind.PAGE_MARKER:
+                # 页标只影响 by_page；标题策略允许同一 Section 跨页。
                 continue
+            # 遇到新标题且当前 section 已有正文内容，先 flush 当前 section
             if block.block_kind is BlockKind.HEADING and section_has_body:
                 flush_section()
             section_blocks.append(block)
@@ -160,6 +173,14 @@ class MarkdownChunker:
         *,
         soft_limit: int,
     ) -> tuple[Chunk, ...]:
+        """将 blocks 装箱为 chunks，遵守软硬字符上限。
+
+        装箱策略：
+        - soft_limit（软上限）：已积累字符 >= soft_limit 时，下一个 block 触发 flush
+        - max_characters（硬上限）：加入 block 后总字符将超过硬上限时，先 flush 再加入
+        - 每个 block 之间额外计入 1 字符分隔符（换行符）
+        - 单个 oversized block 会被 _split_oversized_block 递归拆分后再装箱
+        """
         chunks: list[Chunk] = []
         selected: list[TextBlock] = []
         selected_chars = 0
@@ -174,10 +195,13 @@ class MarkdownChunker:
 
         for block in blocks:
             for part in self._split_oversized_block(block):
-                separator_chars = 2 if selected else 0
+                # 首个 block 无需分隔符，后续每个 block 前有一个换行符
+                separator_chars = 1 if selected else 0
                 part_chars = len(part.text) + separator_chars
                 if selected and (
+                    # 软上限触发：当前已超过 soft_limit，不应再追加
                     selected_chars >= soft_limit
+                    # 硬上限触发：追加后将超过 max_characters
                     or selected_chars + part_chars > self.config.max_characters
                 ):
                     flush()
@@ -194,6 +218,7 @@ class MarkdownChunker:
         self,
         block: TextBlock,
     ) -> tuple[TextBlock, ...]:
+        """对超长 block 进行递归拆分，拆分后 offset 从 block 内部坐标平移回原文坐标。"""
         if len(block.text) <= self.config.max_characters:
             return (block,)
 
@@ -202,6 +227,8 @@ class MarkdownChunker:
             chunk_size=self.config.max_characters,
             chunk_overlap=0,
         )
+        # splitter 返回的 offset 是相对于 block.text 的局部坐标，
+        # 需要加上 block.start_offset 才能映射回整篇原文的绝对坐标
         return tuple(
             replace(
                 block,
@@ -223,6 +250,11 @@ class MarkdownChunker:
 
     @staticmethod
     def _build_chunk(selected: tuple[TextBlock, ...]) -> Chunk:
+        """从选中的 blocks 构建一个 Chunk。
+
+        chunk 的 start/end_offset 取首末 span 的边界（可能不连续），
+        source_spans 才是精确的证据范围，用于后续 locator 相交判断。
+        """
         block_kinds = tuple(block.block_kind for block in selected)
         section_paths = tuple(
             dict.fromkeys(
@@ -248,7 +280,7 @@ class MarkdownChunker:
         )
         return Chunk(
             chunk_id="pending",
-            text="\n\n".join(block.text for block in selected if block.text).strip(),
+            text="\n".join(block.text for block in selected if block.text).strip(),
             chunk_index=0,
             start_offset=source_spans[0].start_offset if source_spans else None,
             end_offset=source_spans[-1].end_offset if source_spans else None,

@@ -14,7 +14,6 @@ class BlockKind(StrEnum):
     TABLE = "table"
     CODE = "code"
     FORMULA = "formula"
-    IMAGE = "image"
     LIST = "list"
     QUOTE = "quote"
     PAGE_MARKER = "page_marker"

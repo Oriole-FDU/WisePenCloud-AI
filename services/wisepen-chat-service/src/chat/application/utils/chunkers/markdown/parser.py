@@ -44,9 +44,10 @@ class MarkdownParser:
             return ()
 
         lines = text.splitlines(keepends=True)
+        # line_offsets[i] = 第 i 行在原文中的起始偏移，line_offsets[-1] = 文本总长
         line_offsets = [0]
         page_markers: list[TextBlock] = []
-        # 构建行 offset 时同步提取页码，避免对所有行做第二轮扫描。
+        # markdown-it 不保留 HTML 注释，页标必须在构建行 offset 时单独提取。
         for line_index, line in enumerate(lines):
             start_offset = line_offsets[-1]
             end_offset = start_offset + len(line)
@@ -69,6 +70,7 @@ class MarkdownParser:
 
         tokens = self._parser.parse(text)
         blocks = self._parse_tokens(tokens, lines, line_offsets)
+        # 页标与结构块按 offset 合并排序，确保后续 merge/attach 逻辑基于位置顺序
         blocks.extend(page_markers)
         blocks.sort(
             key=lambda block: (
@@ -76,9 +78,11 @@ class MarkdownParser:
                 block.end_offset if block.end_offset is not None else -1,
             )
         )
+        # 后处理：合并表题+表格、投影页码到结构块
         blocks = _merge_captioned_tables(blocks, text)
         blocks = _attach_page_labels(blocks)
 
+        # 空结果兜底：整篇文本作为单个 UNKNOWN block
         if not blocks:
             return (
                 TextBlock(
@@ -108,27 +112,27 @@ class MarkdownParser:
     ) -> list[TextBlock]:
         """解析顶层 token，并维护当前标题栈形成完整 section_path。"""
         blocks: list[TextBlock] = []
+        # 标题栈：(heading_level, title)，遇到更深层级时弹出浅层，形成层级路径
         headings: list[tuple[int, str]] = []
 
         for index, token in enumerate(tokens):
+            # 只处理顶层块级 token（level==0 且有行映射）
             if token.level != 0 or token.map is None:
                 continue
 
+            # heading_open 的下一个 token 通常是 inline 类型，包含标题纯文本
             inline_token = (
                 tokens[index + 1]
                 if index + 1 < len(tokens) and tokens[index + 1].type == "inline"
                 else None
             )
-            image = (
-                _image_only(inline_token) if token.type == "paragraph_open" else None
-            )
-            kind = _token_kind(token, image)
+            kind = _token_kind(token)
             if kind is None:
                 continue
 
             start_line, end_line = token.map
-            block_text = "".join(lines[start_line:end_line]).strip()
-            if not block_text or PAGE_MARKER_RE.fullmatch(block_text):
+            block_text = "".join(lines[start_line:end_line])
+            if not block_text.strip() or PAGE_MARKER_RE.fullmatch(block_text.strip()):
                 continue
 
             metadata: dict[str, object] = {}
@@ -136,6 +140,8 @@ class MarkdownParser:
             if kind == BlockKind.HEADING:
                 title = inline_token.content.strip() if inline_token else block_text
                 level = int(token.tag[1])
+                # 弹出 >= 当前层级的标题，模拟文档大纲的层级关系
+                # 例如遇到 H3 时弹出栈中已有的 H3/H4/H5...，保留 H1/H2
                 headings = [
                     (depth, value) for depth, value in headings if depth < level
                 ]
@@ -143,13 +149,6 @@ class MarkdownParser:
                 section_path = tuple(value for _, value in headings)
                 metadata["title"] = title
                 metadata["heading_level"] = level
-            elif image is not None:
-                metadata.update(
-                    {
-                        "alt": image.content,
-                        "src": image.attrGet("src") or "",
-                    }
-                )
 
             blocks.append(
                 TextBlock(
@@ -167,8 +166,12 @@ class MarkdownParser:
         return blocks
 
 
-def _token_kind(token: Token, image: Token | None) -> BlockKind | None:
-    """将顶层 token 收敛为模块支持的结构类型。"""
+def _token_kind(token: Token) -> BlockKind | None:
+    """将顶层 token 收敛为模块支持的结构类型。
+
+    html_block 需要特殊处理：只有以 <table 开头的才映射为 TABLE，其余忽略
+    （因为 HTML 注释页标已被单独提取，此处忽略不会遗漏）。
+    """
     if token.type == "html_block":
         return (
             BlockKind.TABLE
@@ -176,67 +179,57 @@ def _token_kind(token: Token, image: Token | None) -> BlockKind | None:
             else None
         )
     if token.type == "paragraph_open":
-        return BlockKind.IMAGE if image is not None else BlockKind.PARAGRAPH
+        return BlockKind.PARAGRAPH
     return _TOKEN_KINDS.get(token.type)
-
-
-def _image_only(inline_token: Token | None) -> Token | None:
-    """如果段落只包含图片和空白，一次遍历返回第一张图片。"""
-    if inline_token is None:
-        return None
-
-    image: Token | None = None
-    for child in inline_token.children or ():
-        if child.type == "softbreak" or (
-            child.type == "text" and not child.content.strip()
-        ):
-            continue
-        if child.type != "image":
-            return None
-        image = image or child
-    return image
 
 
 def _merge_captioned_tables(
     blocks: list[TextBlock],
     text: str,
 ) -> list[TextBlock]:
-    """将 PDF Markdown 中独立导出的表题段落绑定回紧随其后的表格。
+    """将 PDF Markdown 中紧邻的表题与表格合并。
 
-    否则表题可能落入前一个 chunk，表格则失去表号和语义说明，后续也无法生成表格
-    anchor。这里仅合并原文中只隔空白的相邻段落与表格。
+    PDF 转 Markdown 时，"表 1 xxx" 和紧随的 <table> 会被解析为两个 block。
+    本函数检测这种相邻模式并将它们合并为一个 TABLE block，避免表题被孤立为 PARAGRAPH。
 
-    页保护不由本函数直接识别：parse() 已在 blocks 中插入 PAGE_MARKER 并按 offset
-    排序。跨页时序列会变成 ``caption -> page marker -> table``，而本函数只查看
-    caption 的下一个 block，故不会把跨页表题和表格视为候选对。
+    page marker 会作为中间 block 阻断候选，因此不会跨页合并。
     """
     merged: list[TextBlock] = []
     index = 0
 
     while index < len(blocks):
-        caption = blocks[index]
+        first = blocks[index]
         if index + 1 < len(blocks):
-            table = blocks[index + 1]
+            second = blocks[index + 1]
+            # 表题可以在表格上方或下方，所以需要尝试两种顺序
+            caption, table = (
+                (first, second)
+                if first.block_kind == BlockKind.PARAGRAPH
+                else (second, first)
+            )
+            # 用首行匹配表题格式（如 "表 1.2"、"Table 3"）
             match = TABLE_CAPTION_RE.match(caption.text.partition("\n")[0].strip())
             if (
                 caption.block_kind == BlockKind.PARAGRAPH
                 and table.block_kind == BlockKind.TABLE
                 and match is not None
-                and caption.end_offset is not None
-                and table.start_offset is not None
-                and not text[caption.end_offset : table.start_offset].strip()
+                # 两个 block 之间不能有非空白内容（防止误合并不相关的段落）
+                and first.end_offset is not None
+                and second.start_offset is not None
+                and not text[first.end_offset : second.start_offset].strip()
             ):
-                start_offset = caption.start_offset
-                end_offset = table.end_offset
+                start_offset = first.start_offset
+                end_offset = second.end_offset
                 merged.append(
                     replace(
                         table,
                         text=(
-                            text[start_offset:end_offset].strip()
+                            text[start_offset:end_offset]
                             if start_offset is not None and end_offset is not None
-                            else f"{caption.text}\n\n{table.text}"
+                            else f"{first.text}\n\n{second.text}"
                         ),
                         start_offset=start_offset,
+                        end_offset=end_offset,
                         section_path=table.section_path or caption.section_path,
                         metadata={
                             **table.metadata,
@@ -248,14 +241,18 @@ def _merge_captioned_tables(
                 index += 2
                 continue
 
-        merged.append(caption)
+        merged.append(first)
         index += 1
 
     return merged
 
 
 def _attach_page_labels(blocks: list[TextBlock]) -> list[TextBlock]:
-    """把页标记投影到后续结构块，页边界策略不再负责猜测归属。"""
+    """把页标记投影到后续结构块。
+
+    按 offset 排序后遍历，每遇到一个 PAGE_MARKER 就更新 active_page_label，
+    后续所有结构块都会携带该页码直到下一个 PAGE_MARKER。页标记本身不参与投影。
+    """
     active_page_label: str | None = None
     labeled: list[TextBlock] = []
     for block in blocks:

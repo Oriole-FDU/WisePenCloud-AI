@@ -25,9 +25,9 @@ def test_keeps_full_section_path_and_locator() -> None:
     text = "# 一级\n\n## 二级\n\n正文。"
     result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
 
-    paragraph = next(block for block in result.blocks if block.text == "正文。")
+    paragraph = next(block for block in result.blocks if block.text.strip() == "正文。")
     assert paragraph.section_path == ("一级", "二级")
-    heading = next(block for block in result.blocks if block.text == "## 二级")
+    heading = next(block for block in result.blocks if block.text.strip() == "## 二级")
     assert heading.metadata["heading_level"] == 2
     assert any(locator.name == "section:一级 > 二级" for locator in result.locators)
 
@@ -41,7 +41,7 @@ def test_marks_pipe_and_html_tables() -> None:
 
     assert table.block_kind == BlockKind.TABLE
     assert table.section_path == ("指标",)
-    assert pipe_text[table.start_offset : table.end_offset].strip() == table.text
+    assert pipe_text[table.start_offset : table.end_offset] == table.text
     assert any(
         BlockKind.TABLE in chunk.metadata.get("block_kinds", ())
         for chunk in pipe_result.chunks
@@ -66,8 +66,26 @@ def test_merges_pdf_table_caption_and_builds_anchor() -> None:
 
     assert table.block_kind == BlockKind.TABLE
     assert table.text.startswith("·  Table 1")
-    assert text[table.start_offset : table.end_offset].strip() == table.text
+    assert text[table.start_offset : table.end_offset] == table.text
     assert any(locator.name == "anchor:Table 1" for locator in result.locators)
+
+
+def test_merges_table_caption_after_table_and_builds_anchor() -> None:
+    text = (
+        "|Layer Type|Complexity|\n"
+        "|---|---|\n"
+        "|Self-Attention|O(n²)|\n\n"
+        "Table 2: Complexity by layer.\n\n"
+        "后续正文。"
+    )
+    result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
+    table = next(block for block in result.blocks if "Layer Type" in block.text)
+
+    assert table.block_kind == BlockKind.TABLE
+    assert table.text.endswith("Table 2: Complexity by layer.\n")
+    assert text[table.start_offset : table.end_offset] == table.text
+    assert table.metadata["caption"].strip() == "Table 2: Complexity by layer."
+    assert any(locator.name == "anchor:Table 2" for locator in result.locators)
 
 
 def test_page_markers_are_hard_chunk_boundaries() -> None:
@@ -89,7 +107,7 @@ def test_page_markers_are_hard_chunk_boundaries() -> None:
     assert all("<!-- page" not in chunk.text for chunk in result.chunks)
 
 
-def test_parser_keeps_image_and_page_marker_semantics() -> None:
+def test_parser_keeps_images_as_paragraph_content() -> None:
     text = "\n".join(
         (
             "<!-- page 7 -->",
@@ -100,8 +118,8 @@ def test_parser_keeps_image_and_page_marker_semantics() -> None:
     )
     result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
     page_marker = result.blocks[0]
-    image = result.blocks[1]
-    mixed = result.blocks[2]
+    image_paragraph = result.blocks[1]
+    mixed_paragraph = result.blocks[2]
 
     assert page_marker.block_kind == BlockKind.PAGE_MARKER
     assert page_marker.metadata["page_label"] == "7"
@@ -109,10 +127,10 @@ def test_parser_keeps_image_and_page_marker_semantics() -> None:
         text[page_marker.start_offset : page_marker.end_offset].strip()
         == page_marker.text
     )
-    assert image.block_kind == BlockKind.IMAGE
-    assert image.metadata["alt"] == "Figure 2: architecture"
-    assert mixed.block_kind == BlockKind.PARAGRAPH
-    assert any(locator.name == "anchor:Figure 2" for locator in result.locators)
+    assert image_paragraph.block_kind == BlockKind.PARAGRAPH
+    assert image_paragraph.metadata["page_label"] == "7"
+    assert mixed_paragraph.block_kind == BlockKind.PARAGRAPH
+    assert not any(locator.name == "anchor:Figure 2" for locator in result.locators)
 
 
 def test_by_page_keeps_a_normal_page_whole() -> None:
