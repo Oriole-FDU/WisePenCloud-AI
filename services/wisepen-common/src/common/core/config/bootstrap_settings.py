@@ -33,8 +33,8 @@ class BootstrapSettings(BaseSettings):
     DEVELOPER_ENABLE: bool = False
     DEVELOPER_NAME: str | None = None
 
-    # Nacos 接入
-    NACOS_SERVER_ADDR: str
+    # Nacos 接入（DEV 模式下可留空，Nacos 注册会静默跳过）
+    NACOS_SERVER_ADDR: str = "localhost:8848"
     NACOS_NAMESPACE_ID: str = ""
     NACOS_GROUP: str = "DEFAULT_GROUP"
     NACOS_USERNAME: Optional[str] = None
