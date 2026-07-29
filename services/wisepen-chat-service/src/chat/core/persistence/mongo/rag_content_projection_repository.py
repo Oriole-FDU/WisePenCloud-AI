@@ -340,22 +340,61 @@ class MongoRagContentProjectionRepository:
         if not requested_ids:
             return ()
         revision = checkpoint.applied_content_revision
-        documents = (
+        documents = await RagSectionDocument.find(
+            RagSectionDocument.content_revision == revision,
+            RagSectionDocument.resource_id == resource_id,
+            In(RagSectionDocument.section_id, requested_ids),
+        ).to_list()
+        current_by_id = {document.section_id: document for document in documents}
+
+        # 只加载当前节点需要的 parent、前后兄弟和 children，避免为一个 Section
+        # 读取整个资源的标题树。一个 Section 的 children 可以有多个，但查询范围
+        # 仍由本次请求的 Section ID 集合限定。
+        parent_ids = tuple(
+            dict.fromkeys(
+                document.parent_section_id
+                for document in documents
+                if document.parent_section_id is not None
+            )
+        )
+        sibling_conditions = [
+            {
+                "parent_section_id": document.parent_section_id,
+                "ordinal": ordinal,
+            }
+            for document in documents
+            for ordinal in (document.ordinal - 1, document.ordinal + 1)
+            if ordinal >= 0
+        ]
+        context_conditions: list[dict[str, object]] = []
+        if parent_ids:
+            context_conditions.append({"section_id": {"$in": list(parent_ids)}})
+        context_conditions.append(
+            {"parent_section_id": {"$in": list(requested_ids)}}
+        )
+        context_conditions.extend(sibling_conditions)
+
+        context_documents = (
             await RagSectionDocument.find(
                 RagSectionDocument.content_revision == revision,
                 RagSectionDocument.resource_id == resource_id,
-            )
-            .sort("own_start")
-            .to_list()
+                {"$or": context_conditions},
+            ).to_list()
+            if context_conditions
+            else []
         )
-        by_id = {document.section_id: document for document in documents}
+        context_by_id = {
+            document.section_id: document for document in (*documents, *context_documents)
+        }
         children_by_parent: dict[str | None, list[RagSectionDocument]] = {}
-        for document in documents:
+        for document in context_documents:
             children_by_parent.setdefault(document.parent_section_id, []).append(document)
+        for children in children_by_parent.values():
+            children.sort(key=lambda document: document.ordinal)
 
         views: list[RagSectionView] = []
         for section_id in requested_ids:
-            current = by_id.get(section_id)
+            current = current_by_id.get(section_id)
             if current is None:
                 continue
             siblings = children_by_parent.get(current.parent_section_id, [])
@@ -371,8 +410,8 @@ class MongoRagContentProjectionRepository:
                 RagSectionView(
                     section=_to_section(current),
                     parent=(
-                        _to_section(by_id[current.parent_section_id])
-                        if current.parent_section_id is not None
+                        _to_section(context_by_id[current.parent_section_id])
+                        if current.parent_section_id in context_by_id
                         else None
                     ),
                     previous=_to_section(previous) if previous is not None else None,

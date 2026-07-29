@@ -111,6 +111,8 @@ class KnowledgeNavigateLocateTool:
 
 
 def _render_result(result: KnowledgeNavigationLocateResult) -> ToolReturn:
+    # 这里先初始化为空列表；section_view_payload 会通过可变参数把每个
+    # source 的完整正文原地追加进来，同时在 payload 中记录对应的 content_index。
     cacheable_texts: list[CacheableText] = []
     sources = [
         section_view_payload(source, cacheable_texts) for source in result.sources

@@ -142,6 +142,8 @@ def _render_result(
     *,
     section_ids: tuple[str, ...],
 ) -> ToolReturn:
+    # 这里先初始化为空列表；section_view_payload 会通过可变参数把每个
+    # reading block 和 evidence 的完整正文原地追加进来，并返回对应的 content_index。
     cacheable_texts: list[CacheableText] = []
     sections = [
         section_view_payload(section, cacheable_texts)

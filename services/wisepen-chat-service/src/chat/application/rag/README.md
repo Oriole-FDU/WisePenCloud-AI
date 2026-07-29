@@ -96,3 +96,5 @@ knowledge_navigate_expand
 仓储协议、Mongo 实体和具体后端的职责见 [`repositories/README.md`](repositories/README.md)。
 
 核心数据模型的生产者、消费者和生命周期见 [`data_models.md`](data_models.md)。
+
+内容投影实体为什么存在、如何协作见 [`content_projection_entities.md`](content_projection_entities.md)。
