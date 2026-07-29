@@ -10,7 +10,8 @@ from common.observability import instrument_fastapi_app, setup_observability
 from common.web.exception_handlers import setup_global_exception_handlers
 from common.web.middleware import SecurityHeaderMiddleware
 from sandbox.api import create_app
-from sandbox.container import build_container
+from sandbox.api.endpoints import health, pool, sandbox
+from sandbox.container import container
 from sandbox.application.services.sandbox_session import SandboxSessionService
 from sandbox.gateway.binding import VncBinding
 from sandbox.core.config.app_settings import settings
@@ -25,8 +26,9 @@ setup_observability(
 )
 
 # 容器在模块加载时构建，FastAPI 路由、MCP 和 VNC 网关共享同一个 Scheduler。
-container = build_container()
-sandbox_session = SandboxSessionService(container.scheduler)
+container.config.from_dict(settings.model_dump())
+container.wire(modules=[health, pool, sandbox])
+sandbox_session = SandboxSessionService(container.scheduler())
 from sandbox.transport.mcp import build_sandbox_mcp
 
 mcp_server = build_sandbox_mcp(sandbox_session)
@@ -53,7 +55,7 @@ async def lifespan(app):
         except Exception as exc:
             # 服务发现注册失败不阻断本地服务启动，便于开发环境和故障排查。
             error("nacos 实例注册失败。", service=bootstrap_settings.SERVICE_NAME, exc=exc)
-        app.state.watcher_task = asyncio.create_task(container.watcher.run())
+        app.state.watcher_task = asyncio.create_task(container.watcher().run())
         info(
             "服务已就绪。",
             service=bootstrap_settings.SERVICE_NAME,
@@ -63,7 +65,7 @@ async def lifespan(app):
             yield
         finally:
             info("服务正在停止。", service=bootstrap_settings.SERVICE_NAME)
-            container.watcher.stop()
+            container.watcher().stop()
             task = getattr(app.state, "watcher_task", None)
             if task:
                 task.cancel()
@@ -76,8 +78,6 @@ async def lifespan(app):
 
 
 app = create_app(
-    container.scheduler,
-    container.pool,
     mcp_app=mcp_server.streamable_http_app(),
     lifespan=lifespan,
     vnc_binding=vnc_binding,

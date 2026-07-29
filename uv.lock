@@ -3675,6 +3675,7 @@ name = "wisepen-sandbox-service"
 version = "0.2.0"
 source = { editable = "services/wisepen-sandbox-service" }
 dependencies = [
+    { name = "dependency-injector" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "mcp" },
@@ -3694,6 +3695,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "dependency-injector" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "httpx", marker = "extra == 'test'" },
