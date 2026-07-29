@@ -21,7 +21,7 @@ def _tenant(req: Request) -> tuple[str, str] | None:
 
 
 def _endpoint() -> SandboxEndpoint | None:
-    return deps._vnc_binding
+    return deps._session_pool
 
 
 @router.get("/vnc")

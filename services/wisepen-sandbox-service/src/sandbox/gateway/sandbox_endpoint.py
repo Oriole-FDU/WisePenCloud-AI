@@ -6,16 +6,22 @@ SandboxEndpoint — 抽象网关与沙箱后端的连接协议。
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
 class SandboxConnection:
-    """沙箱为某个用户+会话提供的连接信息。"""
-    vnc_url: str                 # noVNC 页面地址
-    websockify_url: str          # WebSocket 地址 (ws://...)
-    container_id: str            # 内部标识（日志/释放用）
-    metadata: dict[str, str]     # 自定义扩展 {key: value}
+    """沙箱为某个用户+会话提供的连接信息。
+
+    VNC 端点使用 vnc_url / websockify_url；
+    文件/Shell/MCP 使用 container_id + fencing_token。
+    """
+    container_id: str            # 完整容器 ID（docker cp/exec 用）
+    short_id: str                # 前 12 位（日志/展示用）
+    fencing_token: int           # 释放时校验（防 stale release）
+    vnc_url: str = ""            # noVNC 页面地址（VNC 专有）
+    websockify_url: str = ""     # WebSocket 地址（VNC 专有）
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 class SandboxEndpoint(ABC):

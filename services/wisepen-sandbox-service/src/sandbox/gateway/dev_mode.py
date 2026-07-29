@@ -35,11 +35,16 @@ class MockSandbox:
         self._files: dict[str, str] = {}
         self._next_token = 0
 
-    # ---- ContainerQueue duck-type ----
+    # ---- SandboxEndpoint duck-type (returns SandboxConnection) ----
 
-    def acquire(self, user_id: str, session_id: str) -> tuple[str, int]:
+    def acquire(self, user_id: str = "", session_id: str = "") -> object:
         self._next_token += 1
-        return ("mock-container", self._next_token)
+        from sandbox.gateway.sandbox_endpoint import SandboxConnection
+        return SandboxConnection(
+            container_id="mock-container",
+            short_id="mock-contai",
+            fencing_token=self._next_token,
+        )
 
     def heartbeat(self, user_id: str = "", session_id: str = "") -> None:
         pass  # Mock mode: session affinity is irrelevant

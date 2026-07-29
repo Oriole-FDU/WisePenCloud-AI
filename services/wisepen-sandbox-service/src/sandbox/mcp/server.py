@@ -42,7 +42,8 @@ async def _run_on_container(
     method: str, path: str, body: dict,
     executor: Any = None,
 ) -> dict:
-    cid, token = await asyncio.to_thread(session_pool.acquire, uid, sid)
+    conn = await asyncio.to_thread(session_pool.acquire, uid, sid)
+    cid = conn.container_id
     try:
         if executor is not None:
             return await executor(cid, method, path, body)

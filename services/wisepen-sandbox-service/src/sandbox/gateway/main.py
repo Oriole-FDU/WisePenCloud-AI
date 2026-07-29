@@ -14,7 +14,6 @@ from sandbox.gateway.settings import settings
 from sandbox.gateway.api.router import api_router
 from sandbox.gateway.api import deps
 from sandbox.gateway.api.session_pool import SessionPool
-from sandbox.gateway.api.vnc_binding import ContainerBinding
 from sandbox.gateway.dev_mode import docker_available, build_mock_sandbox
 from sandbox.gateway.isolation import configure_workspace
 from sandbox.Queue.pool_manager import PoolConfig, ContainerPoolManager
@@ -85,7 +84,6 @@ async def lifespan(app: FastAPI):
 
     # 容器池管理
     docker_ok = docker_available()
-    vnc_binding = None
     pool = None
 
     if docker_ok:
@@ -105,9 +103,6 @@ async def lifespan(app: FastAPI):
         session_pool = SessionPool(pool)
         deps.set_session_pool(session_pool)
         mcp_server = build_sandbox_mcp(session_pool)
-
-        vnc_binding = ContainerBinding(pool)
-        deps.set_vnc_binding(vnc_binding)
     else:
         mock = build_mock_sandbox()
         session_pool = mock  # MockSandbox duck-types as session pool
@@ -122,21 +117,6 @@ async def lifespan(app: FastAPI):
     # Mount MCP server (ASGI router bypasses BaseHTTPMiddleware, wraps own security)
     global _mcp_app
     _mcp_app = _wrap_mcp_with_security(mcp_server.streamable_http_app())
-
-    vnc_cleanup_task = None
-    if vnc_binding is not None:
-        shutdown_event = asyncio.Event()
-
-        async def _vnc_cleanup_loop():
-            while not shutdown_event.is_set():
-                try:
-                    await asyncio.sleep(300)
-                    released = vnc_binding.cleanup_idle()
-                    if released:
-                        info("vnc idle cleanup.", released=released)
-                except asyncio.CancelledError:
-                    break
-        vnc_cleanup_task = asyncio.create_task(_vnc_cleanup_loop())
 
     session_cleanup_task = None
     if session_pool is not None:
@@ -172,9 +152,6 @@ async def lifespan(app: FastAPI):
 
     info("stopping.", service=bootstrap_settings.SERVICE_NAME)
 
-    if vnc_cleanup_task is not None:
-        shutdown_event.set()
-        vnc_cleanup_task.cancel()
     if session_cleanup_task is not None:
         session_shutdown.set()
         session_cleanup_task.cancel()
@@ -204,9 +181,9 @@ fastapi_app.include_router(api_router, prefix="/v1/sandbox/gateway")
 # 手动 drain 端点
 @fastapi_app.post("/v1/sandbox/gateway/admin/drain")
 async def admin_drain():
-    binding = deps._vnc_binding
-    if binding:
-        return R.success(binding.stats())
+    sp = deps._session_pool
+    if sp:
+        return R.success(sp.stats())
     return R(code=503, msg="vnc binding not initialized", data=None)
 
 
