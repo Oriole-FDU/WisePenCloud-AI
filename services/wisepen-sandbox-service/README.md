@@ -151,15 +151,74 @@ LocalWorkspaceStore 会校验 tenant/workspace 标识、相对路径、符号链
 
 ### 5.3 内部 API
 
-| 方法与路径 | 行为 |
-| --- | --- |
-| `GET /healthz` | 只表示进程存活，不依赖 Pool 数量 |
-| `GET /readyz` | READY 数量达到 min_ready 返回 200，否则返回 503 和 `MIN_READY_NOT_REACHED` |
-| `POST /internal/sandboxes/allocate` | 校验 request/tenant/workspace，按 request_id 幂等分配 |
-| `POST /internal/leases/{lease_id}/execute` | 只通过租约执行，校验上下文和 fencing token |
-| `POST /internal/leases/{lease_id}/release` | 幂等关闭租约、提交工作区并销毁实例 |
-| `GET /internal/sandboxes/{sandbox_id}` | 返回管理状态，不暴露 provider_id 和 token |
-| `GET /internal/pool/metrics` | 返回 generation、状态计数、readiness 和生命周期指标 |
+Sandbox API 与 Chat API 使用相同的接口表达约定：HTTP 端点按域位于 `sandbox.api.endpoints.health`、`pool` 和 `sandbox`；每个模块在顶层声明 `APIRouter` 和端点函数，并通过 `sandbox.container.Container` 注入 `SandboxPool` 或 `SandboxScheduler`。对应 Pydantic DTO 分别位于 `sandbox.api.schemas.health`、`pool` 和 `sandbox`，并由 `sandbox.api.schemas` 统一导出。业务接口使用 `R(code/msg/data)` 包装，并在端点上提供 `summary`、详细 `description` 和 `response_model`。健康探针保留裸 JSON 和 HTTP 503 语义，避免影响容器编排和负载均衡。
+
+启动服务后可通过以下入口查看机器可读和交互式文档：
+
+- Swagger UI：`GET /docs`
+- OpenAPI JSON：`GET /openapi.json`
+
+| 方法与路径 | 请求 | 成功响应 | 主要失败 |
+| --- | --- | --- | --- |
+| `GET /healthz` | 无 | `{"status":"ok"}`，HTTP 200 | 进程无响应 |
+| `GET /readyz` | 无 | `{"status":"ready","ready":N,"min_ready":M}`，HTTP 200 | READY 不足 -> HTTP 503、`MIN_READY_NOT_REACHED` |
+| `POST /internal/sandboxes/allocate` | `request_id`、`tenant_id`、`workspace_id` | `R[SandboxLeaseResponse]` | `POOL_EMPTY`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE` |
+| `POST /internal/leases/{lease_id}/execute` | `request_id`、租户/工作区、`fencing_token`、`operation`、`payload` | `R[ExecutionResultResponse]` | `LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`SANDBOX_UNAVAILABLE` |
+| `POST /internal/leases/{lease_id}/release` | `fencing_token` | `R[{"status":"released"}]` | `LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`WORKSPACE_SYNC_FAILED` |
+| `GET /internal/sandboxes/{sandbox_id}` | 无 | `R[SandboxStatusResponse]` | `LEASE_NOT_FOUND` |
+| `GET /internal/pool/metrics` | 无 | `R[PoolMetricsResponse]` | `SYSTEM_ERROR` |
+
+#### 5.3.1 分配、执行和释放示例
+
+分配请求：
+
+```json
+{
+  "request_id": "chat-turn-123",
+  "tenant_id": "user-10001",
+  "workspace_id": "session-20001"
+}
+```
+
+分配响应中的 `data.lease_id`、`data.fencing_token` 和 `data.endpoint` 供同一租约的后续操作使用：
+
+```json
+{
+  "code": 200,
+  "msg": "操作成功",
+  "data": {
+    "lease_id": "lease_1",
+    "request_id": "chat-turn-123",
+    "sandbox_id": "sandbox-1",
+    "tenant_id": "user-10001",
+    "workspace_id": "session-20001",
+    "expires_at": "2026-07-29T10:00:00Z",
+    "fencing_token": 1,
+    "endpoint": {"base_url": "http://sandbox:8080", "token": null}
+  }
+}
+```
+
+执行请求通过租约路径传递 fencing token：
+
+```json
+{
+  "request_id": "tool-call-456",
+  "tenant_id": "user-10001",
+  "workspace_id": "session-20001",
+  "fencing_token": 1,
+  "operation": "shell_exec",
+  "payload": {"command": "python main.py"}
+}
+```
+
+释放请求只需要 fencing token。释放入口先关闭执行，再提交完整工作区快照并销毁用户实例；成功响应为 `data.status = "released"`。重复释放保持幂等。
+
+#### 5.3.2 状态、指标和安全边界
+
+状态接口返回生命周期状态、租约上下文和非敏感 endpoint 地址。`provider_id`、Provider metadata、endpoint token 和 readiness token 属于 Sandbox Service 内部信息，不会出现在状态响应中。allocate 响应中的 endpoint token 只服务于当前短期租约，释放后失效。
+
+metrics 响应固定包含 `generation`、`empty_checkouts`、`min_ready` 和 `target_ready`，并携带 readiness、状态计数、租约、预热、销毁和 workspace 同步指标。后续新增指标会作为 `data` 的额外字段返回。
 
 稳定错误码包括 `POOL_EMPTY`、`LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE`、`WORKSPACE_SYNC_FAILED` 和 `WORKSPACE_CACHE_LIMIT_EXCEEDED`。
 
