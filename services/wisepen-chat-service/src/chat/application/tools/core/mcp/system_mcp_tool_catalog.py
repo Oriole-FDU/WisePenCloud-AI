@@ -109,6 +109,15 @@ _SANDBOX_TOOL_CONFIGS: List[dict[str, Any]] = [{
         max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
     ),
     "failure_reason": "Shell Exec Failed",
+}, {
+    "tool_name": "parse_file",
+    "policy": ToolPolicy(
+        expose_by_default=True,
+        risk_level=ToolRiskLevel.LOW,
+        timeout_seconds=15.0,
+        max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+    ),
+    "failure_reason": "Parse File Failed",
 }]
 
 

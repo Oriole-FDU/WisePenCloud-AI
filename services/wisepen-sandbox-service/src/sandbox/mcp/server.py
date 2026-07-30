@@ -1,4 +1,4 @@
-"""Sandbox MCP server — exposes 6 file/shell tools via MCP protocol."""
+"""Sandbox MCP server — exposes file/shell tools via MCP protocol."""
 from __future__ import annotations
 
 import asyncio
@@ -12,28 +12,15 @@ from common.logger import error as log_error
 from sandbox.gateway.isolation import PathValidationError
 from sandbox.gateway.container_utils import execute_on_container
 from sandbox.mcp.context import extract_tenant, build_translator
+from sandbox.mcp.tool_base import (
+    SandboxToolSpec,
+    ToolContext,
+    register_sandbox_tool,
+    _scrub_result as _scrub,
+)
 
 _STREAMABLE_HTTP_PATH = "/"
 _MCP_SERVER_NAME = "wisepen-sandbox-mcp-service"
-
-
-def _scrub_result(result: Any, translator) -> Any:
-    """递归替换响应中的物理路径为虚拟路径。"""
-    if isinstance(result, dict):
-        scrubbed = {}
-        for k, v in result.items():
-            if k in ("file", "path") and isinstance(v, str):
-                scrubbed[k] = translator.reverse(v)
-            elif isinstance(v, str) and translator.physical_root in v:
-                scrubbed[k] = v.replace(translator.physical_root, "/workspace")
-            elif isinstance(v, list):
-                scrubbed[k] = [_scrub_result(item, translator) for item in v]
-            elif isinstance(v, dict):
-                scrubbed[k] = _scrub_result(v, translator)
-            else:
-                scrubbed[k] = v
-        return scrubbed
-    return result
 
 
 async def _run_on_container(
@@ -90,7 +77,7 @@ def build_sandbox_mcp(
             body["max_chars"] = max_chars
         try:
             result = await _run(uid, sid, "POST", "/v1/file/read", body)
-            return json.dumps(_scrub_result(result, translator))
+            return json.dumps(_scrub(result, translator))
         except Exception as e:
             log_error("mcp read_file failed", exc=e, file=file)
             return json.dumps({"error": f"read_file failed: {e}"})
@@ -111,7 +98,7 @@ def build_sandbox_mcp(
         body = {"file": physical, "content": content, "encoding": "utf-8"}
         try:
             result = await _run(uid, sid, "POST", "/v1/file/write", body)
-            return json.dumps(_scrub_result(result, translator))
+            return json.dumps(_scrub(result, translator))
         except Exception as e:
             log_error("mcp write_file failed", exc=e, file=file)
             return json.dumps({"error": f"write_file failed: {e}"})
@@ -132,7 +119,7 @@ def build_sandbox_mcp(
         body = {"path": physical, "recursive": recursive}
         try:
             result = await _run(uid, sid, "POST", "/v1/file/list", body)
-            return json.dumps(_scrub_result(result, translator))
+            return json.dumps(_scrub(result, translator))
         except Exception as e:
             log_error("mcp list_directory failed", exc=e, path=path)
             return json.dumps({"error": f"list_directory failed: {e}"})
@@ -156,7 +143,7 @@ def build_sandbox_mcp(
         body = {"path": physical, "pattern": pattern, "recursive": recursive, "ignore_case": ignore_case}
         try:
             result = await _run(uid, sid, "POST", "/v1/file/grep", body)
-            return json.dumps(_scrub_result(result, translator))
+            return json.dumps(_scrub(result, translator))
         except Exception as e:
             log_error("mcp grep_files failed", exc=e, path=path, pattern=pattern)
             return json.dumps({"error": f"grep_files failed: {e}"})
@@ -177,7 +164,7 @@ def build_sandbox_mcp(
         body = {"file": physical, "old_str": old_str, "new_str": new_str}
         try:
             result = await _run(uid, sid, "POST", "/v1/file/replace", body)
-            return json.dumps(_scrub_result(result, translator))
+            return json.dumps(_scrub(result, translator))
         except Exception as e:
             log_error("mcp edit_file failed", exc=e, file=file)
             return json.dumps({"error": f"edit_file failed: {e}"})
@@ -200,9 +187,57 @@ def build_sandbox_mcp(
             body["timeout"] = timeout_ms // 1000
         try:
             result = await _run(uid, sid, "POST", "/v1/shell/exec", body)
-            return json.dumps(_scrub_result(result, translator))
+            return json.dumps(_scrub(result, translator))
         except Exception as e:
             log_error("mcp shell_exec failed", exc=e, command=command)
             return json.dumps({"error": f"shell_exec failed: {e}"})
+
+    # ---- SandboxScriptTool: host_cache 模式（无需 acquire 容器） ----
+
+    parse_file_spec = SandboxToolSpec.from_json_schema(
+        name="parse_file",
+        description=(
+            "Read and return the full content of a text file from the sandbox workspace. "
+            "Use this to inspect the output of scripts or read configuration files. "
+            "For binary files (PDF, Word, Excel), shell_exec should be used instead."
+        ),
+        properties={
+            "file": {
+                "type": "string",
+                "description": "Absolute path under /workspace/ to the file to parse.",
+            },
+            "max_chars": {
+                "type": "integer",
+                "description": "Maximum characters to return. Defaults to 20000.",
+                "default": 20000,
+            },
+        },
+        required=["file"],
+        mode="host_cache",
+    )
+
+    async def _parse_file_handler(ctx: ToolContext, file: str, max_chars: int = 20000) -> dict:
+        physical = ctx.translate(file)
+        # Dev mode mock: use executor if available
+        if ctx.executor is not None:
+            result = await ctx.executor("mock-cid", "POST", "/v1/file/read",
+                                        {"file": physical, "max_chars": max_chars})
+            content = result.get("content", "")
+            return {"success": True, "content": content, "path": file, "chars_read": len(content)}
+
+        try:
+            with open(physical, "r", encoding="utf-8") as fh:
+                content = fh.read(max_chars)
+        except FileNotFoundError:
+            return {"error": f"file not found: {file}"}
+        except IsADirectoryError:
+            return {"error": f"path is a directory: {file}"}
+        except PermissionError:
+            return {"error": f"permission denied: {file}"}
+        except UnicodeDecodeError:
+            return {"error": f"file is not a UTF-8 text file: {file}"}
+        return {"success": True, "content": content, "path": file, "chars_read": len(content)}
+
+    register_sandbox_tool(mcp, parse_file_spec, _parse_file_handler, session_pool, executor)
 
     return mcp
