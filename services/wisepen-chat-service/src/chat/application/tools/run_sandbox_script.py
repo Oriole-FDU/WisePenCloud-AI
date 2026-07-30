@@ -17,21 +17,19 @@ class RunSandboxScriptTool:
             llm_spec=ToolLLMSpec(
                 name="run_sandbox_script",
                 description=(
-                    "Run a script package in the sandbox environment. "
-                    "Provide package_id and optional entry/args/env/timeout_ms/limits."
+                    "Run source code in the sandbox environment. "
+                    "Provide language and code, with optional timeout_ms and limits."
                 ),
                 parameters_schema=ToolParametersSchema(
                     {
                         "type": "object",
                         "properties": {
-                            "package_id": {"type": "string", "minLength": 1},
-                            "entry": {"type": "string"},
-                            "args": {"type": "array", "items": {"type": "string"}},
-                            "env": {"type": "object", "additionalProperties": {"type": "string"}},
+                            "language": {"type": "string", "minLength": 1},
+                            "code": {"type": "string", "minLength": 1},
                             "timeout_ms": {"type": "integer", "minimum": 1},
                             "limits": {"type": "object"},
                         },
-                        "required": ["package_id"],
+                        "required": ["language", "code"],
                     }
                 ),
             ),
@@ -39,14 +37,13 @@ class RunSandboxScriptTool:
         )
 
     async def execute(self, context: Dict[str, Any], **kwargs) -> str:
-        package_id = str(kwargs.get("package_id") or "").strip()
-        if not package_id:
-            return "[Tool Error] missing package_id"
+        language = str(kwargs.get("language") or "").strip()
+        code = str(kwargs.get("code") or "")
+        if not language or not code:
+            return "[Tool Error] missing language or code"
         payload = {
-            "package_id": package_id,
-            "entry": kwargs.get("entry"),
-            "args": kwargs.get("args") if isinstance(kwargs.get("args"), list) else [],
-            "env": kwargs.get("env") if isinstance(kwargs.get("env"), dict) else {},
+            "language": language,
+            "code": code,
             "timeout_ms": kwargs.get("timeout_ms"),
             "limits": kwargs.get("limits") if isinstance(kwargs.get("limits"), dict) else {},
         }

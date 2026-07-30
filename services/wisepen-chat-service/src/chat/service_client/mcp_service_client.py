@@ -27,12 +27,14 @@ class McpServiceClient:
         service_name: str = _DEFAULT_SERVICE_NAME,
         timeout: float = 30.0,
         default_strategy: Optional[LoadBalancingStrategy] = None,
+        base_url: str = "",
     ) -> None:
         self._discovery = discovery
         self._from_source_secret = from_source_secret
         self._service_name = service_name
         self._timeout = timeout
         self._strategy = default_strategy
+        self._base_url = base_url.rstrip("/")
 
     async def list_tools(self) -> list[McpToolDescriptor]:
         async with streamable_http_client(
@@ -83,14 +85,20 @@ class McpServiceClient:
         return output
 
     async def _resolve_url(self) -> str:
-        instance = await self._discovery.pick(self._service_name, strategy=self._strategy)
-        return f"http://{instance.ip}:{instance.port}{_MCP_PATH}"
+        try:
+            instance = await self._discovery.pick(self._service_name, strategy=self._strategy)
+            return f"http://{instance.ip}:{instance.port}{_MCP_PATH}"
+        except Exception:
+            if self._base_url:
+                return f"{self._base_url}{_MCP_PATH}"
+            raise
 
     def _build_headers(self, context: Mapping[str, Any] | None = None) -> dict[str, str]:
         headers: dict[str, str] = {}
+        context = context or {}
 
         headers[SecurityConstants.HEADER_FROM_SOURCE] = self._from_source_secret
-        user_id = SecurityContextHolder.get_user_id()
+        user_id = str(context.get("user_id") or SecurityContextHolder.get_user_id() or "").strip()
         identity_type = SecurityContextHolder.get_identity_type()
         if user_id:
             headers[SecurityConstants.HEADER_USER_ID] = user_id
@@ -100,9 +108,12 @@ class McpServiceClient:
                 str(group_id): role.code
                 for group_id, role in SecurityContextHolder.get_group_role_map().items()
             }, ensure_ascii=False)
-        session_id = str((context or {}).get("session_id") or "").strip()
+        session_id = str(context.get("session_id") or SecurityContextHolder.get_session_id() or "").strip()
         if session_id:
             headers[SecurityConstants.HEADER_SESSION_ID] = session_id
+        request_id = str(context.get("request_id") or "").strip()
+        if request_id:
+            headers[SecurityConstants.HEADER_REQUEST_ID] = request_id
         developer = GrayContextHolder.get_developer_tag()
         if developer:
             headers[CommonConstants.GRAY_HEADER_DEV_KEY] = developer

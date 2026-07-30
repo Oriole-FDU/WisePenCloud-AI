@@ -249,11 +249,13 @@ class ChatTurnCoordinator:
         )]
 
         token_usage = 0
-        if self._sandbox_client is not None:
-            await self._sandbox_client.allocate_request(tool_context)
-
-        # 流式推理
+        sandbox_acquired = False
         try:
+            if self._sandbox_client is not None:
+                await self._sandbox_client.allocate_request(tool_context)
+                sandbox_acquired = True
+
+            # 流式推理
             async for event in self._query_loop_runtime.stream_chat_with_tool_calling(
                 messages=messages_for_llm,
                 tool_scope=tool_scope,
@@ -276,8 +278,11 @@ class ChatTurnCoordinator:
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
         finally:
-            if self._sandbox_client is not None:
-                await self._sandbox_client.release_request(sandbox_request_id)
+            if self._sandbox_client is not None and sandbox_acquired:
+                try:
+                    await self._sandbox_client.release_request(sandbox_request_id)
+                except Exception as exc:
+                    error("sandbox lease release failed.", session_id=session_id, exc=exc)
 
         # 使用 FastAPI 的 BackgroundTasks 在响应返回给用户后，异步执行
         if background_tasks is not None:

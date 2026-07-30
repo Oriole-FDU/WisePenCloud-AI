@@ -46,14 +46,21 @@ class SandboxSessionService:
         return await self._allocate(tenant_id, workspace_id)
 
     async def release(self) -> None:
-        lease = await self._allocate()
-        await self._scheduler.release(lease.lease_id, lease.fencing_token)
+        tenant_id, workspace_id, request_id = self._context()
+        await self._scheduler.release_request(
+            request_id or self._default_request_id(tenant_id, workspace_id),
+            tenant_id,
+            workspace_id,
+        )
 
     async def release_for(self, tenant_id: str, workspace_id: str) -> None:
-        lease = await self._allocate(tenant_id, workspace_id)
-        await self._scheduler.release(lease.lease_id, lease.fencing_token)
+        await self._scheduler.release_request(
+            self._default_request_id(tenant_id, workspace_id),
+            tenant_id,
+            workspace_id,
+        )
 
-    def _context(self) -> tuple[str, str]:
+    def _context(self) -> tuple[str, str, str | None]:
         # 安全上下文来自网关安全中间件，不能信任用户在工具参数中传身份。
         tenant_id = (SecurityContextHolder.get_user_id() or "").strip()
         workspace_id = (SecurityContextHolder.get_session_id() or "").strip()
@@ -62,15 +69,20 @@ class SandboxSessionService:
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
                 "用户和会话上下文不能为空",
             )
-        return tenant_id, workspace_id
+        return tenant_id, workspace_id, SecurityContextHolder.get_request_id()
 
     async def _allocate(
         self,
         tenant_id: str | None = None,
         workspace_id: str | None = None,
     ) -> SandboxLease:
+        request_id = None
         if not tenant_id or not workspace_id:
-            tenant_id, workspace_id = self._context()
+            tenant_id, workspace_id, request_id = self._context()
         # 工具协议和远程桌面是长连接式入口，按 tenant/workspace 固定 request_id 复用同一租约。
-        request_id = f"mcp:{tenant_id}:{workspace_id}"
+        request_id = request_id or self._default_request_id(tenant_id, workspace_id)
         return await self._scheduler.allocate(request_id, tenant_id, workspace_id)
+
+    @staticmethod
+    def _default_request_id(tenant_id: str, workspace_id: str) -> str:
+        return f"mcp:{tenant_id}:{workspace_id}"

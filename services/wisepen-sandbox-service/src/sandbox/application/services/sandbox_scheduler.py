@@ -123,27 +123,48 @@ class SandboxScheduler:
 
     async def release(self, lease_id: str, fencing_token: int) -> None:
         async with self._lifecycle_lock:
-            if lease_id in self._released_leases:
+            await self._release_locked(lease_id, fencing_token)
+
+    async def release_request(
+        self,
+        request_id: str,
+        tenant_id: str,
+        workspace_id: str,
+    ) -> None:
+        """按幂等分配请求释放租约；不存在时视为已经释放。"""
+        async with self._lifecycle_lock:
+            record = await self._repository.find_request(request_id)
+            if record is None:
                 return
-            record = await self._repository.find_lease(lease_id)
-            if record.state in (SandboxState.DESTROYED, SandboxState.LOST):
-                self._released_leases.add(lease_id)
-                return
-            record = await self._repository.close_lease(lease_id, fencing_token)
-            if record.state == SandboxState.DESTROYING:
-                return
-            commit_error: Exception | None = None
-            try:
-                # 先导出并提交工作区；即使失败，也不能阻止后续 destroy。
-                await self._export_and_commit_workspace(record, lease_id)
-            except ServiceException as exc:
-                commit_error = exc
-            finally:
-                # 用户实例销毁后由 Watcher 补池，不允许直接复用为 READY。
-                await self._destroy_record(record, DestroyReason.LEASE_RELEASED)
-                self._released_leases.add(lease_id)
-            if commit_error:
-                raise commit_error
+            if record.tenant_id != tenant_id or record.workspace_id != workspace_id:
+                raise ServiceException(
+                    SandboxErrorCode.FENCING_REJECTED,
+                    "租约上下文不匹配",
+                )
+            await self._release_locked(record.lease_id or "", record.fencing_token)
+
+    async def _release_locked(self, lease_id: str, fencing_token: int) -> None:
+        if lease_id in self._released_leases:
+            return
+        record = await self._repository.find_lease(lease_id)
+        if record.state in (SandboxState.DESTROYED, SandboxState.LOST):
+            self._released_leases.add(lease_id)
+            return
+        record = await self._repository.close_lease(lease_id, fencing_token)
+        if record.state == SandboxState.DESTROYING:
+            return
+        commit_error: Exception | None = None
+        try:
+            # 先导出并提交工作区；即使失败，也不能阻止后续 destroy。
+            await self._export_and_commit_workspace(record, lease_id)
+        except ServiceException as exc:
+            commit_error = exc
+        finally:
+            # 用户实例销毁后由 Watcher 补池，不允许直接复用为 READY。
+            await self._destroy_record(record, DestroyReason.LEASE_RELEASED)
+            self._released_leases.add(lease_id)
+        if commit_error:
+            raise commit_error
 
     async def recover_expired(self) -> int:
         recovered = 0

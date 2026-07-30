@@ -53,12 +53,14 @@ class SandboxClient:
         base_url: str = "",
         from_source: str = "",
         timeout_seconds: float = 30.0,
+        mcp_client: Any | None = None,
     ) -> None:
         self._rpc = rpc
         self._service_name = service_name
         self._base_url = base_url.rstrip("/")
         self._from_source = from_source
         self._timeout = timeout_seconds
+        self._mcp_client = mcp_client
         self._leases: dict[str, LeaseContext] = {}
         self._locks: dict[str, asyncio.Lock] = {}
 
@@ -132,11 +134,45 @@ class SandboxClient:
 
     async def allocate_request(self, context: dict[str, Any]) -> LeaseContext:
         request_id = self._request_id(context)
+        if self._mcp_client is not None:
+            output = await self._mcp_client.call_tool(
+                None,
+                "acquire_sandbox",
+                {},
+                context=context,
+            )
+            payload = _decode_mcp_payload(output)
+            lease = LeaseContext(
+                lease_id=str(payload["lease_id"]),
+                request_id=str(payload.get("request_id") or request_id),
+                tenant_id=str(payload.get("tenant_id") or context.get("user_id") or ""),
+                workspace_id=str(payload.get("workspace_id") or context.get("session_id") or ""),
+                fencing_token=int(payload["fencing_token"]),
+                expires_at=payload.get("expires_at"),
+            )
+            self._leases[request_id] = lease
+            return lease
         lease = await self._ensure_lease(context, request_id)
         return lease
 
     async def release_request(self, request_id: str) -> None:
         lease = self._leases.get(request_id)
+        if self._mcp_client is not None:
+            if lease is None:
+                return
+            await self._mcp_client.call_tool(
+                None,
+                "release_sandbox",
+                {},
+                context={
+                    "request_id": request_id,
+                    "user_id": lease.tenant_id if lease else "",
+                    "session_id": lease.workspace_id if lease else "",
+                },
+            )
+            self._leases.pop(request_id, None)
+            self._locks.pop(request_id, None)
+            return
         if not lease:
             return
         try:
@@ -273,3 +309,12 @@ def _sandbox_code_from_number(code: int | None) -> str:
 
 def _sandbox_code_from_rpc(exc: RpcError) -> str:
     return _sandbox_code_from_number(exc.code)
+
+
+def _decode_mcp_payload(output: str) -> dict[str, Any]:
+    import json
+
+    payload = json.loads(output)
+    if not isinstance(payload, dict):
+        raise SandboxClientError("SANDBOX_UNAVAILABLE", "MCP 沙箱响应不是对象")
+    return payload
