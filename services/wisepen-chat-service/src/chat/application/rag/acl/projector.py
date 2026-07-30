@@ -6,7 +6,6 @@ from typing import Any
 
 from .models import RagComputedGroupAclProjection, RagResourceAclProjection
 
-
 # Java 侧 VIEW 权限对应第 1 位。
 _VIEW_MASK = 1 << 1
 
@@ -101,7 +100,7 @@ class RagAclProjector:
         return tuple(projections)
 
     def _read_group_users(
-        self, value: Any, *, group_is_readable: bool
+            self, value: Any, *, group_is_readable: bool
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """解析组内用户相对于组基础权限的例外规则。"""
         if not isinstance(value, Mapping):
@@ -131,7 +130,7 @@ class RagAclProjector:
     def _has_view(mask: Any) -> bool:
         """判断权限掩码中是否包含 VIEW 位。"""
         return (
-            isinstance(mask, int)
-            and not isinstance(mask, bool)
-            and (mask & _VIEW_MASK) != 0
+                isinstance(mask, int)
+                and not isinstance(mask, bool)
+                and (mask & _VIEW_MASK) != 0
         )

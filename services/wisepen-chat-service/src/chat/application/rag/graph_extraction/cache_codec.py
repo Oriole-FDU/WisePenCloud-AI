@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
-
 from neo4j_graphrag.experimental.components.types import Neo4jGraph
-
 
 # 缓存中的统一节点 ID 前缀。
 # SDK 候选图中的节点 ID 形如 "chunk_id:UUID"，直接缓存会绑定到具体 chunk；

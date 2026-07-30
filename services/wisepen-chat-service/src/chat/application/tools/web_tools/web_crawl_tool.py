@@ -80,8 +80,8 @@ class WebCrawlTool:
                     "to max_pages, max_depth, and same_domain; the result contains only successfully "
                     "cleaned HTML pages as Markdown. This tool does not extract direct PDF URLs or "
                     "search the web. Use web_fetch for one known page, a batch of known URLs, or a "
-                    "direct PDF URL. Each returned page includes its source URL and cached content "
-                    "index for follow-up content reads."
+                    "direct PDF URL. Each returned page includes its source URL, and the cached "
+                    "content keeps source_url metadata for follow-up content reads."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -136,17 +136,18 @@ class WebCrawlTool:
             "seed_url": seed_url,
             "pages_crawled": len(pages),
             "pages": tuple(
-                {
-                    "url": page.source_url,
-                    "content_index": index,
-                }
-                for index, page in enumerate(pages)
+                {"url": page.source_url}
+                for page in pages
             ),
         }
         return ToolReturn(
             visible_result=visible_result,
             cacheable_texts=tuple(
-                CacheableText(text=page.text, is_md=True)
+                CacheableText(
+                    text=page.text,
+                    is_md=True,
+                    metadata={"source_url": page.source_url},
+                )
                 for page in pages
             ),
         )

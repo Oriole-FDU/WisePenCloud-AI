@@ -36,10 +36,10 @@ class RagPermissionFilterBuilder:
         return qdrant_models.Filter(should=should)
 
     def build_neo4j_predicate(
-        self,
-        scope: RagPermissionScope,
-        *,
-        node_alias: str,
+            self,
+            scope: RagPermissionScope,
+            *,
+            node_alias: str,
     ) -> tuple[str, dict[str, Any]]:
         if not node_alias.isidentifier():
             raise ValueError("node_alias must be a valid identifier")
@@ -134,9 +134,9 @@ class RagPermissionFilterBuilder:
 
     @staticmethod
     def _nested_qdrant_group_filter(
-        filter_clauses: list[qdrant_models.Condition],
-        *,
-        must_not: list[qdrant_models.Condition] | None = None,
+            filter_clauses: list[qdrant_models.Condition],
+            *,
+            must_not: list[qdrant_models.Condition] | None = None,
     ) -> qdrant_models.NestedCondition:
         # Qdrant NestedCondition：对数组字段 computed_group_acls 的每个元素应用子 filter，
         # 对应 Neo4j 端通过 HAS_GROUP_ACL 关系遍历的语义。

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -59,6 +59,7 @@ class ToolContentWindow:
     page_labels: tuple[str, ...] = ()
     section_paths: tuple[tuple[str, ...], ...] = ()
     anchor_labels: tuple[str, ...] = ()
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

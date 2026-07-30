@@ -116,6 +116,22 @@ async def test_plain_text_store_uses_plain_text_chunker() -> None:
 
 
 @pytest.mark.asyncio
+async def test_store_preserves_metadata_on_storage_and_receipt() -> None:
+    repository = _RepositoryStub()
+    result = await ToolContentStore(repository=repository).put(
+        session_id="session-1",
+        text="来源文本。",
+        metadata={"source_url": "https://example.com"},
+    )
+
+    assert result.status == ToolContentPutStatus.STORED
+    assert result.receipt is not None
+    assert result.receipt.metadata == {"source_url": "https://example.com"}
+    assert repository.stored is not None
+    assert repository.stored.metadata == {"source_url": "https://example.com"}
+
+
+@pytest.mark.asyncio
 async def test_store_preserves_raw_text_for_chunk_offsets() -> None:
     repository = _RepositoryStub()
     text = "\n<!-- page 1 -->\n\n# 鉴权\n\n正文。\n"

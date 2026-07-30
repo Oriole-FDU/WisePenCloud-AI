@@ -41,10 +41,13 @@ def render_tool_result(
 ) -> RenderToolResult:
     """将常见返回值编码为 JSON，不支持的对象降级为原始文本表达。"""
     try:
-        tool_output = orjson.dumps(
+        encoded_output = orjson.dumps(
             output,
             default=_json_default,
             option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY,
+        )
+        tool_output = orjson.dumps(
+            _remove_empty_json_values(orjson.loads(encoded_output))
         ).decode()
     except TypeError:
         tool_output = str(output)
@@ -72,6 +75,28 @@ def render_tool_result(
         persisted_output_placeholder=persisted_output_placeholder,
         tool_output=tool_output,
     )
+
+
+def _remove_empty_json_values(value: Any) -> Any:
+    """递归删除 JSON 对象和数组中的空值。"""
+    if isinstance(value, dict):
+        values = {
+            key: _remove_empty_json_values(item)
+            for key, item in value.items()
+        }
+        return {
+            key: item
+            for key, item in values.items()
+            if not _is_empty_json_value(item)
+        }
+    if isinstance(value, list):
+        values = [_remove_empty_json_values(item) for item in value]
+        return [item for item in values if not _is_empty_json_value(item)]
+    return value
+
+
+def _is_empty_json_value(value: Any) -> bool:
+    return value is None or value == "" or value == {} or value == []
 
 
 def _json_default(value: Any) -> Any:

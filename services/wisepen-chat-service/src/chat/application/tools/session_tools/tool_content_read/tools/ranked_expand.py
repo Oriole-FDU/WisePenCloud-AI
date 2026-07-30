@@ -43,7 +43,12 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         "top_k": {
             "type": "integer",
             "default": 10,
-            "description": "Maximum number of globally ranked windows returned.",
+            "description": (
+                "Maximum number of globally ranked windows returned across all content_ids. "
+                "Defaults to 10. Use chunk_count from each input content_receipt as a sizing "
+                "signal: increase top_k for large documents or broad questions that may need "
+                "evidence from many chunks."
+            ),
         },
         "merge_before": {"type": "integer", "default": 0},
         "merge_after": {"type": "integer", "default": 0},
@@ -80,6 +85,9 @@ class ToolContentRankedExpandReadTool:
                     "  - query is the question the candidate chunks should answer, for example: 'What is 2+2?'.\n"
                     "  - Do not pass keywords or describe the retrieval task.\n"
                     "  - selector prefilters chunks before ranking; selector groups are intersected.\n"
+                    "  - top_k defaults to 10 and limits results globally across all content_ids. "
+                    "Use each source content_receipt's chunk_count as a sizing signal; increase "
+                    "top_k when a large document or broad question may require evidence from many chunks.\n"
                     "  - merge_before and merge_after expand windows around ranked chunks.\n\n"
                     "OUTPUT RULES:\n"
                     "  - Returns ranked windows with rank and score, plus per-content failures.\n"

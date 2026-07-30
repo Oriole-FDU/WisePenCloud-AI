@@ -130,6 +130,7 @@ def _markdown_content() -> StoredToolContent:
         session_id="session-1",
         content_type="text/markdown",
         text=text,
+        metadata={"source_url": "https://example.com/markdown"},
         chunks=(
             ToolContentChunk(
                 chunk_index=0,
@@ -373,6 +374,28 @@ async def test_regex_tool_reads_33_content_ids_in_16_item_batches() -> None:
     )
 
 
+def test_regex_tool_describes_adaptive_max_matches() -> None:
+    reader = _RegexBatchReader()
+    tool = ToolContentRegexReadTool(reader=reader)
+    llm_spec = tool.definition.llm_spec
+    max_matches_schema = llm_spec.parameters_schema.raw["properties"]["max_matches"]
+
+    assert max_matches_schema["default"] == 10
+    assert "chunk_count" in max_matches_schema["description"]
+    assert "chunk_count" in llm_spec.description
+
+
+def test_ranked_expand_tool_describes_adaptive_top_k() -> None:
+    reader = _RankedExpandBatchReader()
+    tool = ToolContentRankedExpandReadTool(reader=reader)
+    llm_spec = tool.definition.llm_spec
+    top_k_schema = llm_spec.parameters_schema.raw["properties"]["top_k"]
+
+    assert top_k_schema["default"] == 10
+    assert "chunk_count" in top_k_schema["description"]
+    assert "chunk_count" in llm_spec.description
+
+
 @pytest.mark.asyncio
 async def test_ranked_expand_tool_uses_ranked_result_and_internal_batches() -> None:
     reader = _RankedExpandBatchReader()
@@ -505,6 +528,9 @@ async def test_range_reader_supports_head_and_tail_ranges() -> None:
     assert head.window is not None
     assert head.window.text == "The "
     assert (head.window.start_offset, head.window.end_offset) == (0, 4)
+    assert head.window.metadata == {
+        "source_url": "https://example.com/markdown"
+    }
     assert tail.window is not None
     assert tail.window.text == "appears."
     assert tail.window.end_offset == len(stored.text)
@@ -586,6 +612,7 @@ def test_window_builder_aggregates_locator_without_redundant_title() -> None:
         session_id="session-1",
         content_type="text/markdown",
         text=text,
+        metadata={"source_url": "https://example.com"},
         chunks=(
             ToolContentChunk(
                 chunk_index=0,
@@ -620,3 +647,4 @@ def test_window_builder_aggregates_locator_without_redundant_title() -> None:
     assert window.section_paths == (("Parent", "Child"),)
     assert window.page_labels == ("7",)
     assert window.anchor_labels == ("Table 1", "Figure 2")
+    assert window.metadata == {"source_url": "https://example.com"}

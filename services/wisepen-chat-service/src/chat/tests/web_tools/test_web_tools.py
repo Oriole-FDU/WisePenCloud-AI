@@ -63,14 +63,16 @@ async def test_web_fetch_preserves_html_and_pdf_markdown_formats(
     )
 
     assert [content.is_md for content in result.cacheable_texts] == [True, True]
+    assert [content.metadata for content in result.cacheable_texts] == [
+        {"source_url": "https://example.com"},
+        {"source_url": "https://example.com/paper.pdf"},
+    ]
     assert result.visible_result["items"] == (
         {
             "source_url": "https://example.com",
-            "content_index": 0,
         },
         {
             "source_url": "https://example.com/paper.pdf",
-            "content_index": 1,
         },
     )
 
@@ -84,6 +86,9 @@ async def test_web_crawl_marks_cleaned_html_as_markdown() -> None:
 
     assert len(result.cacheable_texts) == 1
     assert result.cacheable_texts[0].is_md is True
+    assert result.cacheable_texts[0].metadata == {
+        "source_url": "https://example.com"
+    }
 
 
 @pytest.mark.asyncio
@@ -144,8 +149,16 @@ async def test_tool_output_cache_maps_is_md_to_content_type() -> None:
     await cache.process(
         tool_return=ToolReturn(
             cacheable_texts=(
-                CacheableText(text="# html", is_md=True),
-                CacheableText(text="pdf", is_md=False),
+                CacheableText(
+                    text="# html",
+                    is_md=True,
+                    metadata={"source_url": "https://example.com"},
+                ),
+                CacheableText(
+                    text="pdf",
+                    is_md=False,
+                    metadata={"source_url": "https://example.com/paper.pdf"},
+                ),
             ),
         ),
         invocation=ToolInvocation(

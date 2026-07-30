@@ -132,6 +132,7 @@ class ToolContentStore:
                 content_id=stored.content_id,
                 chunk_count=len(chunks),
                 supported_selectors=_supported_selectors(stored),
+                metadata=content_metadata,
             ),
         )
 

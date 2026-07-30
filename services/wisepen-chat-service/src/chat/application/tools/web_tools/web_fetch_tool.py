@@ -53,8 +53,8 @@ class WebFetchTool:
                     "web_crawl when you need to "
                     "discover and read multiple linked HTML pages starting from one site URL. URLs "
                     "must be complete public http(s) URLs; invalid or unsupported URLs are omitted "
-                    "from the returned items. Each returned item identifies its source URL and the "
-                    "corresponding cached content index for follow-up content reads."
+                    "from the returned items. Each returned item identifies its source URL, and "
+                    "the cached content keeps source_url metadata for follow-up content reads."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -84,17 +84,18 @@ class WebFetchTool:
         )
         visible_result = {
             "items": tuple(
-                {
-                    "source_url": result.source_url,
-                    "content_index": index,
-                }
-                for index, result in enumerate(results)
+                {"source_url": result.source_url}
+                for result in results
             )
         }
         return ToolReturn(
             visible_result=visible_result,
             cacheable_texts=tuple(
-                CacheableText(text=result.text, is_md=result.is_md)
+                CacheableText(
+                    text=result.text,
+                    is_md=result.is_md,
+                    metadata={"source_url": result.source_url},
+                )
                 for result in results
             ),
         )

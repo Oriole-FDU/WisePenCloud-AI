@@ -105,6 +105,8 @@ async def test_upserts_revision_scoped_point_with_complete_acl() -> None:
     assert payload["source_ref_id"] == projection.source_refs[0].ref_id
     assert payload["section_id"] == projection.retrieval_chunks[0].section_id
     assert payload["reading_block_id"] == projection.reading_blocks[0].block_id
+    assert "document_version" not in payload
+    assert "page_labels" not in payload
     assert payload["embedding_key"]
     sparse_document = points[0].vector["sparse"]
     assert sparse_document.model == "qdrant/bm25"

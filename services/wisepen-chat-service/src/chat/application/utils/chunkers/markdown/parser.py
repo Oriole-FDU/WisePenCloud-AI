@@ -10,9 +10,18 @@ from mdit_py_plugins.dollarmath import dollarmath_plugin
 from ..models import BlockKind, TextBlock
 
 PAGE_MARKER_RE = re.compile(r"^<!--\s*page\s+(\d+)\s*-->\s*$")
-TABLE_CAPTION_RE = re.compile(
-    r"^(?:[·•]\s*|[-*+]\s+)?[*_`~\s]*(?:Table|表格|表)\s+(\d+(?:\.\d+)*)",
-    re.IGNORECASE,
+
+NUMBERED_CAPTION_RE = re.compile(
+    r"^(?:[·•]\s*|[-*+]\s+)?[*_`~\s]*"
+    r"(?:(?P<table_label>Table|表格|表)|(?P<figure_label>Figure|Fig\.?|图))"
+    r"\s*(?P<number>\d+(?:\.\d+)*)\s*[-:：.．、]\s*"
+    r"(?P<title>\S(?:.*\S)?)[*_`~\s]*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+HTML_FIGCAPTION_RE = re.compile(
+    r"<figcaption\b[^>]*>(?P<caption>.*?)</figcaption\s*>",
+    re.IGNORECASE | re.DOTALL,
 )
 
 _TOKEN_KINDS = {
@@ -78,8 +87,8 @@ class MarkdownParser:
                 block.end_offset if block.end_offset is not None else -1,
             )
         )
-        # 后处理：合并表题+表格、投影页码到结构块
-        blocks = _merge_captioned_tables(blocks, text)
+        # 后处理：关联编号 caption、投影页码到结构块
+        blocks = _merge_numbered_captions(blocks, text)
         blocks = _attach_page_labels(blocks)
 
         # 空结果兜底：整篇文本作为单个 UNKNOWN block
@@ -129,6 +138,8 @@ class MarkdownParser:
             kind = _token_kind(token)
             if kind is None:
                 continue
+            if kind is BlockKind.PARAGRAPH and _is_figure_paragraph(inline_token):
+                kind = BlockKind.FIGURE
 
             start_line, end_line = token.map
             block_text = "".join(lines[start_line:end_line])
@@ -137,6 +148,22 @@ class MarkdownParser:
 
             metadata: dict[str, object] = {}
             section_path = tuple(title for _, title in headings)
+            if kind is BlockKind.FIGURE:
+                figure_caption = _inline_figure_caption(inline_token)
+                if figure_caption is None:
+                    figure_caption = _html_figure_caption(block_text)
+                if figure_caption is not None:
+                    metadata["caption"] = figure_caption
+                    caption_match = NUMBERED_CAPTION_RE.fullmatch(
+                        figure_caption.strip()
+                    )
+                    if (
+                        caption_match is not None
+                        and caption_match.group("figure_label") is not None
+                    ):
+                        metadata["anchor_label"] = (
+                            f"Figure {caption_match.group('number')}"
+                        )
             if kind == BlockKind.HEADING:
                 title = inline_token.content.strip() if inline_token else block_text
                 level = int(token.tag[1])
@@ -169,28 +196,73 @@ class MarkdownParser:
 def _token_kind(token: Token) -> BlockKind | None:
     """将顶层 token 收敛为模块支持的结构类型。
 
-    html_block 需要特殊处理：只有以 <table 开头的才映射为 TABLE，其余忽略
+    html_block 需要特殊处理：只识别 table、figure 和独立 img，其余忽略
     （因为 HTML 注释页标已被单独提取，此处忽略不会遗漏）。
     """
     if token.type == "html_block":
-        return (
-            BlockKind.TABLE
-            if token.content.lstrip().lower().startswith("<table")
-            else None
-        )
+        html = token.content.lstrip().lower()
+        if html.startswith("<table"):
+            return BlockKind.TABLE
+        if html.startswith(("<figure", "<img")):
+            return BlockKind.FIGURE
+        return None
     if token.type == "paragraph_open":
         return BlockKind.PARAGRAPH
     return _TOKEN_KINDS.get(token.type)
 
 
-def _merge_captioned_tables(
+def _is_figure_paragraph(inline_token: Token | None) -> bool:
+    """仅把独立图片或“图片 + 编号图题”段落识别为 figure。"""
+    if inline_token is None or not inline_token.children:
+        return False
+
+    images = [child for child in inline_token.children if child.type == "image"]
+    if len(images) != 1:
+        return False
+
+    surrounding_text = " ".join(
+        child.content.strip()
+        for child in inline_token.children
+        if child.type == "text" and child.content.strip()
+    )
+    if not surrounding_text:
+        return True
+
+    caption_match = NUMBERED_CAPTION_RE.fullmatch(surrounding_text.strip())
+    return (
+        caption_match is not None
+        and caption_match.group("figure_label") is not None
+    )
+
+
+def _inline_figure_caption(inline_token: Token | None) -> str | None:
+    if inline_token is None:
+        return None
+    for child in inline_token.children or ():
+        if child.type != "image":
+            continue
+        caption_match = NUMBERED_CAPTION_RE.fullmatch(child.content.strip())
+        if (
+            caption_match is not None
+            and caption_match.group("figure_label") is not None
+        ):
+            return child.content.strip()
+    return None
+
+
+def _html_figure_caption(text: str) -> str | None:
+    match = HTML_FIGCAPTION_RE.search(text)
+    return match.group("caption").strip() if match is not None else None
+
+
+def _merge_numbered_captions(
     blocks: list[TextBlock],
     text: str,
 ) -> list[TextBlock]:
-    """将 PDF Markdown 中紧邻的表题与表格合并。
+    """将紧邻的编号表题/图题与对应结构块合并。
 
-    PDF 转 Markdown 时，"表 1 xxx" 和紧随的 <table> 会被解析为两个 block。
-    本函数检测这种相邻模式并将它们合并为一个 TABLE block，避免表题被孤立为 PARAGRAPH。
+    转换后的 Markdown 会把 caption 和 table/figure 解析为两个 block。
+    本函数只合并标签与目标类型一致的相邻 block，避免 caption 被孤立为 PARAGRAPH。
 
     page marker 会作为中间 block 阻断候选，因此不会跨页合并。
     """
@@ -201,18 +273,31 @@ def _merge_captioned_tables(
         first = blocks[index]
         if index + 1 < len(blocks):
             second = blocks[index + 1]
-            # 表题可以在表格上方或下方，所以需要尝试两种顺序
-            caption, table = (
+            # caption 可以位于目标块上方或下方，所以需要尝试两种顺序
+            caption, target = (
                 (first, second)
                 if first.block_kind == BlockKind.PARAGRAPH
                 else (second, first)
             )
-            # 用首行匹配表题格式（如 "表 1.2"、"Table 3"）
-            match = TABLE_CAPTION_RE.match(caption.text.partition("\n")[0].strip())
+            caption_match = (
+                NUMBERED_CAPTION_RE.fullmatch(caption.text.strip())
+                if caption.block_kind is BlockKind.PARAGRAPH
+                else None
+            )
+            anchor_prefix: str | None = None
+            if caption_match is not None:
+                if (
+                    target.block_kind is BlockKind.TABLE
+                    and caption_match.group("table_label") is not None
+                ):
+                    anchor_prefix = "Table"
+                elif (
+                    target.block_kind is BlockKind.FIGURE
+                    and caption_match.group("figure_label") is not None
+                ):
+                    anchor_prefix = "Figure"
             if (
-                caption.block_kind == BlockKind.PARAGRAPH
-                and table.block_kind == BlockKind.TABLE
-                and match is not None
+                anchor_prefix is not None
                 # 两个 block 之间不能有非空白内容（防止误合并不相关的段落）
                 and first.end_offset is not None
                 and second.start_offset is not None
@@ -222,7 +307,7 @@ def _merge_captioned_tables(
                 end_offset = second.end_offset
                 merged.append(
                     replace(
-                        table,
+                        target,
                         text=(
                             text[start_offset:end_offset]
                             if start_offset is not None and end_offset is not None
@@ -230,11 +315,13 @@ def _merge_captioned_tables(
                         ),
                         start_offset=start_offset,
                         end_offset=end_offset,
-                        section_path=table.section_path or caption.section_path,
+                        section_path=target.section_path or caption.section_path,
                         metadata={
-                            **table.metadata,
+                            **target.metadata,
                             "caption": caption.text,
-                            "anchor_label": f"Table {match.group(1)}",
+                            "anchor_label": (
+                                f"{anchor_prefix} {caption_match.group('number')}"
+                            ),
                         },
                     )
                 )

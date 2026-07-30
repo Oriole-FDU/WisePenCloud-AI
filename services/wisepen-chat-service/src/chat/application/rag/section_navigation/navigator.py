@@ -8,10 +8,9 @@ from chat.application.rag.evidence import (
     RagMaterializedHit,
     RagMaterializedSource,
 )
-from chat.application.rag.repositories import RagSectionNavigationRepository
 from chat.application.rag.ingestion.models import RagSectionReadingBlock
-
-from .models import RagLocatedSection, RagSectionView
+from chat.application.rag.repositories import RagSectionNavigationRepository
+from .models import RagSectionView
 
 
 class RagSectionNavigator:
@@ -23,34 +22,29 @@ class RagSectionNavigator:
         self._repository = repository
 
     async def build_hits(
-        self,
-        hits: tuple[RagMaterializedHit, ...],
-    ) -> tuple[RagLocatedSection, ...]:
+            self,
+            hits: tuple[RagMaterializedHit, ...],
+    ) -> tuple[RagSectionView, ...]:
         """把检索命中提升为 SectionView，每个 Section 保留 ranking 最高的命中。"""
         # 按 (resource_id, section_id) 批量加载 Section 视图（含轻量 frontier）。
         views = await self._load_views(
             tuple(
-                (hit.hit.candidate.resource_id, hit.hit.candidate.section_id)
+                (hit.resource_id, hit.section_id)
                 for hit in hits
             )
         )
         return tuple(
-            RagLocatedSection(
-                materialized_hit=hit,
-                view=replace(
-                    views[(hit.hit.candidate.resource_id, hit.hit.candidate.section_id)],
-                    # 同一个 SectionView 只保留当前命中的 source 和 reading block，
-                    # 避免多检索子块互相覆盖证据。
-                    sources=(hit.source,),
-                    reading_blocks=(hit.reading_block,),
-                ),
+            replace(
+                views[(hit.resource_id, hit.section_id)],
+                sources=(hit.source,),
+                reading_blocks=(hit.reading_block,),
             )
             for hit in hits
         )
 
     async def build_sources(
-        self,
-        sources: tuple[RagMaterializedSource, ...],
+            self,
+            sources: tuple[RagMaterializedSource, ...],
     ) -> tuple[RagSectionView, ...]:
         """直接为 SourceRef 构建 SectionView，不经过候选排序。"""
         # 去重：多个 SourceRef 可能映射到同一 Section，只需为每个 Section 加载一次视图。
@@ -74,10 +68,10 @@ class RagSectionNavigator:
         )
 
     async def read_sections(
-        self,
-        *,
-        resource_id: str,
-        section_ids: tuple[str, ...],
+            self,
+            *,
+            resource_id: str,
+            section_ids: tuple[str, ...],
     ) -> tuple[RagSectionView, ...]:
         """读取已发现 Section 的全部 ReadingBlock，用于返回完整正文。"""
         keys = tuple((resource_id, section_id) for section_id in section_ids)
@@ -102,8 +96,8 @@ class RagSectionNavigator:
         )
 
     async def _load_views(
-        self,
-        keys: tuple[tuple[str, str], ...],
+            self,
+            keys: tuple[tuple[str, str], ...],
     ) -> dict[tuple[str, str], RagSectionView]:
         """按资源并行加载 Section 视图，并对缺失的 Section 立即报错。"""
         # 输入可能有重复键，去重并保留顺序。

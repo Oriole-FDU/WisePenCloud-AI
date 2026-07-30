@@ -137,15 +137,8 @@ class KnowledgeEvidence:
 
     evidence_ref_id: str  # evidence 的稳定 ID，跨抽取运行保持一致。
     source_ref_id: str  # 对应的 SourceRef ID。
-    resource_id: str  # 原文资源 ID。
-    document_version: int  # 资源文档版本号。
     chunk_id: str  # evidence 所在 chunk。
-    start_offset: int  # 原文 Markdown 中的起始 offset。
-    end_offset: int  # 原文 Markdown 中的结束 offset。
-    quote: str  # 证据原文（与 offset 区间一致）。
-    page_label: str | None  # 原文页码标签。
-    section_id: str  # evidence 所在 section ID。
-    section_path: tuple[str, ...]  # evidence 所在 section 路径。
+    quote: str  # 已按原文 offset 校验的连续证据文本。
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,8 +159,6 @@ class ExtractedKnowledgeRelation:
     source_local_id: str  # 关系源节点的 local_id。
     target_local_id: str  # 关系目标节点的 local_id。
     relation_type: KnowledgeRelationType  # 关系类型。
-    relation_profile: KnowledgeRelationProfile  # 关系所属 profile。
-    assertion: KnowledgeAssertion  # 关系在原文中的断言状态。
     evidence: KnowledgeEvidence  # 关系的精确原文证据。
     predicate: str | None = None  # RELATED_TO 的具体谓词；其他关系为 None。
 

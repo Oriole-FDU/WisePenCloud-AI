@@ -48,7 +48,6 @@ from chat.application.rag.retrieval import (
     RagCandidateRetriever,
     RagPermissionFilterBuilder,
 )
-from chat.application.rag.retrieval.locator import RagKnowledgeLocator
 from chat.application.token_counter import TokenCounter
 from chat.core.persistence import (
     MongoSessionRepository,
@@ -96,6 +95,7 @@ from chat.application.tools.rag_tools import (
     KnowledgeNavigateSectionsTool,
 )
 from chat.application.utils.ranking.presets import (
+    KNOWLEDGE_GRAPH_PATH_PIPELINE,
     KNOWLEDGE_SEARCH_PIPELINE,
     READ_RANKED_EXPAND_PIPELINE,
     WEB_SEARCH_PIPELINE,
@@ -479,6 +479,7 @@ class Container(containers.DeclarativeContainer):
         context_indexing=rag_context_indexing,
     )
     knowledge_search_pipeline = providers.Object(KNOWLEDGE_SEARCH_PIPELINE)
+    knowledge_graph_path_pipeline = providers.Object(KNOWLEDGE_GRAPH_PATH_PIPELINE)
     read_ranked_expand_pipeline = providers.Object(READ_RANKED_EXPAND_PIPELINE)
     web_search_ranking_pipeline = providers.Object(WEB_SEARCH_PIPELINE)
     rag_graph_llm = providers.Singleton(
@@ -522,12 +523,6 @@ class Container(containers.DeclarativeContainer):
         RagSectionNavigator,
         repository=rag_content_projection_repository,
     )
-    rag_knowledge_locator = providers.Singleton(
-        RagKnowledgeLocator,
-        retriever=rag_candidate_retriever,
-        materializer=rag_evidence_materializer,
-        section_navigator=rag_section_navigator,
-    )
     knowledge_navigation_state_repository = providers.Singleton(
         RedisKnowledgeNavigationStateRepository,
         redis_client=redis_client,
@@ -535,12 +530,13 @@ class Container(containers.DeclarativeContainer):
     )
     knowledge_navigation_service = providers.Singleton(
         KnowledgeNavigationService,
-        locator=rag_knowledge_locator,
+        retriever=rag_candidate_retriever,
         permission_authorizer=rag_permission_authorizer,
         graph_repository=rag_knowledge_graph_repository,
         evidence_materializer=rag_evidence_materializer,
         section_navigator=rag_section_navigator,
         state_repository=knowledge_navigation_state_repository,
+        path_ranking_pipeline=knowledge_graph_path_pipeline,
     )
     rag_document_ready_consumer = providers.Singleton(
         RagDocumentReadyConsumer,

@@ -59,6 +59,7 @@ class ToolContentWindowBuilder:
             page_labels=page_labels,
             section_paths=section_paths,
             anchor_labels=anchor_labels,
+            metadata=dict(stored.metadata),
         )
 
     def build_range_window(
@@ -93,6 +94,7 @@ class ToolContentWindowBuilder:
             page_labels=page_labels,
             section_paths=section_paths,
             anchor_labels=anchor_labels,
+            metadata=dict(stored.metadata),
         )
 
     def _truncate(self, text: str) -> str:

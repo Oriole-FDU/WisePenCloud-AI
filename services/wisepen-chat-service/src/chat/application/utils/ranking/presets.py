@@ -22,7 +22,27 @@ READ_RANKED_EXPAND_PIPELINE = RankingPipeline(
         FieldedBM25Scorer(
             tokenizer=_THULAC_TOKENIZER,
             config=FieldedBM25ScorerConfig(
-                field_weights={"section": 2.0, "anchor": 1.5},
+                field_weights={
+                    "section": 2.0,
+                    "anchor": 1.5
+                },
+            ),
+        ),
+    ),
+    fusion=WeightedRrfFusion(),
+    reranker=_ZERO_ENTROPY_RERANKER,
+)
+
+KNOWLEDGE_GRAPH_PATH_PIPELINE = RankingPipeline(
+    scorers=(
+        BM25Scorer(tokenizer=_THULAC_TOKENIZER),
+        FieldedBM25Scorer(
+            tokenizer=_THULAC_TOKENIZER,
+            config=FieldedBM25ScorerConfig(
+                field_weights={
+                    "nodes": 2.0,
+                    "relations": 2.0
+                },
             ),
         ),
     ),

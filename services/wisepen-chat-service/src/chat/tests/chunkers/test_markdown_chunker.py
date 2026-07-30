@@ -32,6 +32,29 @@ def test_keeps_full_section_path_and_locator() -> None:
     assert any(locator.name == "section:一级 > 二级" for locator in result.locators)
 
 
+def test_section_locator_includes_nested_sections_until_next_parent_heading() -> None:
+    text = (
+        "# 一级\n\n一级正文。\n\n"
+        "## 二级甲\n\n二级甲正文。\n\n"
+        "### 三级\n\n三级正文。\n\n"
+        "## 二级乙\n\n二级乙正文。\n\n"
+        "# 下一个一级\n\n下一个一级正文。"
+    )
+    result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
+
+    section = next(locator for locator in result.locators if locator.name == "section:一级")
+    next_heading_start = text.index("# 下一个一级")
+
+    assert section.end_offset == next_heading_start
+    assert section.chunk_indices == (0, 1, 2, 3)
+    next_section = next(
+        locator
+        for locator in result.locators
+        if locator.name == "section:下一个一级"
+    )
+    assert next_section.chunk_indices == (4,)
+
+
 def test_marks_pipe_and_html_tables() -> None:
     pipe_text = "# 指标\n\n| A | B |\n|---|---|\n| 1 | 2 |"
     pipe_result = MarkdownChunker().chunk(document=ChunkDocument(text=pipe_text))
@@ -88,6 +111,40 @@ def test_merges_table_caption_after_table_and_builds_anchor() -> None:
     assert any(locator.name == "anchor:Table 2" for locator in result.locators)
 
 
+def test_merges_wrapped_numbered_table_caption() -> None:
+    text = (
+        "Table 3. Results across all evaluated\n"
+        "benchmarks and model sizes.\n\n"
+        "|Model|Score|\n"
+        "|---|---|\n"
+        "|Small|0.8|"
+    )
+    result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
+
+    assert len(result.blocks) == 1
+    assert result.blocks[0].metadata["caption"].startswith("Table 3.")
+    assert result.blocks[0].metadata["anchor_label"] == "Table 3"
+
+
+def test_does_not_merge_numbered_reference_or_figure_caption_into_table() -> None:
+    for caption in (
+        "Table 1 is discussed in the following section.",
+        "Figure 1: System architecture.",
+    ):
+        text = (
+            f"{caption}\n\n"
+            "|Model|Score|\n"
+            "|---|---|\n"
+            "|Small|0.8|"
+        )
+        result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
+
+        assert len(result.blocks) == 2
+        assert result.blocks[0].block_kind == BlockKind.PARAGRAPH
+        assert result.blocks[1].block_kind == BlockKind.TABLE
+        assert "caption" not in result.blocks[1].metadata
+
+
 def test_page_markers_are_hard_chunk_boundaries() -> None:
     text = "\n\n".join(
         (
@@ -107,7 +164,7 @@ def test_page_markers_are_hard_chunk_boundaries() -> None:
     assert all("<!-- page" not in chunk.text for chunk in result.chunks)
 
 
-def test_parser_keeps_images_as_paragraph_content() -> None:
+def test_parser_marks_standalone_images_as_figures() -> None:
     text = "\n".join(
         (
             "<!-- page 7 -->",
@@ -118,7 +175,7 @@ def test_parser_keeps_images_as_paragraph_content() -> None:
     )
     result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
     page_marker = result.blocks[0]
-    image_paragraph = result.blocks[1]
+    figure = result.blocks[1]
     mixed_paragraph = result.blocks[2]
 
     assert page_marker.block_kind == BlockKind.PAGE_MARKER
@@ -127,10 +184,49 @@ def test_parser_keeps_images_as_paragraph_content() -> None:
         text[page_marker.start_offset : page_marker.end_offset].strip()
         == page_marker.text
     )
-    assert image_paragraph.block_kind == BlockKind.PARAGRAPH
-    assert image_paragraph.metadata["page_label"] == "7"
+    assert figure.block_kind == BlockKind.FIGURE
+    assert figure.metadata["page_label"] == "7"
+    assert figure.metadata["caption"] == "Figure 2: architecture"
     assert mixed_paragraph.block_kind == BlockKind.PARAGRAPH
+    assert any(locator.name == "anchor:Figure 2" for locator in result.locators)
+
+
+def test_figure_url_is_not_mistaken_for_numbered_caption() -> None:
+    result = MarkdownChunker().chunk(
+        document=ChunkDocument(text="![architecture](figure2.png)")
+    )
+
+    assert result.blocks[0].block_kind == BlockKind.FIGURE
+    assert "caption" not in result.blocks[0].metadata
     assert not any(locator.name == "anchor:Figure 2" for locator in result.locators)
+
+
+def test_merges_figure_caption_and_builds_anchor() -> None:
+    text = (
+        "![architecture](https://example.com/figure.png)\n\n"
+        "Figure 4: System architecture."
+    )
+    result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
+
+    assert len(result.blocks) == 1
+    assert result.blocks[0].block_kind == BlockKind.FIGURE
+    assert result.blocks[0].metadata["caption"].strip() == (
+        "Figure 4: System architecture."
+    )
+    assert any(locator.name == "anchor:Figure 4" for locator in result.locators)
+
+
+def test_marks_html_figure_and_builds_locator_from_figcaption() -> None:
+    text = (
+        '<figure>\n<img src="figure.png">\n'
+        "<figcaption>Figure 5: System architecture.</figcaption>\n</figure>"
+    )
+    result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
+
+    assert len(result.blocks) == 1
+    assert result.blocks[0].block_kind == BlockKind.FIGURE
+    assert result.blocks[0].metadata["caption"] == "Figure 5: System architecture."
+    assert any(locator.name == "anchor:Figure 5" for locator in result.locators)
 
 
 def test_by_page_keeps_a_normal_page_whole() -> None:

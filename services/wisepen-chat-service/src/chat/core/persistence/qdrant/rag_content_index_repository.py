@@ -172,7 +172,6 @@ class QdrantRagVectorIndexRepository:
                     payload={
                         "content_revision": stage.content_revision,
                         "resource_id": projection.resource_id,
-                        "document_version": projection.document_version,
                         "chunk_id": chunk.chunk_id,
                         "reading_block_id": chunk.reading_block_id,
                         "chunk_index": chunk.chunk_index,
@@ -180,7 +179,6 @@ class QdrantRagVectorIndexRepository:
                         "raw_text": chunk.raw_text,
                         "section_id": chunk.section_id,
                         "section_path": list(chunk.section_path),
-                        "page_labels": list(chunk.page_labels),
                         "anchor_labels": list(chunk.anchor_labels),
                         "source_ref_id": source_ref.ref_id,
                         **_acl_payload(acl_projection),

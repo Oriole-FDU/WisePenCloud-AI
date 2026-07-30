@@ -91,7 +91,6 @@ children:  学习推荐 / 推荐策略 / 评分规则
 ```json
 {
   "state_id": "kns_xxx",
-  "resource_id": "resource_course_notes",
   "section_ids": [
     "section_spaced_repetition",
     "section_retrieval_practice"
@@ -99,7 +98,8 @@ children:  学习推荐 / 推荐策略 / 评分规则
 }
 ```
 
-`knowledge_navigate_sections` 返回的是所选 Section 的完整 ReadingBlock，而不是只返回一个检索 chunk。我会按 ReadingBlock 顺序阅读，并把新的 `parent`、`previous`、`next`、`children` 视为下一层可选路径。
+`knowledge_navigate_sections` 返回的是所选 Section 的完整 ReadingBlock，而不是只返回一个检索 chunk。我会按 ReadingBlock
+顺序阅读，并把新的 `parent`、`previous`、`next`、`children` 视为下一层可选路径。
 
 重要的是：我不会自动把所有 frontier 都读取一遍。每次只选择能减少当前问题不确定性的路径，避免把标题树变成无目的的全文遍历。
 
@@ -130,8 +130,16 @@ children:  学习推荐 / 推荐策略 / 评分规则
 ```json
 {
   "state_id": "kns_xxx",
-  "node_ids": ["entity_retrieval_practice", "entity_knowledge_dependency"],
-  "relation_types": ["DEPENDS_ON", "CITES", "EXPLAINS"],
+  "node_ids": [
+    "entity_retrieval_practice",
+    "entity_knowledge_dependency"
+  ],
+  "query": "哪些理论解释了知识点依赖如何影响间隔复习？",
+  "relation_types": [
+    "DEPENDS_ON",
+    "CITES",
+    "EXPLAINS"
+  ],
   "direction": "both",
   "max_depth": 1,
   "max_results": 10
@@ -146,13 +154,18 @@ children:  学习推荐 / 推荐策略 / 评分规则
 论文     --EXPLAINS--> 检索练习
 ```
 
-我不会把一条两跳路径直接当成事实。路径只是告诉我可以继续调查的方向；真正的依据在返回的 `sources` 中。
+这里的 `query` 只表达当前多跳意图，用于对合法图路径排序；它不会改变 `relation_types`、`direction` 或 `max_depth`
+定义的图遍历范围。省略时，工具继续使用最初调用 `locate` 的问题作为排序意图。
+
+我不会把一条两跳路径直接当成事实。每条边的 `relation_type` / `predicate` 给出形式化关系，`relation_evidence`
+则把两端节点和经过原文校验的完整 quote 组合成可读证据；`sources` 继续提供证据所在 Section 的上下文。
 
 ## 第四步：我回到关系证据所在的 Section
 
 `expand` 返回的不只有节点和边，还会返回关系证据对应的 Section 来源。我会检查：
 
 - 关系来自哪个资源；
+- `relation_evidence` 中的原文是否直接支持形式化关系；
 - 证据位于哪个 `section_path`；
 - 证据 Section 的 `summary` 是否和关系一致；
 - `sources` 的具体正文是否明确表达了该关系。
@@ -162,18 +175,21 @@ children:  学习推荐 / 推荐策略 / 评分规则
 ```json
 {
   "state_id": "kns_xxx",
-  "resource_id": "resource_paper_notes",
-  "section_ids": ["section_experiment_design"]
+  "section_ids": [
+    "section_experiment_design"
+  ]
 }
 ```
 
 这样我可以看到该 Section 的完整 ReadingBlock，而不是只看图抽取时命中的一小段文本。
 
-如果证据只说明“检索练习有助于长期保持”，但没有说明“推荐器必须结合知识点依赖”，我就不能把后一个结论写成论文事实。此时我会继续读取相关 Section，或者明确指出这是当前资料中的设计推论。
+如果证据只说明“检索练习有助于长期保持”，但没有说明“推荐器必须结合知识点依赖”，我就不能把后一个结论写成论文事实。此时我会继续读取相关
+Section，或者明确指出这是当前资料中的设计推论。
 
 ## 第五步：我按需要继续多跳
 
-读取论文来源后，可能发现它又连接到一个外部来源节点，或者连接到课程实现中的“依赖图”。我会把新返回的 `node_ids` 作为下一次 `expand` 的输入：
+读取论文来源后，可能发现它又连接到一个外部来源节点，或者连接到课程实现中的“依赖图”。我会把新返回的 `node_ids` 作为下一次
+`expand` 的输入：
 
 ```text
 expand(检索练习)
@@ -239,4 +255,5 @@ Section ID -> 当前 Section 的完整正文 + parent/previous/next/children
 7. 根据证据决定继续下一跳，还是整理答案。
 ```
 
-因此，Section 导航不是另一个关键词检索系统，而是我在检索命中后恢复文档结构、控制阅读范围和组织多跳路径的方式。`locate` 给我入口，`sections` 让我沿原文标题树阅读，`expand` 让我跨文档追踪概念、依赖和来源。
+因此，Section 导航不是另一个关键词检索系统，而是我在检索命中后恢复文档结构、控制阅读范围和组织多跳路径的方式。`locate` 给我入口，
+`sections` 让我沿原文标题树阅读，`expand` 让我跨文档追踪概念、依赖和来源。

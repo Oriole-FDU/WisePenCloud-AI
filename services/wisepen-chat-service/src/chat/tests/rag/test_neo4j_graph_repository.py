@@ -9,10 +9,8 @@ from chat.application.rag.acl import (
     RagResourceAclProjection,
 )
 from chat.application.rag.graph_extraction import (
-    KnowledgeAssertion,
     KnowledgeEntityType,
     KnowledgeNodeKind,
-    KnowledgeRelationProfile,
     KnowledgeRelationType,
 )
 from chat.application.rag.graph_projection import (
@@ -113,12 +111,14 @@ async def test_repository_writes_acl_evidence_and_switches_revision_last() -> No
         if "KNOWLEDGE_RELATION" in query and "UNWIND $edges" in query
     )
     assert relation_call["edges"][0]["relation_type"] == "DEPENDS_ON"
-    assert relation_call["edges"][0]["evidence_ref_ids"] == ["evidence-1"]
+    assert "evidence_ref_ids" not in relation_call["edges"][0]
+    assert relation_call["edges"][0]["evidence_quotes"] == ["evidence"]
     assert relation_call["edges"][0]["evidence_source_ref_ids"] == ["source-1"]
     mention_call = next(
         params for query, params in driver.calls if "UNWIND $mentions" in query
     )
     assert mention_call["mentions"][0]["chunk_id"] == "chunk-1"
+    assert mention_call["mentions"][0]["evidence_quote"] == "evidence"
     assert "applied_relation_revision" in driver.calls[5][0]
     assert "DELETE relation" in driver.calls[6][0]
     assert "DELETE mention" in driver.calls[7][0]
@@ -180,7 +180,6 @@ async def test_resolve_mentions_applies_acl_and_current_revision() -> None:
                 "kind": "Entity",
                 "label": "Alpha",
                 "entity_type": "concept",
-                "type_tags": ["concept"],
             }
         ]
     )
@@ -210,14 +209,12 @@ async def test_expand_uses_bounded_pattern_and_acl_for_endpoints_and_evidence() 
                         "kind": "Entity",
                         "label": "Alpha",
                         "entity_type": "concept",
-                        "type_tags": ["concept"],
                     },
                     {
                         "node_id": "kn_beta",
                         "kind": "Entity",
                         "label": "Beta",
                         "entity_type": "concept",
-                        "type_tags": ["concept"],
                     },
                 ],
                 "edges": [
@@ -226,13 +223,10 @@ async def test_expand_uses_bounded_pattern_and_acl_for_endpoints_and_evidence() 
                         "source_node_id": "kn_alpha",
                         "target_node_id": "kn_beta",
                         "relation_type": "DEPENDS_ON",
-                        "relation_profile": "core",
                         "predicate": None,
                         "evidence_resource_id": "resource-1",
-                        "evidence_ref_ids": ["knev_1"],
+                        "evidence_quotes": ["Alpha depends on Beta."],
                         "evidence_source_ref_ids": ["source-1"],
-                        "source_content_revision": "revision-1",
-                        "relation_revision": "relation-1",
                     }
                 ],
             }
@@ -259,6 +253,7 @@ async def test_expand_uses_bounded_pattern_and_acl_for_endpoints_and_evidence() 
     assert params["relation_types"] == ["DEPENDS_ON"]
     assert params["known_node_ids"] == ["kn_seen"]
     assert result[0].edges[0].evidence_source_ref_ids == ("source-1",)
+    assert result[0].edges[0].evidence_quotes == ("Alpha depends on Beta.",)
 
 
 @pytest.mark.asyncio
@@ -325,7 +320,6 @@ def _projection() -> KnowledgeGraphProjection:
         resource_id="resource-1",
         content_revision="revision-1",
         relation_revision="relation-1",
-        extractor_version="extractor-1",
         nodes=(
             KnowledgeNode(
                 node_id=resource_id,
@@ -337,7 +331,6 @@ def _projection() -> KnowledgeGraphProjection:
                 node_id=entity_id,
                 kind=KnowledgeNodeKind.ENTITY,
                 label="Beta",
-                canonical_key="beta",
                 entity_type=KnowledgeEntityType.TECHNOLOGY,
             ),
         ),
@@ -347,9 +340,7 @@ def _projection() -> KnowledgeGraphProjection:
                 node_id=entity_id,
                 chunk_id="chunk-1",
                 source_ref_id="source-1",
-                evidence_ref_id="evidence-1",
-                start_offset=10,
-                end_offset=14,
+                evidence_quote="evidence",
             ),
         ),
         edges=(
@@ -358,13 +349,9 @@ def _projection() -> KnowledgeGraphProjection:
                 source_node_id=resource_id,
                 target_node_id=entity_id,
                 relation_type=KnowledgeRelationType.DEPENDS_ON,
-                relation_profile=KnowledgeRelationProfile.CORE,
                 predicate=None,
-                evidence_ref_ids=("evidence-1",),
+                evidence_quotes=("evidence",),
                 evidence_source_ref_ids=("source-1",),
-                evidence_start_offsets=(10,),
-                evidence_end_offsets=(14,),
-                assertions=(KnowledgeAssertion.AFFIRMED,),
             ),
         ),
     )
@@ -378,14 +365,12 @@ def _path_record() -> dict:
                 "kind": "Entity",
                 "label": "Alpha",
                 "entity_type": "concept",
-                "type_tags": ["concept"],
             },
             {
                 "node_id": "kn_beta",
                 "kind": "Entity",
                 "label": "Beta",
                 "entity_type": "concept",
-                "type_tags": ["concept"],
             },
         ],
         "edges": [
@@ -394,13 +379,10 @@ def _path_record() -> dict:
                 "source_node_id": "kn_alpha",
                 "target_node_id": "kn_beta",
                 "relation_type": "DEPENDS_ON",
-                "relation_profile": "core",
                 "predicate": None,
                 "evidence_resource_id": "resource-1",
-                "evidence_ref_ids": ["knev_1"],
+                "evidence_quotes": ["Alpha depends on Beta."],
                 "evidence_source_ref_ids": ["source-1"],
-                "source_content_revision": "revision-1",
-                "relation_revision": "relation-1",
             }
         ],
     }

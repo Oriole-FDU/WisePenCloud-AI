@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from chat.application.rag.evidence import RagMaterializedHit, RagMaterializedSource
+from chat.application.rag.evidence import RagMaterializedSource
 from chat.application.rag.ingestion import RagSectionNode, RagSectionReadingBlock
 
 
@@ -17,11 +17,3 @@ class RagSectionView:
     previous: RagSectionNode | None = None
     next: RagSectionNode | None = None
     children: tuple[RagSectionNode, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class RagLocatedSection:
-    """由一个检索命中提升得到的 Section 结果。"""
-
-    materialized_hit: RagMaterializedHit
-    view: RagSectionView

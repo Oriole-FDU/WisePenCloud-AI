@@ -10,11 +10,10 @@ from chat.application.rag.repositories import (
     RagContentProjectionRepository,
     RagVectorIndexRepository,
 )
-
 from .context_indexing import ContextIndexingService
 from .models import RagContentProjection, RagDocumentContent
-from .section_projector import RagSectionProjector
 from .revision import RagProjectionStage, RagProjectionStageAction, prepare_projection_stage
+from .section_projector import RagSectionProjector
 
 if TYPE_CHECKING:
     from chat.application.utils.llm_clients.embedding import EmbeddingClient
@@ -47,14 +46,14 @@ class RagContentIndexer:
     )
 
     def __init__(
-        self,
-        *,
-        projector: RagSectionProjector,
-        projection_repository: RagContentProjectionRepository,
-        vector_repository: RagVectorIndexRepository,
-        acl_repository: RagAclProjectionRepository,
-        embedding_client: EmbeddingClient,
-        context_indexing: ContextIndexingService,
+            self,
+            *,
+            projector: RagSectionProjector,
+            projection_repository: RagContentProjectionRepository,
+            vector_repository: RagVectorIndexRepository,
+            acl_repository: RagAclProjectionRepository,
+            embedding_client: EmbeddingClient,
+            context_indexing: ContextIndexingService,
     ) -> None:
         self._projector = projector
         self._projection_repository = projection_repository
@@ -134,7 +133,7 @@ class RagContentIndexer:
         )
 
     async def _load_acl_projection(
-        self, projection: RagContentProjection
+            self, projection: RagContentProjection
     ) -> RagResourceAclProjection | None:
         """加载索引写入所需的 ACL 快照。
 
@@ -157,10 +156,10 @@ class RagContentIndexer:
         return acl_projection
 
     async def _embed(
-        self,
-        projection: RagContentProjection,
-        *,
-        reusable_vectors: Mapping[str, Sequence[float]],
+            self,
+            projection: RagContentProjection,
+            *,
+            reusable_vectors: Mapping[str, Sequence[float]],
     ) -> tuple[dict[str, Sequence[float]], int]:
         """复用已有向量，并批量生成剩余 Chunk 的稠密向量。"""
         if not projection.retrieval_chunks:

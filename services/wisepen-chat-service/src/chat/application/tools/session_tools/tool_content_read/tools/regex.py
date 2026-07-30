@@ -46,7 +46,11 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         "max_matches": {
             "type": "integer",
             "default": 10,
-            "description": "Maximum number of matches returned across all content_ids.",
+            "description": (
+                "Maximum number of matches returned across all content_ids. Defaults to 10. "
+                "Use chunk_count from each input content_receipt as a sizing signal: increase "
+                "max_matches when searching many chunks or when the pattern may occur frequently."
+            ),
         },
         "merge_before": {"type": "integer", "default": 0},
         "merge_after": {"type": "integer", "default": 0},
@@ -81,6 +85,9 @@ class ToolContentRegexReadTool:
                     "INPUT RULES:\n"
                     "  - Accepts up to 64 content_ids and reads them in bounded internal batches of 16.\n"
                     "  - selector prefilters chunks before matching; selector groups are intersected.\n"
+                    "  - max_matches defaults to 10 and limits results globally across all content_ids. "
+                    "Use each source content_receipt's chunk_count as a sizing signal; increase "
+                    "max_matches when searching many chunks or expecting frequent matches.\n"
                     "  - merge_before and merge_after expand windows around matched chunks.\n"
                     "  - Matching uses the stored source text without Markdown repair or normalization.\n"
                     "  - Markdown formulas and similar content may be malformed after parsing; use broader regex patterns for them.\n\n"

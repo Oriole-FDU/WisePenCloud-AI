@@ -8,10 +8,10 @@ from .models import (
     RagSectionReadingBlock,
     RagSourceRef,
 )
-from .section_projector import RagSectionProjector
 from .revision import (
     RagProjectionCheckpoint,
     RagProjectionStage,
     RagProjectionStageAction,
     prepare_projection_stage,
 )
+from .section_projector import RagSectionProjector

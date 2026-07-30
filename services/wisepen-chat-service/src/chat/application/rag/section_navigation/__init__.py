@@ -1,2 +1,2 @@
-from .models import RagLocatedSection, RagSectionView
+from .models import RagSectionView
 from .navigator import RagSectionNavigator

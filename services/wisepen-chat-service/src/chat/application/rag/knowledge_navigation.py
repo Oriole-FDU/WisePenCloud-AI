@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -8,18 +9,27 @@ from chat.application.rag.evidence import RagEvidenceMaterializer, RagEvidenceUn
 from chat.application.rag.graph_extraction import (
     KnowledgeEntityType,
     KnowledgeNodeKind,
-    KnowledgeRelationProfile,
     KnowledgeRelationType,
 )
 from chat.application.rag.repositories import (
     KnowledgeGraphNavigationRepository,
     KnowledgeNavigationStateRepository,
 )
-from chat.application.rag.retrieval import RagPermissionScope, RagRetrievalRequest
-from chat.application.rag.retrieval.locator import RagKnowledgeLocator
+from chat.application.rag.retrieval import (
+    RagCandidateRetriever,
+    RagPermissionScope,
+    RagRetrievalRequest,
+)
 from chat.application.rag.section_navigation import RagSectionNavigator, RagSectionView
+from chat.application.utils.ranking import (
+    RankCandidate,
+    RankingPipeline,
+    RankQuery,
+    RankRequest,
+)
 
 _CANDIDATE_LIMIT = 80
+_EXPAND_CANDIDATE_MULTIPLIER = 4
 
 
 class KnowledgeNavigationDirection(StrEnum):
@@ -40,8 +50,6 @@ class KnowledgeNavigationNode:
     kind: KnowledgeNodeKind  # Entity、Resource 或 ExternalSource。
     label: str  # 面向 Agent 展示的节点名称。
     entity_type: KnowledgeEntityType | None = None  # Entity 的细分类型；Resource/ExternalSource 为 None。
-    type_tags: tuple[str, ...] = ()  # Neo4j 节点保留的类型标签，供导航结果展示。
-    available_relations: tuple[KnowledgeRelationType, ...] = ()  # 当前节点可继续使用的关系类型。
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -49,8 +57,6 @@ class KnowledgeNavigationNode:
             "kind": self.kind.value,
             "label": self.label,
             "entity_type": self.entity_type.value if self.entity_type else None,
-            "type_tags": list(self.type_tags),
-            "available_relations": [item.value for item in self.available_relations],
         }
 
 
@@ -60,13 +66,10 @@ class KnowledgeNavigationEdge:
     source_node_id: str  # 关系语义上的起点，不随本次遍历方向变化。
     target_node_id: str  # 关系语义上的终点，不随本次遍历方向变化。
     relation_type: KnowledgeRelationType  # 关系类型，如 USES、CITES、DEPENDS_ON。
-    relation_profile: KnowledgeRelationProfile  # 该关系所属 schema profile。
     predicate: str | None  # RELATED_TO 的具体谓词；其他关系为 None。
     evidence_resource_id: str  # 关系证据所在资源，决定后续回源分组。
-    evidence_ref_ids: tuple[str, ...]  # 图抽取生成的 evidence ID，面向关系溯源。
-    evidence_source_ref_ids: tuple[str, ...]  # 与 evidence_ref_ids 同序的 Mongo SourceRef ID。
-    source_content_revision: str  # 写入该边时所依据的正文内容投影版本。
-    relation_revision: str  # 写入该边时所依据的图关系投影版本。
+    evidence_quotes: tuple[str, ...]  # 已按原文 offset 校验的关系证据。
+    evidence_source_ref_ids: tuple[str, ...]  # 用于内部正文回源的 Mongo SourceRef ID。
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,15 +77,10 @@ class KnowledgeNavigationPath:
     nodes: tuple[KnowledgeNavigationNode, ...]  # 按遍历顺序排列的节点序列。
     edges: tuple[KnowledgeNavigationEdge, ...]  # 连接相邻 nodes 的边序列。
 
-    @property
-    def depth(self) -> int:
-        return len(self.edges)
-
     def to_payload(self) -> dict[str, object]:
         return {
             "node_ids": [node.node_id for node in self.nodes],
             "edge_ids": [edge.edge_id for edge in self.edges],
-            "depth": self.depth,
         }
 
 
@@ -91,8 +89,9 @@ class KnowledgeNavigationState:
     state_id: str  # Redis 导航状态 ID，由 locate 创建并由后续 tool 传回。
     user_id: str  # 状态所属用户，用于拒绝跨用户复用 state_id。
     session_id: str  # 状态所属聊天会话，用于拒绝跨会话复用 state_id。
-    root_query: str  # 创建该导航状态的初始问题，仅用于结果上下文展示。
-    known_node_ids: tuple[str, ...] = ()  # 已返回的图节点和 Section ID，作为 read/expand 的输入白名单。
+    root_query: str  # 创建该导航状态的初始问题，用作 expand 排序回退。
+    known_graph_node_ids: tuple[str, ...] = ()  # expand 可用的图节点白名单。
+    known_sections: tuple[tuple[str, str], ...] = ()  # section_id 与所属 resource_id。
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,26 +107,24 @@ class KnowledgeGraphExpandRequest:
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeNavigationLocateResult:
-    state: KnowledgeNavigationState  # locate 创建的导航状态。
+    state_id: str  # locate 创建的导航状态 ID。
     nodes: tuple[KnowledgeNavigationNode, ...]  # RAG 命中 chunk 通过 MENTIONS 反查出的图节点。
     sources: tuple[RagSectionView, ...]  # 命中 Section 的正文证据和标题树 frontier。
 
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeNavigationExpandResult:
-    state: KnowledgeNavigationState  # 本次 expand 校验通过的导航状态快照。
+    state_id: str  # 本次 expand 使用的导航状态 ID。
     nodes: tuple[KnowledgeNavigationNode, ...]  # 本次保留路径中的去重节点。
     edges: tuple[KnowledgeNavigationEdge, ...]  # 本次保留路径中的去重关系边。
     paths: tuple[KnowledgeNavigationPath, ...]  # 至少发现一个新节点的有界遍历路径。
     sources: tuple[RagSectionView, ...]  # 关系 evidence 回源后对应的 Section 来源。
-    new_node_ids: tuple[str, ...]  # 已写入 Redis 状态、供下次 expand 使用的新图节点 ID。
 
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeSectionReadResult:
-    state: KnowledgeNavigationState  # 本次 read_sections 校验通过的导航状态快照。
+    state_id: str  # 本次 read_sections 使用的导航状态 ID。
     sections: tuple[RagSectionView, ...]  # 带全部 ReadingBlock 正文和 frontier 的 Section 视图。
-    new_section_ids: tuple[str, ...]  # 已写入 Redis 状态、供下次读取使用的新 Section ID。
 
 
 class KnowledgeNavigationStateNotFoundError(RuntimeError):
@@ -144,8 +141,9 @@ class KnowledgeNavigationService:
     __slots__ = (
         "_evidence_materializer",
         "_graph_repository",
-        "_locator",
+        "_path_ranking_pipeline",
         "_permission_authorizer",
+        "_retriever",
         "_section_navigator",
         "_state_repository",
     )
@@ -153,19 +151,21 @@ class KnowledgeNavigationService:
     def __init__(
         self,
         *,
-        locator: RagKnowledgeLocator,
+        retriever: RagCandidateRetriever,
         permission_authorizer: RagPermissionAuthorizer,
         graph_repository: KnowledgeGraphNavigationRepository,
         evidence_materializer: RagEvidenceMaterializer,
         section_navigator: RagSectionNavigator,
         state_repository: KnowledgeNavigationStateRepository,
+        path_ranking_pipeline: RankingPipeline,
     ) -> None:
-        self._locator = locator
+        self._retriever = retriever
         self._permission_authorizer = permission_authorizer
         self._graph_repository = graph_repository
         self._evidence_materializer = evidence_materializer
         self._section_navigator = section_navigator
         self._state_repository = state_repository
+        self._path_ranking_pipeline = path_ranking_pipeline
 
     async def locate(
         self,
@@ -176,65 +176,62 @@ class KnowledgeNavigationService:
         permission_scope: RagPermissionScope,
     ) -> KnowledgeNavigationLocateResult:
         """根据查询建立知识导航初始状态。"""
-        # 使用 RAG 找到与查询相关的上下文证据。
-        hits = await self._locator.locate(
-            RagRetrievalRequest(
-                query=query,
-                permission_scope=permission_scope,
-                top_k=max_results,
-                candidate_limit=_CANDIDATE_LIMIT,
-            )
+        request = RagRetrievalRequest(
+            query=query,
+            permission_scope=permission_scope,
+            top_k=max_results,
+            candidate_limit=_CANDIDATE_LIMIT,
         )
+        candidates = await self._retriever.retrieve(request)
+        materialized_hits = await self._evidence_materializer.materialize(
+            candidates=candidates,
+            permission_scope=permission_scope,
+        )
+        views = await self._section_navigator.build_hits(materialized_hits)
 
         # 根据 evidence 来源定位已有知识图谱节点。
         nodes = await self._graph_repository.resolve_mentions(
             sources=tuple(
                 KnowledgeMentionSource(
-                    resource_id=hit.materialized_hit.resource_id,
-                    chunk_id=hit.materialized_hit.chunk_id,
+                    resource_id=source.source_ref.resource_id,
+                    chunk_id=source.source_ref.chunk_id,
                 )
-                for hit in hits
+                for view in views
+                for source in view.sources
             ),
             permission_scope=permission_scope,
         )
 
-        # 创建会话级导航状态，记录当前已发现节点；
-        # known_node_ids 同时包含 RAG 命中的 Section 节点和它们的 parent/previous/next/children frontier，
-        # 后续 expand/read_sections 都基于这个集合做归属校验。
+        known_sections = {
+            section.section_id: section.resource_id
+            for view in views
+            for section in (
+                view.section,
+                view.parent,
+                view.previous,
+                view.next,
+                *view.children,
+            )
+            if section is not None
+        }
         state = await self._state_repository.create(
             user_id=permission_scope.user_id,
             session_id=session_id,
             root_query=query,
-            known_node_ids=tuple(
-                dict.fromkeys(
-                    [node.node_id for node in nodes]
-                    + [
-                        section.section_id
-                        for hit in hits
-                        for section in (
-                            hit.view.section,
-                            hit.view.parent,
-                            hit.view.previous,
-                            hit.view.next,
-                            *hit.view.children,
-                        )
-                        if section is not None
-                    ]
-                )
-            ),
+            known_graph_node_ids=tuple(node.node_id for node in nodes),
+            known_sections=known_sections,
         )
 
         return KnowledgeNavigationLocateResult(
-            state=state,
+            state_id=state.state_id,
             nodes=nodes,
-            sources=tuple(hit.view for hit in hits),
+            sources=views,
         )
 
     async def read_sections(
         self,
         *,
         state_id: str,
-        resource_id: str,
         section_ids: tuple[str, ...],
         session_id: str,
         permission_scope: RagPermissionScope,
@@ -247,54 +244,64 @@ class KnowledgeNavigationService:
             or state.session_id != session_id
         ):
             raise KnowledgeNavigationStateNotFoundError(state_id)
-        # 防止客户端提交未在导航上下文中出现的 Section ID。
-        if not set(section_ids).issubset(state.known_node_ids):
+        known_sections = dict(state.known_sections)
+        if not set(section_ids).issubset(known_sections):
             raise KnowledgeNavigationStateInvalidatedError(state_id)
 
-        # Section 读取涉及正文回源，必须做最终 ACL 校验（与 evidence materializer 保持一致）。
+        resource_ids = tuple(
+            dict.fromkeys(known_sections[section_id] for section_id in section_ids)
+        )
         accessible = await self._permission_authorizer.accessible_resource_ids(
-            resource_ids=(resource_id,),
+            resource_ids=resource_ids,
             scope=permission_scope,
         )
-        if resource_id not in accessible:
+        inaccessible = tuple(
+            resource_id for resource_id in resource_ids if resource_id not in accessible
+        )
+        if inaccessible:
             raise RagEvidenceUnavailableError(
-                f"resource permission changed before section read: {resource_id}"
+                "resource permission changed before section read: " + ", ".join(inaccessible)
             )
 
-        sections = await self._section_navigator.read_sections(
-            resource_id=resource_id,
-            section_ids=section_ids,
-        )
-        # 展开当前 Section 的 parent/previous/next/children frontier，用于下一轮 read/expand。
-        discovered_ids = tuple(
-            dict.fromkeys(
-                section.section_id
-                for view in sections
-                for section in (
-                    view.parent,
-                    view.previous,
-                    view.next,
-                    *view.children,
+        section_groups = await asyncio.gather(
+            *(
+                self._section_navigator.read_sections(
+                    resource_id=resource_id,
+                    section_ids=tuple(
+                        section_id
+                        for section_id in section_ids
+                        if known_sections[section_id] == resource_id
+                    ),
                 )
-                if section is not None
+                for resource_id in resource_ids
             )
         )
-        new_section_ids = tuple(
-            section_id
-            for section_id in discovered_ids
-            if section_id not in state.known_node_ids
-        )
-        # 把新发现的 Section 原子地加入 known_node_ids，供下次 read 校验。
-        if not await self._state_repository.add_known_nodes(
+        sections_by_id = {
+            view.section.section_id: view
+            for group in section_groups
+            for view in group
+        }
+        sections = tuple(sections_by_id[section_id] for section_id in section_ids)
+        discovered_sections = {
+            section.section_id: section.resource_id
+            for view in sections
+            for section in (view.parent, view.previous, view.next, *view.children)
+            if section is not None
+        }
+        new_sections = {
+            section_id: resource_id
+            for section_id, resource_id in discovered_sections.items()
+            if section_id not in known_sections
+        }
+        if not await self._state_repository.add_known_sections(
             state_id=state.state_id,
-            node_ids=new_section_ids,
+            sections=new_sections,
         ):
             raise KnowledgeNavigationStateNotFoundError(state_id)
 
         return KnowledgeSectionReadResult(
-            state=state,
+            state_id=state.state_id,
             sections=sections,
-            new_section_ids=new_section_ids,
         )
 
     async def expand(
@@ -302,6 +309,7 @@ class KnowledgeNavigationService:
         *,
         state_id: str,
         node_ids: tuple[str, ...],
+        query: str | None,
         relation_types: tuple[KnowledgeRelationType, ...],
         direction: KnowledgeNavigationDirection,
         max_depth: int,
@@ -321,18 +329,24 @@ class KnowledgeNavigationService:
             raise KnowledgeNavigationStateNotFoundError(state_id)
 
         # 防止客户端提交未在当前导航上下文中出现的节点。
-        if not set(node_ids).issubset(state.known_node_ids):
+        if not set(node_ids).issubset(state.known_graph_node_ids):
             raise KnowledgeNavigationStateInvalidatedError(state_id)
 
+        # Neo4j 只负责按图约束生成合法候选；自然语言意图在应用层排序，
+        # 避免 query 改写遍历语义，也避免固定图顺序过早截断相关路径。
+        candidate_limit = min(
+            max_results * _EXPAND_CANDIDATE_MULTIPLIER,
+            _CANDIDATE_LIMIT,
+        )
         paths = await self._graph_repository.expand(
             KnowledgeGraphExpandRequest(
                 seed_node_ids=node_ids,
                 permission_scope=permission_scope,
-                known_node_ids=state.known_node_ids,
+                known_node_ids=state.known_graph_node_ids,
                 relation_types=relation_types,
                 direction=direction,
                 max_depth=max_depth,
-                limit=max_results,
+                limit=candidate_limit,
             )
         )
 
@@ -340,8 +354,34 @@ class KnowledgeNavigationService:
         paths = tuple(
             path
             for path in paths
-            if any(node.node_id not in state.known_node_ids for node in path.nodes[1:])
+            if any(node.node_id not in state.known_graph_node_ids for node in path.nodes[1:])
         )
+
+        effective_query = query or state.root_query
+        ranked_paths = await self._path_ranking_pipeline.arank(
+            RankRequest(
+                query=RankQuery(text=effective_query),
+                candidates=tuple(
+                    RankCandidate(
+                        candidate_id=str(i),
+                        text=_path_ranking_text(p),
+                        fields={
+                            "nodes": "\n".join(n.label for n in p.nodes),
+                            "relations": "\n".join(
+                                " ".join(filter(None, (e.relation_type.value, e.predicate)))
+                                for e in p.edges
+                            ),
+                        },
+                        prior_rank=i + 1,
+                    )
+                    for i, p in enumerate(paths)
+                ),
+                top_k=max_results,
+                candidate_limit=candidate_limit,
+            )
+        )
+
+        paths = tuple(paths[int(item.candidate_id)] for item in ranked_paths.ranked)
 
         # 节点和边按 ID 去重并稳定排序，保证多次展开的结果一致。
         nodes_by_id = {node.node_id: node for path in paths for node in path.nodes}
@@ -363,20 +403,35 @@ class KnowledgeNavigationService:
         sources = await self._section_navigator.build_sources(materialized)
 
         new_node_ids = tuple(
-            node.node_id for node in nodes if node.node_id not in state.known_node_ids
+            node.node_id for node in nodes if node.node_id not in state.known_graph_node_ids
         )
 
         # 原子更新导航状态：新发现节点加入 known_node_ids，供下一次 expand 校验。
-        if not await self._state_repository.add_known_nodes(
+        if not await self._state_repository.add_known_graph_nodes(
             state_id=state.state_id, node_ids=new_node_ids
         ):
             raise KnowledgeNavigationStateNotFoundError(state_id)
 
         return KnowledgeNavigationExpandResult(
-            state=state,
+            state_id=state.state_id,
             nodes=nodes,
             edges=edges,
             paths=paths,
             sources=sources,
-            new_node_ids=new_node_ids,
         )
+
+
+def _path_ranking_text(path: KnowledgeNavigationPath) -> str:
+    nodes = " -> ".join(node.label for node in path.nodes)
+    relations = "\n".join(
+        " | ".join(
+            value
+            for value in (
+                edge.relation_type.value,
+                edge.predicate,
+            )
+            if value
+        )
+        for edge in path.edges
+    )
+    return f"Path: {nodes}\nRelations:\n{relations}"

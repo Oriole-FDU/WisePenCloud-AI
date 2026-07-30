@@ -19,7 +19,6 @@ from chat.application.rag.repositories import (
 )
 from common.logger import info, warn
 
-
 _NonEmptyString = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1)]
 
 
@@ -132,10 +131,10 @@ class RagAclRecalculateConsumer:
     __slots__ = ("_projection_targets", "_repository")
 
     def __init__(
-        self,
-        *,
-        repository: RagAclProjectionRepository,
-        projection_targets: Sequence[RagAclProjectionTarget],
+            self,
+            *,
+            repository: RagAclProjectionRepository,
+            projection_targets: Sequence[RagAclProjectionTarget],
     ) -> None:
         self._repository = repository
         self._projection_targets = tuple(projection_targets)

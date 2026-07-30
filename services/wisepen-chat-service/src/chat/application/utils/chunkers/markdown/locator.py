@@ -5,6 +5,12 @@ import re
 from ..models import BlockKind, Chunk, ChunkLocator, LocatorKind, TextBlock
 
 _TABLE_RE = re.compile(r"^(?:Table|表格|表)\s+(\d+(?:\.\d+)*)", re.IGNORECASE)
+
+_FIGURE_RE = re.compile(
+    r"(?:(?:Figure|Fig\.?)\s+|图\s*)(\d+(?:\.\d+)*)\s*[-:：.．、]",
+    re.IGNORECASE,
+)
+
 _FORMULA_RE = re.compile(
     r"(?:Equation|Eq\.?|公式)\s+\(?(\d+(?:\.\d+)*)\)?",
     re.IGNORECASE,
@@ -43,11 +49,13 @@ def _section_locators(
     ]
     locators: list[ChunkLocator] = []
     for index, heading in enumerate(headings):
-        end_offset = (
-            headings[index + 1].start_offset
-            if index + 1 < len(headings)
-            else text_length
-        )
+        heading_level = int(heading.metadata["heading_level"])
+        end_offset = text_length
+        for candidate in headings[index + 1 :]:
+            candidate_level = int(candidate.metadata["heading_level"])
+            if candidate_level <= heading_level:
+                end_offset = candidate.start_offset
+                break
         covered = _overlapping_chunks(chunks, heading.start_offset, end_offset)
         if not covered:
             continue
@@ -153,6 +161,9 @@ def _anchor_label(block: TextBlock) -> str | None:
     if block.block_kind == BlockKind.TABLE:
         match = _TABLE_RE.match(block.text.strip())
         prefix = "Table"
+    elif block.block_kind == BlockKind.FIGURE:
+        match = _FIGURE_RE.search(block.text)
+        prefix = "Figure"
     elif block.block_kind == BlockKind.FORMULA:
         match = _FORMULA_RE.search(block.text)
         prefix = "Equation"

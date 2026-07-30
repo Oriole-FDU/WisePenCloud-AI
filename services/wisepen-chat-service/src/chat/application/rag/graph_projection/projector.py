@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from hashlib import sha256
+
+import unicodedata
 
 from chat.application.rag.graph_extraction import (
     ExtractedKnowledgeNode,
@@ -11,19 +12,17 @@ from chat.application.rag.graph_extraction import (
     KnowledgeRelationType,
     KnowledgeWindowExtraction,
 )
-
 from .models import KnowledgeEdge, KnowledgeGraphProjection, KnowledgeMention, KnowledgeNode
-
 
 _EXTRACTOR_VERSION = "neo4j-graphrag:1.18.0"
 _RELATION_SCHEMA_VERSION = "wisepen-knowledge-relations:v1"
 
 
 def build_knowledge_graph_projection(
-    *,
-    resource_id: str,
-    content_revision: str,
-    extractions: tuple[KnowledgeWindowExtraction, ...],
+        *,
+        resource_id: str,
+        content_revision: str,
+        extractions: tuple[KnowledgeWindowExtraction, ...],
 ) -> KnowledgeGraphProjection:
     """将窗口级抽取结果合并为稳定的知识图谱投影。"""
     # 抽取器、关系 schema 或内容变化时，生成新的关系版本。
@@ -68,9 +67,7 @@ def build_knowledge_graph_projection(
                 node_id=node.node_id,
                 chunk_id=evidence.chunk_id,
                 source_ref_id=evidence.source_ref_id,
-                evidence_ref_id=evidence.evidence_ref_id,
-                start_offset=evidence.start_offset,
-                end_offset=evidence.end_offset,
+                evidence_quote=evidence.quote,
             )
 
     # 将多个窗口中语义相同的关系合并，统一收集其证据。
@@ -92,17 +89,12 @@ def build_knowledge_graph_projection(
 
     edges: list[KnowledgeEdge] = []
     for (source_node_id, target_node_id, relation_type, predicate), relations in grouped_edges.items():
-        relation_profiles = {relation.relation_profile for relation in relations}
-        if len(relation_profiles) != 1:
-            raise ValueError(f"relation {relation_type.value} has conflicting profiles")
-        relation_profile = next(iter(relation_profiles))
-
-        # 同一证据可以支持不同断言；仅合并完全相同的证据与断言。
+        # 同一原文证据只保留一次，避免把抽取器内部断言状态泄漏到导航模型。
         evidence_items = {
-            (relation.evidence.evidence_ref_id, relation.assertion): relation for relation in relations
+            relation.evidence.evidence_ref_id: relation for relation in relations
         }
         ordered = tuple(
-            evidence_items[key] for key in sorted(evidence_items, key=lambda item: (item[0], item[1].value))
+            evidence_items[key] for key in sorted(evidence_items)
         )
 
         edge_id = _stable_id(
@@ -120,13 +112,9 @@ def build_knowledge_graph_projection(
                 source_node_id=source_node_id,
                 target_node_id=target_node_id,
                 relation_type=relation_type,
-                relation_profile=relation_profile,
                 predicate=predicate,
-                evidence_ref_ids=tuple(relation.evidence.evidence_ref_id for relation in ordered),
+                evidence_quotes=tuple(relation.evidence.quote for relation in ordered),
                 evidence_source_ref_ids=tuple(relation.evidence.source_ref_id for relation in ordered),
-                evidence_start_offsets=tuple(relation.evidence.start_offset for relation in ordered),
-                evidence_end_offsets=tuple(relation.evidence.end_offset for relation in ordered),
-                assertions=tuple(relation.assertion for relation in ordered),
             )
         )
 
@@ -134,7 +122,6 @@ def build_knowledge_graph_projection(
         resource_id=resource_id,
         content_revision=content_revision,
         relation_revision=relation_revision,
-        extractor_version=_EXTRACTOR_VERSION,
         nodes=tuple(nodes[node_id] for node_id in sorted(nodes)),
         mentions=tuple(mentions[mention_id] for mention_id in sorted(mentions)),
         edges=tuple(sorted(edges, key=lambda edge: edge.edge_id)),
@@ -163,7 +150,6 @@ def _resolve_node(candidate: ExtractedKnowledgeNode, *, resource_id: str) -> Kno
             node_id=_stable_id("kn", "external_source", canonical_key),
             kind=candidate.kind,
             label=candidate.label,
-            source_key=canonical_key,
         )
 
     if candidate.entity_type is None:
@@ -173,7 +159,6 @@ def _resolve_node(candidate: ExtractedKnowledgeNode, *, resource_id: str) -> Kno
         node_id=_stable_id("kn", "entity", candidate.entity_type.value, canonical_key),
         kind=candidate.kind,
         label=candidate.label,
-        canonical_key=canonical_key,
         entity_type=candidate.entity_type,
     )
 

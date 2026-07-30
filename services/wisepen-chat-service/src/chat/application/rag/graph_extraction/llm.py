@@ -22,11 +22,11 @@ class QueryClientGraphRagLLM(LLMInterfaceV2):
         self._client = client
 
     def invoke(
-        self,
-        input: list[LLMMessage],
-        *,
-        response_format: type[BaseModel] | dict[str, Any] | None = None,
-        **kwargs: Any,
+            self,
+            input: list[LLMMessage],
+            *,
+            response_format: type[BaseModel] | dict[str, Any] | None = None,
+            **kwargs: Any,
     ) -> LLMResponse:
         del kwargs
         prompt, messages = _query_messages(input)
@@ -38,11 +38,11 @@ class QueryClientGraphRagLLM(LLMInterfaceV2):
         return LLMResponse(content=result.content)
 
     async def ainvoke(
-        self,
-        input: list[LLMMessage],
-        *,
-        response_format: type[BaseModel] | dict[str, Any] | None = None,
-        **kwargs: Any,
+            self,
+            input: list[LLMMessage],
+            *,
+            response_format: type[BaseModel] | dict[str, Any] | None = None,
+            **kwargs: Any,
     ) -> LLMResponse:
         del kwargs
         prompt, messages = _query_messages(input)
@@ -73,7 +73,7 @@ def _query_messages(input: list[LLMMessage]) -> tuple[str, list[dict[str, Any]]]
 
 
 def _query_response_format(
-    response_format: type[BaseModel] | dict[str, Any] | None,
+        response_format: type[BaseModel] | dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     """将 Pydantic Model 转换为 OpenAI-compatible JSON Schema 格式。"""
     if response_format is None or isinstance(response_format, dict):

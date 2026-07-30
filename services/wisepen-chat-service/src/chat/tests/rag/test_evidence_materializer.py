@@ -10,11 +10,9 @@ from chat.application.rag.evidence import (
 from chat.application.rag.ingestion import RagSectionReadingBlock, RagSourceRef
 from chat.application.rag.retrieval import (
     RagPermissionScope,
-    RagRankedHit,
     RagRetrievalCandidate,
 )
 from chat.application.utils.chunkers import SourceSpan
-from chat.application.utils.ranking import RankCandidate, RankedCandidate
 
 
 class _SourceRepository:
@@ -98,28 +96,18 @@ def _hit(
     block_id: str,
     section_id: str,
     resource_id: str = "resource-1",
-) -> RagRankedHit:
-    candidate = RagRetrievalCandidate(
+) -> RagRetrievalCandidate:
+    return RagRetrievalCandidate(
         chunk_id=chunk_id,
         reading_block_id=block_id,
         section_id=section_id,
         section_path=("标题",),
         resource_id=resource_id,
-        document_version=1,
         content_revision="revision-1",
         raw_text="正文",
-        page_labels=(),
         anchor_labels=(),
         source_ref_id=ref_id,
         signals=(),
-    )
-    return RagRankedHit(
-        candidate=candidate,
-        ranking=RankedCandidate(
-            candidate=RankCandidate(candidate_id=chunk_id),
-            rank=1,
-            score=1.0,
-        ),
     )
 
 
@@ -152,7 +140,7 @@ async def test_materializer_promotes_best_chunk_to_one_result_per_section() -> N
 
     assert repository.source_calls == [("resource-1", ("ref-1", "ref-2"))]
     assert len(results) == 1
-    assert results[0].hit.candidate.chunk_id == "chunk-1"
+    assert results[0].source.source_ref.chunk_id == "chunk-1"
     assert results[0].source.source_ref.ref_id == "ref-1"
     assert results[0].reading_block.block_id == "block-1"
 

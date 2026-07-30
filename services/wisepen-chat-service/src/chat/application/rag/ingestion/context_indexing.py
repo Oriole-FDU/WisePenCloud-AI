@@ -8,12 +8,10 @@ from typing import TYPE_CHECKING
 
 from chat.application.rag.repositories import RagContextIndexingCache
 from chat.application.utils.xml_markup import xml_cdata
-
 from .models import RagContentProjection, RagRetrievalChunk, RagSectionReadingBlock
 
 if TYPE_CHECKING:
     from chat.application.utils.llm_clients import QueryClient
-
 
 _PROMPT_VERSION = "context-indexing:v1"
 _MAX_CONCURRENCY = 5
@@ -137,11 +135,11 @@ class ContextIndexingService:
         )
 
     async def _generate(
-        self,
-        key: str,
-        chunk: RagRetrievalChunk,
-        reading_block: RagSectionReadingBlock,
-        semaphore: asyncio.Semaphore,
+            self,
+            key: str,
+            chunk: RagRetrievalChunk,
+            reading_block: RagSectionReadingBlock,
+            semaphore: asyncio.Semaphore,
     ) -> tuple[str, str]:
         try:
             async with semaphore:
@@ -186,9 +184,9 @@ class ContextIndexingService:
             raise ContextIndexingError(f"context indexing failed for chunk {chunk.chunk_id}") from error
 
     def _cache_key(
-        self,
-        chunk: RagRetrievalChunk,
-        reading_block: RagSectionReadingBlock,
+            self,
+            chunk: RagRetrievalChunk,
+            reading_block: RagSectionReadingBlock,
     ) -> str:
         """生成上下文缓存键。
 

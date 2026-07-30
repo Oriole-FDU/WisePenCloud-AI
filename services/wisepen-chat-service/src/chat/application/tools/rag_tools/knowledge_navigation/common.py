@@ -33,10 +33,14 @@ def section_view_payload(
     section = view.section
     return {
         "resource_id": section.resource_id,
-        "document_version": section.document_version,
         **section.to_tree_payload(),
         "reading_blocks": [
-            _reading_block_payload(block, cacheable_texts)
+            _reading_block_payload(
+                block,
+                resource_id=section.resource_id,
+                section_path=section.section_path,
+                cacheable_texts=cacheable_texts,
+            )
             for block in view.reading_blocks
         ],
         "evidence": [
@@ -55,16 +59,25 @@ def section_view_payload(
 
 def _reading_block_payload(
     block: RagSectionReadingBlock,
+    *,
+    resource_id: str,
+    section_path: tuple[str, ...],
     cacheable_texts: list[CacheableText],
 ) -> dict[str, Any]:
     return {
-        "reading_block_id": block.block_id,
-        "ordinal": block.ordinal,
-        "content_index": _append_cacheable_text(cacheable_texts, block.raw_text),
-        "content_start": min(span.start_offset for span in block.source_spans),
-        "content_end": max(span.end_offset for span in block.source_spans),
-        "page_labels": list(block.page_labels),
-        "anchor_labels": list(block.anchor_labels),
+        "content_index": _append_cacheable_text(
+            cacheable_texts,
+            block.raw_text,
+            metadata={
+                "kind": "rag_section_reading_block",
+                "resource_id": resource_id,
+                "section_id": block.section_id,
+                "section_path": section_path,
+                "reading_block_id": block.block_id,
+                "page_labels": block.page_labels,
+                "anchor_labels": block.anchor_labels,
+            },
+        ),
         "preview": _preview(block.raw_text),
     }
 
@@ -75,12 +88,20 @@ def _source_payload(
 ) -> dict[str, Any]:
     source_ref = source.source_ref
     return {
-        "ref_id": source_ref.ref_id,
-        "content_index": _append_cacheable_text(cacheable_texts, source.content),
-        "content_start": min(span.start_offset for span in source_ref.source_spans),
-        "content_end": max(span.end_offset for span in source_ref.source_spans),
-        "page_label": source_ref.page_label,
-        "anchor_labels": list(source_ref.anchor_labels),
+        "content_index": _append_cacheable_text(
+            cacheable_texts,
+            source.content,
+            metadata={
+                "kind": "rag_evidence",
+                "resource_id": source_ref.resource_id,
+                "section_id": source_ref.section_id,
+                "section_path": source_ref.section_path,
+                "source_ref_id": source_ref.ref_id,
+                "chunk_id": source_ref.chunk_id,
+                "page_label": source_ref.page_label,
+                "anchor_labels": source_ref.anchor_labels,
+            },
+        ),
         "preview": _preview(source.content),
     }
 
@@ -88,9 +109,11 @@ def _source_payload(
 def _append_cacheable_text(
     cacheable_texts: list[CacheableText],
     text: str,
+    *,
+    metadata: dict[str, object],
 ) -> int:
     content_index = len(cacheable_texts)
-    cacheable_texts.append(CacheableText(text=text, is_md=True))
+    cacheable_texts.append(CacheableText(text=text, is_md=True, metadata=metadata))
     return content_index
 
 

@@ -58,7 +58,11 @@ class ToolOutputCache:
             <= self._inline_max_chars
         ):
             payload["contents"] = tuple(
-                cacheable_text.text for cacheable_text in cacheable_texts
+                {
+                    "text": cacheable_text.text,
+                    "metadata": dict(cacheable_text.metadata),
+                }
+                for cacheable_text in cacheable_texts
             )
             return payload
 
@@ -75,6 +79,7 @@ class ToolOutputCache:
                     "content_id": receipt.content_id,
                     "chunk_count": receipt.chunk_count,
                     "supported_selectors": receipt.supported_selectors,
+                    "metadata": receipt.metadata,
                 }
                 for content_index, receipt in indexed_receipts
             )
@@ -99,6 +104,7 @@ class ToolOutputCache:
                     content_type=(
                         "text/markdown" if cacheable_text.is_md else "text/plain"
                     ),
+                    metadata=dict(cacheable_text.metadata),
                 )
             except Exception as exc:
                 # 缓存属于附加能力，单段入库失败不应中断整个工具调用。

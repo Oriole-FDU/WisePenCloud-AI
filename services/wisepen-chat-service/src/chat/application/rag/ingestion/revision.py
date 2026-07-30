@@ -4,7 +4,6 @@ from hashlib import sha256
 
 from .models import RagContentProjection
 
-
 _CONTENT_PROJECTION_SCHEMA_VERSION = "rag_content_projection:v4"
 
 
@@ -47,8 +46,8 @@ class RagProjectionStage:
 
 
 def prepare_projection_stage(
-    projection: RagContentProjection,
-    checkpoint: RagProjectionCheckpoint | None,
+        projection: RagContentProjection,
+        checkpoint: RagProjectionCheckpoint | None,
 ) -> RagProjectionStage:
     """判断当前 Projection 是否需要继续处理。
 
@@ -65,15 +64,15 @@ def prepare_projection_stage(
             # 完全相同版本已经写入，无需重复处理。
             action = RagProjectionStageAction.ALREADY_APPLIED
         elif (
-            checkpoint.applied_document_version is not None
-            and checkpoint.applied_document_version > projection.document_version
+                checkpoint.applied_document_version is not None
+                and checkpoint.applied_document_version > projection.document_version
         ):
             # 已应用更新版本，当前消息属于旧事件。
             action = RagProjectionStageAction.STALE
         # staged 不是完成态；相同 revision 重试和同版本内容修正都继续处理。
         elif (
-            checkpoint.staged_document_version is not None
-            and checkpoint.staged_document_version > projection.document_version
+                checkpoint.staged_document_version is not None
+                and checkpoint.staged_document_version > projection.document_version
         ):
             # 存在更新的 staged 版本，当前事件无需继续。
             action = RagProjectionStageAction.STALE

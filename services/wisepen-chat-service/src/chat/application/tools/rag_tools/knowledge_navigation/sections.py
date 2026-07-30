@@ -27,12 +27,11 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         "state_id": {
             "type": "string",
             "minLength": 1,
-            "description": "Required. The state_id returned by knowledge_navigate_locate.",
-        },
-        "resource_id": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Required. The resource_id containing the selected sections.",
+            "description": (
+                "Required. Reuse the exact state_id returned by locate or a previous "
+                "navigation call. It binds the already exposed sections to the current "
+                "session, so an ID from another navigation state cannot be substituted."
+            ),
         },
         "section_ids": {
             "type": "array",
@@ -40,12 +39,15 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "minItems": 1,
             "maxItems": 12,
             "description": (
-                "Required. Section IDs already returned by locate or an earlier "
-                "section read. Their complete own content and tree frontier are returned."
+                "Required. Select section_ids already exposed in sources or a section "
+                "frontier under this state; arbitrary document IDs are not accepted. "
+                "Each selected section returns its own content plus its parent, previous, "
+                "next, and child choices. Pass multiple IDs when those branches should "
+                "be read together."
             ),
         },
     },
-    "required": ["state_id", "resource_id", "section_ids"],
+    "required": ["state_id", "section_ids"],
     "additionalProperties": False,
 }
 
@@ -61,9 +63,19 @@ class KnowledgeNavigateSectionsTool:
             llm_spec=ToolLLMSpec(
                 name="knowledge_navigate_sections",
                 description=(
-                    "Read selected sections from a private document and reveal their "
-                    "parent, previous, next, and child section frontier. Use section_ids "
-                    "returned by knowledge_navigate_locate or this tool."
+                    "Description:\n"
+                    "Read selected private-document sections and reveal their parent, "
+                    "previous, next, and child frontier. Use section_ids returned by "
+                    "knowledge_navigate_locate or this tool.\n\n"
+                    "Output:\n"
+                    "Use each section's reading blocks and evidence as the current "
+                    "document context, resolving content_index through "
+                    "contents/content_receipts when exact wording is needed. The "
+                    "frontier describes where to read next: choose parent for broader "
+                    "context, previous or next for sequence, and children for detail, "
+                    "then call this tool again with those section_ids. Structural "
+                    "adjacency is for navigation and does not itself prove a semantic "
+                    "relation. Reuse state_id for the continuation."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -88,29 +100,24 @@ class KnowledgeNavigateSectionsTool:
     ) -> ToolReturn:
         del config
         state_id = str(kwargs.get("state_id", "")).strip()
-        resource_id = str(kwargs.get("resource_id", "")).strip()
         section_ids = tuple(
             str(value).strip() for value in kwargs.get("section_ids", ())
         )
         if (
             not state_id
-            or not resource_id
             or not section_ids
             or any(not section_id for section_id in section_ids)
             or len(set(section_ids)) != len(section_ids)
         ):
             raise ToolExecutionError(
                 reason="knowledge_navigation_invalid_request",
-                detail_reason=(
-                    "state_id, resource_id, and unique non-blank section_ids are required"
-                ),
+                detail_reason="state_id and unique non-blank section_ids are required",
                 retryable=False,
             )
 
         try:
             result = await self._service.read_sections(
                 state_id=state_id,
-                resource_id=resource_id,
                 section_ids=section_ids,
                 session_id=str(context["session_id"]),
                 permission_scope=RagPermissionScope(
@@ -134,16 +141,10 @@ class KnowledgeNavigateSectionsTool:
         except Exception as error:
             raise navigation_backend_error(error) from error
 
-        return _render_result(result, section_ids=section_ids)
+        return _render_result(result)
 
 
-def _render_result(
-    result: KnowledgeSectionReadResult,
-    *,
-    section_ids: tuple[str, ...],
-) -> ToolReturn:
-    # 这里先初始化为空列表；section_view_payload 会通过可变参数把每个
-    # reading block 和 evidence 的完整正文原地追加进来，并返回对应的 content_index。
+def _render_result(result: KnowledgeSectionReadResult) -> ToolReturn:
     cacheable_texts: list[CacheableText] = []
     sections = [
         section_view_payload(section, cacheable_texts)
@@ -151,18 +152,8 @@ def _render_result(
     ]
     return ToolReturn(
         visible_result={
-            "state_id": result.state.state_id,
-            "action": "read_sections",
-            "root_query": result.state.root_query,
-            "focus": {"section_ids": list(section_ids)},
+            "state_id": result.state_id,
             "sections": sections,
-            "navigation": {
-                "visited_nodes": len(result.state.known_node_ids)
-                + len(result.new_section_ids),
-                "frontier_nodes": len(result.new_section_ids),
-                "truncated": False,
-                "exhausted": not result.new_section_ids,
-            },
         },
         cacheable_texts=tuple(cacheable_texts),
     )

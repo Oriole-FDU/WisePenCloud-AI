@@ -5,8 +5,7 @@ from collections.abc import Mapping, Sequence
 
 from chat.application.rag.acl import RagPermissionAuthorizer
 from chat.application.rag.repositories import RagSourceRepository
-from chat.application.rag.retrieval import RagPermissionScope, RagRankedHit
-
+from chat.application.rag.retrieval import RagPermissionScope, RagRetrievalCandidate
 from .models import RagMaterializedHit, RagMaterializedSource
 
 
@@ -24,22 +23,24 @@ class RagEvidenceMaterializer:
         self._permission_authorizer = permission_authorizer
 
     async def materialize(
-        self, hits: tuple[RagRankedHit, ...], permission_scope: RagPermissionScope
+            self,
+            candidates: tuple[RagRetrievalCandidate, ...],
+            permission_scope: RagPermissionScope,
     ) -> tuple[RagMaterializedHit, ...]:
         """批量回源检索命中，并恢复每个命中关联的完整证据。"""
-        if not hits:
+        if not candidates:
             return ()
 
         # 按资源聚合 SourceRef 和 ReadingBlock，减少仓储查询次数。
         ref_ids_by_resource: dict[str, list[str]] = {}
         block_ids_by_resource: dict[str, list[str]] = {}
 
-        for hit in hits:
-            ref_ids_by_resource.setdefault(hit.candidate.resource_id, []).append(
-                hit.candidate.source_ref_id
+        for candidate in candidates:
+            ref_ids_by_resource.setdefault(candidate.resource_id, []).append(
+                candidate.source_ref_id
             )
-            block_ids_by_resource.setdefault(hit.candidate.resource_id, []).append(
-                hit.candidate.reading_block_id
+            block_ids_by_resource.setdefault(candidate.resource_id, []).append(
+                candidate.reading_block_id
             )
 
         # SourceRef 回源内部已经做了最终 ACL 校验；这里只负责 ReadingBlock 加载。
@@ -71,27 +72,28 @@ class RagEvidenceMaterializer:
         materialized_hits: list[RagMaterializedHit] = []
         # 同一 Section 的多个检索子块只保留首个（已按 ranking 排好序），与 README 的不变量对齐。
         materialized_section_keys: set[tuple[str, str]] = set()
-        for hit in hits:
+        for candidate in candidates:
             block_key = (
-                hit.candidate.resource_id,
-                hit.candidate.reading_block_id,
+                candidate.resource_id,
+                candidate.reading_block_id,
             )
             reading_block = blocks_by_key.get(block_key)
             if reading_block is None:
                 raise RagEvidenceUnavailableError(
                     "applied reading block is missing: " f"{block_key[0]}/{block_key[1]}"
                 )
-            section_key = (hit.candidate.resource_id, hit.candidate.section_id)
+            section_key = (candidate.resource_id, candidate.section_id)
             if section_key in materialized_section_keys:
                 continue
             materialized_section_keys.add(section_key)
 
             materialized_hits.append(
                 RagMaterializedHit(
-                    hit=hit,
+                    resource_id=candidate.resource_id,
+                    section_id=candidate.section_id,
                     reading_block=reading_block,
                     source=sources_by_key[
-                        (hit.candidate.resource_id, hit.candidate.source_ref_id)
+                        (candidate.resource_id, candidate.source_ref_id)
                     ],
                 )
             )
@@ -99,9 +101,9 @@ class RagEvidenceMaterializer:
         return tuple(materialized_hits)
 
     async def materialize_refs(
-        self,
-        ref_ids_by_resource: Mapping[str, Sequence[str]],
-        permission_scope: RagPermissionScope,
+            self,
+            ref_ids_by_resource: Mapping[str, Sequence[str]],
+            permission_scope: RagPermissionScope,
     ) -> tuple[RagMaterializedSource, ...]:
         """回源 Applied SourceRef，并执行完整性与最终权限校验。"""
         if not ref_ids_by_resource:

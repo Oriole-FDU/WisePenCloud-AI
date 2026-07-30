@@ -66,10 +66,8 @@ def _candidate(
         section_id=f"section-{chunk_id}",
         section_path=("标题",),
         resource_id=resource_id,
-        document_version=1,
         content_revision=revision,
         raw_text=f"正文 {chunk_id}",
-        page_labels=(),
         anchor_labels=(),
         source_ref_id=f"ref-{chunk_id}",
         signals=(
@@ -121,7 +119,7 @@ async def test_retriever_drops_non_applied_revisions_before_ranking() -> None:
         )
     )
 
-    assert [hit.candidate.chunk_id for hit in hits] == ["current"]
+    assert [hit.chunk_id for hit in hits] == ["current"]
     assert projection_repository.requested_resource_ids == [
         ("resource-2", "resource-1")
     ]
@@ -193,7 +191,7 @@ async def test_retriever_selects_applied_revision_for_same_chunk_id() -> None:
     )
 
     assert len(hits) == 1
-    assert hits[0].candidate.content_revision == "revision-applied"
+    assert hits[0].content_revision == "revision-applied"
 
 
 @pytest.mark.asyncio

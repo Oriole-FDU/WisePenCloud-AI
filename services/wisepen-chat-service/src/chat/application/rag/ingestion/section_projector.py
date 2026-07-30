@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-# 标题树 → Section ReadingBlock → 检索子块 的投影流水线。
-# 三个独立的 MarkdownChunker 负责不同粒度的切分：
-#   - structure_chunker：按 BY_TITLE 切出 Heading 边界，用于构建 Section 树。
-#   - reading_block_chunker：在单个 Section 内部再次切分，避免长 Section 一次性返回过大正文。
-#   - retrieval_chunker：在 ReadingBlock 内切出 embedding/BM25 用的更小检索子块。
-
 from dataclasses import replace
 from hashlib import sha256
 
@@ -17,16 +11,21 @@ from chat.application.utils.chunkers import (
     MarkdownChunkingStrategy,
     SourceSpan,
 )
-
 from .models import (
     RagContentProjection,
     RagDocumentContent,
     RagRetrievalChunk,
-    RagSectionNode,
     RagSectionReadingBlock,
     RagSourceRef,
 )
 from .section_tree import build_section_tree
+
+
+# 标题树 → Section ReadingBlock → 检索子块 的投影流水线。
+# 三个独立的 MarkdownChunker 负责不同粒度的切分：
+#   - structure_chunker：按 BY_TITLE 切出 Heading 边界，用于构建 Section 树。
+#   - reading_block_chunker：在单个 Section 内部再次切分，避免长 Section 一次性返回过大正文。
+#   - retrieval_chunker：在 ReadingBlock 内切出 embedding/BM25 用的更小检索子块。
 
 
 class RagSectionProjector:
@@ -35,11 +34,11 @@ class RagSectionProjector:
     __slots__ = ("_reading_block_chunker", "_retrieval_chunker", "_structure_chunker")
 
     def __init__(
-        self,
-        *,
-        structure_chunker: MarkdownChunker | None = None,
-        reading_block_chunker: MarkdownChunker | None = None,
-        retrieval_chunker: MarkdownChunker | None = None,
+            self,
+            *,
+            structure_chunker: MarkdownChunker | None = None,
+            reading_block_chunker: MarkdownChunker | None = None,
+            retrieval_chunker: MarkdownChunker | None = None,
     ) -> None:
         self._structure_chunker = structure_chunker or MarkdownChunker()
         self._reading_block_chunker = reading_block_chunker or MarkdownChunker()
@@ -65,7 +64,7 @@ class RagSectionProjector:
             replace(
                 section,
                 summary=" ".join(
-                    content.markdown[section.own_start : section.own_end].split()
+                    content.markdown[section.own_start: section.own_end].split()
                 )[:500],
             )
             for section in build_section_tree(
@@ -86,7 +85,7 @@ class RagSectionProjector:
             if section.own_start == section.own_end:
                 continue
             # 在 Section 局部坐标下做切分，然后平移回 Markdown 全文坐标。
-            section_text = content.markdown[section.own_start : section.own_end]
+            section_text = content.markdown[section.own_start: section.own_end]
             section_result = self._reading_block_chunker.chunk(
                 document=ChunkDocument(
                     text=section_text,
@@ -162,7 +161,7 @@ class RagSectionProjector:
                         )
                     )
                     child_raw_text = "\n\n".join(
-                        content.markdown[span.start_offset : span.end_offset] for span in source_spans
+                        content.markdown[span.start_offset: span.end_offset] for span in source_spans
                     )
                     child_index_text = (
                         f"Section: {' > '.join(section.section_path)}\nSection summary: {section.summary}\n\n{child_raw_text}"
@@ -233,8 +232,8 @@ class RagSectionProjector:
 
 
 def _render_source(
-    markdown: str,
-    source_spans: tuple[SourceSpan, ...],
+        markdown: str,
+        source_spans: tuple[SourceSpan, ...],
 ) -> tuple[str, tuple[tuple[int, int, int], ...]]:
     """拼接 raw_text 并返回 local→source 坐标映射。
 
@@ -248,7 +247,7 @@ def _render_source(
     for span in source_spans:
         if fragments:
             cursor += 2  # 与 "\n\n".join 的分隔符保持一致。
-        fragment = markdown[span.start_offset : span.end_offset]
+        fragment = markdown[span.start_offset: span.end_offset]
         fragments.append(fragment)
         source_map.append((cursor, cursor + len(fragment), span.start_offset))
         cursor += len(fragment)
@@ -256,9 +255,9 @@ def _render_source(
 
 
 def _reading_block_id(
-    content: RagDocumentContent,
-    section_id: str,
-    source_spans: tuple[SourceSpan, ...],
+        content: RagDocumentContent,
+        section_id: str,
+        source_spans: tuple[SourceSpan, ...],
 ) -> str:
     """根据资源版本和 Section 内部 span 范围生成稳定 ID。"""
     spans = ";".join(f"{span.start_offset}:{span.end_offset}" for span in source_spans)
@@ -275,8 +274,8 @@ def _reading_block_id(
 
 
 def _retrieval_chunk_id(
-    reading_block_id: str,
-    source_spans: tuple[SourceSpan, ...],
+        reading_block_id: str,
+        source_spans: tuple[SourceSpan, ...],
 ) -> str:
     """在 ReadingBlock 命名空间下为检索子块生成稳定 ID。"""
     spans = ";".join(f"{span.start_offset}:{span.end_offset}" for span in source_spans)

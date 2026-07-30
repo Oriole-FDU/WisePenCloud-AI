@@ -12,6 +12,7 @@ class BlockKind(StrEnum):
     HEADING = "heading"
     PARAGRAPH = "paragraph"
     TABLE = "table"
+    FIGURE = "figure"
     CODE = "code"
     FORMULA = "formula"
     LIST = "list"

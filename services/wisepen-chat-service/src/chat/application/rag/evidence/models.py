@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from chat.application.rag.ingestion import RagSectionReadingBlock, RagSourceRef
-from chat.application.rag.retrieval import RagRankedHit
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,16 +15,9 @@ class RagMaterializedSource:
 
 @dataclass(frozen=True, slots=True)
 class RagMaterializedHit:
-    """回源后的检索命中，附带完整证据链。"""
+    """排序后候选与权威正文之间的最小交接模型。"""
 
-    hit: RagRankedHit  # 经过排序的最终命中。
+    resource_id: str
+    section_id: str
     reading_block: RagSectionReadingBlock  # 检索子块命中后回读的 Section 正文块。
     source: RagMaterializedSource  # 检索子块对应的精确证据。
-
-    @property
-    def resource_id(self) -> str:
-        return self.hit.candidate.resource_id
-
-    @property
-    def chunk_id(self) -> str:
-        return self.hit.candidate.chunk_id

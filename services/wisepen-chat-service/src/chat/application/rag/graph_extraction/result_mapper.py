@@ -15,7 +15,7 @@ from .models import (
     KnowledgeRelationType,
     KnowledgeWindowExtraction,
 )
-from .relations import RELATION_PROFILES, relation_pattern_allowed
+from .relations import relation_pattern_allowed
 
 
 class KnowledgeGraphResultMapper:
@@ -63,6 +63,8 @@ class KnowledgeGraphResultMapper:
                 continue
             if not relation_pattern_allowed(source.kind, relation_type, target.kind):
                 continue
+            if assertion is not KnowledgeAssertion.AFFIRMED:
+                continue
 
             # 关系没有能够精确映射回原文的证据时，不进入业务结果。
             evidence = _locate_evidence(window, relation.properties.get("evidence_quote"))
@@ -79,22 +81,16 @@ class KnowledgeGraphResultMapper:
                 source_local_id=source.local_id,
                 target_local_id=target.local_id,
                 relation_type=relation_type,
-                relation_profile=RELATION_PROFILES[relation_type],
-                assertion=assertion,
                 evidence=evidence,
                 predicate=predicate,
             )
 
-            # assertion 属于关系语义的一部分。
-            # 相同节点、关系类型和证据下的不同断言不会相互覆盖。
             relation_key = (
                 source.local_id,
                 target.local_id,
                 relation_type,
-                assertion,
                 predicate,
-                evidence.start_offset,
-                evidence.end_offset,
+                evidence.evidence_ref_id,
             )
             relations[relation_key] = validated_relation
 
@@ -183,15 +179,8 @@ def _locate_evidence(window: KnowledgeExtractionWindow, raw_quote: object) -> Kn
                 return KnowledgeEvidence(
                     evidence_ref_id="knev_" + sha256(identity.encode("utf-8")).hexdigest()[:32],
                     source_ref_id=source_ref.ref_id,
-                    resource_id=window.resource_id,
-                    document_version=window.document_version,
                     chunk_id=window.chunk_id,
-                    start_offset=source_start,
-                    end_offset=source_end,
                     quote=quote,
-                    page_label=source_ref.page_label,
-                    section_id=source_ref.section_id,
-                    section_path=source_ref.section_path,
                 )
 
         # 使用 +1 支持引文在窗口文本中的重叠匹配。
@@ -199,7 +188,7 @@ def _locate_evidence(window: KnowledgeExtractionWindow, raw_quote: object) -> Kn
 
 
 def _map_local_span(
-    window: KnowledgeExtractionWindow, *, local_start: int, local_end: int
+        window: KnowledgeExtractionWindow, *, local_start: int, local_end: int
 ) -> tuple[int, int] | None:
     """通过窗口预计算映射，将局部 span 转换为原文 span。"""
     # 映射的合法性和互斥性由窗口构建阶段负责验证。Mapper 只接受完整落入单条 local span 的引文，

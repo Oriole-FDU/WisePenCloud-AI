@@ -12,10 +12,8 @@ from chat.application.rag.ingestion import (
     RagSectionReadingBlock,
     RagSourceRef,
 )
-from chat.application.rag.retrieval import RagRankedHit, RagRetrievalCandidate
 from chat.application.rag.section_navigation import RagSectionNavigator, RagSectionView
 from chat.application.utils.chunkers import SourceSpan
-from chat.application.utils.ranking import RankCandidate, RankedCandidate
 
 
 class _SectionRepository:
@@ -92,29 +90,9 @@ def _materialized_hit() -> RagMaterializedHit:
         ),
         content="evidence",
     )
-    candidate = RagRetrievalCandidate(
-        chunk_id="chunk-1",
-        reading_block_id="block-1",
-        section_id="section-current",
-        section_path=("Current",),
-        resource_id="resource-1",
-        document_version=1,
-        content_revision="revision-1",
-        raw_text="evidence",
-        page_labels=(),
-        anchor_labels=(),
-        source_ref_id="ref-1",
-        signals=(),
-    )
     return RagMaterializedHit(
-        hit=RagRankedHit(
-            candidate=candidate,
-            ranking=RankedCandidate(
-                candidate=RankCandidate(candidate_id="chunk-1"),
-                rank=1,
-                score=1.0,
-            ),
-        ),
+        resource_id="resource-1",
+        section_id="section-current",
         reading_block=_block("block-1", "section-current"),
         source=source,
     )
@@ -139,11 +117,11 @@ async def test_hit_is_promoted_to_section_view_with_lightweight_frontier() -> No
 
     result = await navigator.build_hits((_materialized_hit(),))
 
-    assert result[0].view.section is current
-    assert result[0].view.reading_blocks[0].block_id == "block-1"
-    assert result[0].view.sources[0].content == "evidence"
-    assert result[0].view.parent is parent
-    assert result[0].view.children == (child,)
+    assert result[0].section is current
+    assert result[0].reading_blocks[0].block_id == "block-1"
+    assert result[0].sources[0].content == "evidence"
+    assert result[0].parent is parent
+    assert result[0].children == (child,)
 
 
 @pytest.mark.asyncio

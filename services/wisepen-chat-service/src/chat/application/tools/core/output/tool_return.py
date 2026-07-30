@@ -6,10 +6,11 @@ from typing import Any, Mapping
 
 @dataclass(frozen=True, slots=True)
 class CacheableText:
-    """一段待治理正文，以及正文是否为 Markdown。"""
+    """一段待治理正文，以及内容格式和稳定来源标识。"""
 
     text: str
     is_md: bool = False
+    metadata: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

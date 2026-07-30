@@ -31,13 +31,11 @@ def _point(
         payload={
             "content_revision": content_revision,
             "resource_id": "resource-1",
-            "document_version": 2,
             "chunk_id": chunk_id,
             "reading_block_id": "block-1",
             "raw_text": f"正文 {chunk_id}",
             "section_id": "section-1",
             "section_path": ["标题"],
-            "page_labels": ["1"],
             "anchor_labels": [],
             "source_ref_id": "ref-1",
         },
@@ -94,6 +92,8 @@ async def test_qdrant_candidate_repository_uses_native_hybrid_query_and_acl_filt
     assert len(dense_prefetch.filter.must) == 2
     assert dense_prefetch.filter.must[1].key == "resource_id"
     assert sparse_prefetch.filter == dense_prefetch.filter
+    assert "document_version" not in query_call["with_payload"]
+    assert "page_labels" not in query_call["with_payload"]
 
 
 @pytest.mark.asyncio

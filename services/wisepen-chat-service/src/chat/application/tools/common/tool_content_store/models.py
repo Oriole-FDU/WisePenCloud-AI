@@ -60,3 +60,4 @@ class ToolContentReceipt:
     content_id: str
     chunk_count: int
     supported_selectors: tuple[str, ...] = ()
+    metadata: dict[str, object] = field(default_factory=dict)

@@ -17,7 +17,6 @@ from neo4j_graphrag.experimental.components.types import Neo4jGraph, TextChunk, 
 from neo4j_graphrag.llm.base import LLMInterfaceV2
 
 from chat.application.rag.repositories import KnowledgeGraphExtractionCache
-
 from .cache_codec import decode_cached_graph, encode_cached_graph, slice_window_graph
 from .models import (
     KnowledgeEntityType,
@@ -30,7 +29,6 @@ from .models import (
 from .relations import relation_descriptions, relation_pattern_allowed
 from .result_mapper import KnowledgeGraphResultMapper
 from .windows import render_extraction_window
-
 
 _REQUIRES_EXTRACTION_EXAMPLE = """
 Input: Transformer requires positional encoding to represent token order.
@@ -63,13 +61,13 @@ class KnowledgeGraphExtractor:
     )
 
     def __init__(
-        self,
-        *,
-        llm: LLMInterfaceV2,
-        cache: KnowledgeGraphExtractionCache | None = None,
-        cache_profile: str = "",
-        profiles: frozenset[KnowledgeRelationProfile] | None = None,
-        max_concurrency: int = 5,
+            self,
+            *,
+            llm: LLMInterfaceV2,
+            cache: KnowledgeGraphExtractionCache | None = None,
+            cache_profile: str = "",
+            profiles: frozenset[KnowledgeRelationProfile] | None = None,
+            max_concurrency: int = 5,
     ) -> None:
         cache_profile = cache_profile.strip()
         if cache is not None and not cache_profile:
@@ -116,7 +114,7 @@ class KnowledgeGraphExtractor:
         )
 
     async def extract(
-        self, windows: tuple[KnowledgeExtractionWindow, ...]
+            self, windows: tuple[KnowledgeExtractionWindow, ...]
     ) -> tuple[KnowledgeWindowExtraction, ...]:
         """批量抽取窗口知识图，并恢复为输入窗口顺序。"""
         if not windows:
@@ -240,7 +238,7 @@ def _build_schema(profiles: frozenset[KnowledgeRelationProfile]) -> GraphSchema:
                         name="entity_type",
                         type="STRING",
                         description="实体类型，只能是 "
-                        + ", ".join(entity_type.value for entity_type in KnowledgeEntityType),
+                                    + ", ".join(entity_type.value for entity_type in KnowledgeEntityType),
                     ),
                     PropertyType(
                         name="evidence_quote",
@@ -284,10 +282,10 @@ def _build_schema(profiles: frozenset[KnowledgeRelationProfile]) -> GraphSchema:
                     node_type=node_type.value,
                 )
                 for node_type, property_names in (
-                    (KnowledgeNodeKind.ENTITY, ("name", "entity_type", "evidence_quote")),
-                    (KnowledgeNodeKind.RESOURCE, ("name", "resource_id")),
-                    (KnowledgeNodeKind.EXTERNAL_SOURCE, ("name", "evidence_quote")),
-                )
+                (KnowledgeNodeKind.ENTITY, ("name", "entity_type", "evidence_quote")),
+                (KnowledgeNodeKind.RESOURCE, ("name", "resource_id")),
+                (KnowledgeNodeKind.EXTERNAL_SOURCE, ("name", "evidence_quote")),
+            )
                 for property_name in property_names
             ),
             # 所有关系都必须具有精确证据和断言状态。

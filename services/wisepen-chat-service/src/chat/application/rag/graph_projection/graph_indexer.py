@@ -10,7 +10,6 @@ from chat.application.rag.repositories import (
     RagAclProjectionRepository,
     RagContentProjectionRepository,
 )
-
 from .projector import build_knowledge_graph_projection
 
 
@@ -26,11 +25,8 @@ class KnowledgeGraphIndexAction(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeGraphIndexResult:
-    resource_id: str
-    content_revision: str
     relation_revision: str | None
     action: KnowledgeGraphIndexAction
-    projected_node_count: int = 0
     projected_relation_count: int = 0
 
 
@@ -45,12 +41,12 @@ class KnowledgeGraphIndexer:
     )
 
     def __init__(
-        self,
-        *,
-        content_repository: RagContentProjectionRepository,
-        acl_repository: RagAclProjectionRepository,
-        extractor: KnowledgeGraphExtractor,
-        graph_repository: KnowledgeGraphProjectionRepository,
+            self,
+            *,
+            content_repository: RagContentProjectionRepository,
+            acl_repository: RagAclProjectionRepository,
+            extractor: KnowledgeGraphExtractor,
+            graph_repository: KnowledgeGraphProjectionRepository,
     ) -> None:
         self._content_repository = content_repository
         self._acl_repository = acl_repository
@@ -60,11 +56,9 @@ class KnowledgeGraphIndexer:
     async def index(self, *, resource_id: str, content_revision: str) -> KnowledgeGraphIndexResult:
         """为指定正文版本构建知识图谱投影。"""
         if await self._graph_repository.is_projection_applied(
-            resource_id=resource_id, content_revision=content_revision
+                resource_id=resource_id, content_revision=content_revision
         ):
             return KnowledgeGraphIndexResult(
-                resource_id=resource_id,
-                content_revision=content_revision,
                 relation_revision=None,
                 action=KnowledgeGraphIndexAction.ALREADY_APPLIED,
             )
@@ -72,10 +66,10 @@ class KnowledgeGraphIndexer:
         source = await self._content_repository.load_applied_extraction_source(resource_id)
         checkpoint = await self._content_repository.get_checkpoint(resource_id)
         if (
-            source is None
-            or checkpoint is None
-            or source.content_revision != content_revision
-            or checkpoint.applied_content_revision != content_revision
+                source is None
+                or checkpoint is None
+                or source.content_revision != content_revision
+                or checkpoint.applied_content_revision != content_revision
         ):
             raise KnowledgeGraphIndexingError(
                 f"applied content projection is unavailable for {resource_id}"
@@ -96,8 +90,6 @@ class KnowledgeGraphIndexer:
         checkpoint = await self._content_repository.get_checkpoint(resource_id)
         if checkpoint is None or checkpoint.applied_content_revision != content_revision:
             return KnowledgeGraphIndexResult(
-                resource_id=resource_id,
-                content_revision=content_revision,
                 relation_revision=None,
                 action=KnowledgeGraphIndexAction.STALE,
             )
@@ -114,17 +106,12 @@ class KnowledgeGraphIndexer:
         except KnowledgeGraphProjectionSupersededError:
             # 仓储层负责最终并发校验，防止旧版本覆盖新版本。
             return KnowledgeGraphIndexResult(
-                resource_id=resource_id,
-                content_revision=content_revision,
                 relation_revision=None,
                 action=KnowledgeGraphIndexAction.STALE,
             )
 
         return KnowledgeGraphIndexResult(
-            resource_id=resource_id,
-            content_revision=content_revision,
             relation_revision=projection.relation_revision,
             action=KnowledgeGraphIndexAction.APPLIED,
-            projected_node_count=len(projection.nodes),
             projected_relation_count=len(projection.edges),
         )

@@ -106,7 +106,6 @@ async def test_graph_indexer_invalidates_before_extraction_and_applies_empty_gra
 
     assert events == ["invalidate", "extract", "acl", "apply"]
     assert result.action is KnowledgeGraphIndexAction.APPLIED
-    assert result.projected_node_count == 1
     assert result.projected_relation_count == 0
     assert graph_repository.projection is not None
     assert graph_repository.projection.content_revision == "revision-1"

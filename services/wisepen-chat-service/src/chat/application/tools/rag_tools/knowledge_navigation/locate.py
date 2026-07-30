@@ -26,8 +26,11 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "type": "string",
             "minLength": 1,
             "description": (
-                "Required. The complete question or concept to locate in the user's "
-                "private documents. Do not use keywords or describe the retrieval task."
+                "Required. The full question or concept to answer from the user's "
+                "private documents. Include the subject and any constraints needed to "
+                "judge relevance. Use natural language, not search keywords or an "
+                "instruction such as 'search my documents'. This also becomes the "
+                "default ranking intent for later graph expansion."
             ),
         },
         "max_results": {
@@ -35,7 +38,10 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "minimum": 1,
             "maximum": 20,
             "default": 10,
-            "description": "Maximum number of located sources to return.",
+            "description": (
+                "Maximum number of initially matched source sections. Use fewer for a "
+                "focused question and more when the question is broad or ambiguous."
+            ),
         },
     },
     "required": ["query"],
@@ -54,10 +60,20 @@ class KnowledgeNavigateLocateTool:
             llm_spec=ToolLLMSpec(
                 name="knowledge_navigate_locate",
                 description=(
+                    "Description:\n"
                     "Locate evidence and concepts in the user's private WisePen "
-                    "documents. Use this for the first private-knowledge query. It "
-                    "returns readable source context, graph nodes, and a state_id. "
-                    "Continue from returned nodes with knowledge_navigate_expand."
+                    "documents. Use this as the first private-knowledge navigation "
+                    "call.\n\n"
+                    "Output:\n"
+                    "Treat sources as the evidence available for the current question: "
+                    "use their previews to judge relevance and content_index to access "
+                    "the exact text through contents/content_receipts. Nodes are graph "
+                    "navigation anchors, not evidence by themselves; select a relevant "
+                    "node_id and call knowledge_navigate_expand when the question needs "
+                    "cross-document or multi-hop reasoning. Call "
+                    "knowledge_navigate_sections with a returned section_id when the "
+                    "answer needs surrounding, preceding, or more detailed document "
+                    "context. Reuse the returned state_id for either continuation."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -111,31 +127,15 @@ class KnowledgeNavigateLocateTool:
 
 
 def _render_result(result: KnowledgeNavigationLocateResult) -> ToolReturn:
-    # 这里先初始化为空列表；section_view_payload 会通过可变参数把每个
-    # source 的完整正文原地追加进来，同时在 payload 中记录对应的 content_index。
     cacheable_texts: list[CacheableText] = []
     sources = [
         section_view_payload(source, cacheable_texts) for source in result.sources
     ]
     return ToolReturn(
         visible_result={
-            "state_id": result.state.state_id,
-            "action": "locate",
-            "root_query": result.state.root_query,
-            "focus": {
-                "query": result.state.root_query,
-                "node_ids": [node.node_id for node in result.nodes],
-            },
+            "state_id": result.state_id,
             "nodes": [node.to_payload() for node in result.nodes],
-            "edges": [],
-            "paths": [],
             "sources": sources,
-            "navigation": {
-                "visited_nodes": 0,
-                "frontier_nodes": len(result.nodes),
-                "truncated": False,
-                "exhausted": not sources,
-            },
         },
         cacheable_texts=tuple(cacheable_texts),
     )

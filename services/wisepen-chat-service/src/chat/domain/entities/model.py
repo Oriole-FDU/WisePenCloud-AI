@@ -40,6 +40,7 @@ class Model(Document):
     billing_ratio: int = Field(default=1, description="计费倍率")
 
     support_thinking: bool = Field(default=False, description="是否支持深度思考")
+    # 仅声明模型能力；平台多模态输入链路尚未完成，见 services/wisepen-chat-service/TODO.md。
     support_vision: bool = Field(default=False, description="是否支持视觉输入")
     support_tools: bool = Field(default=True, description="是否支持 tool calling")
 

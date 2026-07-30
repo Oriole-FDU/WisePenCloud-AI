@@ -16,13 +16,11 @@ from chat.application.utils.ranking import ScoreSignal, ScoreSignalKind
 _PAYLOAD_FIELDS = (
     "content_revision",
     "resource_id",
-    "document_version",
     "chunk_id",
     "reading_block_id",
     "raw_text",
     "section_id",
     "section_path",
-    "page_labels",
     "anchor_labels",
     "source_ref_id",
 )
@@ -31,13 +29,11 @@ _PAYLOAD_FIELDS = (
 class _CandidatePayload(TypedDict):
     content_revision: str
     resource_id: str
-    document_version: int
     chunk_id: str
     reading_block_id: str
     raw_text: str
     section_id: str
     section_path: list[str]
-    page_labels: list[str]
     anchor_labels: list[str]
     source_ref_id: str
 
@@ -142,10 +138,8 @@ def _to_candidates(
                 section_id=payload["section_id"],
                 section_path=tuple(payload["section_path"]),
                 resource_id=payload["resource_id"],
-                document_version=payload["document_version"],
                 content_revision=payload["content_revision"],
                 raw_text=payload["raw_text"],
-                page_labels=tuple(payload["page_labels"]),
                 anchor_labels=tuple(payload["anchor_labels"]),
                 source_ref_id=payload["source_ref_id"],
                 signals=(

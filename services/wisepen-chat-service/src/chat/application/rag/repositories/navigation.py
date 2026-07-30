@@ -30,17 +30,17 @@ class KnowledgeGraphNavigationRepository(Protocol):
     """知识图谱导航只读访问接口，封装 Cypher/索引层实现细节。"""
 
     async def resolve_mentions(
-        self,
-        *,
-        sources: tuple[KnowledgeMentionSource, ...],
-        permission_scope: RagPermissionScope,
-        limit: int = 32,
+            self,
+            *,
+            sources: tuple[KnowledgeMentionSource, ...],
+            permission_scope: RagPermissionScope,
+            limit: int = 32,
     ) -> tuple[KnowledgeNavigationNode, ...]:
         """根据 RAG 命中来源（resource_id + chunk_id）反查对应知识图谱节点，并完成 ACL 过滤。"""
         ...
 
     async def expand(
-        self, request: KnowledgeGraphExpandRequest
+            self, request: KnowledgeGraphExpandRequest
     ) -> tuple[KnowledgeNavigationPath, ...]:
         """从 seed 节点出发，按指定方向和关系集合在 ACL 范围内扩展图路径。"""
         ...
@@ -50,12 +50,13 @@ class KnowledgeNavigationStateRepository(Protocol):
     """知识导航会话状态的持久化接口，用于跨 expand 调用保留上下文。"""
 
     async def create(
-        self,
-        *,
-        user_id: str,
-        session_id: str,
-        root_query: str,
-        known_node_ids: tuple[str, ...] = (),
+            self,
+            *,
+            user_id: str,
+            session_id: str,
+            root_query: str,
+            known_graph_node_ids: tuple[str, ...],
+            known_sections: Mapping[str, str],
     ) -> KnowledgeNavigationState:
         """创建一次新的导航会话，并初始化已发现节点集合。"""
         ...
@@ -64,11 +65,20 @@ class KnowledgeNavigationStateRepository(Protocol):
         """读取导航会话；不存在时返回 None。"""
         ...
 
-    async def add_known_nodes(
-        self,
-        *,
-        state_id: str,
-        node_ids: tuple[str, ...],
+    async def add_known_graph_nodes(
+            self,
+            *,
+            state_id: str,
+            node_ids: tuple[str, ...],
     ) -> bool:
-        """向已知节点集合追加新节点；状态已删除或过期时返回 False。"""
+        """向图节点白名单追加新节点；状态已删除或过期时返回 False。"""
+        ...
+
+    async def add_known_sections(
+            self,
+            *,
+            state_id: str,
+            sections: Mapping[str, str],
+    ) -> bool:
+        """追加 Section 及其可信资源归属；状态已删除或过期时返回 False。"""
         ...

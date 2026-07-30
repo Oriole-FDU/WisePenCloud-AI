@@ -13,8 +13,7 @@ from chat.application.utils.ranking import (
     RankRequest,
     RankingPipeline,
 )
-
-from .models import RagCandidateRequest, RagRankedHit, RagRetrievalRequest
+from .models import RagCandidateRequest, RagRetrievalCandidate, RagRetrievalRequest
 
 if TYPE_CHECKING:
     from chat.application.utils.llm_clients.embedding import EmbeddingClient
@@ -36,13 +35,13 @@ class RagCandidateRetriever:
     )
 
     def __init__(
-        self,
-        *,
-        embedding_client: EmbeddingClient,
-        candidate_repository: RagCandidateRepository,
-        projection_repository: RagContentProjectionRepository,
-        permission_authorizer: RagPermissionAuthorizer,
-        ranking_pipeline: RankingPipeline,
+            self,
+            *,
+            embedding_client: EmbeddingClient,
+            candidate_repository: RagCandidateRepository,
+            projection_repository: RagContentProjectionRepository,
+            permission_authorizer: RagPermissionAuthorizer,
+            ranking_pipeline: RankingPipeline,
     ) -> None:
         self._embedding_client = embedding_client
         self._candidate_repository = candidate_repository
@@ -50,7 +49,10 @@ class RagCandidateRetriever:
         self._permission_authorizer = permission_authorizer
         self._ranking_pipeline = ranking_pipeline
 
-    async def retrieve(self, request: RagRetrievalRequest) -> tuple[RagRankedHit, ...]:
+    async def retrieve(
+            self,
+            request: RagRetrievalRequest,
+    ) -> tuple[RagRetrievalCandidate, ...]:
         """执行完整 RAG 检索流程。"""
         query = request.query.strip()
         if not query:
@@ -131,7 +133,7 @@ class RagCandidateRetriever:
 
         # 排序结果只引用仍然存在且已通过前置校验的候选，防止排序层引到被过滤掉的 chunk。
         return tuple(
-            RagRankedHit(candidate=candidates_by_id[item.candidate_id], ranking=item)
+            candidates_by_id[item.candidate_id]
             for item in ranking.ranked
             if item.candidate_id in candidates_by_id
         )

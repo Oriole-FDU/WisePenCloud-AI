@@ -48,7 +48,8 @@ RagProjectionCheckpointDocument
   -> 该 revision 下的一整套 parts / sections / reading blocks / source refs
 ```
 
-`content_revision` 是这套数据的共同版本边界。查询任何内容实体时，都必须先从 checkpoint 得到当前 `applied_content_revision`，再按这个 revision 读取，不能跨 revision 混用。
+`content_revision` 是这套数据的共同版本边界。查询任何内容实体时，都必须先从 checkpoint 得到当前 `applied_content_revision`
+，再按这个 revision 读取，不能跨 revision 混用。
 
 ## 为什么不能只保存一张 Chunk 表
 
@@ -117,7 +118,8 @@ rrev_abc
 
 ### 它解决的问题
 
-一次内容更新会同时影响 Mongo、Qdrant 和 Neo4j。它们不能通过一次 Mongo 事务一起提交，因此不能简单地把“Mongo 已写入”当成“RAG 新版本已经可读”。
+一次内容更新会同时影响 Mongo、Qdrant 和 Neo4j。它们不能通过一次 Mongo 事务一起提交，因此不能简单地把“Mongo 已写入”当成“RAG
+新版本已经可读”。
 
 例如：
 
@@ -279,7 +281,8 @@ chunk_id
   -> 原文正文
 ```
 
-它保存的是定位信息和来源元数据，不重复保存完整正文。查询时先由 checkpoint 选定 applied revision，再通过 SourceRef 的 spans 从对应 ContentPart 中读取内容。
+它保存的是定位信息和来源元数据，不重复保存完整正文。查询时先由 checkpoint 选定 applied revision，再通过 SourceRef 的 spans
+从对应 ContentPart 中读取内容。
 
 当前实现中，一个 retrieval chunk 对应一个 SourceRef，但一个 Section 可以拥有多个 SourceRef。
 

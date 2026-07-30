@@ -4,7 +4,6 @@ from collections.abc import Iterable
 from typing import Protocol
 
 from chat.application.rag.repositories import RagAclProjectionRepository
-
 from .models import RagResourceAclProjection
 
 
@@ -29,7 +28,7 @@ class RagPermissionAuthorizer:
         self._repository = repository
 
     async def accessible_resource_ids(
-        self, resource_ids: Iterable[str], scope: RagPermissionIdentity
+            self, resource_ids: Iterable[str], scope: RagPermissionIdentity
     ) -> frozenset[str]:
         """返回当前用户具有 VIEW 权限的资源 ID。"""
         # 去重并保留原始顺序，减少无意义的批量查询。
@@ -56,11 +55,11 @@ class RagPermissionAuthorizer:
 
 
 def _can_view_resource(
-    projection: RagResourceAclProjection,
-    *,
-    user_id: str,
-    managed_group_ids: frozenset[str],
-    joined_group_ids: frozenset[str],
+        projection: RagResourceAclProjection,
+        *,
+        user_id: str,
+        managed_group_ids: frozenset[str],
+        joined_group_ids: frozenset[str],
 ) -> bool:
     """根据资源级 ACL 和用户组 ACL 判断用户是否可读。"""
     # 资源所有者和资源级显式授权用户直接放行。

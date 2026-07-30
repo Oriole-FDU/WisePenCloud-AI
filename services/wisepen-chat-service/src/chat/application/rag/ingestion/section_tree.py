@@ -2,16 +2,15 @@ from dataclasses import replace
 from hashlib import sha256
 
 from chat.application.utils.chunkers import BlockKind, TextBlock
-
 from .models import RagSectionNode
 
 
 def build_section_tree(
-    blocks: tuple[TextBlock, ...],
-    *,
-    resource_id: str,
-    document_version: int,
-    text_length: int,
+        blocks: tuple[TextBlock, ...],
+        *,
+        resource_id: str,
+        document_version: int,
+        text_length: int,
 ) -> tuple[RagSectionNode, ...]:
     """根据文档标题块构建层级化 Section 树。
 

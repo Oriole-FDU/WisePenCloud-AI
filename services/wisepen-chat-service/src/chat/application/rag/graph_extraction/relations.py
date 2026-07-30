@@ -6,7 +6,6 @@ from .models import (
     KnowledgeRelationType,
 )
 
-
 # 基础通用关系：适用于大多数文档知识图谱场景。
 CORE_RELATIONS: dict[KnowledgeRelationType, str] = {
     KnowledgeRelationType.ABOUT: "主体内容明确围绕客体",
@@ -27,7 +26,6 @@ CORE_RELATIONS: dict[KnowledgeRelationType, str] = {
     KnowledgeRelationType.AUTHORED_BY: "主体由客体人物或组织创作",
 }
 
-
 # 学习型关系：更偏向教材、论文、知识库中的解释关系。
 LEARNING_RELATIONS: dict[KnowledgeRelationType, str] = {
     KnowledgeRelationType.DEFINES: "主体给出客体的正式定义",
@@ -35,7 +33,6 @@ LEARNING_RELATIONS: dict[KnowledgeRelationType, str] = {
     KnowledgeRelationType.EXAMPLE_OF: "主体是客体的实例",
     KnowledgeRelationType.REQUIRES: "理解或使用主体需要客体",
 }
-
 
 # 学术关系：面向论文、研究资料等文档。
 SCHOLARLY_RELATIONS: dict[KnowledgeRelationType, str] = {
@@ -46,14 +43,12 @@ SCHOLARLY_RELATIONS: dict[KnowledgeRelationType, str] = {
     KnowledgeRelationType.SUPPLEMENTS: "主体补充客体文档",
 }
 
-
 # 关系 -> 类型映射，用于根据关系反查所属 profile。
 RELATION_PROFILES: dict[KnowledgeRelationType, KnowledgeRelationProfile] = {
     **{relation: KnowledgeRelationProfile.CORE for relation in CORE_RELATIONS},
     **{relation: KnowledgeRelationProfile.LEARNING for relation in LEARNING_RELATIONS},
     **{relation: KnowledgeRelationProfile.SCHOLARLY for relation in SCHOLARLY_RELATIONS},
 }
-
 
 # Resource 节点允许作为 source 的特殊关系。
 # Resource -> Entity 是文档级知识入口关系。
@@ -83,7 +78,7 @@ def relation_descriptions(profiles: frozenset[KnowledgeRelationProfile]) -> dict
 
 
 def relation_pattern_allowed(
-    source: KnowledgeNodeKind, relation: KnowledgeRelationType, target: KnowledgeNodeKind
+        source: KnowledgeNodeKind, relation: KnowledgeRelationType, target: KnowledgeNodeKind
 ) -> bool:
     """检查节点类型和关系组合是否符合 schema 约束。"""
     # 普通实体之间允许建立所有声明过的关系。

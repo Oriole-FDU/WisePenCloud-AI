@@ -40,7 +40,7 @@ class _Redis:
     async def execute(self):
         for command in self._commands:
             if command[0] == "hset":
-                self.hashes[command[1]] = dict(command[2])
+                self.hashes.setdefault(command[1], {}).update(command[2])
             elif command[0] == "sadd":
                 self.sets.setdefault(command[1], set()).update(command[2])
             else:
@@ -69,24 +69,39 @@ async def test_navigation_state_round_trips_minimal_bound_state() -> None:
         user_id="user-1",
         session_id="session-1",
         root_query="概念之间有什么关系？",
-        known_node_ids=("node-1", "node-1", "node-2"),
+        known_graph_node_ids=("node-1", "node-1", "node-2"),
+        known_sections={"section-1": "resource-1"},
     )
     loaded = await repository.get(created.state_id)
 
     assert created.state_id.startswith("kns_")
-    assert created.known_node_ids == ("node-1", "node-2")
+    assert created.known_graph_node_ids == ("node-1", "node-2")
+    assert created.known_sections == (("section-1", "resource-1"),)
     assert loaded == created
     state_key = f"wisepen:rag:navigation_state:{created.state_id}"
-    known_nodes_key = f"{state_key}:known_nodes"
+    known_nodes_key = f"{state_key}:known_graph_nodes"
+    known_sections_key = f"{state_key}:known_sections"
     assert redis.expirations[state_key] == 1800
     assert redis.expirations[known_nodes_key] == 1800
+    assert redis.expirations[known_sections_key] == 1800
 
-    updated = await repository.add_known_nodes(
+    updated = await repository.add_known_graph_nodes(
         state_id=created.state_id,
         node_ids=("node-2", "node-3"),
     )
     loaded = await repository.get(created.state_id)
     assert updated is True
     assert loaded is not None
-    assert loaded.known_node_ids == ("node-1", "node-2", "node-3")
+    assert loaded.known_graph_node_ids == ("node-1", "node-2", "node-3")
 
+    updated = await repository.add_known_sections(
+        state_id=created.state_id,
+        sections={"section-2": "resource-2"},
+    )
+    loaded = await repository.get(created.state_id)
+    assert updated is True
+    assert loaded is not None
+    assert loaded.known_sections == (
+        ("section-1", "resource-1"),
+        ("section-2", "resource-2"),
+    )

@@ -7,7 +7,6 @@ from neo4j_graphrag.experimental.components.types import Neo4jGraph
 from neo4j_graphrag.llm.types import LLMResponse
 
 from chat.application.rag.graph_extraction import (
-    KnowledgeAssertion,
     KnowledgeExtractionChunk,
     KnowledgeExtractionSource,
     KnowledgeGraphExtractor,
@@ -233,17 +232,11 @@ def test_result_mapper_uses_explicit_offsets_and_stable_source_ref_selection() -
         frozenset({KnowledgeRelationType.DEPENDS_ON})
     ).map(graph, window)
 
-    assert [relation.assertion for relation in result.relations] == [
-        KnowledgeAssertion.AFFIRMED,
-        KnowledgeAssertion.UNCERTAIN,
-    ]
+    assert len(result.relations) == 1
     assert {
         relation.evidence.source_ref_id for relation in result.relations
     } == {"source-narrow"}
-    assert {
-        (relation.evidence.start_offset, relation.evidence.end_offset)
-        for relation in result.relations
-    } == {(100, 122)}
+    assert result.relations[0].evidence.quote == "Alpha depends on Beta."
 
 
 def test_extraction_windows_reject_unmapped_source_text() -> None:
@@ -371,7 +364,7 @@ async def test_sdk_extractor_keeps_only_schema_valid_source_backed_graph() -> No
         KnowledgeRelationType.DEFINES,
     ]
     evidence = result.relations[0].evidence
-    assert (evidence.start_offset, evidence.end_offset) == (100, 122)
+    assert evidence.quote == "Alpha depends on Beta."
     assert evidence.source_ref_id == "source-1"
     prompt, messages, response_format = client.calls[0]
     assert "CURRENT_RESOURCE:" in prompt
@@ -476,8 +469,10 @@ async def test_extraction_cache_relocates_evidence_for_new_revision() -> None:
     moved_result = await extractor.extract((moved,))
 
     assert len(client.calls) == 1
-    assert first_result[0].relations[0].evidence.start_offset == 100
-    assert moved_result[0].relations[0].evidence.start_offset == 200
+    assert (
+        first_result[0].relations[0].evidence.evidence_ref_id
+        != moved_result[0].relations[0].evidence.evidence_ref_id
+    )
     assert moved_result[0].relations[0].evidence.source_ref_id == "source-2"
 
 

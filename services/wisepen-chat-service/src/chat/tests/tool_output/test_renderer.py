@@ -110,6 +110,33 @@ def test_renderer_encodes_common_tool_outputs() -> None:
     }
 
 
+def test_renderer_removes_empty_values_after_json_encoding() -> None:
+    result = render_tool_result(
+        invocation=_invocation(),
+        output={
+            "none": None,
+            "empty_string": "",
+            "empty_list": [],
+            "empty_tuple": (),
+            "empty_object": {},
+            "recursively_empty": {"items": [None, "", {}, [], ()]},
+            "nested": {
+                "removed": None,
+                "items": [None, "", {}, [], {"value": "kept"}],
+            },
+            "zero": 0,
+            "false": False,
+        },
+        tool_definition=None,
+    )
+
+    assert json.loads(result.tool_output) == {
+        "nested": {"items": [{"value": "kept"}]},
+        "zero": 0,
+        "false": False,
+    }
+
+
 def test_renderer_falls_back_to_original_text_for_unsupported_objects() -> None:
     output = {"value": object()}
 
@@ -151,7 +178,12 @@ async def test_executor_caches_tool_return_large_text() -> None:
                 "example_tool": _ToolStub(
                     ToolReturn(
                         visible_result={"status": "ok"},
-                        cacheable_texts=(CacheableText(text="# large text"),),
+                        cacheable_texts=(
+                            CacheableText(
+                                text="# large text",
+                                metadata={"source_url": "https://example.com"},
+                            ),
+                        ),
                     )
                 )
             },
@@ -170,9 +202,12 @@ async def test_executor_caches_tool_return_large_text() -> None:
     assert payload["status"] == "ok"
     assert payload["content_receipts"][0]["content_index"] == 0
     assert payload["content_receipts"][0]["content_id"] == repository.stored.content_id
+    assert payload["content_receipts"][0]["metadata"] == {
+        "source_url": "https://example.com"
+    }
     assert repository.stored.content_type == "text/plain"
     assert repository.stored.chunks[0].section_paths == ()
-    assert repository.stored.metadata == {}
+    assert repository.stored.metadata == {"source_url": "https://example.com"}
 
 
 @pytest.mark.asyncio
@@ -221,6 +256,7 @@ async def test_output_cache_preserves_index_after_partial_store_failure() -> Non
                 receipt=ToolContentReceipt(
                     content_id="cnt_second",
                     chunk_count=1,
+                    metadata=dict(kwargs["metadata"]),
                 ),
             )
 
@@ -231,7 +267,10 @@ async def test_output_cache_preserves_index_after_partial_store_failure() -> Non
         tool_return=ToolReturn(
             cacheable_texts=(
                 CacheableText(text="first"),
-                CacheableText(text="second"),
+                CacheableText(
+                    text="second",
+                    metadata={"source_url": "https://example.com/second"},
+                ),
             )
         ),
         invocation=_invocation(),
@@ -244,5 +283,41 @@ async def test_output_cache_preserves_index_after_partial_store_failure() -> Non
             "content_id": "cnt_second",
             "chunk_count": 1,
             "supported_selectors": (),
+            "metadata": {"source_url": "https://example.com/second"},
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_output_cache_inlines_structured_contents() -> None:
+    payload = await ToolOutputCache(
+        content_store=_RepositoryStub(),
+        inline_max_chars=100,
+    ).process(
+        tool_return=ToolReturn(
+            visible_result={"status": "ok"},
+            cacheable_texts=(
+                CacheableText(
+                    text="first",
+                    metadata={"source_url": "https://example.com/1"},
+                ),
+                CacheableText(
+                    text="second",
+                    metadata={"source_url": "https://example.com/2"},
+                ),
+            ),
+        ),
+        invocation=_invocation(),
+        session_id="session-1",
+    )
+
+    assert payload["contents"] == (
+        {
+            "text": "first",
+            "metadata": {"source_url": "https://example.com/1"},
+        },
+        {
+            "text": "second",
+            "metadata": {"source_url": "https://example.com/2"},
         },
     )

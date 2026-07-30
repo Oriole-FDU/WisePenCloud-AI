@@ -22,7 +22,6 @@ from chat.application.rag.repositories import (
 )
 from chat.application.rag.graph_extraction import (
     KnowledgeEntityType,
-    KnowledgeRelationProfile,
     KnowledgeRelationType,
 )
 from chat.application.rag.retrieval import (
@@ -84,10 +83,9 @@ MERGE (resource)-[:HAS_GROUP_ACL]->(acl)
 _UPSERT_ENTITIES = """
 UNWIND $nodes AS item
 MERGE (node:KnowledgeNode:EntityNode {node_id: item.node_id})
-SET node.canonical_key = item.canonical_key,
-    node.label = item.label,
-    node.entity_type = item.entity_type,
-    node.type_tags = item.type_tags
+SET node.label = item.label,
+    node.entity_type = item.entity_type
+REMOVE node.canonical_key, node.type_tags
 """
 
 # 外部来源节点：写入/更新外部知识来源
@@ -95,8 +93,8 @@ SET node.canonical_key = item.canonical_key,
 _UPSERT_EXTERNAL_SOURCES = """
 UNWIND $nodes AS item
 MERGE (node:KnowledgeNode:ExternalSourceNode {node_id: item.node_id})
-SET node.source_key = item.source_key,
-    node.label = item.label
+SET node.label = item.label
+REMOVE node.source_key
 """
 
 # 知识关系边：写入/更新实体间关系
@@ -107,18 +105,19 @@ MATCH (source:KnowledgeNode {node_id: item.source_node_id})
 MATCH (target:KnowledgeNode {node_id: item.target_node_id})
 MERGE (source)-[relation:KNOWLEDGE_RELATION {edge_id: item.edge_id}]->(target)
 SET relation.relation_type = item.relation_type,
-    relation.relation_profile = item.relation_profile,
     relation.predicate = item.predicate,
     relation.origin = 'extracted',
     relation.evidence_resource_id = $resource_id,
-    relation.evidence_ref_ids = item.evidence_ref_ids,
+    relation.evidence_quotes = item.evidence_quotes,
     relation.evidence_source_ref_ids = item.evidence_source_ref_ids,
-    relation.evidence_start_offsets = item.evidence_start_offsets,
-    relation.evidence_end_offsets = item.evidence_end_offsets,
-    relation.assertions = item.assertions,
-    relation.extractor_version = $extractor_version,
     relation.source_content_revision = $content_revision,
     relation.relation_revision = $relation_revision
+REMOVE relation.relation_profile,
+       relation.evidence_ref_ids,
+       relation.evidence_start_offsets,
+       relation.evidence_end_offsets,
+       relation.assertions,
+       relation.extractor_version
 """
 
 # 提及关系边：写入资源对知识节点的 MENTIONS 关系
@@ -130,12 +129,13 @@ MATCH (target:KnowledgeNode {node_id: item.node_id})
 MERGE (resource)-[mention:MENTIONS {mention_id: item.mention_id}]->(target)
 SET mention.chunk_id = item.chunk_id,
     mention.source_ref_id = item.source_ref_id,
-    mention.evidence_ref_id = item.evidence_ref_id,
-    mention.evidence_start_offset = item.start_offset,
-    mention.evidence_end_offset = item.end_offset,
+    mention.evidence_quote = item.evidence_quote,
     mention.evidence_resource_id = $resource_id,
     mention.source_content_revision = $content_revision,
     mention.relation_revision = $relation_revision
+REMOVE mention.evidence_ref_id,
+       mention.evidence_start_offset,
+       mention.evidence_end_offset
 """
 
 # 投影版本标记：将 relation_revision 写入资源节点，标记投影已应用
@@ -331,7 +331,6 @@ class Neo4jKnowledgeGraphRepository(
             "resource_id": projection.resource_id,
             "content_revision": projection.content_revision,
             "relation_revision": projection.relation_revision,
-            "extractor_version": projection.extractor_version,
             "database_": self._database,
         }
         # 1. 写入实体节点
@@ -340,10 +339,8 @@ class Neo4jKnowledgeGraphRepository(
             nodes=[
                 {
                     "node_id": node.node_id,
-                    "canonical_key": node.canonical_key,
                     "label": node.label,
                     "entity_type": node.entity_type.value,
-                    "type_tags": [node.entity_type.value],
                 }
                 for node in projection.nodes
                 if node.kind is KnowledgeNodeKind.ENTITY
@@ -357,7 +354,6 @@ class Neo4jKnowledgeGraphRepository(
             nodes=[
                 {
                     "node_id": node.node_id,
-                    "source_key": node.source_key,
                     "label": node.label,
                 }
                 for node in projection.nodes
@@ -374,13 +370,9 @@ class Neo4jKnowledgeGraphRepository(
                     "source_node_id": edge.source_node_id,
                     "target_node_id": edge.target_node_id,
                     "relation_type": edge.relation_type.value,
-                    "relation_profile": edge.relation_profile.value,
                     "predicate": edge.predicate,
-                    "evidence_ref_ids": list(edge.evidence_ref_ids),
+                    "evidence_quotes": list(edge.evidence_quotes),
                     "evidence_source_ref_ids": list(edge.evidence_source_ref_ids),
-                    "evidence_start_offsets": list(edge.evidence_start_offsets),
-                    "evidence_end_offsets": list(edge.evidence_end_offsets),
-                    "assertions": [item.value for item in edge.assertions],
                 }
                 for edge in projection.edges
             ],
@@ -395,9 +387,7 @@ class Neo4jKnowledgeGraphRepository(
                     "node_id": mention.node_id,
                     "chunk_id": mention.chunk_id,
                     "source_ref_id": mention.source_ref_id,
-                    "evidence_ref_id": mention.evidence_ref_id,
-                    "start_offset": mention.start_offset,
-                    "end_offset": mention.end_offset,
+                    "evidence_quote": mention.evidence_quote,
                 }
                 for mention in projection.mentions
             ],
@@ -463,8 +453,7 @@ class Neo4jKnowledgeGraphRepository(
                      ELSE 'Resource'
                    END AS kind,
                    coalesce(node.label, node.resource_id) AS label,
-                   node.entity_type AS entity_type,
-                   coalesce(node.type_tags, []) AS type_tags
+                   node.entity_type AS entity_type
             ORDER BY node_id
             LIMIT $limit
             """,
@@ -484,7 +473,6 @@ class Neo4jKnowledgeGraphRepository(
                     "kind": record["kind"],
                     "label": record["label"],
                     "entity_type": record["entity_type"],
-                    "type_tags": record["type_tags"],
                 }
             )
             for record in result.records
@@ -548,8 +536,7 @@ class Neo4jKnowledgeGraphRepository(
                        ELSE 'Resource'
                      END,
                      label: coalesce(path_node.label, path_node.resource_id),
-                     entity_type: path_node.entity_type,
-                     type_tags: coalesce(path_node.type_tags, [])
+                     entity_type: path_node.entity_type
                    }}] AS nodes,
                    [relation IN relationships(path) | {{
                      edge_id: coalesce(relation.edge_id, relation.mention_id),
@@ -559,22 +546,16 @@ class Neo4jKnowledgeGraphRepository(
                        relation.relation_type,
                        type(relation)
                      ),
-                     relation_profile: coalesce(
-                       relation.relation_profile,
-                       'core'
-                     ),
                      predicate: relation.predicate,
                      evidence_resource_id: relation.evidence_resource_id,
-                     evidence_ref_ids: coalesce(
-                       relation.evidence_ref_ids,
-                       [relation.evidence_ref_id]
+                     evidence_quotes: coalesce(
+                       relation.evidence_quotes,
+                       [relation.evidence_quote]
                      ),
                      evidence_source_ref_ids: coalesce(
                        relation.evidence_source_ref_ids,
                        [relation.source_ref_id]
-                     ),
-                     source_content_revision: relation.source_content_revision,
-                     relation_revision: relation.relation_revision
+                     )
                    }}] AS edges
             ORDER BY size(edges), nodes[-1].node_id
             LIMIT $limit
@@ -625,7 +606,6 @@ def _map_node(item: dict) -> KnowledgeNavigationNode:
         entity_type=(
             KnowledgeEntityType(entity_type) if entity_type is not None else None
         ),
-        type_tags=tuple(item.get("type_tags") or ()),
     )
 
 
@@ -636,15 +616,12 @@ def _map_edge(item: dict) -> KnowledgeNavigationEdge:
         source_node_id=item["source_node_id"],
         target_node_id=item["target_node_id"],
         relation_type=KnowledgeRelationType(item["relation_type"]),
-        relation_profile=KnowledgeRelationProfile(item["relation_profile"]),
         predicate=item.get("predicate"),
         evidence_resource_id=item["evidence_resource_id"],
-        evidence_ref_ids=tuple(
-            value for value in item.get("evidence_ref_ids") or () if value
+        evidence_quotes=tuple(
+            value for value in item.get("evidence_quotes") or () if value
         ),
         evidence_source_ref_ids=tuple(
             value for value in item.get("evidence_source_ref_ids") or () if value
         ),
-        source_content_revision=item["source_content_revision"],
-        relation_revision=item["relation_revision"],
     )

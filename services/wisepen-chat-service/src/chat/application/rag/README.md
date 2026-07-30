@@ -62,19 +62,19 @@ knowledge_navigate_expand
 
 ## 目录职责
 
-| 目录 | 作用 |
-|---|---|
-| `ingestion/models.py` | Kafka 内容、SectionNode、ReadingBlock、RetrievalChunk、SourceRef |
-| `ingestion/section_tree.py` | 从 parser blocks 确定性构建标题树 |
-| `ingestion/section_projector.py` | Section -> ReadingBlock -> RetrievalChunk 投影 |
-| `ingestion/context_indexing.py` | 生成检索上下文并回填 Section 摘要 |
-| `retrieval/` | Qdrant 召回、版本过滤、排序 |
-| `evidence/` | SourceRef 和 ReadingBlock 权威回源、ACL 二次授权 |
-| `section_navigation/` | SectionView 和标题树 frontier |
-| `knowledge_navigation.py` | locate、Section 读取、跨文档图展开编排 |
-| `graph_extraction/` | 从检索子块构造 LLM 抽取窗口 |
-| `graph_projection/` | 图结果去重、revision 和 Neo4j 投影 |
-| `repositories/` | RAG 仓储协议统一入口 |
+| 目录                               | 作用                                                         |
+|----------------------------------|------------------------------------------------------------|
+| `ingestion/models.py`            | Kafka 内容、SectionNode、ReadingBlock、RetrievalChunk、SourceRef |
+| `ingestion/section_tree.py`      | 从 parser blocks 确定性构建标题树                                   |
+| `ingestion/section_projector.py` | Section -> ReadingBlock -> RetrievalChunk 投影               |
+| `ingestion/context_indexing.py`  | 生成检索上下文并回填 Section 摘要                                      |
+| `retrieval/`                     | Qdrant 召回、版本过滤、排序                                          |
+| `evidence/`                      | SourceRef 和 ReadingBlock 权威回源、ACL 二次授权                     |
+| `section_navigation/`            | SectionView 和标题树 frontier                                  |
+| `knowledge_navigation.py`        | locate、Section 读取、跨文档图展开编排                                 |
+| `graph_extraction/`              | 从检索子块构造 LLM 抽取窗口                                           |
+| `graph_projection/`              | 图结果去重、revision 和 Neo4j 投影                                  |
+| `repositories/`                  | RAG 仓储协议统一入口                                               |
 
 ## 代码阅读顺序
 

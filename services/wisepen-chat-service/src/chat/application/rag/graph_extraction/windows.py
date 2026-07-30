@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 from chat.application.rag.ingestion import RagSourceRef
-
 from .models import (
     KnowledgeExtractionSource,
     KnowledgeExtractionWindow,
     KnowledgeWindowSourceSpan,
 )
 
-
 # 邻接 chunk 上下文长度，仅用于消歧，不参与事实抽取。
 _ADJACENT_CONTEXT_CHARS = 800
 
 
 def build_extraction_windows(
-    source: KnowledgeExtractionSource,
+        source: KnowledgeExtractionSource,
 ) -> tuple[KnowledgeExtractionWindow, ...]:
     """将 RAG 内容投影转换为知识抽取窗口。"""
     # 建立 chunk -> source refs 索引，方便后续绑定 evidence。
@@ -41,7 +39,7 @@ def build_extraction_windows(
         source_mappings: list[KnowledgeWindowSourceSpan] = []
         search_start = 0
         for source_span in chunk.source_spans:
-            source_text = source.markdown[source_span.start_offset : source_span.end_offset]
+            source_text = source.markdown[source_span.start_offset: source_span.end_offset]
             local_start = chunk.raw_text.find(source_text, search_start)
             if not source_text or local_start < 0:
                 raise ValueError(f"chunk {chunk.chunk_id} source span does not match raw text")
@@ -73,13 +71,13 @@ def build_extraction_windows(
                 previous_context=(
                     previous_chunk.raw_text[-_ADJACENT_CONTEXT_CHARS:]
                     if previous_chunk is not None
-                    and previous_chunk.section_id == chunk.section_id
+                       and previous_chunk.section_id == chunk.section_id
                     else ""
                 ),
                 next_context=(
                     next_chunk.raw_text[:_ADJACENT_CONTEXT_CHARS]
                     if next_chunk is not None
-                    and next_chunk.section_id == chunk.section_id
+                       and next_chunk.section_id == chunk.section_id
                     else ""
                 ),
             )
