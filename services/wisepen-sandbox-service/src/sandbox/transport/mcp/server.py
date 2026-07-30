@@ -23,6 +23,30 @@ def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
     )
 
     @mcp.tool(
+        name="acquire_sandbox",
+        description="Acquire the current user's sandbox lease for this request.",
+    )
+    async def acquire_sandbox() -> dict[str, Any]:
+        lease = await session.acquire()
+        return {
+            "lease_id": lease.lease_id,
+            "request_id": lease.request_id,
+            "sandbox_id": lease.sandbox_id,
+            "tenant_id": lease.tenant_id,
+            "workspace_id": lease.workspace_id,
+            "expires_at": lease.expires_at.isoformat(),
+            "fencing_token": lease.fencing_token,
+        }
+
+    @mcp.tool(
+        name="release_sandbox",
+        description="Release the current user's sandbox lease for this request.",
+    )
+    async def release_sandbox() -> dict[str, str]:
+        await session.release()
+        return {"status": "released"}
+
+    @mcp.tool(
         name="read_file",
         description="Read a file from the current user's sandbox workspace.",
     )
@@ -101,24 +125,20 @@ def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
 
     @mcp.tool(
         name="run_sandbox_script",
-        description="Run a script package in the current user's sandbox.",
+        description="Run source code in the current user's sandbox.",
     )
     async def run_sandbox_script(
-        package_id: Annotated[str, Field(description="Script package identifier.")],
-        entry: str | None = None,
-        args: list[str] | None = None,
-        env: dict[str, str] | None = None,
-        timeout_ms: int | None = None,
+        language: Annotated[str, Field(description="Programming language, for example python.")],
+        code: Annotated[str, Field(description="Source code to execute.")],
+        timeout_ms: Annotated[int | None, Field(description="Optional execution timeout in milliseconds.")] = None,
         limits: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        # 执行通道是预留的脚本/代码执行通道，payload 原样交给 Provider 做后端协议适配。
+        # 统一代码执行契约，Provider 再负责适配 AIO 的 /v1/code/execute。
         return await session.execute(
             "execute",
             {
-                "package_id": package_id,
-                "entry": entry,
-                "args": args or [],
-                "env": env or {},
+                "language": language,
+                "code": code,
                 "timeout_ms": timeout_ms,
                 "limits": limits or {},
             },

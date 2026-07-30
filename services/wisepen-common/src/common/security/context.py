@@ -38,6 +38,14 @@ class SecurityContextHolder:
         return SecurityContextHolder._get("session_id")
 
     @staticmethod
+    def set_request_id(request_id: str):
+        SecurityContextHolder._set("request_id", request_id)
+
+    @staticmethod
+    def get_request_id() -> Optional[str]:
+        return SecurityContextHolder._get("request_id")
+
+    @staticmethod
     def set_identity_type(code: int):
         """从网关透传的 int code 转换为 IdentityType 枚举存储。"""
         identity = IdentityType.get_by_code(code)

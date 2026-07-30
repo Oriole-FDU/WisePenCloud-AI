@@ -51,6 +51,9 @@ class SandboxRepository(Protocol):
     async def find_lease(self, lease_id: str) -> SandboxRecord:
         ...
 
+    async def find_request(self, request_id: str) -> SandboxRecord | None:
+        ...
+
     async def close_lease(self, lease_id: str, fencing_token: int) -> SandboxRecord:
         ...
 

@@ -47,6 +47,7 @@ from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClie
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
 from common.kafka.producer import KafkaProducerClient
+from chat.core.providers.sandbox_client import SandboxClient
 
 
 async def _provide_nacos_naming() -> NacosNamingService:
@@ -149,9 +150,19 @@ class Container(containers.DeclarativeContainer):
         McpServiceClient,
         discovery=service_discovery,
         from_source_secret=settings.FROM_SOURCE_SECRET,
-        service_name="wisepen-sandbox-service",
+        service_name=settings.SANDBOX_SERVICE_NAME,
         timeout=settings.RPC_DEFAULT_TIMEOUT,
         default_strategy=settings.RPC_LB_STRATEGY,
+        base_url=settings.SANDBOX_SERVICE_URL,
+    )
+    sandbox_client = providers.Singleton(
+        SandboxClient,
+        rpc=rpc_client,
+        service_name=settings.SANDBOX_SERVICE_NAME,
+        base_url=settings.SANDBOX_SERVICE_URL,
+        from_source=settings.SANDBOX_FROM_SOURCE or settings.FROM_SOURCE_SECRET,
+        timeout_seconds=settings.SANDBOX_TIMEOUT_SECONDS,
+        mcp_client=sandbox_mcp_service_client,
     )
     mcp_client = providers.Singleton(
         McpClient,
