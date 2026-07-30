@@ -4,6 +4,7 @@ import time
 from typing import Any, List
 
 from chat.application.tools.core import (
+    ToolConfigSpec,
     ToolDefinition,
     ToolLLMSpec,
     ToolParametersSchema,
@@ -16,7 +17,43 @@ from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.service_client import McpServiceClient
 from common.logger import error
 
-_SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
+_WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
+    schema={
+        "type": "object",
+        "properties": {
+            "api_key": {
+                "type": "string",
+                "title": "API Key",
+                "description": "API key for the configured search provider.",
+                "writeOnly": True,
+            },
+        },
+        "additionalProperties": False,
+    },
+    required_keys=("api_key",),
+    secret_keys=("api_key",),
+)
+
+_WEB_SEARCH_POLICY = ToolPolicy(
+    expose_by_default=True,
+    risk_level=ToolRiskLevel.LOW,
+    timeout_seconds=300.0,
+    persist_output=True,
+    max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+)
+
+_RAG_NAVIGATION_POLICY = ToolPolicy(
+    expose_by_default=True,
+    risk_level=ToolRiskLevel.LOW,
+    timeout_seconds=300.0,
+    persist_output=True,
+    required_context_keys=("session_id",),
+    max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+)
+
+_SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [
+    # 1. 技能创建与管理工具
+    {
         "tool_name": "create_skill_info",
         "policy": ToolPolicy(
             expose_by_default=False,
@@ -28,7 +65,8 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
             max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
         ),
         "failure_reason": "Skill Info Create Failed",
-    }, {
+    },
+    {
         "tool_name": "get_skill_info",
         "policy": ToolPolicy(
             expose_by_default=False,
@@ -40,8 +78,9 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
             max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
         ),
         "failure_reason": "Skill Info Load Failed",
-    }, {
-        "tool_name": "create_skill_info",
+    },
+    {
+        "tool_name": "update_skill_info",  
         "policy": ToolPolicy(
             expose_by_default=False,
             risk_level=ToolRiskLevel.MEDIUM,
@@ -52,7 +91,8 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
             max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
         ),
         "failure_reason": "Skill Info Update Failed",
-    }, {
+    },
+    {
         "tool_name": "upload_skill_draft_asset",
         "policy": ToolPolicy(
             expose_by_default=False,
@@ -64,7 +104,67 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
             max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
         ),
         "failure_reason": "Skill Draft Asset Upload Failed",
-    }
+    },
+
+    # 2. 知识库/ RAG 导航工具
+    {
+        "tool_name": "knowledge_navigate_locate",
+        "policy": _RAG_NAVIGATION_POLICY,
+        "failure_reason": "Knowledge Navigation Locate Failed",
+    },
+    {
+        "tool_name": "knowledge_navigate_expand",
+        "policy": _RAG_NAVIGATION_POLICY,
+        "failure_reason": "Knowledge Navigation Expand Failed",
+    },
+    {
+        "tool_name": "knowledge_navigate_sections",
+        "policy": _RAG_NAVIGATION_POLICY,
+        "failure_reason": "Knowledge Navigation Sections Failed",
+    },
+
+    # 3. Web Search
+    {
+        "tool_name": "platform_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "failure_reason": "Platform Search Failed",
+    },
+    {
+        "tool_name": "exa_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "Exa Search Failed",
+    },
+    {
+        "tool_name": "tavily_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "Tavily Search Failed",
+    },
+    {
+        "tool_name": "anysearch_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "AnySearch Search Failed",
+    },
+    {
+        "tool_name": "baidu_qianfan_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "Baidu Qianfan Search Failed",
+    },
+    {
+        "tool_name": "tinyfish_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "TinyFish Search Failed",
+    },
+    {
+        "tool_name": "firecrawl_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "Firecrawl Search Failed",
+    },
 ]
 
 
@@ -112,6 +212,7 @@ class SystemMcpToolCatalog:
                         parameters_schema=parameters_schema,
                     ),
                     policy=overlay["policy"],
+                    config_spec=overlay.get("config_spec"),
                     preflight_hooks=(),
                 ),
                 failure_reason=overlay["failure_reason"],

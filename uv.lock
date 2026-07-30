@@ -29,6 +29,7 @@ members = [
     "wisepen-chat-service",
     "wisepen-common",
     "wisepen-mcp-service",
+    "wisepen-rag-service",
     "wisepen-server-py",
 ]
 
@@ -6364,10 +6365,8 @@ dependencies = [
     { name = "anthropic" },
     { name = "anyio" },
     { name = "beanie" },
-    { name = "bm25s" },
     { name = "charset-normalizer" },
     { name = "dashscope" },
-    { name = "ddgs" },
     { name = "dependency-injector" },
     { name = "dnspython" },
     { name = "docling" },
@@ -6375,22 +6374,17 @@ dependencies = [
     { name = "google-genai" },
     { name = "hishel", extra = ["async"] },
     { name = "httpx" },
-    { name = "jieba" },
     { name = "jsonschema" },
-    { name = "langchain-text-splitters" },
     { name = "litellm" },
     { name = "lxml" },
     { name = "magika", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13' and sys_platform == 'win32'" },
     { name = "magika", version = "0.6.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13' or sys_platform != 'win32'" },
-    { name = "markdown-it-py" },
     { name = "markitdown" },
     { name = "mcp" },
-    { name = "mdit-py-plugins" },
     { name = "mem0ai" },
     { name = "nacos-sdk-python" },
     { name = "neo4j" },
     { name = "neo4j-graphrag" },
-    { name = "numpy" },
     { name = "openai" },
     { name = "openpyxl" },
     { name = "orjson" },
@@ -6405,7 +6399,6 @@ dependencies = [
     { name = "regex" },
     { name = "scrapling", extra = ["fetchers"] },
     { name = "tabulate" },
-    { name = "thulac" },
     { name = "trafilatura" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "wisepen-common" },
@@ -6424,10 +6417,8 @@ requires-dist = [
     { name = "anthropic" },
     { name = "anyio" },
     { name = "beanie" },
-    { name = "bm25s", specifier = ">=0.3.9" },
     { name = "charset-normalizer" },
     { name = "dashscope" },
-    { name = "ddgs", specifier = ">=9.14.4" },
     { name = "dependency-injector" },
     { name = "dnspython" },
     { name = "docling" },
@@ -6435,21 +6426,16 @@ requires-dist = [
     { name = "google-genai" },
     { name = "hishel", extras = ["async"] },
     { name = "httpx" },
-    { name = "jieba" },
     { name = "jsonschema" },
-    { name = "langchain-text-splitters", specifier = ">=1.0,<2" },
     { name = "litellm" },
     { name = "lxml" },
     { name = "magika" },
-    { name = "markdown-it-py", specifier = ">=4,<5" },
     { name = "markitdown" },
     { name = "mcp", specifier = ">=1.27,<2" },
-    { name = "mdit-py-plugins", specifier = ">=0.5,<1" },
     { name = "mem0ai" },
     { name = "nacos-sdk-python" },
     { name = "neo4j", specifier = "==6.2.0" },
     { name = "neo4j-graphrag", specifier = "==1.18.0" },
-    { name = "numpy" },
     { name = "openai" },
     { name = "openpyxl" },
     { name = "orjson" },
@@ -6464,7 +6450,6 @@ requires-dist = [
     { name = "regex" },
     { name = "scrapling", extras = ["fetchers"] },
     { name = "tabulate", specifier = ">=0.9,<1" },
-    { name = "thulac" },
     { name = "trafilatura" },
     { name = "uvicorn", extras = ["standard"] },
     { name = "wisepen-common", editable = "services/wisepen-common" },
@@ -6484,10 +6469,16 @@ version = "0.1.0"
 source = { editable = "services/wisepen-common" }
 dependencies = [
     { name = "aiokafka" },
+    { name = "bm25s" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "jieba" },
+    { name = "langchain-text-splitters" },
     { name = "loguru" },
+    { name = "markdown-it-py" },
+    { name = "mdit-py-plugins" },
     { name = "nacos-sdk-python" },
+    { name = "numpy" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-instrumentation-aiokafka" },
@@ -6497,15 +6488,23 @@ dependencies = [
     { name = "opentelemetry-sdk" },
     { name = "pydantic" },
     { name = "starlette" },
+    { name = "thulac" },
+    { name = "zeroentropy" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "aiokafka" },
+    { name = "bm25s", specifier = ">=0.3.9" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "jieba" },
+    { name = "langchain-text-splitters", specifier = ">=1.0,<2" },
     { name = "loguru" },
+    { name = "markdown-it-py", specifier = ">=4,<5" },
+    { name = "mdit-py-plugins", specifier = ">=0.5,<1" },
     { name = "nacos-sdk-python" },
+    { name = "numpy" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-instrumentation-aiokafka" },
@@ -6515,6 +6514,8 @@ requires-dist = [
     { name = "opentelemetry-sdk" },
     { name = "pydantic" },
     { name = "starlette" },
+    { name = "thulac" },
+    { name = "zeroentropy" },
 ]
 
 [[package]]
@@ -6522,6 +6523,7 @@ name = "wisepen-mcp-service"
 version = "0.1.0"
 source = { editable = "services/wisepen-mcp-service" }
 dependencies = [
+    { name = "ddgs" },
     { name = "dependency-injector" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -6532,10 +6534,12 @@ dependencies = [
     { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "wisepen-common" },
+    { name = "zeroentropy" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "ddgs", specifier = ">=9.14.4" },
     { name = "dependency-injector" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -6546,6 +6550,60 @@ requires-dist = [
     { name = "pyyaml" },
     { name = "uvicorn", extras = ["standard"] },
     { name = "wisepen-common", editable = "services/wisepen-common" },
+    { name = "zeroentropy" },
+]
+
+[[package]]
+name = "wisepen-rag-service"
+version = "0.1.0"
+source = { editable = "services/wisepen-rag-service" }
+dependencies = [
+    { name = "beanie" },
+    { name = "dependency-injector" },
+    { name = "fastapi" },
+    { name = "nacos-sdk-python" },
+    { name = "neo4j" },
+    { name = "neo4j-graphrag" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
+    { name = "qdrant-client" },
+    { name = "redis" },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "wisepen-common" },
+    { name = "zeroentropy" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beanie" },
+    { name = "dependency-injector" },
+    { name = "fastapi" },
+    { name = "nacos-sdk-python" },
+    { name = "neo4j", specifier = "==6.2.0" },
+    { name = "neo4j-graphrag", specifier = "==1.18.0" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
+    { name = "qdrant-client", specifier = "==1.18.0" },
+    { name = "redis" },
+    { name = "uvicorn", extras = ["standard"] },
+    { name = "wisepen-common", editable = "services/wisepen-common" },
+    { name = "zeroentropy" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
 ]
 
 [[package]]
@@ -6557,6 +6615,7 @@ dependencies = [
     { name = "wisepen-chat-service" },
     { name = "wisepen-common" },
     { name = "wisepen-mcp-service" },
+    { name = "wisepen-rag-service" },
 ]
 
 [package.metadata]
@@ -6565,6 +6624,7 @@ requires-dist = [
     { name = "wisepen-chat-service", editable = "services/wisepen-chat-service" },
     { name = "wisepen-common", editable = "services/wisepen-common" },
     { name = "wisepen-mcp-service", editable = "services/wisepen-mcp-service" },
+    { name = "wisepen-rag-service", editable = "services/wisepen-rag-service" },
 ]
 
 [[package]]

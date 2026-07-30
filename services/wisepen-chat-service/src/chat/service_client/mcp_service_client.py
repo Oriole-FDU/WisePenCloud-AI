@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, TypeAlias
 
 from httpx import AsyncClient
 from mcp import ClientSession
@@ -16,6 +16,9 @@ from common.security.context import SecurityContextHolder
 
 _DEFAULT_SERVICE_NAME = "wisepen-mcp-service"
 _MCP_PATH = "/mcp/"
+_MCP_TOOL_CONFIG_META_KEY = "wisepen/tool_config"
+_MCP_TOOL_CONTEXT_META_KEY = "wisepen/tool_context"
+McpToolStructuredContent: TypeAlias = dict[str, Any] | None
 
 
 class McpServiceClient:
@@ -51,7 +54,8 @@ class McpServiceClient:
         for item in result.tools or []:
             name = item.name.strip()
             description = item.description
-            if not name or not description: continue
+            if not name or not description:
+                continue
             input_schema = item.inputSchema
             if hasattr(input_schema, "model_dump"):
                 input_schema = input_schema.model_dump(by_alias=True)
@@ -63,7 +67,15 @@ class McpServiceClient:
         server: Any,
         tool_name: str,
         arguments: Mapping[str, Any],
-    ) -> str:
+        *,
+        tool_config: Mapping[str, Any] | None = None,
+        tool_context: Mapping[str, Any] | None = None,
+    ) -> McpToolStructuredContent:
+        meta: dict[str, Any] = {}
+        if tool_config:
+            meta[_MCP_TOOL_CONFIG_META_KEY] = dict(tool_config)
+        if tool_context:
+            meta[_MCP_TOOL_CONTEXT_META_KEY] = dict(tool_context)
         async with streamable_http_client(
             url=await self._resolve_url(),
             http_client=AsyncClient(
@@ -74,12 +86,22 @@ class McpServiceClient:
         ) as (read_stream, write_stream, _):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
-                result = await session.call_tool(tool_name, dict(arguments))
+                result = await session.call_tool(
+                    tool_name,
+                    dict(arguments),
+                    meta=meta or None,
+                )
 
-        output = json.dumps(result.structuredContent, ensure_ascii=False, default=str)
         if getattr(result, "isError", False):
-            raise RuntimeError(output or f"MCP tool '{tool_name}' returned an error.")
-        return output
+            error_output = json.dumps(
+                result.structuredContent,
+                ensure_ascii=False,
+                default=str,
+            )
+            raise RuntimeError(
+                error_output or f"MCP tool '{tool_name}' returned an error."
+            )
+        return result.structuredContent
 
     async def _resolve_url(self) -> str:
         instance = await self._discovery.pick(self._service_name, strategy=self._strategy)

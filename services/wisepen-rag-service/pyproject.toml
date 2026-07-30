@@ -1,0 +1,29 @@
+[project]
+name = "wisepen-rag-service"
+version = "0.1.0"
+description = "WisePen RAG Microservice: indexing, retrieval, and knowledge navigation"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "pydantic",
+    "pydantic-settings",
+    "uvicorn[standard]",
+    "dependency_injector",
+    "beanie",
+    "redis",
+    "nacos-sdk-python",
+    "pyyaml",
+    "neo4j==6.2.0",
+    "neo4j-graphrag==1.18.0",
+    "qdrant-client==1.18.0",
+    "openai",
+    "zeroentropy",
+    "wisepen-common",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]

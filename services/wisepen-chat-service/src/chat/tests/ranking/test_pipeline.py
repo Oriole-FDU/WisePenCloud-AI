@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from chat.application.utils.ranking import (
+from common.utils.ranking import (
     RankCandidate,
     RankedCandidate,
     RankingPipeline,
@@ -11,8 +11,8 @@ from chat.application.utils.ranking import (
     ScoreSignal,
     ScoreSignalKind,
 )
-from chat.application.utils.ranking.fusion import WeightedRrfFusion
-from chat.application.utils.ranking.prefilters import (
+from common.utils.ranking.fusion import WeightedRrfFusion
+from common.utils.ranking.prefilters import (
     KeywordPrefilter,
     KeywordPrefilterConfig,
 )
@@ -144,7 +144,7 @@ async def test_arank_offloads_sync_ranking_stages(
         return function(*args, **kwargs)
 
     monkeypatch.setattr(
-        "chat.application.utils.ranking.pipeline.asyncio.to_thread",
+        "common.utils.ranking.pipeline.asyncio.to_thread",
         run_in_thread,
     )
     pipeline = RankingPipeline(

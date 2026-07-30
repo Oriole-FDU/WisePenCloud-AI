@@ -1,21 +1,21 @@
 import pytest
 
-from chat.application.utils.ranking import (
+from common.utils.ranking import (
     RankCandidate,
     RankedCandidate,
     RankQuery,
     ScoreSignal,
 )
-from chat.application.utils.ranking.diversifiers import (
+from common.utils.ranking.diversifiers import (
     MmrDiversifier,
     MmrDiversifierConfig,
 )
-from chat.application.utils.ranking.fusion import WeightedRrfFusion
-from chat.application.utils.ranking.scorers import (
+from common.utils.ranking.fusion import WeightedRrfFusion
+from common.utils.ranking.scorers import (
     FieldedBM25Scorer,
     FieldedBM25ScorerConfig,
 )
-from chat.application.utils.ranking.tokenizer import RankingTokenizer
+from common.utils.ranking.tokenizer import RankingTokenizer
 
 
 class _WhitespaceTokenizer(RankingTokenizer):

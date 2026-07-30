@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from chat.application.utils.chunkers import SourceSpan
+from common.utils.chunkers import SourceSpan
 
 
 @dataclass(frozen=True, slots=True)

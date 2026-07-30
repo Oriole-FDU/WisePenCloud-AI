@@ -1,6 +1,6 @@
 import pytest
 
-from chat.application.utils.ranking.tokenizer import (
+from common.utils.ranking.tokenizer import (
     JiebaRankingTokenizer,
     ThuLacRankingTokenizer,
 )

@@ -1,6 +1,6 @@
 import pytest
 
-from chat.application.utils.chunkers import (
+from common.utils.chunkers import (
     BlockKind,
     ChunkDocument,
     MarkdownChunkerConfig,

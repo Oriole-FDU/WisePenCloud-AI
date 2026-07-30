@@ -1,4 +1,4 @@
-from chat.application.utils.chunkers import (
+from common.utils.chunkers import (
     ChunkDocument,
     PlainTextChunker,
     PlainTextChunkerConfig,

@@ -14,10 +14,23 @@ class AppSettings(BaseModel):
 
     FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
 
-    RPC_LB_STRATEGY: Literal["weighted_random", "round_robin", "random"] = "weighted_random"
+    RPC_LB_STRATEGY: Literal["weighted_random", "round_robin", "random"] = (
+        "weighted_random"
+    )
     RPC_DEFAULT_TIMEOUT: float = 5.0
     RPC_DEFAULT_RETRIES: int = 2
     SERVICE_DISCOVERY_CACHE_TTL_SECONDS: float = 30.0
+
+    WEB_SEARCH_FOURGET_BASE_URL: str = "http://127.0.0.1:8088"
+    WEB_SEARCH_EXA_BASE_URL: str = "https://api.exa.ai"
+    WEB_SEARCH_TAVILY_BASE_URL: str = "https://api.tavily.com"
+    WEB_SEARCH_ANYSEARCH_BASE_URL: str = "https://api.anysearch.com"
+    WEB_SEARCH_BAIDU_QIANFAN_BASE_URL: str = "https://qianfan.baidubce.com"
+    WEB_SEARCH_TINYFISH_BASE_URL: str = "https://api.search.tinyfish.ai"
+    WEB_SEARCH_FIRECRAWL_BASE_URL: str = "https://api.firecrawl.dev"
+    WEB_SEARCH_HTTP_TIMEOUT_SECONDS: float = 15.0
+    ZERO_ENTROPY_API_KEY: str = ""
+    RERANKER_MODEL: str = "zerank-2"
 
 
 def _run_async(coro):

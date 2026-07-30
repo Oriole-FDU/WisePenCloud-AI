@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from pprint import pformat
 
-from chat.application.utils.chunkers import (
+from common.utils.chunkers import (
     ChunkDocument,
     MarkdownChunker,
     MarkdownChunkerConfig,

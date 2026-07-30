@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from chat.application.utils.chunkers import BlockKind
+from common.utils.chunkers import BlockKind
 
 CONTENT_IDS_SCHEMA: dict[str, Any] = {
     "type": "array",

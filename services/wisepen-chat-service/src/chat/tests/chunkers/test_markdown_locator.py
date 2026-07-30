@@ -1,10 +1,10 @@
-from chat.application.utils.chunkers import (
+from common.utils.chunkers import (
     BlockKind,
     Chunk,
     SourceSpan,
     TextBlock,
 )
-from chat.application.utils.chunkers.markdown.locator import build_markdown_locators
+from common.utils.chunkers.markdown.locator import build_markdown_locators
 
 
 def test_incomplete_page_marker_is_ignored() -> None:

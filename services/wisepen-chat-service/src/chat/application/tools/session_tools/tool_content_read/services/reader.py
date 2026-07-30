@@ -9,8 +9,8 @@ from chat.application.tools.common.tool_content_store import (
     ToolContentChunk,
     ToolContentStore,
 )
-from chat.application.utils.ranking import RankCandidate, RankQuery, RankRequest
-from chat.application.utils.ranking.pipeline import RankingPipeline
+from common.utils.ranking import RankCandidate, RankQuery, RankRequest
+from common.utils.ranking.pipeline import RankingPipeline
 
 from .chunk_selection import select_chunks
 from .content_window_builder import ToolContentWindowBuilder, chunk_text

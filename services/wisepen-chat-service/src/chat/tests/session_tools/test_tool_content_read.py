@@ -35,8 +35,8 @@ from chat.application.tools.session_tools.tool_content_read.tools import (
     ToolContentRegexReadTool,
     ToolContentRankedExpandReadTool,
 )
-from chat.application.utils.chunkers import SourceSpan
-from chat.application.utils.ranking.pipeline import RankingPipeline
+from common.utils.chunkers import SourceSpan
+from common.utils.ranking.pipeline import RankingPipeline
 
 
 class _StoreStub:
