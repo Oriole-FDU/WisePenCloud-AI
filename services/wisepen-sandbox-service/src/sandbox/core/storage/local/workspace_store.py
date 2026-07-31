@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import shutil
@@ -13,6 +14,10 @@ from sandbox.domain.error_codes import SandboxErrorCode
 
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+
+
+def content_bytes(content: str | bytes) -> bytes:
+    return content if isinstance(content, bytes) else content.encode("utf-8")
 
 
 def validate_workspace_id(value: str) -> str:
@@ -59,6 +64,7 @@ class LocalWorkspaceStore:
         self._max_file_bytes = max(1, max_file_bytes)
         self._max_total_bytes = max(1, max_total_bytes)
         self._manifest_name = normalize_relative_path(manifest_name)
+        self._commit_lock = asyncio.Lock()
         if "/" in self._manifest_name:
             raise ServiceException(
                 SandboxErrorCode.WORKSPACE_PATH_INVALID,
@@ -76,7 +82,7 @@ class LocalWorkspaceStore:
         # 暂存目录带随机后缀，避免并发/失败重试复用同一个临时目录。
         return self._staging_root / tenant_id / f"{workspace_id}-{uuid.uuid4().hex}"
 
-    def _validate_limits(self, files: dict[str, str]) -> tuple[int, int]:
+    def _validate_limits(self, files: dict[str, str | bytes]) -> tuple[int, int]:
         # 提交前先按 UTF-8 文本大小计算配额，防止缓存目录被用户输出撑爆。
         if len(files) > self._max_files:
             raise ServiceException(
@@ -86,7 +92,7 @@ class LocalWorkspaceStore:
         total_bytes = 0
         for relative, content in files.items():
             normalize_relative_path(relative)
-            size = len(content.encode("utf-8"))
+            size = len(content_bytes(content))
             if size > self._max_file_bytes:
                 raise ServiceException(
                     SandboxErrorCode.WORKSPACE_CACHE_LIMIT_EXCEEDED,
@@ -136,6 +142,7 @@ class LocalWorkspaceStore:
     ) -> None:
         file_count, total_bytes = self._validate_limits(snapshot.files)
         target.mkdir(parents=True, exist_ok=True)
+        file_types: dict[str, str] = {}
         for relative, content in snapshot.files.items():
             normalized = normalize_relative_path(relative)
             # 清单文件是系统元数据，用户文件不能覆盖它，否则会破坏缓存审计信息。
@@ -152,7 +159,12 @@ class LocalWorkspaceStore:
                     SandboxErrorCode.WORKSPACE_PATH_INVALID,
                     "工作区不允许包含符号链接",
                 )
-            path.write_text(content, encoding="utf-8")
+            if isinstance(content, bytes):
+                path.write_bytes(content)
+                file_types[normalized] = "binary"
+            else:
+                path.write_text(content, encoding="utf-8")
+                file_types[normalized] = "utf-8"
         manifest = {
             "tenant_id": snapshot.tenant_id,
             "workspace_id": snapshot.workspace_id,
@@ -161,6 +173,7 @@ class LocalWorkspaceStore:
             "committed_at": utc_now().isoformat(),
             "file_count": file_count,
             "total_bytes": total_bytes,
+            "file_types": file_types,
         }
         (target / self._manifest_name).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2),
@@ -200,8 +213,11 @@ class LocalWorkspaceStore:
             pass
 
     async def snapshot(self, tenant_id: str, workspace_id: str) -> WorkspaceSnapshot:
+        return await asyncio.to_thread(self._snapshot_sync, tenant_id, workspace_id)
+
+    def _snapshot_sync(self, tenant_id: str, workspace_id: str) -> WorkspaceSnapshot:
         root = self._path(tenant_id, workspace_id)
-        files: dict[str, str] = {}
+        files: dict[str, str | bytes] = {}
         file_count = 0
         total_bytes = 0
         if root.exists():
@@ -210,6 +226,19 @@ class LocalWorkspaceStore:
                     SandboxErrorCode.WORKSPACE_PATH_INVALID,
                     "工作区根目录不能是符号链接",
                 )
+            file_types: dict[str, str] = {}
+            manifest_path = root / self._manifest_name
+            if manifest_path.is_file() and not manifest_path.is_symlink():
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    raw_types = manifest.get("file_types", {})
+                    if isinstance(raw_types, dict):
+                        file_types = {str(key): str(value) for key, value in raw_types.items()}
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise ServiceException(
+                        SandboxErrorCode.WORKSPACE_SYNC_FAILED,
+                        "工作区清单损坏",
+                    ) from exc
             for path in root.rglob("*"):
                 if path.is_symlink():
                     raise ServiceException(
@@ -226,9 +255,34 @@ class LocalWorkspaceStore:
                         file_count,
                         total_bytes,
                     )
-                    content = path.read_text(encoding="utf-8", errors="replace")
-                    files[relative] = content
+                    raw = path.read_bytes()
+                    if file_types.get(relative) == "binary":
+                        files[relative] = raw
+                    else:
+                        try:
+                            files[relative] = raw.decode("utf-8")
+                        except UnicodeDecodeError:
+                            # 兼容旧缓存：没有类型元数据时按二进制保留，而不是替换或丢弃。
+                            files[relative] = raw
         return WorkspaceSnapshot(tenant_id, workspace_id, files)
+
+    def _existing_fencing_token(self, root: Path) -> int | None:
+        manifest_path = root / self._manifest_name
+        if not manifest_path.exists():
+            return None
+        if manifest_path.is_symlink():
+            raise ServiceException(
+                SandboxErrorCode.WORKSPACE_PATH_INVALID,
+                "工作区清单不能是符号链接",
+            )
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return int(manifest.get("fencing_token", 0))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise ServiceException(
+                SandboxErrorCode.WORKSPACE_SYNC_FAILED,
+                "工作区清单损坏",
+            ) from exc
 
     async def commit(
         self,
@@ -236,7 +290,24 @@ class LocalWorkspaceStore:
         lease_id: str,
         fencing_token: int = 0,
     ) -> None:
+        async with self._commit_lock:
+            await asyncio.to_thread(
+                self._commit_sync, snapshot, lease_id, fencing_token
+            )
+
+    def _commit_sync(
+        self,
+        snapshot: WorkspaceSnapshot,
+        lease_id: str,
+        fencing_token: int,
+    ) -> None:
         root = self._path(snapshot.tenant_id, snapshot.workspace_id)
+        existing_token = self._existing_fencing_token(root)
+        if existing_token is not None and fencing_token < existing_token:
+            raise ServiceException(
+                SandboxErrorCode.FENCING_REJECTED,
+                "工作区快照 fencing token 已过期",
+            )
         staging = self._staging_path(snapshot.tenant_id, snapshot.workspace_id)
         self._cleanup_dir(staging)
         try:

@@ -12,13 +12,14 @@ from sandbox.domain.entities import (
     SandboxState,
     WorkspaceSnapshot,
 )
-from sandbox.domain.interfaces import LeaderLease, MetricsPort, SandboxProvider, WorkspaceStore
+from sandbox.domain.interfaces import FileTransferPort, LeaderLease, MetricsPort, SandboxProvider, WorkspaceStore
 from sandbox.application.services import SandboxPool, SandboxScheduler, Watcher
 from sandbox.core.storage import LocalWorkspaceStore, MemoryLeaderLease, MemorySandboxRepository
 from sandbox.core.observability import MetricsCollector
 
 __all__ = [
     "Endpoint",
+    "FileTransferPort",
     "DestroyReason",
     "ExecutionRequest",
     "ExecutionResult",

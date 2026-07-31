@@ -8,10 +8,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from common.core.domain import R
 from common.core.exceptions import ServiceException
-from sandbox.gateway.api.router import create_gateway_router
 from sandbox.gateway.binding import VncBinding
 
-from sandbox.api.endpoints import health, pool, sandbox
+from sandbox.api.endpoints import health, pool, sandbox, vnc
 
 
 def create_app(
@@ -50,5 +49,5 @@ def create_app(
         # 模型上下文协议使用 streamable-http，挂载后实际工具入口为 /mcp/。
         app.mount("/mcp", mcp_app)
     if vnc_binding is not None:
-        app.include_router(create_gateway_router(vnc_binding))
+        app.include_router(vnc.create_router(vnc_binding))
     return app

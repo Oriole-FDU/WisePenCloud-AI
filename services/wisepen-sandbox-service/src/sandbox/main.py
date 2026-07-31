@@ -38,6 +38,11 @@ vnc_binding = VncBinding(sandbox_session)
 @asynccontextmanager
 async def lifespan(app):
     async with mcp_server.session_manager.run():
+        info("服务正在启动。", service=bootstrap_settings.SERVICE_NAME)
+        # Docker worker 前置条件和 Nacos 注册均为启动硬依赖。
+        await container.provider().validate_deployment()
+        await nacos_client_manager.register_instance()
+
         cleanup_stop = asyncio.Event()
 
         async def cleanup_loop() -> None:
@@ -49,12 +54,6 @@ async def lifespan(app):
                     await vnc_binding.cleanup_idle()
 
         cleanup_task = asyncio.create_task(cleanup_loop())
-        info("服务正在启动。", service=bootstrap_settings.SERVICE_NAME)
-        try:
-            await nacos_client_manager.register_instance()
-        except Exception as exc:
-            # 服务发现注册失败不阻断本地服务启动，便于开发环境和故障排查。
-            error("nacos 实例注册失败。", service=bootstrap_settings.SERVICE_NAME, exc=exc)
         app.state.watcher_task = asyncio.create_task(container.watcher().run())
         info(
             "服务已就绪。",
@@ -71,6 +70,15 @@ async def lifespan(app):
                 task.cancel()
             cleanup_stop.set()
             cleanup_task.cancel()
+            for exc in await container.scheduler().shutdown():
+                error("sandbox graceful shutdown failed.", exc=exc)
+            provider = container.provider()
+            cleanup_owned = getattr(provider, "cleanup_owned", None)
+            if cleanup_owned is not None:
+                try:
+                    await cleanup_owned()
+                except Exception as exc:
+                    error("sandbox worker 清理失败。", exc=exc)
             try:
                 await nacos_client_manager.deregister_instance()
             except Exception as exc:

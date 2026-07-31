@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 
 from sandbox.domain.entities import (
     Endpoint,
@@ -14,13 +13,12 @@ from sandbox.domain.entities import (
     WorkspaceSnapshot,
 )
 from sandbox.domain.interfaces.sandbox_provider import SandboxProvider
+from sandbox.domain.interfaces.file_transfer import FileTransferPort
 
 from sandbox.core.providers.aio_adapter.client import AioClient
 from sandbox.core.providers.aio_adapter.docker_runtime import DockerRuntime
 from sandbox.core.providers.aio_adapter.models import AdapterConfig
 from sandbox.core.providers.aio_adapter.path_policy import PathPolicy, TenantScope
-from common.core.exceptions import ServiceException
-from sandbox.domain.error_codes import SandboxErrorCode
 
 
 class AioSandboxProvider(SandboxProvider):
@@ -29,42 +27,40 @@ class AioSandboxProvider(SandboxProvider):
     def __init__(
         self,
         runtime: DockerRuntime,
+        file_transfer: FileTransferPort,
         *,
         request_timeout_seconds: float = 30.0,
     ) -> None:
         self._runtime = runtime
+        self._file_transfer = file_transfer
         self._request_timeout = request_timeout_seconds
         self._clients: dict[str, AioClient] = {}
 
     @classmethod
-    def from_environment(cls) -> "AioSandboxProvider":
-        config = AdapterConfig(
-            docker_bin=os.getenv("SANDBOX_DOCKER_BIN", "docker"),
-            image=os.getenv("SANDBOX_IMAGE", "ghcr.io/agent-infra/sandbox:latest"),
-            host=os.getenv("SANDBOX_DOCKER_HOST", "127.0.0.1"),
-            api_port=int(os.getenv("SANDBOX_AIO_PORT", "8080")),
-            network=os.getenv("SANDBOX_DOCKER_NETWORK") or None,
-            request_timeout_seconds=float(
-                os.getenv("SANDBOX_REQUEST_TIMEOUT_SECONDS", "30")
-            ),
-            warmup_timeout_seconds=float(
-                os.getenv("SANDBOX_WARMUP_TIMEOUT_SECONDS", "60")
-            ),
-            command_timeout_seconds=float(
-                os.getenv("SANDBOX_DOCKER_COMMAND_TIMEOUT_SECONDS", "30")
-            ),
-            workdir=os.getenv("SANDBOX_AIO_WORKDIR", "/home/gem"),
-            e2e_label=os.getenv("SANDBOX_E2E_LABEL", "false").lower() == "true",
-            tty=os.getenv("SANDBOX_DOCKER_TTY", "true").lower() == "true",
+    def from_settings(
+        cls,
+        config: AdapterConfig,
+        file_transfer: FileTransferPort,
+    ) -> "AioSandboxProvider":
+        return cls(
+            DockerRuntime(config),
+            file_transfer,
+            request_timeout_seconds=config.request_timeout_seconds,
         )
-        return cls(DockerRuntime(config), request_timeout_seconds=config.request_timeout_seconds)
+
+    async def validate_deployment(self) -> None:
+        await asyncio.to_thread(self._runtime.validate_deployment)
 
     async def create(self, spec: SandboxSpec) -> SandboxRef:
         handle = await asyncio.to_thread(self._runtime.create, spec)
         return SandboxRef(
             sandbox_id=f"sb_{handle.container_id[:16]}",
             provider_id=handle.container_id,
-            endpoint=Endpoint(handle.endpoint),
+            endpoint=Endpoint(
+                handle.endpoint,
+                public_vnc_url=handle.public_vnc_url,
+                public_websocket_url=handle.public_websocket_url,
+            ),
             metadata={"image": spec.image},
         )
 
@@ -85,15 +81,7 @@ class AioSandboxProvider(SandboxProvider):
     async def prepare_workspace(
         self, sandbox: SandboxRef, workspace: WorkspaceSnapshot
     ) -> None:
-        client = self._client(sandbox)
-        policy = PathPolicy(
-            TenantScope(workspace.tenant_id, workspace.workspace_id),
-            self._runtime.workdir,
-            isolate_scope=True,
-        )
-        # 缓存恢复写入 scope 根目录下，避免不同用户/会话在 AIO workdir 内互相覆盖。
-        for path, content in workspace.files.items():
-            await client.file_write(policy.translate(path), content)
+        await self._file_transfer.copy_in(sandbox, workspace)
 
     async def activate(self, sandbox: SandboxRef, lease: SandboxLease) -> Endpoint:
         await self._client(sandbox).health()
@@ -159,38 +147,32 @@ class AioSandboxProvider(SandboxProvider):
     async def export_workspace(
         self, sandbox: SandboxRef, tenant_id: str, workspace_id: str
     ) -> WorkspaceSnapshot:
-        client = self._client(sandbox)
-        policy = PathPolicy(
-            TenantScope(tenant_id, workspace_id),
-            self._runtime.workdir,
-            isolate_scope=True,
+        return await self._file_transfer.copy_out(
+            sandbox, tenant_id, workspace_id
         )
-        try:
-            listing = await client.file_list(policy.root, recursive=True)
-        except ServiceException as exc:
-            if exc.code != SandboxErrorCode.AIO_RESOURCE_NOT_FOUND.code:
-                raise
-            # 从未写入过的工作区没有目录，按空快照处理。
-            return WorkspaceSnapshot(tenant_id, workspace_id)
-        files: dict[str, str] = {}
-        entries = listing.get("files", []) if isinstance(listing, dict) else []
-        for entry in entries:
-            if not isinstance(entry, dict) or entry.get("is_directory"):
-                continue
-            path = str(entry.get("path") or entry.get("name") or "")
-            if not path:
-                continue
-            # 文件列表返回容器绝对路径，先反向校验归属，再读文件并存为工作区相对路径。
-            virtual = policy.reverse(path)
-            content = await client.file_read(policy.translate(virtual))
-            files[virtual.removeprefix(f"{policy.root}/")] = str(
-                content.get("content", "")
-            )
-        return WorkspaceSnapshot(tenant_id, workspace_id, files)
+
+    async def checkpoint_workspace(
+        self,
+        sandbox: SandboxRef,
+        tenant_id: str,
+        workspace_id: str,
+        lease_id: str,
+        fencing_token: int,
+    ) -> WorkspaceSnapshot:
+        return await self._file_transfer.checkpoint(
+            sandbox,
+            tenant_id,
+            workspace_id,
+            lease_id,
+            fencing_token,
+        )
 
     async def destroy(self, sandbox: SandboxRef, reason: str) -> None:
         await asyncio.to_thread(self._runtime.remove, sandbox.provider_id)
         self._clients.pop(sandbox.sandbox_id, None)
+
+    async def cleanup_owned(self) -> int:
+        return await asyncio.to_thread(self._runtime.cleanup_owned)
 
     def _client(self, sandbox: SandboxRef) -> AioClient:
         if sandbox.endpoint is None:

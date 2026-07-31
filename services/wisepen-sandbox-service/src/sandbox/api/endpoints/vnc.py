@@ -7,17 +7,12 @@ from common.security.context import SecurityContextHolder
 from sandbox.gateway.binding import VncBinding
 
 
-def create_vnc_router(binding: VncBinding) -> APIRouter:
-    router = APIRouter()
+def create_router(binding: VncBinding) -> APIRouter:
+    router = APIRouter(prefix="/v1/sandbox/gateway", tags=["vnc"])
 
     def identity(request: Request) -> tuple[str, str]:
-        # 优先读取网关透传请求头，测试或内部调用时再回退到安全上下文。
         user_id = (request.headers.get("X-User-Id") or SecurityContextHolder.get_user_id() or "").strip()
-        session_id = (
-            request.headers.get("X-Session-Id")
-            or SecurityContextHolder.get_session_id()
-            or ""
-        ).strip()
+        session_id = (request.headers.get("X-Session-Id") or SecurityContextHolder.get_session_id() or "").strip()
         if not user_id or not session_id:
             raise HTTPException(status_code=400, detail="X-User-Id 和 X-Session-Id 不能为空")
         return user_id, session_id
