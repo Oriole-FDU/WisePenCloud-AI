@@ -95,7 +95,7 @@ class AppSettings(BaseModel):
 
     # Agentic ReAct 循环
     # ReAct 最大推理迭代次数，防止工具调用产生无限循环
-    AGENT_MAX_ITERATIONS: int = 5
+    AGENT_MAX_ITERATIONS: int = 50
     # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
     TOOL_RESULT_MAX_CHARS: int = 4000
     TOOL_CONTENT_DEFAULT_TTL_SECONDS: int = 1800

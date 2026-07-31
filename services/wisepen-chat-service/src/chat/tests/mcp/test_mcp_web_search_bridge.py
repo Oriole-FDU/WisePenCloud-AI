@@ -35,7 +35,10 @@ async def test_remote_tool_forwards_private_tool_config() -> None:
         server=None,
         remote_name="exa_search",
         definition=SimpleNamespace(
-            policy=SimpleNamespace(required_context_keys=()),
+            policy=SimpleNamespace(
+                required_context_keys=(),
+                timeout_seconds=300.0,
+            ),
         ),
         failure_reason="Exa Search Failed",
     )
@@ -49,6 +52,7 @@ async def test_remote_tool_forwards_private_tool_config() -> None:
 
     assert result["candidates"][0]["candidate_id"] == "[1]"
     assert client.kwargs["tool_config"] == {"api_key": "secret"}
+    assert client.kwargs["timeout_seconds"] == 300.0
     assert client.args == (
         None,
         "exa_search",
@@ -89,6 +93,7 @@ class _Session:
 
 @asynccontextmanager
 async def _streamable_http_client(**kwargs):
+    _streamable_http_client.http_client = kwargs["http_client"]
     yield object(), object(), None
 
 
@@ -111,9 +116,12 @@ async def test_service_client_uses_meta_and_preserves_structured_result(
         "exa_search",
         {"search_query": "wise pen", "ranking_query": "What is WisePen?"},
         tool_config={"api_key": "secret"},
+        timeout_seconds=300.0,
     )
 
     assert result == {"query": "wise pen", "candidates": []}
     assert _Session.captured_meta == {
         "wisepen/tool_config": {"api_key": "secret"}
     }
+    assert _streamable_http_client.http_client.timeout.read == 300.0
+    assert _streamable_http_client.http_client.is_closed

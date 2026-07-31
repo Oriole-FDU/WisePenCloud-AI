@@ -45,12 +45,14 @@ class McpRemoteTool:
                         for key in self._definition.policy.required_context_keys
                         if key in context
                     },
+                    timeout_seconds=self._definition.policy.timeout_seconds,
                 )
             else:
                 output = await self._mcp_client.call_tool(
                     self._server,
                     self._remote_name,
                     kwargs,
+                    timeout_seconds=self._definition.policy.timeout_seconds,
                 )
             return _restore_tool_return(output)
         except Exception as e:

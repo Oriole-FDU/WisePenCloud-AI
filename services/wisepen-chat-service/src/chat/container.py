@@ -216,7 +216,7 @@ class Container(containers.DeclarativeContainer):
         McpServiceClient,
         discovery=service_discovery,
         from_source_secret=settings.FROM_SOURCE_SECRET,
-        timeout=settings.RPC_DEFAULT_TIMEOUT,
+        timeout=settings.MCP_DEFAULT_TIMEOUT_SECONDS,
         default_strategy=settings.RPC_LB_STRATEGY,
     )
     mcp_client = providers.Singleton(

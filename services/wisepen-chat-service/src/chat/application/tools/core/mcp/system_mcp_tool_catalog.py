@@ -37,7 +37,7 @@ _WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
 _WEB_SEARCH_POLICY = ToolPolicy(
     expose_by_default=True,
     risk_level=ToolRiskLevel.LOW,
-    timeout_seconds=300.0,
+    timeout_seconds=100.0,
     persist_output=True,
     max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
 )

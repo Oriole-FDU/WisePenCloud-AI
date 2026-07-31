@@ -38,17 +38,18 @@ class McpServiceClient:
         self._strategy = default_strategy
 
     async def list_tools(self) -> list[McpToolDescriptor]:
-        async with streamable_http_client(
-            url=await self._resolve_url(),
-            http_client=AsyncClient(
-                headers=self._build_headers(),
-                timeout=self._timeout,
-            ),
-            terminate_on_close=True,
-        ) as (read_stream, write_stream, _):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.list_tools()
+        async with AsyncClient(
+            headers=self._build_headers(),
+            timeout=self._timeout,
+        ) as http_client:
+            async with streamable_http_client(
+                url=await self._resolve_url(),
+                http_client=http_client,
+                terminate_on_close=True,
+            ) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    result = await session.list_tools()
 
         descriptors: list[McpToolDescriptor] = []
         for item in result.tools or []:
@@ -70,27 +71,31 @@ class McpServiceClient:
         *,
         tool_config: Mapping[str, Any] | None = None,
         tool_context: Mapping[str, Any] | None = None,
+        timeout_seconds: float | None = None,
     ) -> McpToolStructuredContent:
         meta: dict[str, Any] = {}
         if tool_config:
             meta[_MCP_TOOL_CONFIG_META_KEY] = dict(tool_config)
         if tool_context:
             meta[_MCP_TOOL_CONTEXT_META_KEY] = dict(tool_context)
-        async with streamable_http_client(
-            url=await self._resolve_url(),
-            http_client=AsyncClient(
-                headers=self._build_headers(),
-                timeout=self._timeout,
-            ),
-            terminate_on_close=True,
-        ) as (read_stream, write_stream, _):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.call_tool(
-                    tool_name,
-                    dict(arguments),
-                    meta=meta or None,
-                )
+
+        timeout = self._timeout if timeout_seconds is None else timeout_seconds
+        async with AsyncClient(
+            headers=self._build_headers(),
+            timeout=timeout,
+        ) as http_client:
+            async with streamable_http_client(
+                url=await self._resolve_url(),
+                http_client=http_client,
+                terminate_on_close=True,
+            ) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    result = await session.call_tool(
+                        tool_name,
+                        dict(arguments),
+                        meta=meta or None,
+                    )
 
         if getattr(result, "isError", False):
             error_output = json.dumps(
