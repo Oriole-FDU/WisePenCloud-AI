@@ -79,10 +79,11 @@ source_text = "\n\n".join(
 |----------------------|---------------|-------------------------------------------|
 | 标题                   | `HEADING`     | `heading_level`、`title`、完整 `section_path` |
 | 普通段落                 | `PARAGRAPH`   | 当前 `section_path`                         |
-| pipe/HTML 表格         | `TABLE`       | 前置或后置表题合并后可带 `anchor_label`               |
+| pipe/HTML 表格         | `TABLE`       | 上置或下置编号表题合并后可带 `anchor_label`          |
 | fenced/indented code | `CODE`        | 当前 `section_path`                         |
 | 列表、引用、公式             | 对应类型          | 当前 `section_path`                         |
-| 含图片的段落               | `PARAGRAPH`   | 图片语法保留在段落原文中                              |
+| 独占图片段落               | `FIGURE`      | 上置或下置编号图题合并后可带 `anchor_label`          |
+| 含图片的普通段落            | `PARAGRAPH`   | 图片语法保留在段落原文中                            |
 | `<!-- page N -->`    | `PAGE_MARKER` | `page_label`                              |
 
 `TextBlock.text` 保留对应 offset 范围内的原始文本，不裁剪首尾空白或换行。
@@ -99,8 +100,10 @@ source_text = "\n\n".join(
 
 `Windows` 标题及其正文的 `section_path` 是 `("产品", "安装", "Windows")`。
 
-PDF Markdown 中独立的表题段落会在满足以下条件时与紧随其后的表格合并：表题可识别、两者只隔空白、且中间没有 page
-marker。这样表号和表格正文不会被拆开。
+普通 Markdown 中独立的表题/图题段落会在满足以下条件时与相邻表格/图片合并：标签可识别、两者只隔空白、且中间没有 page
+marker。表题和图题都支持位于主体之前或之后；这样编号和主体不会被拆开，并可生成 `anchor:Table N` 或 `anchor:Figure N`。
+
+caption 不作为独立 `BlockKind` 或 metadata 保存。parser 只保留合并后的原文范围和实际供 locator 使用的 `anchor_label`。
 
 ## 页码契约
 
@@ -110,8 +113,7 @@ marker。这样表号和表格正文不会被拆开。
 <!-- page 1 -->
 ```
 
-页码标记本身不进入 chunk 正文。parser 将该页码投影给后续 blocks，直到遇到下一个 page marker。Java Kafka
-页码契约修复后，应直接同步修改这里的正则和 fixture，不增加双格式兼容。
+页码标记本身不进入 chunk 正文。parser 将该页码投影给后续 blocks，直到遇到下一个 page marker。
 
 ## Markdown 策略
 

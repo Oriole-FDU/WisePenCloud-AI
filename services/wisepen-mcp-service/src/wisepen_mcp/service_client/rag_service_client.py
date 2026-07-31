@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from common.core.exceptions import RpcError
+from common.core.exceptions import RpcError, ServiceException
 from common.http.rpc_client import RpcClient
+
+from wisepen_mcp.domain.error_codes import McpErrorCode
 
 _DEFAULT_SERVICE_NAME = "wisepen-rag-service"
 _LOCATE_PATH = "/internal/rag/knowledge-navigation/locate"
@@ -82,16 +84,25 @@ class RagServiceClient:
         )
 
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        data = await self._rpc.post(
-            self._service_name,
-            path,
-            json=payload,
-            timeout=300.0,
-        )
+        try:
+            data = await self._rpc.post(
+                self._service_name,
+                path,
+                json=payload,
+                timeout=300.0,
+            )
+        except RpcError as error:
+            if error.code == McpErrorCode.RAG_NAVIGATION_INVALID.code:
+                raise ServiceException(McpErrorCode.RAG_NAVIGATION_INVALID, error.msg) from error
+            if error.code == McpErrorCode.RAG_NAVIGATION_STATE_NOT_FOUND.code:
+                raise ServiceException(McpErrorCode.RAG_NAVIGATION_STATE_NOT_FOUND) from error
+            if error.code == McpErrorCode.RAG_NAVIGATION_STATE_INVALIDATED.code:
+                raise ServiceException(McpErrorCode.RAG_NAVIGATION_STATE_INVALIDATED) from error
+            raise ServiceException(McpErrorCode.RAG_NAVIGATION_FAILED, error.msg) from error
+
         if not isinstance(data, dict):
-            raise RpcError(
-                service_name=self._service_name,
-                path=path,
-                msg=f"unexpected data payload: {data!r}",
+            raise ServiceException(
+                McpErrorCode.RAG_NAVIGATION_FAILED,
+                f"unexpected data payload: {data!r}",
             )
         return data

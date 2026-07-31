@@ -107,7 +107,8 @@ def test_merges_table_caption_after_table_and_builds_anchor() -> None:
     assert table.block_kind == BlockKind.TABLE
     assert table.text.endswith("Table 2: Complexity by layer.\n")
     assert text[table.start_offset : table.end_offset] == table.text
-    assert table.metadata["caption"].strip() == "Table 2: Complexity by layer."
+    assert "caption" not in table.metadata
+    assert table.metadata["anchor_label"] == "Table 2"
     assert any(locator.name == "anchor:Table 2" for locator in result.locators)
 
 
@@ -122,8 +123,8 @@ def test_merges_wrapped_numbered_table_caption() -> None:
     result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
 
     assert len(result.blocks) == 1
-    assert result.blocks[0].metadata["caption"].startswith("Table 3.")
     assert result.blocks[0].metadata["anchor_label"] == "Table 3"
+    assert "caption" not in result.blocks[0].metadata
 
 
 def test_does_not_merge_numbered_reference_or_figure_caption_into_table() -> None:
@@ -164,13 +165,29 @@ def test_page_markers_are_hard_chunk_boundaries() -> None:
     assert all("<!-- page" not in chunk.text for chunk in result.chunks)
 
 
+def test_page_marker_plugin_only_accepts_standalone_valid_markers() -> None:
+    text = "before <!-- page 7 --> after\n\n<!-- page -->\n\n正文。"
+    result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
+
+    assert not any(
+        block.block_kind == BlockKind.PAGE_MARKER for block in result.blocks
+    )
+    assert all(block.block_kind == BlockKind.PARAGRAPH for block in result.blocks)
+
+    valid_result = MarkdownChunker().chunk(
+        document=ChunkDocument(text="<!-- page 7 -->  \n\n正文。")
+    )
+    assert valid_result.blocks[0].block_kind == BlockKind.PAGE_MARKER
+    assert valid_result.blocks[0].metadata["page_label"] == "7"
+
+
 def test_parser_marks_standalone_images_as_figures() -> None:
     text = "\n".join(
         (
             "<!-- page 7 -->",
-            "![Figure 2: architecture](https://example.com/figure.png)",
+            "![image](https://example.com/figure.png)",
             "",
-            "before ![Figure 3: mixed](https://example.com/mixed.png) after",
+            "before ![image](https://example.com/mixed.png) after",
         )
     )
     result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
@@ -182,13 +199,13 @@ def test_parser_marks_standalone_images_as_figures() -> None:
     assert page_marker.metadata["page_label"] == "7"
     assert (
         text[page_marker.start_offset : page_marker.end_offset].strip()
-        == page_marker.text
+        == page_marker.text.strip()
     )
     assert figure.block_kind == BlockKind.FIGURE
     assert figure.metadata["page_label"] == "7"
-    assert figure.metadata["caption"] == "Figure 2: architecture"
+    assert "caption" not in figure.metadata
     assert mixed_paragraph.block_kind == BlockKind.PARAGRAPH
-    assert any(locator.name == "anchor:Figure 2" for locator in result.locators)
+    assert not any(locator.name.startswith("anchor:Figure") for locator in result.locators)
 
 
 def test_figure_url_is_not_mistaken_for_numbered_caption() -> None:
@@ -210,23 +227,63 @@ def test_merges_figure_caption_and_builds_anchor() -> None:
 
     assert len(result.blocks) == 1
     assert result.blocks[0].block_kind == BlockKind.FIGURE
-    assert result.blocks[0].metadata["caption"].strip() == (
-        "Figure 4: System architecture."
-    )
+    assert result.blocks[0].metadata["anchor_label"] == "Figure 4"
+    assert "caption" not in result.blocks[0].metadata
     assert any(locator.name == "anchor:Figure 4" for locator in result.locators)
 
 
-def test_marks_html_figure_and_builds_locator_from_figcaption() -> None:
+def test_merges_figure_caption_before_figure_and_builds_anchor() -> None:
     text = (
-        '<figure>\n<img src="figure.png">\n'
-        "<figcaption>Figure 5: System architecture.</figcaption>\n</figure>"
+        "Figure 6: System architecture.\n\n"
+        "![architecture](https://example.com/figure.png)"
     )
     result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
 
     assert len(result.blocks) == 1
     assert result.blocks[0].block_kind == BlockKind.FIGURE
-    assert result.blocks[0].metadata["caption"] == "Figure 5: System architecture."
-    assert any(locator.name == "anchor:Figure 5" for locator in result.locators)
+    assert result.blocks[0].metadata["anchor_label"] == "Figure 6"
+    assert text[result.blocks[0].start_offset : result.blocks[0].end_offset] == (
+        result.blocks[0].text
+    )
+    assert "caption" not in result.blocks[0].metadata
+    assert any(locator.name == "anchor:Figure 6" for locator in result.locators)
+
+
+def test_merges_multiline_figure_caption_from_mineru_output() -> None:
+    text = (
+        "![image](https://example.com/figure.png)\n\n"
+        "Figure 1. Claude Skills follow a long-context, progressively disclosed format, "
+        "which requires a complex sandboxing\n"
+        "system and multiple interactions, thereby posing challenges to robust reasoning."
+    )
+    result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
+
+    assert len(result.blocks) == 1
+    assert result.blocks[0].block_kind == BlockKind.FIGURE
+    assert result.blocks[0].metadata["anchor_label"] == "Figure 1"
+    assert result.blocks[0].text == text
+    assert "caption" not in result.blocks[0].metadata
+    assert any(locator.name == "anchor:Figure 1" for locator in result.locators)
+
+
+def test_link_wrapped_images_remain_paragraphs() -> None:
+    result = MarkdownChunker().chunk(
+        document=ChunkDocument(
+            text="[![image](https://example.com/figure.png)](https://example.com/source)"
+        )
+    )
+
+    assert result.blocks[0].block_kind == BlockKind.PARAGRAPH
+
+
+def test_parser_moves_formula_anchor_generation_out_of_locator() -> None:
+    result = MarkdownChunker().chunk(
+        document=ChunkDocument(text="$$x$$ (Eq. 2)\n")
+    )
+
+    assert result.blocks[0].block_kind == BlockKind.FORMULA
+    assert result.blocks[0].metadata["anchor_label"] == "Equation 2"
+    assert any(locator.name == "anchor:Equation 2" for locator in result.locators)
 
 
 def test_by_page_keeps_a_normal_page_whole() -> None:

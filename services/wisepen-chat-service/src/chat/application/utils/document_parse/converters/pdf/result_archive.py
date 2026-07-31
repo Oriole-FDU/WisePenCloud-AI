@@ -2,20 +2,24 @@ from __future__ import annotations
 
 import json
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
-from ...errors import DocumentTooLargeError, RemoteParserError
 from ..utils import decode_text
-from .page_markers import insert_page_markers
+from ...errors import DocumentTooLargeError, RemoteParserError
+from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make
+from mineru.utils.enum_class import MakeMode
+
+_IMAGE_DIR = "images"
 
 
 def extract_pdf_markdown(
-    zip_path: Path,
-    *,
-    file_name: str,
-    max_output_bytes: int,
+        zip_path: Path,
+        *,
+        file_name: str,
+        max_output_bytes: int,
 ) -> str:
-    """从 PDF 解析结果 ZIP 中读取 Markdown 和分页信息。"""
+    """从 PDF 解析结果 ZIP 中读取 middle JSON 并按页渲染 Markdown。"""
     try:
         with zipfile.ZipFile(zip_path) as archive:
             members = [
@@ -23,42 +27,35 @@ def extract_pdf_markdown(
                 for info in archive.infolist()
                 if not info.is_dir()
             ]
-            markdown_info = _select_markdown(
+            middle_json_info = _select_middle_json(
                 members,
                 file_name=file_name,
             )
-            content_list_info = _select_content_list(
-                members,
-                file_name=file_name,
-            )
+            if middle_json_info.file_size > max_output_bytes:
+                raise DocumentTooLargeError(
+                    f"PDF parser ZIP member {middle_json_info.filename} for "
+                    f"{file_name} exceeds {max_output_bytes} bytes."
+                )
 
-            for info in (markdown_info, content_list_info):
-                if info.file_size > max_output_bytes:
-                    raise DocumentTooLargeError(
-                        f"PDF parser ZIP member {info.filename} for "
-                        f"{file_name} exceeds {max_output_bytes} bytes."
-                    )
-
-            markdown = decode_text(
-                archive.read(markdown_info),
-                file_name=PurePosixPath(markdown_info.filename).name,
-            ).strip()
             try:
-                content_list = json.loads(
+                middle_json = json.loads(
                     decode_text(
-                        archive.read(content_list_info),
-                        file_name=PurePosixPath(
-                            content_list_info.filename
-                        ).name,
+                        archive.read(middle_json_info),
+                        file_name=PurePosixPath(middle_json_info.filename).name,
                     )
                 )
             except (ValueError, UnicodeError) as exc:
                 raise RemoteParserError(
-                    f"PDF parser content list for {file_name} "
-                    "is not valid JSON."
+                    f"PDF parser middle JSON for {file_name} is not valid JSON."
                 ) from exc
 
-            return insert_page_markers(markdown, content_list)
+            markdown = _render_markdown_pages(middle_json)
+            if len(markdown.encode("utf-8")) > max_output_bytes:
+                raise DocumentTooLargeError(
+                    f"Rendered PDF Markdown for {file_name} "
+                    f"exceeds {max_output_bytes} bytes."
+                )
+            return markdown
     except (RemoteParserError, DocumentTooLargeError):
         raise
     except zipfile.BadZipFile as exc:
@@ -71,50 +68,44 @@ def extract_pdf_markdown(
         ) from exc
 
 
-def _select_markdown(
-    members: list[zipfile.ZipInfo],
-    *,
-    file_name: str,
+def _select_middle_json(
+        members: list[zipfile.ZipInfo],
+        *,
+        file_name: str,
 ) -> zipfile.ZipInfo:
-    markdown_files = [
+    middle_json_files = [
         info
         for info in members
-        if PurePosixPath(info.filename).suffix.lower() == ".md"
+        if PurePosixPath(info.filename).name.lower().endswith("_middle.json")
     ]
-    selected = next(
-        (
-            info
-            for info in markdown_files
-            if PurePosixPath(info.filename).name.lower() == "full.md"
-        ),
-        None,
-    ) or (markdown_files[0] if len(markdown_files) == 1 else None)
-
-    if selected is None:
+    if len(middle_json_files) != 1:
         raise RemoteParserError(
-            f"PDF parser result for {file_name} "
-            "does not contain unique final Markdown."
+            f"PDF parser result for {file_name} does not contain unique middle JSON."
         )
 
-    return selected
+    return middle_json_files[0]
 
 
-def _select_content_list(
-    members: list[zipfile.ZipInfo],
-    *,
-    file_name: str,
-) -> zipfile.ZipInfo:
-    content_lists = [
-        info
-        for info in members
-        if PurePosixPath(info.filename).name.lower().endswith(
-            "_content_list.json"
-        )
-    ]
-    if len(content_lists) != 1:
-        raise RemoteParserError(
-            f"PDF parser result for {file_name} "
-            "does not contain unique content list JSON."
-        )
+def _render_markdown_pages(middle_json: object) -> str:
+    """按 middle JSON 的页面边界渲染 Markdown，并在每页前写入页标。"""
+    if not isinstance(middle_json, Mapping):
+        raise ValueError("MinerU middle JSON must be an object.")
 
-    return content_lists[0]
+    pdf_info = middle_json.get("pdf_info")
+    if not isinstance(pdf_info, list):
+        raise ValueError("MinerU middle JSON must contain a pdf_info list.")
+
+    pages: list[str] = []
+    for index, page_info in enumerate(pdf_info):
+        if not isinstance(page_info, Mapping):
+            raise ValueError("MinerU pdf_info entries must be objects.")
+
+        page_idx = page_info.get("page_idx", index)
+        if type(page_idx) is not int or page_idx < 0:
+            raise ValueError("MinerU page_idx must be a non-negative integer.")
+
+        page_markdown = union_make([page_info], MakeMode.MM_MD, _IMAGE_DIR).strip()
+        marker = f"<!-- page {page_idx + 1} -->"
+        pages.append(f"{marker}\n\n{page_markdown}" if page_markdown else marker)
+
+    return "\n\n".join(pages)

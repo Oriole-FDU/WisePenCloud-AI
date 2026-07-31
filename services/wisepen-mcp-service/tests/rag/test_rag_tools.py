@@ -3,8 +3,9 @@ from types import SimpleNamespace
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from wisepen_mcp.capabilities.rag.renderer import render_expand_result
-from wisepen_mcp.capabilities.rag.tools import _session_id, register_rag_tools
+from wisepen_mcp.capabilities.rag.tools import register_rag_tools
+from wisepen_mcp.capabilities.rag.tools.common import session_id
+from wisepen_mcp.capabilities.rag.tools.expand import _render_expand_result
 from wisepen_mcp.capabilities.core.tools import (
     MCP_TOOL_CONTEXT_META_KEY,
 )
@@ -41,7 +42,7 @@ async def test_registration_exposes_three_navigation_tools() -> None:
 
 
 def test_expand_renderer_uses_shared_tool_return_and_keeps_evidence_identity() -> None:
-    result = render_expand_result(
+    result = _render_expand_result(
         {
             "state_id": "state-1",
             "nodes": [
@@ -68,15 +69,17 @@ def test_expand_renderer_uses_shared_tool_return_and_keeps_evidence_identity() -
         "Alpha --DEPENDS_ON--> Beta\nEvidence:\n1. Alpha depends on Beta."
     )
     assert result["cacheable_texts"][0]["metadata"] == {
-        "kind": "rag_section_reading_block",
-        "resource_id": "resource-1",
-        "section_id": "section-1",
-        "section_path": ["Chapter 1"],
         "reading_block_id": "block-1",
+        "section_path": ["Chapter 1"],
         "page_labels": ["1"],
         "anchor_labels": ["Paragraph 1"],
     }
-    assert result["cacheable_texts"][1]["metadata"]["source_ref_id"] == "source-1"
+    assert result["cacheable_texts"][1]["metadata"] == {
+        "source_ref_id": "source-1",
+        "section_path": ["Chapter 1"],
+        "page_label": "1",
+        "anchor_labels": ["Paragraph 1"],
+    }
 
 
 def test_session_id_is_read_from_mcp_tool_context() -> None:
@@ -88,7 +91,7 @@ def test_session_id_is_read_from_mcp_tool_context() -> None:
         )
     )
 
-    assert _session_id(context) == "session-1"
+    assert session_id(context) == "session-1"
 
 
 def _section_view_payload() -> dict[str, object]:

@@ -1,20 +1,6 @@
 from __future__ import annotations
 
-import re
-
 from ..models import BlockKind, Chunk, ChunkLocator, LocatorKind, TextBlock
-
-_TABLE_RE = re.compile(r"^(?:Table|表格|表)\s+(\d+(?:\.\d+)*)", re.IGNORECASE)
-
-_FIGURE_RE = re.compile(
-    r"(?:(?:Figure|Fig\.?)\s+|图\s*)(\d+(?:\.\d+)*)\s*[-:：.．、]",
-    re.IGNORECASE,
-)
-
-_FORMULA_RE = re.compile(
-    r"(?:Equation|Eq\.?|公式)\s+\(?(\d+(?:\.\d+)*)\)?",
-    re.IGNORECASE,
-)
 
 
 def build_markdown_locators(
@@ -125,8 +111,8 @@ def _anchor_locators(
     """将结构块锚点映射到覆盖它的 chunks。"""
     locators: list[ChunkLocator] = []
     for block in blocks:
-        anchor_label = _anchor_label(block)
-        if anchor_label is None:
+        anchor_label = block.metadata.get("anchor_label")
+        if not isinstance(anchor_label, str) or not anchor_label:
             continue
         if block.start_offset is None or block.end_offset is None:
             continue
@@ -150,27 +136,6 @@ def _anchor_locators(
             )
         )
     return tuple(locators)
-
-
-def _anchor_label(block: TextBlock) -> str | None:
-    """优先读取 parser 产出的锚点，再按结构类型从正文提取。"""
-    stored = block.metadata.get("anchor_label")
-    if isinstance(stored, str) and stored:
-        return stored
-
-    if block.block_kind == BlockKind.TABLE:
-        match = _TABLE_RE.match(block.text.strip())
-        prefix = "Table"
-    elif block.block_kind == BlockKind.FIGURE:
-        match = _FIGURE_RE.search(block.text)
-        prefix = "Figure"
-    elif block.block_kind == BlockKind.FORMULA:
-        match = _FORMULA_RE.search(block.text)
-        prefix = "Equation"
-    else:
-        return None
-
-    return f"{prefix} {match.group(1)}" if match else None
 
 
 def _overlapping_chunks(

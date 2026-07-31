@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
-from wisepen_mcp.capabilities.core.tools import MCP_TOOL_CONFIG_META_KEY
+from wisepen_mcp.capabilities.core.tools import get_tool_config_value
 
 from .services import SearchMode, SearchProviderName
 from .services.service import WebSearchService
@@ -26,33 +26,23 @@ TOOL_DESCRIPTION = (
 
 SearchQuery = Annotated[
     str,
-    Field(
-        min_length=1,
-        description="Concise keywords sent to the search provider.",
-    ),
+    Field(min_length=1, description="Concise keywords sent to the search provider."),
 ]
 RankingQuery = Annotated[
     str,
     Field(
         min_length=1,
-        description=(
-            "Complete natural-language question used to rank the returned candidates."
-        ),
+        description="Complete natural-language question used to rank the returned candidates.",
     ),
 ]
 SearchModeArgument = Annotated[
     SearchMode,
-    Field(
-        description=(
-            "Use academic for literature search; unsupported providers fall back to web."
-        ),
-    ),
+    Field(description="Use academic for literature search; unsupported providers fall back to web."),
 ]
 MaxResults = Annotated[
     int,
     Field(
-        ge=1,
-        le=MAX_SEARCH_RESULTS,
+        ge=1, le=MAX_SEARCH_RESULTS,
         description="Maximum number of search candidates to return.",
     ),
 ]
@@ -67,14 +57,17 @@ def register_web_search_tools(mcp: FastMCP, service: WebSearchService) -> None:
         mode: SearchModeArgument = SearchMode.WEB,
         max_results: MaxResults = DEFAULT_SEARCH_RESULTS,
     ) -> dict[str, Any]:
-        return (await service.search(
-            provider=None,
-            api_key=_tool_api_key(ctx),
-            search_query=search_query,
-            ranking_query=ranking_query,
-            mode=mode,
-            max_results=max_results,
-        )).model_dump(mode="json", exclude_none=True)
+        return (
+            await service.search(
+                provider=None,
+                api_key=_tool_api_key(ctx),
+                search_query=search_query,
+                ranking_query=ranking_query,
+                mode=mode,
+                max_results=max_results,
+            )
+        ).model_dump(mode="json", exclude_none=True)
+
 
     @mcp.tool(name="exa_search", description=TOOL_DESCRIPTION)
     async def exa_search(
@@ -84,14 +77,17 @@ def register_web_search_tools(mcp: FastMCP, service: WebSearchService) -> None:
         mode: SearchModeArgument = SearchMode.WEB,
         max_results: MaxResults = DEFAULT_SEARCH_RESULTS,
     ) -> dict[str, Any]:
-        return (await service.search(
-            provider=SearchProviderName.EXA,
-            api_key=_tool_api_key(ctx),
-            search_query=search_query,
-            ranking_query=ranking_query,
-            mode=mode,
-            max_results=max_results,
-        )).model_dump(mode="json", exclude_none=True)
+        return (
+            await service.search(
+                provider=SearchProviderName.EXA,
+                api_key=_tool_api_key(ctx),
+                search_query=search_query,
+                ranking_query=ranking_query,
+                mode=mode,
+                max_results=max_results,
+            )
+        ).model_dump(mode="json", exclude_none=True)
+
 
     @mcp.tool(name="tavily_search", description=TOOL_DESCRIPTION)
     async def tavily_search(
@@ -101,14 +97,17 @@ def register_web_search_tools(mcp: FastMCP, service: WebSearchService) -> None:
         mode: SearchModeArgument = SearchMode.WEB,
         max_results: MaxResults = DEFAULT_SEARCH_RESULTS,
     ) -> dict[str, Any]:
-        return (await service.search(
-            provider=SearchProviderName.TAVILY,
-            api_key=_tool_api_key(ctx),
-            search_query=search_query,
-            ranking_query=ranking_query,
-            mode=mode,
-            max_results=max_results,
-        )).model_dump(mode="json", exclude_none=True)
+        return (
+            await service.search(
+                provider=SearchProviderName.TAVILY,
+                api_key=_tool_api_key(ctx),
+                search_query=search_query,
+                ranking_query=ranking_query,
+                mode=mode,
+                max_results=max_results,
+            )
+        ).model_dump(mode="json", exclude_none=True)
+
 
     @mcp.tool(name="anysearch_search", description=TOOL_DESCRIPTION)
     async def anysearch_search(
@@ -118,14 +117,17 @@ def register_web_search_tools(mcp: FastMCP, service: WebSearchService) -> None:
         mode: SearchModeArgument = SearchMode.WEB,
         max_results: MaxResults = DEFAULT_SEARCH_RESULTS,
     ) -> dict[str, Any]:
-        return (await service.search(
-            provider=SearchProviderName.ANYSEARCH,
-            api_key=_tool_api_key(ctx),
-            search_query=search_query,
-            ranking_query=ranking_query,
-            mode=mode,
-            max_results=max_results,
-        )).model_dump(mode="json", exclude_none=True)
+        return (
+            await service.search(
+                provider=SearchProviderName.ANYSEARCH,
+                api_key=_tool_api_key(ctx),
+                search_query=search_query,
+                ranking_query=ranking_query,
+                mode=mode,
+                max_results=max_results,
+            )
+        ).model_dump(mode="json", exclude_none=True)
+
 
     @mcp.tool(name="baidu_qianfan_search", description=TOOL_DESCRIPTION)
     async def baidu_qianfan_search(
@@ -135,14 +137,17 @@ def register_web_search_tools(mcp: FastMCP, service: WebSearchService) -> None:
         mode: SearchModeArgument = SearchMode.WEB,
         max_results: MaxResults = DEFAULT_SEARCH_RESULTS,
     ) -> dict[str, Any]:
-        return (await service.search(
-            provider=SearchProviderName.BAIDU_QIANFAN,
-            api_key=_tool_api_key(ctx),
-            search_query=search_query,
-            ranking_query=ranking_query,
-            mode=mode,
-            max_results=max_results,
-        )).model_dump(mode="json", exclude_none=True)
+        return (
+            await service.search(
+                provider=SearchProviderName.BAIDU_QIANFAN,
+                api_key=_tool_api_key(ctx),
+                search_query=search_query,
+                ranking_query=ranking_query,
+                mode=mode,
+                max_results=max_results,
+            )
+        ).model_dump(mode="json", exclude_none=True)
+
 
     @mcp.tool(name="tinyfish_search", description=TOOL_DESCRIPTION)
     async def tinyfish_search(
@@ -152,14 +157,17 @@ def register_web_search_tools(mcp: FastMCP, service: WebSearchService) -> None:
         mode: SearchModeArgument = SearchMode.WEB,
         max_results: MaxResults = DEFAULT_SEARCH_RESULTS,
     ) -> dict[str, Any]:
-        return (await service.search(
-            provider=SearchProviderName.TINYFISH,
-            api_key=_tool_api_key(ctx),
-            search_query=search_query,
-            ranking_query=ranking_query,
-            mode=mode,
-            max_results=max_results,
-        )).model_dump(mode="json", exclude_none=True)
+        return (
+            await service.search(
+                provider=SearchProviderName.TINYFISH,
+                api_key=_tool_api_key(ctx),
+                search_query=search_query,
+                ranking_query=ranking_query,
+                mode=mode,
+                max_results=max_results,
+            )
+        ).model_dump(mode="json", exclude_none=True)
+
 
     @mcp.tool(name="firecrawl_search", description=TOOL_DESCRIPTION)
     async def firecrawl_search(
@@ -169,22 +177,18 @@ def register_web_search_tools(mcp: FastMCP, service: WebSearchService) -> None:
         mode: SearchModeArgument = SearchMode.WEB,
         max_results: MaxResults = DEFAULT_SEARCH_RESULTS,
     ) -> dict[str, Any]:
-        return (await service.search(
-            provider=SearchProviderName.FIRECRAWL,
-            api_key=_tool_api_key(ctx),
-            search_query=search_query,
-            ranking_query=ranking_query,
-            mode=mode,
-            max_results=max_results,
-        )).model_dump(mode="json", exclude_none=True)
+        return (
+            await service.search(
+                provider=SearchProviderName.FIRECRAWL,
+                api_key=_tool_api_key(ctx),
+                search_query=search_query,
+                ranking_query=ranking_query,
+                mode=mode,
+                max_results=max_results,
+            )
+        ).model_dump(mode="json", exclude_none=True)
 
 
 def _tool_api_key(ctx: Context) -> str | None:
-    meta = ctx.request_context.meta
-    tool_config: Any = None
-    if meta:
-        tool_config = (meta.model_extra or {}).get(MCP_TOOL_CONFIG_META_KEY)
-    if not isinstance(tool_config, dict):
-        return None
-    api_key = tool_config.get("api_key")
+    api_key = get_tool_config_value(ctx, "api_key")
     return api_key.strip() if isinstance(api_key, str) and api_key.strip() else None

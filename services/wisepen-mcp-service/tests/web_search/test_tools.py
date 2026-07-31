@@ -14,7 +14,8 @@ from wisepen_mcp.capabilities.web_search.services.models import (
     WebSearchCandidate,
 )
 from wisepen_mcp.capabilities.web_search.services import WebSearchService
-from wisepen_mcp.capabilities.web_search.tools import register_web_search_tools
+from wisepen_mcp.capabilities.core.tools import MCP_TOOL_CONFIG_META_KEY
+from wisepen_mcp.capabilities.web_search.tools import _tool_api_key, register_web_search_tools
 
 
 class _SearchPipeline:
@@ -103,3 +104,15 @@ async def test_registration_exposes_seven_tools_with_dict_output() -> None:
         "max_results",
     }
     assert platform_search.outputSchema["type"] == "object"
+
+
+def test_tool_api_key_is_read_from_mcp_tool_config() -> None:
+    context = SimpleNamespace(
+        request_context=SimpleNamespace(
+            meta=SimpleNamespace(
+                model_extra={MCP_TOOL_CONFIG_META_KEY: {"api_key": " secret "}}
+            )
+        )
+    )
+
+    assert _tool_api_key(context) == "secret"
