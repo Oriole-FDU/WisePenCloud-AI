@@ -5,11 +5,12 @@ from types import SimpleNamespace
 import pytest
 from common.core.exceptions import ServiceException
 
-from sandbox.domain.entities import SandboxSpec
+from sandbox.domain.entities import Endpoint, SandboxRef, SandboxSpec, WorkspaceSnapshot
 from sandbox.domain.error_codes import SandboxErrorCode
 from sandbox.core.providers.aio_adapter.models import AdapterConfig
 from sandbox.core.providers.aio_adapter.path_policy import PathPolicy, TenantScope
 from sandbox.core.providers.aio_adapter.docker_runtime import DockerRuntime
+from sandbox.core.providers.aio_adapter.provider import AioSandboxProvider
 from sandbox.core.providers.aio_adapter.client import AioClient
 
 
@@ -50,6 +51,9 @@ def test_docker_runtime_builds_managed_container_commands():
     assert handle.container_id == "container-id"
     assert handle.endpoint.endswith(":49152")
     assert "wisepen.managed=true" in calls[0]
+    assert "wisepen.role=aio-worker" in calls[0]
+    assert any(value.startswith("wisepen.owner=wisepen-sandbox-service-") for value in calls[0])
+    assert calls[0].count("-p") == 2
     assert "test-image" in calls[0]
     assert "-w" not in calls[0]
     assert "-i" in calls[0]
@@ -79,6 +83,78 @@ def test_docker_runtime_maps_command_failure_to_service_error():
     with pytest.raises(ServiceException) as exc_info:
         runtime.inspect("container-id")
     assert exc_info.value.code == SandboxErrorCode.SANDBOX_UNAVAILABLE.code
+
+
+def test_docker_runtime_preflight_and_public_vnc_urls():
+    calls = []
+
+    def runner(args, **kwargs):
+        calls.append(args)
+        if args[1] == "run":
+            output = "container-id\n"
+        elif args[1] == "port":
+            output = "127.0.0.1:49152\n" if "8080/tcp" in args else "127.0.0.1:49153\n"
+        else:
+            output = "ok\n"
+        return SimpleNamespace(returncode=0, stdout=output, stderr="")
+
+    runtime = DockerRuntime(
+        AdapterConfig(
+            image="test-image",
+            network="sandbox-net",
+            public_vnc_url_template="https://sandbox.example/vnc/{container_name}",
+            public_websocket_url_template="wss://sandbox.example/ws/{port}",
+        ),
+        runner=runner,
+    )
+    runtime.validate_deployment()
+    handle = runtime.create(SandboxSpec("test-image"))
+
+    assert [call[1:3] for call in calls[:3]] == [
+        ["version", "--format"],
+        ["image", "inspect"],
+        ["network", "inspect"],
+    ]
+    assert handle.endpoint.startswith("http://wisepen-aio-")
+    assert handle.public_vnc_url.startswith("https://sandbox.example/vnc/wisepen-aio-")
+    assert handle.public_websocket_url == "wss://sandbox.example/ws/49153"
+
+
+@pytest.mark.asyncio
+async def test_provider_delegates_workspace_transfer():
+    class Transfer:
+        def __init__(self):
+            self.calls = []
+
+        async def copy_in(self, sandbox, snapshot):
+            self.calls.append(("in", sandbox, snapshot))
+
+        async def copy_out(self, sandbox, tenant_id, workspace_id):
+            self.calls.append(("out", sandbox, tenant_id, workspace_id))
+            return WorkspaceSnapshot(tenant_id, workspace_id, {"result.bin": b"\xff"})
+
+        async def checkpoint(
+            self, sandbox, tenant_id, workspace_id, lease_id, fencing_token
+        ):
+            self.calls.append(
+                ("checkpoint", sandbox, tenant_id, workspace_id, lease_id, fencing_token)
+            )
+            return WorkspaceSnapshot(tenant_id, workspace_id, {"saved": "yes"})
+
+    transfer = Transfer()
+    provider = AioSandboxProvider(DockerRuntime(AdapterConfig()), transfer)
+    sandbox = SandboxRef("sb-1", "container-1", Endpoint("http://worker:8080"))
+    snapshot = WorkspaceSnapshot("tenant", "workspace", {"main.py": "print(1)"})
+
+    await provider.prepare_workspace(sandbox, snapshot)
+    exported = await provider.export_workspace(sandbox, "tenant", "workspace")
+    checkpoint = await provider.checkpoint_workspace(
+        sandbox, "tenant", "workspace", "lease-1", 7
+    )
+
+    assert transfer.calls[0] == ("in", sandbox, snapshot)
+    assert exported.files == {"result.bin": b"\xff"}
+    assert checkpoint.files == {"saved": "yes"}
 
 
 @pytest.mark.asyncio

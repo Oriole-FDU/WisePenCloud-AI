@@ -42,6 +42,10 @@ class FakeProvider:
         self.prepared_snapshots: list[WorkspaceSnapshot] = []
         self.exported_files: dict[str, str] = {"result.txt": "done"}
         self.fail_prepare = False
+        self.checkpoints: list[tuple[str, int]] = []
+
+    async def validate_deployment(self) -> None:
+        return None
 
     async def create(self, spec: SandboxSpec) -> SandboxRef:
         self.created += 1
@@ -70,6 +74,17 @@ class FakeProvider:
         return ExecutionResult(request.request_id, "succeeded", {"ok": True})
 
     async def export_workspace(self, sandbox: SandboxRef, tenant_id: str, workspace_id: str) -> WorkspaceSnapshot:
+        return WorkspaceSnapshot(tenant_id, workspace_id, dict(self.exported_files))
+
+    async def checkpoint_workspace(
+        self,
+        sandbox: SandboxRef,
+        tenant_id: str,
+        workspace_id: str,
+        lease_id: str,
+        fencing_token: int,
+    ) -> WorkspaceSnapshot:
+        self.checkpoints.append((lease_id, fencing_token))
         return WorkspaceSnapshot(tenant_id, workspace_id, dict(self.exported_files))
 
     async def destroy(self, sandbox: SandboxRef, reason: str) -> None:
@@ -151,6 +166,47 @@ async def test_expired_lease_exports_cache_before_destroying():
 
 
 @pytest.mark.asyncio
+async def test_checkpoint_validates_fencing_and_commits_without_destroying():
+    provider = FakeProvider()
+    repository, pool = await ready_pool(provider)
+    workspace = FakeWorkspace()
+    scheduler = SandboxScheduler(pool, repository, provider, workspace)
+    lease = await scheduler.allocate("req-checkpoint", "tenant", "workspace")
+
+    await scheduler.checkpoint(lease.lease_id, lease.fencing_token)
+
+    assert provider.checkpoints == [(lease.lease_id, lease.fencing_token)]
+    assert workspace.commits[-1][0].files == {"result.txt": "done"}
+    assert provider.destroyed == []
+    with pytest.raises(ServiceException) as exc_info:
+        await scheduler.checkpoint(lease.lease_id, lease.fencing_token + 1)
+    assert exc_info.value.code == SandboxErrorCode.FENCING_REJECTED.code
+
+
+@pytest.mark.asyncio
+async def test_shutdown_commits_active_workspace_before_destroying():
+    events: list[str] = []
+
+    class RecordingWorkspace(FakeWorkspace):
+        async def commit(self, snapshot, lease_id, fencing_token=0):
+            events.append("commit")
+            await super().commit(snapshot, lease_id, fencing_token)
+
+    class RecordingProvider(FakeProvider):
+        async def destroy(self, sandbox, reason):
+            events.append("destroy")
+            await super().destroy(sandbox, reason)
+
+    provider = RecordingProvider()
+    repository, pool = await ready_pool(provider)
+    scheduler = SandboxScheduler(pool, repository, provider, RecordingWorkspace())
+    await scheduler.allocate("req-shutdown", "tenant", "workspace")
+
+    assert await scheduler.shutdown() == []
+    assert events == ["commit", "destroy"]
+
+
+@pytest.mark.asyncio
 async def test_expired_lease_destroy_continues_when_commit_fails():
     class FailingWorkspace(FakeWorkspace):
         async def commit(self, snapshot, lease_id, fencing_token=0):
@@ -220,3 +276,26 @@ async def test_watcher_fills_only_the_ready_deficit():
     snapshot = await pool.snapshot()
     assert snapshot.counts[SandboxState.READY] == 2
     assert provider.created == 2
+
+
+@pytest.mark.asyncio
+async def test_watcher_checkpoints_active_leases():
+    provider = FakeProvider()
+    repository, pool = await ready_pool(provider)
+    workspace = FakeWorkspace()
+    scheduler = SandboxScheduler(pool, repository, provider, workspace)
+    lease = await scheduler.allocate("req-watcher-checkpoint", "tenant", "workspace")
+    watcher = Watcher(
+        pool,
+        repository,
+        provider,
+        SandboxSpec("test"),
+        scheduler=scheduler,
+        target_ready=0,
+        checkpoint_interval_seconds=1,
+    )
+    watcher._next_checkpoint_at = 0
+
+    await watcher.reconcile()
+
+    assert provider.checkpoints == [(lease.lease_id, lease.fencing_token)]

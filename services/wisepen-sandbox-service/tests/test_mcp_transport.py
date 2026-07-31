@@ -25,6 +25,8 @@ def test_sandbox_mcp_registers_expected_tools() -> None:
         "edit_file",
         "shell_exec",
         "run_sandbox_script",
+        "acquire_sandbox",
+        "release_sandbox",
     }
 
 
