@@ -58,6 +58,8 @@ class SandboxSpec:
 class Endpoint:
     base_url: str
     token: str | None = None
+    public_vnc_url: str | None = None
+    public_websocket_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -128,7 +130,7 @@ class WorkspaceSnapshot:
     # 工作区快照表示完整缓存快照；提交时会整体替换旧目录。
     tenant_id: str
     workspace_id: str
-    files: dict[str, str] = field(default_factory=dict)
+    files: dict[str, str | bytes] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

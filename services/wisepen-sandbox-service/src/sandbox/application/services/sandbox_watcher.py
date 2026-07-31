@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+import logging
 import uuid
 from time import monotonic
 
@@ -14,6 +15,9 @@ from sandbox.domain.interfaces.sandbox_provider import SandboxProvider
 from sandbox.application.services.sandbox_pool import SandboxPool
 from sandbox.domain.repositories import SandboxRepository
 from sandbox.application.services.sandbox_scheduler import SandboxScheduler
+
+
+logger = logging.getLogger(__name__)
 
 
 class Watcher:
@@ -39,6 +43,7 @@ class Watcher:
         warmup_timeout_seconds: float = 60,
         destroy_timeout_seconds: float = 60,
         interval_seconds: float = 5,
+        checkpoint_interval_seconds: float = 300,
         max_retries: int = 3,
         metrics: MetricsPort | None = None,
     ) -> None:
@@ -58,6 +63,8 @@ class Watcher:
         self._warmup_timeout = warmup_timeout_seconds
         self._destroy_timeout = destroy_timeout_seconds
         self._interval = interval_seconds
+        self._checkpoint_interval = max(1.0, checkpoint_interval_seconds)
+        self._next_checkpoint_at = monotonic() + self._checkpoint_interval
         self._max_retries = max(1, max_retries)
         self._stop = asyncio.Event()
         self._reconcile_lock = asyncio.Lock()
@@ -76,6 +83,7 @@ class Watcher:
                 if self._scheduler:
                     # 先回收过期用户实例，再评估 READY 缺口，避免旧实例占用资源。
                     await self._scheduler.recover_expired()
+                    await self._checkpoint_active_leases()
                 await self._recover_stale()
                 snapshot = await self._pool.snapshot()
                 ready = snapshot.counts[SandboxState.READY]
@@ -105,6 +113,28 @@ class Watcher:
             finally:
                 if self._leader_lease:
                     await self._leader_lease.release(self._leader_key, self._owner)
+
+    async def _checkpoint_active_leases(self) -> None:
+        if not self._scheduler or monotonic() < self._next_checkpoint_at:
+            return
+        self._next_checkpoint_at = monotonic() + self._checkpoint_interval
+        records = await self._repository.records_in([SandboxState.RUNNING])
+        for record in records:
+            if not record.lease_id:
+                continue
+            try:
+                await self._scheduler.checkpoint(
+                    record.lease_id,
+                    record.fencing_token,
+                )
+            except Exception as exc:
+                self._metrics.increment("watcher_checkpoint_failures")
+                logger.exception(
+                    "sandbox workspace checkpoint failed: sandbox_id=%s lease_id=%s",
+                    record.ref.sandbox_id,
+                    record.lease_id,
+                    exc_info=exc,
+                )
 
     async def _warm_one(self) -> None:
         started = monotonic()

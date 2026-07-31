@@ -9,6 +9,7 @@ class AdapterConfig:
     image: str = "ghcr.io/agent-infra/sandbox:latest"
     host: str = "127.0.0.1"
     api_port: int = 8080
+    vnc_port: int = 6080
     network: str | None = None
     request_timeout_seconds: float = 30.0
     warmup_timeout_seconds: float = 60.0
@@ -17,3 +18,6 @@ class AdapterConfig:
     command_timeout_seconds: float = 30.0
     e2e_label: bool = False
     tty: bool = True
+    owner_id: str = "wisepen-sandbox-service"
+    public_vnc_url_template: str = ""
+    public_websocket_url_template: str = ""

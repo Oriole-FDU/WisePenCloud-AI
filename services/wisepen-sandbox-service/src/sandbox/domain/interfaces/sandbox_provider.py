@@ -15,6 +15,9 @@ from sandbox.domain.entities import (
 
 
 class SandboxProvider(Protocol):
+    async def validate_deployment(self) -> None:
+        ...
+
     async def create(self, spec: SandboxSpec) -> SandboxRef:
         ...
 
@@ -39,6 +42,16 @@ class SandboxProvider(Protocol):
 
     async def export_workspace(
         self, sandbox: SandboxRef, tenant_id: str, workspace_id: str
+    ) -> WorkspaceSnapshot:
+        ...
+
+    async def checkpoint_workspace(
+        self,
+        sandbox: SandboxRef,
+        tenant_id: str,
+        workspace_id: str,
+        lease_id: str,
+        fencing_token: int,
     ) -> WorkspaceSnapshot:
         ...
 

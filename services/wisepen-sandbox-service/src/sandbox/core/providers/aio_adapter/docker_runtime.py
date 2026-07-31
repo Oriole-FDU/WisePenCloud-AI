@@ -17,6 +17,8 @@ from sandbox.core.providers.aio_adapter.models import AdapterConfig
 class ContainerHandle:
     container_id: str
     endpoint: str
+    public_vnc_url: str | None = None
+    public_websocket_url: str | None = None
 
 
 class DockerRuntime:
@@ -25,10 +27,22 @@ class DockerRuntime:
     def __init__(self, config: AdapterConfig, runner=subprocess.run) -> None:
         self._config = config
         self._runner = runner
+        self._owner_id = f"{config.owner_id}-{uuid.uuid4().hex}"
 
     @property
     def workdir(self) -> str:
         return self._config.workdir
+
+    @property
+    def owner_id(self) -> str:
+        return self._owner_id
+
+    def validate_deployment(self) -> None:
+        """Fail before readiness when Docker, image, or network is unavailable."""
+        self._run([self._config.docker_bin, "version", "--format", "{{.Server.Version}}"])
+        self._run([self._config.docker_bin, "image", "inspect", self._config.image])
+        if self._config.network:
+            self._run([self._config.docker_bin, "network", "inspect", self._config.network])
 
     def create(self, spec: SandboxSpec) -> ContainerHandle:
         name = f"wisepen-aio-{uuid.uuid4().hex[:12]}"
@@ -42,10 +56,16 @@ class DockerRuntime:
             "--label",
             "wisepen.managed=true",
             "--label",
+            "wisepen.role=aio-worker",
+            "--label",
+            f"wisepen.owner={self._owner_id}",
+            "--label",
             f"wisepen.sandbox_id={name}",
             "-p",
             # 端口映射使用 host::containerPort，让 Docker 分配随机宿主机端口，避免并发预热冲突。
             f"{self._config.host}::{self._config.api_port}",
+            "-p",
+            f"{self._config.host}::{self._config.vnc_port}",
         ]
         if self._config.e2e_label:
             # 端到端标签只在测试环境开启，方便清理测试容器。
@@ -68,20 +88,83 @@ class DockerRuntime:
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
                 "容器创建返回了空 id",
             )
-        # 读取随机映射后的宿主机端口，作为 AIO HTTP endpoint 暴露给上层。
+        api_host_port = self._host_port(container_id, self._config.api_port)
+        vnc_host_port = self._host_port(container_id, self._config.vnc_port)
+        endpoint = (
+            f"http://{name}:{self._config.api_port}"
+            if self._config.network
+            else f"http://{self._config.host}:{api_host_port}"
+        )
+        return ContainerHandle(
+            container_id,
+            endpoint,
+            self._format_public_url(
+                self._config.public_vnc_url_template,
+                container_id,
+                name,
+                vnc_host_port,
+            ),
+            self._format_public_url(
+                self._config.public_websocket_url_template,
+                container_id,
+                name,
+                vnc_host_port,
+            ),
+        )
+
+    def _host_port(self, container_id: str, container_port: int) -> str:
         port = self._run(
-            [self._config.docker_bin, "port", container_id, f"{self._config.api_port}/tcp"]
+            [self._config.docker_bin, "port", container_id, f"{container_port}/tcp"]
         ).strip()
         host_port = port.rsplit(":", 1)[-1]
-        return ContainerHandle(container_id, f"http://{self._config.host}:{host_port}")
+        if not host_port.isdigit():
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                f"容器端口 {container_port} 未正确映射",
+            )
+        return host_port
+
+    def _format_public_url(
+        self,
+        template: str,
+        container_id: str,
+        container_name: str,
+        host_port: str,
+    ) -> str | None:
+        if not template:
+            return None
+        try:
+            return template.format(
+                host=self._config.host,
+                port=host_port,
+                container_id=container_id,
+                container_name=container_name,
+            )
+        except (KeyError, ValueError) as exc:
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "public VNC URL 模板非法",
+            ) from exc
 
     def remove(self, container_id: str) -> None:
-        try:
-            self._run([self._config.docker_bin, "rm", "-f", container_id])
-        except ServiceException as exc:
-            # 销毁按幂等语义处理，容器已不存在时视为清理成功。
-            if "No such container" not in str(exc):
-                raise
+        self._run([self._config.docker_bin, "rm", "-f", container_id])
+
+    def cleanup_owned(self) -> int:
+        raw = self._run(
+            [
+                self._config.docker_bin,
+                "ps",
+                "-aq",
+                "--filter",
+                "label=wisepen.role=aio-worker",
+                "--filter",
+                f"label=wisepen.owner={self._owner_id}",
+            ]
+        )
+        container_ids = [value for value in raw.splitlines() if value.strip()]
+        for container_id in container_ids:
+            self.remove(container_id.strip())
+        return len(container_ids)
 
     def inspect(self, container_id: str) -> dict:
         raw = self._run([self._config.docker_bin, "inspect", container_id])

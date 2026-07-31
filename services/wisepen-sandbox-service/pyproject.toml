@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-asyncio", "httpx"]
+mongo = ["pymongo"]
 
 [tool.uv.sources]
 wisepen-common = { workspace = true }

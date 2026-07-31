@@ -4,13 +4,17 @@ import asyncio
 import time
 from dataclasses import dataclass
 
+from common.core.exceptions import ServiceException
+
 from sandbox.application.services.sandbox_session import SandboxSessionService
+from sandbox.domain.error_codes import SandboxErrorCode
 
 
 @dataclass(frozen=True)
 class VncConnection:
     vnc_url: str
     sandbox_id: str
+    websocket_url: str | None = None
 
 
 class VncBinding:
@@ -31,11 +35,15 @@ class VncBinding:
                 self._bindings[key] = (connection, time.monotonic())
                 return connection
             lease = await self._session.acquire_for(user_id, session_id)
-            if lease.endpoint is None or not lease.endpoint.base_url:
-                raise RuntimeError("sandbox endpoint is unavailable")
+            if lease.endpoint is None or not lease.endpoint.public_vnc_url:
+                raise ServiceException(
+                    SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                    "public VNC URL 未配置",
+                )
             connection = VncConnection(
-                vnc_url=f"{lease.endpoint.base_url.rstrip('/')}/vnc/index.html?autoconnect=true",
+                vnc_url=lease.endpoint.public_vnc_url,
                 sandbox_id=lease.sandbox_id,
+                websocket_url=lease.endpoint.public_websocket_url,
             )
             self._bindings[key] = (connection, time.monotonic())
             return connection

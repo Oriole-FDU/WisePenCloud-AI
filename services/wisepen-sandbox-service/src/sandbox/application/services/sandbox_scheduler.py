@@ -125,6 +125,52 @@ class SandboxScheduler:
         async with self._lifecycle_lock:
             await self._release_locked(lease_id, fencing_token)
 
+    async def checkpoint(
+        self,
+        lease_id: str,
+        fencing_token: int,
+    ) -> None:
+        """Persist a complete snapshot for a live lease without closing it."""
+        async with self._lifecycle_lock:
+            record = await self._repository.find_lease(lease_id)
+            record = await self._repository.validate_lease(
+                lease_id,
+                record.tenant_id or "",
+                record.workspace_id or "",
+                fencing_token,
+            )
+            if record.state != SandboxState.RUNNING:
+                raise ServiceException(
+                    SandboxErrorCode.INVALID_STATE_TRANSITION,
+                    "仅运行中的沙箱允许 checkpoint",
+                )
+            started = monotonic()
+            try:
+                snapshot = await self._provider.checkpoint_workspace(
+                    record.ref,
+                    record.tenant_id or "",
+                    record.workspace_id or "",
+                    lease_id,
+                    fencing_token,
+                )
+                await self._workspace_store.commit(
+                    snapshot,
+                    lease_id,
+                    fencing_token,
+                )
+            except Exception as exc:
+                self._metrics.increment("workspace_checkpoint_failures")
+                error = ServiceException(
+                    SandboxErrorCode.WORKSPACE_SYNC_FAILED,
+                    "工作区 checkpoint 失败",
+                )
+                error.__cause__ = exc
+                raise error
+            self._metrics.increment("workspace_checkpoint_successes")
+            self._metrics.observe_ms(
+                "workspace_checkpoint", (monotonic() - started) * 1000
+            )
+
     async def release_request(
         self,
         request_id: str,
@@ -189,6 +235,43 @@ class SandboxScheduler:
                 else:
                     recovered += 1
         return recovered
+
+    async def shutdown(self) -> list[Exception]:
+        """Persist active leases and destroy every repository-owned worker."""
+        errors: list[Exception] = []
+        async with self._lifecycle_lock:
+            records = await self._repository.records_in(
+                [
+                    SandboxState.CREATING,
+                    SandboxState.WARMING,
+                    SandboxState.READY,
+                    SandboxState.ALLOCATED,
+                    SandboxState.RUNNING,
+                    SandboxState.SYNCING,
+                    SandboxState.DESTROYING,
+                ]
+            )
+            for record in records:
+                try:
+                    if record.state in (SandboxState.ALLOCATED, SandboxState.RUNNING):
+                        if not record.lease_id:
+                            raise ServiceException(
+                                SandboxErrorCode.LEASE_NOT_FOUND,
+                                "运行中沙箱缺少租约",
+                            )
+                        await self._repository.close_lease(
+                            record.lease_id, record.fencing_token
+                        )
+                        try:
+                            await self._export_and_commit_workspace(
+                                record, record.lease_id
+                            )
+                        except Exception as exc:
+                            errors.append(exc)
+                    await self._destroy_record(record, DestroyReason.PROVIDER_ERROR)
+                except Exception as exc:
+                    errors.append(exc)
+        return errors
 
     async def _export_and_commit_workspace(
         self,
