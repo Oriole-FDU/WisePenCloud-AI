@@ -7,6 +7,7 @@ import redis.asyncio as redis
 from dependency_injector import containers, providers
 from scrapling.fetchers import AsyncStealthySession, FetcherSession
 from v2.nacos import NacosNamingService
+from zeroentropy import AsyncZeroEntropy
 
 from chat.core.config.app_settings import settings
 from chat.core.config.bootstrap_settings import bootstrap_settings
@@ -54,9 +55,18 @@ from chat.application.tools.session_tools.tool_content_read.tools import (
 from chat.application.tools.session_tools.tool_content_read.services.reader import (
     ToolContentReader,
 )
-from chat.application.utils.ranking_presets import (
-    READ_RANKED_EXPAND_PIPELINE,
+from common.utils.ranking import RankingPipeline
+from common.utils.ranking.fusion import WeightedRrfFusion
+from common.utils.ranking.rerankers import (
+    ZeroEntropyReranker,
+    ZeroEntropyRerankerConfig,
 )
+from common.utils.ranking.scorers import (
+    BM25Scorer,
+    FieldedBM25Scorer,
+    FieldedBM25ScorerConfig,
+)
+from common.utils.ranking.tokenizer import ThuLacRankingTokenizer
 from chat.application.tools.core.mcp import (
     McpClient,
     McpToolCatalog,
@@ -114,6 +124,26 @@ def _get_iflytek_speech_config():
 
 def _build_redis_client() -> redis.Redis:
     return redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
+def _build_read_ranked_expand_pipeline() -> RankingPipeline:
+    tokenizer = ThuLacRankingTokenizer()
+    return RankingPipeline(
+        scorers=(
+            BM25Scorer(tokenizer=tokenizer),
+            FieldedBM25Scorer(
+                tokenizer=tokenizer,
+                config=FieldedBM25ScorerConfig(
+                    field_weights={"section": 2.0, "anchor": 1.5},
+                ),
+            ),
+        ),
+        fusion=WeightedRrfFusion(),
+        reranker=ZeroEntropyReranker(
+            client=AsyncZeroEntropy(api_key=settings.ZERO_ENTROPY_API_KEY),
+            config=ZeroEntropyRerankerConfig(model=settings.RERANKER_MODEL),
+        ),
+    )
 
 
 async def _provide_web_fetch_static_session() -> AsyncIterator[FetcherSession]:
@@ -255,7 +285,9 @@ class Container(containers.DeclarativeContainer):
         KafkaProducerClient,
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
     )
-    read_ranked_expand_pipeline = providers.Object(READ_RANKED_EXPAND_PIPELINE)
+    read_ranked_expand_pipeline = providers.Singleton(
+        _build_read_ranked_expand_pipeline,
+    )
 
     tool_content_repository = providers.Singleton(
         RedisToolContentRepository,

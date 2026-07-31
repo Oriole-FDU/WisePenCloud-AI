@@ -31,8 +31,6 @@ dependencies = [
     "pyyaml",
     "zeroentropy",
     "pymupdf",
-    "docling",
-    "markitdown",
     "magika",
     "pandas",
     "openpyxl",
@@ -50,6 +48,9 @@ dependencies = [
     "hishel[async]",
     "pdf-inspector>=0.2.5",
     "mineru==3.4.4",
+    "markitdown",
+    "beautifulsoup4",
+    "markdownify",
 ]
 
 [dependency-groups]

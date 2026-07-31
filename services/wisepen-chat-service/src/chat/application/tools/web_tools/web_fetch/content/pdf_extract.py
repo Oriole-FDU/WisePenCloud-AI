@@ -12,10 +12,10 @@ async def extract_pdf_markdown(
     *,
     url: str,
 ) -> str:
-    """在线程池中将 PDF 转换为 Markdown。"""
+    """将原生文本 PDF 快速转换为带页码标记的 Markdown。"""
     try:
         result = await asyncio.to_thread(
-            pdf_inspector.process_pdf_bytes,
+            pdf_inspector.extract_pages_markdown_bytes,
             content,
         )
     except Exception as exc:
@@ -24,10 +24,19 @@ async def extract_pdf_markdown(
             reason=f"PDF extraction failed: {exc}",
         ) from exc
 
-    if not result.markdown:
+    pages = [
+        (
+            f"<!-- page {page.page + 1} -->\n\n"
+            f"{page.markdown.strip()}"
+        )
+        for page in result.pages
+        if page.markdown.strip()
+    ]
+
+    if not pages:
         raise UrlFetchError(
             url=url,
             reason="PDF contains no extractable markdown",
         )
 
-    return result.markdown
+    return "\n\n".join(pages)

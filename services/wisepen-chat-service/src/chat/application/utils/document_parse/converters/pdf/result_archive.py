@@ -5,7 +5,6 @@ import zipfile
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
-from ..utils import decode_text
 from ...errors import DocumentTooLargeError, RemoteParserError
 from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make
 from mineru.utils.enum_class import MakeMode
@@ -39,12 +38,9 @@ def extract_pdf_markdown(
 
             try:
                 middle_json = json.loads(
-                    decode_text(
-                        archive.read(middle_json_info),
-                        file_name=PurePosixPath(middle_json_info.filename).name,
-                    )
+                    archive.read(middle_json_info).decode("utf-8")
                 )
-            except (ValueError, UnicodeError) as exc:
+            except (ValueError, UnicodeDecodeError) as exc:
                 raise RemoteParserError(
                     f"PDF parser middle JSON for {file_name} is not valid JSON."
                 ) from exc

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 import anyio
@@ -75,7 +76,6 @@ class PdfConverter:
             file_path: Path,
             *,
             file_name: str,
-            mime_type: str | None = None,
     ) -> str:
         if not file_path.is_file():
             raise FileNotFoundError(file_path)
@@ -87,7 +87,7 @@ class PdfConverter:
             await self._request_parse(
                 file_path=file_path,
                 upload_file_name=upload_file_name,
-                mime_type=mime_type or "application/pdf",
+                mime_type="application/pdf",
                 zip_path=zip_path,
             )
             markdown = await asyncio.to_thread(
@@ -186,3 +186,12 @@ class PdfConverter:
         content_type = response.headers.get("content-type", "").lower()
         if written == 0 or ("zip" not in content_type and bytes(signature) != b"PK"):
             raise RemoteParserError("PDF parser did not return a ZIP result.")
+
+
+@lru_cache(maxsize=8)
+def get_pdf_converter(api_url: str) -> PdfConverter:
+    """按解析服务地址复用长期 HTTP 客户端和 PDF converter。"""
+    return PdfConverter(
+        http_client=httpx.AsyncClient(),
+        api_url=api_url,
+    )

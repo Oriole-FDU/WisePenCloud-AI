@@ -1,0 +1,1 @@
+"""DOCX converter placeholder."""

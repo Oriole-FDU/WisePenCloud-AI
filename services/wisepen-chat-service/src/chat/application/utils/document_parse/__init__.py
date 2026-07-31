@@ -1,21 +1,15 @@
 from .errors import (
-    DocumentDecodeError,
+    ArchiveExtractionError,
     DocumentParseError,
-    DocumentParserError,
     DocumentTooLargeError,
     RemoteParserError,
     RemoteParserTimeoutError,
-    UnsupportedDocumentFormatError,
 )
-from .parser import DocumentParser
 
 __all__ = [
-    "DocumentDecodeError",
+    "ArchiveExtractionError",
     "DocumentParseError",
-    "DocumentParser",
-    "DocumentParserError",
     "DocumentTooLargeError",
     "RemoteParserError",
     "RemoteParserTimeoutError",
-    "UnsupportedDocumentFormatError",
 ]

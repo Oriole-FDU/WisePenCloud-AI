@@ -5,6 +5,7 @@ from pathlib import Path
 from mineru.utils.enum_class import MakeMode
 
 from chat.application.utils.document_parse.converters.pdf import result_archive
+from chat.application.utils.document_parse.converters.pdf import converter as pdf_converter
 from chat.application.utils.document_parse.converters.pdf.converter import (
     _PDF_PARSE_FORM,
 )
@@ -18,6 +19,27 @@ def test_pdf_request_only_returns_middle_json() -> None:
     assert _PDF_PARSE_FORM["return_md"] == "false"
     assert _PDF_PARSE_FORM["return_content_list"] == "false"
     assert _PDF_PARSE_FORM["return_middle_json"] == "true"
+
+
+def test_get_pdf_converter_is_cached_by_api_url(monkeypatch) -> None:
+    created: list[object] = []
+
+    class FakePdfConverter:
+        def __init__(self, **kwargs: object) -> None:
+            created.append(kwargs)
+
+    pdf_converter.get_pdf_converter.cache_clear()
+    monkeypatch.setattr(pdf_converter, "PdfConverter", FakePdfConverter)
+
+    assert pdf_converter.get_pdf_converter("https://mineru.example") is (
+        pdf_converter.get_pdf_converter("https://mineru.example")
+    )
+    assert len(created) == 1
+    assert pdf_converter.get_pdf_converter("https://other.example") is not (
+        pdf_converter.get_pdf_converter("https://mineru.example")
+    )
+
+    pdf_converter.get_pdf_converter.cache_clear()
 
 
 def test__render_markdown_pages_calls_mineru_once_per_page(
