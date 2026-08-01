@@ -26,15 +26,16 @@ class AioClient:
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
-    async def health(self) -> bool:
+    async def health(self, *, timeout_seconds: float | None = None) -> bool:
         url = f"{self._base_url}/v1/sandbox"
+        timeout = self._timeout if timeout_seconds is None else timeout_seconds
         debug(
             "AIO 健康检查请求开始",
             url=url,
-            timeout_seconds=self._timeout,
+            timeout_seconds=timeout,
         )
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.get(url, headers=self._headers())
             debug(
                 "AIO 健康检查收到响应",
@@ -60,7 +61,7 @@ class AioClient:
                 "AIO 健康检查超时",
                 exc=exc,
                 url=url,
-                timeout_seconds=self._timeout,
+                timeout_seconds=timeout,
             )
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,

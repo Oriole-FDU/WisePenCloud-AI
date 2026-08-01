@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from datetime import timedelta
 import logging
 import uuid
@@ -44,6 +45,11 @@ class Watcher:
         warmup_timeout_seconds: float = 60,
         destroy_timeout_seconds: float = 60,
         interval_seconds: float = 5,
+        warmup_max_retries: int = 3,
+        warmup_retry_backoff_seconds: float = 5,
+        warmup_retry_max_backoff_seconds: float = 60,
+        leader_lease_ttl_seconds: float = 90,
+        leader_lease_renew_interval_seconds: float = 20,
         checkpoint_interval_seconds: float = 300,
         metrics: MetricsPort | None = None,
     ) -> None:
@@ -63,6 +69,12 @@ class Watcher:
         self._warmup_timeout = warmup_timeout_seconds
         self._destroy_timeout = destroy_timeout_seconds
         self._interval = interval_seconds
+        # 该值限制指数退避等级，达到上限后保持最大间隔但仍持续尝试恢复。
+        self._warmup_max_retries = max(1, warmup_max_retries)
+        self._warmup_retry_backoff = warmup_retry_backoff_seconds
+        self._warmup_retry_max_backoff = warmup_retry_max_backoff_seconds
+        self._leader_lease_ttl = leader_lease_ttl_seconds
+        self._leader_lease_renew_interval = leader_lease_renew_interval_seconds
         self._checkpoint_interval = max(1.0, checkpoint_interval_seconds)
         self._next_checkpoint_at = monotonic() + self._checkpoint_interval
         self._stop = asyncio.Event()
@@ -72,8 +84,10 @@ class Watcher:
 
     async def reconcile(self) -> int:
         async with self._reconcile_lock:
+            renew_stop: asyncio.Event | None = None
+            renew_task: asyncio.Task[None] | None = None
             if self._leader_lease and not await self._leader_lease.acquire(
-                self._leader_key, self._owner, max(self._interval * 3, 1)
+                self._leader_key, self._owner, self._leader_lease_ttl
             ):
                 self._metrics.increment("watcher_not_leader")
                 warn(
@@ -82,6 +96,9 @@ class Watcher:
                     leader_key=self._leader_key,
                 )
                 return 0
+            if self._leader_lease:
+                renew_stop = asyncio.Event()
+                renew_task = asyncio.create_task(self._renew_leader_lease(renew_stop))
             try:
                 self._metrics.increment("watcher_reconciles")
                 if self._scheduler:
@@ -128,7 +145,9 @@ class Watcher:
                         await self._warm_one(attempt)
                     except Exception as exc:
                         # 连续失败时先停手，避免镜像/运行时异常导致快速创建失败风暴。
-                        self._retry_count += 1
+                        self._retry_count = min(
+                            self._retry_count + 1, self._warmup_max_retries
+                        )
                         self._metrics.increment("warmup_failures")
                         error(
                             "沙箱 watcher 预热失败，本轮停止继续创建",
@@ -155,8 +174,46 @@ class Watcher:
                 )
                 return created
             finally:
+                if renew_stop:
+                    renew_stop.set()
+                if renew_task:
+                    renew_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await renew_task
                 if self._leader_lease:
                     await self._leader_lease.release(self._leader_key, self._owner)
+
+    async def _renew_leader_lease(self, stop: asyncio.Event) -> None:
+        """续期可覆盖长时间容器预热，避免多副本重复补池。"""
+        while True:
+            try:
+                await asyncio.wait_for(
+                    stop.wait(), timeout=self._leader_lease_renew_interval
+                )
+                return
+            except asyncio.TimeoutError:
+                pass
+            assert self._leader_lease is not None
+            renewed = await self._leader_lease.acquire(
+                self._leader_key, self._owner, self._leader_lease_ttl
+            )
+            if not renewed:
+                error(
+                    "沙箱 watcher leader 租约续期失败",
+                    owner=self._owner,
+                    leader_key=self._leader_key,
+                )
+                return
+
+    def _next_reconcile_delay(self) -> float:
+        if self._retry_count == 0:
+            return self._interval
+        # 达到等级上限后维持最大退避但持续重试，防止短暂故障永久耗尽 READY 池。
+        exponent = min(self._retry_count, self._warmup_max_retries) - 1
+        return min(
+            self._warmup_retry_backoff * (2**exponent),
+            self._warmup_retry_max_backoff,
+        )
 
     async def _checkpoint_active_leases(self) -> None:
         if not self._scheduler or monotonic() < self._next_checkpoint_at:
@@ -191,8 +248,15 @@ class Watcher:
             warmup_timeout_seconds=self._warmup_timeout,
         )
         try:
+            create_started = monotonic()
             ref = await self._provider.create(self._spec)
+            self._metrics.observe_ms(
+                "warmup_create", (monotonic() - create_started) * 1000
+            )
         except Exception as exc:
+            self._metrics.observe_ms(
+                "warmup_create", (monotonic() - create_started) * 1000
+            )
             self._metrics.increment("create_failures")
             error(
                 "沙箱容器创建失败",
@@ -228,9 +292,18 @@ class Watcher:
                 endpoint=ref.endpoint.base_url if ref.endpoint else None,
                 timeout_seconds=self._warmup_timeout,
             )
-            health = await asyncio.wait_for(
-                self._provider.wait_ready(ref, self._warmup_timeout),
-                timeout=self._warmup_timeout,
+            wait_ready_started = monotonic()
+            try:
+                health = await asyncio.wait_for(
+                    self._provider.wait_ready(ref, self._warmup_timeout),
+                    timeout=self._warmup_timeout,
+                )
+            finally:
+                self._metrics.observe_ms(
+                    "warmup_wait_ready", (monotonic() - wait_ready_started) * 1000
+                )
+            self._metrics.increment(
+                "warmup_ready_attempts", max(1, health.attempts)
             )
             info(
                 "沙箱 AIO 就绪等待结束",
@@ -243,7 +316,14 @@ class Watcher:
             health_fn = getattr(self._provider, "health", None)
             if health_fn is not None:
                 info("沙箱开始执行 AIO 就绪复检", sandbox_id=ref.sandbox_id)
-                health_check = await health_fn(ref)
+                health_check_started = monotonic()
+                try:
+                    health_check = await health_fn(ref)
+                finally:
+                    self._metrics.observe_ms(
+                        "warmup_ready_check",
+                        (monotonic() - health_check_started) * 1000,
+                    )
                 info(
                     "沙箱 AIO 就绪复检结束",
                     sandbox_id=ref.sandbox_id,
@@ -409,7 +489,9 @@ class Watcher:
         while not self._stop.is_set():
             await self.reconcile()
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self._interval)
+                await asyncio.wait_for(
+                    self._stop.wait(), timeout=self._next_reconcile_delay()
+                )
             except asyncio.TimeoutError:
                 continue
 

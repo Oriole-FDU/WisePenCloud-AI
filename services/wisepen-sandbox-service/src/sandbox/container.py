@@ -70,6 +70,15 @@ def _workspace_store(
     raise RuntimeError(f"Unsupported workspace store backend: {backend}")
 
 
+def _sandbox_spec(image: str, browser_no_sandbox: str) -> SandboxSpec:
+    environment = (
+        {"BROWSER_NO_SANDBOX": browser_no_sandbox}
+        if browser_no_sandbox
+        else {}
+    )
+    return SandboxSpec(image=image, environment=environment)
+
+
 class Container(containers.DeclarativeContainer):
     """Sandbox 运行时依赖容器，与 API endpoints 共用同一组服务实例。"""
 
@@ -104,10 +113,15 @@ class Container(containers.DeclarativeContainer):
         network=config.SANDBOX_DOCKER_NETWORK,
         request_timeout_seconds=config.SANDBOX_REQUEST_TIMEOUT_SECONDS,
         warmup_timeout_seconds=config.SANDBOX_WARMUP_TIMEOUT_SECONDS,
+        health_timeout_seconds=config.SANDBOX_AIO_HEALTH_TIMEOUT_SECONDS,
+        health_retry_interval_seconds=config.SANDBOX_AIO_HEALTH_RETRY_INTERVAL_SECONDS,
         command_timeout_seconds=config.SANDBOX_DOCKER_COMMAND_TIMEOUT_SECONDS,
+        create_max_attempts=config.SANDBOX_DOCKER_CREATE_MAX_ATTEMPTS,
+        create_retry_backoff_seconds=config.SANDBOX_DOCKER_CREATE_RETRY_BACKOFF_SECONDS,
         workdir=config.SANDBOX_AIO_WORKDIR,
         tty=config.SANDBOX_DOCKER_TTY,
         owner_id=config.SANDBOX_OWNER_ID,
+        browser_no_sandbox=config.SANDBOX_BROWSER_NO_SANDBOX,
         public_vnc_url_template=config.SANDBOX_PUBLIC_VNC_URL_TEMPLATE,
         public_websocket_url_template=config.SANDBOX_PUBLIC_WEBSOCKET_URL_TEMPLATE,
     )
@@ -135,7 +149,8 @@ class Container(containers.DeclarativeContainer):
         provider=provider,
         workspace_store=workspace_store,
         destroy_timeout_seconds=config.SANDBOX_DESTROY_TIMEOUT_SECONDS,
-        destroy_max_retries=3,
+        destroy_max_retries=config.SANDBOX_DESTROY_MAX_RETRIES,
+        destroy_backoff_seconds=config.SANDBOX_DESTROY_RETRY_BACKOFF_SECONDS,
         metrics=metrics,
     )
     leader_lease = providers.Singleton(MemoryLeaderLease)
@@ -144,7 +159,11 @@ class Container(containers.DeclarativeContainer):
         pool=pool,
         repository=repository,
         provider=provider,
-        spec=providers.Factory(SandboxSpec, image=config.SANDBOX_IMAGE),
+        spec=providers.Factory(
+            _sandbox_spec,
+            image=config.SANDBOX_IMAGE,
+            browser_no_sandbox=config.SANDBOX_BROWSER_NO_SANDBOX,
+        ),
         scheduler=scheduler,
         leader_lease=leader_lease,
         target_ready=config.SANDBOX_TARGET_READY,
@@ -153,6 +172,12 @@ class Container(containers.DeclarativeContainer):
         max_create_batch=config.SANDBOX_MAX_CREATE_BATCH,
         warmup_timeout_seconds=config.SANDBOX_WARMUP_TIMEOUT_SECONDS,
         destroy_timeout_seconds=config.SANDBOX_DESTROY_TIMEOUT_SECONDS,
+        interval_seconds=config.SANDBOX_WATCHER_INTERVAL_SECONDS,
+        warmup_max_retries=config.SANDBOX_WARMUP_MAX_RETRIES,
+        warmup_retry_backoff_seconds=config.SANDBOX_WARMUP_RETRY_BACKOFF_SECONDS,
+        warmup_retry_max_backoff_seconds=config.SANDBOX_WARMUP_RETRY_MAX_BACKOFF_SECONDS,
+        leader_lease_ttl_seconds=config.SANDBOX_LEADER_LEASE_TTL_SECONDS,
+        leader_lease_renew_interval_seconds=config.SANDBOX_LEADER_LEASE_RENEW_INTERVAL_SECONDS,
         checkpoint_interval_seconds=config.SANDBOX_CHECKPOINT_INTERVAL_SECONDS,
         metrics=metrics,
     )

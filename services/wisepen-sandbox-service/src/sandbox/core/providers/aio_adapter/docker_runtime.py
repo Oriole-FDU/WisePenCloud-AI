@@ -4,11 +4,11 @@ import json
 import subprocess
 import uuid
 from dataclasses import dataclass
-from time import monotonic
+from time import monotonic, sleep
 from typing import Sequence
 
 from common.core.exceptions import ServiceException
-from common.logger import debug, error, info
+from common.logger import debug, error, info, warn
 
 from sandbox.domain.entities import SandboxSpec
 from sandbox.domain.error_codes import SandboxErrorCode
@@ -23,12 +23,21 @@ class ContainerHandle:
     public_websocket_url: str | None = None
 
 
+class DockerCommandFailure(ServiceException):
+    """保留 Docker CLI 的退出状态，供存在副作用的命令判定是否可恢复。"""
+
+    def __init__(self, message: str, returncode: int) -> None:
+        super().__init__(SandboxErrorCode.SANDBOX_UNAVAILABLE, message)
+        self.returncode = returncode
+
+
 class DockerRuntime:
     """通过 Docker CLI 管理 all-in-one-sandbox 容器。"""
 
-    def __init__(self, config: AdapterConfig, runner=subprocess.run) -> None:
+    def __init__(self, config: AdapterConfig, runner=subprocess.run, sleeper=sleep) -> None:
         self._config = config
         self._runner = runner
+        self._sleeper = sleeper
         self._owner_id = f"{config.owner_id}-{uuid.uuid4().hex}"
 
     @property
@@ -121,7 +130,7 @@ class DockerRuntime:
             network=self._config.network,
             environment_keys=sorted(spec.environment),
         )
-        container_id = self._run(args).strip()
+        container_id = self._run_create(args, name).strip()
         if not container_id:
             error(
                 "Docker 创建 AIO 容器返回空容器 ID",
@@ -173,6 +182,82 @@ class DockerRuntime:
             public_vnc_url,
             public_websocket_url,
         )
+
+    def _run_create(self, args: Sequence[str], container_name: str) -> str:
+        """运行 docker run，并处理 CLI 在结果返回前被信号中断的情况。"""
+        had_ambiguous_result = False
+        for attempt in range(1, self._config.create_max_attempts + 1):
+            try:
+                return self._run(args)
+            except DockerCommandFailure as exc:
+                if exc.returncode >= 0 and not had_ambiguous_result:
+                    raise
+
+                container_id = self._find_container_id(container_name)
+                if container_id:
+                    info(
+                        "Docker 创建命令未返回结果但容器已创建，复用容器",
+                        container_name=container_name,
+                        container_id=container_id,
+                        returncode=exc.returncode,
+                        attempt=attempt,
+                    )
+                    return container_id
+
+                if exc.returncode >= 0 or attempt == self._config.create_max_attempts:
+                    raise
+
+                had_ambiguous_result = True
+                delay_seconds = self._config.create_retry_backoff_seconds * attempt
+                warn(
+                    "Docker 创建命令被信号中断，确认容器不存在后重试",
+                    container_name=container_name,
+                    returncode=exc.returncode,
+                    attempt=attempt,
+                    max_attempts=self._config.create_max_attempts,
+                    delay_seconds=delay_seconds,
+                )
+                self._sleeper(delay_seconds)
+
+        raise AssertionError("docker create retry loop exited unexpectedly")
+
+    def _find_container_id(self, container_name: str) -> str | None:
+        """不确定 docker run 是否提交时，按唯一容器名确认实际结果。"""
+        try:
+            result = self._runner(
+                [
+                    self._config.docker_bin,
+                    "container",
+                    "inspect",
+                    "--format",
+                    "{{.Id}}",
+                    container_name,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=self._config.command_timeout_seconds,
+            )
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
+            warn(
+                "Docker 创建结果确认命令无法执行",
+                exc=exc,
+                container_name=container_name,
+            )
+            return None
+        if result.returncode != 0:
+            debug(
+                "Docker 创建结果确认未找到容器",
+                container_name=container_name,
+                returncode=result.returncode,
+                detail=((result.stderr or result.stdout or "").strip())[:500],
+            )
+            return None
+        container_id = (result.stdout or "").strip()
+        if not container_id:
+            warn("Docker 创建结果确认返回空容器 ID", container_name=container_name)
+            return None
+        return container_id
 
     def _host_port(self, container_id: str, container_port: int) -> str:
         port = self._run(
@@ -337,9 +422,9 @@ class DockerRuntime:
                 detail=detail[:500],
                 elapsed_ms=round((monotonic() - started) * 1000, 2),
             )
-            raise ServiceException(
-                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+            raise DockerCommandFailure(
                 f"docker 命令失败：{' '.join(args[1:3])}：{detail[:500]}",
+                result.returncode,
             )
         debug(
             "Docker 命令执行完成",

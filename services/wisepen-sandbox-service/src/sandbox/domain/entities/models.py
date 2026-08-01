@@ -41,6 +41,7 @@ class Health:
     healthy: bool
     status: str = "unknown"
     version: str | None = None
+    attempts: int = 0
 
 
 @dataclass(frozen=True)

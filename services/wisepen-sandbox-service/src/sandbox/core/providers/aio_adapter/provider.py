@@ -32,10 +32,14 @@ class AioSandboxProvider(SandboxProvider):
         file_transfer: FileTransferPort,
         *,
         request_timeout_seconds: float = 30.0,
+        health_timeout_seconds: float = 3.0,
+        health_retry_interval_seconds: float = 0.5,
     ) -> None:
         self._runtime = runtime
         self._file_transfer = file_transfer
         self._request_timeout = request_timeout_seconds
+        self._health_timeout = health_timeout_seconds
+        self._health_retry_interval = health_retry_interval_seconds
         self._clients: dict[str, AioClient] = {}
 
     @classmethod
@@ -55,6 +59,10 @@ class AioSandboxProvider(SandboxProvider):
             network=config.network,
             request_timeout_seconds=config.request_timeout_seconds,
             warmup_timeout_seconds=config.warmup_timeout_seconds,
+            health_timeout_seconds=config.health_timeout_seconds,
+            health_retry_interval_seconds=config.health_retry_interval_seconds,
+            create_max_attempts=config.create_max_attempts,
+            create_retry_backoff_seconds=config.create_retry_backoff_seconds,
             e2e_label=config.e2e_label,
             tty=config.tty,
         )
@@ -62,6 +70,8 @@ class AioSandboxProvider(SandboxProvider):
             DockerRuntime(config),
             file_transfer,
             request_timeout_seconds=config.request_timeout_seconds,
+            health_timeout_seconds=config.health_timeout_seconds,
+            health_retry_interval_seconds=config.health_retry_interval_seconds,
         )
 
     async def validate_deployment(self) -> None:
@@ -110,12 +120,15 @@ class AioSandboxProvider(SandboxProvider):
         while asyncio.get_running_loop().time() < deadline:
             attempt += 1
             try:
-                healthy = await client.health()
+                remaining_seconds = deadline - asyncio.get_running_loop().time()
+                healthy = await client.health(
+                    timeout_seconds=min(self._health_timeout, remaining_seconds)
+                )
             except ServiceException as exc:
                 remaining_seconds = max(
                     0, deadline - asyncio.get_running_loop().time()
                 )
-                await asyncio.sleep(min(1, remaining_seconds))
+                await asyncio.sleep(min(self._health_retry_interval, remaining_seconds))
                 continue
             if healthy:
                 info(
@@ -125,7 +138,7 @@ class AioSandboxProvider(SandboxProvider):
                     endpoint=sandbox.endpoint.base_url if sandbox.endpoint else None,
                     attempt=attempt,
                 )
-                return Health(True, "ready")
+                return Health(True, "ready", attempts=attempt)
             warn(
                 "AIO provider 健康检查返回未就绪",
                 sandbox_id=sandbox.sandbox_id,
@@ -133,7 +146,8 @@ class AioSandboxProvider(SandboxProvider):
                 endpoint=sandbox.endpoint.base_url if sandbox.endpoint else None,
                 attempt=attempt,
             )
-            await asyncio.sleep(1)
+            remaining_seconds = max(0, deadline - asyncio.get_running_loop().time())
+            await asyncio.sleep(min(self._health_retry_interval, remaining_seconds))
         exc = TimeoutError(f"沙箱 {sandbox.sandbox_id} 未在限定时间内就绪")
         error(
             "AIO provider 等待沙箱就绪超时",
