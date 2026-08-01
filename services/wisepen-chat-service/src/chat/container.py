@@ -142,7 +142,7 @@ class Container(containers.DeclarativeContainer):
         McpServiceClient,
         discovery=service_discovery,
         from_source_secret=settings.FROM_SOURCE_SECRET,
-        timeout=settings.RPC_DEFAULT_TIMEOUT,
+        timeout=settings.MCP_DEFAULT_TIMEOUT_SECONDS,
         default_strategy=settings.RPC_LB_STRATEGY,
     )
     sandbox_mcp_service_client = providers.Singleton(
@@ -150,7 +150,7 @@ class Container(containers.DeclarativeContainer):
         discovery=service_discovery,
         from_source_secret=settings.FROM_SOURCE_SECRET,
         service_name=settings.SANDBOX_SERVICE_NAME,
-        timeout=settings.RPC_DEFAULT_TIMEOUT,
+        timeout=settings.SANDBOX_TIMEOUT_SECONDS,
         default_strategy=settings.RPC_LB_STRATEGY,
         base_url=settings.SANDBOX_SERVICE_URL,
     )

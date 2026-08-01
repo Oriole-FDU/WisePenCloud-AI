@@ -153,7 +153,6 @@ class Container(containers.DeclarativeContainer):
         max_create_batch=config.SANDBOX_MAX_CREATE_BATCH,
         warmup_timeout_seconds=config.SANDBOX_WARMUP_TIMEOUT_SECONDS,
         destroy_timeout_seconds=config.SANDBOX_DESTROY_TIMEOUT_SECONDS,
-        max_retries=config.SANDBOX_WARMUP_MAX_RETRIES,
         checkpoint_interval_seconds=config.SANDBOX_CHECKPOINT_INTERVAL_SECONDS,
         metrics=metrics,
     )
