@@ -32,7 +32,10 @@ sandbox_session = SandboxSessionService(container.scheduler())
 from sandbox.transport.mcp import build_sandbox_mcp
 
 mcp_server = build_sandbox_mcp(sandbox_session)
-vnc_binding = VncBinding(sandbox_session)
+vnc_binding = VncBinding(
+    sandbox_session,
+    idle_timeout_seconds=settings.SANDBOX_VNC_IDLE_TIMEOUT_SECONDS,
+)
 
 
 @asynccontextmanager
@@ -49,7 +52,10 @@ async def lifespan(app):
             # 远程桌面是浏览器跳转式连接，前端不一定显式释放，因此后台按空闲时间回收。
             while not cleanup_stop.is_set():
                 try:
-                    await asyncio.wait_for(cleanup_stop.wait(), timeout=300)
+                    await asyncio.wait_for(
+                        cleanup_stop.wait(),
+                        timeout=settings.SANDBOX_VNC_IDLE_CLEANUP_INTERVAL_SECONDS,
+                    )
                 except asyncio.TimeoutError:
                     await vnc_binding.cleanup_idle()
 

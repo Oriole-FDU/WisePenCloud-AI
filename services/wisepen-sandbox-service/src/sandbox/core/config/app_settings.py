@@ -37,14 +37,22 @@ class AppSettings(BaseModel):
     SANDBOX_VNC_PORT: int
     SANDBOX_REQUEST_TIMEOUT_SECONDS: float
     SANDBOX_DOCKER_COMMAND_TIMEOUT_SECONDS: float
+    SANDBOX_AIO_HEALTH_TIMEOUT_SECONDS: float
+    SANDBOX_AIO_HEALTH_RETRY_INTERVAL_SECONDS: float
+    SANDBOX_DOCKER_CREATE_MAX_ATTEMPTS: int
+    SANDBOX_DOCKER_CREATE_RETRY_BACKOFF_SECONDS: float
     SANDBOX_AIO_WORKDIR: str
     SANDBOX_CONTAINER_WORKSPACE_ROOT: str
     SANDBOX_CONTAINER_USER: str
     SANDBOX_DOCKER_TTY: bool
     SANDBOX_OWNER_ID: str
+    # 本地 Docker/Colima 环境可显式传入 --no-sandbox，生产默认不改变 Chromium 隔离。
+    SANDBOX_BROWSER_NO_SANDBOX: str = ""
     SANDBOX_PUBLIC_VNC_URL_TEMPLATE: str
     SANDBOX_PUBLIC_WEBSOCKET_URL_TEMPLATE: str
     SANDBOX_CHECKPOINT_INTERVAL_SECONDS: float
+    SANDBOX_VNC_IDLE_TIMEOUT_SECONDS: float
+    SANDBOX_VNC_IDLE_CLEANUP_INTERVAL_SECONDS: float
 
     # 预热容器镜像；Provider 可在 SandboxSpec 为空时回退到该值。
     SANDBOX_IMAGE: str
@@ -58,6 +66,13 @@ class AppSettings(BaseModel):
     SANDBOX_WARMUP_TIMEOUT_SECONDS: float
     SANDBOX_DESTROY_TIMEOUT_SECONDS: float
     SANDBOX_WARMUP_MAX_RETRIES: int
+    SANDBOX_WARMUP_RETRY_BACKOFF_SECONDS: float
+    SANDBOX_WARMUP_RETRY_MAX_BACKOFF_SECONDS: float
+    SANDBOX_WATCHER_INTERVAL_SECONDS: float
+    SANDBOX_LEADER_LEASE_TTL_SECONDS: float
+    SANDBOX_LEADER_LEASE_RENEW_INTERVAL_SECONDS: float
+    SANDBOX_DESTROY_MAX_RETRIES: int
+    SANDBOX_DESTROY_RETRY_BACKOFF_SECONDS: float
 
     @field_validator("SANDBOX_WORKSPACE_STORE_BACKEND")
     @classmethod
@@ -66,6 +81,11 @@ class AppSettings(BaseModel):
         if normalized not in {"local", "mongo"}:
             raise ValueError("SANDBOX_WORKSPACE_STORE_BACKEND 只能是 local 或 mongo")
         return normalized
+
+    @field_validator("SANDBOX_BROWSER_NO_SANDBOX")
+    @classmethod
+    def normalize_browser_no_sandbox(cls, value: str) -> str:
+        return value.strip()
 
     @model_validator(mode="after")
     def validate_runtime_values(self) -> "AppSettings":
@@ -81,12 +101,37 @@ class AppSettings(BaseModel):
             self.SANDBOX_WORKSPACE_CACHE_MAX_TOTAL_BYTES,
             self.SANDBOX_LEASE_TTL_SECONDS,
             self.SANDBOX_MAX_CREATE_BATCH,
+            self.SANDBOX_DOCKER_COMMAND_TIMEOUT_SECONDS,
+            self.SANDBOX_AIO_HEALTH_TIMEOUT_SECONDS,
+            self.SANDBOX_AIO_HEALTH_RETRY_INTERVAL_SECONDS,
+            self.SANDBOX_DOCKER_CREATE_MAX_ATTEMPTS,
+            self.SANDBOX_DOCKER_CREATE_RETRY_BACKOFF_SECONDS,
             self.SANDBOX_WARMUP_TIMEOUT_SECONDS,
             self.SANDBOX_DESTROY_TIMEOUT_SECONDS,
+            self.SANDBOX_WARMUP_MAX_RETRIES,
+            self.SANDBOX_WARMUP_RETRY_BACKOFF_SECONDS,
+            self.SANDBOX_WARMUP_RETRY_MAX_BACKOFF_SECONDS,
+            self.SANDBOX_WATCHER_INTERVAL_SECONDS,
+            self.SANDBOX_LEADER_LEASE_TTL_SECONDS,
+            self.SANDBOX_LEADER_LEASE_RENEW_INTERVAL_SECONDS,
+            self.SANDBOX_DESTROY_MAX_RETRIES,
+            self.SANDBOX_DESTROY_RETRY_BACKOFF_SECONDS,
             self.SANDBOX_CHECKPOINT_INTERVAL_SECONDS,
+            self.SANDBOX_VNC_IDLE_TIMEOUT_SECONDS,
+            self.SANDBOX_VNC_IDLE_CLEANUP_INTERVAL_SECONDS,
         )
         if any(value <= 0 for value in positive):
             raise ValueError("沙箱容量、超时和文件限制必须为正数")
+        if (
+            self.SANDBOX_LEADER_LEASE_RENEW_INTERVAL_SECONDS
+            >= self.SANDBOX_LEADER_LEASE_TTL_SECONDS
+        ):
+            raise ValueError("leader 租约续期周期必须小于租约 TTL")
+        if (
+            self.SANDBOX_WARMUP_RETRY_MAX_BACKOFF_SECONDS
+            < self.SANDBOX_WARMUP_RETRY_BACKOFF_SECONDS
+        ):
+            raise ValueError("预热重试最大退避不能小于初始退避")
         required_text = (
             self.FROM_SOURCE_SECRET,
             self.SANDBOX_PROVIDER_FACTORY,

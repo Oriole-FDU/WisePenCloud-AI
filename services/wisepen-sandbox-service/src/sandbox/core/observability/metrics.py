@@ -14,6 +14,7 @@ class MetricsCollector:
     def __init__(self) -> None:
         self._counters: Counter[str] = Counter()
         self._durations: Counter[str] = Counter()
+        self._duration_counts: Counter[str] = Counter()
         self._active_tenants: Counter[str] = Counter()
         self._readiness_degraded_since: float | None = None
 
@@ -25,6 +26,7 @@ class MetricsCollector:
 
     def observe_ms(self, name: str, value_ms: float) -> None:
         self._durations[name] += int(value_ms)
+        self._duration_counts[name] += 1
 
     def lease_started(self, tenant_id: str) -> None:
         self._active_tenants[tenant_id] += 1
@@ -50,6 +52,15 @@ class MetricsCollector:
         return {
             **self._counters,
             **{f"duration_ms_{key}": value for key, value in self._durations.items()},
+            **{
+                f"duration_count_{key}": value
+                for key, value in self._duration_counts.items()
+            },
+            **{
+                f"duration_avg_ms_{key}": self._durations[key] / value
+                for key, value in self._duration_counts.items()
+                if value
+            },
             "warmup_failure_rate": (
                 self._counters["warmup_failures"] / warmup_attempts
                 if warmup_attempts else 0.0
