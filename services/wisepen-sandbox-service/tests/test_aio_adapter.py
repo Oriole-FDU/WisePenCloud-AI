@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from common.core.exceptions import ServiceException
 
-from sandbox.domain.entities import Endpoint, SandboxRef, SandboxSpec, WorkspaceSnapshot
+from sandbox.domain.entities import Endpoint, Health, SandboxRef, SandboxSpec, WorkspaceSnapshot
 from sandbox.domain.error_codes import SandboxErrorCode
 from sandbox.core.providers.aio_adapter.models import AdapterConfig
 from sandbox.core.providers.aio_adapter.path_policy import PathPolicy, TenantScope
@@ -83,6 +83,32 @@ def test_docker_runtime_maps_command_failure_to_service_error():
     with pytest.raises(ServiceException) as exc_info:
         runtime.inspect("container-id")
     assert exc_info.value.code == SandboxErrorCode.SANDBOX_UNAVAILABLE.code
+
+
+def test_docker_runtime_redacts_environment_values_in_command_logs():
+    redacted = DockerRuntime._redact_args(
+        [
+            "docker",
+            "run",
+            "-e",
+            "API_TOKEN=secret-value",
+            "--env",
+            "MODE=warm",
+            "--env=PASSWORD=another-secret",
+            "test-image",
+        ]
+    )
+
+    assert redacted == [
+        "docker",
+        "run",
+        "-e",
+        "API_TOKEN=<redacted>",
+        "--env",
+        "MODE=<redacted>",
+        "--env=PASSWORD=<redacted>",
+        "test-image",
+    ]
 
 
 def test_docker_runtime_preflight_and_public_vnc_urls():
@@ -256,3 +282,67 @@ async def test_aio_client_uses_real_file_search_and_execute_contract(monkeypatch
             {"language": "python", "code": "print(1)"},
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_aio_provider_retries_transient_health_failure_during_warmup():
+    provider = AioSandboxProvider(
+        DockerRuntime(AdapterConfig(image="test-image")), None
+    )
+    sandbox = SandboxRef(
+        sandbox_id="sb-warmup",
+        provider_id="container-warmup",
+        endpoint=Endpoint("http://127.0.0.1:49152"),
+    )
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        async def health(self):
+            self.calls += 1
+            if self.calls == 1:
+                raise ServiceException(
+                    SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                    "transient AIO startup failure",
+                )
+            return True
+
+    client = Client()
+    provider._clients[sandbox.sandbox_id] = client
+
+    result = await provider.wait_ready(sandbox, timeout_seconds=2)
+
+    assert result == Health(True, "ready")
+    assert client.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_aio_provider_keeps_warmup_failure_after_persistent_health_failure():
+    provider = AioSandboxProvider(
+        DockerRuntime(AdapterConfig(image="test-image")), None
+    )
+    sandbox = SandboxRef(
+        sandbox_id="sb-warmup-timeout",
+        provider_id="container-warmup-timeout",
+        endpoint=Endpoint("http://127.0.0.1:49153"),
+    )
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        async def health(self):
+            self.calls += 1
+            raise ServiceException(
+                SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "persistent AIO startup failure",
+            )
+
+    client = Client()
+    provider._clients[sandbox.sandbox_id] = client
+
+    with pytest.raises(TimeoutError, match="未在限定时间内就绪"):
+        await provider.wait_ready(sandbox, timeout_seconds=0.01)
+
+    assert client.calls == 1

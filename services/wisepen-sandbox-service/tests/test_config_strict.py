@@ -6,12 +6,18 @@ import sys
 
 import pytest
 import yaml
+from dependency_injector.errors import Error as DependencyInjectionError
 from pydantic import ValidationError
 
 os.environ.setdefault("NACOS_SERVER_ADDR", "127.0.0.1:8848")
 
 from sandbox.core.config import nacos as nacos_module
-from sandbox.container import Container, _load_provider
+from sandbox.container import (
+    RUNTIME_CONFIG_KEYS,
+    Container,
+    _load_provider,
+    configure_container,
+)
 from sandbox.core.providers.aio_adapter.models import AdapterConfig
 from sandbox.core.providers.aio_adapter.provider import AioSandboxProvider
 from sandbox.core.storage.local import LocalWorkspaceStore
@@ -122,6 +128,52 @@ def test_container_builds_provider_transfer_and_selected_store_from_settings():
     assert isinstance(container.provider(), AioSandboxProvider)
     assert isinstance(container.workspace_store(), LocalWorkspaceStore)
     assert container.provider()._file_transfer is container.file_transfer()
+
+
+def test_container_applies_nacos_runtime_parameters_to_services():
+    config = complete_config()
+    config.update(
+        {
+            "SANDBOX_LEASE_TTL_SECONDS": 1800,
+            "SANDBOX_TARGET_READY": 10,
+            "SANDBOX_MIN_READY": 5,
+            "SANDBOX_READY_RESERVE": 0,
+            "SANDBOX_MAX_CREATE_BATCH": 4,
+            "SANDBOX_WARMUP_TIMEOUT_SECONDS": 180.0,
+            "SANDBOX_DESTROY_TIMEOUT_SECONDS": 180.0,
+            "SANDBOX_WARMUP_MAX_RETRIES": 3,
+            "SANDBOX_CHECKPOINT_INTERVAL_SECONDS": 300.0,
+        }
+    )
+    container = Container()
+
+    effective = configure_container(container, config)
+
+    assert effective == {key: config[key] for key in RUNTIME_CONFIG_KEYS}
+    pool = container.pool()
+    watcher = container.watcher()
+    scheduler = container.scheduler()
+
+    assert (pool._lease_ttl, pool._target_ready, pool._min_ready) == (1800, 10, 5)
+    assert (
+        watcher._target_ready,
+        watcher._min_ready,
+        watcher._reserve,
+        watcher._max_create_batch,
+        watcher._warmup_timeout,
+        watcher._destroy_timeout,
+        watcher._checkpoint_interval,
+    ) == (10, 5, 0, 4, 180.0, 180.0, 3, 300.0)
+    assert scheduler._destroy_timeout == 180.0
+
+
+@pytest.mark.parametrize("missing_key", RUNTIME_CONFIG_KEYS)
+def test_container_rejects_missing_runtime_parameter(missing_key):
+    config = complete_config()
+    config.pop(missing_key)
+
+    with pytest.raises(DependencyInjectionError, match="Undefined configuration option"):
+        configure_container(Container(), config)
 
 
 def test_load_provider_passes_adapter_config_and_file_transfer(monkeypatch):
