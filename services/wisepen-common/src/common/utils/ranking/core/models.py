@@ -20,25 +20,12 @@ class ScoreSignalKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class RankQuery:
-    """排序查询对象，承载主查询和可选的多路扩展查询。"""
+    """排序查询对象。"""
 
-    text: str  # 主查询文本
-    queries: tuple[str, ...] = ()  # 扩展查询文本列表，会与 text 一起参与排序
+    text: str  # 查询文本
     metadata: Metadata = field(
         default_factory=dict
     )  # 调用方附加元数据，pipeline 不解释其含义
-
-    @property
-    def all_queries(self) -> tuple[str, ...]:
-        """返回参与排序的全部非空查询文本，并保持首次出现顺序去重。"""
-        queries: list[str] = []
-
-        if self.text.strip():
-            queries.append(self.text)
-
-        queries.extend(query for query in self.queries if query.strip())
-
-        return tuple(dict.fromkeys(queries))
 
 
 @dataclass(frozen=True, slots=True)

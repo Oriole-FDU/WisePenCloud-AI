@@ -54,11 +54,7 @@ class FieldedBM25Scorer:
 
         positions = candidate_positions(candidates)
 
-        query_tokens = [
-            tokens
-            for tokens in (list(self.tokenizer.tokenize(q)) for q in query.all_queries)
-            if tokens
-        ]
+        query_tokens = list(self.tokenizer.tokenize(query.text))
         if not query_tokens:
             return ()
 
@@ -84,46 +80,34 @@ class FieldedBM25Scorer:
             retriever = bm25s.BM25()
             retriever.index(corpus_tokens, show_progress=False)
             documents, scores = retriever.retrieve(
-                query_tokens,
+                [query_tokens],
                 k=n,
                 sorted=True,
                 show_progress=False,
             )
 
-            best: dict[str, tuple[float, int]] = {}
-            for query_index in range(len(query_tokens)):
-                for rank, raw_index in enumerate(documents[query_index], 1):
-                    candidate = candidates[int(raw_index)]
-                    if not candidate.fields.get(field_name, "").strip():
-                        continue
-                    score = float(scores[query_index][rank - 1])
-                    current = best.get(candidate.candidate_id)
-                    if (
-                            current is None
-                            or score > current[0]
-                            or (score == current[0] and rank < current[1])
-                    ):
-                        # 多 query 命中同一候选同一字段时，只保留该字段下最高 BM25 分和对应 rank。
-                        best[candidate.candidate_id] = (score, rank)
-
-            signals.extend(
-                ScoreSignal(
-                    candidate_id=candidate_id,
-                    name=f"bm25:{field_name}",
-                    value=score,
-                    kind=ScoreSignalKind.FIELD,
-                    rank=rank,
-                    weight=weight,  # 字段加权点：title/heading 等字段通过 signal.weight 影响融合贡献
-                    reason=f"BM25 {field_name} relevance.",
-                    metadata={
-                        "field": field_name,
-                        "method": "lucene",
-                        "query_count": len(query_tokens),
-                    },
+            for rank, raw_index in enumerate(documents[0], 1):
+                candidate = candidates[int(raw_index)]
+                if not candidate.fields.get(field_name, "").strip():
+                    continue
+                score = float(scores[0][rank - 1])
+                if score <= cfg.min_score:
+                    continue
+                signals.append(
+                    ScoreSignal(
+                        candidate_id=candidate.candidate_id,
+                        name=f"bm25:{field_name}",
+                        value=score,
+                        kind=ScoreSignalKind.FIELD,
+                        rank=rank,
+                        weight=weight,  # 字段加权点：title/heading 等字段通过 signal.weight 影响融合贡献
+                        reason=f"BM25 {field_name} relevance.",
+                        metadata={
+                            "field": field_name,
+                            "method": "lucene",
+                        },
+                    )
                 )
-                for candidate_id, (score, rank) in best.items()
-                if score > cfg.min_score
-            )
 
         return tuple(
             sorted(

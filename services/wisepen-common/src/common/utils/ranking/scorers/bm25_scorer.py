@@ -53,13 +53,7 @@ class BM25Scorer:
         if not any(corpus_tokens):
             return ()
 
-        query_tokens = [
-            tokens
-            for tokens in (
-                list(self.tokenizer.tokenize(text)) for text in query.all_queries
-            )
-            if tokens
-        ]
+        query_tokens = list(self.tokenizer.tokenize(query.text))
         if not query_tokens:
             return ()
 
@@ -69,43 +63,29 @@ class BM25Scorer:
         retriever = bm25s.BM25()
         retriever.index(corpus_tokens, show_progress=False)
         documents, scores = retriever.retrieve(
-            query_tokens,
+            [query_tokens],
             k=n,
             sorted=True,
             show_progress=False,
         )
 
-        # 多 query 聚合：按 candidate 保留最高分及其 rank
-        best: dict[str, tuple[float, int]] = {}
-        for query_index in range(len(query_tokens)):
-            for rank, raw_index in enumerate(documents[query_index], 1):
-                candidate_id = candidates[int(raw_index)].candidate_id
-                score = float(scores[query_index][rank - 1])
-                current = best.get(candidate_id)
-                if (
-                        current is None
-                        or score > current[0]
-                        or (score == current[0] and rank < current[1])
-                ):
-                    best[candidate_id] = (score, rank)
-
-        signals = [
-            ScoreSignal(
-                candidate_id=candidate_id,
-                name="bm25:text",
-                value=score,
-                kind=ScoreSignalKind.LEXICAL,
-                rank=rank,
-                weight=cfg.weight,
-                reason="BM25 text relevance.",
-                metadata={
-                    "method": "lucene",
-                    "query_count": len(query_tokens),
-                },
+        signals: list[ScoreSignal] = []
+        for rank, raw_index in enumerate(documents[0], 1):
+            score = float(scores[0][rank - 1])
+            if score <= cfg.min_score:
+                continue
+            signals.append(
+                ScoreSignal(
+                    candidate_id=candidates[int(raw_index)].candidate_id,
+                    name="bm25:text",
+                    value=score,
+                    kind=ScoreSignalKind.LEXICAL,
+                    rank=rank,
+                    weight=cfg.weight,
+                    reason="BM25 text relevance.",
+                    metadata={"method": "lucene"},
+                )
             )
-            for candidate_id, (score, rank) in best.items()
-            if score > cfg.min_score
-        ]
 
         return tuple(
             sorted(
