@@ -19,6 +19,8 @@ from sandbox.core.providers.aio_adapter.client import AioClient
 from sandbox.core.providers.aio_adapter.docker_runtime import DockerRuntime
 from sandbox.core.providers.aio_adapter.models import AdapterConfig
 from sandbox.core.providers.aio_adapter.path_policy import PathPolicy, TenantScope
+from common.core.exceptions import ServiceException
+from common.logger import error, info, warn
 
 
 class AioSandboxProvider(SandboxProvider):
@@ -42,6 +44,20 @@ class AioSandboxProvider(SandboxProvider):
         config: AdapterConfig,
         file_transfer: FileTransferPort,
     ) -> "AioSandboxProvider":
+
+        info(
+            "AIO 沙箱 provider 配置完成",
+            docker_bin=config.docker_bin,
+            image=config.image,
+            docker_host=config.host,
+            aio_port=config.api_port,
+            file_transfer_port=file_transfer,
+            network=config.network,
+            request_timeout_seconds=config.request_timeout_seconds,
+            warmup_timeout_seconds=config.warmup_timeout_seconds,
+            e2e_label=config.e2e_label,
+            tty=config.tty,
+        )
         return cls(
             DockerRuntime(config),
             file_transfer,
@@ -52,8 +68,15 @@ class AioSandboxProvider(SandboxProvider):
         await asyncio.to_thread(self._runtime.validate_deployment)
 
     async def create(self, spec: SandboxSpec) -> SandboxRef:
+        info(
+            "AIO provider 开始创建沙箱",
+            image=spec.image,
+            cpu_cores=spec.cpu_cores,
+            memory_mb=spec.memory_mb,
+            environment_keys=sorted(spec.environment),
+        )
         handle = await asyncio.to_thread(self._runtime.create, spec)
-        return SandboxRef(
+        ref = SandboxRef(
             sandbox_id=f"sb_{handle.container_id[:16]}",
             provider_id=handle.container_id,
             endpoint=Endpoint(
@@ -63,19 +86,80 @@ class AioSandboxProvider(SandboxProvider):
             ),
             metadata={"image": spec.image},
         )
+        info(
+            "AIO provider 创建沙箱返回",
+            sandbox_id=ref.sandbox_id,
+            provider_id=ref.provider_id,
+            endpoint=ref.endpoint.base_url if ref.endpoint else None,
+            image=spec.image,
+        )
+        return ref
 
     async def wait_ready(self, sandbox: SandboxRef, timeout_seconds: float) -> Health:
         client = self._client(sandbox)
         deadline = asyncio.get_running_loop().time() + timeout_seconds
+        attempt = 0
+        info(
+            "AIO provider 开始等待沙箱就绪",
+            sandbox_id=sandbox.sandbox_id,
+            provider_id=sandbox.provider_id,
+            endpoint=sandbox.endpoint.base_url if sandbox.endpoint else None,
+            timeout_seconds=timeout_seconds,
+        )
         # 容器启动后 AIO HTTP 服务会延迟可用，预热阶段轮询健康接口。
         while asyncio.get_running_loop().time() < deadline:
-            if await client.health():
+            attempt += 1
+            try:
+                healthy = await client.health()
+            except ServiceException as exc:
+                remaining_seconds = max(
+                    0, deadline - asyncio.get_running_loop().time()
+                )
+                await asyncio.sleep(min(1, remaining_seconds))
+                continue
+            if healthy:
+                info(
+                    "AIO provider 检查到沙箱已就绪",
+                    sandbox_id=sandbox.sandbox_id,
+                    provider_id=sandbox.provider_id,
+                    endpoint=sandbox.endpoint.base_url if sandbox.endpoint else None,
+                    attempt=attempt,
+                )
                 return Health(True, "ready")
+            warn(
+                "AIO provider 健康检查返回未就绪",
+                sandbox_id=sandbox.sandbox_id,
+                provider_id=sandbox.provider_id,
+                endpoint=sandbox.endpoint.base_url if sandbox.endpoint else None,
+                attempt=attempt,
+            )
             await asyncio.sleep(1)
-        raise TimeoutError(f"沙箱 {sandbox.sandbox_id} 未在限定时间内就绪")
+        exc = TimeoutError(f"沙箱 {sandbox.sandbox_id} 未在限定时间内就绪")
+        error(
+            "AIO provider 等待沙箱就绪超时",
+            exc=exc,
+            sandbox_id=sandbox.sandbox_id,
+            provider_id=sandbox.provider_id,
+            endpoint=sandbox.endpoint.base_url if sandbox.endpoint else None,
+            attempts=attempt,
+            timeout_seconds=timeout_seconds,
+        )
+        raise exc
 
     async def health(self, sandbox: SandboxRef) -> Health:
+        info(
+            "AIO provider 开始执行沙箱健康复检",
+            sandbox_id=sandbox.sandbox_id,
+            provider_id=sandbox.provider_id,
+            endpoint=sandbox.endpoint.base_url if sandbox.endpoint else None,
+        )
         healthy = await self._client(sandbox).health()
+        info(
+            "AIO provider 沙箱健康复检结束",
+            sandbox_id=sandbox.sandbox_id,
+            provider_id=sandbox.provider_id,
+            healthy=healthy,
+        )
         return Health(healthy, "ready" if healthy else "unhealthy")
 
     async def prepare_workspace(
@@ -168,8 +252,31 @@ class AioSandboxProvider(SandboxProvider):
         )
 
     async def destroy(self, sandbox: SandboxRef, reason: str) -> None:
-        await asyncio.to_thread(self._runtime.remove, sandbox.provider_id)
+        info(
+            "AIO provider 开始销毁沙箱",
+            sandbox_id=sandbox.sandbox_id,
+            provider_id=sandbox.provider_id,
+            endpoint=sandbox.endpoint.base_url if sandbox.endpoint else None,
+            reason=reason,
+        )
+        try:
+            await asyncio.to_thread(self._runtime.remove, sandbox.provider_id)
+        except Exception as exc:
+            error(
+                "AIO provider 销毁沙箱失败",
+                exc=exc,
+                sandbox_id=sandbox.sandbox_id,
+                provider_id=sandbox.provider_id,
+                reason=reason,
+            )
+            raise
         self._clients.pop(sandbox.sandbox_id, None)
+        info(
+            "AIO provider 销毁沙箱完成",
+            sandbox_id=sandbox.sandbox_id,
+            provider_id=sandbox.provider_id,
+            reason=reason,
+        )
 
     async def cleanup_owned(self) -> int:
         return await asyncio.to_thread(self._runtime.cleanup_owned)
@@ -179,6 +286,13 @@ class AioSandboxProvider(SandboxProvider):
             raise RuntimeError("沙箱缺少 endpoint")
         client = self._clients.get(sandbox.sandbox_id)
         if client is None:
+            info(
+                "AIO provider 创建 HTTP client",
+                sandbox_id=sandbox.sandbox_id,
+                endpoint=sandbox.endpoint.base_url,
+                timeout_seconds=self._request_timeout,
+                has_token=sandbox.endpoint.token is not None,
+            )
             client = AioClient(
                 sandbox.endpoint.base_url,
                 self._request_timeout,

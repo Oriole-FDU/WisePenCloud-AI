@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 
 from common.core.exceptions import ServiceException
+from common.logger import debug, error, info, warn
 
 from sandbox.domain.error_codes import SandboxErrorCode
 
@@ -26,13 +27,41 @@ class AioClient:
         return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
     async def health(self) -> bool:
+        url = f"{self._base_url}/v1/sandbox"
+        debug(
+            "AIO 健康检查请求开始",
+            url=url,
+            timeout_seconds=self._timeout,
+        )
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.get(
-                    f"{self._base_url}/v1/sandbox", headers=self._headers()
+                response = await client.get(url, headers=self._headers())
+            debug(
+                "AIO 健康检查收到响应",
+                url=url,
+                status_code=response.status_code,
+                is_success=response.is_success,
+            )
+            if response.is_success:
+                info(
+                    "AIO 健康检查成功",
+                    url=url,
+                    status_code=response.status_code,
+                )
+            else:
+                warn(
+                    "AIO 健康检查返回非 2xx",
+                    url=url,
+                    status_code=response.status_code,
                 )
             return response.is_success
         except httpx.TimeoutException as exc:
+            error(
+                "AIO 健康检查超时",
+                exc=exc,
+                url=url,
+                timeout_seconds=self._timeout,
+            )
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
                 "AIO 健康检查超时",
