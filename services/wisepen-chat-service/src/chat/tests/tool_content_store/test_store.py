@@ -34,6 +34,7 @@ async def test_markdown_store_projects_page_and_section_locators() -> None:
 
     assert result.status == ToolContentPutStatus.STORED
     assert result.receipt is not None
+    assert result.receipt.total_length == len("<!-- page 1 -->\n\n# 鉴权\n\n请求必须携带 AppBuilder API Key。")
     assert repository.stored is not None
     assert repository.stored.chunks[0].page_labels == ("1",)
     assert repository.stored.chunks[0].section_paths == (("鉴权",),)

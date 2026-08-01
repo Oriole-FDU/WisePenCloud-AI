@@ -58,7 +58,7 @@ async def test_web_fetch_preserves_html_and_pdf_markdown_formats(
     result = await WebFetchTool(
         fetch_coordinator=_FetchCoordinator(),
     ).execute(
-        {"user_id": "u1"},
+        {},
         urls=["https://example.com", "https://example.com/paper.pdf"],
     )
 
@@ -80,7 +80,7 @@ async def test_web_fetch_preserves_html_and_pdf_markdown_formats(
 @pytest.mark.asyncio
 async def test_web_crawl_marks_cleaned_html_as_markdown() -> None:
     result = await WebCrawlTool(crawler=_Crawler()).execute(
-        {"user_id": "u1"},
+        {},
         seed_url="https://example.com",
     )
 
@@ -100,7 +100,8 @@ async def test_pdf_extraction_runs_inspector_in_thread(
     async def fake_to_thread(function: Any, content: bytes) -> Any:
         called["function"] = function
         called["content"] = content
-        return type("PdfResult", (), {"markdown": "## PDF\n"})()
+        page = type("PdfPage", (), {"page": 0, "markdown": "## PDF\n"})()
+        return type("PdfResult", (), {"pages": (page,)})()
 
     monkeypatch.setattr(pdf_extract.asyncio, "to_thread", fake_to_thread)
 
@@ -109,9 +110,9 @@ async def test_pdf_extraction_runs_inspector_in_thread(
         url="https://example.com/paper.pdf",
     )
 
-    assert markdown == "## PDF\n"
+    assert markdown == "<!-- page 1 -->\n\n## PDF"
     assert called == {
-        "function": pdf_extract.pdf_inspector.process_pdf_bytes,
+        "function": pdf_extract.pdf_inspector.extract_pages_markdown_bytes,
         "content": b"%PDF-1.7 fake",
     }
 
@@ -121,7 +122,8 @@ async def test_pdf_extraction_rejects_empty_markdown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_to_thread(*_: Any) -> Any:
-        return type("PdfResult", (), {"markdown": ""})()
+        page = type("PdfPage", (), {"page": 0, "markdown": ""})()
+        return type("PdfResult", (), {"pages": (page,)})()
 
     monkeypatch.setattr(pdf_extract.asyncio, "to_thread", fake_to_thread)
 

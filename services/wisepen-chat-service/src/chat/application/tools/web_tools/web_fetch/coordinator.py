@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from chat.application.tools.utils.url import UrlSecurityError
+from chat.application.tools.web_tools.common import (
+    WebContentCache,
+    WebContentCacheRepository,
+)
 from common.logger import warn
 
 from .batch_scheduler import FetchBatchScheduler, FetchJob
-from .cache import WebFetchCache
 from .content.html_clean import clean_html
 from .content.pdf_extract import extract_pdf_markdown
 from .content.quality import should_fallback
-from .core.cache import WebContentCacheRepository
 from .core.errors import (
     UrlFetchError,
     UrlFetchHttpError,
@@ -49,7 +51,7 @@ class FetchCoordinator:
     ) -> None:
         self._static_fetcher = static_fetcher
         self._stealthy_fetcher = stealthy_fetcher
-        self._cache = WebFetchCache(
+        self._cache = WebContentCache(
             repository=content_cache_repository,
         )
         self._min_text_length = min_text_length
@@ -58,9 +60,6 @@ class FetchCoordinator:
     async def fetch(
         self,
         urls: list[str],
-        *,
-        user_id: str,
-        source_scope: str = "web_public",
     ) -> tuple[WebFetchResult, ...]:
         if not urls:
             return ()
@@ -72,8 +71,6 @@ class FetchCoordinator:
             return await self._run_fetch_job(
                 job=job,
                 fetcher=self._static_fetcher,
-                user_id=user_id,
-                source_scope=source_scope,
                 read_cache=True,
                 allow_fallback=True,
             )
@@ -85,8 +82,6 @@ class FetchCoordinator:
             return await self._run_fetch_job(
                 job=job,
                 fetcher=self._stealthy_fetcher,
-                user_id=user_id,
-                source_scope=source_scope,
                 read_cache=False,
                 allow_fallback=False,
             )
@@ -109,19 +104,20 @@ class FetchCoordinator:
         *,
         job: FetchJob,
         fetcher: WebFetcher,
-        user_id: str,
-        source_scope: str,
         read_cache: bool,
         allow_fallback: bool,
     ) -> tuple[WebFetchResult | None, bool]:
         try:
             if read_cache:
-                cached = await self._cache.read_page(
+                cached = await self._cache.read(
                     url=job.url,
-                    user_id=user_id,
                 )
                 if cached is not None:
-                    return cached.result, False
+                    return WebFetchResult(
+                        source_url=job.url,
+                        text=cached.text,
+                        is_md=cached.is_md,
+                    ), False
 
             try:
                 raw = await fetcher.fetch(job.url)
@@ -141,12 +137,12 @@ class FetchCoordinator:
                 # stealthy 没有后续阶段，只能把当前结果直接交给调用方。
                 return (result, False) if not allow_fallback else (None, True)
 
-            await self._cache.write_result(
+            await self._cache.write(
                 url=job.url,
-                user_id=user_id,
-                source_scope=source_scope,
-                raw=raw,
-                result=result,
+                headers=raw.headers,
+                text=result.text,
+                is_md=result.is_md,
+                raw_html=raw.raw_html,
             )
             return result, False
 

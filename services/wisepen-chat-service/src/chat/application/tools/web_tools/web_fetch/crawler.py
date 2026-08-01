@@ -11,12 +11,14 @@ from chat.application.tools.utils.url import (
     UrlSecurityError,
     validate_public_http_url_async,
 )
+from chat.application.tools.web_tools.common import (
+    WebContentCache,
+    WebContentCacheRepository,
+)
 from common.logger import warn
 
-from .cache import WebFetchCache
 from .content.html_clean import clean_html
 from .content.quality import should_fallback
-from .core.cache import WebContentCacheRepository
 from .core.errors import UrlFetchError, UrlFetchUnsupportedUrlError
 from .core.models import WebFetchResult
 from .fetchers import WebFetcher
@@ -50,7 +52,7 @@ class WebCrawler:
     ) -> None:
         self._static_fetcher = static_fetcher
         self._stealthy_fetcher = stealthy_fetcher
-        self._cache = WebFetchCache(
+        self._cache = WebContentCache(
             repository=content_cache_repository,
         )
         self._min_text_length = min_text_length
@@ -60,8 +62,6 @@ class WebCrawler:
         self,
         seed_url: str,
         *,
-        user_id: str,
-        source_scope: str = "web_public",
         max_pages: int = 20,
         max_depth: int = 2,
         same_domain: bool = True,
@@ -87,8 +87,6 @@ class WebCrawler:
                 *(
                     self._fetch_one(
                         url,
-                        user_id=user_id,
-                        source_scope=source_scope,
                     )
                     for url, _ in batch
                 ),
@@ -126,20 +124,24 @@ class WebCrawler:
     async def _fetch_one(
         self,
         url: str,
-        *,
-        user_id: str,
-        source_scope: str,
     ) -> _CrawlPage | None:
         try:
             url = await validate_public_http_url_async(url.strip())
         except UrlSecurityError:
             return None
 
-        cached = await self._cache.read_page(url=url, user_id=user_id)
+        cached = await self._cache.read(url=url)
         if cached is not None:
-            if not cached.result.is_md:
+            if not cached.is_md:
                 return None
-            return _CrawlPage(result=cached.result, raw_html=cached.raw_html)
+            return _CrawlPage(
+                result=WebFetchResult(
+                    source_url=url,
+                    text=cached.text,
+                    is_md=True,
+                ),
+                raw_html=cached.raw_html,
+            )
 
         used_stealthy = False
         try:
@@ -191,12 +193,12 @@ class WebCrawler:
             is_md=True,
         )
         if not needs_fallback:
-            await self._cache.write_result(
+            await self._cache.write(
                 url=url,
-                user_id=user_id,
-                source_scope=source_scope,
-                raw=raw,
-                result=result,
+                headers=raw.headers,
+                text=result.text,
+                is_md=result.is_md,
+                raw_html=raw.raw_html,
             )
         return _CrawlPage(result=result, raw_html=raw.raw_html)
 

@@ -41,7 +41,6 @@ async def test_fetch_releases_file_sniff_worker_when_scrapling_page_fetch_is_pen
                 "https://example.test/slow",
                 "https://example.test/fast",
             ],
-            user_id="u1",
         )
     )
 
@@ -83,7 +82,6 @@ async def test_fetch_allows_each_failed_static_fetch_to_fallback(
             "https://example.test/one",
             "https://example.test/two",
         ],
-        user_id="u1",
     )
 
     assert len(result) == 2
@@ -114,7 +112,6 @@ async def test_fetch_skips_invalid_url_without_blocking_other_jobs(
             "not a URL",
             "https://example.test/valid",
         ],
-        user_id="u1",
     )
 
     assert static_fetcher.calls == [

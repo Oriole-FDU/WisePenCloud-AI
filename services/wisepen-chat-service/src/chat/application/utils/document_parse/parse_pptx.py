@@ -1,22 +1,18 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 from collections.abc import Mapping
 from pathlib import Path
 
 
-async def parse_pptx(
+def parse_pptx(
     file_path: str | Path,
     *,
     image_path: str | Path | None = None,
 ) -> str:
     file_path = Path(file_path)
-    image_path = Path(image_path) if image_path else file_path.parent / "images"
-    return await asyncio.to_thread(_parse_pptx, file_path, image_path)
+    image_path = Path(image_path) if image_path is not None else None
 
-
-def _parse_pptx(file_path: Path, image_path: Path) -> str:
     from mineru.backend.office.office_middle_json_mkcontent import union_make
     from mineru.backend.office.pptx_analyze import office_pptx_analyze
     from mineru.data.data_reader_writer import FileBasedDataWriter
@@ -27,7 +23,11 @@ def _parse_pptx(file_path: Path, image_path: Path) -> str:
 
     middle_json, _ = office_pptx_analyze(
         file_path.read_bytes(),
-        image_writer=FileBasedDataWriter(str(image_path)),
+        image_writer=(
+            FileBasedDataWriter(str(image_path))
+            if image_path is not None
+            else None
+        ),
     )
 
     pdf_info = middle_json.get("pdf_info")
@@ -46,7 +46,7 @@ def _parse_pptx(file_path: Path, image_path: Path) -> str:
         page_markdown = union_make(
             [page_info],
             MakeMode.MM_MD,
-            image_path.name,
+            image_path.name if image_path is not None else "",
         ).strip()
         marker = f"<!-- page {page_idx + 1} -->"
         pages.append(f"{marker}\n\n{page_markdown}" if page_markdown else marker)
@@ -82,11 +82,9 @@ def main() -> None:
     if args.fast:
         markdown = fast_parse_pptx(args.file_path)
     else:
-        markdown = asyncio.run(
-            parse_pptx(
-                args.file_path,
-                image_path=args.output.parent / "images",
-            )
+        markdown = parse_pptx(
+            args.file_path,
+            image_path=args.output.parent / "images",
         )
 
     args.output.write_text(markdown, encoding="utf-8")

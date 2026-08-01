@@ -5,38 +5,24 @@ import pytest
 from chat.application.tools.web_tools.web_fetch.coordinator import (
     FetchCoordinator,
 )
-from chat.application.tools.web_tools.web_fetch.core.models import (
-    RawFetchOutput,
-    WebContentCacheMode,
-    WebContentCacheValue,
-)
+from chat.application.tools.web_tools.common import WebContentCacheValue
+from chat.application.tools.web_tools.web_fetch.core.models import RawFetchOutput
 
 
 class _MemoryCacheRepository:
     def __init__(self) -> None:
-        self.values: dict[
-            tuple[str, str, WebContentCacheMode],
-            WebContentCacheValue,
-        ] = {}
+        self.values: dict[tuple[str, str], WebContentCacheValue] = {}
 
     async def get_value(
         self,
         *,
-        user_id: str,
         url: str,
-        cache_mode: WebContentCacheMode,
+        cache_variant: str = "",
     ) -> WebContentCacheValue | None:
-        return self.values.get((user_id, url, cache_mode)) or self.values.get(
-            ("", url, cache_mode)
-        )
+        return self.values.get((url, cache_variant))
 
     async def set_value(self, value: WebContentCacheValue) -> None:
-        user_id = (
-            ""
-            if value.cache_mode is WebContentCacheMode.PUBLIC
-            else value.user_id
-        )
-        self.values[(user_id, value.canonical_url, value.cache_mode)] = value
+        self.values[(value.canonical_url, value.cache_variant)] = value
 
 
 class _StaticFetcher:
@@ -77,14 +63,8 @@ async def test_html_result_hits_url_cache_on_second_fetch(
         min_text_length=1,
     )
 
-    first = await coordinator.fetch(
-        ["https://example.test/page"],
-        user_id="u1",
-    )
-    second = await coordinator.fetch(
-        ["https://example.test/page"],
-        user_id="u1",
-    )
+    first = await coordinator.fetch(["https://example.test/page"])
+    second = await coordinator.fetch(["https://example.test/page"])
 
     assert static_fetcher.calls == 1
     assert first[0].is_md is True
@@ -109,14 +89,8 @@ async def test_pdf_cache_preserves_markdown_format(
         content_cache_repository=_MemoryCacheRepository(),
     )
 
-    first = await coordinator.fetch(
-        ["https://example.test/paper.pdf"],
-        user_id="u1",
-    )
-    second = await coordinator.fetch(
-        ["https://example.test/paper.pdf"],
-        user_id="u1",
-    )
+    first = await coordinator.fetch(["https://example.test/paper.pdf"])
+    second = await coordinator.fetch(["https://example.test/paper.pdf"])
 
     assert static_fetcher.calls == 1
     assert first[0].is_md is True

@@ -75,7 +75,14 @@ from chat.application.tools.core.mcp import (
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import (
     GetHistoricalChatMessagesTool,
 )
-from chat.application.tools.web_tools import WebCrawlTool, WebFetchTool
+from chat.application.tools.web_tools import (
+    DocumentLinkExtractTool,
+    WebCrawlTool,
+    WebFetchTool,
+)
+from chat.application.tools.web_tools.document_link_extract import (
+    DocumentLinkExtractor,
+)
 from chat.application.tools.web_tools.web_fetch import (
     FetchCoordinator,
     StaticPageFetcher,
@@ -370,6 +377,15 @@ class Container(containers.DeclarativeContainer):
         WebFetchTool,
         fetch_coordinator=web_fetch_coordinator,
     )
+    document_link_extractor = providers.Singleton(
+        DocumentLinkExtractor,
+        session=web_fetch_static_session,
+        content_cache_repository=web_content_cache_repository,
+    )
+    document_link_extract_tool = providers.Singleton(
+        DocumentLinkExtractTool,
+        extractor=document_link_extractor,
+    )
     web_crawl_tool = providers.Singleton(
         WebCrawlTool,
         crawler=web_crawler,
@@ -382,6 +398,7 @@ class Container(containers.DeclarativeContainer):
         tool_content_regex_read_tool,
         tool_content_ranked_expand_read_tool,
         web_fetch_tool,
+        document_link_extract_tool,
         web_crawl_tool,
     )
 

@@ -202,6 +202,7 @@ async def test_executor_caches_tool_return_large_text() -> None:
     assert payload["status"] == "ok"
     assert payload["content_receipts"][0]["content_index"] == 0
     assert payload["content_receipts"][0]["content_id"] == repository.stored.content_id
+    assert payload["content_receipts"][0]["total_length"] == len(repository.stored.text)
     assert payload["content_receipts"][0]["metadata"] == {
         "source_url": "https://example.com"
     }
@@ -256,6 +257,7 @@ async def test_output_cache_preserves_index_after_partial_store_failure() -> Non
                 receipt=ToolContentReceipt(
                     content_id="cnt_second",
                     chunk_count=1,
+                    total_length=len("second"),
                     metadata=dict(kwargs["metadata"]),
                 ),
             )
@@ -282,6 +284,7 @@ async def test_output_cache_preserves_index_after_partial_store_failure() -> Non
             "content_index": 1,
             "content_id": "cnt_second",
             "chunk_count": 1,
+            "total_length": 6,
             "supported_selectors": (),
             "metadata": {"source_url": "https://example.com/second"},
         },

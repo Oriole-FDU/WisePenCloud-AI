@@ -13,12 +13,7 @@ from .models import (
     SearchResponse,
     WebSearchCandidate,
 )
-from .providers.base import SearchProviderError
-from .sources import (
-    CustomSearchSource,
-    PlatformDefaultSearchSource,
-    WebSearchSourceScope,
-)
+from .providers.base import ProviderSearcher
 
 
 class SearchPipeline:
@@ -33,23 +28,16 @@ class SearchPipeline:
         search_query: str,
         ranking_query: str,
         max_results: int,
-        source: PlatformDefaultSearchSource | CustomSearchSource,
+        searcher: ProviderSearcher,
         mode: SearchMode,
     ) -> SearchPipelineResult:
-        try:
-            response = await self._request_provider_response(
-                query=search_query,
-                max_results=max_results,
-                source=source,
-                mode=mode,
-            )
-        except SearchProviderError:
-            if source.scope is WebSearchSourceScope.PRIVATE:
-                raise
+        response = await self._request_provider_response(
+            query=search_query,
+            max_results=max_results,
+            searcher=searcher,
+            mode=mode,
+        )
 
-            response = None
-
-        items = response.results if response is not None else ()
         candidates = tuple(
             WebSearchCandidate(
                 candidate_id=f"[{index}]",
@@ -58,7 +46,7 @@ class SearchPipeline:
                 snippet=item.snippet,
                 highlights=item.highlights,
             )
-            for index, item in enumerate(items, 1)
+            for index, item in enumerate(response.results, 1)
         )
 
         ranked = await self._ranking_pipeline.arank(
@@ -116,13 +104,13 @@ class SearchPipeline:
         *,
         query: str,
         max_results: int,
-        source: PlatformDefaultSearchSource | CustomSearchSource,
+        searcher: ProviderSearcher,
         mode: SearchMode,
     ) -> SearchResponse:
         search = (
-            source.searcher.search_academic
+            searcher.search_academic
             if mode is SearchMode.ACADEMIC
-            else source.searcher.search_web
+            else searcher.search_web
         )
 
         return await search(

@@ -79,9 +79,10 @@ class WebCrawlTool:
                     "section. Pages are discovered breadth-first from links in fetched HTML, subject "
                     "to max_pages, max_depth, and same_domain; the result contains only successfully "
                     "cleaned HTML pages as Markdown. This tool does not extract direct PDF URLs or "
-                    "search the web. Use web_fetch for one known page, a batch of known URLs, or a "
-                    "direct PDF URL. Each returned page includes its source URL, and the cached "
-                    "content keeps source_url metadata for follow-up content reads."
+                    "search the web. Use web_fetch for known HTML pages or convenient fast PDF "
+                    "extraction; use document_link_extract for exact PDF, DOCX, XLSX, or PPTX "
+                    "extraction. Each returned page includes its source URL, and cached content "
+                    "keeps source_url metadata for follow-up content reads."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -90,7 +91,6 @@ class WebCrawlTool:
                 persist_output=True,
                 risk_level=ToolRiskLevel.MEDIUM,
                 timeout_seconds=300.0,
-                required_context_keys=("user_id",),
             ),
         )
 
@@ -104,12 +104,11 @@ class WebCrawlTool:
         config: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> ToolReturn:
-        del config
+        del context, config
         seed_url = str(kwargs["seed_url"]).strip()
         try:
             pages = await self._crawler.crawl(
                 seed_url,
-                user_id=str(context["user_id"]),
                 max_pages=int(kwargs.get("max_pages") or DEFAULT_MAX_PAGES),
                 max_depth=int(kwargs.get("max_depth") or DEFAULT_MAX_DEPTH),
                 same_domain=(

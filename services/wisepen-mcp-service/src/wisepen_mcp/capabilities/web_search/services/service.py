@@ -55,7 +55,7 @@ class WebSearchService:
             )
 
         try:
-            source = self._source_factory.build(
+            searcher = self._source_factory.build(
                 provider=provider,
                 api_key=api_key,
             )
@@ -63,7 +63,7 @@ class WebSearchService:
                 search_query=search_query,
                 ranking_query=ranking_query,
                 max_results=max_results,
-                source=source,
+                searcher=searcher,
                 mode=mode,
             )
         except SearchProviderCredentialError as error:
@@ -101,5 +101,5 @@ class WebSearchService:
                 )
                 for candidate in result.candidates
             ),
-            supplier_answer=result.response.answer if result.response else None,
+            supplier_answer=result.response.answer,
         )

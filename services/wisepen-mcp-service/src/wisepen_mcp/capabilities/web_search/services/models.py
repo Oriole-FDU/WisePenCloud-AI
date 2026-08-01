@@ -52,7 +52,7 @@ class WebSearchCandidate:
 @dataclass(frozen=True, slots=True)
 class SearchPipelineResult:
     search_query: str
-    response: SearchResponse | None
+    response: SearchResponse
     candidates: tuple[WebSearchCandidate, ...]
 
 

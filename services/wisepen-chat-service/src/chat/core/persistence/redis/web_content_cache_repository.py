@@ -7,10 +7,7 @@ from hashlib import sha256
 
 from redis.asyncio import Redis
 
-from chat.application.tools.web_tools.web_fetch.core.models import (
-    WebContentCacheMode,
-    WebContentCacheValue,
-)
+from chat.application.tools.web_tools.common import WebContentCacheValue
 
 from .base import RedisRepository
 
@@ -24,15 +21,13 @@ class RedisWebContentCacheRepository(RedisRepository):
     async def get_value(
         self,
         *,
-        user_id: str,
         url: str,
-        cache_mode: WebContentCacheMode,
+        cache_variant: str = "",
     ) -> WebContentCacheValue | None:
         raw = await self._redis.get(
             self._value_key(
-                user_id=user_id,
                 url=url,
-                cache_mode=cache_mode,
+                cache_variant=cache_variant,
             )
         )
         if raw is None:
@@ -41,12 +36,11 @@ class RedisWebContentCacheRepository(RedisRepository):
         try:
             payload = json.loads(raw)
             return WebContentCacheValue(
-                user_id=str(payload["user_id"]),
                 canonical_url=str(payload["canonical_url"]),
-                cache_mode=WebContentCacheMode(payload["cache_mode"]),
                 text=str(payload["text"]),
                 is_md=bool(payload["is_md"]),
                 raw_html=payload.get("raw_html"),
+                cache_variant=str(payload.get("cache_variant") or ""),
                 expire_at=datetime.fromisoformat(payload["expire_at"]),
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
@@ -54,16 +48,14 @@ class RedisWebContentCacheRepository(RedisRepository):
 
     async def set_value(self, value: WebContentCacheValue) -> None:
         payload = asdict(value)
-        payload["cache_mode"] = value.cache_mode.value
         payload["expire_at"] = value.expire_at.isoformat()
         expire_at = value.expire_at
         if expire_at.tzinfo is None:
             expire_at = expire_at.replace(tzinfo=timezone.utc)
         await self._redis.set(
             self._value_key(
-                user_id=value.user_id,
                 url=value.canonical_url,
-                cache_mode=value.cache_mode,
+                cache_variant=value.cache_variant,
             ),
             json.dumps(payload, ensure_ascii=False),
             ex=max(
@@ -78,14 +70,14 @@ class RedisWebContentCacheRepository(RedisRepository):
     def _value_key(
         cls,
         *,
-        user_id: str,
         url: str,
-        cache_mode: WebContentCacheMode,
+        cache_variant: str = "",
     ) -> str:
-        url_hash = cls._hash(url.strip())
-        if cache_mode is WebContentCacheMode.PUBLIC:
-            return f"{_VALUE_KEY_PREFIX}public:{url_hash}"
-        return f"{_VALUE_KEY_PREFIX}private:{cls._hash(user_id)}:{url_hash}"
+        cache_key = url.strip()
+        if cache_variant:
+            cache_key = f"{cache_key}\0{cache_variant}"
+        url_hash = cls._hash(cache_key)
+        return f"{_VALUE_KEY_PREFIX}{url_hash}"
 
     @staticmethod
     def _hash(value: str) -> str:

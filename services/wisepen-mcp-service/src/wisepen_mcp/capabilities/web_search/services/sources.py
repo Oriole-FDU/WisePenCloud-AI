@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 
 import httpx
 
@@ -19,29 +18,6 @@ from .providers.base import (
     ProviderSearcher,
     SearchProviderConfig,
 )
-
-
-class WebSearchSourceScope(StrEnum):
-    """搜索来源的缓存隔离域。"""
-
-    PUBLIC = "public"
-    PRIVATE = "private"
-
-
-@dataclass(frozen=True, slots=True)
-class PlatformDefaultSearchSource:
-    searcher: ProviderSearcher
-    provider: SearchProviderName | None = None
-    scope: WebSearchSourceScope = WebSearchSourceScope.PUBLIC
-    source_id: str = "platform_default"
-
-
-@dataclass(frozen=True, slots=True)
-class CustomSearchSource:
-    provider: SearchProviderName
-    searcher: ProviderSearcher
-    source_id: str
-    scope: WebSearchSourceScope = WebSearchSourceScope.PRIVATE
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,19 +38,13 @@ class SearchSourceFactory:
         *,
         provider: SearchProviderName | None,
         api_key: str | None,
-    ) -> PlatformDefaultSearchSource | CustomSearchSource:
+    ) -> ProviderSearcher:
         if provider is None:
-            return PlatformDefaultSearchSource(
-                searcher=self.platform_default_searcher,
-            )
+            return self.platform_default_searcher
 
-        return CustomSearchSource(
+        return self._build_custom_searcher(
             provider=provider,
-            source_id=f"custom:{provider.value}",
-            searcher=self._build_custom_searcher(
-                provider=provider,
-                api_key=api_key,
-            ),
+            api_key=api_key,
         )
 
     def _build_custom_searcher(

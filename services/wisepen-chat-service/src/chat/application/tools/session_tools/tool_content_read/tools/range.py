@@ -15,7 +15,7 @@ from ..services.models import ToolContentReadResult
 from ..services.reader import ToolContentReader
 
 _TIMEOUT_SECONDS = 300.0
-_DEFAULT_READ_CHARS = 4000
+_DEFAULT_READ_CHARS = 8000
 _PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -68,10 +68,12 @@ class ToolContentReadTool:
                     "  - Ranges use Python slice semantics: start is inclusive and end is exclusive.\n"
                     "  - Negative offsets count from the end; start=-1000 reads the final 1000 characters.\n"
                     "  - start=0,end=2000 reads the first 2000 characters.\n"
-                    "  - Omitting both offsets reads the first 4000 characters.\n\n"
+                    "  - Omitting both offsets reads the first 8000 characters; content beyond this range is clipped.\n\n"
+                    "  - Use total_length from the source content_receipt to choose a strategy: read all when it is "
+                    "under 8000, read in two ranges when it is 8000-16000, and prefer "
+                    "tool_content_ranked_expand_read before focused range reads when it exceeds 16000.\n\n"
                     "OUTPUT RULES:\n"
                     "  - Returns the requested text with normalized absolute offsets and structural locators.\n"
-                    "  - Oversized ranges are capped at the configured output window.\n"
                     "  - This tool reads existing cnt_* content and never creates another content receipt."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),

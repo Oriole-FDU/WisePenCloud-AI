@@ -4,12 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from chat.application.tools.web_tools.web_fetch.cache import WebFetchCache
-from chat.application.tools.web_tools.web_fetch.core.models import (
-    RawFetchOutput,
-    WebContentCacheMode,
+from chat.application.tools.web_tools.common import (
+    WebContentCache,
     WebContentCacheValue,
-    WebFetchResult,
 )
 
 
@@ -20,10 +17,10 @@ class _RecordingRepository:
     async def get_value(
         self,
         *,
-        user_id: str,
         url: str,
-        cache_mode: WebContentCacheMode,
+        cache_variant: str = "",
     ) -> WebContentCacheValue | None:
+        del url, cache_variant
         return None
 
     async def set_value(self, value: WebContentCacheValue) -> None:
@@ -73,21 +70,11 @@ async def _write_result(
     headers: dict[str, str],
 ) -> None:
     url = "https://example.test/page"
-    cache = WebFetchCache(repository=repository)
-    raw = RawFetchOutput(
-        source_url=url,
+    cache = WebContentCache(repository=repository)
+    await cache.write(
+        url=url,
         headers=headers,
-        raw_html="<article>content</article>",
-    )
-    result = WebFetchResult(
-        source_url=url,
         text="content",
         is_md=True,
-    )
-    await cache.write_result(
-        url=url,
-        user_id="u1",
-        source_scope="web_public",
-        raw=raw,
-        result=result,
+        raw_html="<article>content</article>",
     )

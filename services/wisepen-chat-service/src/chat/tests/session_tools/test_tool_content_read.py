@@ -547,6 +547,10 @@ async def test_range_tool_defaults_to_head_and_caps_requested_range() -> None:
     )
 
     assert tool.definition.llm_spec.name == "tool_content_read"
+    description = tool.definition.llm_spec.description
+    assert "first 8000 characters" in description
+    assert "first 4000 characters" not in description
+    assert "total_length" in description
     assert result.window is not None
     assert result.window.text == stored.text[:5]
     assert (result.window.start_offset, result.window.end_offset) == (0, 5)

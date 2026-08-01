@@ -24,8 +24,9 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "maxItems": MAX_URLS,
             "description": (
                 "One or more complete, publicly reachable http:// or https:// URLs. "
-                "Use a direct PDF URL when you need PDF content; ordinary HTML pages are "
-                "cleaned to Markdown. Do not pass a search query, site name, or relative URL."
+                "HTML pages are cleaned to Markdown. Direct PDF URLs use fast native text-layer "
+                "extraction only. Use document_link_extract for exact PDF parsing or DOCX, XLSX, "
+                "and PPTX links. Do not pass a search query, site name, or relative URL."
             ),
         },
     },
@@ -48,13 +49,14 @@ class WebFetchTool:
                 name="web_fetch",
                 description=(
                     "Fetch one or more specific public HTTP(S) URLs and return their readable "
-                    "content. Use this when the exact page or PDF URL is already known, including "
-                    "several unrelated URLs. HTML and direct PDFs are returned as Markdown. Use "
-                    "web_crawl when you need to "
-                    "discover and read multiple linked HTML pages starting from one site URL. URLs "
-                    "must be complete public http(s) URLs; invalid or unsupported URLs are omitted "
-                    "from the returned items. Each returned item identifies its source URL, and "
-                    "the cached content keeps source_url metadata for follow-up content reads."
+                    "content. Use this when exact HTML page URLs are known, including several "
+                    "unrelated pages. Direct PDF URLs are supported as a convenience but use only "
+                    "fast native text-layer extraction; this tool does not provide exact PDF "
+                    "parsing and does not accept other binary documents. Use document_link_extract "
+                    "for exact PDF, DOCX, XLSX, or PPTX extraction, and web_crawl to discover linked "
+                    "HTML pages. Invalid or unsupported URLs are omitted. Each returned item "
+                    "identifies its source URL, and cached content keeps source_url metadata for "
+                    "follow-up content reads."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -63,7 +65,6 @@ class WebFetchTool:
                 persist_output=True,
                 risk_level=ToolRiskLevel.MEDIUM,
                 timeout_seconds=300.0,
-                required_context_keys=("user_id",),
             ),
         )
 
@@ -77,10 +78,9 @@ class WebFetchTool:
         config: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> ToolReturn:
-        del config
+        del context, config
         results = await self._fetch_coordinator.fetch(
             [str(url).strip() for url in kwargs["urls"]],
-            user_id=str(context["user_id"]),
         )
         visible_result = {
             "items": tuple(

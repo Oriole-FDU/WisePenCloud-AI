@@ -131,6 +131,7 @@ class ToolContentStore:
             receipt=ToolContentReceipt(
                 content_id=stored.content_id,
                 chunk_count=len(chunks),
+                total_length=len(stored.text),
                 supported_selectors=_supported_selectors(stored),
                 metadata=content_metadata,
             ),

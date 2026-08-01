@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 from pathlib import Path
 
 
-async def parse_xlsx(
+def parse_xlsx(
     file_path: str | Path,
     *,
     image_path: str | Path | None = None,
 ) -> str:
     file_path = Path(file_path)
-    image_path = Path(image_path) if image_path else file_path.parent / "images"
-    return await asyncio.to_thread(_parse_xlsx, file_path, image_path)
+    image_path = Path(image_path) if image_path is not None else None
 
-
-def _parse_xlsx(file_path: Path, image_path: Path) -> str:
     from mineru.backend.office.office_middle_json_mkcontent import union_make
     from mineru.backend.office.xlsx_analyze import office_xlsx_analyze
     from mineru.data.data_reader_writer import FileBasedDataWriter
@@ -26,13 +22,17 @@ def _parse_xlsx(file_path: Path, image_path: Path) -> str:
 
     middle_json, _ = office_xlsx_analyze(
         file_path.read_bytes(),
-        image_writer=FileBasedDataWriter(str(image_path)),
+        image_writer=(
+            FileBasedDataWriter(str(image_path))
+            if image_path is not None
+            else None
+        ),
     )
     _convert_simple_mineru_tables(middle_json)
     return union_make(
         middle_json["pdf_info"],
         MakeMode.MM_MD,
-        image_path.name,
+        image_path.name if image_path is not None else "",
     )
 
 
@@ -102,11 +102,9 @@ def main() -> None:
     if args.fast:
         markdown = fast_parse_xlsx(args.file_path)
     else:
-        markdown = asyncio.run(
-            parse_xlsx(
-                args.file_path,
-                image_path=args.output.parent / "images",
-            )
+        markdown = parse_xlsx(
+            args.file_path,
+            image_path=args.output.parent / "images",
         )
 
     args.output.write_text(markdown, encoding="utf-8")
