@@ -1,10 +1,6 @@
-import pytest
-
 from common.utils.chunkers import (
     BlockKind,
     ChunkDocument,
-    MarkdownChunkerConfig,
-    MarkdownChunkingStrategy,
     MarkdownChunker,
 )
 
@@ -46,13 +42,12 @@ def test_section_locator_includes_nested_sections_until_next_parent_heading() ->
     next_heading_start = text.index("# 下一个一级")
 
     assert section.end_offset == next_heading_start
-    assert section.chunk_indices == (0, 1, 2, 3)
     next_section = next(
         locator
         for locator in result.locators
         if locator.name == "section:下一个一级"
     )
-    assert next_section.chunk_indices == (4,)
+    assert next_section.start_offset == next_heading_start
 
 
 def test_marks_pipe_and_html_tables() -> None:
@@ -146,7 +141,7 @@ def test_does_not_merge_numbered_reference_or_figure_caption_into_table() -> Non
         assert "caption" not in result.blocks[1].metadata
 
 
-def test_page_markers_are_hard_chunk_boundaries() -> None:
+def test_page_markers_do_not_create_chunk_boundaries() -> None:
     text = "\n\n".join(
         (
             "<!-- page 1 -->",
@@ -157,11 +152,8 @@ def test_page_markers_are_hard_chunk_boundaries() -> None:
     )
     result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
 
-    assert result.metadata["strategy"] == "by_page"
-    assert [chunk.metadata["page_labels"] for chunk in result.chunks] == [
-        ("1",),
-        ("2",),
-    ]
+    assert len(result.chunks) == 1
+    assert result.chunks[0].metadata["page_labels"] == ("1", "2")
     assert all("<!-- page" not in chunk.text for chunk in result.chunks)
 
 
@@ -286,35 +278,7 @@ def test_parser_moves_formula_anchor_generation_out_of_locator() -> None:
     assert any(locator.name == "anchor:Equation 2" for locator in result.locators)
 
 
-def test_by_page_keeps_a_normal_page_whole() -> None:
-    text = "<!-- page 1 -->\n\n# 标题\n\n第一段。\n\n第二段。"
-    result = MarkdownChunker(
-        MarkdownChunkerConfig(
-            strategy=MarkdownChunkingStrategy.BY_PAGE,
-            max_characters=100,
-            new_after_n_chars=1,
-        )
-    ).chunk(document=ChunkDocument(text=text))
-
-    assert len(result.chunks) == 1
-    assert result.chunks[0].metadata["page_labels"] == ("1",)
-
-
-def test_by_page_rejects_document_without_page_markers() -> None:
-    chunker = MarkdownChunker(
-        MarkdownChunkerConfig(strategy=MarkdownChunkingStrategy.BY_PAGE)
-    )
-
-    with pytest.raises(ValueError, match="requires page markers"):
-        chunker.chunk(document=ChunkDocument(text="# 标题\n\n正文。"))
-
-
-def test_config_rejects_string_strategy() -> None:
-    with pytest.raises(TypeError, match="MarkdownChunkingStrategy"):
-        MarkdownChunkerConfig(strategy="by_page")  # type: ignore[arg-type]
-
-
-def test_by_title_can_keep_one_section_across_pages() -> None:
+def test_semantic_section_can_cross_pages() -> None:
     text = "\n\n".join(
         (
             "<!-- page 1 -->",
@@ -324,12 +288,9 @@ def test_by_title_can_keep_one_section_across_pages() -> None:
             "第二页正文。",
         )
     )
-    result = MarkdownChunker(
-        MarkdownChunkerConfig(strategy=MarkdownChunkingStrategy.BY_TITLE)
-    ).chunk(document=ChunkDocument(text=text))
+    result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
 
     assert len(result.chunks) == 1
-    assert result.metadata["strategy"] == "by_title"
     assert result.chunks[0].metadata["page_labels"] == ("1", "2")
     assert len(result.chunks[0].source_spans) == 3
     assert "<!-- page" not in result.chunks[0].text
@@ -339,11 +300,9 @@ def test_by_title_can_keep_one_section_across_pages() -> None:
     )
 
 
-def test_by_title_starts_a_new_chunk_for_each_section_with_body() -> None:
+def test_each_section_with_body_starts_a_semantic_chunk() -> None:
     text = "# 第一节\n\n第一节正文。\n\n## 第二节\n\n第二节正文。"
-    result = MarkdownChunker(
-        MarkdownChunkerConfig(strategy=MarkdownChunkingStrategy.BY_TITLE)
-    ).chunk(document=ChunkDocument(text=text))
+    result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
 
     assert [chunk.metadata["section_paths"] for chunk in result.chunks] == [
         (("第一节",),),
@@ -351,14 +310,11 @@ def test_by_title_starts_a_new_chunk_for_each_section_with_body() -> None:
     ]
 
 
-def test_by_page_splits_only_an_oversized_page() -> None:
-    text = "<!-- page 9 -->\n\n" + "超长正文。" * 20
-    result = MarkdownChunker(
-        MarkdownChunkerConfig(
-            strategy=MarkdownChunkingStrategy.BY_PAGE,
-            max_characters=30,
-        )
-    ).chunk(document=ChunkDocument(text=text))
+def test_oversized_semantic_section_uses_length_as_safety_fallback() -> None:
+    text = "<!-- page 9 -->\n\n# 标题\n\n" + "超长正文。" * 20
+    result = MarkdownChunker(max_characters=30).chunk(
+        document=ChunkDocument(text=text)
+    )
 
     assert len(result.chunks) > 1
     assert all(len(chunk.text) <= 30 for chunk in result.chunks)

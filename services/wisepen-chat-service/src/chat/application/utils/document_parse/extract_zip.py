@@ -6,7 +6,6 @@ import ntpath
 import os
 import shutil
 import stat
-import sys
 import tempfile
 import unicodedata
 import zipfile
@@ -325,11 +324,12 @@ def _resolve_entry_path(root: Path, raw_name: str) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Safely extract a ZIP into a new isolated directory.")
     parser.add_argument("file_path", type=Path)
-    parser.add_argument("--output", type=Path, required=True, help="Parent directory for the isolated extraction directory")
     args = parser.parse_args()
+    output_dir = args.file_path.with_suffix("")
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        extraction_dir = extract_zip(args.file_path, output_dir=args.output)
+        extraction_dir = extract_zip(args.file_path, output_dir=output_dir)
     except (ArchiveExtractionError, FileNotFoundError, OSError) as exc:
         parser.exit(1, f"error: {exc}\n")
     print(f"Archive extracted to {extraction_dir}")

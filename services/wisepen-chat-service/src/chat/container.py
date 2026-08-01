@@ -48,9 +48,10 @@ from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.output.cache import ToolOutputCache
 from chat.application.tools.common.tool_content_store import ToolContentStore
 from chat.application.tools.session_tools.tool_content_read.tools import (
+    ToolContentReadByLocatorTool,
+    ToolContentRankedReadTool,
     ToolContentReadTool,
     ToolContentRegexReadTool,
-    ToolContentRankedExpandReadTool,
 )
 from chat.application.tools.session_tools.tool_content_read.services.reader import (
     ToolContentReader,
@@ -133,7 +134,7 @@ def _build_redis_client() -> redis.Redis:
     return redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
-def _build_read_ranked_expand_pipeline() -> RankingPipeline:
+def _build_tool_content_ranked_read_pipeline() -> RankingPipeline:
     tokenizer = ThuLacRankingTokenizer()
     return RankingPipeline(
         scorers=(
@@ -292,8 +293,8 @@ class Container(containers.DeclarativeContainer):
         KafkaProducerClient,
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
     )
-    read_ranked_expand_pipeline = providers.Singleton(
-        _build_read_ranked_expand_pipeline,
+    tool_content_ranked_read_pipeline = providers.Singleton(
+        _build_tool_content_ranked_read_pipeline,
     )
 
     tool_content_repository = providers.Singleton(
@@ -328,19 +329,23 @@ class Container(containers.DeclarativeContainer):
     tool_content_reader = providers.Singleton(
         ToolContentReader,
         max_window_chars=settings.TOOL_RESULT_MAX_CHARS,
-        ranking_pipeline=read_ranked_expand_pipeline,
+        ranking_pipeline=tool_content_ranked_read_pipeline,
         store=tool_content_store,
     )
     tool_content_read_tool = providers.Singleton(
         ToolContentReadTool,
         reader=tool_content_reader,
     )
+    tool_content_read_by_locator_tool = providers.Singleton(
+        ToolContentReadByLocatorTool,
+        reader=tool_content_reader,
+    )
     tool_content_regex_read_tool = providers.Singleton(
         ToolContentRegexReadTool,
         reader=tool_content_reader,
     )
-    tool_content_ranked_expand_read_tool = providers.Singleton(
-        ToolContentRankedExpandReadTool,
+    tool_content_ranked_read_tool = providers.Singleton(
+        ToolContentRankedReadTool,
         reader=tool_content_reader,
     )
     web_content_cache_repository = providers.Singleton(
@@ -395,8 +400,9 @@ class Container(containers.DeclarativeContainer):
         load_skill_tool,
         load_skill_asset_tool,
         tool_content_read_tool,
+        tool_content_read_by_locator_tool,
         tool_content_regex_read_tool,
-        tool_content_ranked_expand_read_tool,
+        tool_content_ranked_read_tool,
         web_fetch_tool,
         document_link_extract_tool,
         web_crawl_tool,

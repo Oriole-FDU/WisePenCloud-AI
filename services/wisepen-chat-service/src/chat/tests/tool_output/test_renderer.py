@@ -257,6 +257,8 @@ async def test_output_cache_preserves_index_after_partial_store_failure() -> Non
                 receipt=ToolContentReceipt(
                     content_id="cnt_second",
                     chunk_count=1,
+                    locator_count=0,
+                    locator_kinds=(),
                     total_length=len("second"),
                     metadata=dict(kwargs["metadata"]),
                 ),
@@ -282,10 +284,11 @@ async def test_output_cache_preserves_index_after_partial_store_failure() -> Non
     assert payload["content_receipts"] == (
         {
             "content_index": 1,
-            "content_id": "cnt_second",
-            "chunk_count": 1,
-            "total_length": 6,
-            "supported_selectors": (),
+                "content_id": "cnt_second",
+                "chunk_count": 1,
+                "locator_count": 0,
+                "locator_kinds": (),
+                "total_length": 6,
             "metadata": {"source_url": "https://example.com/second"},
         },
     )

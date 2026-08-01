@@ -68,47 +68,19 @@ def _convert_simple_mineru_tables(middle_json: dict) -> None:
                         span["html"] = markdownify(str(table)).strip()
 
 
-def fast_parse_xlsx(file_path: str | Path) -> str:
-    import pandas as pd
-
-    file_path = Path(file_path)
-    if not file_path.is_file():
-        raise FileNotFoundError(file_path)
-
-    with pd.ExcelFile(file_path, engine="openpyxl") as workbook:
-        sheet_frames = pd.read_excel(
-            workbook,
-            sheet_name=None,
-            dtype=str,
-            keep_default_na=False,
-            na_filter=False,
-        )
-
-    sections = []
-    for sheet_name, frame in sheet_frames.items():
-        markdown = str(frame.fillna("").to_markdown(index=False) or "").strip()
-        sections.append(f"# Sheet: {sheet_name}\n\n{markdown}".rstrip())
-
-    return "\n\n".join(sections)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Parse an XLSX into Markdown.")
     parser.add_argument("file_path", type=Path)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--fast", action="store_true")
     args = parser.parse_args()
+    output_path = args.file_path.with_suffix(".md")
 
-    if args.fast:
-        markdown = fast_parse_xlsx(args.file_path)
-    else:
-        markdown = parse_xlsx(
-            args.file_path,
-            image_path=args.output.parent / "images",
-        )
+    markdown = parse_xlsx(
+        args.file_path,
+        image_path=output_path.parent / "images",
+    )
 
-    args.output.write_text(markdown, encoding="utf-8")
-    print(f"Markdown saved to {args.output}")
+    output_path.write_text(markdown, encoding="utf-8")
+    print(f"Markdown saved to {output_path}")
 
 
 if __name__ == "__main__":

@@ -28,16 +28,8 @@ class ChunkerKind(StrEnum):
     MARKDOWN = "markdown"
 
 
-class MarkdownChunkingStrategy(StrEnum):
-    """Markdown 结构块到检索块的路由策略。"""
-
-    AUTO = "auto"
-    BY_PAGE = "by_page"
-    BY_TITLE = "by_title"
-
-
 class LocatorKind(StrEnum):
-    """Markdown chunk 可提供的语义定位维度。"""
+    """Markdown 原文支持的命名定位维度。"""
 
     SECTION = "section"
     PAGE = "page"
@@ -94,16 +86,13 @@ class Chunk:
 
 
 @dataclass(frozen=True, slots=True)
-class ChunkLocator:
-    """章节、页码或锚点到最终 chunk 的语义定位项。"""
+class TextLocator:
+    """章节、页码或锚点在原文中的确定性定位范围。"""
 
     name: str  # 带类型前缀的稳定名称
     kind: LocatorKind  # 定位维度
-    chunk_indices: tuple[int, ...]  # 覆盖的 chunk 顺序索引
-    chunk_ids: tuple[str, ...] = ()  # 覆盖的稳定 chunk ID
-    start_offset: int | None = None  # 定位范围起点
-    end_offset: int | None = None  # 定位范围终点
-    metadata: Metadata = field(default_factory=dict)  # 结构化路径或标签
+    start_offset: int  # 定位范围起点，左闭
+    end_offset: int  # 定位范围终点，右开
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,5 +102,5 @@ class ChunkingResult:
     chunks: tuple[Chunk, ...]  # 最终分块
     chunker: ChunkerKind  # 实际使用的设施
     blocks: tuple[TextBlock, ...] = ()  # 解析产生的中间块
-    locators: tuple[ChunkLocator, ...] = ()  # Markdown 语义定位项
+    locators: tuple[TextLocator, ...] = ()  # Markdown 原文定位项
     metadata: Metadata = field(default_factory=dict)  # 本次处理的统计信息

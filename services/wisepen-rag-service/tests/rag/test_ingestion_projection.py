@@ -18,7 +18,7 @@ def test_empty_content_produces_only_document_root() -> None:
     assert projection.sections[0].own_end == 0
 
 
-def test_paginated_projection_keeps_pages_inside_section_reading_blocks() -> None:
+def test_semantic_section_reading_block_can_cross_pages() -> None:
     markdown = "\n\n".join(
         (
             "<!-- page 1 -->",
@@ -46,7 +46,9 @@ def test_paginated_projection_keeps_pages_inside_section_reading_blocks() -> Non
         for block in projection.reading_blocks
         if block.section_id == install.section_id
     )
-    assert [block.page_labels for block in install_blocks] == [("1",), ("2",)]
+    assert [block.page_labels for block in install_blocks] == [("1", "2")]
+    assert "安装步骤。" in install_blocks[0].raw_text
+    assert "安装补充。" in install_blocks[0].raw_text
     assert all("<!-- page" not in block.raw_text for block in install_blocks)
 
     sections_by_id = {section.section_id: section for section in projection.sections}

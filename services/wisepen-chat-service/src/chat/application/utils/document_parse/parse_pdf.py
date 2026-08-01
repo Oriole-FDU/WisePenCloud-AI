@@ -42,17 +42,17 @@ def fast_parse_pdf(file_path: str | Path) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Parse a PDF into Markdown.")
     parser.add_argument("file_path", type=Path)
-    parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--fast", action="store_true")
     args = parser.parse_args()
+    output_path = args.file_path.with_suffix(".md")
 
     if args.fast:
         markdown = fast_parse_pdf(args.file_path)
     else:
         markdown = asyncio.run(parse_pdf(args.file_path))
 
-    args.output.write_text(markdown, encoding="utf-8")
-    print(f"Markdown saved to {args.output}")
+    output_path.write_text(markdown, encoding="utf-8")
+    print(f"Markdown saved to {output_path}")
 
 
 if __name__ == "__main__":

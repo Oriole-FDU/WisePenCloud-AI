@@ -47,11 +47,7 @@ class ToolContentReadTool:
 
     __slots__ = ("_definition", "_reader")
 
-    def __init__(
-            self,
-            *,
-            reader: ToolContentReader,
-    ) -> None:
+    def __init__(self, *, reader: ToolContentReader) -> None:
         self._reader = reader
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
@@ -62,7 +58,7 @@ class ToolContentReadTool:
                     "  - MUST trigger when you need a known range, the beginning, or the end of cached content.\n"
                     "  - SHOULD trigger when nearby context matters more than cross-document search.\n"
                     "DO NOT TRIGGER when:\n"
-                    "  - You need natural-language retrieval across documents; use tool_content_ranked_expand_read.\n"
+                    "  - You need ranked semantic retrieval across documents; use tool_content_ranked_read.\n"
                     "  - You need exact pattern matching across documents; use tool_content_regex_read.\n\n"
                     "INPUT RULES:\n"
                     "  - Ranges use Python slice semantics: start is inclusive and end is exclusive.\n"
@@ -71,7 +67,7 @@ class ToolContentReadTool:
                     "  - Omitting both offsets reads the first 8000 characters; content beyond this range is clipped.\n\n"
                     "  - Use total_length from the source content_receipt to choose a strategy: read all when it is "
                     "under 8000, read in two ranges when it is 8000-16000, and prefer "
-                    "tool_content_ranked_expand_read before focused range reads when it exceeds 16000.\n\n"
+                    "tool_content_ranked_read before focused range reads when it exceeds 16000.\n\n"
                     "OUTPUT RULES:\n"
                     "  - Returns the requested text with normalized absolute offsets and structural locators.\n"
                     "  - This tool reads existing cnt_* content and never creates another content receipt."
@@ -92,11 +88,12 @@ class ToolContentReadTool:
         return self._definition
 
     async def execute(
-            self,
-            context: dict[str, Any],
-            config: dict[str, Any] | None = None,
-            **kwargs: Any,
+        self,
+        context: dict[str, Any],
+        config: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> ToolContentReadResult:
+        del config
         start = int(kwargs["start"]) if "start" in kwargs else None
         end = int(kwargs["end"]) if "end" in kwargs else None
         if start is None and end is None:

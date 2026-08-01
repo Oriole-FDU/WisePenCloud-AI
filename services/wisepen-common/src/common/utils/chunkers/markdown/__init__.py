@@ -1,3 +1,3 @@
-from .chunker import MarkdownChunker, MarkdownChunkerConfig
+from .chunker import MarkdownChunker
 
-__all__ = ["MarkdownChunker", "MarkdownChunkerConfig"]
+__all__ = ["MarkdownChunker"]

@@ -2,42 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from common.utils.chunkers import SourceSpan
+from common.utils.chunkers import LocatorKind, SourceSpan, TextLocator
 
 
 @dataclass(frozen=True, slots=True)
 class ToolContentChunk:
-    """ToolContent 中持久化的 chunk 元数据。"""
+    """用于语义检索的 chunk 及其权威原文范围。"""
 
     chunk_index: int
-    start_offset: int | None = None
-    end_offset: int | None = None
-    source_spans: tuple[SourceSpan, ...] = ()
-    block_kinds: tuple[str, ...] = ()
+    source_spans: tuple[SourceSpan, ...]
     section_paths: tuple[tuple[str, ...], ...] = ()
     page_labels: tuple[str, ...] = ()
     anchor_labels: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class ToolContentIndexEntry:
-    """ToolContent 读取索引项。"""
-
-    locator_name: str
-    locator_kind: str
-    chunk_indices: tuple[int, ...]
-    start_offset: int | None = None
-    end_offset: int | None = None
-    section_path: tuple[str, ...] = ()
-    page_label: str | None = None
-    anchor_label: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ToolContentIndex:
-    """ToolContent 的读取索引集合。"""
-
-    entries: tuple[ToolContentIndexEntry, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +25,7 @@ class StoredToolContent:
     content_type: str
     text: str
     chunks: tuple[ToolContentChunk, ...] = ()
-    index: ToolContentIndex | None = None
+    locators: tuple[TextLocator, ...] = ()
     metadata: dict[str, object] = field(default_factory=dict)
 
 
@@ -59,6 +35,7 @@ class ToolContentReceipt:
 
     content_id: str
     chunk_count: int
+    locator_count: int
+    locator_kinds: tuple[LocatorKind, ...]
     total_length: int
-    supported_selectors: tuple[str, ...] = ()
     metadata: dict[str, object] = field(default_factory=dict)

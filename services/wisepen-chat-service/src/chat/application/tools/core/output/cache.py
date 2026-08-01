@@ -78,8 +78,9 @@ class ToolOutputCache:
                     "content_index": content_index,
                     "content_id": receipt.content_id,
                     "chunk_count": receipt.chunk_count,
+                    "locator_count": receipt.locator_count,
+                    "locator_kinds": receipt.locator_kinds,
                     "total_length": receipt.total_length,
-                    "supported_selectors": receipt.supported_selectors,
                     "metadata": receipt.metadata,
                 }
                 for content_index, receipt in indexed_receipts

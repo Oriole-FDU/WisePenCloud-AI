@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import regex
+
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -11,49 +12,41 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
-from chat.application.tools.utils.batching import batched
 
-from ..services.models import (
-    ToolContentReadFailure,
-    ToolContentRegexReadRequest,
-    ToolContentRegexReadResult,
-    ToolContentSelector,
-)
+from ..services.models import ToolContentRegexReadRequest, ToolContentRegexReadResult
 from ..services.reader import ToolContentReader
-from .common import (
-    CONTENT_IDS_SCHEMA,
-    SELECTOR_SCHEMA,
-)
 
-_INTERNAL_BATCH_SIZE = 16
 _MAX_REGEX_CHARS = 500
 _TIMEOUT_SECONDS = 300.0
+_CONTENT_IDS_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "items": {"type": "string", "minLength": 1},
+    "minItems": 1,
+    "maxItems": 64,
+    "description": "One or more cnt_* ids from previous content_receipts.",
+}
 _PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "content_ids": CONTENT_IDS_SCHEMA,
-        "selector": SELECTOR_SCHEMA,
+        "content_ids": _CONTENT_IDS_SCHEMA,
         "pattern": {
             "type": "string",
             "minLength": 1,
             "maxLength": _MAX_REGEX_CHARS,
-            "description": (
-                "Required. Python regular expression matched against the stored source text. "
-                "Markdown formulas and similar content may contain malformed or unexpected markup, "
-                "so use a broader pattern when extracting them."
-            ),
+            "description": "Python regular expression matched against the complete stored source text.",
         },
         "max_matches": {
             "type": "integer",
             "default": 10,
-            "description": (
-                "Maximum number of matches returned across all content_ids. Defaults to 10. "
-                "Use chunk_count from each input content_receipt as a sizing signal: increase "
-                "max_matches when searching many chunks or when the pattern may occur frequently."
-            ),
+            "minimum": 0,
+            "description": "Maximum matches returned across all content_ids.",
         },
-        "merge_before": {"type": "integer", "default": 0},
-        "merge_after": {"type": "integer", "default": 0},
+        "context_chars": {
+            "type": "integer",
+            "default": 1000,
+            "minimum": 0,
+            "description": "Source characters included before and after each exact match.",
+        },
     },
     "required": ["content_ids", "pattern"],
     "additionalProperties": False,
@@ -61,39 +54,22 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
 
 
 class ToolContentRegexReadTool:
-    """跨文档正则读取已有 cnt_* 内容。"""
+    """跨文档正则扫描权威原文。"""
 
     __slots__ = ("_definition", "_reader")
 
-    def __init__(
-            self,
-            *,
-            reader: ToolContentReader,
-    ) -> None:
+    def __init__(self, *, reader: ToolContentReader) -> None:
         self._reader = reader
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="tool_content_regex_read",
                 description=(
-                    "Find exact regular-expression matches from cached tool output across one or more content_ids.\n\n"
-                    "WHEN TO TRIGGER:\n"
-                    "  - MUST trigger when previous tool calls returned content_receipts and exact pattern matching is needed.\n"
-                    "  - SHOULD trigger for IDs, URLs, headings, names, citations, or other precise text.\n"
-                    "DO NOT TRIGGER when:\n"
-                    "  - You need natural-language retrieval; use tool_content_ranked_expand_read.\n"
-                    "  - You need a known character range; use tool_content_read.\n\n"
-                    "INPUT RULES:\n"
-                    "  - Accepts up to 64 content_ids and reads them in bounded internal batches of 16.\n"
-                    "  - selector prefilters chunks before matching; selector groups are intersected.\n"
-                    "  - max_matches defaults to 10 and limits results globally across all content_ids. "
-                    "Use each source content_receipt's chunk_count as a sizing signal; increase "
-                    "max_matches when searching many chunks or expecting frequent matches.\n"
-                    "  - merge_before and merge_after expand windows around matched chunks.\n"
-                    "  - Matching uses the stored source text without Markdown repair or normalization.\n"
-                    "  - Markdown formulas and similar content may be malformed after parsing; use broader regex patterns for them.\n\n"
-                    "OUTPUT RULES:\n"
-                    "  - Returns matches and per-content failures without discarding successful batches.\n"
-                    "  - This tool reads existing cnt_* content and never creates another content receipt."
+                    "Search complete cached source texts with a Python regular expression. "
+                    "Use this for exact names, identifiers, citations, headings, URLs, or other "
+                    "literal patterns, including matches that cross retrieval chunk boundaries. "
+                    "Results include absolute match offsets and bounded source context. Use "
+                    "tool_content_ranked_read for semantic retrieval, tool_content_read_by_locator "
+                    "for known page/section/anchor locators, and tool_content_read for known offsets."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -111,11 +87,12 @@ class ToolContentRegexReadTool:
         return self._definition
 
     async def execute(
-            self,
-            context: dict[str, Any],
-            config: dict[str, Any] | None = None,
-            **kwargs: Any,
+        self,
+        context: dict[str, Any],
+        config: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> ToolContentRegexReadResult:
+        del config
         pattern = str(kwargs.get("pattern") or "")
         if not pattern:
             raise ToolExecutionError(reason="missing_pattern", detail_reason="pattern is required.")
@@ -129,38 +106,19 @@ class ToolContentRegexReadTool:
         except regex.error as exc:
             raise ToolExecutionError(reason="invalid_regex_pattern", detail_reason=str(exc)) from exc
 
-        content_ids = tuple(str(value) for value in kwargs["content_ids"])
-        max_matches = max(int(kwargs.get("max_matches", 10)), 0)
-        matches = []
-        failed = []
-        for batch in batched(content_ids, batch_size=_INTERNAL_BATCH_SIZE):
-            remaining_matches = max_matches - len(matches)
-            if remaining_matches <= 0:
-                break
-
-            request = ToolContentRegexReadRequest(
-                content_ids=batch,
-                pattern=pattern,
-                selector=ToolContentSelector.from_payload(kwargs.get("selector")),
-                max_matches=remaining_matches,
-                merge_before=int(kwargs.get("merge_before", 0)),
-                merge_after=int(kwargs.get("merge_after", 0)),
+        try:
+            return await self._reader.read_regex(
+                request=ToolContentRegexReadRequest(
+                    content_ids=tuple(str(value) for value in kwargs["content_ids"]),
+                    pattern=pattern,
+                    max_matches=max(int(kwargs.get("max_matches", 10)), 0),
+                    context_chars=max(int(kwargs.get("context_chars", 1000)), 0),
+                ),
+                session_id=str(context["session_id"]),
             )
-            try:
-                result = await self._reader.read_regex(
-                    request=request,
-                    session_id=str(context["session_id"]),
-                )
-            except Exception as exc:
-                failed.extend(
-                    ToolContentReadFailure(content_id=content_id, reason=type(exc).__name__)
-                    for content_id in batch
-                )
-                continue
-            matches.extend(result.matches[:remaining_matches])
-            failed.extend(result.failed)
-
-        return ToolContentRegexReadResult(
-            matches=tuple(matches),
-            failed=tuple(failed)
-        )
+        except Exception as exc:
+            raise ToolExecutionError(
+                reason="tool_content_regex_read_failed",
+                detail_reason=str(exc),
+                retryable=False,
+            ) from exc

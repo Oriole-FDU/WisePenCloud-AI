@@ -32,10 +32,6 @@ dependencies = [
     "zeroentropy",
     "pymupdf",
     "magika",
-    "pandas",
-    "openpyxl",
-    "xlrd>=2.0.2,<3",
-    "tabulate>=0.9,<1",
     "regex",
     "wisepen-common",
     "httpx",
@@ -48,7 +44,6 @@ dependencies = [
     "hishel[async]",
     "pdf-inspector>=0.2.5",
     "mineru==3.4.4",
-    "markitdown",
     "beautifulsoup4",
     "markdownify",
 ]

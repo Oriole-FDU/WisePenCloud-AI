@@ -7,8 +7,6 @@ from common.utils.chunkers import (
     ChunkDocument,
     LocatorKind,
     MarkdownChunker,
-    MarkdownChunkerConfig,
-    MarkdownChunkingStrategy,
     SourceSpan,
 )
 from .models import (
@@ -23,7 +21,7 @@ from .section_tree import build_section_tree
 
 # 标题树 → Section ReadingBlock → 检索子块 的投影流水线。
 # 三个独立的 MarkdownChunker 负责不同粒度的切分：
-#   - structure_chunker：按 BY_TITLE 切出 Heading 边界，用于构建 Section 树。
+#   - structure_chunker：按标题语义切出 Heading 边界，用于构建 Section 树。
 #   - reading_block_chunker：在单个 Section 内部再次切分，避免长 Section 一次性返回过大正文。
 #   - retrieval_chunker：在 ReadingBlock 内切出 embedding/BM25 用的更小检索子块。
 
@@ -34,22 +32,16 @@ class RagSectionProjector:
     __slots__ = ("_reading_block_chunker", "_retrieval_chunker", "_structure_chunker")
 
     def __init__(
-            self,
-            *,
-            structure_chunker: MarkdownChunker | None = None,
-            reading_block_chunker: MarkdownChunker | None = None,
-            retrieval_chunker: MarkdownChunker | None = None,
+        self,
+        *,
+        structure_chunker: MarkdownChunker | None = None,
+        reading_block_chunker: MarkdownChunker | None = None,
+        retrieval_chunker: MarkdownChunker | None = None,
     ) -> None:
         self._structure_chunker = structure_chunker or MarkdownChunker()
         self._reading_block_chunker = reading_block_chunker or MarkdownChunker()
-        # 检索子块比 Section 更小，固定 800 字符上限、600 字符软触发。
-        self._retrieval_chunker = retrieval_chunker or MarkdownChunker(
-            MarkdownChunkerConfig(
-                strategy=MarkdownChunkingStrategy.BY_TITLE,
-                max_characters=800,
-                new_after_n_chars=600,
-            )
-        )
+        # 检索子块比 Section 更小，固定 800 字符硬上限。
+        self._retrieval_chunker = retrieval_chunker or MarkdownChunker(max_characters=800)
 
     def project(self, content: RagDocumentContent) -> RagContentProjection:
         # 第一次 chunk 解析只为得到 Heading 边界和 locator，blocks 留作 Section 树构建。
@@ -123,14 +115,14 @@ class RagSectionProjector:
                     source_spans=block_spans,
                     page_labels=tuple(
                         dict.fromkeys(
-                            str(locator.metadata["page_label"])
+                            locator.name.removeprefix("page:")
                             for locator in locators
                             if locator.kind is LocatorKind.PAGE
                         )
                     ),
                     anchor_labels=tuple(
                         dict.fromkeys(
-                            str(locator.metadata["anchor_label"])
+                            locator.name.removeprefix("anchor:")
                             for locator in locators
                             if locator.kind is LocatorKind.ANCHOR
                         )
@@ -189,14 +181,14 @@ class RagSectionProjector:
                         source_spans=source_spans,
                         page_labels=tuple(
                             dict.fromkeys(
-                                str(locator.metadata["page_label"])
+                                locator.name.removeprefix("page:")
                                 for locator in child_locators
                                 if locator.kind is LocatorKind.PAGE
                             )
                         ),
                         anchor_labels=tuple(
                             dict.fromkeys(
-                                str(locator.metadata["anchor_label"])
+                                locator.name.removeprefix("anchor:")
                                 for locator in child_locators
                                 if locator.kind is LocatorKind.ANCHOR
                             )
