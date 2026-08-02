@@ -1,20 +1,31 @@
 from __future__ import annotations
 
 import argparse
+from enum import StrEnum
 from pathlib import Path
 
 from .converters.xlsx import XlsxConverter
+
+
+class XlsxBackend(StrEnum):
+    OPENPYXL = "openpyxl"
+    MINERU = "mineru"
 
 
 def parse_xlsx(
     file_path: str | Path,
     *,
     image_path: str | Path | None = None,
+    backend: XlsxBackend | str = XlsxBackend.OPENPYXL,
 ) -> str:
     file_path = Path(file_path)
     image_path = Path(image_path) if image_path is not None else None
     if not file_path.is_file():
         raise FileNotFoundError(file_path)
+
+    backend = XlsxBackend(backend)
+    if backend is XlsxBackend.OPENPYXL:
+        return XlsxConverter().convert(file_path, image_path=image_path)
 
     from mineru.backend.office.office_middle_json_mkcontent import union_make
     from mineru.backend.office.xlsx_analyze import office_xlsx_analyze
@@ -36,29 +47,22 @@ def parse_xlsx(
     )
 
 
-def fast_parse_xlsx(
-    file_path: str | Path,
-    *,
-    image_path: str | Path | None = None,
-) -> str:
-    return XlsxConverter().convert(file_path, image_path=image_path)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Parse an XLSX into Markdown.")
     parser.add_argument("file_path", type=Path)
     parser.add_argument(
-        "--fast",
-        action="store_true",
-        help="Use the lightweight openpyxl renderer instead of MinerU.",
+        "--backend",
+        choices=[item.value for item in XlsxBackend],
+        default=XlsxBackend.OPENPYXL.value,
+        help="XLSX parse backend. Defaults to openpyxl; mineru preserves MinerU HTML blocks.",
     )
     args = parser.parse_args()
     output_path = args.file_path.with_suffix(".md")
 
-    parse = fast_parse_xlsx if args.fast else parse_xlsx
-    markdown = parse(
+    markdown = parse_xlsx(
         args.file_path,
         image_path=output_path.parent / "images",
+        backend=args.backend,
     )
 
     output_path.write_text(markdown, encoding="utf-8")

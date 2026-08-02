@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
+import httpx
 import pytest
 
 from chat.application.tools.web_tools import DocumentLinkExtractTool, WebFetchTool
@@ -31,24 +31,48 @@ class _MemoryCacheRepository:
         self.values[(value.canonical_url, value.cache_variant)] = value
 
 
-class _Response:
-    status = 200
-    history: tuple[object, ...] = ()
+class _ChunkStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[bytes], consumed_chunks: list[bytes]) -> None:
+        self._chunks = chunks
+        self._consumed_chunks = consumed_chunks
 
-    def __init__(self, url: str, body: bytes) -> None:
-        self.url = url
-        self.body = body
-        self.headers = {"cache-control": "max-age=60"}
+    async def __aiter__(self):
+        for chunk in self._chunks:
+            self._consumed_chunks.append(chunk)
+            yield chunk
 
 
-class _Session:
-    def __init__(self, body: bytes) -> None:
-        self.body = body
+class _HttpxProbe:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+        self.consumed_chunks: list[bytes] = []
         self.calls = 0
 
-    async def get(self, url: str, **_: Any) -> _Response:
+    def handle(self, request: httpx.Request) -> httpx.Response:
         self.calls += 1
-        return _Response(url, self.body)
+        return httpx.Response(
+            200,
+            headers={"cache-control": "max-age=60"},
+            stream=_ChunkStream(self._chunks, self.consumed_chunks),
+            request=request,
+        )
+
+
+def _patch_httpx_client(
+    monkeypatch: pytest.MonkeyPatch,
+    probe: _HttpxProbe,
+) -> None:
+    original_client = httpx.AsyncClient
+    transport = httpx.MockTransport(probe.handle)
+
+    def build_client(*args, **kwargs) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original_client(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "chat.application.tools.web_tools.document_link_extract.extractor.httpx.AsyncClient",
+        build_client,
+    )
 
 
 @pytest.mark.asyncio
@@ -56,9 +80,12 @@ async def test_document_link_extract_uses_detected_type_and_shared_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     url = "https://example.test/workbook"
-    session = _Session(b"xlsx bytes")
+    sniff_bytes = b"x" * 64_000
+    tail_bytes = b"lsx tail"
+    probe = _HttpxProbe([sniff_bytes, tail_bytes])
     repository = _MemoryCacheRepository()
     parsed_paths: list[Path] = []
+    detected_lengths: list[int] = []
 
     async def validate_url(value: str) -> str:
         return value
@@ -66,9 +93,19 @@ async def test_document_link_extract_uses_detected_type_and_shared_cache(
     def parse_workbook(file_path: Path, *, image_path: None) -> str:
         assert image_path is None
         assert file_path.suffix == ".xlsx"
-        assert file_path.read_bytes() == b"xlsx bytes"
+        assert file_path.read_bytes() == sniff_bytes + tail_bytes
         parsed_paths.append(file_path)
         return "# Workbook"
+
+    def detect_workbook(content: bytes) -> FileType:
+        detected_lengths.append(len(content))
+        return FileType(
+            label="xlsx",
+            mime_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            extension="",
+        )
 
     monkeypatch.setattr(
         "chat.application.tools.web_tools.document_link_extract.extractor.validate_public_http_url_async",
@@ -76,28 +113,24 @@ async def test_document_link_extract_uses_detected_type_and_shared_cache(
     )
     monkeypatch.setattr(
         "chat.application.tools.web_tools.document_link_extract.extractor.detect_file_type_from_bytes",
-        lambda _: FileType(
-            label="xlsx",
-            mime_type=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
-            extension="",
-        ),
+        detect_workbook,
     )
     monkeypatch.setattr(
         "chat.application.tools.web_tools.document_link_extract.extractor.parse_xlsx",
         parse_workbook,
     )
+    _patch_httpx_client(monkeypatch, probe)
 
     extractor = DocumentLinkExtractor(
-        session=session,
         content_cache_repository=repository,
     )
     first = await extractor.extract(url)
     second = await extractor.extract(url)
 
     assert first == second == "# Workbook"
-    assert session.calls == 1
+    assert probe.calls == 1
+    assert probe.consumed_chunks == [sniff_bytes, tail_bytes]
+    assert detected_lengths == [16_384]
     assert len(parsed_paths) == 1
     assert not parsed_paths[0].exists()
     assert (url, "document_link_extract:exact") in repository.values
@@ -108,7 +141,7 @@ async def test_document_link_extract_separates_exact_and_fast_pdf_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     url = "https://example.test/paper.pdf"
-    session = _Session(b"%PDF-fake")
+    probe = _HttpxProbe([b"%PDF-fake"])
     repository = _MemoryCacheRepository()
 
     async def validate_url(value: str) -> str:
@@ -133,9 +166,9 @@ async def test_document_link_extract_separates_exact_and_fast_pdf_cache(
         "chat.application.tools.web_tools.document_link_extract.extractor.fast_parse_pdf",
         lambda _: "fast",
     )
+    _patch_httpx_client(monkeypatch, probe)
 
     extractor = DocumentLinkExtractor(
-        session=session,
         content_cache_repository=repository,
     )
     exact = await extractor.extract(
@@ -148,7 +181,7 @@ async def test_document_link_extract_separates_exact_and_fast_pdf_cache(
     )
 
     assert (exact, fast) == ("exact", "fast")
-    assert session.calls == 2
+    assert probe.calls == 2
     assert {
         value.cache_variant
         for value in repository.values.values()
@@ -162,6 +195,10 @@ async def test_document_link_extract_separates_exact_and_fast_pdf_cache(
 async def test_document_link_extract_rejects_non_whitelisted_bytes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    first_chunk = b"p" * 64_000
+    second_chunk = b"ng tail"
+    probe = _HttpxProbe([first_chunk, second_chunk])
+
     async def validate_url(value: str) -> str:
         return value
 
@@ -173,12 +210,14 @@ async def test_document_link_extract_rejects_non_whitelisted_bytes(
         "chat.application.tools.web_tools.document_link_extract.extractor.detect_file_type_from_bytes",
         lambda _: FileType(label="png", mime_type="image/png", extension="pdf"),
     )
+    _patch_httpx_client(monkeypatch, probe)
 
-    extractor = DocumentLinkExtractor(session=_Session(b"png bytes"))
+    extractor = DocumentLinkExtractor()
     with pytest.raises(UnsupportedDocumentTypeError, match="detected png"):
         await extractor.extract(
             "https://example.test/fake.pdf",
         )
+    assert probe.consumed_chunks == [first_chunk]
 
 
 @pytest.mark.asyncio

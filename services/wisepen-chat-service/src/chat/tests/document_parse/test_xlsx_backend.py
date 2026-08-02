@@ -6,10 +6,10 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
 from PIL import Image
 
-from chat.application.utils.document_parse.parse_xlsx import fast_parse_xlsx
+from chat.application.utils.document_parse.parse_xlsx import parse_xlsx
 
 
-def test_fast_parse_xlsx_renders_simple_table_without_html_roundtrip(tmp_path: Path) -> None:
+def test_parse_xlsx_openpyxl_renders_simple_table_without_html_roundtrip(tmp_path: Path) -> None:
     workbook = Workbook()
     sheet = workbook.active
     sheet["A1"] = "Name"
@@ -22,7 +22,7 @@ def test_fast_parse_xlsx_renders_simple_table_without_html_roundtrip(tmp_path: P
     file_path = tmp_path / "simple.xlsx"
     workbook.save(file_path)
 
-    markdown = fast_parse_xlsx(file_path)
+    markdown = parse_xlsx(file_path)
 
     assert markdown == (
         "<!-- page 1 -->\n\n"
@@ -34,7 +34,7 @@ def test_fast_parse_xlsx_renders_simple_table_without_html_roundtrip(tmp_path: P
     assert "<table>" not in markdown
 
 
-def test_fast_parse_xlsx_does_not_duplicate_islands_inside_table_bbox(tmp_path: Path) -> None:
+def test_parse_xlsx_openpyxl_does_not_duplicate_islands_inside_table_bbox(tmp_path: Path) -> None:
     workbook = Workbook()
     sheet = workbook.active
     for coordinate in (
@@ -60,12 +60,12 @@ def test_fast_parse_xlsx_does_not_duplicate_islands_inside_table_bbox(tmp_path: 
     file_path = tmp_path / "island.xlsx"
     workbook.save(file_path)
 
-    markdown = fast_parse_xlsx(file_path)
+    markdown = parse_xlsx(file_path)
 
     assert markdown.count("island") == 1
 
 
-def test_fast_parse_xlsx_preserves_merged_cells_as_html_and_sheet_pages(tmp_path: Path) -> None:
+def test_parse_xlsx_openpyxl_preserves_merged_cells_as_html_and_sheet_pages(tmp_path: Path) -> None:
     workbook = Workbook()
     first = workbook.active
     first.title = "Merged"
@@ -81,7 +81,7 @@ def test_fast_parse_xlsx_preserves_merged_cells_as_html_and_sheet_pages(tmp_path
     file_path = tmp_path / "merged.xlsx"
     workbook.save(file_path)
 
-    markdown = fast_parse_xlsx(file_path)
+    markdown = parse_xlsx(file_path)
 
     assert "<!-- page 1 -->\n\n# Merged\n\n<table>" in markdown
     assert '<th colspan="2">Header</th>' in markdown
@@ -89,7 +89,7 @@ def test_fast_parse_xlsx_preserves_merged_cells_as_html_and_sheet_pages(tmp_path
     assert "hidden text" not in markdown
 
 
-def test_fast_parse_xlsx_extracts_anchored_sheet_images(tmp_path: Path) -> None:
+def test_parse_xlsx_openpyxl_extracts_anchored_sheet_images(tmp_path: Path) -> None:
     source_image = tmp_path / "source.png"
     Image.new("RGB", (2, 2), color="red").save(source_image)
     workbook = Workbook()
@@ -99,7 +99,7 @@ def test_fast_parse_xlsx_extracts_anchored_sheet_images(tmp_path: Path) -> None:
     file_path = tmp_path / "image.xlsx"
     workbook.save(file_path)
 
-    markdown = fast_parse_xlsx(file_path, image_path=tmp_path / "images")
+    markdown = parse_xlsx(file_path, image_path=tmp_path / "images")
 
     assert "Table" in markdown
     assert "![image1.png](images/image1.png)" in markdown

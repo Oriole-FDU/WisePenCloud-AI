@@ -99,9 +99,13 @@ class DocxConverter:
         styles: Styles,
         numbering: Numbering,
     ) -> tuple[str, int]:
-        text = inline.render(paragraph).strip()
+        text = inline.render(paragraph).strip(" \t\r\n")
         explicit_breaks = text.count("\f")
         props = child(paragraph, "w", "pPr")
+        visible_text = text.replace("\f", "").strip()
+        if not visible_text and explicit_breaks and child(props, "w", "sectPr") is None:
+            # 空段落中的分页符只是排版控制符，没有可回源的正文锚点。
+            return "", 0
         style_id = attr(child(props, "w", "pStyle"), "w", "val")
         level = heading_level(styles, style_id)
         label = numbering.label(props, style_id, styles)

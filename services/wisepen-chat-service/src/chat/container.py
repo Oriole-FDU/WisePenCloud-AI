@@ -384,7 +384,6 @@ class Container(containers.DeclarativeContainer):
     )
     document_link_extractor = providers.Singleton(
         DocumentLinkExtractor,
-        session=web_fetch_static_session,
         content_cache_repository=web_content_cache_repository,
     )
     document_link_extract_tool = providers.Singleton(

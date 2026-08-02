@@ -2,15 +2,18 @@
 
 这个目录承载 XLSX 解析路径。入口在 `parse_xlsx.py`：
 
-- `parse_xlsx()` 直接调用 MinerU Office 的 `office_xlsx_analyze()` 和 `union_make()`，
-  完整保留 MinerU 输出的 HTML block。
-- `fast_parse_xlsx()` 使用本目录的 `XlsxConverter`，直接从 workbook 结构输出
-  Markdown/HTML。
+- `parse_xlsx(..., backend="openpyxl")` 使用本目录的 `XlsxConverter`，直接从
+  workbook 结构输出 Markdown/HTML，也是默认 backend。
+- `parse_xlsx(..., backend="mineru")` 调用 MinerU Office 的 `office_xlsx_analyze()`
+  和 `union_make()`，完整保留 MinerU 输出的 HTML block。
 
 ## 当前处理逻辑
 
-- fast 路径直接使用 `openpyxl` 读取 workbook，不调用 MinerU 的 `office_xlsx_analyze`
-  和 `union_make`。
+- `openpyxl` backend 直接读取 workbook，不调用 MinerU 的 `office_xlsx_analyze`
+  和 `union_make`；它的价值是直接生成 Markdown、减少 HTML block token，而不是
+  在常驻服务热进程里承诺比 MinerU 更快。
+- `mineru` backend 在分支内 lazy import，避免默认 `openpyxl` backend 承担 MinerU
+  导入成本。
 - 每个可见 sheet 作为一个物理页输出项目 page marker：`<!-- page N -->`。
 - 多个非空 sheet 时，在每页开头输出 sheet title；单个非空 sheet 不额外加标题。
 - 用工作表中的非空单元格和合并单元格区域做连通分量，识别线性表格区域。
@@ -33,9 +36,9 @@
 
 ## 有意去掉的重逻辑
 
-- fast 路径不生成 MinerU middle json。
+- `openpyxl` backend 不生成 MinerU middle json。
 - 不先把表格转 HTML，再用 BeautifulSoup / markdownify 反解析 Markdown。
-- parse 路径不修改 `span["html"]`，避免破坏原始 HTML block 属性。
+- `mineru` backend 不修改 `span["html"]`，避免破坏原始 HTML block 属性。
 - 不复刻 MinerU 的 chart source table、WPS `DISPIMG`、公式 OMML、富文本 HTML
   样式、复杂图片占位等完整 Office 框架。
 - 不做 OCR，不从图片中识别表格内容。
