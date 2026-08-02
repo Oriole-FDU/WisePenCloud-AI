@@ -276,7 +276,7 @@ def find_json_values(value: Any) -> list[dict[str, Any]]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sandbox-url", default="http://127.0.0.1:9210")
+    parser.add_argument("--sandbox-url", default="http://127.0.0.1:19905")
     parser.add_argument("--chat-url", default="http://127.0.0.1:19904")
     parser.add_argument("--source", default="APISIX-wX0iR6tY")
     parser.add_argument("--user-id", default="chat-curl-user")

@@ -15,7 +15,7 @@ DEFAULT_STATE_FILE = "/tmp/wisepen-sandbox-e2e-lease.json"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Sandbox lease and execute checks.")
-    parser.add_argument("--base-url", default="http://127.0.0.1:9210")
+    parser.add_argument("--base-url", default="http://127.0.0.1:19905")
     parser.add_argument("--source", default="APISIX-wX0iR6tY")
     parser.add_argument("--tenant", default="tenant-a")
     parser.add_argument("--workspace", default="workspace-a")

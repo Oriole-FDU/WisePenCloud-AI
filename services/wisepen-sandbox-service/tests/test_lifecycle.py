@@ -276,6 +276,70 @@ async def test_watcher_fills_only_the_ready_deficit():
     snapshot = await pool.snapshot()
     assert snapshot.counts[SandboxState.READY] == 2
     assert provider.created == 2
+    metrics = snapshot.as_dict()
+    assert metrics["warmup_ready_attempts"] == 2
+    for name in ("warmup_create", "warmup_wait_ready", "warmup_ready_check", "warmup"):
+        assert metrics[f"duration_count_{name}"] == 2
+        assert f"duration_avg_ms_{name}" in metrics
+
+
+def test_watcher_caps_warmup_retry_backoff_without_stopping_recovery():
+    watcher = Watcher(
+        SandboxPool(MemorySandboxRepository()),
+        MemorySandboxRepository(),
+        FakeProvider(),
+        SandboxSpec("test"),
+        interval_seconds=2,
+        warmup_max_retries=3,
+        warmup_retry_backoff_seconds=5,
+        warmup_retry_max_backoff_seconds=60,
+    )
+
+    watcher._retry_count = 1
+    assert watcher._next_reconcile_delay() == 5
+    watcher._retry_count = 2
+    assert watcher._next_reconcile_delay() == 10
+    watcher._retry_count = 3
+    assert watcher._next_reconcile_delay() == 20
+    watcher._retry_count = 20
+    assert watcher._next_reconcile_delay() == 20
+
+
+@pytest.mark.asyncio
+async def test_watcher_renews_leader_lease_during_a_slow_warmup():
+    class RecordingLease:
+        def __init__(self) -> None:
+            self.acquires = 0
+
+        async def acquire(self, key, owner, ttl_seconds):
+            self.acquires += 1
+            return True
+
+        async def release(self, key, owner):
+            return None
+
+    class SlowProvider(FakeProvider):
+        async def wait_ready(self, sandbox, timeout_seconds):
+            await asyncio.sleep(0.05)
+            return Health(True, "ready")
+
+    provider = SlowProvider()
+    repository = MemorySandboxRepository()
+    lease = RecordingLease()
+    watcher = Watcher(
+        SandboxPool(repository),
+        repository,
+        provider,
+        SandboxSpec("test"),
+        leader_lease=lease,
+        target_ready=1,
+        warmup_timeout_seconds=1,
+        leader_lease_ttl_seconds=0.1,
+        leader_lease_renew_interval_seconds=0.01,
+    )
+
+    assert await watcher.reconcile() == 1
+    assert lease.acquires >= 2
 
 
 @pytest.mark.asyncio

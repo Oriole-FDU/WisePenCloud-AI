@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="http://127.0.0.1:9210"
+BASE_URL="http://127.0.0.1:19905"
 SOURCE="APISIX-wX0iR6tY"
 USER_ID="mcp-curl-user"
 SESSION_ID="mcp-curl-session"
-REQUEST_ID="mcp-curl-request"
+REQUEST_ID="mcp-curl-$(date +%s)-$RANDOM"
+LEASE_ACQUIRED=0
+RELEASE_COMPLETED=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -33,9 +35,22 @@ MCP_HEADERS=(
 )
 
 mcp_post() {
-  curl -fsS --max-time "${MCP_TIMEOUT_SECONDS:-30}" "${MCP_HEADERS[@]}" \
-    -X POST "$MCP_URL" --data "$1"
+  local timeout_seconds="$1"
+  local payload="$2"
+  curl -fsS --max-time "$timeout_seconds" "${MCP_HEADERS[@]}" \
+    -X POST "$MCP_URL" --data "$payload"
 }
+
+release_on_exit() {
+  if [[ "$LEASE_ACQUIRED" != 1 || "$RELEASE_COMPLETED" == 1 ]]; then
+    return
+  fi
+  if ! mcp_post 120 '{"jsonrpc":"2.0","id":999,"method":"tools/call","params":{"name":"release_sandbox","arguments":{}}}' >/dev/null; then
+    echo "mcp_release_cleanup=FAILED request_id=${REQUEST_ID}" >&2
+  fi
+}
+
+trap release_on_exit EXIT
 
 parse_json() {
   python3 - "$1" <<'PY'
@@ -56,12 +71,12 @@ print(json.dumps(value, ensure_ascii=False))
 PY
 }
 
-INITIALIZE=$(mcp_post '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"wisepen-curl","version":"1.0"}}}')
+INITIALIZE=$(mcp_post 30 '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"wisepen-curl","version":"1.0"}}}')
 parse_json "$INITIALIZE" >/dev/null
 echo "mcp_initialize=PASS"
-mcp_post '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' >/dev/null || true
+mcp_post 30 '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' >/dev/null || true
 
-TOOLS_JSON=$(parse_json "$(mcp_post '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')")
+TOOLS_JSON=$(parse_json "$(mcp_post 30 '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')")
 python3 - "$TOOLS_JSON" <<'PY'
 import json
 import sys
@@ -79,7 +94,7 @@ if missing:
 print("mcp_tools=PASS " + ",".join(sorted(names)))
 PY
 
-ACQUIRE_JSON=$(parse_json "$(mcp_post '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"acquire_sandbox","arguments":{}}}')")
+ACQUIRE_JSON=$(parse_json "$(mcp_post 60 '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"acquire_sandbox","arguments":{}}}')")
 python3 - "$ACQUIRE_JSON" <<'PY'
 import json
 import sys
@@ -90,8 +105,9 @@ if not payload.get("lease_id") or not payload.get("sandbox_id"):
     raise SystemExit(f"acquire_sandbox returned no lease: {response}")
 print("mcp_acquire=PASS lease_id=" + payload["lease_id"])
 PY
+LEASE_ACQUIRED=1
 
-RUN_JSON=$(parse_json "$(mcp_post '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"run_sandbox_script","arguments":{"language":"python","code":"print(\"mcp-curl-e2e\")"}}}')")
+RUN_JSON=$(parse_json "$(mcp_post 60 '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"run_sandbox_script","arguments":{"language":"python","code":"print(\"mcp-curl-e2e\")"}}}')")
 python3 - "$RUN_JSON" <<'PY'
 import json
 import sys
@@ -105,7 +121,7 @@ if "mcp-curl-e2e" not in json.dumps(payload, ensure_ascii=False):
 print("mcp_run_sandbox_script=PASS")
 PY
 
-RELEASE_JSON=$(parse_json "$(mcp_post '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"release_sandbox","arguments":{}}}')")
+RELEASE_JSON=$(parse_json "$(mcp_post 120 '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"release_sandbox","arguments":{}}}')")
 python3 - "$RELEASE_JSON" <<'PY'
 import json
 import sys
@@ -116,3 +132,4 @@ if payload.get("status") != "released":
     raise SystemExit(f"release_sandbox failed: {response}")
 print("mcp_release=PASS")
 PY
+RELEASE_COMPLETED=1

@@ -75,6 +75,24 @@ def test_docker_runtime_can_mark_e2e_containers():
     assert "wisepen.e2e=true" in calls[0]
 
 
+def test_docker_runtime_passes_browser_no_sandbox_environment():
+    calls = []
+
+    def runner(args, **kwargs):
+        calls.append(args)
+        output = "container-id\n" if args[1] == "run" else "127.0.0.1:49152\n"
+        return SimpleNamespace(returncode=0, stdout=output, stderr="")
+
+    runtime = DockerRuntime(AdapterConfig(image="test-image"), runner=runner)
+    runtime.create(
+        SandboxSpec(
+            "test-image", environment={"BROWSER_NO_SANDBOX": "--no-sandbox"}
+        )
+    )
+
+    assert "BROWSER_NO_SANDBOX=--no-sandbox" in calls[0]
+
+
 def test_docker_runtime_maps_command_failure_to_service_error():
     def runner(args, **kwargs):
         return SimpleNamespace(returncode=1, stdout="", stderr="daemon unavailable")
@@ -83,6 +101,52 @@ def test_docker_runtime_maps_command_failure_to_service_error():
     with pytest.raises(ServiceException) as exc_info:
         runtime.inspect("container-id")
     assert exc_info.value.code == SandboxErrorCode.SANDBOX_UNAVAILABLE.code
+
+
+def test_docker_runtime_recovers_container_when_docker_cli_is_signaled_after_create():
+    calls = []
+
+    def runner(args, **kwargs):
+        calls.append(args)
+        if args[1] == "run":
+            return SimpleNamespace(returncode=-5, stdout="", stderr="")
+        if args[1:3] == ["container", "inspect"]:
+            return SimpleNamespace(returncode=0, stdout="recovered-container\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="127.0.0.1:49152\n", stderr="")
+
+    runtime = DockerRuntime(AdapterConfig(image="test-image"), runner=runner)
+
+    handle = runtime.create(SandboxSpec("test-image"))
+
+    assert handle.container_id == "recovered-container"
+    assert sum(args[1] == "run" for args in calls) == 1
+    assert any(args[1:3] == ["container", "inspect"] for args in calls)
+
+
+def test_docker_runtime_retries_signaled_create_only_when_container_is_absent():
+    calls = []
+    runs = 0
+
+    def runner(args, **kwargs):
+        nonlocal runs
+        calls.append(args)
+        if args[1] == "run":
+            runs += 1
+            if runs == 1:
+                return SimpleNamespace(returncode=-5, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout="container-id\n", stderr="")
+        if args[1:3] == ["container", "inspect"]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="not found")
+        return SimpleNamespace(returncode=0, stdout="127.0.0.1:49152\n", stderr="")
+
+    runtime = DockerRuntime(
+        AdapterConfig(image="test-image"), runner=runner, sleeper=lambda _: None
+    )
+
+    handle = runtime.create(SandboxSpec("test-image"))
+
+    assert handle.container_id == "container-id"
+    assert sum(args[1] == "run" for args in calls) == 2
 
 
 def test_docker_runtime_redacts_environment_values_in_command_logs():
@@ -244,6 +308,67 @@ async def test_aio_client_maps_server_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_aio_client_health_can_use_a_shorter_warmup_timeout(monkeypatch):
+    client_timeouts = []
+
+    class Response:
+        status_code = 200
+        is_success = True
+
+    class Client:
+        def __init__(self, **kwargs):
+            client_timeouts.append(kwargs["timeout"])
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, **kwargs):
+            return Response()
+
+    monkeypatch.setattr("sandbox.core.providers.aio_adapter.client.httpx.AsyncClient", Client)
+
+    assert await AioClient("http://sandbox", timeout_seconds=30).health(
+        timeout_seconds=2
+    )
+    assert client_timeouts == [2]
+
+
+@pytest.mark.asyncio
+async def test_aio_client_requests_keep_the_business_timeout(monkeypatch):
+    client_timeouts = []
+
+    class Response:
+        status_code = 200
+        is_success = True
+
+        def json(self):
+            return {"ok": True}
+
+    class Client:
+        def __init__(self, **kwargs):
+            client_timeouts.append(kwargs["timeout"])
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, **kwargs):
+            return Response()
+
+    monkeypatch.setattr("sandbox.core.providers.aio_adapter.client.httpx.AsyncClient", Client)
+
+    assert await AioClient("http://sandbox", timeout_seconds=30).request("/v1/test", {}) == {
+        "ok": True
+    }
+    assert client_timeouts == [30]
+
+
+@pytest.mark.asyncio
 async def test_aio_client_uses_real_file_search_and_execute_contract(monkeypatch):
     calls = []
 
@@ -298,9 +423,11 @@ async def test_aio_provider_retries_transient_health_failure_during_warmup():
     class Client:
         def __init__(self):
             self.calls = 0
+            self.timeouts = []
 
-        async def health(self):
+        async def health(self, *, timeout_seconds=None):
             self.calls += 1
+            self.timeouts.append(timeout_seconds)
             if self.calls == 1:
                 raise ServiceException(
                     SandboxErrorCode.SANDBOX_UNAVAILABLE,
@@ -313,8 +440,9 @@ async def test_aio_provider_retries_transient_health_failure_during_warmup():
 
     result = await provider.wait_ready(sandbox, timeout_seconds=2)
 
-    assert result == Health(True, "ready")
+    assert result == Health(True, "ready", attempts=2)
     assert client.calls == 2
+    assert all(timeout is not None and 0 < timeout <= 2.0 for timeout in client.timeouts)
 
 
 @pytest.mark.asyncio
@@ -332,7 +460,7 @@ async def test_aio_provider_keeps_warmup_failure_after_persistent_health_failure
         def __init__(self):
             self.calls = 0
 
-        async def health(self):
+        async def health(self, *, timeout_seconds=None):
             self.calls += 1
             raise ServiceException(
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,

@@ -6,18 +6,12 @@ import sys
 
 import pytest
 import yaml
-from dependency_injector.errors import Error as DependencyInjectionError
 from pydantic import ValidationError
 
 os.environ.setdefault("NACOS_SERVER_ADDR", "127.0.0.1:8848")
 
 from sandbox.core.config import nacos as nacos_module
-from sandbox.container import (
-    RUNTIME_CONFIG_KEYS,
-    Container,
-    _load_provider,
-    configure_container,
-)
+from sandbox.container import Container, _load_provider
 from sandbox.core.providers.aio_adapter.models import AdapterConfig
 from sandbox.core.providers.aio_adapter.provider import AioSandboxProvider
 from sandbox.core.storage.local import LocalWorkspaceStore
@@ -42,14 +36,21 @@ def complete_config() -> dict[str, object]:
         "SANDBOX_VNC_PORT": 6080,
         "SANDBOX_REQUEST_TIMEOUT_SECONDS": 30.0,
         "SANDBOX_DOCKER_COMMAND_TIMEOUT_SECONDS": 30.0,
+        "SANDBOX_AIO_HEALTH_TIMEOUT_SECONDS": 3.0,
+        "SANDBOX_AIO_HEALTH_RETRY_INTERVAL_SECONDS": 0.5,
+        "SANDBOX_DOCKER_CREATE_MAX_ATTEMPTS": 3,
+        "SANDBOX_DOCKER_CREATE_RETRY_BACKOFF_SECONDS": 0.2,
         "SANDBOX_AIO_WORKDIR": "/home/gem",
         "SANDBOX_CONTAINER_WORKSPACE_ROOT": "/home/gem/workspaces",
         "SANDBOX_CONTAINER_USER": "gem:gem",
         "SANDBOX_DOCKER_TTY": True,
         "SANDBOX_OWNER_ID": "wisepen-sandbox-service",
+        "SANDBOX_BROWSER_NO_SANDBOX": "",
         "SANDBOX_PUBLIC_VNC_URL_TEMPLATE": "https://sandbox.example/vnc/{container_name}",
         "SANDBOX_PUBLIC_WEBSOCKET_URL_TEMPLATE": "wss://sandbox.example/ws/{port}",
         "SANDBOX_CHECKPOINT_INTERVAL_SECONDS": 300.0,
+        "SANDBOX_VNC_IDLE_TIMEOUT_SECONDS": 1800.0,
+        "SANDBOX_VNC_IDLE_CLEANUP_INTERVAL_SECONDS": 300.0,
         "SANDBOX_IMAGE": "sandbox-worker:latest",
         "SANDBOX_LEASE_TTL_SECONDS": 1800,
         "SANDBOX_TARGET_READY": 2,
@@ -59,6 +60,13 @@ def complete_config() -> dict[str, object]:
         "SANDBOX_WARMUP_TIMEOUT_SECONDS": 60.0,
         "SANDBOX_DESTROY_TIMEOUT_SECONDS": 60.0,
         "SANDBOX_WARMUP_MAX_RETRIES": 3,
+        "SANDBOX_WARMUP_RETRY_BACKOFF_SECONDS": 5.0,
+        "SANDBOX_WARMUP_RETRY_MAX_BACKOFF_SECONDS": 60.0,
+        "SANDBOX_WATCHER_INTERVAL_SECONDS": 5.0,
+        "SANDBOX_LEADER_LEASE_TTL_SECONDS": 90.0,
+        "SANDBOX_LEADER_LEASE_RENEW_INTERVAL_SECONDS": 20.0,
+        "SANDBOX_DESTROY_MAX_RETRIES": 3,
+        "SANDBOX_DESTROY_RETRY_BACKOFF_SECONDS": 0.1,
     }
 
 
@@ -105,6 +113,13 @@ def test_missing_nacos_fields_do_not_use_defaults(app_settings_module, monkeypat
         app_settings_module.load_settings()
 
 
+def test_browser_no_sandbox_defaults_to_empty_for_production(app_settings_module):
+    config = complete_config()
+    config.pop("SANDBOX_BROWSER_NO_SANDBOX")
+
+    assert app_settings_module.AppSettings(**config).SANDBOX_BROWSER_NO_SANDBOX == ""
+
+
 @pytest.mark.asyncio
 async def test_nacos_registration_failure_is_fatal(monkeypatch):
     class Client:
@@ -128,6 +143,7 @@ def test_container_builds_provider_transfer_and_selected_store_from_settings():
     assert isinstance(container.provider(), AioSandboxProvider)
     assert isinstance(container.workspace_store(), LocalWorkspaceStore)
     assert container.provider()._file_transfer is container.file_transfer()
+    assert container.watcher()._spec.environment == {}
 
 
 def test_container_applies_nacos_runtime_parameters_to_services():
@@ -141,15 +157,25 @@ def test_container_applies_nacos_runtime_parameters_to_services():
             "SANDBOX_MAX_CREATE_BATCH": 4,
             "SANDBOX_WARMUP_TIMEOUT_SECONDS": 180.0,
             "SANDBOX_DESTROY_TIMEOUT_SECONDS": 180.0,
-            "SANDBOX_WARMUP_MAX_RETRIES": 3,
+            "SANDBOX_WARMUP_MAX_RETRIES": 5,
+            "SANDBOX_WARMUP_RETRY_BACKOFF_SECONDS": 2.0,
+            "SANDBOX_WARMUP_RETRY_MAX_BACKOFF_SECONDS": 20.0,
+            "SANDBOX_WATCHER_INTERVAL_SECONDS": 3.0,
+            "SANDBOX_LEADER_LEASE_TTL_SECONDS": 120.0,
+            "SANDBOX_LEADER_LEASE_RENEW_INTERVAL_SECONDS": 30.0,
+            "SANDBOX_DESTROY_MAX_RETRIES": 4,
+            "SANDBOX_DESTROY_RETRY_BACKOFF_SECONDS": 0.3,
+            "SANDBOX_AIO_HEALTH_TIMEOUT_SECONDS": 4.0,
+            "SANDBOX_AIO_HEALTH_RETRY_INTERVAL_SECONDS": 0.7,
+            "SANDBOX_DOCKER_CREATE_MAX_ATTEMPTS": 4,
+            "SANDBOX_DOCKER_CREATE_RETRY_BACKOFF_SECONDS": 0.3,
             "SANDBOX_CHECKPOINT_INTERVAL_SECONDS": 300.0,
+            "SANDBOX_BROWSER_NO_SANDBOX": "--no-sandbox",
         }
     )
     container = Container()
 
-    effective = configure_container(container, config)
-
-    assert effective == {key: config[key] for key in RUNTIME_CONFIG_KEYS}
+    container.config.from_dict(config)
     pool = container.pool()
     watcher = container.watcher()
     scheduler = container.scheduler()
@@ -162,18 +188,25 @@ def test_container_applies_nacos_runtime_parameters_to_services():
         watcher._max_create_batch,
         watcher._warmup_timeout,
         watcher._destroy_timeout,
+        watcher._interval,
+        watcher._warmup_max_retries,
+        watcher._warmup_retry_backoff,
+        watcher._warmup_retry_max_backoff,
+        watcher._leader_lease_ttl,
+        watcher._leader_lease_renew_interval,
         watcher._checkpoint_interval,
-    ) == (10, 5, 0, 4, 180.0, 180.0, 3, 300.0)
-    assert scheduler._destroy_timeout == 180.0
-
-
-@pytest.mark.parametrize("missing_key", RUNTIME_CONFIG_KEYS)
-def test_container_rejects_missing_runtime_parameter(missing_key):
-    config = complete_config()
-    config.pop(missing_key)
-
-    with pytest.raises(DependencyInjectionError, match="Undefined configuration option"):
-        configure_container(Container(), config)
+    ) == (10, 5, 0, 4, 180.0, 180.0, 3.0, 5, 2.0, 20.0, 120.0, 30.0, 300.0)
+    assert (scheduler._destroy_timeout, scheduler._destroy_max_retries, scheduler._destroy_backoff) == (
+        180.0,
+        4,
+        0.3,
+    )
+    assert container.provider()._health_timeout == 4.0
+    assert container.provider()._health_retry_interval == 0.7
+    assert container.provider()._runtime._config.create_max_attempts == 4
+    assert container.provider()._runtime._config.create_retry_backoff_seconds == 0.3
+    assert watcher._spec.environment == {"BROWSER_NO_SANDBOX": "--no-sandbox"}
+    assert container.provider()._runtime._config.browser_no_sandbox == "--no-sandbox"
 
 
 def test_load_provider_passes_adapter_config_and_file_transfer(monkeypatch):
