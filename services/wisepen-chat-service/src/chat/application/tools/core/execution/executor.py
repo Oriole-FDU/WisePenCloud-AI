@@ -56,6 +56,9 @@ class ToolExecutor:
                 else:
                     preflight_metadata.update(output.metadata)
 
+            timeout_seconds = tool.definition.policy.resolve_timeout_seconds(
+                invocation.tool_call_arguments
+            )
             output = await self._run(
                 tool.execute(
                     context={
@@ -65,7 +68,7 @@ class ToolExecutor:
                     config=tool_config,
                     **invocation.tool_call_arguments,
                 ),
-                timeout_seconds=tool.definition.policy.timeout_seconds,
+                timeout_seconds=timeout_seconds,
                 tool_name=invocation.tool_name,
             )
 

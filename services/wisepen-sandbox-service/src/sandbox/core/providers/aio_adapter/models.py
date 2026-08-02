@@ -12,6 +12,9 @@ class AdapterConfig:
     vnc_port: int = 6080
     network: str | None = None
     request_timeout_seconds: float = 30.0
+    execution_default_timeout_ms: int = 30000
+    execution_max_timeout_ms: int = 120000
+    execution_transport_grace_seconds: float = 5.0
     warmup_timeout_seconds: float = 60.0
     health_timeout_seconds: float = 3.0
     health_retry_interval_seconds: float = 0.5

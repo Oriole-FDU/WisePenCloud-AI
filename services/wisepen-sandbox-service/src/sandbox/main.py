@@ -17,6 +17,7 @@ from sandbox.gateway.binding import VncBinding
 from sandbox.core.config.app_settings import settings
 from sandbox.core.config.bootstrap_settings import bootstrap_settings
 from sandbox.core.config.nacos import nacos_client_manager
+from sandbox.transport.mcp import build_sandbox_mcp
 
 
 setup_logging_intercept(bootstrap_settings.LOG_LEVEL)
@@ -28,8 +29,11 @@ setup_observability(
 # 容器在模块加载时构建，FastAPI 路由、MCP 和 VNC 网关共享同一个 Scheduler。
 container.config.from_dict(settings.model_dump())
 container.wire(modules=[health, pool, sandbox])
-sandbox_session = SandboxSessionService(container.scheduler())
-from sandbox.transport.mcp import build_sandbox_mcp
+sandbox_session = SandboxSessionService(
+    container.scheduler(),
+    execution_default_timeout_ms=settings.SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS,
+    execution_max_timeout_ms=settings.SANDBOX_EXECUTION_MAX_TIMEOUT_MS,
+)
 
 mcp_server = build_sandbox_mcp(sandbox_session)
 vnc_binding = VncBinding(

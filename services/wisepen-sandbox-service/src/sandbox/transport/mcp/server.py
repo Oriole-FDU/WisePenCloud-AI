@@ -116,7 +116,13 @@ def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
     async def shell_exec(
         command: Annotated[str, Field(description="Shell command.")],
         exec_dir: Annotated[str, Field(description="Optional relative directory or /workspace subdirectory; defaults to the current workspace.")] = ".",
-        timeout_ms: Annotated[int, Field(description="Execution timeout in milliseconds.")] = 30000,
+        timeout_ms: Annotated[
+            int,
+            Field(
+                description="Execution timeout in milliseconds; maximum 120000.",
+                ge=1,
+            ),
+        ] = 30000,
     ) -> dict[str, Any]:
         return await session.execute(
             "shell_exec",
@@ -130,7 +136,13 @@ def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
     async def run_sandbox_script(
         language: Annotated[str, Field(description="Programming language, for example python.")],
         code: Annotated[str, Field(description="Source code to execute.")],
-        timeout_ms: Annotated[int | None, Field(description="Optional execution timeout in milliseconds.")] = None,
+        timeout_ms: Annotated[
+            int | None,
+            Field(
+                description="Optional execution timeout in milliseconds; defaults to 30000 and maximum 120000.",
+                ge=1,
+            ),
+        ] = None,
         limits: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # 统一代码执行契约，Provider 再负责适配 AIO 的 /v1/code/execute。

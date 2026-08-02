@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from functools import partial
 from typing import Any, List
 
 from chat.application.tools.core import (
@@ -11,6 +12,7 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 from chat.application.tools.core.mcp.remote_tool import McpRemoteTool
+from chat.application.tools.core.execution.timeout_budget import timeout_seconds_from_ms
 from chat.core.config.app_settings import settings
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.service_client import McpServiceClient
@@ -67,16 +69,49 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
     }
 ]
 
+_SANDBOX_EXECUTION_TOOLS = {"shell_exec", "run_sandbox_script"}
+
+
+def _sandbox_execution_timeout_resolver(grace_seconds: float):
+    return partial(
+        timeout_seconds_from_ms,
+        default_timeout_ms=settings.SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS,
+        max_timeout_ms=settings.SANDBOX_EXECUTION_MAX_TIMEOUT_MS,
+        grace_seconds=grace_seconds,
+    )
+
+
+def _sandbox_tool_policy(name: str) -> ToolPolicy:
+    common = {
+        "expose_by_default": True,
+        "risk_level": (
+            ToolRiskLevel.MEDIUM
+            if name in _SANDBOX_EXECUTION_TOOLS
+            else ToolRiskLevel.LOW
+        ),
+        "persist_output": True,
+        "max_output_chars": settings.TOOL_RESULT_MAX_CHARS,
+    }
+    if name not in _SANDBOX_EXECUTION_TOOLS:
+        return ToolPolicy(
+            **common,
+            timeout_seconds=settings.MCP_DEFAULT_TIMEOUT_SECONDS,
+        )
+    return ToolPolicy(
+        **common,
+        timeout_seconds_resolver=_sandbox_execution_timeout_resolver(
+            settings.SANDBOX_EXECUTION_OUTER_GRACE_SECONDS
+        ),
+        transport_timeout_seconds_resolver=_sandbox_execution_timeout_resolver(
+            settings.SANDBOX_EXECUTION_TRANSPORT_GRACE_SECONDS
+        ),
+    )
+
+
 _SANDBOX_TOOL_CONFIGS: List[dict[str, Any]] = [
     {
         "tool_name": name,
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM if name in {"shell_exec", "run_sandbox_script"} else ToolRiskLevel.LOW,
-            timeout_seconds=settings.MCP_DEFAULT_TIMEOUT_SECONDS,
-            persist_output=True,
-            max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
-        ),
+        "policy": _sandbox_tool_policy(name),
         "failure_reason": f"Sandbox {name} Failed",
     }
     for name in (

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import ceil
 from typing import Any
 
 import httpx
@@ -155,16 +156,45 @@ class AioClient:
             {"file": path, "old_str": old_str, "new_str": new_str},
         )
 
-    async def shell_exec(self, command: str, exec_dir: str, timeout_ms: int) -> dict[str, Any]:
+    async def shell_exec(
+        self,
+        command: str,
+        exec_dir: str,
+        timeout_ms: int,
+        request_grace_seconds: float,
+    ) -> dict[str, Any]:
+        timeout_seconds = max(1, ceil(timeout_ms / 1000))
+        request_timeout_seconds = timeout_seconds + request_grace_seconds
+        debug(
+            "AIO Shell 执行超时预算已解析",
+            timeout_ms=timeout_ms,
+            aio_timeout_seconds=timeout_seconds,
+            request_timeout_seconds=request_timeout_seconds,
+        )
         return await self.request(
             "/v1/shell/exec",
-            # 命令执行接口在 AIO 侧的超时时间单位是秒，内部协议入口使用毫秒。
-            {"command": command, "exec_dir": exec_dir, "timeout": max(1, timeout_ms // 1000)},
+            {"command": command, "exec_dir": exec_dir, "timeout": timeout_seconds},
+            timeout=request_timeout_seconds,
         )
 
     async def code_execute(
-        self, language: str, code: str, payload: dict[str, Any] | None = None
+        self,
+        language: str,
+        code: str,
+        timeout_ms: int,
+        request_grace_seconds: float,
     ) -> dict[str, Any]:
-        body = dict(payload or {})
-        body.update({"language": language, "code": code})
-        return await self.request("/v1/code/execute", body)
+        timeout_seconds = max(1, ceil(timeout_ms / 1000))
+        request_timeout_seconds = timeout_seconds + request_grace_seconds
+        debug(
+            "AIO 代码执行超时预算已解析",
+            language=language,
+            timeout_ms=timeout_ms,
+            aio_timeout_seconds=timeout_seconds,
+            request_timeout_seconds=request_timeout_seconds,
+        )
+        return await self.request(
+            "/v1/code/execute",
+            {"language": language, "code": code, "timeout": timeout_seconds},
+            timeout=request_timeout_seconds,
+        )

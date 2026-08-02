@@ -67,7 +67,8 @@ class McpClient:
         for item in result.tools or []:
             name = item.name.strip()
             description = item.description
-            if not name or not description: continue
+            if not name or not description:
+                continue
             input_schema = item.inputSchema
             if hasattr(input_schema, "model_dump"):
                 input_schema = input_schema.model_dump(by_alias=True)
@@ -80,14 +81,17 @@ class McpClient:
         tool_name: str,
         arguments: Mapping[str, Any],
         context: Mapping[str, Any] | None = None,
+        *,
+        timeout_seconds: float | None = None,
     ) -> str:
         url = await self._resolve_url(server)
+        request_timeout = timeout_seconds or server.timeout_seconds or self._timeout
 
         async with streamable_http_client(
             url,
             http_client=AsyncClient(
                 headers=server.headers,
-                timeout=server.timeout_seconds or self._timeout,
+                timeout=request_timeout,
             ),
             terminate_on_close=True,
         ) as (read_stream, write_stream, _):

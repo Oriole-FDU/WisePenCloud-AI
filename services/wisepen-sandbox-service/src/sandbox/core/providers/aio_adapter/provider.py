@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shlex
+from typing import Any
 
 from sandbox.domain.entities import (
     Endpoint,
@@ -16,6 +17,11 @@ from sandbox.domain.entities import (
 )
 from sandbox.domain.interfaces.sandbox_provider import SandboxProvider
 from sandbox.domain.interfaces.file_transfer import FileTransferPort
+from sandbox.domain.execution_timeout import (
+    DEFAULT_EXECUTION_TIMEOUT_MS,
+    MAX_EXECUTION_TIMEOUT_MS,
+    normalize_execution_timeout_ms,
+)
 
 from sandbox.core.providers.aio_adapter.client import AioClient
 from sandbox.core.providers.aio_adapter.docker_runtime import DockerRuntime
@@ -37,6 +43,9 @@ class AioSandboxProvider(SandboxProvider):
         health_timeout_seconds: float = 3.0,
         health_retry_interval_seconds: float = 0.5,
         workspace_root: str = "/home/gem/workspaces",
+        execution_default_timeout_ms: int = DEFAULT_EXECUTION_TIMEOUT_MS,
+        execution_max_timeout_ms: int = MAX_EXECUTION_TIMEOUT_MS,
+        execution_transport_grace_seconds: float = 5.0,
     ) -> None:
         self._runtime = runtime
         self._file_transfer = file_transfer
@@ -44,6 +53,9 @@ class AioSandboxProvider(SandboxProvider):
         self._health_timeout = health_timeout_seconds
         self._health_retry_interval = health_retry_interval_seconds
         self._workspace_root = workspace_root.rstrip("/")
+        self._execution_default_timeout_ms = execution_default_timeout_ms
+        self._execution_max_timeout_ms = execution_max_timeout_ms
+        self._execution_transport_grace_seconds = execution_transport_grace_seconds
         self._clients: dict[str, AioClient] = {}
 
     @classmethod
@@ -66,6 +78,9 @@ class AioSandboxProvider(SandboxProvider):
             health_timeout_seconds=config.health_timeout_seconds,
             health_retry_interval_seconds=config.health_retry_interval_seconds,
             workspace_root=config.workspace_root,
+            execution_default_timeout_ms=config.execution_default_timeout_ms,
+            execution_max_timeout_ms=config.execution_max_timeout_ms,
+            execution_transport_grace_seconds=config.execution_transport_grace_seconds,
             create_max_attempts=config.create_max_attempts,
             create_retry_backoff_seconds=config.create_retry_backoff_seconds,
             e2e_label=config.e2e_label,
@@ -78,6 +93,9 @@ class AioSandboxProvider(SandboxProvider):
             health_timeout_seconds=config.health_timeout_seconds,
             health_retry_interval_seconds=config.health_retry_interval_seconds,
             workspace_root=config.workspace_root,
+            execution_default_timeout_ms=config.execution_default_timeout_ms,
+            execution_max_timeout_ms=config.execution_max_timeout_ms,
+            execution_transport_grace_seconds=config.execution_transport_grace_seconds,
         )
 
     async def validate_deployment(self) -> None:
@@ -130,7 +148,7 @@ class AioSandboxProvider(SandboxProvider):
                 healthy = await client.health(
                     timeout_seconds=min(self._health_timeout, remaining_seconds)
                 )
-            except ServiceException as exc:
+            except ServiceException:
                 remaining_seconds = max(
                     0, deadline - asyncio.get_running_loop().time()
                 )
@@ -234,20 +252,24 @@ class AioSandboxProvider(SandboxProvider):
             )
         elif operation == "shell_exec":
             exec_dir = policy.translate(str(payload.get("exec_dir", ".")))
+            timeout_ms = self._normalize_execution_timeout(payload.get("timeout_ms"))
             data = await client.shell_exec(
                 self._shell_command(exec_dir, str(payload.get("command", ""))),
                 exec_dir,
-                int(payload.get("timeout_ms", 30000)),
+                timeout_ms,
+                self._execution_transport_grace_seconds,
             )
         elif operation == "execute":
             language = str(payload.get("language", "python"))
             code = str(payload.get("code", ""))
+            timeout_ms = self._normalize_execution_timeout(payload.get("timeout_ms"))
             if language.strip().lower() in {"py", "python", "python3"}:
                 code = self._python_workspace_code(policy.root, code)
             data = await client.code_execute(
                 language,
                 code,
-                payload,
+                timeout_ms,
+                self._execution_transport_grace_seconds,
             )
         else:
             raise ValueError(f"不支持的沙箱操作：{operation}")
@@ -264,6 +286,13 @@ class AioSandboxProvider(SandboxProvider):
             "import os as _wisepen_os\n"
             f"_wisepen_os.chdir({json.dumps(workspace_dir)})\n"
             f"exec(compile({json.dumps(code)}, '<sandbox-user-code>', 'exec'), globals(), globals())\n"
+        )
+
+    def _normalize_execution_timeout(self, value: Any) -> int:
+        return normalize_execution_timeout_ms(
+            value,
+            default_timeout_ms=self._execution_default_timeout_ms,
+            max_timeout_ms=self._execution_max_timeout_ms,
         )
 
     async def export_workspace(
