@@ -200,6 +200,44 @@ def test_parser_marks_standalone_images_as_figures() -> None:
     assert not any(locator.name.startswith("anchor:Figure") for locator in result.locators)
 
 
+def test_flat_docx_markdown_has_no_sections_but_keeps_figures() -> None:
+    text = "\n\n".join(
+        (
+            "<!-- page 1 -->",
+            "关于招募全国青少年人工智能大赛\n技术类志愿者的通知",
+            "一、招募对象及人数",
+            "这是一段没有 Word 标题样式的正文。" * 20,
+            "<!-- page 2 -->",
+            "五、服务保障",
+            "1、志愿服务补贴按日发放。",
+            "![image1.png](images/image1.png)",
+            "报名问卷：[https://example.com](https://example.com)",
+            "![image2.jpeg](images/image2.jpeg)",
+            "附：志愿者证书样张",
+        )
+    )
+
+    default_result = MarkdownChunker().chunk(document=ChunkDocument(text=text))
+    small_result = MarkdownChunker(max_characters=120).chunk(
+        document=ChunkDocument(text=text)
+    )
+
+    assert not any(block.block_kind is BlockKind.HEADING for block in default_result.blocks)
+    assert not any(locator.name.startswith("section:") for locator in default_result.locators)
+    assert all(not block.section_path for block in default_result.blocks)
+    assert [
+        block.block_kind
+        for block in default_result.blocks
+        if block.text.startswith("![image")
+    ] == [BlockKind.FIGURE, BlockKind.FIGURE]
+    assert len(small_result.chunks) > len(default_result.chunks)
+    assert any(
+        BlockKind.FIGURE in chunk.metadata["block_kinds"]
+        for chunk in small_result.chunks
+    )
+    assert all("<!-- page" not in chunk.text for chunk in small_result.chunks)
+
+
 def test_figure_url_is_not_mistaken_for_numbered_caption() -> None:
     result = MarkdownChunker().chunk(
         document=ChunkDocument(text="![architecture](figure2.png)")

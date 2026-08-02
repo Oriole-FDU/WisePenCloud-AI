@@ -44,8 +44,7 @@ dependencies = [
     "hishel[async]",
     "pdf-inspector>=0.2.5",
     "mineru==3.4.4",
-    "beautifulsoup4",
-    "markdownify",
+    "openpyxl",
 ]
 
 [dependency-groups]

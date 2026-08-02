@@ -2303,19 +2303,6 @@ wheels = [
 ]
 
 [[package]]
-name = "markdownify"
-version = "1.2.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "beautifulsoup4" },
-    { name = "six" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/92/ab/d1297139c0e2ceb151ae564c8c4f57ac0155d8f1f8b4cbd5d6523c82ea36/markdownify-1.2.3.tar.gz", hash = "sha256:1a176f05522c8a2cb1dd3ab9d307dcdadbed5c26ae717855bfc42b3b6d38d937", size = 18852, upload-time = "2026-06-30T20:27:39.06Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/10/fa543d484e8b1199243fe20eedd02cc5af050edebce98a7293a5773df592/markdownify-1.2.3-py3-none-any.whl", hash = "sha256:a189a0bedfd14009030fde5f85bb6f77c56897cb839b5c25315dd7d4e3e290ba", size = 15732, upload-time = "2026-06-30T20:27:38.094Z" },
-]
-
-[[package]]
 name = "markupsafe"
 version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -5493,7 +5480,6 @@ dependencies = [
     { name = "anthropic" },
     { name = "anyio" },
     { name = "beanie" },
-    { name = "beautifulsoup4" },
     { name = "charset-normalizer" },
     { name = "dashscope" },
     { name = "dependency-injector" },
@@ -5507,7 +5493,6 @@ dependencies = [
     { name = "lxml" },
     { name = "magika", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13' and sys_platform == 'win32'" },
     { name = "magika", version = "0.6.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13' or sys_platform != 'win32'" },
-    { name = "markdownify" },
     { name = "mcp" },
     { name = "mem0ai" },
     { name = "mineru" },
@@ -5515,6 +5500,7 @@ dependencies = [
     { name = "neo4j" },
     { name = "neo4j-graphrag" },
     { name = "openai" },
+    { name = "openpyxl" },
     { name = "orjson" },
     { name = "pdf-inspector" },
     { name = "pydantic" },
@@ -5542,7 +5528,6 @@ requires-dist = [
     { name = "anthropic" },
     { name = "anyio" },
     { name = "beanie" },
-    { name = "beautifulsoup4" },
     { name = "charset-normalizer" },
     { name = "dashscope" },
     { name = "dependency-injector" },
@@ -5555,7 +5540,6 @@ requires-dist = [
     { name = "litellm" },
     { name = "lxml" },
     { name = "magika" },
-    { name = "markdownify" },
     { name = "mcp", specifier = ">=1.27,<2" },
     { name = "mem0ai" },
     { name = "mineru", specifier = "==3.4.4" },
@@ -5563,6 +5547,7 @@ requires-dist = [
     { name = "neo4j", specifier = "==6.2.0" },
     { name = "neo4j-graphrag", specifier = "==1.18.0" },
     { name = "openai" },
+    { name = "openpyxl" },
     { name = "orjson" },
     { name = "pdf-inspector", specifier = ">=0.2.5" },
     { name = "pydantic" },

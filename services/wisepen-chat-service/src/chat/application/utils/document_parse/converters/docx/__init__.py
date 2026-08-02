@@ -1,1 +1,3 @@
-"""DOCX converter placeholder."""
+from .converter import DocxConverter
+
+__all__ = ["DocxConverter"]

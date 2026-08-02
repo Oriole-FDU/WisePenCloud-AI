@@ -17,7 +17,7 @@ from chat.application.utils.document_parse.parse_pdf import (
     parse_pdf,
 )
 from chat.application.utils.document_parse.parse_pptx import parse_pptx
-from chat.application.utils.document_parse.parse_xlsx import parse_xlsx
+from chat.application.utils.document_parse.parse_xlsx import fast_parse_xlsx
 from chat.application.utils.file_type_detect import detect_file_type_from_bytes
 
 
@@ -185,5 +185,5 @@ class DocumentLinkExtractor:
         if document_type is DocumentType.DOCX:
             return await asyncio.to_thread(parse_docx, file_path)
         if document_type is DocumentType.XLSX:
-            return await asyncio.to_thread(parse_xlsx, file_path, image_path=None)
+            return await asyncio.to_thread(fast_parse_xlsx, file_path, image_path=None)
         return await asyncio.to_thread(parse_pptx, file_path, image_path=None)
