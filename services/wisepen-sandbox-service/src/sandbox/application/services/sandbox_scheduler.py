@@ -309,21 +309,44 @@ class SandboxScheduler:
                 self._metrics.increment("expired_lease_recoveries")
         return recovered
 
-    async def shutdown(self) -> list[Exception]:
+    async def shutdown(self, *, total_timeout_seconds: float = 8.0) -> list[Exception]:
+        """Graceful shutdown with a hard time budget.
+
+        Destroys every known container **concurrently** within
+        *total_timeout_seconds* so that Docker's SIGTERM→SIGKILL window
+        is never exceeded.  Containers that could not be destroyed within
+        the budget are left for the label-based ``cleanup_owned()``
+        backstop in *main.py*.
+        """
         errors: list[Exception] = []
-        for binding in list(await self._binding_manager.user_bindings()):
+
+        async def _retire_one(binding) -> None:
             try:
                 await self._retire_binding(binding, DestroyReason.PROVIDER_ERROR)
             except Exception as exc:
                 errors.append(exc)
-        records = await self._repository.records_in(
-            [SandboxState.CREATING, SandboxState.WARMING, SandboxState.READY, SandboxState.DESTROYING]
-        )
-        for record in records:
+
+        async def _destroy_one(record: SandboxRecord) -> None:
             try:
                 await self._destroy_record(record, DestroyReason.PROVIDER_ERROR)
             except Exception as exc:
                 errors.append(exc)
+
+        # 并行销毁所有用户容器和池中实例，避免 Docker 的 10s 默认超时。
+        bindings = list(await self._binding_manager.user_bindings())
+        records = await self._repository.records_in(
+            [SandboxState.CREATING, SandboxState.WARMING, SandboxState.READY, SandboxState.DESTROYING]
+        )
+        tasks = [asyncio.create_task(_retire_one(b)) for b in bindings]
+        tasks += [asyncio.create_task(_destroy_one(r)) for r in records]
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=total_timeout_seconds)
+            for task in pending:
+                task.cancel()
+            for task in done:
+                exc = task.exception()
+                if exc is not None:
+                    errors.append(exc)
         return errors
 
     async def _checkpoint_workspace(

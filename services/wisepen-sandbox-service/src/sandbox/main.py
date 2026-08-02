@@ -90,15 +90,29 @@ async def lifespan(app):
                 task.cancel()
             cleanup_stop.set()
             cleanup_task.cancel()
-            for exc in await container.scheduler().shutdown():
-                error("sandbox graceful shutdown failed.", exc=exc)
+            # 并行执行：优雅关闭容器 + Docker label 兜底清理。
+            # cleanup_owned 通过 docker rm -f 按 label 批量删除，不依赖
+            # Repository 状态，能清理 shutdown() 超时后残留的容器。
+            scheduler_shutdown = asyncio.create_task(
+                container.scheduler().shutdown()
+            )
             provider = container.provider()
             cleanup_owned = getattr(provider, "cleanup_owned", None)
-            if cleanup_owned is not None:
+            cleanup_task_shutdown = (
+                asyncio.create_task(cleanup_owned())
+                if cleanup_owned is not None
+                else None
+            )
+            # 等待两路清理完成；任一失败只记日志不阻塞对方。
+            scheduler_errors = await scheduler_shutdown
+            for exc in scheduler_errors:
+                error("sandbox graceful shutdown failed.", exc=exc)
+            if cleanup_task_shutdown is not None:
                 try:
-                    await cleanup_owned()
+                    count = await cleanup_task_shutdown
+                    info(f"label 兜底清理了 {count} 个残留容器。")
                 except Exception as exc:
-                    error("sandbox worker 清理失败。", exc=exc)
+                    error("sandbox label 清理失败。", exc=exc)
             if use_nacos:
                 try:
                     await nacos_client_manager.deregister_instance()

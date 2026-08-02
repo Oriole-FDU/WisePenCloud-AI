@@ -7,6 +7,7 @@ services:
       dockerfile: services/wisepen-sandbox-service/Dockerfile
     container_name: wisepen-sandbox
     restart: unless-stopped
+    stop_grace_period: 15s
     ports:
       - "19905:19905"
     volumes:
