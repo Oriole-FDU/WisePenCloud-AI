@@ -95,6 +95,12 @@ class AioClient:
                 )
             payload = response.json()
             # 部分 AIO 接口返回 R(data=...)，部分直接返回 dict；这里统一拆出业务 data。
+            if isinstance(payload, dict) and payload.get("success") is False:
+                reason = self._failure_reason(payload)
+                raise ServiceException(
+                    SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                    f"AIO 业务请求失败：{reason}",
+                )
             if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
                 return payload["data"]
             return payload if isinstance(payload, dict) else {"data": payload}
@@ -110,6 +116,14 @@ class AioClient:
                 SandboxErrorCode.SANDBOX_UNAVAILABLE,
                 "AIO 请求失败",
             ) from exc
+
+    @staticmethod
+    def _failure_reason(payload: dict[str, Any]) -> str:
+        for key in ("message", "msg", "detail", "error", "code"):
+            value = payload.get(key)
+            if value not in (None, "", False):
+                return str(value)[:500]
+        return "AIO 返回 success=false 但未提供错误原因"
 
     async def file_read(self, path: str, max_chars: int | None = None) -> dict[str, Any]:
         body: dict[str, Any] = {"file": path}

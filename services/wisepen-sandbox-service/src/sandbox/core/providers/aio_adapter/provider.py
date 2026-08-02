@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import shlex
 
 from sandbox.domain.entities import (
     Endpoint,
@@ -34,12 +36,14 @@ class AioSandboxProvider(SandboxProvider):
         request_timeout_seconds: float = 30.0,
         health_timeout_seconds: float = 3.0,
         health_retry_interval_seconds: float = 0.5,
+        workspace_root: str = "/home/gem/workspaces",
     ) -> None:
         self._runtime = runtime
         self._file_transfer = file_transfer
         self._request_timeout = request_timeout_seconds
         self._health_timeout = health_timeout_seconds
         self._health_retry_interval = health_retry_interval_seconds
+        self._workspace_root = workspace_root.rstrip("/")
         self._clients: dict[str, AioClient] = {}
 
     @classmethod
@@ -61,6 +65,7 @@ class AioSandboxProvider(SandboxProvider):
             warmup_timeout_seconds=config.warmup_timeout_seconds,
             health_timeout_seconds=config.health_timeout_seconds,
             health_retry_interval_seconds=config.health_retry_interval_seconds,
+            workspace_root=config.workspace_root,
             create_max_attempts=config.create_max_attempts,
             create_retry_backoff_seconds=config.create_retry_backoff_seconds,
             e2e_label=config.e2e_label,
@@ -72,6 +77,7 @@ class AioSandboxProvider(SandboxProvider):
             request_timeout_seconds=config.request_timeout_seconds,
             health_timeout_seconds=config.health_timeout_seconds,
             health_retry_interval_seconds=config.health_retry_interval_seconds,
+            workspace_root=config.workspace_root,
         )
 
     async def validate_deployment(self) -> None:
@@ -193,7 +199,7 @@ class AioSandboxProvider(SandboxProvider):
         client = self._client(sandbox)
         policy = PathPolicy(
             TenantScope(request.tenant_id, request.workspace_id),
-            self._runtime.workdir,
+            self._workspace_root,
             isolate_scope=True,
         )
         payload = request.payload
@@ -227,20 +233,38 @@ class AioSandboxProvider(SandboxProvider):
                 str(payload.get("new_str", "")),
             )
         elif operation == "shell_exec":
+            exec_dir = policy.translate(str(payload.get("exec_dir", ".")))
             data = await client.shell_exec(
-                str(payload.get("command", "")),
-                policy.translate(str(payload.get("exec_dir", "."))),
+                self._shell_command(exec_dir, str(payload.get("command", ""))),
+                exec_dir,
                 int(payload.get("timeout_ms", 30000)),
             )
         elif operation == "execute":
+            language = str(payload.get("language", "python"))
+            code = str(payload.get("code", ""))
+            if language.strip().lower() in {"py", "python", "python3"}:
+                code = self._python_workspace_code(policy.root, code)
             data = await client.code_execute(
-                str(payload.get("language", "python")),
-                str(payload.get("code", "")),
+                language,
+                code,
                 payload,
             )
         else:
             raise ValueError(f"不支持的沙箱操作：{operation}")
         return ExecutionResult(request.request_id, "succeeded", data)
+
+    @staticmethod
+    def _shell_command(exec_dir: str, command: str) -> str:
+        return f"cd -- {shlex.quote(exec_dir)} && {command}"
+
+    @staticmethod
+    def _python_workspace_code(workspace_dir: str, code: str) -> str:
+        # Compile separately so a user module may still begin with a future import.
+        return (
+            "import os as _wisepen_os\n"
+            f"_wisepen_os.chdir({json.dumps(workspace_dir)})\n"
+            f"exec(compile({json.dumps(code)}, '<sandbox-user-code>', 'exec'), globals(), globals())\n"
+        )
 
     async def export_workspace(
         self, sandbox: SandboxRef, tenant_id: str, workspace_id: str
