@@ -23,7 +23,7 @@ _CONTENT_IDS_SCHEMA: dict[str, Any] = {
     "items": {"type": "string", "minLength": 1},
     "minItems": 1,
     "maxItems": 64,
-    "description": "One or more cnt_* ids from previous content_receipts.",
+    "description": "One or more cnt_* ids from previous contents entries.",
 }
 _PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",

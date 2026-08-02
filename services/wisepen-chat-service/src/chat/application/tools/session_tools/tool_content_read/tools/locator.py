@@ -21,7 +21,7 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         "content_id": {
             "type": "string",
             "minLength": 1,
-            "description": "One cnt_* id from a previous content receipt.",
+            "description": "One cnt_* id from a previous contents entry.",
         },
         "locator": {
             "type": "string",

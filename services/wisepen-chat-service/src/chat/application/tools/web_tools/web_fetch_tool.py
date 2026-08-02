@@ -49,7 +49,7 @@ class WebFetchTool:
                 name="web_fetch",
                 description=(
                     "Fetch one or more specific public HTTP(S) URLs and return their readable "
-                    "content. Use this when exact HTML page URLs are known, including several "
+                    "markdown content. Use this when exact HTML page URLs are known, including several "
                     "unrelated pages. Direct PDF URLs are supported as a convenience but use only "
                     "fast native text-layer extraction; this tool does not provide exact PDF "
                     "parsing and does not accept other binary documents. Use document_link_extract "

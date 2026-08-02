@@ -418,7 +418,8 @@ class Container(containers.DeclarativeContainer):
     tool_output_cache = providers.Singleton(
         ToolOutputCache,
         content_store=tool_content_store,
-        inline_max_chars=settings.TOOL_RESULT_MAX_CHARS,
+        per_max_chars=settings.TOOL_CONTENT_PREVIEW_PER_MAX_CHARS,
+        total_max_chars=settings.TOOL_CONTENT_PREVIEW_TOTAL_MAX_CHARS,
     )
     tool_dispatcher = providers.Singleton(
         ToolDispatcher,

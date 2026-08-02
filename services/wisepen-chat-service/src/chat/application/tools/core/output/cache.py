@@ -14,23 +14,29 @@ from chat.application.tools.core.output.tool_return import (
 )
 from common.logger import warn
 
+_TRUNCATION_MARKER = "\n...\n"
+
 
 class ToolOutputCache:
-    """将 ToolReturn 中可缓存的大文本内联，或转换为内容存储回执。"""
+    """将 ToolReturn 中可缓存的大文本存储，并生成模型可见的内容预览。"""
 
-    __slots__ = ("_content_store", "_inline_max_chars")
+    __slots__ = ("_content_store", "_per_max_chars", "_total_max_chars")
 
     def __init__(
         self,
         *,
         content_store: ToolContentStore,
-        inline_max_chars: int,
+        per_max_chars: int,
+        total_max_chars: int,
     ) -> None:
-        if inline_max_chars < 1:
-            raise ValueError("inline_max_chars must be greater than 0")
+        if per_max_chars < 1:
+            raise ValueError("per_max_chars must be greater than 0")
+        if total_max_chars < 1:
+            raise ValueError("total_max_chars must be greater than 0")
 
         self._content_store = content_store
-        self._inline_max_chars = inline_max_chars
+        self._per_max_chars = per_max_chars
+        self._total_max_chars = total_max_chars
 
     async def process(
         self,
@@ -39,11 +45,11 @@ class ToolOutputCache:
         invocation: ToolInvocation,
         session_id: str,
     ) -> dict[str, Any]:
-        """将可缓存文本附加到可见结果，或替换为外部内容回执。"""
+        """将可缓存文本附加到可见结果，并补充后续读取所需的凭证字段。"""
         payload = dict(tool_return.visible_result)
 
         # 与 ToolContentStore 的空文本规则保持一致，避免纯空白内容
-        # 在 inline 和持久化两条路径中产生不同结果。
+        # 在预览和持久化两条路径中产生不同结果。
         cacheable_texts = tuple(
             cacheable_text
             for cacheable_text in tool_return.cacheable_texts
@@ -52,41 +58,60 @@ class ToolOutputCache:
         if not cacheable_texts:
             return payload
 
-        # 总量较小时直接放入工具结果，避免一次额外的存储和读取。
-        if (
-            sum(len(cacheable_text.text) for cacheable_text in cacheable_texts)
-            <= self._inline_max_chars
-        ):
-            payload["contents"] = tuple(
-                {
-                    "text": cacheable_text.text,
-                    "metadata": dict(cacheable_text.metadata),
-                }
-                for cacheable_text in cacheable_texts
+        # 每段内容都先入库，模型可见预览和后续读取凭证保持在同一个 content 条目里。
+        receipts = dict(
+            await self._store_contents(
+                invocation=invocation,
+                cacheable_texts=cacheable_texts,
+                session_id=session_id,
             )
-            return payload
-
-        # 超过内联边界后，每段文本独立入库；单段失败不影响其他文本。
-        indexed_receipts = await self._store_contents(
-            invocation=invocation,
-            cacheable_texts=cacheable_texts,
-            session_id=session_id,
         )
-        if indexed_receipts:
-            payload["content_receipts"] = tuple(
+        budget = self._preview_budget(cacheable_texts)
+        payload["contents"] = tuple(
+            self._content_payload(
+                content_index=index,
+                cacheable_text=cacheable_text,
+                receipt=receipts.get(index),
+                budget=budget,
+            )
+            for index, cacheable_text in enumerate(cacheable_texts)
+        )
+        return payload
+
+    def _preview_budget(self, cacheable_texts: tuple[CacheableText, ...]) -> int:
+        total_length = sum(len(cacheable_text.text) for cacheable_text in cacheable_texts)
+        if total_length >= self._total_max_chars:
+            return max(1, self._total_max_chars // len(cacheable_texts))
+        return self._per_max_chars
+
+    def _content_payload(
+        self,
+        *,
+        content_index: int,
+        cacheable_text: CacheableText,
+        receipt: ToolContentReceipt | None,
+        budget: int,
+    ) -> dict[str, Any]:
+        preview, truncated = _preview_text(cacheable_text.text, budget)
+        item: dict[str, Any] = {
+            "content_index": content_index,
+            "text": preview,
+            "truncated": truncated,
+            "total_length": len(cacheable_text.text),
+            "metadata": dict(cacheable_text.metadata),
+        }
+        if receipt is not None:
+            item.update(
                 {
-                    "content_index": content_index,
                     "content_id": receipt.content_id,
                     "chunk_count": receipt.chunk_count,
                     "locator_count": receipt.locator_count,
                     "locator_kinds": receipt.locator_kinds,
                     "total_length": receipt.total_length,
-                    "metadata": receipt.metadata,
+                    "metadata": dict(receipt.metadata),
                 }
-                for content_index, receipt in indexed_receipts
             )
-
-        return payload
+        return item
 
     async def _store_contents(
         self,
@@ -129,7 +154,22 @@ class ToolOutputCache:
                     tool_call_id=invocation.tool_call_id,
                     cacheable_text_index=index,
                     reason=result.reason,
-                    audit_message="工具输出内容超过入库上限，该文本不会出现在模型输出回执中。",
+                    audit_message="工具输出内容超过入库上限，该文本不会带有后续读取凭证。",
                 )
 
         return tuple(receipts)
+
+
+def _preview_text(text: str, budget: int) -> tuple[str, bool]:
+    if len(text) <= budget:
+        return text, False
+    if budget <= len(_TRUNCATION_MARKER):
+        return text[:budget], True
+
+    available = budget - len(_TRUNCATION_MARKER)
+    head_chars = available - available // 2
+    tail_chars = available // 2
+    return (
+        text[:head_chars] + _TRUNCATION_MARKER + text[-tail_chars:],
+        True,
+    )

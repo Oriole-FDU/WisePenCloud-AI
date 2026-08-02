@@ -147,7 +147,11 @@ async def test_tool_output_cache_maps_is_md_to_content_type() -> None:
                 {"receipt": None, "status": None},
             )()
 
-    cache = ToolOutputCache(content_store=_Store(), inline_max_chars=1)
+    cache = ToolOutputCache(
+        content_store=_Store(),
+        per_max_chars=1,
+        total_max_chars=1,
+    )
     await cache.process(
         tool_return=ToolReturn(
             cacheable_texts=(

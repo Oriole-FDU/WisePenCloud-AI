@@ -22,7 +22,7 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         "content_id": {
             "type": "string",
             "minLength": 1,
-            "description": "Required. One cnt_* id from a previous content receipt.",
+            "description": "Required. One cnt_* id from a previous contents entry.",
         },
         "start": {
             "type": "integer",
@@ -65,12 +65,12 @@ class ToolContentReadTool:
                     "  - Negative offsets count from the end; start=-1000 reads the final 1000 characters.\n"
                     "  - start=0,end=2000 reads the first 2000 characters.\n"
                     "  - Omitting both offsets reads the first 8000 characters; content beyond this range is clipped.\n\n"
-                    "  - Use total_length from the source content_receipt to choose a strategy: read all when it is "
+                    "  - Use total_length from the source contents entry to choose a strategy: read all when it is "
                     "under 8000, read in two ranges when it is 8000-16000, and prefer "
                     "tool_content_ranked_read before focused range reads when it exceeds 16000.\n\n"
                     "OUTPUT RULES:\n"
                     "  - Returns the requested text with normalized absolute offsets and structural locators.\n"
-                    "  - This tool reads existing cnt_* content and never creates another content receipt."
+                    "  - This tool reads existing cnt_* content and never creates another content entry."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),

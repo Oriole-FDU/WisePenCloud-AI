@@ -159,7 +159,8 @@ async def test_executor_renders_plain_output_without_tool_return() -> None:
         ),
         output_cache=ToolOutputCache(
             content_store=ToolContentStore(repository=repository),
-            inline_max_chars=3,
+            per_max_chars=3,
+            total_max_chars=3,
         ),
     )
 
@@ -191,7 +192,8 @@ async def test_executor_caches_tool_return_large_text() -> None:
         ),
         output_cache=ToolOutputCache(
             content_store=ToolContentStore(repository=repository),
-            inline_max_chars=3,
+            per_max_chars=8,
+            total_max_chars=100,
         ),
     )
 
@@ -200,12 +202,13 @@ async def test_executor_caches_tool_return_large_text() -> None:
     assert repository.stored is not None
     payload = json.loads(result.tool_output)
     assert payload["status"] == "ok"
-    assert payload["content_receipts"][0]["content_index"] == 0
-    assert payload["content_receipts"][0]["content_id"] == repository.stored.content_id
-    assert payload["content_receipts"][0]["total_length"] == len(repository.stored.text)
-    assert payload["content_receipts"][0]["metadata"] == {
-        "source_url": "https://example.com"
-    }
+    content = payload["contents"][0]
+    assert content["content_index"] == 0
+    assert content["content_id"] == repository.stored.content_id
+    assert content["text"] == "# \n...\nt"
+    assert content["truncated"] is True
+    assert content["total_length"] == len(repository.stored.text)
+    assert content["metadata"] == {"source_url": "https://example.com"}
     assert repository.stored.content_type == "text/plain"
     assert repository.stored.chunks[0].section_paths == ()
     assert repository.stored.metadata == {"source_url": "https://example.com"}
@@ -232,7 +235,8 @@ async def test_executor_preserves_cacheable_text_markdown_type() -> None:
         ),
         output_cache=ToolOutputCache(
             content_store=ToolContentStore(repository=repository),
-            inline_max_chars=3,
+            per_max_chars=8,
+            total_max_chars=100,
         ),
     )
 
@@ -266,7 +270,8 @@ async def test_output_cache_preserves_index_after_partial_store_failure() -> Non
 
     payload = await ToolOutputCache(
         content_store=_Store(),
-        inline_max_chars=1,
+        per_max_chars=20,
+        total_max_chars=100,
     ).process(
         tool_return=ToolReturn(
             cacheable_texts=(
@@ -281,24 +286,34 @@ async def test_output_cache_preserves_index_after_partial_store_failure() -> Non
         session_id="session-1",
     )
 
-    assert payload["content_receipts"] == (
+    assert payload["contents"] == (
+        {
+            "content_index": 0,
+            "text": "first",
+            "truncated": False,
+            "total_length": 5,
+            "metadata": {},
+        },
         {
             "content_index": 1,
-                "content_id": "cnt_second",
-                "chunk_count": 1,
-                "locator_count": 0,
-                "locator_kinds": (),
-                "total_length": 6,
+            "text": "second",
+            "truncated": False,
+            "total_length": 6,
             "metadata": {"source_url": "https://example.com/second"},
+            "content_id": "cnt_second",
+            "chunk_count": 1,
+            "locator_count": 0,
+            "locator_kinds": (),
         },
     )
 
 
 @pytest.mark.asyncio
-async def test_output_cache_inlines_structured_contents() -> None:
+async def test_output_cache_stores_and_previews_structured_contents() -> None:
     payload = await ToolOutputCache(
-        content_store=_RepositoryStub(),
-        inline_max_chars=100,
+        content_store=ToolContentStore(repository=_RepositoryStub()),
+        per_max_chars=100,
+        total_max_chars=100,
     ).process(
         tool_return=ToolReturn(
             visible_result={"status": "ok"},
@@ -317,13 +332,48 @@ async def test_output_cache_inlines_structured_contents() -> None:
         session_id="session-1",
     )
 
-    assert payload["contents"] == (
-        {
-            "text": "first",
-            "metadata": {"source_url": "https://example.com/1"},
-        },
-        {
-            "text": "second",
-            "metadata": {"source_url": "https://example.com/2"},
-        },
+    first_content, second_content = payload["contents"]
+    assert first_content["content_index"] == 0
+    assert first_content["text"] == "first"
+    assert first_content["truncated"] is False
+    assert first_content["total_length"] == 5
+    assert first_content["metadata"] == {"source_url": "https://example.com/1"}
+    assert first_content["content_id"].startswith("cnt_")
+    assert first_content["chunk_count"] == 1
+    assert first_content["locator_count"] == 0
+    assert first_content["locator_kinds"] == ()
+
+    assert second_content["content_index"] == 1
+    assert second_content["text"] == "second"
+    assert second_content["truncated"] is False
+    assert second_content["total_length"] == 6
+    assert second_content["metadata"] == {"source_url": "https://example.com/2"}
+    assert second_content["content_id"].startswith("cnt_")
+    assert second_content["chunk_count"] == 1
+    assert second_content["locator_count"] == 0
+    assert second_content["locator_kinds"] == ()
+
+
+@pytest.mark.asyncio
+async def test_output_cache_uses_average_preview_budget_when_total_reaches_limit() -> None:
+    payload = await ToolOutputCache(
+        content_store=ToolContentStore(repository=_RepositoryStub()),
+        per_max_chars=50,
+        total_max_chars=20,
+    ).process(
+        tool_return=ToolReturn(
+            cacheable_texts=(
+                CacheableText(text="abcdefghijklmno"),
+                CacheableText(text="pqrstuvwxyz1234"),
+            ),
+        ),
+        invocation=_invocation(),
+        session_id="session-1",
     )
+
+    assert payload["contents"][0]["text"] == "abc\n...\nno"
+    assert payload["contents"][0]["truncated"] is True
+    assert payload["contents"][0]["total_length"] == 15
+    assert payload["contents"][1]["text"] == "pqr\n...\n34"
+    assert payload["contents"][1]["truncated"] is True
+    assert payload["contents"][1]["total_length"] == 15
