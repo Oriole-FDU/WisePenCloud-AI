@@ -63,6 +63,10 @@ async def test_internal_api_requires_fencing_and_exposes_metrics():
             "workspace_id",
             "expires_at",
             "fencing_token",
+            "user_binding_id",
+            "user_idle_expires_at",
+            "container_reused",
+            "workspace_reused",
             "endpoint",
         }
         assert lease["endpoint"]["base_url"]
@@ -136,6 +140,15 @@ async def test_internal_api_requires_fencing_and_exposes_metrics():
         assert released.status_code == 200
         assert released.json()["data"] == {"status": "released"}
 
+        status = await client.get(f"/internal/sandboxes/{lease['sandbox_id']}")
+        assert status.json()["data"]["state"] == "user_idle"
+
+        deleted = await client.post(
+            "/internal/sandbox-workspaces/delete",
+            json={"tenant_id": "tenant", "workspace_id": "workspace"},
+        )
+        assert deleted.json()["data"]["status"] == "deleted"
+
 
 @pytest.mark.asyncio
 async def test_health_readiness_and_request_validation_contracts():
@@ -180,6 +193,8 @@ def test_openapi_documents_internal_sandbox_contracts():
         ("/internal/sandboxes/allocate", "post"),
         ("/internal/leases/{lease_id}/execute", "post"),
         ("/internal/leases/{lease_id}/release", "post"),
+        ("/internal/sandbox-workspaces/delete", "post"),
+        ("/internal/user-sandboxes/destroy", "post"),
         ("/internal/sandboxes/{sandbox_id}", "get"),
         ("/internal/pool/metrics", "get"),
     ):

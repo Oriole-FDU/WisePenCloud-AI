@@ -27,6 +27,8 @@ def test_sandbox_mcp_registers_expected_tools() -> None:
         "run_sandbox_script",
         "acquire_sandbox",
         "release_sandbox",
+        "destroy_sandbox_session",
+        "delete_sandbox_workspace",
     }
 
 

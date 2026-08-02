@@ -56,6 +56,9 @@ def complete_config() -> dict[str, object]:
         "SANDBOX_VNC_IDLE_CLEANUP_INTERVAL_SECONDS": 300.0,
         "SANDBOX_IMAGE": "sandbox-worker:latest",
         "SANDBOX_LEASE_TTL_SECONDS": 1800,
+        "SANDBOX_USER_REUSE_ENABLED": True,
+        "SANDBOX_USER_IDLE_TTL_SECONDS": 600,
+        "SANDBOX_MAX_USER_BINDINGS": 20,
         "SANDBOX_TARGET_READY": 2,
         "SANDBOX_MIN_READY": 1,
         "SANDBOX_READY_RESERVE": 0,
@@ -168,6 +171,9 @@ def test_container_applies_nacos_runtime_parameters_to_services():
     config.update(
         {
             "SANDBOX_LEASE_TTL_SECONDS": 1800,
+            "SANDBOX_USER_REUSE_ENABLED": False,
+            "SANDBOX_USER_IDLE_TTL_SECONDS": 900,
+            "SANDBOX_MAX_USER_BINDINGS": 30,
             "SANDBOX_TARGET_READY": 10,
             "SANDBOX_MIN_READY": 5,
             "SANDBOX_READY_RESERVE": 0,
@@ -218,6 +224,11 @@ def test_container_applies_nacos_runtime_parameters_to_services():
         4,
         0.3,
     )
+    assert (
+        scheduler._user_reuse_enabled,
+        scheduler._user_idle_ttl,
+        scheduler._max_user_bindings,
+    ) == (False, 900, 30)
     assert container.provider()._health_timeout == 4.0
     assert container.provider()._health_retry_interval == 0.7
     assert container.provider()._runtime._config.create_max_attempts == 4

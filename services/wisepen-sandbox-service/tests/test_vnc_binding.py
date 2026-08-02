@@ -12,9 +12,9 @@ from sandbox.api import create_app
 
 class FakeSession:
     def __init__(self) -> None:
-        self.release_calls: list[tuple[str, str]] = []
+        self.release_calls: list[str] = []
 
-    async def acquire_for(self, user_id: str, session_id: str):
+    async def acquire_vnc_for(self, user_id: str):
         await asyncio.sleep(0)
         return SimpleNamespace(
             sandbox_id="sandbox-1",
@@ -25,8 +25,8 @@ class FakeSession:
             ),
         )
 
-    async def release_for(self, user_id: str, session_id: str) -> None:
-        self.release_calls.append((user_id, session_id))
+    async def release_vnc_for(self, user_id: str) -> None:
+        self.release_calls.append(user_id)
 
 
 @pytest.mark.asyncio
@@ -36,7 +36,7 @@ async def test_vnc_binding_is_idempotent_and_release_is_safe() -> None:
 
     first, second = await asyncio.gather(
         binding.acquire("user-1", "session-1"),
-        binding.acquire("user-1", "session-1"),
+        binding.acquire("user-1", "session-2"),
     )
 
     assert first == second
@@ -46,14 +46,14 @@ async def test_vnc_binding_is_idempotent_and_release_is_safe() -> None:
 
     await binding.release("user-1", "session-1")
     await binding.release("user-1", "session-1")
-    assert session.release_calls == [("user-1", "session-1")]
+    assert session.release_calls == ["user-1"]
 
 
 @pytest.mark.asyncio
 async def test_vnc_binding_rejects_missing_public_url() -> None:
     session = FakeSession()
 
-    async def acquire_without_public_url(user_id: str, session_id: str):
+    async def acquire_without_public_url(user_id: str):
         return SimpleNamespace(
             sandbox_id="sandbox-1",
             endpoint=SimpleNamespace(
@@ -63,7 +63,7 @@ async def test_vnc_binding_rejects_missing_public_url() -> None:
             ),
         )
 
-    session.acquire_for = acquire_without_public_url
+    session.acquire_vnc_for = acquire_without_public_url
     with pytest.raises(ServiceException):
         await VncBinding(session).acquire("user-1", "session-1")
 

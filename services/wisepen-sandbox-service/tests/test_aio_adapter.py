@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from types import SimpleNamespace
 
 import pytest
@@ -98,16 +99,15 @@ async def test_provider_uses_workspace_root_for_shell_and_python_cwd():
     await provider.forward(sandbox, python_request)
 
     workspace = "/home/gem/workspaces/tenant/session"
-    assert client.shell_calls == [
+    assert client.shell_calls[:1] == [
         (f"cd -- {workspace} && pwd && cat input.txt", workspace, 30000, 5.0)
     ]
-    language, wrapped, timeout_ms, request_grace_seconds = client.code_calls[0]
-    assert language == "python"
-    assert f"_wisepen_os.chdir(\"{workspace}\")" in wrapped
-    assert "compile(\"from __future__ import annotations" in wrapped
-    assert json.dumps(python_source) in wrapped
+    command, exec_dir, timeout_ms, request_grace_seconds = client.shell_calls[1]
+    assert command == f"python3 -c {shlex.quote(python_source)}"
+    assert exec_dir == workspace
     assert timeout_ms == 30000
     assert request_grace_seconds == 5.0
+    assert client.code_calls == []
 
 
 def test_docker_runtime_builds_managed_container_commands():
@@ -519,6 +519,50 @@ async def test_aio_client_uses_real_file_search_and_execute_contract(monkeypatch
         ),
     ]
     assert client_timeouts == [30.0, 7.0, 65.0]
+
+
+@pytest.mark.asyncio
+async def test_aio_client_kills_running_shell_session_after_timeout(monkeypatch):
+    calls = []
+
+    class Response:
+        status_code = 200
+        is_success = True
+
+        def __init__(self, data):
+            self._data = data
+
+        def json(self):
+            return {"success": True, "data": self._data}
+
+    class Client:
+        def __init__(self, **_kwargs): ...
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs["json"]))
+            if url.endswith("/v1/shell/exec"):
+                return Response({"status": "running", "session_id": "shell-1"})
+            return Response({"status": "terminated"})
+
+    monkeypatch.setattr("sandbox.core.providers.aio_adapter.client.httpx.AsyncClient", Client)
+
+    with pytest.raises(ServiceException) as exc_info:
+        await AioClient("http://sandbox").shell_exec("sleep 30", "/workspace", 1000, 5.0)
+
+    assert exc_info.value.code == SandboxErrorCode.EXECUTION_TIMEOUT.code
+    assert calls == [
+        (
+            "http://sandbox/v1/shell/exec",
+            {"command": "sleep 30", "exec_dir": "/workspace", "timeout": 1},
+        ),
+        ("http://sandbox/v1/shell/kill", {"id": "shell-1"}),
+    ]
 
 
 @pytest.mark.asyncio

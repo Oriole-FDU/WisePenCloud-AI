@@ -102,6 +102,42 @@ def chat_json_request(
     return response
 
 
+def sandbox_json_request(
+    sandbox_url: str,
+    path: str,
+    *,
+    source: str,
+    request_id: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    request = Request(
+        f"{sandbox_url.rstrip('/')}{path}",
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-From-Source": source,
+            "X-Request-Id": request_id,
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=float(os.getenv("SANDBOX_API_TIMEOUT_SECONDS", "30"))) as response:
+            raw = response.read().decode("utf-8")
+    except HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Sandbox POST {path} returned HTTP {exc.code}: {raw}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"Sandbox POST {path} failed: {exc.reason}") from exc
+    try:
+        response = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Sandbox POST {path} returned invalid JSON: {raw}") from exc
+    if not isinstance(response, dict) or response.get("code") != 200:
+        raise RuntimeError(f"Sandbox POST {path} failed: {response}")
+    return response
+
+
 def select_chat_model(payload: dict[str, Any], model_id: str | None = None, provider_id: str | None = None) -> tuple[str, str]:
     data = payload.get("data")
     if not isinstance(data, dict):
@@ -164,6 +200,30 @@ def metric_running(raw: str) -> int:
     return int((payload.get("data") or {}).get("running", 0))
 
 
+def metric_user_bindings(raw: str) -> int:
+    payload = json.loads(raw)
+    if payload.get("code") != 200:
+        raise RuntimeError(f"pool metrics failed: {payload}")
+    data = payload.get("data") or {}
+    return int(data.get("active_user_bindings", 0)) + int(
+        data.get("idle_user_bindings", 0)
+    )
+
+
+def destroy_user_sandbox(args: argparse.Namespace) -> None:
+    sandbox_json_request(
+        args.sandbox_url,
+        "/internal/user-sandboxes/destroy",
+        source=args.source,
+        request_id=f"{args.request_id}-user-sandbox-destroy",
+        body={"user_id": args.user_id},
+    )
+
+
+def managed_docker_count(raw: str) -> int:
+    return len([line for line in raw.splitlines() if line.strip()])
+
+
 def parse_sse(raw: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for line in raw.splitlines():
@@ -180,6 +240,29 @@ def parse_sse(raw: str) -> list[dict[str, Any]]:
 
 def _event_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def sandbox_ids(events: list[dict[str, Any]]) -> set[str]:
+    found: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            sandbox_id = value.get("sandbox_id")
+            if isinstance(sandbox_id, str) and sandbox_id:
+                found.add(sandbox_id)
+            for nested in value.values():
+                visit(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested)
+        elif isinstance(value, str):
+            for match in re.findall(r'["\']sandbox_id["\']\s*[:=]\s*["\']([^"\']+)', value):
+                found.add(match)
+
+    for event in events:
+        if event.get("type") == "tool-output-available":
+            visit(event.get("output"))
+    return found
 
 
 def print_sse_summary(events: list[dict[str, Any]]) -> None:
@@ -344,7 +427,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sandbox-url", default="http://127.0.0.1:19905")
     parser.add_argument("--chat-url", default="http://127.0.0.1:19904")
     parser.add_argument("--source", default="APISIX-wX0iR6tY")
-    parser.add_argument("--user-id", default="chat-curl-user")
+    parser.add_argument("--user-id", default=f"chat-file-transfer-{uuid.uuid4().hex}")
     parser.add_argument("--request-id", default=f"file-transfer-e2e-{uuid.uuid4().hex}")
     parser.add_argument("--model-id", default=os.getenv("CHAT_MODEL_ID"))
     parser.add_argument("--provider-id", default=os.getenv("CHAT_PROVIDER_ID"))
@@ -358,6 +441,8 @@ def main(args: argparse.Namespace | None = None) -> int:
     args = args or parse_args()
     created_sessions: list[str] = []
     primary_error: Exception | None = None
+    before_bindings = 0
+    before_containers = 0
     cases = [
         {"name": "session-one", "source_path": "/source/session-one.txt", "upload_path": "/upload/session-one.txt"},
         {"name": "session-two", "source_path": "/source/session-two.txt", "upload_path": "/upload/session-two.txt"},
@@ -370,7 +455,12 @@ def main(args: argparse.Namespace | None = None) -> int:
             case["session_id"] = session_id
             created_sessions.append(session_id)
             print(f"chat_session=PASS case={case['name']} session_id={session_id} user_id={args.user_id}")
-        before = metric_running(run(["bash", str(METRICS_SCRIPT), args.sandbox_url], label="pool_metrics_before"))
+        before_metrics = run(["bash", str(METRICS_SCRIPT), args.sandbox_url], label="pool_metrics_before")
+        before = metric_running(before_metrics)
+        before_bindings = metric_user_bindings(before_metrics)
+        before_containers = managed_docker_count(
+            run(["docker", "ps", "-q", "--filter", "label=wisepen.managed=true"], label="docker_before")
+        )
         with FileTransferFixture(args.fixture_bind_host) as fixture:
             print(f"file_transfer_fixture=PASS port={fixture.port}")
             for case in cases:
@@ -380,15 +470,41 @@ def main(args: argparse.Namespace | None = None) -> int:
                 download_marker = "E2E_DOWNLOAD_CURL_MS"
                 download = _run_chat_turn(args, model_id, provider_id, case["session_id"], f"{case['name']}-download", _download_query(source_url, input_file, case["name"]))
                 _assert_turn(download, tools={"shell_exec", "run_sandbox_script"}, input_contains=(source_url, input_file, "output.txt"), output_markers={download_marker, "E2E_TRANSFORM_MARKER"}, label=f"{case['name']}-download")
+                download_ids = sandbox_ids(download)
+                if len(download_ids) != 1:
+                    raise RuntimeError(f"Expected one sandbox_id for {case['name']} download: {download_ids}")
                 upload_marker = "E2E_UPLOAD_CURL_MS"
                 upload = _run_chat_turn(args, model_id, provider_id, case["session_id"], f"{case['name']}-upload", _upload_query(upload_url, upload_marker))
                 _assert_turn(upload, tools={"shell_exec"}, input_contains=(upload_url, "output.txt"), output_markers={upload_marker}, label=f"{case['name']}-upload")
+                upload_ids = sandbox_ids(upload)
+                if upload_ids != download_ids:
+                    raise RuntimeError(
+                        f"Session {case['name']} did not reuse one sandbox: download={download_ids} upload={upload_ids}"
+                    )
+                case["sandbox_id"] = next(iter(download_ids))
+                print(f"session_sandbox_reuse=PASS case={case['name']} sandbox_id={case['sandbox_id']}")
+            user_sandbox_ids = {case["sandbox_id"] for case in cases}
+            if len(user_sandbox_ids) != 1:
+                raise RuntimeError(f"Same-user sessions did not share one sandbox: {cases}")
+            print(
+                "cross_session_user_container_reuse=PASS "
+                f"sessions=2 sandbox_id={next(iter(user_sandbox_ids))}"
+            )
             fixture.assert_uploads(cases)
-            print("file_transfer_uploads=PASS sessions=2 isolated=true")
-        after = metric_running(run(["bash", str(METRICS_SCRIPT), args.sandbox_url], label="pool_metrics_after"))
-        if after > before:
-            raise RuntimeError(f"Sandbox running count increased after Chat responses: before={before} after={after}")
-        print(f"chat_sandbox_file_transfer_e2e=PASS running_before={before} running_after={after}")
+            print("file_transfer_uploads=PASS sessions=2 workspace_isolated=true")
+        after_metrics = run(["bash", str(METRICS_SCRIPT), args.sandbox_url], label="pool_metrics_after")
+        after = metric_running(after_metrics)
+        after_bindings = metric_user_bindings(after_metrics)
+        if after_bindings < before_bindings + 1:
+            raise RuntimeError(
+                "User sandbox binding was not retained after Chat turns: "
+                f"before={before_bindings} after={after_bindings}"
+            )
+        print(
+            "chat_sandbox_file_transfer_e2e=PASS "
+            f"running_before={before} running_after={after} "
+            f"user_bindings_before={before_bindings} user_bindings_after={after_bindings}"
+        )
     except Exception as exc:
         primary_error = exc
     finally:
@@ -399,6 +515,40 @@ def main(args: argparse.Namespace | None = None) -> int:
                 print(f"chat_session_cleanup=PASS session_id={session_id}")
             except Exception as cleanup_error:
                 cleanup_errors.append(f"{session_id}: {cleanup_error}")
+        if not cleanup_errors and created_sessions:
+            try:
+                destroy_user_sandbox(args)
+                print(f"user_sandbox_cleanup=PASS user_id={args.user_id}")
+            except Exception as cleanup_error:
+                cleanup_errors.append(f"user sandbox {args.user_id}: {cleanup_error}")
+        if not cleanup_errors and created_sessions:
+            deadline = time.monotonic() + 30
+            while True:
+                metrics_raw = run(
+                    ["bash", str(METRICS_SCRIPT), args.sandbox_url],
+                    label="pool_metrics_cleanup",
+                )
+                bindings = metric_user_bindings(metrics_raw)
+                containers = managed_docker_count(
+                    run(
+                        ["docker", "ps", "-q", "--filter", "label=wisepen.managed=true"],
+                        label="docker_cleanup",
+                    )
+                )
+                if bindings <= before_bindings and containers <= before_containers:
+                    print(
+                        "sandbox_cleanup=PASS "
+                        f"bindings_before={before_bindings} bindings_after={bindings} "
+                        f"containers_before={before_containers} containers_after={containers}"
+                    )
+                    break
+                if time.monotonic() >= deadline:
+                    cleanup_errors.append(
+                        "sandbox resources did not return to baseline: "
+                        f"bindings={bindings}/{before_bindings} containers={containers}/{before_containers}"
+                    )
+                    break
+                time.sleep(0.5)
         if cleanup_errors:
             message = "Chat session cleanup failed: " + "; ".join(cleanup_errors)
             if primary_error is not None:

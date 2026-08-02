@@ -124,8 +124,18 @@ def test_main_runs_four_turns_for_same_user_and_cleans_up(monkeypatch):
 
     turn = {"value": 0}
     def fake_run(command, *, label):
+        if command[0] == "docker":
+            return "ready-container\n"
         if command[1] == str(e2e.METRICS_SCRIPT):
-            return '{"code": 200, "data": {"running": 0}}'
+            bindings = 1 if label == "pool_metrics_after" else 0
+            return json.dumps({
+                "code": 200,
+                "data": {
+                    "running": 0,
+                    "active_user_bindings": 0,
+                    "idle_user_bindings": bindings,
+                },
+            })
         if command[1] == str(e2e.CHAT_SCRIPT):
             turn["value"] += 1
             query = command[command.index("--query") + 1]
@@ -133,18 +143,23 @@ def test_main_runs_four_turns_for_same_user_and_cleans_up(monkeypatch):
             if "--upload-file" in query:
                 return "\n".join([
                     "data: " + json.dumps({"type": "tool-input-available", "toolName": "shell_exec", "input": {"command": query}}),
-                    'data: {"type":"tool-output-available","output":"E2E_UPLOAD_CURL_MS=1.2"}',
+                    'data: {"type":"tool-output-available","output":{"sandbox_id":"shared-user-sandbox","text":"E2E_UPLOAD_CURL_MS=1.2"}}',
                     'data: {"type":"finish"}',
                 ])
             return "\n".join([
                 "data: " + json.dumps({"type": "tool-input-available", "toolName": "shell_exec", "input": {"command": query}}),
                 'data: {"type":"tool-input-available","toolName":"run_sandbox_script","input":{"language":"python"}}',
-                'data: {"type":"tool-output-available","output":"E2E_DOWNLOAD_CURL_MS=1.1 E2E_TRANSFORM_MARKER duration_ms: 3"}',
+                'data: {"type":"tool-output-available","output":{"sandbox_id":"shared-user-sandbox","text":"E2E_DOWNLOAD_CURL_MS=1.1 E2E_TRANSFORM_MARKER duration_ms: 3"}}',
                 'data: {"type":"finish"}',
             ])
         raise AssertionError(command)
 
     monkeypatch.setattr(e2e, "chat_json_request", chat_request)
+    monkeypatch.setattr(
+        e2e,
+        "sandbox_json_request",
+        lambda *_args, **_kwargs: {"code": 200, "data": {"status": "destroyed"}},
+    )
     monkeypatch.setattr(e2e, "run", fake_run)
     monkeypatch.setattr(e2e, "FileTransferFixture", FakeFixture)
     assert e2e.main(args()) == 0
@@ -169,7 +184,22 @@ def test_main_cleans_both_sessions_after_a_turn_failure(monkeypatch):
         return {"code": 200, "data": None}
 
     monkeypatch.setattr(e2e, "chat_json_request", chat_request)
-    monkeypatch.setattr(e2e, "run", lambda _command, *, label: '{"code": 200, "data": {"running": 0}}' if label == "pool_metrics_before" else (_ for _ in ()).throw(RuntimeError("sandbox unavailable")))
+    monkeypatch.setattr(
+        e2e,
+        "sandbox_json_request",
+        lambda *_args, **_kwargs: {"code": 200, "data": {"status": "destroyed"}},
+    )
+    monkeypatch.setattr(
+        e2e,
+        "run",
+        lambda command, *, label: (
+            '{"code": 200, "data": {"running": 0, "active_user_bindings": 0, "idle_user_bindings": 0}}'
+            if label == "pool_metrics_before"
+            else "ready-container\n"
+            if command[0] == "docker"
+            else (_ for _ in ()).throw(RuntimeError("sandbox unavailable"))
+        ),
+    )
     monkeypatch.setattr(e2e, "FileTransferFixture", FakeFixture)
     with pytest.raises(RuntimeError, match="sandbox unavailable"):
         e2e.main(args())
