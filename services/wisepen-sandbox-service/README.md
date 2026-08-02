@@ -16,11 +16,11 @@ wisepen-sandbox-service
 
 `wisepen-sandbox-service` 通过 `domain.interfaces` 暴露平台无关的 `SandboxProvider`、`WorkspaceStore` 和 `LeaderLease` 端口；AIO 协议、Docker CLI 和平台路径差异封装在 `core.providers.aio_adapter` 中。
 
-当前实现采用进程内 Repository、WorkspaceStore 和 LeaderLease，便于开发和测试；后续可以替换为 Redis、Mongo 或对象存储实现，而不改变调度核心规则。
+当前 Repository 和 LeaderLease 是进程内实现，本版本只支持单个 Sandbox Service 实例。WorkspaceStore 可使用本地或 Mongo 实现；多实例共享用户绑定、session workspace 和 TurnLease 状态需另行设计。
 
 ## 2. 设计目标与边界
 
-系统通过预先启动一组空闲沙箱降低用户请求延迟。用户请求到来后，Scheduler 原子地取得 READY 沙箱，复制工作区、激活实例并创建短期租约。任务结束后，工作区提交回存储，沙箱默认销毁；Watcher 观察 READY 数量并补充新的预热实例。
+系统通过预先启动一组空闲沙箱降低首次请求延迟。Scheduler 首次为 `user_id` 取得 READY 沙箱并建立稳定的用户绑定；该用户的每个 session 映射为容器内独立目录 `/home/gem/workspaces/{user_id}/{session_id}`。正常 release 只结束本轮 TurnLease 并 checkpoint 当前 session；最后一个 TurnLease 结束后容器进入 `USER_IDLE`，由用户级 TTL、LRU、显式用户销毁、致命故障或 shutdown 最终回收。
 
 设计目标：
 
@@ -76,8 +76,9 @@ flowchart LR
 正常生命周期为：
 
 ```text
-CREATING -> WARMING -> READY -> ALLOCATED -> RUNNING
-RUNNING -> SYNCING -> DESTROYING -> DESTROYED
+CREATING -> WARMING -> READY -> ALLOCATED -> USER_ACTIVE
+USER_ACTIVE -> USER_IDLE -> USER_ACTIVE
+USER_IDLE -> RETIRING -> DESTROYING -> DESTROYED
 ```
 
 异常销毁最终进入 `LOST`，不回 READY。
@@ -87,20 +88,22 @@ RUNNING -> SYNCING -> DESTROYING -> DESTROYED
 | `CREATING` | 已提交创建，尚未健康 | `WARMING`、`DESTROYING` |
 | `WARMING` | 正在等待平台就绪 | `READY`、`DESTROYING` |
 | `READY` | 健康且无租约，可 checkout | `ALLOCATED`、`DESTROYING` |
-| `ALLOCATED` | 已绑定租约，正在准备环境 | `RUNNING`、`DESTROYING` |
-| `RUNNING` | 用户正在使用 | `SYNCING`、`DESTROYING` |
-| `SYNCING` | 正在提交工作区 | `DESTROYING` |
+| `ALLOCATED` | READY 容器已绑定用户，正在恢复首个 session 并激活 AIO | `USER_ACTIVE`、`RETIRING`、`DESTROYING` |
+| `USER_ACTIVE` | 用户容器至少有一个活动 TurnLease | `USER_IDLE`、`RETIRING`、`DESTROYING` |
+| `USER_IDLE` | 用户绑定保留，当前无活动 TurnLease | `USER_ACTIVE`、`RETIRING`、`DESTROYING` |
+| `RETIRING` | 用户绑定已关闭，准备最终回收 | `DESTROYING` |
+| `RUNNING`、`CHECKPOINTING`、`SESSION_IDLE`、`SYNCING` | 历史查询兼容状态，新流程不再写入 | `RETIRING`、`DESTROYING` |
 | `DESTROYING` | 正在调用平台销毁 | `DESTROYED`、`LOST` |
 | `DESTROYED` | 已确认销毁 | 无 |
 | `LOST` | 无法确认销毁或平台失联 | 无 |
 
-非法状态转换由 Repository 统一抛出 `INVALID_STATE_TRANSITION`。用户实例不实现 reset/reuse，因此释放后不会直接回 READY。
+非法状态转换由 Repository 统一抛出 `INVALID_STATE_TRANSITION`。用户实例不会回公共 READY 池；它只允许绑定的 `user_id` 使用，但该用户的多个 session 可以共享容器并并发执行。
 
 核心标识包括 `sandbox_id`、`lease_id`、`request_id`、`tenant_id`、`workspace_id` 和 fencing token。`provider_id` 只在 Adapter 和内部记录中使用；管理 API 的状态响应会移除 provider_id、metadata 和 endpoint token。
 
 ### 4.1 Pool 原子语义
 
-`checkout_ready()` 在同一把锁内完成 READY 选择、状态改为 ALLOCATED、租约创建、request 映射和单调 fencing token 分配。并发请求不会取得同一个沙箱。
+`checkout_ready()` 在同一把 Repository 锁内完成用户绑定查询或 READY 选择、状态变更、session 活动索引、request 映射和单调 fencing token 分配。不同用户不会取得同一个沙箱；同一用户的不同 session 会取得同一沙箱；同一 session 已有活动 TurnLease 时立即返回 `SESSION_BUSY`。
 
 Watcher 通过以下顺序将预热实例加入 Pool：
 
@@ -115,11 +118,11 @@ WARMING
 
 ### 4.2 租约与 fencing
 
-- 同一 `request_id` 重试返回原租约；相同 request_id 携带不同租户或工作区返回 `REQUEST_CONFLICT`。
+- 活动 TurnLease 的同一 `request_id` 重试返回原租约；租约已关闭后重试返回 `LEASE_EXPIRED`；相同 request_id 携带不同用户或 session 返回 `REQUEST_CONFLICT`。
 - 每次新分配生成单调 fencing token。
 - execute 必须校验 lease_id、tenant_id、workspace_id、request_id 和 fencing token。
 - 租约过期、release 开始或 fencing token 不匹配后，新的 execute 被拒绝。
-- release 先关闭租约入口，再执行同步和销毁；重复 release 不重复 commit/destroy。
+- release 先关闭 TurnLease 入口，再 checkpoint 当前 session；最后一个 TurnLease 结束后进入 `USER_IDLE`。重复 release 不重复 commit，也不销毁健康容器。
 
 ## 5. 端口与 API
 
@@ -147,7 +150,7 @@ class WorkspaceStore(Protocol):
     async def commit(self, snapshot: WorkspaceSnapshot, lease_id: str, fencing_token: int = 0) -> None: ...
 ```
 
-LocalWorkspaceStore 会校验 tenant/workspace 标识、相对路径、符号链接和路径穿越。缓存范围是 `tenant_id + workspace_id`；当前 Chat/VNC/MCP 入口分别将其映射为用户和会话。commit 采用完整快照替换语义：本次导出不存在的旧文件会从缓存中删除，并写入 manifest 记录 lease、fencing、文件数和字节数。commit 失败时 Scheduler 仍继续 destroy，实例绝不回池。未创建的 workspace 目录可表示为空快照。
+LocalWorkspaceStore 会校验 tenant/workspace 标识、相对路径、符号链接和路径穿越。缓存范围是 `user_id + session_id`。commit 采用完整快照替换语义：本次导出不存在的旧文件会从缓存中删除，并写入 manifest 记录 lease、fencing、文件数和字节数。普通 release 的 commit 失败会记录降级状态，健康实例仍可进入 `USER_IDLE`；最终回收时 commit 失败不阻止 destroy。未创建的 workspace 目录可表示为空快照。
 
 ### 5.3 内部 API
 
@@ -162,9 +165,11 @@ Sandbox API 与 Chat API 使用相同的接口表达约定：HTTP 端点按域�
 | --- | --- | --- | --- |
 | `GET /healthz` | 无 | `{"status":"ok"}`，HTTP 200 | 进程无响应 |
 | `GET /readyz` | 无 | `{"status":"ready","ready":N,"min_ready":M}`，HTTP 200 | READY 不足 -> HTTP 503、`MIN_READY_NOT_REACHED` |
-| `POST /internal/sandboxes/allocate` | `request_id`、`tenant_id`、`workspace_id` | `R[SandboxLeaseResponse]` | `POOL_EMPTY`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE` |
-| `POST /internal/leases/{lease_id}/execute` | `request_id`、租户/工作区、`fencing_token`、`operation`、`payload` | `R[ExecutionResultResponse]` | `LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`SANDBOX_UNAVAILABLE` |
-| `POST /internal/leases/{lease_id}/release` | `fencing_token` | `R[{"status":"released"}]` | `LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`WORKSPACE_SYNC_FAILED` |
+| `POST /internal/sandboxes/allocate` | `request_id`、`tenant_id=user_id`、`workspace_id=session_id` | `R[SandboxLeaseResponse]` | `POOL_EMPTY`、`SESSION_BUSY`、`USER_SANDBOX_CAPACITY`、`REQUEST_CONFLICT` |
+| `POST /internal/leases/{lease_id}/execute` | `request_id`、用户/session、`fencing_token`、`operation`、`payload` | `R[ExecutionResultResponse]` | `LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`EXECUTION_TIMEOUT` |
+| `POST /internal/leases/{lease_id}/release` | `fencing_token` | `R[{"status":"released"}]`，最后一个 turn 后进入 `USER_IDLE` | `LEASE_NOT_FOUND`、`FENCING_REJECTED` |
+| `POST /internal/sandbox-workspaces/delete` | `tenant_id=user_id`、`workspace_id=session_id` | 删除 session 目录和快照，用户容器保留 | `SANDBOX_UNAVAILABLE` |
+| `POST /internal/user-sandboxes/destroy` | `user_id` | 销毁用户绑定和物理容器，幂等返回 | `SANDBOX_UNAVAILABLE` |
 | `GET /internal/sandboxes/{sandbox_id}` | 无 | `R[SandboxStatusResponse]` | `LEASE_NOT_FOUND` |
 | `GET /internal/pool/metrics` | 无 | `R[PoolMetricsResponse]` | `SYSTEM_ERROR` |
 
@@ -194,6 +199,10 @@ Sandbox API 与 Chat API 使用相同的接口表达约定：HTTP 端点按域�
     "workspace_id": "session-20001",
     "expires_at": "2026-07-29T10:00:00Z",
     "fencing_token": 1,
+    "user_binding_id": "user_f85c...",
+    "user_idle_expires_at": null,
+    "container_reused": false,
+    "workspace_reused": false,
     "endpoint": {"base_url": "http://sandbox:8080", "token": null}
   }
 }
@@ -212,7 +221,7 @@ Sandbox API 与 Chat API 使用相同的接口表达约定：HTTP 端点按域�
 }
 ```
 
-释放请求只需要 fencing token。释放入口先关闭执行，再提交完整工作区快照并销毁用户实例；成功响应为 `data.status = "released"`。重复释放保持幂等。
+释放请求只需要 fencing token。释放入口先关闭本轮执行，再提交当前 session 的完整快照；成功响应为 `data.status = "released"`。重复释放保持幂等。删除 Chat session 使用 workspace delete；只有用户 TTL、LRU、管理端强制销毁或 shutdown 才销毁物理容器。
 
 #### 5.3.2 状态、指标和安全边界
 
@@ -220,7 +229,7 @@ Sandbox API 与 Chat API 使用相同的接口表达约定：HTTP 端点按域�
 
 metrics 响应固定包含 `generation`、`empty_checkouts`、`min_ready` 和 `target_ready`，并携带 readiness、状态计数、租约、预热、销毁和 workspace 同步指标。后续新增指标会作为 `data` 的额外字段返回。
 
-稳定错误码包括 `POOL_EMPTY`、`LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE`、`WORKSPACE_SYNC_FAILED`、`WORKSPACE_CACHE_LIMIT_EXCEEDED` 和 `INVALID_EXECUTION_TIMEOUT`。
+稳定错误码包括 `POOL_EMPTY`、`SESSION_BUSY`、`USER_SANDBOX_CAPACITY`、`LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE`、`WORKSPACE_SYNC_FAILED`、`WORKSPACE_CACHE_LIMIT_EXCEEDED`、`INVALID_EXECUTION_TIMEOUT` 和 `EXECUTION_TIMEOUT`。
 
 ## 6. 生命周期流程
 
@@ -278,9 +287,9 @@ sequenceDiagram
         else 获得 LeaderLease
             L-->>W: true
             W->>S: recover_expired()
-            S->>R: 查找过期 ALLOCATED/RUNNING lease
-            S->>A: 导出并缓存过期用户实例工作区
-            S->>A: 销毁过期用户实例
+            S->>R: 查找过期 TurnLease 和 USER_IDLE 绑定
+            S->>A: checkpoint 过期 turn 的 session workspace
+            S->>R: 释放过期 turn；回收超时用户容器
             W->>R: 清理 CREATING/WARMING/DESTROYING 超时实例
             W->>P: snapshot()
             P-->>W: ready、warming、creating、generation
@@ -366,16 +375,14 @@ Watcher 会排除 CREATING/WARMING 实例，避免并发重复创建；预热失
 
 ### 6.3 allocate、execute、release
 
-1. allocate 校验字段并按 request_id 查询幂等记录。
-2. Pool 原子 checkout READY，生成 lease 和 fencing token。
-3. Scheduler 从 WorkspaceStore 获取快照，调用 Provider.prepare_workspace。
-4. Provider.activate 后状态进入 RUNNING，返回短期 endpoint 和租约信息。
-5. execute 只接受 lease_id，校验租户、workspace、租约状态、有效期和 fencing token，再调用 Provider.forward。
-6. release 原子关闭租约入口，状态进入 SYNCING。
-7. Provider.export_workspace 后调用 WorkspaceStore.commit，将完整工作区快照缓存到 `tenant_id + workspace_id`。
-8. 无论 commit 成功或失败，都调用带超时和有限重试的 destroy。
-9. destroy 成功进入 DESTROYED；超时/连续失败进入 LOST；成功销毁后清理租约映射。
-10. Watcher 根据 READY 数量下降补充新的 WARMING 实例，健康后进入 READY。
+1. allocate 校验字段并按 request_id 查询活动幂等记录，再原子检查 `(user_id, session_id)` 是否已有 TurnLease。
+2. 已有用户绑定时直接复用容器；新用户才从 Pool checkout READY 并创建 `UserSandboxBindingRecord`。
+3. session 目录未驻留于当前容器 generation 时，从 WorkspaceStore 恢复并调用 Provider.prepare_workspace；已有目录则直接复用。
+4. 新用户容器 activate 后进入 `USER_ACTIVE`；每轮返回独立 lease 和 fencing token。
+5. execute 校验用户、session、租约状态、有效期和 fencing token，再在 session workspace 锁内调用 Provider.forward。不同 session 不共享执行锁。
+6. release 原子关闭 TurnLease，checkpoint 当前 session 并提交完整快照。
+7. 若仍有其他活动 TurnLease，容器保持 `USER_ACTIVE`；否则进入 `USER_IDLE` 并设置 600 秒空闲期限。
+8. Watcher 回收过期 TurnLease 和超时的 `USER_IDLE` 绑定，并维持 READY Pool；普通 release 不触发 destroy。
 
 ```mermaid
 sequenceDiagram
@@ -392,177 +399,196 @@ sequenceDiagram
     A->>C: docker run -d -it
     C-->>A: /v1/sandbox=200
     W->>P: return_ready(token, generation)
-    U->>S: allocate(request_id, tenant, workspace)
-    S->>P: atomic checkout READY
-    P-->>S: lease + fencing token
-    S->>F: snapshot
-    S->>A: prepare_workspace + activate
-    A->>C: file write / health
+    U->>S: allocate(request_id, user, session)
+    S->>P: atomic lookup user binding / checkout READY
+    P-->>S: user binding + TurnLease + fencing
+    opt session workspace 尚未驻留
+        S->>F: snapshot(user, session)
+        S->>A: prepare_workspace
+    end
+    S->>A: 首次用户绑定时 activate
     S-->>U: lease + endpoint
     U->>S: execute(lease_id, fencing_token)
-    S->>A: forward
+    S->>A: forward in session workspace
     A->>C: file / shell / code API
     U->>S: release(lease_id, fencing_token)
-    S->>A: export workspace
+    S->>A: checkpoint session workspace
     S->>F: commit(snapshot, lease, fencing)
-    S->>A: destroy with timeout/retry
-    A->>C: docker rm -f
-    S-->>U: release acknowledged
-    W->>P: detect READY deficit
-    W->>A: create replacement
+    S->>P: USER_ACTIVE or USER_IDLE
+    S-->>U: release acknowledged; container retained
+    W->>P: reclaim expired turns / idle users / detect READY deficit
 ```
 
-### 6.4 Chat 调用沙箱工具的完整请求链路
+### 6.4 用户级容器复用与 Session Workspace 并发
 
-Chat 的沙箱租约边界是“一轮 Chat Turn”，不是一次工具调用。`ChatTurnCoordinator` 在进入 LLM 流式推理前创建本轮 `sandbox_request_id`，先调用 `SandboxClient.allocate_request()` 获取租约；本轮后续的文件、Shell 和脚本工具都复用这个租约。无论模型正常结束、工具执行失败、LLM 流异常还是客户端断开，最终都会在 `finally` 中调用 `release_request()`。
+物理容器的复用边界是 `user_id`，在 Sandbox API 中沿用 `tenant_id` 字段传递；`workspace_id` 对应 `session_id`。一个用户稳定绑定一个 AIO 容器，该用户的多个 session 分别使用容器内独立目录。不同 session 可通过 AIO 的多个 Shell 终端并发执行，不设置每用户业务并发上限；同一 session 仅允许一个活动 TurnLease，冲突时 Repository 原子返回 `SESSION_BUSY`，不建立等待队列。
 
-#### 6.4.1 请求标识映射
+Repository 分开维护四类记录：
 
-| Chat 标识 | Sandbox Service 标识 | 用途 |
+| 记录 | 生命周期 | 权威字段 |
 | --- | --- | --- |
-| `user_id` | `tenant_id` | 租户隔离和工作区路径隔离 |
-| `session_id` | `workspace_id` | 当前会话对应的持久化工作区 |
-| `sandbox_request_id` | MCP `X-Request-Id` | 一轮 Chat 的幂等分配键 |
-| `lease_id` | Scheduler 内部租约标识 | Sandbox MCP 执行时的服务端定位键 |
-| `fencing_token` | Scheduler 内部租约版本 | 拒绝旧租约或并发失效请求 |
-| 工具调用 ID | Sandbox MCP 生成的子请求 ID | 一次具体工具操作的请求标识 |
+| `SandboxRecord` | Docker/AIO 容器 | `sandbox_id`、用户 owner、容器状态、活动 turn 数、最近错误 |
+| `UserSandboxBindingRecord` | user 到容器的稳定绑定 | `user_binding_id`、`user_id`、`sandbox_id`、空闲期限、复用次数 |
+| `SessionWorkspaceRecord` | session 在用户容器内的目录 | `user_id`、`session_id`、容器 generation、dirty/checkpoint 状态 |
+| `TurnLeaseRecord` | 一轮 Chat 或 VNC 操作 | `request_id`、`lease_id`、session、过期时间、fencing token、释放时间 |
 
-Chat 通过 `McpServiceClient` 调用 Sandbox 的 `/mcp/`：配置 `SANDBOX_SERVICE_URL` 时直连，未配置时按 `wisepen-sandbox-service` 服务发现。`SandboxClient` 只负责本轮的 `acquire_sandbox` / `release_sandbox` 生命周期调用；文件、Shell 和代码工具由 `McpRemoteTool` 直接调用 Sandbox MCP，并通过同一 `X-Request-Id` 复用租约。
+Chat `SandboxClient` 的本地用户绑定缓存只用于复用信息和清理优化，Sandbox Repository 才是权威状态。当前 Repository 为进程内存实现，因此本版本只支持单个 Sandbox Service 实例；多个实例会导致用户绑定、session 活动索引和 fencing 状态分裂。
 
-#### 6.4.2 UML 泳道图
+#### 6.4.1 用户容器状态机
 
-下图中的每个 participant 都是一个泳道。Watcher 是后台并行泳道，不参与用户请求的同步返回，但会在 READY 数量下降后补充新的预热实例。
+```mermaid
+stateDiagram-v2
+    [*] --> CREATING
+    CREATING --> WARMING: "容器创建成功"
+    WARMING --> READY: "AIO 健康检查通过"
+    READY --> ALLOCATED: "首次为 user 分配"
+    ALLOCATED --> USER_ACTIVE: "恢复首个 session 并激活 AIO"
+
+    USER_ACTIVE --> USER_ACTIVE: "不同 session acquire/release"
+    USER_ACTIVE --> USER_IDLE: "最后一个 TurnLease release"
+    USER_IDLE --> USER_ACTIVE: "同一 user 任意 session acquire"
+
+    USER_ACTIVE --> RETIRING: "显式销毁、致命故障或 shutdown"
+    USER_IDLE --> RETIRING: "空闲 600 秒、LRU 或 shutdown"
+    RETIRING --> DESTROYING: "最终 checkpoint 并关闭入口"
+    DESTROYING --> DESTROYED: "销毁成功"
+    DESTROYING --> LOST: "超时且重试耗尽"
+
+    CREATING --> DESTROYING: "创建失败"
+    WARMING --> DESTROYING: "预热失败"
+    ALLOCATED --> DESTROYING: "恢复或激活失败"
+```
+
+正常 `release_sandbox` 只关闭当前 TurnLease 并 checkpoint 当前 session。还有其他 session 活动时容器保持 `USER_ACTIVE`；最后一个 TurnLease 结束后进入 `USER_IDLE`。容器不会回公共 READY 池。同一用户再次 acquire 时直接复用 AIO 容器；仅当对应 session 目录尚未驻留于当前容器 generation 时才从 WorkspaceStore 恢复。
+
+删除 session 只删除其容器目录和 WorkspaceStore 快照，不销毁用户容器。只有显式用户销毁、用户容器空闲 TTL、LRU 淘汰、确认的 AIO 致命故障或服务关闭才进入 `RETIRING` 并销毁物理容器。TurnLease 过期只结束该 turn；若没有其他活动 turn，容器进入 `USER_IDLE`。
+
+#### 6.4.2 TurnLease 与并发约束
+
+```mermaid
+stateDiagram-v2
+    [*] --> ACQUIRING
+    ACQUIRING --> ACTIVE: "session 无活动 turn，签发 lease 和 fencing"
+    ACQUIRING --> REJECTED: "同一 session 已有活动 turn，SESSION_BUSY"
+
+    ACTIVE --> RELEASING: "release_sandbox"
+    RELEASING --> RELEASED: "checkpoint 当前 session 并清除 TurnLease"
+    ACTIVE --> EXPIRED: "租约过期或请求失联"
+
+    RELEASED --> [*]
+    REJECTED --> [*]
+    EXPIRED --> [*]
+```
+
+活动 TurnLease 的同一 `request_id` 重试返回原租约；已释放 request 返回 `LEASE_EXPIRED`；相同 request ID 携带不同 user/session 返回 `REQUEST_CONFLICT`。同一 session 的第二个 request 在 Repository 锁内立即返回 `SESSION_BUSY`，没有 Condition、等待队列或 acquire wait timeout。Chat 多端已限制同一 SSE，`SESSION_BUSY` 是低成本的最终防抖约束。
+
+不同 session 的 execute 不持有全局 lifecycle lock，只使用各自的 workspace 锁，因此一个长 Shell 等待时其他 session 仍可继续调用同一 AIO 容器。Shell 和常用脚本语言接受 `timeout_ms`，由 Nacos 的默认值和最大值归一化后传给 AIO。AIO exec 超时返回 `status=running` 时，Client 使用返回的 Shell session ID 调用 `/v1/shell/kill` 清理进程树，再返回 `EXECUTION_TIMEOUT`；共享用户容器不销毁。
+
+#### 6.4.3 Chat、MCP、VNC 与 Watcher 时序
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as 用户/前端
-    participant CA as Chat API
-    participant CC as ChatTurnCoordinator
-    participant QR as QueryLoopRuntime/ToolDispatcher
-    participant SC as Chat SandboxClient
-    participant SA as Sandbox Service MCP
-    participant SS as SandboxScheduler
-    participant PR as Pool/Repository
-    participant WS as WorkspaceStore
-    participant AD as AIO Adapter
-    participant DR as DockerRuntime
-    participant C as AIO Container
-    participant W as Watcher
+    participant Chat as "ChatTurnCoordinator"
+    participant Client as "Chat SandboxClient"
+    participant MCP as "Sandbox MCP"
+    participant Scheduler as "SandboxScheduler"
+    participant Repo as "MemoryRepository"
+    participant Store as "WorkspaceStore"
+    participant AIO as "AIO/Docker"
+    participant VNC as "VNC Binding"
+    participant Watcher as "Watcher"
 
-    Note over W,PR: 后台持续运行：预热、恢复过期租约、补充 READY
-    W->>PR: snapshot() 读取 READY、WARMING、CREATING
-    W->>SS: recover_expired()
-    W->>AD: create(spec) + wait_ready()
-    AD->>DR: docker run -d -it -p 127.0.0.1::8080
-    DR-->>AD: sandbox_id、动态 endpoint
-    AD->>C: GET /v1/sandbox 轮询健康状态
-    C-->>AD: HTTP 200
-    W->>PR: return_ready(health_token, generation)
-    PR-->>W: WARMING -> READY
-
-    U->>CA: POST /chat/completions
-    CA->>CC: handle_chat(user_id, session_id, query)
-    CC->>CC: 创建 sandbox_request_id 和 tool_context
-    CC->>SC: allocate_request(tool_context)
-    SC->>SA: tools/call acquire_sandbox
-    SA->>SS: allocate(request_id, tenant_id, workspace_id)
-    SS->>PR: request_id 幂等查询 + 原子 checkout READY
-    PR-->>SS: READY -> ALLOCATED，生成 lease/fencing
-    SS->>WS: snapshot(tenant_id, workspace_id)
-    WS-->>SS: WorkspaceSnapshot 或空快照
-    SS->>AD: prepare_workspace(snapshot)
-    AD->>C: POST /v1/file/write 写入工作区文件
-    SS->>AD: activate(sandbox, lease)
-    AD->>C: GET /v1/sandbox 确认实例可用
-    SS->>PR: CAS ALLOCATED -> RUNNING
-    SS-->>SA: lease_id、endpoint、expires_at、fencing_token
-    SA-->>SC: MCP lease JSON
-    SC->>SC: 缓存 LeaseContext
-    CC-->>QR: 启动 LLM 流式推理和工具循环
-
-    QR->>QR: LLM 返回 tool_call
-    QR->>SA: MCP read/write/shell/script tool
-    SA->>SS: execute(lease_id, ExecutionRequest)
-    SS->>PR: 校验租户、workspace、状态、过期时间、fencing
-    PR-->>SS: RUNNING 且租约有效
-    SS->>AD: forward(operation, payload)
-    AD->>C: /v1/file/*、/v1/shell/exec 或 /v1/code/execute
-    C-->>AD: AIO data 响应
-    AD-->>SS: ExecutionResult
-    SS-->>SA: ExecutionResult
-    SA-->>QR: MCP 工具结果
-    QR-->>CC: ToolOutputAvailableEvent
-    CC-->>U: 流式返回工具状态/最终文本
-
-    Note over QR,CC: 工具调用使用同一 X-Request-Id；Sandbox MCP 幂等复用同一 lease
-    QR->>QR: 将工具结果加入上下文并继续下一轮 LLM
-
-    alt 正常结束、异常或客户端断开
-        CC->>SC: finally: release_request(sandbox_request_id)
-        SC->>SA: tools/call release_sandbox
-        SA->>SS: release_request(request_id, tenant_id, workspace_id)
-        SS->>PR: 原子关闭租约入口
-        PR-->>SS: RUNNING -> SYNCING
-        SS->>AD: export_workspace(sandbox, tenant, workspace)
-        AD->>C: POST /v1/file/list + POST /v1/file/read
-        C-->>AD: 工作区文件快照
-        AD-->>SS: WorkspaceSnapshot
-        SS->>WS: commit(snapshot, lease_id, fencing_token)
-        alt commit 成功
-            WS-->>SS: commit success
-        else commit 失败
-            WS-->>SS: WORKSPACE_SYNC_FAILED
-            Note over SS,AD: 仍然继续销毁，实例不回 READY
+    Chat->>Client: "allocate_request(user_id, session_id, turn_request_id)"
+    Client->>MCP: "acquire_sandbox + 可信请求头"
+    MCP->>Scheduler: "allocate(request, user, session)"
+    Scheduler->>Repo: "原子查询用户绑定和 session 活动索引"
+    alt "用户首次绑定"
+        Scheduler->>Repo: "READY -> ALLOCATED，创建 UserBinding 和 TurnLease"
+        Scheduler->>Store: "读取该 session snapshot"
+        Scheduler->>AIO: "prepare workspace + activate"
+        Scheduler->>Repo: "ALLOCATED -> USER_ACTIVE"
+    else "用户容器已存在"
+        Scheduler->>Repo: "USER_IDLE/ACTIVE -> USER_ACTIVE，签发 TurnLease"
+        opt "session 目录不在当前容器 generation"
+            Scheduler->>Store: "读取该 session snapshot"
+            Scheduler->>AIO: "prepare workspace"
         end
-        SS->>AD: destroy(reason, timeout/retry)
-        AD->>DR: docker rm -f provider_id
-        DR->>C: 销毁用户实例
-        alt destroy 成功
-            SS->>PR: DESTROYING -> DESTROYED，清理 lease/request 映射
-        else 超时或连续失败
-            SS->>PR: DESTROYING -> LOST
-        end
-        SA-->>SC: MCP released 或稳定领域错误
-        SC->>SC: 清理本地 LeaseContext
+    else "同 session 已有活动 turn"
+        Repo-->>Scheduler: "SESSION_BUSY"
+    end
+    Scheduler-->>Client: "sandbox_id、user_binding_id、lease_id、复用标记"
+    Client-->>Chat: "TurnLeaseContext"
+
+    loop "本轮工具调用"
+        Chat->>MCP: "read/write/shell/script"
+        MCP->>Scheduler: "execute(lease, fencing)"
+        Scheduler->>Repo: "校验 ACTIVE TurnLease"
+        Scheduler->>AIO: "按 session workspace forward"
+        AIO-->>Chat: "工具结果"
     end
 
-    par 用户实例释放后，Watcher 补池
-        W->>PR: 读取 READY 数量下降
-        W->>W: 计算 target_ready + reserve - ready - warming - creating
-        W->>AD: 创建替代预热实例
-        AD->>C: docker run + GET /v1/sandbox
-        W->>PR: generation 校验后 return_ready()
-        PR-->>W: 新实例进入 READY
-    and 运行期间的后台恢复
-        W->>SS: recover_expired()
-        SS->>PR: 查找 ALLOCATED/RUNNING 过期租约
-        SS->>AD: 关闭并销毁过期用户实例
+    Chat->>Client: "finally: release_request"
+    Client->>MCP: "release_sandbox"
+    MCP->>Scheduler: "结束 TurnLease"
+    Scheduler->>AIO: "checkpoint 当前 session"
+    Scheduler->>Store: "commit session snapshot"
+    Scheduler->>Repo: "USER_ACTIVE 或最后一个 turn 后 USER_IDLE"
+    Scheduler-->>Client: "released，不销毁容器"
+
+    VNC->>Scheduler: "user + 保留 workspace __vnc__ acquire"
+    VNC->>Scheduler: "显式 release；同用户共享 endpoint"
+
+    par "后台回收"
+        Watcher->>Scheduler: "回收过期 TurnLease"
+        Watcher->>Scheduler: "回收 USER_IDLE TTL 绑定"
+        Scheduler->>Repo: "USER_IDLE -> RETIRING"
+        Scheduler->>AIO: "checkpoint 活动目录 + destroy"
+        Scheduler->>Repo: "DESTROYING -> DESTROYED/LOST"
+    and "维持预热池"
+        Watcher->>Repo: "读取 READY 缺口"
+        Watcher->>AIO: "创建并预热新容器"
+        Watcher->>Repo: "WARMING -> READY"
     end
 ```
 
-#### 6.4.3 分阶段行为
+Chat 每轮仍在 `finally` 调用 release，但 release 只结束 TurnLease。`deleteSession` 校验会话归属后调用 `delete_sandbox_workspace`；Sandbox 暂时不可用时记录错误并继续删除 Chat 数据，用户容器由 TTL 回收。`destroy_sandbox_session` 保留为 workspace delete 的兼容别名，不再表示销毁物理容器。VNC 按 user 共享 endpoint，并通过保留 workspace `__vnc__` 的 TurnLease 维持活跃状态。
 
-1. **Chat 建立租约**：Chat API 校验会话后进入 `ChatTurnCoordinator`。协调器根据 `user_id`、`session_id` 和本轮随机生成的 `sandbox_request_id` 构造工具上下文，并通过 MCP `acquire_sandbox` 完成 allocate。此时没有 READY 实例会直接阻止本轮进入工具推理，返回 `POOL_EMPTY`。
-2. **Sandbox 原子分配**：Sandbox MCP 从可信请求头读取 `request_id`、`tenant_id` 和 `workspace_id`。Scheduler 通过 Repository 在同一把锁内完成 request_id 幂等查询、READY checkout、租约绑定和 fencing token 生成，状态从 `READY` 进入 `ALLOCATED`。
-3. **工作区准备和激活**：Scheduler 从 WorkspaceStore 读取持久化快照。Adapter 将文件写入 AIO 工作区，然后通过 `/v1/sandbox` 确认实例可用，状态从 `ALLOCATED` 进入 `RUNNING`。allocate 返回的 endpoint 只属于本次 lease，Chat 不直接使用 AIO token 或 Docker container ID。
-4. **工具调用复用租约**：LLM 返回工具调用后，QueryLoopRuntime 通过 ToolDispatcher 执行 `read_file`、`write_file`、`list_directory`、`grep_files`、`edit_file`、`shell_exec` 或 `run_sandbox_script`。`McpRemoteTool` 以相同 `request_id` 调用 Sandbox MCP，`SandboxSessionService` 幂等命中本轮租约，不会重复 allocate。
-5. **执行请求校验**：每次 MCP execute 都从可信请求头取得租户、工作区和 request ID，再由 Sandbox Service 校验 lease、租户、工作区、租约有效期和 `RUNNING` 状态；校验失败时拒绝请求，防止旧 Chat 请求或旧租约继续操作容器。
-6. **Adapter 协议转换**：Sandbox Service 只看到 `SandboxProvider`。Adapter 将领域操作转换成 AIO HTTP 请求，使用 `/v1/file/search`、`/v1/shell/exec`、`/v1/code/execute` 等实际路径，并通过 PathPolicy 将工作区映射到 `/home/gem/{tenant_id}/{workspace_id}`。Chat 工具说明中的 `/workspace` 是逻辑路径，演示时应优先使用相对路径。Shell 和代码执行默认预算为 30 秒、最大 120 秒；Chat 工具外层和 MCP/AIO 传输分别增加响应余量，不能再由通用 MCP 的 15 秒超时提前取消。
-7. **释放与持久化**：Chat 的 `finally` 调用 release。Scheduler 先关闭租约入口，因此 release 开始后新的 execute 会被拒绝；随后导出容器工作区、以完整替换语义提交 WorkspaceStore，并无条件进入销毁流程。commit 失败只影响持久化结果，不允许实例回 READY。下一次同 `tenant_id + workspace_id` 分配会读取该缓存并写回新沙箱。
-8. **销毁和补池**：销毁成功后用户实例进入 `DESTROYED`，失败或超时进入 `LOST`。Watcher 发现 READY 缺口后创建新的实例，只有健康检查和 `return_ready()` 成功的新实例才能进入 READY。用户实例和替代预热实例不会复用同一个 sandbox_id。
+#### 6.4.4 容量、API 与配置
 
-#### 6.4.4 请求边界与失败返回
+最多保留 `SANDBOX_MAX_USER_BINDINGS` 个用户绑定容器。新用户到达且容量已满时，Scheduler 淘汰最久未使用的 `USER_IDLE` 绑定；没有空闲用户容器可淘汰时返回 `USER_SANDBOX_CAPACITY`。session 数量和同用户不同 session 的业务并发不设置单独上限，实际容量由 AIO 和宿主机资源约束。公共 READY Pool 与用户绑定容量分别统计。
 
-| 阶段 | 调用边界 | 失败表现 |
-| --- | --- | --- |
-| Chat allocate | Chat `SandboxClient` -> Sandbox MCP `acquire_sandbox` | `POOL_EMPTY`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE`，本轮 Chat 不进入工具循环 |
-| 工具 execute | `McpRemoteTool` -> Sandbox MCP | 工具失败由 MCP remote tool 包装，QueryLoopRuntime 可将错误作为工具结果继续推理 |
-| release | Chat `finally` -> Sandbox MCP `release_sandbox` | MCP 返回领域错误时记录 release 失败，不影响已返回的 Chat 流 |
-| workspace commit | Scheduler -> WorkspaceStore | 返回 `WORKSPACE_SYNC_FAILED`，但仍销毁用户实例 |
-| AIO destroy | Scheduler -> Adapter -> DockerRuntime | 404 幂等成功；超时/连续失败进入 `LOST`，不回 READY |
-| Watcher recovery | Watcher -> Scheduler.recover_expired | 过期 `ALLOCATED/RUNNING` 实例走关闭、导出缓存和销毁流程，不直接回池 |
+新增或变更的接口：
 
+| 接口 | 语义 |
+| --- | --- |
+| MCP `acquire_sandbox` | 返回 TurnLease、`user_binding_id`、用户空闲期限以及容器/workspace 复用标记 |
+| MCP `release_sandbox` | 结束本轮 TurnLease并 checkpoint 当前 session，不销毁用户容器 |
+| MCP `delete_sandbox_workspace` | 删除可信请求头中 user/session 对应的目录和快照 |
+| MCP `destroy_sandbox_session` | `delete_sandbox_workspace` 的兼容别名 |
+| `POST /internal/leases/{lease_id}/release` | 与 MCP release 相同，不销毁健康容器 |
+| `POST /internal/sandbox-workspaces/delete` | 按 user/session 删除 workspace |
+| `POST /internal/user-sandboxes/destroy` | 管理端按 user 强制销毁物理容器 |
+| `GET /internal/sandboxes/{sandbox_id}` | 返回 owner、活动 turn 数、用户绑定和复用次数 |
+
+配置默认值：
+
+```text
+SANDBOX_USER_REUSE_ENABLED=true
+SANDBOX_USER_IDLE_TTL_SECONDS=600
+SANDBOX_MAX_USER_BINDINGS=20
+SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS=30000
+SANDBOX_EXECUTION_MAX_TIMEOUT_MS=120000
+SANDBOX_EXECUTION_TRANSPORT_GRACE_SECONDS=5
+```
+
+acquire 不等待同 session 的既有 turn。专用 MCP client 优先读取 `result.content`，确保 `SESSION_BUSY`、`USER_SANDBOX_CAPACITY` 和 `POOL_EMPTY` 不会被空的 `structuredContent` 序列化为 `null`。执行 transport timeout 应大于允许的 AIO 任务 timeout，并包含 grace 时间。
+
+#### 6.4.5 指标与降级规则
+
+Pool metrics 包含活动/空闲用户绑定、活动 TurnLease、用户容器复用命中、新建用户绑定、`SESSION_BUSY` 拒绝、TTL/LRU 回收、执行超时和 checkpoint 降级等计数，可用“用户容器复用命中 / allocate 成功”计算容器复用率。
+
+WorkspaceStore commit 失败会记录 `workspace_checkpoint_degraded` 和 `last_error`，但健康 AIO 不因普通 release 的存储故障立即销毁。租约过期会结束 turn；显式用户 destroy 和服务 shutdown 会尽力 checkpoint 活动 session，即使失败也继续销毁。
 ### 6.5 失败补偿
 
 | 失败点 | 处理 |
@@ -572,9 +598,14 @@ sequenceDiagram
 | workspace prepare 失败 | 立即销毁，实例不回池 |
 | activate 失败 | 销毁已 checkout 实例，返回 `SANDBOX_UNAVAILABLE` |
 | execute 期间 AIO 失联 | 拒绝后续操作，交由恢复流程销毁 |
-| workspace commit 失败 | 记录 `WORKSPACE_SYNC_FAILED`，仍继续销毁 |
+| 普通 release 的 workspace commit 失败 | 记录 checkpoint 降级和 `last_error`，健康容器继续保留 |
+| 最终回收的 workspace commit 失败 | 记录降级，仍继续销毁 |
+| 同 session 并发 acquire | Repository 原子检查并立即返回 `SESSION_BUSY` |
+| 用户绑定达到上限 | 淘汰最久未使用的 `USER_IDLE`；无可淘汰项则返回 `USER_SANDBOX_CAPACITY` |
+| 用户容器空闲超过 600 秒 | Watcher 最终回收用户容器，记录 TTL 指标 |
+| Shell/Python/Node/Shell 脚本超过 Nacos timeout | Sandbox 调用 AIO Shell kill 清理目标进程树，返回 `EXECUTION_TIMEOUT`，共享容器保持可用 |
 | destroy 超时 | `wait_for`、指数退避和有限重试，最终 LOST |
-| 租约过期 | Watcher 调用 Scheduler.recover_expired，先尝试导出并缓存工作区，再销毁；缓存失败也不直接回 READY |
+| 租约过期 | Watcher 调用 `recover_expired`，checkpoint 当前 session 并释放 TurnLease；用户容器按是否仍有活动 turn 进入 `USER_ACTIVE` 或 `USER_IDLE` |
 
 ## 7. AIO Adapter 实现细节
 
@@ -598,7 +629,7 @@ DockerRuntime 使用动态宿主机端口，将容器端口 8080 映射到 `127.
 - 文件写入/读取/列表/替换：`/v1/file/write`、`/v1/file/read`、`/v1/file/list`、`/v1/file/replace`；
 - 文件搜索：实际为 `/v1/file/search`，请求字段为 `file`、`regex`，不是旧假设的 `/v1/file/grep`；
 - Shell：`/v1/shell/exec`，响应包含 `session_id`、`command`、`status`、`output`、`console`、`exit_code`；
-- 代码执行：`/v1/code/execute`，请求字段为 `language`、`code`、秒单位的 `timeout`，响应包含执行状态、stdout/stderr 和 exit_code；内部 MCP 的 `timeout_ms` 会向上取整后映射到该字段；
+- 代码执行：AIO 提供 `/v1/code/execute`，但实测超时后可能遗留用户子进程且没有 code interrupt 接口。因此 Python、Node 和 Shell 脚本通过 `/v1/shell/exec` 执行，并在超时时调用 `/v1/shell/kill`；未知语言暂时保留 code API 兼容路径；
 - AIO 响应普遍使用 `data` 包装，AioClient 会解包后交给 Provider；
 - 当前未发现 endpoint/token 必须认证的情况，但客户端保留 Authorization header 支持。
 
@@ -607,10 +638,10 @@ DockerRuntime 使用动态宿主机端口，将容器端口 8080 映射到 `127.
 Provider 将每个工作区映射为：
 
 ```text
-/home/gem/{tenant_id}/{workspace_id}/...
+/home/gem/workspaces/{user_id}/{session_id}/...
 ```
 
-PathPolicy 拒绝空路径、越界绝对路径、`..`、非法租户/工作区标识和符号链接逃逸。list、search、Shell 默认使用当前 workspace 根，而不是整个 `/home/gem`。export 只读取当前作用域；目录不存在时返回空 WorkspaceSnapshot。
+PathPolicy 拒绝空路径、越界绝对路径、`..`、非法用户/session 标识和符号链接逃逸。list、search、Shell 默认使用当前 session workspace 根，而不是整个用户容器。checkpoint 只导出当前 session；目录不存在时返回空 WorkspaceSnapshot。同用户 session 之间是路径与调度层面的逻辑隔离，不构成恶意代码之间的 OS 安全边界。
 
 ## 8. Metrics、安全与可观测性
 
@@ -618,9 +649,10 @@ PathPolicy 拒绝空路径、越界绝对路径、`..`、非法租户/工作区�
 
 - create/warmup/destroy 成功和失败次数；
 - warmup、destroy 耗时和失败率；
-- 过期租约恢复数、当前僵尸租约数；
-- workspace commit 成功/失败次数；
-- active leases by tenant；
+- 活动/空闲用户绑定、活动 TurnLease、过期租约恢复数和当前僵尸租约数；
+- 用户容器创建、复用命中、TTL/LRU 回收和 `SESSION_BUSY` 拒绝；
+- workspace checkpoint 成功/失败/降级次数和执行超时次数；
+- active leases by user；
 - Watcher reconcile、非 leader 和低 readiness 统计。
 
 metrics、状态查询和错误响应不返回 AIO token、workspace 内容、Docker container ID、完整异常堆栈或完整请求体。endpoint/token 只在 allocate 返回的短期租约上下文中使用，释放后失效。
@@ -647,12 +679,13 @@ metrics、状态查询和错误响应不返回 AIO token、workspace 内容、Do
 执行方式：
 
 ```bash
-cd services/wisepen-sandbox-service
-PYTHONPATH=src pytest -q
-# 21 passed
+PYTHONPATH=services/wisepen-common/src:services/wisepen-sandbox-service/src \
+  .venv/bin/pytest -q services/wisepen-sandbox-service/tests \
+  --ignore=services/wisepen-sandbox-service/tests/test_image_config.py
+# 106 passed（test_image_config.py 引用当前仓库不存在的旧 image config，单独排除）
 ```
 
-覆盖内容包括并发 checkout、非法状态、request_id 幂等、租户冲突、租约过期、fencing、return_ready、工作区路径、commit 失败销毁、release 幂等、销毁前缓存、下次分配恢复、完整快照替换、Watcher 补池和 readiness metrics，以及 AIO HTTP、错误映射、真实 search/execute 字段、路径隔离、TTY 和 Docker 参数。
+覆盖内容包括同用户跨 session 容器复用、不同用户隔离、跨 session 并发、同 session `SESSION_BUSY`、request 幂等与已释放 request、租约过期、fencing、workspace 删除/恢复、checkpoint 降级、用户 TTL/LRU、Watcher、API/MCP/VNC、AIO timeout 映射、路径隔离、TTY 和 Docker 参数。
 
 ### 10.2 手动 AIO 容器探测
 
@@ -662,6 +695,7 @@ PYTHONPATH=src pytest -q
 - `/health`、`/v1/health`、`/openapi.json`：不可用，未作为健康路径；
 - 文件写入、读取、列表、搜索、替换：PASS，工作根为 `/home/gem`；
 - Shell 执行：PASS；
+- 多终端并发：PASS，一个 `sleep 12` 等待期间五个 `sleep 1` Shell 可完成；
 - Code Execute：PASS，使用 `language` + `code`；
 - `/v1/file/grep`：不存在，已改用 `/v1/file/search`。
 
@@ -670,17 +704,15 @@ PYTHONPATH=src pytest -q
 所有测试专用容器都使用 `wisepen.e2e=true` 标签，并在每次试跑后确认清理完成。真实 Sandbox Service 试跑结果：
 
 ```text
-Watcher warmup       PASS  CREATING -> WARMING -> READY
-health/readiness     PASS  healthz=200, readyz=200
-allocate             PASS  READY -> ALLOCATED -> RUNNING
-execute              PASS  AIO code execution succeeded
-Watcher replenish    PASS  用户实例占用后补充新的 READY 实例
-fencing rejection    PASS  错误 fencing token 返回 409
-release              PASS  workspace commit -> destroy -> DESTROYED
-release repeat       PASS  幂等，不重复 commit/destroy
-user not READY       PASS  用户实例未回 READY
-metrics              PASS  generation/readiness/tenant metrics 可见且不泄密
-e2e cleanup           PASS  无测试容器残留
+Watcher warmup        PASS  CREATING -> WARMING -> READY
+health/readiness      PASS  healthz=200, readyz=200
+first user allocate   PASS  READY -> ALLOCATED -> USER_ACTIVE
+same-user reuse       PASS  不同 session 共享 sandbox_id，lease/fencing 独立
+cross-session execute PASS  长 Shell 等待时其他 session Shell 可执行
+same-session guard    PASS  第二个活动 request 返回 SESSION_BUSY
+release               PASS  checkpoint 当前 session，最后一个 turn 后 USER_IDLE
+workspace delete      PASS  删除 session 目录，不销毁用户容器
+user cleanup          PASS  显式 user destroy 后容器与绑定回到基线
 ```
 
 第一次真实 release 暴露了“空 workspace 目录不存在”的边界，修复为 Adapter 返回空快照后再次试跑成功。
@@ -689,7 +721,9 @@ e2e cleanup           PASS  无测试容器残留
 
 - 当前 Repository 和 LeaderLease 是进程内实现，进程重启不会保留租约和 Pool 数据；跨进程选主需替换为外部存储/锁。LocalWorkspaceStore 已支持本地工作区缓存，但生产环境仍建议替换为对象存储或带元数据的外部持久化实现。
 - AIO 镜像的 Docker 内置 healthcheck 可能因为 browser 子进程 SIGABRT 显示 `unhealthy`，但本次验证中 `/v1/sandbox` HTTP 接口可正常返回 200；生产环境应分别监控 Docker health 和 AIO HTTP health。
-- 当前用户沙箱默认销毁，不支持 reset 后复用。
+- 同一用户的 session workspace 依靠路径策略、身份上下文、fencing 和局部锁做逻辑隔离；它们共享同一 OS 容器，不是针对同用户恶意代码的强安全边界。
+- 不设置每用户 session 或业务并发上限；需要结合 AIO/宿主机 CPU、内存和进程数指标做容量告警，必要时再增加资源级限流。
+- Python、Node、Shell 和普通 Shell 命令具备进程树终止保证；未知语言仍走 AIO code API，当前不承诺能清理其派生子进程。生产镜像升级时必须回归 `/v1/shell/kill` 的进程树语义。
 - 当前工作区缓存按文本内容读写，二进制文件和大对象传输仍需后续扩展专用协议。
 - 尚未实现真实 Redis/Mongo Repository、跨实例 Watcher 选主、文件大对象传输、VNC/Proxy 端到端和故障注入测试。
 - AIO Adapter 只保留当前文件、Shell、代码执行和容器生命周期所需的最小协议，后续新增 AIO 能力仍应保持平台依赖在 Adapter 内部。

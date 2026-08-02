@@ -36,6 +36,12 @@ def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
             "workspace_id": lease.workspace_id,
             "expires_at": lease.expires_at.isoformat(),
             "fencing_token": lease.fencing_token,
+            "user_binding_id": lease.user_binding_id,
+            "user_idle_expires_at": (
+                lease.user_idle_expires_at.isoformat() if lease.user_idle_expires_at else None
+            ),
+            "container_reused": lease.container_reused,
+            "workspace_reused": lease.workspace_reused,
         }
 
     @mcp.tool(
@@ -45,6 +51,22 @@ def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
     async def release_sandbox() -> dict[str, str]:
         await session.release()
         return {"status": "released"}
+
+    @mcp.tool(
+        name="delete_sandbox_workspace",
+        description="Delete the current session workspace without destroying the user container.",
+    )
+    async def delete_sandbox_workspace() -> dict[str, str]:
+        deleted = await session.delete_workspace()
+        return {"status": "deleted" if deleted else "not_found"}
+
+    @mcp.tool(
+        name="destroy_sandbox_session",
+        description="Compatibility alias for deleting the current session workspace.",
+    )
+    async def destroy_sandbox_session() -> dict[str, str]:
+        deleted = await session.delete_workspace()
+        return {"status": "deleted" if deleted else "not_found"}
 
     @mcp.tool(
         name="read_file",

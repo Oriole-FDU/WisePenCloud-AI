@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import shlex
 from typing import Any
 
@@ -263,14 +262,25 @@ class AioSandboxProvider(SandboxProvider):
             language = str(payload.get("language", "python"))
             code = str(payload.get("code", ""))
             timeout_ms = self._normalize_execution_timeout(payload.get("timeout_ms"))
-            if language.strip().lower() in {"py", "python", "python3"}:
-                code = self._python_workspace_code(policy.root, code)
-            data = await client.code_execute(
-                language,
-                code,
-                timeout_ms,
-                self._execution_transport_grace_seconds,
-            )
+            command = self._script_command(language, code)
+            if command is None:
+                data = await client.code_execute(
+                    language,
+                    code,
+                    timeout_ms,
+                    self._execution_transport_grace_seconds,
+                )
+            else:
+                # AIO code execution has no cancellation endpoint and may leave child
+                # processes behind. Shell sessions expose /v1/shell/kill, which the
+                # client invokes on timeout and which terminates the process tree.
+                data = await client.shell_exec(
+                    command,
+                    policy.root,
+                    timeout_ms,
+                    self._execution_transport_grace_seconds,
+                )
+                data.setdefault("stdout", data.get("output"))
         else:
             raise ValueError(f"不支持的沙箱操作：{operation}")
         return ExecutionResult(request.request_id, "succeeded", data)
@@ -280,13 +290,16 @@ class AioSandboxProvider(SandboxProvider):
         return f"cd -- {shlex.quote(exec_dir)} && {command}"
 
     @staticmethod
-    def _python_workspace_code(workspace_dir: str, code: str) -> str:
-        # Compile separately so a user module may still begin with a future import.
-        return (
-            "import os as _wisepen_os\n"
-            f"_wisepen_os.chdir({json.dumps(workspace_dir)})\n"
-            f"exec(compile({json.dumps(code)}, '<sandbox-user-code>', 'exec'), globals(), globals())\n"
-        )
+    def _script_command(language: str, code: str) -> str | None:
+        normalized = language.strip().lower()
+        quoted = shlex.quote(code)
+        if normalized in {"py", "python", "python3"}:
+            return f"python3 -c {quoted}"
+        if normalized in {"js", "javascript", "node", "nodejs"}:
+            return f"node -e {quoted}"
+        if normalized in {"bash", "sh", "shell"}:
+            return f"bash -c {quoted}"
+        return None
 
     def _normalize_execution_timeout(self, value: Any) -> int:
         return normalize_execution_timeout_ms(
@@ -317,6 +330,11 @@ class AioSandboxProvider(SandboxProvider):
             lease_id,
             fencing_token,
         )
+
+    async def delete_workspace(
+        self, sandbox: SandboxRef, tenant_id: str, workspace_id: str
+    ) -> None:
+        await self._file_transfer.delete_workspace(sandbox, tenant_id, workspace_id)
 
     async def destroy(self, sandbox: SandboxRef, reason: str) -> None:
         info(

@@ -18,3 +18,6 @@ class WorkspaceStore(Protocol):
         fencing_token: int = 0,
     ) -> None:
         ...
+
+    async def delete(self, tenant_id: str, workspace_id: str) -> None:
+        ...

@@ -92,6 +92,8 @@ class Container(containers.DeclarativeContainer):
         lease_ttl_seconds=config.SANDBOX_LEASE_TTL_SECONDS,
         min_ready=config.SANDBOX_MIN_READY,
         target_ready=config.SANDBOX_TARGET_READY,
+        user_idle_ttl_seconds=config.SANDBOX_USER_IDLE_TTL_SECONDS,
+        max_user_bindings=config.SANDBOX_MAX_USER_BINDINGS,
     )
     file_transfer = providers.Singleton(
         DockerWorkspaceTransfer,
@@ -155,6 +157,9 @@ class Container(containers.DeclarativeContainer):
         destroy_timeout_seconds=config.SANDBOX_DESTROY_TIMEOUT_SECONDS,
         destroy_max_retries=config.SANDBOX_DESTROY_MAX_RETRIES,
         destroy_backoff_seconds=config.SANDBOX_DESTROY_RETRY_BACKOFF_SECONDS,
+        user_reuse_enabled=config.SANDBOX_USER_REUSE_ENABLED,
+        user_idle_ttl_seconds=config.SANDBOX_USER_IDLE_TTL_SECONDS,
+        max_user_bindings=config.SANDBOX_MAX_USER_BINDINGS,
         metrics=metrics,
     )
     leader_lease = providers.Singleton(MemoryLeaderLease)

@@ -83,7 +83,7 @@ class McpServiceClient:
                 await session.initialize()
                 result = await session.call_tool(tool_name, dict(arguments))
 
-        output = json.dumps(result.structuredContent, ensure_ascii=False, default=str)
+        output = _stringify_tool_result(result)
         if getattr(result, "isError", False):
             raise RuntimeError(output or f"MCP tool '{tool_name}' returned an error.")
         return output
@@ -122,3 +122,16 @@ class McpServiceClient:
         if developer:
             headers[CommonConstants.GRAY_HEADER_DEV_KEY] = developer
         return headers
+
+
+def _stringify_tool_result(result: Any) -> str:
+    parts: list[str] = []
+    for item in getattr(result, "content", None) or []:
+        text = getattr(item, "text", None)
+        parts.append(str(text) if text is not None else str(item))
+    if parts:
+        return "\n".join(parts)
+    structured = getattr(result, "structuredContent", None)
+    if structured is not None:
+        return json.dumps(structured, ensure_ascii=False, default=str)
+    return ""

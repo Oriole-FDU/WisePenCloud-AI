@@ -75,7 +75,12 @@ class AioClient:
             ) from exc
 
     async def request(
-        self, path: str, body: dict[str, Any], *, timeout: float | None = None
+        self,
+        path: str,
+        body: dict[str, Any],
+        *,
+        timeout: float | None = None,
+        timeout_error_code: Any = None,
     ) -> dict[str, Any]:
         try:
             async with httpx.AsyncClient(timeout=timeout or self._timeout) as client:
@@ -98,6 +103,8 @@ class AioClient:
             # 部分 AIO 接口返回 R(data=...)，部分直接返回 dict；这里统一拆出业务 data。
             if isinstance(payload, dict) and payload.get("success") is False:
                 reason = self._failure_reason(payload)
+                if timeout_error_code is not None and "timeout" in reason.lower():
+                    raise ServiceException(timeout_error_code, "沙箱任务执行超时")
                 raise ServiceException(
                     SandboxErrorCode.SANDBOX_UNAVAILABLE,
                     f"AIO 业务请求失败：{reason}",
@@ -109,8 +116,8 @@ class AioClient:
             raise
         except httpx.TimeoutException as exc:
             raise ServiceException(
-                SandboxErrorCode.SANDBOX_UNAVAILABLE,
-                "AIO 请求超时",
+                timeout_error_code or SandboxErrorCode.SANDBOX_UNAVAILABLE,
+                "沙箱任务执行超时" if timeout_error_code else "AIO 请求超时",
             ) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise ServiceException(
@@ -171,10 +178,32 @@ class AioClient:
             aio_timeout_seconds=timeout_seconds,
             request_timeout_seconds=request_timeout_seconds,
         )
-        return await self.request(
+        result = await self.request(
             "/v1/shell/exec",
             {"command": command, "exec_dir": exec_dir, "timeout": timeout_seconds},
             timeout=request_timeout_seconds,
+            timeout_error_code=SandboxErrorCode.EXECUTION_TIMEOUT,
+        )
+        if str(result.get("status", "")).lower() != "running":
+            return result
+
+        session_id = str(result.get("session_id") or "").strip()
+        if session_id:
+            try:
+                await self.request(
+                    "/v1/shell/kill",
+                    {"id": session_id},
+                    timeout=max(1.0, request_grace_seconds),
+                )
+            except ServiceException as exc:
+                error(
+                    "AIO Shell 超时后的进程终止失败",
+                    exc=exc,
+                    session_id=session_id,
+                )
+        raise ServiceException(
+            SandboxErrorCode.EXECUTION_TIMEOUT,
+            "沙箱任务执行超时",
         )
 
     async def code_execute(
@@ -197,4 +226,5 @@ class AioClient:
             "/v1/code/execute",
             {"language": language, "code": code, "timeout": timeout_seconds},
             timeout=request_timeout_seconds,
+            timeout_error_code=SandboxErrorCode.EXECUTION_TIMEOUT,
         )

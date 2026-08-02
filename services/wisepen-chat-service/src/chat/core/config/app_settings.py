@@ -124,7 +124,7 @@ class AppSettings(BaseModel):
     # Sandbox Service 配置
     SANDBOX_SERVICE_NAME: str = "wisepen-sandbox-service"
     SANDBOX_SERVICE_URL: str = ""
-    SANDBOX_TIMEOUT_SECONDS: float = 30.0
+    SANDBOX_TIMEOUT_SECONDS: float = Field(default=35.0, ge=35.0)
     SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS: int = Field(default=30000, ge=1)
     SANDBOX_EXECUTION_MAX_TIMEOUT_MS: int = Field(default=120000, ge=1)
     SANDBOX_EXECUTION_OUTER_GRACE_SECONDS: float = Field(default=10.0, gt=0)

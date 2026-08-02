@@ -104,6 +104,7 @@ class Watcher:
                 if self._scheduler:
                     # 先回收过期用户实例，再评估 READY 缺口，避免旧实例占用资源。
                     await self._scheduler.recover_expired()
+                    await self._scheduler.reclaim_idle_users()
                     await self._checkpoint_active_leases()
                 await self._recover_stale()
                 snapshot = await self._pool.snapshot()
@@ -219,23 +220,22 @@ class Watcher:
         if not self._scheduler or monotonic() < self._next_checkpoint_at:
             return
         self._next_checkpoint_at = monotonic() + self._checkpoint_interval
-        records = await self._repository.records_in([SandboxState.RUNNING])
+        records = await self._repository.records_in([SandboxState.USER_ACTIVE])
         for record in records:
-            if not record.lease_id:
-                continue
-            try:
-                await self._scheduler.checkpoint(
-                    record.lease_id,
-                    record.fencing_token,
-                )
-            except Exception as exc:
-                self._metrics.increment("watcher_checkpoint_failures")
-                logger.exception(
-                    "sandbox workspace checkpoint failed: sandbox_id=%s lease_id=%s",
-                    record.ref.sandbox_id,
-                    record.lease_id,
-                    exc_info=exc,
-                )
+            for lease in await self._repository.active_turns_for_sandbox(record.ref.sandbox_id):
+                try:
+                    await self._scheduler.checkpoint(
+                        lease.lease_id,
+                        lease.fencing_token,
+                    )
+                except Exception as exc:
+                    self._metrics.increment("watcher_checkpoint_failures")
+                    logger.exception(
+                        "sandbox workspace checkpoint failed: sandbox_id=%s lease_id=%s",
+                        record.ref.sandbox_id,
+                        lease.lease_id,
+                        exc_info=exc,
+                    )
 
     async def _warm_one(self, attempt: int | None = None) -> None:
         started = monotonic()
