@@ -17,8 +17,6 @@ from sandbox.domain.interfaces.sandbox_provider import SandboxProvider
 from sandbox.application.services.sandbox_pool import SandboxPool
 from sandbox.domain.repositories import SandboxRepository
 from sandbox.application.services.sandbox_scheduler import SandboxScheduler
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -58,6 +56,7 @@ class Watcher:
         self._provider = provider
         self._spec = spec
         self._scheduler = scheduler
+        self._lease_manager = getattr(repository, "lease_manager", None)
         self._leader_lease = leader_lease
         self._leader_key = leader_key
         # 持有者标识用于区分多个服务实例的 watcher，内存实现和未来外部锁都依赖它释放租约。
@@ -200,11 +199,10 @@ class Watcher:
             )
             if not renewed:
                 error(
-                    "沙箱 watcher leader 租约续期失败",
+                    "沙箱 watcher leader 租约续期失败，将在下个周期重试",
                     owner=self._owner,
                     leader_key=self._leader_key,
                 )
-                return
 
     def _next_reconcile_delay(self) -> float:
         if self._retry_count == 0:
@@ -217,12 +215,12 @@ class Watcher:
         )
 
     async def _checkpoint_active_leases(self) -> None:
-        if not self._scheduler or monotonic() < self._next_checkpoint_at:
+        if not self._scheduler or not self._lease_manager or monotonic() < self._next_checkpoint_at:
             return
         self._next_checkpoint_at = monotonic() + self._checkpoint_interval
         records = await self._repository.records_in([SandboxState.USER_ACTIVE])
         for record in records:
-            for lease in await self._repository.active_turns_for_sandbox(record.ref.sandbox_id):
+            for lease in await self._lease_manager.active_turns_for_sandbox(record.ref.sandbox_id):
                 try:
                     await self._scheduler.checkpoint(
                         lease.lease_id,
@@ -371,6 +369,7 @@ class Watcher:
                     SandboxState.DESTROYING,
                     error=str(exc)[:200],
                 )
+            destroy_error: Exception | None = None
             try:
                 # 预热失败的容器同样要销毁；失败后进入 LOST，便于指标和人工排查。
                 started = monotonic()
@@ -391,28 +390,45 @@ class Watcher:
                     sandbox_id=ref.sandbox_id,
                     destroy_duration_ms=round((monotonic() - started) * 1000, 2),
                 )
-            except Exception as destroy_exc:
+            except Exception as _destroy_exc:
+                destroy_error = _destroy_exc
                 error(
                     "预热失败的沙箱容器销毁失败",
-                    exc=destroy_exc,
+                    exc=destroy_error,
                     sandbox_id=ref.sandbox_id,
                     provider_id=ref.provider_id,
                 )
-                raise
+                # 将原始错误和销毁错误一起抛出，方便上层定位根因。
+                raise RuntimeError(
+                    f"沙箱销毁失败（原始预热错误: {exc}）"
+                ) from destroy_error
             finally:
                 current = await self._repository.get(ref.sandbox_id)
                 if current and current.state == SandboxState.DESTROYING:
-                    await self._repository.transition(
-                        ref.sandbox_id,
-                        SandboxState.DESTROYING,
-                        SandboxState.LOST,
-                        error=str(exc)[:200],
-                    )
-                    info(
-                        "沙箱预热失败后已进入 LOST",
-                        sandbox_id=ref.sandbox_id,
-                        error_message=str(exc)[:200],
-                    )
+                    if destroy_error is not None:
+                        await self._repository.transition(
+                            ref.sandbox_id,
+                            SandboxState.DESTROYING,
+                            SandboxState.LOST,
+                            error=str(destroy_error)[:200],
+                        )
+                        info(
+                            "沙箱预热失败后已进入 LOST（销毁失败）",
+                            sandbox_id=ref.sandbox_id,
+                            destroy_error=str(destroy_error)[:200],
+                        )
+                    else:
+                        await self._repository.transition(
+                            ref.sandbox_id,
+                            SandboxState.DESTROYING,
+                            SandboxState.DESTROYED,
+                            error=str(exc)[:200],
+                        )
+                        info(
+                            "沙箱预热失败后已进入 DESTROYED（销毁成功）",
+                            sandbox_id=ref.sandbox_id,
+                            warmup_error=str(exc)[:200],
+                        )
             raise
 
     async def _recover_stale(self) -> None:
@@ -449,7 +465,7 @@ class Watcher:
                 await self._repository.transition(
                     record.ref.sandbox_id,
                     SandboxState.DESTROYING,
-                    SandboxState.LOST,
+                    SandboxState.DESTROYED,
                     error="warmup timeout",
                 )
             except Exception as exc:
@@ -475,15 +491,34 @@ class Watcher:
         )
         for record in stale_destroying:
             try:
-                # 销毁中超时说明前一次 destroy 已失控，标 LOST 后不再参与分配。
+                # 先尝试再次销毁，避免因临时 Docker 不可用导致资源泄漏。
+                await asyncio.wait_for(
+                    self._provider.destroy(record.ref, "destroy_timeout_retry"),
+                    timeout=self._destroy_timeout,
+                )
                 await self._repository.transition(
                     record.ref.sandbox_id,
                     SandboxState.DESTROYING,
-                    SandboxState.LOST,
-                    error="destroy timeout",
+                    SandboxState.DESTROYED,
+                    error="destroy timeout (retry succeeded)",
                 )
-            except ServiceException:
+            except Exception as exc:
                 self._metrics.increment("destroy_failures")
+                error(
+                    "清理 DESTROYING 超时沙箱失败，标记为 LOST",
+                    exc=exc,
+                    sandbox_id=record.ref.sandbox_id,
+                    provider_id=record.ref.provider_id,
+                )
+                try:
+                    await self._repository.transition(
+                        record.ref.sandbox_id,
+                        SandboxState.DESTROYING,
+                        SandboxState.LOST,
+                        error="destroy timeout (retry failed)",
+                    )
+                except ServiceException:
+                    self._metrics.increment("destroy_failures")
 
     async def run(self) -> None:
         while not self._stop.is_set():

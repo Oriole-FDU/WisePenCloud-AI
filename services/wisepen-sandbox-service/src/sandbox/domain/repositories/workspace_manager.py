@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Protocol
+
 from sandbox.domain.entities import SessionWorkspaceRecord
 
 
-class WorkspaceManager:
+class WorkspaceManager(Protocol):
     async def find_workspace(self, user_id: str, session_id: str) -> SessionWorkspaceRecord | None: ...
 
     async def workspaces_for_user(self, user_id: str) -> list[SessionWorkspaceRecord]: ...

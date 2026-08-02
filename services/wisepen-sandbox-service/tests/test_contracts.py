@@ -52,7 +52,7 @@ async def test_expired_turn_is_released_without_destroying_user_container() -> N
     repository, pool = await ready_pool(provider)
     scheduler = SandboxScheduler(pool, repository, provider, FakeWorkspace())
     lease = await scheduler.allocate("expired", "user", "session")
-    turn = await repository.get_turn_lease(lease.lease_id)
+    turn = await repository.lease_manager.get_turn_lease(lease.lease_id)
     turn.expires_at = utc_now() - timedelta(seconds=1)
 
     with pytest.raises(ServiceException) as exc_info:

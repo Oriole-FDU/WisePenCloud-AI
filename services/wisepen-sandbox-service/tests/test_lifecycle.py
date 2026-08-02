@@ -212,7 +212,8 @@ async def test_reuse_disabled_release_destroys_without_recursive_locking() -> No
     provider = FakeProvider()
     repository, pool = await ready_pool(provider)
     scheduler = SandboxScheduler(
-        pool, repository, provider, FakeWorkspace(), user_reuse_enabled=False
+        pool, repository, provider, FakeWorkspace(),
+        user_reuse_enabled=False,
     )
     lease = await scheduler.allocate("req", "user-1", "session")
 
@@ -249,7 +250,7 @@ async def test_checkpoint_failure_keeps_healthy_user_container() -> None:
     await scheduler.release(lease.lease_id, lease.fencing_token)
 
     record = await scheduler.status(lease.sandbox_id)
-    workspace = await repository.find_workspace("user-1", "session")
+    workspace = await repository.workspace_manager.find_workspace("user-1", "session")
     assert record.state == SandboxState.USER_IDLE
     assert record.last_error
     assert workspace is not None and workspace.last_error
@@ -277,11 +278,12 @@ async def test_idle_ttl_and_lru_destroy_only_idle_user_containers() -> None:
     provider = FakeProvider()
     repository, pool = await ready_pool(provider)
     scheduler = SandboxScheduler(
-        pool, repository, provider, FakeWorkspace(), max_user_bindings=1
+        pool, repository, provider, FakeWorkspace(),
+        max_user_bindings=1,
     )
     first = await scheduler.allocate("req-a", "user-1", "session")
     await scheduler.release(first.lease_id, first.fencing_token)
-    binding = await repository.find_user_binding("user-1")
+    binding = await repository.binding_manager.find_user_binding("user-1")
     assert binding is not None
     binding.idle_expires_at = utc_now() - timedelta(seconds=1)
     assert await scheduler.reclaim_idle_users() == 1
