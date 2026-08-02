@@ -23,7 +23,7 @@ def args(**overrides) -> Namespace:
         "sandbox_url": "http://sandbox", "chat_url": "http://chat", "source": "source-secret",
         "user_id": "same-user", "request_id": "request-1", "model_id": None,
         "provider_id": None, "developer": "developer", "sandbox_fixture_host": "fixture-host",
-        "fixture_bind_host": "127.0.0.1", "container_workspace_root": "/home/gem/workspaces",
+        "fixture_bind_host": "127.0.0.1",
     }
     values.update(overrides)
     return Namespace(**values)
@@ -91,12 +91,23 @@ def test_assert_turn_requires_tools_markers_and_finish(capsys):
 
 
 def test_download_query_uses_fixed_timing_marker_and_session_specific_transform():
-    query = e2e._download_query("http://fixture/source", "input.txt", "session-one", "/home/gem/workspaces/user/session")
+    query = e2e._download_query("http://fixture/source", "input.txt", "session-one")
 
     assert "E2E_DOWNLOAD_CURL_MS=%{time_total}" in query
     assert "processed-by=session-one" in query
-    assert "-o '/home/gem/workspaces/user/session/input.txt'" in query
-    assert "/home/gem/workspaces/user/session/output.txt" in query
+    assert "-o 'input.txt'" in query
+    assert "output.txt" in query
+    assert "/home/gem/" not in query
+
+
+def test_assert_turn_rejects_internal_container_paths():
+    parsed = e2e.parse_sse("\n".join([
+        'data: {"type":"tool-input-available","toolName":"shell_exec","input":{"command":"cat /home/gem/workspaces/user/session/input.txt"}}',
+        'data: {"type":"finish"}',
+    ]))
+
+    with pytest.raises(RuntimeError, match="internal container path"):
+        e2e._assert_turn(parsed, tools={"shell_exec"}, input_contains=(), output_markers=set(), label="invalid-path")
 
 
 def test_main_runs_four_turns_for_same_user_and_cleans_up(monkeypatch):

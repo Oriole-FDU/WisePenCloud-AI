@@ -30,6 +30,25 @@ def _container_assignment_keyword(assignment_name: str, keyword_name: str) -> st
     raise AssertionError(f"{assignment_name}.{keyword_name} not found")
 
 
+def _container_assignment_keywords(assignment_name: str) -> set[str]:
+    tree = ast.parse(CONTAINER_PATH.read_text(encoding="utf-8-sig"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef) or node.name != "Container":
+            continue
+        for statement in node.body:
+            if not isinstance(statement, ast.Assign):
+                continue
+            if not any(
+                isinstance(target, ast.Name) and target.id == assignment_name
+                for target in statement.targets
+            ):
+                continue
+            if not isinstance(statement.value, ast.Call):
+                raise AssertionError(f"{assignment_name} is not provider call")
+            return {keyword.arg for keyword in statement.value.keywords if keyword.arg}
+    raise AssertionError(f"{assignment_name} not found")
+
+
 def test_mcp_service_clients_use_mcp_specific_timeouts() -> None:
     assert (
         _container_assignment_keyword("mcp_service_client", "timeout")
@@ -39,3 +58,7 @@ def test_mcp_service_clients_use_mcp_specific_timeouts() -> None:
         _container_assignment_keyword("sandbox_mcp_service_client", "timeout")
         == "settings.SANDBOX_TIMEOUT_SECONDS"
     )
+
+
+def test_sandbox_client_has_only_mcp_dependency() -> None:
+    assert _container_assignment_keywords("sandbox_client") == {"mcp_client"}

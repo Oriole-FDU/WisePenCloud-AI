@@ -30,6 +30,16 @@ def test_sandbox_mcp_registers_expected_tools() -> None:
     }
 
 
+def test_sandbox_mcp_documents_logical_workspace_only() -> None:
+    server = build_sandbox_mcp(FakeSession())
+    tools = {tool.name: tool for tool in server._tool_manager.list_tools()}
+    descriptions = "\n".join(str(tool.description or "") for tool in tools.values())
+
+    assert "/workspace" in descriptions
+    assert "/home/gem" not in descriptions
+    assert "optional" in tools["shell_exec"].description.lower()
+
+
 @pytest.mark.asyncio
 async def test_sandbox_mcp_streamable_http_round_trip() -> None:
     server = build_sandbox_mcp(FakeSession())

@@ -516,7 +516,6 @@ Chat 的 Nacos 配置必须包含 `MONGODB_URL`、`MONGODB_DB_NAME`、`REDIS_URL
 ~~~yaml
 SANDBOX_SERVICE_NAME: wisepen-sandbox-service
 SANDBOX_SERVICE_URL: http://127.0.0.1:19905
-SANDBOX_FROM_SOURCE: APISIX-wX0iR6tY
 SANDBOX_TIMEOUT_SECONDS: 30
 ~~
 
@@ -678,10 +677,7 @@ cd /Users/julius/julProg/wisepen/WisePenCloud-AI-fork-simo/services/wisepen-chat
 PYTHONPATH=src:../wisepen-common/src ../../.venv/bin/python -m pytest -q
 PYTHONPATH=src:../wisepen-common/src ../../.venv/bin/python -m pytest -q \
   tests/test_sandbox_client.py \
-  tests/test_mcp_service_client.py \
-  tests/test_sandbox_mcp_catalog.py \
-  tests/test_run_sandbox_script.py \
-  tests/test_chat_coordinator_sandbox_lease.py
+  tests/test_container_wiring.py
 
 cd /Users/julius/julProg/wisepen/WisePenCloud-AI-fork-simo
 ../../.venv/bin/python -m compileall -q \

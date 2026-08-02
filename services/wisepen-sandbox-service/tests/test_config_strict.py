@@ -143,6 +143,7 @@ def test_container_builds_provider_transfer_and_selected_store_from_settings():
     assert isinstance(container.provider(), AioSandboxProvider)
     assert isinstance(container.workspace_store(), LocalWorkspaceStore)
     assert container.provider()._file_transfer is container.file_transfer()
+    assert container.provider()._workspace_root == "/home/gem/workspaces"
     assert container.watcher()._spec.environment == {}
 
 

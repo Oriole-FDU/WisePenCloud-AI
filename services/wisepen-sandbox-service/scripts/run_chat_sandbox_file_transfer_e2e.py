@@ -278,23 +278,23 @@ class FileTransferFixture:
             raise RuntimeError("Session uploads are identical; workspace isolation was not demonstrated")
 
 
-def _download_query(source_url: str, input_file: str, case_name: str, workspace_dir: str) -> str:
-    input_path = f"{workspace_dir}/{input_file}"
-    output_path = f"{workspace_dir}/output.txt"
+def _download_query(source_url: str, input_file: str, case_name: str) -> str:
     return (
-        "在本轮只使用 shell_exec 和 run_sandbox_script。工作区必须使用给定绝对路径，不能使用相对路径或 /home/gem。"
+        "在本轮只使用 shell_exec 和 run_sandbox_script。当前逻辑工作区是 /workspace，"
+        "只使用相对文件路径，不要使用任何容器物理绝对路径。"
         "先必须用 shell_exec 执行此命令下载文件：\n"
-        f"mkdir -p '{workspace_dir}' && curl -fsS -o '{input_path}' -w 'E2E_DOWNLOAD_CURL_MS=%{{time_total}}\\n' '{source_url}'\n"
+        f"curl -fsS -o '{input_file}' -w 'E2E_DOWNLOAD_CURL_MS=%{{time_total}}\\n' '{source_url}'\n"
         "接着必须用 run_sandbox_script，language=python。Python 代码必须读取 "
-        f"{input_path}，把内容转成大写后追加一行 processed-by={case_name}，写入 {output_path}。"
+        f"{input_file}，把内容转成大写后追加一行 processed-by={case_name}，写入 output.txt。"
         "Python stdout 必须包含 E2E_TRANSFORM_MARKER。完成后简短说明。"
     )
 
 
-def _upload_query(upload_url: str, marker: str, output_path: str) -> str:
+def _upload_query(upload_url: str, marker: str) -> str:
     return (
-        "在本轮只使用 shell_exec。必须使用此绝对路径上传 output.txt，不能使用相对路径：\n"
-        f"curl -fsS --upload-file '{output_path}' -w '{marker}=%{{time_total}}\\n' '{upload_url}'\n"
+        "在本轮只使用 shell_exec。当前逻辑工作区是 /workspace；使用相对路径 output.txt，"
+        "不要使用任何容器物理绝对路径：\n"
+        f"curl -fsS --upload-file output.txt -w '{marker}=%{{time_total}}\\n' '{upload_url}'\n"
         "上传成功后简短说明。"
     )
 
@@ -324,6 +324,8 @@ def _assert_turn(events: list[dict[str, Any]], *, tools: set[str], input_contain
     if missing_tools:
         raise RuntimeError(f"Chat did not call {sorted(missing_tools)} for {label}: {calls}")
     inputs = "\n".join(_event_text(event.get("input")) for event in calls)
+    if "/home/gem/" in inputs:
+        raise RuntimeError(f"Tool input exposed an internal container path for {label}: {calls}")
     missing_inputs = [value for value in input_contains if value not in inputs]
     if missing_inputs:
         raise RuntimeError(f"Expected tool input values {missing_inputs} absent for {label}: {calls}")
@@ -349,11 +351,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--developer", default=os.getenv("CHAT_DEVELOPER") or os.getenv("DEVELOPER_NAME"))
     parser.add_argument("--sandbox-fixture-host", required=True, help="Address where sandbox containers can reach this process.")
     parser.add_argument("--fixture-bind-host", default="0.0.0.0")
-    parser.add_argument(
-        "--container-workspace-root",
-        default=os.getenv("SANDBOX_CONTAINER_WORKSPACE_ROOT", "/home/gem/workspaces"),
-        help="Container path exported by DockerWorkspaceTransfer.",
-    )
     return parser.parse_args()
 
 
@@ -381,13 +378,11 @@ def main(args: argparse.Namespace | None = None) -> int:
                 upload_url = fixture.url(args.sandbox_fixture_host, case["upload_path"])
                 input_file = f"{case['name']}-input.txt"
                 download_marker = "E2E_DOWNLOAD_CURL_MS"
-                workspace_dir = f"{args.container_workspace_root.rstrip('/')}/{args.user_id}/{case['session_id']}"
-                download = _run_chat_turn(args, model_id, provider_id, case["session_id"], f"{case['name']}-download", _download_query(source_url, input_file, case["name"], workspace_dir))
-                _assert_turn(download, tools={"shell_exec", "run_sandbox_script"}, input_contains=(source_url, workspace_dir), output_markers={download_marker, "E2E_TRANSFORM_MARKER"}, label=f"{case['name']}-download")
+                download = _run_chat_turn(args, model_id, provider_id, case["session_id"], f"{case['name']}-download", _download_query(source_url, input_file, case["name"]))
+                _assert_turn(download, tools={"shell_exec", "run_sandbox_script"}, input_contains=(source_url, input_file, "output.txt"), output_markers={download_marker, "E2E_TRANSFORM_MARKER"}, label=f"{case['name']}-download")
                 upload_marker = "E2E_UPLOAD_CURL_MS"
-                output_path = f"{workspace_dir}/output.txt"
-                upload = _run_chat_turn(args, model_id, provider_id, case["session_id"], f"{case['name']}-upload", _upload_query(upload_url, upload_marker, output_path))
-                _assert_turn(upload, tools={"shell_exec"}, input_contains=(upload_url, output_path), output_markers={upload_marker}, label=f"{case['name']}-upload")
+                upload = _run_chat_turn(args, model_id, provider_id, case["session_id"], f"{case['name']}-upload", _upload_query(upload_url, upload_marker))
+                _assert_turn(upload, tools={"shell_exec"}, input_contains=(upload_url, "output.txt"), output_markers={upload_marker}, label=f"{case['name']}-upload")
             fixture.assert_uploads(cases)
             print("file_transfer_uploads=PASS sessions=2 isolated=true")
         after = metric_running(run(["bash", str(METRICS_SCRIPT), args.sandbox_url], label="pool_metrics_after"))

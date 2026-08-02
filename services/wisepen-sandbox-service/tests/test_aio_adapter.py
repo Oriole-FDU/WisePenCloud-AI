@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from common.core.exceptions import ServiceException
 
-from sandbox.domain.entities import Endpoint, Health, SandboxRef, SandboxSpec, WorkspaceSnapshot
+from sandbox.domain.entities import Endpoint, ExecutionRequest, Health, SandboxRef, SandboxSpec, WorkspaceSnapshot
 from sandbox.domain.error_codes import SandboxErrorCode
 from sandbox.core.providers.aio_adapter.models import AdapterConfig
 from sandbox.core.providers.aio_adapter.path_policy import PathPolicy, TenantScope
@@ -35,6 +35,70 @@ def test_path_policy_can_isolate_a_tenant_workspace():
     with pytest.raises(ServiceException) as exc_info:
         policy.reverse("/home/gem/tenant_2/workspace_1/probe.txt")
     assert exc_info.value.code == SandboxErrorCode.WORKSPACE_PATH_INVALID.code
+
+
+def test_path_policy_maps_only_logical_workspace_paths_to_isolated_root():
+    policy = PathPolicy(
+        TenantScope("tenant_1", "workspace_1"),
+        "/home/gem/workspaces",
+        isolate_scope=True,
+    )
+
+    expected = "/home/gem/workspaces/tenant_1/workspace_1"
+    assert policy.translate("input.txt") == f"{expected}/input.txt"
+    assert policy.translate("/workspace/input.txt") == f"{expected}/input.txt"
+    assert policy.translate(".") == expected
+    assert policy.translate("/workspace") == expected
+    for invalid in ("/home/gem/workspaces/tenant_1/workspace_1/input.txt", "/workspace/../other.txt", "subdir/../other.txt", "../other.txt", "~/input.txt"):
+        with pytest.raises(ServiceException) as exc_info:
+            policy.translate(invalid)
+        assert exc_info.value.code == SandboxErrorCode.WORKSPACE_PATH_INVALID.code
+
+
+@pytest.mark.asyncio
+async def test_provider_uses_workspace_root_for_shell_and_python_cwd():
+    class Client:
+        def __init__(self):
+            self.shell_calls = []
+            self.code_calls = []
+
+        async def shell_exec(self, command, exec_dir, timeout_ms):
+            self.shell_calls.append((command, exec_dir, timeout_ms))
+            return {"stdout": "ok"}
+
+        async def code_execute(self, language, code, payload):
+            self.code_calls.append((language, code, payload))
+            return {"stdout": "ok"}
+
+    provider = AioSandboxProvider(
+        DockerRuntime(AdapterConfig(image="test-image")), None,
+        workspace_root="/home/gem/workspaces",
+    )
+    sandbox = SandboxRef("sb-paths", "container-paths", Endpoint("http://worker:8080"))
+    client = Client()
+    provider._clients[sandbox.sandbox_id] = client
+    shell_request = ExecutionRequest(
+        "request-shell", "tenant", "session", "shell_exec",
+        {"command": "pwd && cat input.txt", "exec_dir": "/workspace"},
+    )
+    python_source = "from __future__ import annotations\nfrom pathlib import Path\nPath('output.txt').write_text('done')"
+    python_request = ExecutionRequest(
+        "request-python", "tenant", "session", "execute",
+        {"language": "python", "code": python_source},
+    )
+
+    await provider.forward(sandbox, shell_request)
+    await provider.forward(sandbox, python_request)
+
+    workspace = "/home/gem/workspaces/tenant/session"
+    assert client.shell_calls == [
+        (f"cd -- {workspace} && pwd && cat input.txt", workspace, 30000)
+    ]
+    language, wrapped, original_payload = client.code_calls[0]
+    assert language == "python"
+    assert f"_wisepen_os.chdir(\"{workspace}\")" in wrapped
+    assert "compile(\"from __future__ import annotations" in wrapped
+    assert original_payload["code"] == python_source
 
 
 def test_docker_runtime_builds_managed_container_commands():
@@ -304,6 +368,34 @@ async def test_aio_client_maps_server_failure(monkeypatch):
     monkeypatch.setattr("sandbox.core.providers.aio_adapter.client.httpx.AsyncClient", Client)
     with pytest.raises(ServiceException) as exc_info:
         await AioClient("http://sandbox").request("/v1/test", {})
+    assert exc_info.value.code == SandboxErrorCode.SANDBOX_UNAVAILABLE.code
+
+
+@pytest.mark.asyncio
+async def test_aio_client_maps_unsuccessful_business_response_with_nonempty_reason(monkeypatch):
+    class Response:
+        status_code = 200
+        is_success = True
+
+        def json(self):
+            return {"success": False, "message": None}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, **kwargs):
+            return Response()
+
+    monkeypatch.setattr("sandbox.core.providers.aio_adapter.client.httpx.AsyncClient", Client)
+    with pytest.raises(ServiceException, match="未提供错误原因") as exc_info:
+        await AioClient("http://sandbox").request("/v1/shell/exec", {})
     assert exc_info.value.code == SandboxErrorCode.SANDBOX_UNAVAILABLE.code
 
 
