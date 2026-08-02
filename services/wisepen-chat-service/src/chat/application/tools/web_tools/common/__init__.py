@@ -1,8 +1,8 @@
 from .cache import (
     WebContentCache,
+    WebContentCacheRepository,
+    WebContentCacheValue,
 )
-from .models import WebContentCacheValue
-from .repository import WebContentCacheRepository
 
 __all__ = [
     "WebContentCache",

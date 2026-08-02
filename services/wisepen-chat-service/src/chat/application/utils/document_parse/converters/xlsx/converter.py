@@ -182,7 +182,44 @@ def _find_table_components(
                     visited.add(neighbor)
                     queue.append(neighbor)
         components.append(component)
-    return components
+    return _merge_overlapping_components(components)
+
+
+def _merge_overlapping_components(
+    components: list[set[tuple[int, int]]],
+) -> list[set[tuple[int, int]]]:
+    merged: list[set[tuple[int, int]]] = []
+    for component in components:
+        combined = set(component)
+        index = 0
+        while index < len(merged):
+            if _bbox_overlaps(_component_bbox(combined), _component_bbox(merged[index])):
+                combined |= merged.pop(index)
+                index = 0
+                continue
+            index += 1
+        merged.append(combined)
+    return merged
+
+
+def _component_bbox(component: set[tuple[int, int]]) -> tuple[int, int, int, int]:
+    rows = [row for row, _ in component]
+    cols = [col for _, col in component]
+    return min(rows), min(cols), max(rows), max(cols)
+
+
+def _bbox_overlaps(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> bool:
+    first_min_row, first_min_col, first_max_row, first_max_col = first
+    second_min_row, second_min_col, second_max_row, second_max_col = second
+    return (
+        first_min_row <= second_max_row
+        and second_min_row <= first_max_row
+        and first_min_col <= second_max_col
+        and second_min_col <= first_max_col
+    )
 
 
 def _cell_has_content(

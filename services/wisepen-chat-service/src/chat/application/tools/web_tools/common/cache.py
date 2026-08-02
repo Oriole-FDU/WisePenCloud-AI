@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Protocol
 
 from hishel._core._headers import Headers, parse_cache_control
 from hishel._core._spec import get_freshness_lifetime
@@ -9,8 +10,26 @@ from hishel._core.models import Response
 
 from common.logger import info, warn
 
-from .models import WebContentCacheValue
-from .repository import WebContentCacheRepository
+
+@dataclass(frozen=True, slots=True)
+class WebContentCacheValue:
+    canonical_url: str
+    text: str
+    is_md: bool
+    expire_at: datetime
+    raw_html: str | None = None
+    cache_variant: str = ""
+
+
+class WebContentCacheRepository(Protocol):
+    async def get_value(
+        self,
+        *,
+        url: str,
+        cache_variant: str = "",
+    ) -> WebContentCacheValue | None: ...
+
+    async def set_value(self, value: WebContentCacheValue) -> None: ...
 
 
 _DEFAULT_TTL = timedelta(hours=2)

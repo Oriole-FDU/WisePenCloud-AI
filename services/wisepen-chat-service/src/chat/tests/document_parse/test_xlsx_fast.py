@@ -34,6 +34,37 @@ def test_fast_parse_xlsx_renders_simple_table_without_html_roundtrip(tmp_path: P
     assert "<table>" not in markdown
 
 
+def test_fast_parse_xlsx_does_not_duplicate_islands_inside_table_bbox(tmp_path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    for coordinate in (
+        "A1",
+        "B1",
+        "C1",
+        "D1",
+        "E1",
+        "A2",
+        "A3",
+        "A4",
+        "A5",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "B5",
+        "C5",
+        "D5",
+    ):
+        sheet[coordinate] = "1"
+    sheet["C3"] = "island"
+    file_path = tmp_path / "island.xlsx"
+    workbook.save(file_path)
+
+    markdown = fast_parse_xlsx(file_path)
+
+    assert markdown.count("island") == 1
+
+
 def test_fast_parse_xlsx_preserves_merged_cells_as_html_and_sheet_pages(tmp_path: Path) -> None:
     workbook = Workbook()
     first = workbook.active

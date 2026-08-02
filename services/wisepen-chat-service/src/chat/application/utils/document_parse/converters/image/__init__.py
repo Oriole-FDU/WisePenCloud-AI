@@ -1,4 +1,5 @@
-from .converter import ImageParseError, get_image_converter
+from ...errors import ImageParseError
+from .converter import get_image_converter
 
 __all__ = [
     "ImageParseError",

@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from ...errors import DocumentParseError
+from ...errors import ImageParseError
 
 _POLL_HTTP_TIMEOUT_SECONDS = 30.0
 _RESULT_HTTP_TIMEOUT_SECONDS = 60.0
@@ -22,10 +22,6 @@ _OPTIONAL_PAYLOAD = {
     "useDocUnwarping": False,
     "useChartRecognition": False,
 }
-
-
-class ImageParseError(DocumentParseError):
-    """图片解析服务调用或结果处理失败。"""
 
 
 class ImageConverter:
