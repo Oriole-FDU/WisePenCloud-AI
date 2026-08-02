@@ -21,7 +21,7 @@ from sandbox.domain.interfaces.metrics import MetricsPort
 from sandbox.domain.interfaces.sandbox_provider import SandboxProvider
 from sandbox.domain.interfaces.workspace_store import WorkspaceStore
 from sandbox.domain.repositories import SandboxRepository
-
+from sandbox.domain.repositories.binding_manager import activate_user_binding, clear_binding
 
 _MUTATING_OPERATIONS = {"write_file", "edit_file", "shell_exec", "execute"}
 
@@ -107,7 +107,7 @@ class SandboxScheduler:
                     metadata=record.ref.metadata,
                 )
                 await self._repository.save(record)
-                await self._repository.activate_user_binding(record.ref.sandbox_id)
+                await activate_user_binding(record.ref.sandbox_id)
             return replace(lease, endpoint=endpoint)
         except Exception as exc:
             if record.state == SandboxState.ALLOCATED:
@@ -381,4 +381,4 @@ class SandboxScheduler:
         await self._repository.transition(
             record.ref.sandbox_id, SandboxState.DESTROYING, SandboxState.DESTROYED
         )
-        await self._repository.clear_binding(record)
+        await clear_binding(record)

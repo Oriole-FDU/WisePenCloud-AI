@@ -247,8 +247,8 @@ class Watcher:
             image=self._spec.image,
             warmup_timeout_seconds=self._warmup_timeout,
         )
+        create_started = monotonic()
         try:
-            create_started = monotonic()
             ref = await self._provider.create(self._spec)
             self._metrics.observe_ms(
                 "warmup_create", (monotonic() - create_started) * 1000

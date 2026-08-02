@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  sandbox:
+    build:
+      context: ../..
+      dockerfile: services/wisepen-sandbox-service/Dockerfile
+    container_name: wisepen-sandbox
+    restart: unless-stopped
+    ports:
+      - "19905:19905"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /workspaces:/workspaces
+    environment:
+      - PROFILE=dev
+      - CHAT_USE_NACOS=0
+      - NACOS_SERVER_ADDR=localhost:8848
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - SERVICE_HOST=0.0.0.0
+      - SERVICE_PORT=19905
+      - LOG_LEVEL=DEBUG
+    networks:
+      - sandbox-net
+    labels:
+      - "wisepen.role=sandbox"
+
+networks:
+  sandbox-net:
+    driver: bridge
+    name: sandbox-net

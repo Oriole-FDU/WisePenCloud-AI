@@ -22,3 +22,6 @@ mongo = ["pymongo"]
 
 [tool.uv.sources]
 wisepen-common = { workspace = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

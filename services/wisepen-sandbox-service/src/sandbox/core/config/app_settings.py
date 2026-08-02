@@ -5,6 +5,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from common.logger import error, info
+from sandbox.core.config.bootstrap_settings import bootstrap_settings
 from sandbox.core.config.nacos import nacos_client_manager
 
 
@@ -183,7 +184,26 @@ def _run_async(coro):
     return result
 
 
+def _load_local() -> dict:
+    from pathlib import Path
+    SERVICE_ROOT = Path(__file__).resolve().parents[4]  # src/sandbox/core/config/ → sandbox-service/
+    cfg_path = SERVICE_ROOT / "sandbox-service.nacos.yaml"
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"local config not found: {cfg_path}")
+    raw = cfg_path.read_text(encoding="utf-8")
+    cfg = yaml.safe_load(raw) or {}
+    if not isinstance(cfg, dict):
+        raise ValueError("local config must be a yaml mapping")
+    info("using local config file (DEV mode).", file=str(cfg_path))
+    return cfg
+
+
 def load_settings() -> AppSettings:
+    import os
+    use_nacos = str(os.getenv("CHAT_USE_NACOS") or "").strip().lower() in ("1", "true", "yes")
+    if bootstrap_settings.IS_DEV and not use_nacos:
+        return AppSettings(**_load_local())
+
     try:
         info("正在拉取 nacos 应用配置。")
         raw_yaml = _run_async(nacos_client_manager.pull_config())
@@ -195,6 +215,8 @@ def load_settings() -> AppSettings:
         return AppSettings(**config_dict)
     except Exception as e:
         error("拉取 nacos 应用配置失败。", exc=e)
+        if bootstrap_settings.IS_DEV:
+            return AppSettings(**_load_local())
         raise
 
 

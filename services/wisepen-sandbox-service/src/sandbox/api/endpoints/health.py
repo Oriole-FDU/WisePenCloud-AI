@@ -29,7 +29,7 @@ router = APIRouter(tags=["health"])
 """,
 )
 async def healthz() -> HealthResponse:
-    return {"status": "ok"}
+    return HealthResponse(status="ok")
 
 
 @router.get(
@@ -56,7 +56,7 @@ async def readyz(
     pool: SandboxPool = Depends(Provide[Container.pool]),
 ) -> ReadinessResponse:
     snapshot = await pool.snapshot()
-    ready = snapshot.counts[SandboxState.READY]
+    ready = snapshot.counts.get(SandboxState.READY, 0)
     if ready < snapshot.min_ready:
         # 就绪状态代表是否有足够预热实例承接新请求，不等同于进程存活。
         raise HTTPException(
@@ -67,8 +67,8 @@ async def readyz(
                 "min_ready": snapshot.min_ready,
             },
         )
-    return {
-        "status": "ready",
-        "ready": ready,
-        "min_ready": snapshot.min_ready,
-    }
+    return ReadinessResponse(
+        status = "ready",
+        ready = ready,
+        min_ready = snapshot.min_ready,
+    )

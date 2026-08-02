@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -46,9 +47,18 @@ vnc_binding = VncBinding(
 async def lifespan(app):
     async with mcp_server.session_manager.run():
         info("服务正在启动。", service=bootstrap_settings.SERVICE_NAME)
-        # Docker worker 前置条件和 Nacos 注册均为启动硬依赖。
-        await container.provider().validate_deployment()
-        await nacos_client_manager.register_instance()
+
+        use_nacos = str(os.getenv("CHAT_USE_NACOS") or "").strip().lower() in ("1", "true", "yes")
+        # Docker worker 前置条件：DEV 模式下允许跳过（本地可能无 AIO 镜像）。
+        if not bootstrap_settings.IS_DEV or use_nacos:
+            await container.provider().validate_deployment()
+        else:
+            info("跳过部署环境验证（DEV 模式）。")
+
+        if use_nacos:
+            await nacos_client_manager.register_instance()
+        else:
+            info("跳过 Nacos 注册（CHAT_USE_NACOS 未设置）。")
 
         cleanup_stop = asyncio.Event()
 
@@ -89,10 +99,11 @@ async def lifespan(app):
                     await cleanup_owned()
                 except Exception as exc:
                     error("sandbox worker 清理失败。", exc=exc)
-            try:
-                await nacos_client_manager.deregister_instance()
-            except Exception as exc:
-                error("nacos 实例注销失败。", service=bootstrap_settings.SERVICE_NAME, exc=exc)
+            if use_nacos:
+                try:
+                    await nacos_client_manager.deregister_instance()
+                except Exception as exc:
+                    error("nacos 实例注销失败。", service=bootstrap_settings.SERVICE_NAME, exc=exc)
 
 
 app = create_app(
