@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -62,12 +63,18 @@ async def test_provider_uses_workspace_root_for_shell_and_python_cwd():
             self.shell_calls = []
             self.code_calls = []
 
-        async def shell_exec(self, command, exec_dir, timeout_ms):
-            self.shell_calls.append((command, exec_dir, timeout_ms))
+        async def shell_exec(self, command, exec_dir, timeout_ms, request_grace_seconds):
+            self.shell_calls.append(
+                (command, exec_dir, timeout_ms, request_grace_seconds)
+            )
             return {"stdout": "ok"}
 
-        async def code_execute(self, language, code, payload):
-            self.code_calls.append((language, code, payload))
+        async def code_execute(
+            self, language, code, timeout_ms, request_grace_seconds
+        ):
+            self.code_calls.append(
+                (language, code, timeout_ms, request_grace_seconds)
+            )
             return {"stdout": "ok"}
 
     provider = AioSandboxProvider(
@@ -92,13 +99,15 @@ async def test_provider_uses_workspace_root_for_shell_and_python_cwd():
 
     workspace = "/home/gem/workspaces/tenant/session"
     assert client.shell_calls == [
-        (f"cd -- {workspace} && pwd && cat input.txt", workspace, 30000)
+        (f"cd -- {workspace} && pwd && cat input.txt", workspace, 30000, 5.0)
     ]
-    language, wrapped, original_payload = client.code_calls[0]
+    language, wrapped, timeout_ms, request_grace_seconds = client.code_calls[0]
     assert language == "python"
     assert f"_wisepen_os.chdir(\"{workspace}\")" in wrapped
     assert "compile(\"from __future__ import annotations" in wrapped
-    assert original_payload["code"] == python_source
+    assert json.dumps(python_source) in wrapped
+    assert timeout_ms == 30000
+    assert request_grace_seconds == 5.0
 
 
 def test_docker_runtime_builds_managed_container_commands():
@@ -463,6 +472,7 @@ async def test_aio_client_requests_keep_the_business_timeout(monkeypatch):
 @pytest.mark.asyncio
 async def test_aio_client_uses_real_file_search_and_execute_contract(monkeypatch):
     calls = []
+    client_timeouts = []
 
     class Response:
         status_code = 200
@@ -473,7 +483,7 @@ async def test_aio_client_uses_real_file_search_and_execute_contract(monkeypatch
 
     class Client:
         def __init__(self, **kwargs):
-            pass
+            client_timeouts.append(kwargs["timeout"])
 
         async def __aenter__(self):
             return self
@@ -488,17 +498,27 @@ async def test_aio_client_uses_real_file_search_and_execute_contract(monkeypatch
     monkeypatch.setattr("sandbox.core.providers.aio_adapter.client.httpx.AsyncClient", Client)
     client = AioClient("http://sandbox")
     await client.file_grep("/home/gem/t/w", "alpha", False, True)
-    await client.code_execute("python", "print(1)")
+    await client.shell_exec("echo ok", "/home/gem/t/w", 1500, 5.0)
+    await client.code_execute("python", "print(1)", 60000, 5.0)
     assert calls == [
         (
             "http://sandbox/v1/file/search",
             {"file": "/home/gem/t/w", "regex": "(?i)alpha"},
         ),
         (
+            "http://sandbox/v1/shell/exec",
+            {
+                "command": "echo ok",
+                "exec_dir": "/home/gem/t/w",
+                "timeout": 2,
+            },
+        ),
+        (
             "http://sandbox/v1/code/execute",
-            {"language": "python", "code": "print(1)"},
+            {"language": "python", "code": "print(1)", "timeout": 60},
         ),
     ]
+    assert client_timeouts == [30.0, 7.0, 65.0]
 
 
 @pytest.mark.asyncio

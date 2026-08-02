@@ -38,6 +38,8 @@ def test_sandbox_mcp_documents_logical_workspace_only() -> None:
     assert "/workspace" in descriptions
     assert "/home/gem" not in descriptions
     assert "optional" in tools["shell_exec"].description.lower()
+    script_schema = tools["run_sandbox_script"].parameters["properties"]["timeout_ms"]
+    assert "120000" in script_schema["description"]
 
 
 @pytest.mark.asyncio

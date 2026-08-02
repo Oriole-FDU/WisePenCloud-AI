@@ -35,6 +35,9 @@ def complete_config() -> dict[str, object]:
         "SANDBOX_AIO_PORT": 8080,
         "SANDBOX_VNC_PORT": 6080,
         "SANDBOX_REQUEST_TIMEOUT_SECONDS": 30.0,
+        "SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS": 30000,
+        "SANDBOX_EXECUTION_MAX_TIMEOUT_MS": 120000,
+        "SANDBOX_EXECUTION_TRANSPORT_GRACE_SECONDS": 5.0,
         "SANDBOX_DOCKER_COMMAND_TIMEOUT_SECONDS": 30.0,
         "SANDBOX_AIO_HEALTH_TIMEOUT_SECONDS": 3.0,
         "SANDBOX_AIO_HEALTH_RETRY_INTERVAL_SECONDS": 0.5,
@@ -144,7 +147,20 @@ def test_container_builds_provider_transfer_and_selected_store_from_settings():
     assert isinstance(container.workspace_store(), LocalWorkspaceStore)
     assert container.provider()._file_transfer is container.file_transfer()
     assert container.provider()._workspace_root == "/home/gem/workspaces"
+    assert container.provider()._execution_default_timeout_ms == 30000
+    assert container.provider()._execution_max_timeout_ms == 120000
+    assert container.provider()._execution_transport_grace_seconds == 5.0
     assert container.watcher()._spec.environment == {}
+
+
+def test_execution_timeout_config_rejects_default_above_maximum(
+    app_settings_module,
+):
+    config = complete_config()
+    config["SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS"] = 120001
+
+    with pytest.raises(ValidationError, match="默认执行超时"):
+        app_settings_module.AppSettings(**config)
 
 
 def test_container_applies_nacos_runtime_parameters_to_services():
