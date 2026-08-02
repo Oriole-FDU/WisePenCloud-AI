@@ -7,6 +7,10 @@ from common.core.domain import R
 from sandbox.api.schemas import (
     AllocateRequest,
     ExecuteRequest,
+    DeleteWorkspaceRequest,
+    DeleteWorkspaceResponse,
+    DestroyUserSandboxRequest,
+    DestroyUserSandboxResponse,
     ExecutionResultResponse,
     ReleaseRequest,
     ReleaseResponse,
@@ -84,10 +88,10 @@ async def execute(
     status_code=200,
     summary="释放沙箱租约",
     description="""
-- 用途：关闭当前租约，提交工作区快照并销毁用户沙箱实例。
+- 用途：关闭当前 TurnLease，并提交当前 session 工作区快照。
 - 请求：路径参数 lease_id 指定租约；fencing_token 用于拒绝旧租约释放请求。
-- 约束：fencing_token 必须为正整数；释放操作具备幂等语义，重复释放不会重复提交或销毁。
-- 处理：先关闭租约入口，再导出并提交工作区，最后销毁实例；工作区提交失败时仍继续销毁，用户实例不会回到 READY 池。
+- 约束：fencing_token 必须为正整数；释放操作具备幂等语义，重复释放不会重复提交。
+- 处理：先关闭租约入口，再导出并提交当前 session 目录；最后一个 TurnLease 释放后用户容器进入 USER_IDLE，不销毁也不回到公共 READY 池。
 - 失败：请求参数校验失败 -> ResultCode.PARAM_ERROR；租约不存在 -> SandboxErrorCode.LEASE_NOT_FOUND；租约过期 -> SandboxErrorCode.LEASE_EXPIRED；fencing 校验失败 -> SandboxErrorCode.FENCING_REJECTED；工作区提交失败 -> SandboxErrorCode.WORKSPACE_SYNC_FAILED。
 - 响应：返回 `R[ReleaseResponse]`，成功时 data.status 为 `released`。
 """,
@@ -100,6 +104,42 @@ async def release(
 ) -> R[ReleaseResponse]:
     await scheduler.release(lease_id, body.fencing_token)
     return R.success(data=ReleaseResponse(status="released"))
+
+
+@router.post(
+    "/sandbox-workspaces/delete",
+    response_model=R[DeleteWorkspaceResponse],
+    status_code=200,
+    summary="删除 Session Workspace",
+    description="删除指定用户会话在容器内的目录和持久化快照，不销毁用户容器。操作幂等。",
+)
+@inject
+async def delete_workspace(
+    body: DeleteWorkspaceRequest,
+    scheduler: SandboxScheduler = Depends(Provide[Container.scheduler]),
+) -> R[DeleteWorkspaceResponse]:
+    deleted = await scheduler.delete_workspace(body.tenant_id, body.workspace_id)
+    return R.success(
+        data=DeleteWorkspaceResponse(status="deleted" if deleted else "not_found")
+    )
+
+
+@router.post(
+    "/user-sandboxes/destroy",
+    response_model=R[DestroyUserSandboxResponse],
+    status_code=200,
+    summary="强制销毁用户沙箱容器",
+    description="按 user_id 强制终止用户绑定并销毁物理容器，供管理端和测试清理使用。",
+)
+@inject
+async def destroy_user_sandbox(
+    body: DestroyUserSandboxRequest,
+    scheduler: SandboxScheduler = Depends(Provide[Container.scheduler]),
+) -> R[DestroyUserSandboxResponse]:
+    destroyed = await scheduler.destroy_user(body.user_id)
+    return R.success(
+        data=DestroyUserSandboxResponse(status="destroyed" if destroyed else "not_found")
+    )
 
 
 @router.get(

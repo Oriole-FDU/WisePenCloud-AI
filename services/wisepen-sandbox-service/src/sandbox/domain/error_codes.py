@@ -14,3 +14,6 @@ class SandboxErrorCode(IErrorCode):
     AIO_RESOURCE_NOT_FOUND = (46010, "AIO 资源不存在")
     WORKSPACE_CACHE_LIMIT_EXCEEDED = (46011, "沙箱工作区缓存超出限制")
     INVALID_EXECUTION_TIMEOUT = (46012, "沙箱执行超时参数不合法")
+    SESSION_BUSY = (46013, "当前会话已有运行中的沙箱任务")
+    USER_SANDBOX_CAPACITY = (46014, "用户沙箱容器容量已满")
+    EXECUTION_TIMEOUT = (46015, "沙箱任务执行超时")

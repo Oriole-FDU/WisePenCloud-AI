@@ -66,6 +66,17 @@ class DockerWorkspaceTransfer:
             )
         return await self.copy_out(sandbox, tenant_id, workspace_id)
 
+    async def delete_workspace(
+        self, sandbox: SandboxRef, tenant_id: str, workspace_id: str
+    ) -> None:
+        tenant_id = self._safe_id(tenant_id)
+        workspace_id = self._safe_id(workspace_id)
+        container_path = self._container_path(tenant_id, workspace_id)
+        await asyncio.to_thread(
+            self._run,
+            ["exec", sandbox.provider_id, "rm", "-rf", container_path],
+        )
+
     def _copy_in_sync(self, sandbox: SandboxRef, snapshot: WorkspaceSnapshot) -> None:
         tenant_id = self._safe_id(snapshot.tenant_id)
         workspace_id = self._safe_id(snapshot.workspace_id)

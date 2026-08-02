@@ -7,6 +7,7 @@ from chat.api.schemas.session import (
 )
 from chat.api.converters import convert_to_ui_messages
 from chat.application.agents import AgentResolver
+from chat.core.providers.sandbox_client import SandboxClient
 from chat.domain.entities import ChatSession
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.repositories import SessionRepository, MessageRepository
@@ -15,6 +16,7 @@ from chat.container import Container
 from common.security import require_login
 from common.core.domain import R, PageResult
 from common.core.exceptions import ServiceException
+from common.logger import error
 
 router = APIRouter()
 
@@ -120,7 +122,15 @@ async def delete_session(
         session_id: str,
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+        sandbox_client: SandboxClient = Depends(Provide[Container.sandbox_client]),
 ):
+    await session_repo.get_session_for_user(session_id, user_id)
+    try:
+        await sandbox_client.delete_workspace(user_id, session_id)
+    except Exception as exc:
+        # Chat data deletion remains available during a temporary Sandbox outage;
+        # the Sandbox watcher will eventually reclaim the orphaned idle binding.
+        error("sandbox workspace delete failed during chat session deletion.", session_id=session_id, exc=exc)
     await session_repo.delete_session(session_id, user_id)
     return R.success()
 

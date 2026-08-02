@@ -15,11 +15,16 @@ class SandboxState(StrEnum):
     CREATING = "creating"
     WARMING = "warming"
     READY = "ready"
-    # 用户链路：READY 被租出后先分配租约，再激活并承接执行请求。
+    # 用户链路：READY 被用户绑定后可同时承接该用户的多个 session。
     ALLOCATED = "allocated"
+    USER_ACTIVE = "user_active"
+    USER_IDLE = "user_idle"
+    # 旧状态仅用于兼容历史状态查询，新的用户级流程不再写入。
     RUNNING = "running"
-    # 回收链路：关闭租约入口后同步工作区，最后销毁容器。
+    CHECKPOINTING = "checkpointing"
+    SESSION_IDLE = "session_idle"
     SYNCING = "syncing"
+    RETIRING = "retiring"
     DESTROYING = "destroying"
     DESTROYED = "destroyed"
     # 丢失状态表示销毁或预热补偿失败，后续只能由运维/恢复流程处理。
@@ -34,6 +39,9 @@ class DestroyReason(StrEnum):
     LEASE_EXPIRED = "lease_expired"
     DESTROY_TIMEOUT = "destroy_timeout"
     PROVIDER_ERROR = "provider_error"
+    USER_DESTROYED = "user_destroyed"
+    USER_IDLE_EXPIRED = "user_idle_expired"
+    USER_LRU_EVICTED = "user_lru_evicted"
 
 
 @dataclass(frozen=True)
@@ -77,17 +85,64 @@ class SandboxRecord:
     state: SandboxState
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
-    lease_id: str | None = None
-    request_id: str | None = None
-    tenant_id: str | None = None
-    workspace_id: str | None = None
-    lease_expires_at: datetime | None = None
-    # 防护 token 每次 checkout 单调递增，用来拒绝旧租约的执行或释放请求。
-    fencing_token: int = 0
+    owner_user_id: str | None = None
+    user_binding_id: str | None = None
+    active_turn_count: int = 0
+    vnc_ref_count: int = 0
     # 状态版本参与 readiness_token，防止旧健康检查把新状态误放回 READY。
     state_version: int = 0
     last_error: str | None = None
     readiness_token: str | None = None
+    reuse_count: int = 0
+
+
+@dataclass
+class UserSandboxBindingRecord:
+    """Stable ownership of one container by one user."""
+
+    user_binding_id: str
+    sandbox_id: str
+    user_id: str
+    container_generation: int = 1
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+    last_active_at: datetime = field(default_factory=utc_now)
+    idle_expires_at: datetime | None = None
+    reuse_count: int = 0
+
+
+@dataclass
+class SessionWorkspaceRecord:
+    """A session directory resident in one generation of a user's container."""
+
+    user_id: str
+    session_id: str
+    sandbox_id: str
+    container_generation: int
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+    last_checkpoint_at: datetime | None = None
+    dirty: bool = False
+    last_error: str | None = None
+
+
+@dataclass
+class TurnLeaseRecord:
+    """Short-lived, fenced lease for exactly one Chat/VNC turn."""
+
+    lease_id: str
+    request_id: str
+    sandbox_id: str
+    tenant_id: str
+    workspace_id: str
+    expires_at: datetime
+    fencing_token: int
+    user_binding_id: str
+    container_reused: bool = False
+    workspace_reused: bool = False
+    created_at: datetime = field(default_factory=utc_now)
+    closing_at: datetime | None = None
+    released_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +154,10 @@ class LeaseRecord:
     workspace_id: str
     expires_at: datetime
     fencing_token: int
+    user_binding_id: str = ""
+    user_idle_expires_at: datetime | None = None
+    container_reused: bool = False
+    workspace_reused: bool = False
     endpoint: Endpoint | None = None
 
     def as_lease(self) -> "SandboxLease":
@@ -110,6 +169,10 @@ class LeaseRecord:
             workspace_id=self.workspace_id,
             expires_at=self.expires_at,
             fencing_token=self.fencing_token,
+            user_binding_id=self.user_binding_id,
+            user_idle_expires_at=self.user_idle_expires_at,
+            container_reused=self.container_reused,
+            workspace_reused=self.workspace_reused,
             endpoint=self.endpoint,
         )
 
@@ -123,6 +186,10 @@ class SandboxLease:
     workspace_id: str
     expires_at: datetime
     fencing_token: int
+    user_binding_id: str = ""
+    user_idle_expires_at: datetime | None = None
+    container_reused: bool = False
+    workspace_reused: bool = False
     endpoint: Endpoint | None = None
 
 

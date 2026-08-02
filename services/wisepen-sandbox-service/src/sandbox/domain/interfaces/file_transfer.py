@@ -29,3 +29,8 @@ class FileTransferPort(Protocol):
         fencing_token: int,
     ) -> WorkspaceSnapshot:
         ...
+
+    async def delete_workspace(
+        self, sandbox: SandboxRef, tenant_id: str, workspace_id: str
+    ) -> None:
+        ...

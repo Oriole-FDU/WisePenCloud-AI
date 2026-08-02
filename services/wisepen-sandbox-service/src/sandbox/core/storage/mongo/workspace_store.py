@@ -54,6 +54,14 @@ class MongoWorkspaceStore:
     ) -> None:
         await asyncio.to_thread(self._commit_sync, snapshot, lease_id, fencing_token)
 
+    async def delete(self, tenant_id: str, workspace_id: str) -> None:
+        tenant_id = validate_workspace_id(tenant_id)
+        workspace_id = validate_workspace_id(workspace_id)
+        await asyncio.to_thread(
+            self._collection.delete_one,
+            {"tenant_id": tenant_id, "workspace_id": workspace_id},
+        )
+
     def _snapshot_sync(self, tenant_id: str, workspace_id: str) -> WorkspaceSnapshot:
         tenant_id = validate_workspace_id(tenant_id)
         workspace_id = validate_workspace_id(workspace_id)

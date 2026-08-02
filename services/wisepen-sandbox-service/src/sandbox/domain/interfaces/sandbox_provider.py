@@ -55,5 +55,10 @@ class SandboxProvider(Protocol):
     ) -> WorkspaceSnapshot:
         ...
 
+    async def delete_workspace(
+        self, sandbox: SandboxRef, tenant_id: str, workspace_id: str
+    ) -> None:
+        ...
+
     async def destroy(self, sandbox: SandboxRef, reason: str) -> None:
         ...

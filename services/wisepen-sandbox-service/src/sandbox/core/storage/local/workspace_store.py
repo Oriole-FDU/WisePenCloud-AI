@@ -295,6 +295,11 @@ class LocalWorkspaceStore:
                 self._commit_sync, snapshot, lease_id, fencing_token
             )
 
+    async def delete(self, tenant_id: str, workspace_id: str) -> None:
+        root = self._path(tenant_id, workspace_id)
+        async with self._commit_lock:
+            await asyncio.to_thread(self._cleanup_dir, root)
+
     def _commit_sync(
         self,
         snapshot: WorkspaceSnapshot,

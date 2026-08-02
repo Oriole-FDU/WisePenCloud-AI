@@ -62,6 +62,9 @@ class AppSettings(BaseModel):
 
     # 租约和预热池容量参数。reserve 会额外保持冗余 READY 实例，缓冲并发突刺。
     SANDBOX_LEASE_TTL_SECONDS: int
+    SANDBOX_USER_REUSE_ENABLED: bool = True
+    SANDBOX_USER_IDLE_TTL_SECONDS: int = 600
+    SANDBOX_MAX_USER_BINDINGS: int = 20
     SANDBOX_TARGET_READY: int
     SANDBOX_MIN_READY: int
     SANDBOX_READY_RESERVE: int
@@ -103,6 +106,8 @@ class AppSettings(BaseModel):
             self.SANDBOX_WORKSPACE_CACHE_MAX_FILE_BYTES,
             self.SANDBOX_WORKSPACE_CACHE_MAX_TOTAL_BYTES,
             self.SANDBOX_LEASE_TTL_SECONDS,
+            self.SANDBOX_USER_IDLE_TTL_SECONDS,
+            self.SANDBOX_MAX_USER_BINDINGS,
             self.SANDBOX_MAX_CREATE_BATCH,
             self.SANDBOX_REQUEST_TIMEOUT_SECONDS,
             self.SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS,

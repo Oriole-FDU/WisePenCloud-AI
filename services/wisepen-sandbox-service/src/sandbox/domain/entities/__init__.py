@@ -11,6 +11,9 @@ from sandbox.domain.entities.models import (
     SandboxRef,
     SandboxSpec,
     SandboxState,
+    SessionWorkspaceRecord,
+    TurnLeaseRecord,
+    UserSandboxBindingRecord,
     WorkspaceSnapshot,
     utc_now,
 )
@@ -28,6 +31,9 @@ __all__ = [
     "SandboxRef",
     "SandboxSpec",
     "SandboxState",
+    "SessionWorkspaceRecord",
+    "TurnLeaseRecord",
+    "UserSandboxBindingRecord",
     "WorkspaceSnapshot",
     "utc_now",
 ]

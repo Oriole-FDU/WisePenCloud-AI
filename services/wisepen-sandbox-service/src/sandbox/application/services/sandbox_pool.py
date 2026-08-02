@@ -17,17 +17,21 @@ class SandboxPool:
         lease_ttl_seconds: int = 1800,
         min_ready: int = 1,
         target_ready: int = 2,
+        user_idle_ttl_seconds: int = 600,
+        max_user_bindings: int = 20,
     ) -> None:
         self._repository = repository
         self._lease_ttl = lease_ttl_seconds
         self._min_ready = min_ready
         self._target_ready = target_ready
+        self._user_idle_ttl = user_idle_ttl_seconds
+        self._max_user_bindings = max_user_bindings
 
     async def add_ready(self, record: SandboxRecord) -> None:
         """通过正常 readiness gate 注册测试/开发用预热实例。"""
         if await self._repository.get(record.ref.sandbox_id) is None:
             await self._repository.save(record)
-        token = f"{record.ref.sandbox_id}:{record.state_version}:{record.fencing_token}"
+        token = f"{record.ref.sandbox_id}:{record.state_version}"
         generation = await self._repository.prepare_ready(record, token)
         await self._repository.return_ready(record.ref.sandbox_id, token, generation)
 
@@ -40,6 +44,8 @@ class SandboxPool:
             tenant_id,
             workspace_id,
             self._lease_ttl,
+            self._user_idle_ttl,
+            self._max_user_bindings,
         )
         return record, lease.as_lease()
 
@@ -61,7 +67,7 @@ class SandboxPool:
 
     async def health_token(self, record: SandboxRecord) -> str:
         # 健康 token 绑定 sandbox_id、状态版本和 fencing，避免过期健康检查误放回实例。
-        return f"{record.ref.sandbox_id}:{record.state_version}:{record.fencing_token}"
+        return f"{record.ref.sandbox_id}:{record.state_version}"
 
     async def prepare_readiness(self, record: SandboxRecord) -> tuple[str, int]:
         token = await self.health_token(record)

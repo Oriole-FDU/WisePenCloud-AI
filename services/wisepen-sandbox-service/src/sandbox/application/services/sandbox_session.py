@@ -65,20 +65,34 @@ class SandboxSessionService:
     async def acquire_for(self, tenant_id: str, workspace_id: str) -> SandboxLease:
         return await self._allocate(tenant_id, workspace_id)
 
+    async def acquire_vnc_for(self, user_id: str) -> SandboxLease:
+        return await self._scheduler.allocate(f"vnc:{user_id}", user_id, "__vnc__")
+
     async def release(self) -> None:
         tenant_id, workspace_id, request_id = self._context()
-        await self._scheduler.release_request(
-            request_id or self._default_request_id(tenant_id, workspace_id),
-            tenant_id,
-            workspace_id,
-        )
+        if request_id:
+            await self._scheduler.release_request(request_id, tenant_id, workspace_id)
+        else:
+            await self._scheduler.release_session_turn(tenant_id, workspace_id)
 
     async def release_for(self, tenant_id: str, workspace_id: str) -> None:
-        await self._scheduler.release_request(
-            self._default_request_id(tenant_id, workspace_id),
-            tenant_id,
-            workspace_id,
-        )
+        await self._scheduler.release_session_turn(tenant_id, workspace_id)
+
+    async def release_vnc_for(self, user_id: str) -> None:
+        await self._scheduler.release_request(f"vnc:{user_id}", user_id, "__vnc__")
+
+    async def delete_workspace(self) -> bool:
+        tenant_id, workspace_id, _ = self._context()
+        return await self._scheduler.delete_workspace(tenant_id, workspace_id)
+
+    async def delete_workspace_for(self, tenant_id: str, workspace_id: str) -> bool:
+        return await self._scheduler.delete_workspace(tenant_id, workspace_id)
+
+    async def destroy(self) -> bool:
+        return await self.delete_workspace()
+
+    async def destroy_for(self, tenant_id: str, workspace_id: str) -> bool:
+        return await self.delete_workspace_for(tenant_id, workspace_id)
 
     def _context(self) -> tuple[str, str, str | None]:
         # 安全上下文来自网关安全中间件，不能信任用户在工具参数中传身份。
@@ -100,9 +114,5 @@ class SandboxSessionService:
         if not tenant_id or not workspace_id:
             tenant_id, workspace_id, request_id = self._context()
         # 工具协议和远程桌面是长连接式入口，按 tenant/workspace 固定 request_id 复用同一租约。
-        request_id = request_id or self._default_request_id(tenant_id, workspace_id)
+        request_id = request_id or f"mcp:{tenant_id}:{workspace_id}:{uuid.uuid4().hex}"
         return await self._scheduler.allocate(request_id, tenant_id, workspace_id)
-
-    @staticmethod
-    def _default_request_id(tenant_id: str, workspace_id: str) -> str:
-        return f"mcp:{tenant_id}:{workspace_id}"
