@@ -2,7 +2,7 @@
 import asyncio
 import threading
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from chat.core.config.nacos import nacos_client_manager
 from common.logger import error, info
@@ -125,6 +125,24 @@ class AppSettings(BaseModel):
     SANDBOX_SERVICE_NAME: str = "wisepen-sandbox-service"
     SANDBOX_SERVICE_URL: str = ""
     SANDBOX_TIMEOUT_SECONDS: float = 30.0
+    SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS: int = Field(default=30000, ge=1)
+    SANDBOX_EXECUTION_MAX_TIMEOUT_MS: int = Field(default=120000, ge=1)
+    SANDBOX_EXECUTION_OUTER_GRACE_SECONDS: float = Field(default=10.0, gt=0)
+    SANDBOX_EXECUTION_TRANSPORT_GRACE_SECONDS: float = Field(default=5.0, gt=0)
+
+    @model_validator(mode="after")
+    def validate_sandbox_execution_timeouts(self) -> "AppSettings":
+        if (
+            self.SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS
+            > self.SANDBOX_EXECUTION_MAX_TIMEOUT_MS
+        ):
+            raise ValueError("沙箱默认执行超时不能大于最大执行超时")
+        if (
+            self.SANDBOX_EXECUTION_TRANSPORT_GRACE_SECONDS
+            >= self.SANDBOX_EXECUTION_OUTER_GRACE_SECONDS
+        ):
+            raise ValueError("沙箱传输超时余量必须小于工具外层超时余量")
+        return self
 
 
 def _run_async(coro):

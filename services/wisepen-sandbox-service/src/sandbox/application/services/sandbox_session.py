@@ -9,15 +9,35 @@ from common.security.context import SecurityContextHolder
 from sandbox.application.services.sandbox_scheduler import SandboxScheduler
 from sandbox.domain.entities import ExecutionRequest, SandboxLease
 from sandbox.domain.error_codes import SandboxErrorCode
+from sandbox.domain.execution_timeout import (
+    DEFAULT_EXECUTION_TIMEOUT_MS,
+    MAX_EXECUTION_TIMEOUT_MS,
+    normalize_execution_timeout_ms,
+)
 
 
 class SandboxSessionService:
     """把可信用户/会话上下文绑定到 Scheduler 租约 API。"""
 
-    def __init__(self, scheduler: SandboxScheduler) -> None:
+    def __init__(
+        self,
+        scheduler: SandboxScheduler,
+        *,
+        execution_default_timeout_ms: int = DEFAULT_EXECUTION_TIMEOUT_MS,
+        execution_max_timeout_ms: int = MAX_EXECUTION_TIMEOUT_MS,
+    ) -> None:
         self._scheduler = scheduler
+        self._execution_default_timeout_ms = execution_default_timeout_ms
+        self._execution_max_timeout_ms = execution_max_timeout_ms
 
     async def execute(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(payload)
+        if operation in {"execute", "shell_exec"}:
+            payload["timeout_ms"] = normalize_execution_timeout_ms(
+                payload.get("timeout_ms"),
+                default_timeout_ms=self._execution_default_timeout_ms,
+                max_timeout_ms=self._execution_max_timeout_ms,
+            )
         lease = await self._allocate()
         # 同一 MCP/VNC 会话复用 request_id，但每次 execute 仍生成唯一子请求，便于追踪。
         request_id = f"{lease.request_id}:{uuid.uuid4().hex}"

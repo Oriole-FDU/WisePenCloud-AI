@@ -114,6 +114,8 @@ class ToolPolicy:
     expose_by_default: bool = False # 是否默认暴露给模型
 
     timeout_seconds: float | None = None # 超时时间
+    timeout_seconds_resolver: Callable[[dict[str, Any]], float | None] | None = None
+    transport_timeout_seconds_resolver: Callable[[dict[str, Any]], float | None] | None = None
     timeout_strategy: ToolTimeoutStrategy = ToolTimeoutStrategy.CANCEL_TASK # 超时后策略
 
     persist_output: bool = False # 是否持久化输出 (如果不持久化则需要生成占位符)
@@ -126,6 +128,18 @@ class ToolPolicy:
 
     max_output_chars: int | None = None # 输出最大字符数（超过后截断）
     allow_parallel: bool = False # 允许并行
+
+    def resolve_timeout_seconds(self, arguments: dict[str, Any]) -> float | None:
+        if self.timeout_seconds_resolver is not None:
+            return self.timeout_seconds_resolver(arguments)
+        return self.timeout_seconds
+
+    def resolve_transport_timeout_seconds(
+        self, arguments: dict[str, Any]
+    ) -> float | None:
+        if self.transport_timeout_seconds_resolver is not None:
+            return self.transport_timeout_seconds_resolver(arguments)
+        return None
 
 
 @dataclass(frozen=True)

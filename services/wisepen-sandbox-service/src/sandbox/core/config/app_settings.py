@@ -36,6 +36,9 @@ class AppSettings(BaseModel):
     SANDBOX_AIO_PORT: int
     SANDBOX_VNC_PORT: int
     SANDBOX_REQUEST_TIMEOUT_SECONDS: float
+    SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS: int = 30000
+    SANDBOX_EXECUTION_MAX_TIMEOUT_MS: int = 120000
+    SANDBOX_EXECUTION_TRANSPORT_GRACE_SECONDS: float = 5.0
     SANDBOX_DOCKER_COMMAND_TIMEOUT_SECONDS: float
     SANDBOX_AIO_HEALTH_TIMEOUT_SECONDS: float
     SANDBOX_AIO_HEALTH_RETRY_INTERVAL_SECONDS: float
@@ -101,6 +104,10 @@ class AppSettings(BaseModel):
             self.SANDBOX_WORKSPACE_CACHE_MAX_TOTAL_BYTES,
             self.SANDBOX_LEASE_TTL_SECONDS,
             self.SANDBOX_MAX_CREATE_BATCH,
+            self.SANDBOX_REQUEST_TIMEOUT_SECONDS,
+            self.SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS,
+            self.SANDBOX_EXECUTION_MAX_TIMEOUT_MS,
+            self.SANDBOX_EXECUTION_TRANSPORT_GRACE_SECONDS,
             self.SANDBOX_DOCKER_COMMAND_TIMEOUT_SECONDS,
             self.SANDBOX_AIO_HEALTH_TIMEOUT_SECONDS,
             self.SANDBOX_AIO_HEALTH_RETRY_INTERVAL_SECONDS,
@@ -122,6 +129,11 @@ class AppSettings(BaseModel):
         )
         if any(value <= 0 for value in positive):
             raise ValueError("沙箱容量、超时和文件限制必须为正数")
+        if (
+            self.SANDBOX_EXECUTION_DEFAULT_TIMEOUT_MS
+            > self.SANDBOX_EXECUTION_MAX_TIMEOUT_MS
+        ):
+            raise ValueError("沙箱默认执行超时不能大于最大执行超时")
         if (
             self.SANDBOX_LEADER_LEASE_RENEW_INTERVAL_SECONDS
             >= self.SANDBOX_LEADER_LEASE_TTL_SECONDS

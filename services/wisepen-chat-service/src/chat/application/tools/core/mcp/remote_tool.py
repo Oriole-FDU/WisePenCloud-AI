@@ -32,11 +32,17 @@ class McpRemoteTool:
         **kwargs: Any,
     ) -> str:
         try:
+            call_kwargs: dict[str, Any] = {"context": context}
+            transport_timeout = (
+                self._definition.policy.resolve_transport_timeout_seconds(kwargs)
+            )
+            if transport_timeout is not None:
+                call_kwargs["timeout_seconds"] = transport_timeout
             return await self._mcp_client.call_tool(
                 self._server,
                 self._remote_name,
                 kwargs,
-                context=context,
+                **call_kwargs,
             )
         except Exception as e:
             raise ToolExecutionError(

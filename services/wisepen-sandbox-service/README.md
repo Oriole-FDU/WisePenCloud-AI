@@ -220,7 +220,7 @@ Sandbox API 与 Chat API 使用相同的接口表达约定：HTTP 端点按域�
 
 metrics 响应固定包含 `generation`、`empty_checkouts`、`min_ready` 和 `target_ready`，并携带 readiness、状态计数、租约、预热、销毁和 workspace 同步指标。后续新增指标会作为 `data` 的额外字段返回。
 
-稳定错误码包括 `POOL_EMPTY`、`LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE`、`WORKSPACE_SYNC_FAILED` 和 `WORKSPACE_CACHE_LIMIT_EXCEEDED`。
+稳定错误码包括 `POOL_EMPTY`、`LEASE_NOT_FOUND`、`LEASE_EXPIRED`、`FENCING_REJECTED`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE`、`WORKSPACE_SYNC_FAILED`、`WORKSPACE_CACHE_LIMIT_EXCEEDED` 和 `INVALID_EXECUTION_TIMEOUT`。
 
 ## 6. 生命周期流程
 
@@ -422,12 +422,12 @@ Chat 的沙箱租约边界是“一轮 Chat Turn”，不是一次工具调用�
 | --- | --- | --- |
 | `user_id` | `tenant_id` | 租户隔离和工作区路径隔离 |
 | `session_id` | `workspace_id` | 当前会话对应的持久化工作区 |
-| `sandbox_request_id` | allocate 的 `request_id` | 一轮 Chat 的幂等分配键 |
-| `lease_id` | lease URL 路径参数 | execute/release 的唯一租约入口 |
-| `fencing_token` | execute/release 请求字段 | 拒绝旧租约或并发失效请求 |
-| 工具调用 ID | execute 的 `request_id` | 一次具体工具操作的请求标识 |
+| `sandbox_request_id` | MCP `X-Request-Id` | 一轮 Chat 的幂等分配键 |
+| `lease_id` | Scheduler 内部租约标识 | Sandbox MCP 执行时的服务端定位键 |
+| `fencing_token` | Scheduler 内部租约版本 | 拒绝旧租约或并发失效请求 |
+| 工具调用 ID | Sandbox MCP 生成的子请求 ID | 一次具体工具操作的请求标识 |
 
-Chat 的 `SandboxClient` 有两种寻址方式：配置 `SANDBOX_SERVICE_URL` 时直接通过 HTTP 调用 Sandbox Service；未配置时使用 `RpcClient` 按 `wisepen-sandbox-service` 服务名访问。两种方式使用相同的内部 API 和租约语义。HTTP 直连时会携带 `X-From-Source: APISIX-wX0iR6tY`。
+Chat 通过 `McpServiceClient` 调用 Sandbox 的 `/mcp/`：配置 `SANDBOX_SERVICE_URL` 时直连，未配置时按 `wisepen-sandbox-service` 服务发现。`SandboxClient` 只负责本轮的 `acquire_sandbox` / `release_sandbox` 生命周期调用；文件、Shell 和代码工具由 `McpRemoteTool` 直接调用 Sandbox MCP，并通过同一 `X-Request-Id` 复用租约。
 
 #### 6.4.2 UML 泳道图
 
@@ -441,7 +441,7 @@ sequenceDiagram
     participant CC as ChatTurnCoordinator
     participant QR as QueryLoopRuntime/ToolDispatcher
     participant SC as Chat SandboxClient
-    participant SA as Sandbox Service API
+    participant SA as Sandbox Service MCP
     participant SS as SandboxScheduler
     participant PR as Pool/Repository
     participant WS as WorkspaceStore
@@ -465,7 +465,7 @@ sequenceDiagram
     CA->>CC: handle_chat(user_id, session_id, query)
     CC->>CC: 创建 sandbox_request_id 和 tool_context
     CC->>SC: allocate_request(tool_context)
-    SC->>SA: POST /internal/sandboxes/allocate
+    SC->>SA: tools/call acquire_sandbox
     SA->>SS: allocate(request_id, tenant_id, workspace_id)
     SS->>PR: request_id 幂等查询 + 原子 checkout READY
     PR-->>SS: READY -> ALLOCATED，生成 lease/fencing
@@ -477,14 +477,12 @@ sequenceDiagram
     AD->>C: GET /v1/sandbox 确认实例可用
     SS->>PR: CAS ALLOCATED -> RUNNING
     SS-->>SA: lease_id、endpoint、expires_at、fencing_token
-    SA-->>SC: R.data(lease)
+    SA-->>SC: MCP lease JSON
     SC->>SC: 缓存 LeaseContext
     CC-->>QR: 启动 LLM 流式推理和工具循环
 
     QR->>QR: LLM 返回 tool_call
-    QR->>SC: write_file/read_file/shell_exec/execute
-    SC->>SC: 复用已有 LeaseContext
-    SC->>SA: POST /internal/leases/{lease_id}/execute
+    QR->>SA: MCP read/write/shell/script tool
     SA->>SS: execute(lease_id, ExecutionRequest)
     SS->>PR: 校验租户、workspace、状态、过期时间、fencing
     PR-->>SS: RUNNING 且租约有效
@@ -492,19 +490,18 @@ sequenceDiagram
     AD->>C: /v1/file/*、/v1/shell/exec 或 /v1/code/execute
     C-->>AD: AIO data 响应
     AD-->>SS: ExecutionResult
-    SS-->>SA: R.data(result)
-    SA-->>SC: 工具结果
-    SC-->>QR: 工具输出
+    SS-->>SA: ExecutionResult
+    SA-->>QR: MCP 工具结果
     QR-->>CC: ToolOutputAvailableEvent
     CC-->>U: 流式返回工具状态/最终文本
 
-    Note over QR,CC: 还有工具调用时重复 execute；始终复用同一 lease
+    Note over QR,CC: 工具调用使用同一 X-Request-Id；Sandbox MCP 幂等复用同一 lease
     QR->>QR: 将工具结果加入上下文并继续下一轮 LLM
 
     alt 正常结束、异常或客户端断开
         CC->>SC: finally: release_request(sandbox_request_id)
-        SC->>SA: POST /internal/leases/{lease_id}/release
-        SA->>SS: release(lease_id, fencing_token)
+        SC->>SA: tools/call release_sandbox
+        SA->>SS: release_request(request_id, tenant_id, workspace_id)
         SS->>PR: 原子关闭租约入口
         PR-->>SS: RUNNING -> SYNCING
         SS->>AD: export_workspace(sandbox, tenant, workspace)
@@ -526,7 +523,7 @@ sequenceDiagram
         else 超时或连续失败
             SS->>PR: DESTROYING -> LOST
         end
-        SA-->>SC: released 或稳定领域错误
+        SA-->>SC: MCP released 或稳定领域错误
         SC->>SC: 清理本地 LeaseContext
     end
 
@@ -546,12 +543,12 @@ sequenceDiagram
 
 #### 6.4.3 分阶段行为
 
-1. **Chat 建立租约**：Chat API 校验会话后进入 `ChatTurnCoordinator`。协调器根据 `user_id`、`session_id` 和本轮随机生成的 `sandbox_request_id` 构造工具上下文，并在 LLM 调用前完成 allocate。此时没有 READY 实例会直接阻止本轮进入工具推理，返回 `POOL_EMPTY`。
-2. **Sandbox 原子分配**：API 只接收 `request_id`、`tenant_id` 和 `workspace_id`。Scheduler 通过 Repository 在同一把锁内完成 request_id 幂等查询、READY checkout、租约绑定和 fencing token 生成，状态从 `READY` 进入 `ALLOCATED`。
+1. **Chat 建立租约**：Chat API 校验会话后进入 `ChatTurnCoordinator`。协调器根据 `user_id`、`session_id` 和本轮随机生成的 `sandbox_request_id` 构造工具上下文，并通过 MCP `acquire_sandbox` 完成 allocate。此时没有 READY 实例会直接阻止本轮进入工具推理，返回 `POOL_EMPTY`。
+2. **Sandbox 原子分配**：Sandbox MCP 从可信请求头读取 `request_id`、`tenant_id` 和 `workspace_id`。Scheduler 通过 Repository 在同一把锁内完成 request_id 幂等查询、READY checkout、租约绑定和 fencing token 生成，状态从 `READY` 进入 `ALLOCATED`。
 3. **工作区准备和激活**：Scheduler 从 WorkspaceStore 读取持久化快照。Adapter 将文件写入 AIO 工作区，然后通过 `/v1/sandbox` 确认实例可用，状态从 `ALLOCATED` 进入 `RUNNING`。allocate 返回的 endpoint 只属于本次 lease，Chat 不直接使用 AIO token 或 Docker container ID。
-4. **工具调用复用租约**：LLM 返回工具调用后，QueryLoopRuntime 通过 ToolDispatcher 执行 `read_file`、`write_file`、`list_directory`、`grep_files`、`edit_file`、`shell_exec` 或 `run_sandbox_script`。每个工具都调用同一个 SandboxClient，SandboxClient 根据 Chat 请求的 `request_id` 命中缓存的 LeaseContext，不会重复 allocate。
-5. **执行请求校验**：每次 execute 都携带租约上下文。Sandbox Service 校验 lease_id、tenant_id、workspace_id、fencing token、租约有效期和 `RUNNING` 状态；校验失败时拒绝请求，防止旧 Chat 请求或旧租约继续操作容器。
-6. **Adapter 协议转换**：Sandbox Service 只看到 `SandboxProvider`。Adapter 将领域操作转换成 AIO HTTP 请求，使用 `/v1/file/search`、`/v1/shell/exec`、`/v1/code/execute` 等实际路径，并通过 PathPolicy 将工作区映射到 `/home/gem/{tenant_id}/{workspace_id}`。Chat 工具说明中的 `/workspace` 是逻辑路径，演示时应优先使用相对路径。
+4. **工具调用复用租约**：LLM 返回工具调用后，QueryLoopRuntime 通过 ToolDispatcher 执行 `read_file`、`write_file`、`list_directory`、`grep_files`、`edit_file`、`shell_exec` 或 `run_sandbox_script`。`McpRemoteTool` 以相同 `request_id` 调用 Sandbox MCP，`SandboxSessionService` 幂等命中本轮租约，不会重复 allocate。
+5. **执行请求校验**：每次 MCP execute 都从可信请求头取得租户、工作区和 request ID，再由 Sandbox Service 校验 lease、租户、工作区、租约有效期和 `RUNNING` 状态；校验失败时拒绝请求，防止旧 Chat 请求或旧租约继续操作容器。
+6. **Adapter 协议转换**：Sandbox Service 只看到 `SandboxProvider`。Adapter 将领域操作转换成 AIO HTTP 请求，使用 `/v1/file/search`、`/v1/shell/exec`、`/v1/code/execute` 等实际路径，并通过 PathPolicy 将工作区映射到 `/home/gem/{tenant_id}/{workspace_id}`。Chat 工具说明中的 `/workspace` 是逻辑路径，演示时应优先使用相对路径。Shell 和代码执行默认预算为 30 秒、最大 120 秒；Chat 工具外层和 MCP/AIO 传输分别增加响应余量，不能再由通用 MCP 的 15 秒超时提前取消。
 7. **释放与持久化**：Chat 的 `finally` 调用 release。Scheduler 先关闭租约入口，因此 release 开始后新的 execute 会被拒绝；随后导出容器工作区、以完整替换语义提交 WorkspaceStore，并无条件进入销毁流程。commit 失败只影响持久化结果，不允许实例回 READY。下一次同 `tenant_id + workspace_id` 分配会读取该缓存并写回新沙箱。
 8. **销毁和补池**：销毁成功后用户实例进入 `DESTROYED`，失败或超时进入 `LOST`。Watcher 发现 READY 缺口后创建新的实例，只有健康检查和 `return_ready()` 成功的新实例才能进入 READY。用户实例和替代预热实例不会复用同一个 sandbox_id。
 
@@ -559,9 +556,9 @@ sequenceDiagram
 
 | 阶段 | 调用边界 | 失败表现 |
 | --- | --- | --- |
-| Chat allocate | Chat `SandboxClient` -> Sandbox API | `POOL_EMPTY`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE`，本轮 Chat 不进入工具循环 |
-| 工具 execute | Tool -> SandboxClient -> lease execute API | 工具包装为 `[Tool Error]`，QueryLoopRuntime 可将错误作为工具结果继续推理 |
-| release | Chat `finally` -> lease release API | `LEASE_NOT_FOUND` 和 `LEASE_EXPIRED` 视为可清理状态，其他错误继续上抛 |
+| Chat allocate | Chat `SandboxClient` -> Sandbox MCP `acquire_sandbox` | `POOL_EMPTY`、`REQUEST_CONFLICT`、`SANDBOX_UNAVAILABLE`，本轮 Chat 不进入工具循环 |
+| 工具 execute | `McpRemoteTool` -> Sandbox MCP | 工具失败由 MCP remote tool 包装，QueryLoopRuntime 可将错误作为工具结果继续推理 |
+| release | Chat `finally` -> Sandbox MCP `release_sandbox` | MCP 返回领域错误时记录 release 失败，不影响已返回的 Chat 流 |
 | workspace commit | Scheduler -> WorkspaceStore | 返回 `WORKSPACE_SYNC_FAILED`，但仍销毁用户实例 |
 | AIO destroy | Scheduler -> Adapter -> DockerRuntime | 404 幂等成功；超时/连续失败进入 `LOST`，不回 READY |
 | Watcher recovery | Watcher -> Scheduler.recover_expired | 过期 `ALLOCATED/RUNNING` 实例走关闭、导出缓存和销毁流程，不直接回池 |
@@ -601,7 +598,7 @@ DockerRuntime 使用动态宿主机端口，将容器端口 8080 映射到 `127.
 - 文件写入/读取/列表/替换：`/v1/file/write`、`/v1/file/read`、`/v1/file/list`、`/v1/file/replace`；
 - 文件搜索：实际为 `/v1/file/search`，请求字段为 `file`、`regex`，不是旧假设的 `/v1/file/grep`；
 - Shell：`/v1/shell/exec`，响应包含 `session_id`、`command`、`status`、`output`、`console`、`exit_code`；
-- 代码执行：`/v1/code/execute`，请求字段为 `language`、`code`，响应包含执行状态、stdout/stderr 和 exit_code；
+- 代码执行：`/v1/code/execute`，请求字段为 `language`、`code`、秒单位的 `timeout`，响应包含执行状态、stdout/stderr 和 exit_code；内部 MCP 的 `timeout_ms` 会向上取整后映射到该字段；
 - AIO 响应普遍使用 `data` 包装，AioClient 会解包后交给 Provider；
 - 当前未发现 endpoint/token 必须认证的情况，但客户端保留 Authorization header 支持。
 
