@@ -9,6 +9,7 @@ from sandbox.domain.error_codes import SandboxErrorCode
 
 _SEGMENT = re.compile(r"^[A-Za-z0-9_-]+$")
 _DEFAULT_ROOT = "/workspace"
+_LOGICAL_ROOT = "/workspace"
 
 
 @dataclass(frozen=True)
@@ -53,14 +54,24 @@ class PathPolicy:
         return self._scope_root
 
     def translate(self, path: str) -> str:
-        # 入口工具接受相对路径、~ 和工作区内绝对路径，统一解析到容器内绝对路径。
+        # MCP/Chat 只公开 /workspace；真实容器目录是内部实现细节。
         value = (path or "").strip().replace("\\", "/")
         if not value:
             raise ServiceException(SandboxErrorCode.WORKSPACE_PATH_INVALID, "路径不能为空")
-        if value == "~":
+        if value == "~" or value.startswith("~/"):
+            raise ServiceException(
+                SandboxErrorCode.WORKSPACE_PATH_INVALID,
+                "不支持 home 目录路径，请使用相对路径或 /workspace",
+            )
+        if value == _LOGICAL_ROOT or value == f"{_LOGICAL_ROOT}/":
             value = self._scope_root
-        elif value.startswith("~/"):
-            value = f"{self._scope_root}/{value[2:]}"
+        elif value.startswith(f"{_LOGICAL_ROOT}/"):
+            value = f"{self._scope_root}/{value[len(_LOGICAL_ROOT) + 1:]}"
+        elif value.startswith("/"):
+            raise ServiceException(
+                SandboxErrorCode.WORKSPACE_PATH_INVALID,
+                "只支持 /workspace 下的逻辑绝对路径",
+            )
         elif not value.startswith("/"):
             value = f"{self._scope_root}/{value}"
         if value != self._scope_root and not value.startswith(f"{self._scope_root}/"):
@@ -74,14 +85,10 @@ class PathPolicy:
             if part in ("", "."):
                 continue
             if part == "..":
-                if parts:
-                    parts.pop()
-                else:
-                    raise ServiceException(
-                        SandboxErrorCode.WORKSPACE_PATH_INVALID,
-                        "拒绝目录穿越",
-                    )
-                continue
+                raise ServiceException(
+                    SandboxErrorCode.WORKSPACE_PATH_INVALID,
+                    "不支持包含 .. 的工作区路径",
+                )
             parts.append(part)
         resolved = "/" + "/".join(parts)
         if resolved != self._scope_root and not resolved.startswith(f"{self._scope_root}/"):

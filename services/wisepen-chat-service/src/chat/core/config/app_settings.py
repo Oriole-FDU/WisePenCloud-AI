@@ -124,7 +124,6 @@ class AppSettings(BaseModel):
     # Sandbox Service 配置
     SANDBOX_SERVICE_NAME: str = "wisepen-sandbox-service"
     SANDBOX_SERVICE_URL: str = ""
-    SANDBOX_FROM_SOURCE: str = ""
     SANDBOX_TIMEOUT_SECONDS: float = 30.0
 
 

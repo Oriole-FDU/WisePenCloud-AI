@@ -17,6 +17,8 @@ class AdapterConfig:
     health_retry_interval_seconds: float = 0.5
     # 沙箱镜像将 /home/gem 暴露为可写用户目录。
     workdir: str = "/home/gem"
+    # 用户工作区由 DockerWorkspaceTransfer 导入和导出；必须与 PathPolicy 使用同一根目录。
+    workspace_root: str = "/home/gem/workspaces"
     command_timeout_seconds: float = 30.0
     create_max_attempts: int = 3
     create_retry_backoff_seconds: float = 0.2

@@ -48,30 +48,30 @@ def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
 
     @mcp.tool(
         name="read_file",
-        description="Read a file from the current user's sandbox workspace.",
+        description="Read a file from the current sandbox workspace. Use a relative path or /workspace/path; internal container paths are not supported.",
     )
     async def read_file(
-        file: Annotated[str, Field(description="Workspace-relative file path.")],
+        file: Annotated[str, Field(description="Relative path or /workspace/path.")],
         max_chars: Annotated[int | None, Field(description="Optional output limit.")] = None,
     ) -> dict[str, Any]:
         return await session.execute("read_file", {"file": file, "max_chars": max_chars})
 
     @mcp.tool(
         name="write_file",
-        description="Write a file in the current user's sandbox workspace.",
+        description="Write a file in the current sandbox workspace. Use a relative path or /workspace/path; internal container paths are not supported.",
     )
     async def write_file(
-        file: Annotated[str, Field(description="Workspace-relative file path.")],
+        file: Annotated[str, Field(description="Relative path or /workspace/path.")],
         content: Annotated[str, Field(description="File content.")],
     ) -> dict[str, Any]:
         return await session.execute("write_file", {"file": file, "content": content})
 
     @mcp.tool(
         name="list_directory",
-        description="List files in the current user's sandbox workspace.",
+        description="List files in the current sandbox workspace. Use a relative path or /workspace/path.",
     )
     async def list_directory(
-        path: Annotated[str, Field(description="Workspace-relative directory path.")],
+        path: Annotated[str, Field(description="Relative path or /workspace/path.")],
         recursive: Annotated[bool, Field(description="Whether to recurse.")] = False,
     ) -> dict[str, Any]:
         return await session.execute("list_directory", {"path": path, "recursive": recursive})
@@ -111,11 +111,11 @@ def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
 
     @mcp.tool(
         name="shell_exec",
-        description="Execute a shell command in the current user's sandbox.",
+        description="Execute a shell command in the current sandbox workspace. Use relative file paths. exec_dir is optional and must be relative or under /workspace; internal container paths are rejected.",
     )
     async def shell_exec(
         command: Annotated[str, Field(description="Shell command.")],
-        exec_dir: Annotated[str, Field(description="Workspace-relative working directory.")] = ".",
+        exec_dir: Annotated[str, Field(description="Optional relative directory or /workspace subdirectory; defaults to the current workspace.")] = ".",
         timeout_ms: Annotated[int, Field(description="Execution timeout in milliseconds.")] = 30000,
     ) -> dict[str, Any]:
         return await session.execute(
@@ -125,7 +125,7 @@ def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
 
     @mcp.tool(
         name="run_sandbox_script",
-        description="Run source code in the current user's sandbox.",
+        description="Run source code in the current sandbox. Python runs with /workspace as its working directory; use relative file paths and never internal container paths.",
     )
     async def run_sandbox_script(
         language: Annotated[str, Field(description="Programming language, for example python.")],

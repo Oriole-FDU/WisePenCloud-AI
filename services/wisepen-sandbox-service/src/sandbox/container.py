@@ -119,6 +119,7 @@ class Container(containers.DeclarativeContainer):
         create_max_attempts=config.SANDBOX_DOCKER_CREATE_MAX_ATTEMPTS,
         create_retry_backoff_seconds=config.SANDBOX_DOCKER_CREATE_RETRY_BACKOFF_SECONDS,
         workdir=config.SANDBOX_AIO_WORKDIR,
+        workspace_root=config.SANDBOX_CONTAINER_WORKSPACE_ROOT,
         tty=config.SANDBOX_DOCKER_TTY,
         owner_id=config.SANDBOX_OWNER_ID,
         browser_no_sandbox=config.SANDBOX_BROWSER_NO_SANDBOX,
