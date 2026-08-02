@@ -49,6 +49,8 @@ class Watcher:
         leader_lease_ttl_seconds: float = 90,
         leader_lease_renew_interval_seconds: float = 20,
         checkpoint_interval_seconds: float = 300,
+        idle_rounds_threshold: int = 3,
+        idle_interval_seconds: float = 60,
         metrics: MetricsPort | None = None,
     ) -> None:
         self._pool = pool
@@ -76,6 +78,9 @@ class Watcher:
         self._leader_lease_renew_interval = leader_lease_renew_interval_seconds
         self._checkpoint_interval = max(1.0, checkpoint_interval_seconds)
         self._next_checkpoint_at = monotonic() + self._checkpoint_interval
+        self._idle_rounds = 0
+        self._idle_threshold = max(0, idle_rounds_threshold)
+        self._idle_interval = max(1.0, idle_interval_seconds)
         self._stop = asyncio.Event()
         self._reconcile_lock = asyncio.Lock()
         self._retry_count = 0
@@ -116,6 +121,18 @@ class Watcher:
                     self._target_ready + self._reserve - ready - warming - creating,
                 )
                 create_count = min(deficit, self._max_create_batch)
+                # 空闲检测：池满时逐渐降低轮询频率以节省资源。
+                if deficit > 0:
+                    if self._idle_rounds >= self._idle_threshold:
+                        info(
+                            "沙箱 watcher 检测到补池缺口，退出空闲模式",
+                            owner=self._owner,
+                            idle_rounds=self._idle_rounds,
+                            deficit=deficit,
+                        )
+                    self._idle_rounds = 0
+                else:
+                    self._idle_rounds += 1
                 info(
                     "沙箱 watcher 开始补池评估",
                     owner=self._owner,
@@ -128,6 +145,7 @@ class Watcher:
                     deficit=deficit,
                     create_count=create_count,
                     retry_count=self._retry_count,
+                    idle_rounds=self._idle_rounds,
                 )
                 if create_count == 0:
                     info(
@@ -206,6 +224,9 @@ class Watcher:
 
     def _next_reconcile_delay(self) -> float:
         if self._retry_count == 0:
+            # 连续多轮无需补池时，拉大检查间隔以节省资源。
+            if self._idle_rounds >= self._idle_threshold:
+                return self._idle_interval
             return self._interval
         # 达到等级上限后维持最大退避但持续重试，防止短暂故障永久耗尽 READY 池。
         exponent = min(self._retry_count, self._warmup_max_retries) - 1
@@ -532,3 +553,11 @@ class Watcher:
 
     def stop(self) -> None:
         self._stop.set()
+
+    def wakeup(self) -> None:
+        """由外部（例如 checkout 路径）调用，立即退出空闲模式。
+
+        Watcher 在空闲模式下使用较长的轮询间隔。调用此方法可以
+        主动唤醒 Watcher，使其在下一轮立即以正常频率评估补池需求。
+        """
+        self._idle_rounds = 0
