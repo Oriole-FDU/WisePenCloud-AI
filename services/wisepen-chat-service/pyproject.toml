@@ -46,9 +46,3 @@ dependencies = [
     "mineru==3.4.4",
     "openpyxl",
 ]
-
-[dependency-groups]
-dev = [
-    "pytest",
-    "pytest-asyncio",
-]

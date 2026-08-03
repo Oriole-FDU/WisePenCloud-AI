@@ -40,6 +40,25 @@ ENV/
 .mypy_cache/
 .ruff_cache/
 
+# 测试与 lint-only 文件不进入微服务发布分支
+.pytest_cache/
+.pytest-temp/
+**/.pytest_cache/
+**/.pytest-temp/
+**/.ruff_cache/
+**/tests/
+**/test_*.py
+**/*_test.py
+**/test_*.md
+pytest.ini
+tox.ini
+ruff.toml
+.ruff.toml
+
+# 前端子模块不进入当前 Python 微服务 PR
+WisePenCloud/
+WisePenView/
+
 # 操作系统
 .DS_Store
 Thumbs.db

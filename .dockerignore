@@ -1,0 +1,49 @@
+# Python build/runtime noise
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Local environments and tool caches
+.venv/
+venv/
+env/
+ENV/
+.uv/
+.uv-cache/
+.pytest_cache/
+**/.pytest_cache/
+.pytest-temp/
+**/.pytest-temp/
+.ruff_cache/
+**/.ruff_cache/
+.mypy_cache/
+**/.mypy_cache/
+
+# Tests and lint-only configuration must stay out of service images.
+**/tests/
+**/test_*.py
+**/*_test.py
+**/test_*.md
+pytest.ini
+tox.ini
+ruff.toml
+.ruff.toml
+
+# Frontend submodules are not part of Python microservice images.
+WisePenCloud/
+WisePenView/
+
+# IDE, VCS, and local metadata
+.git/
+.idea/
+.vscode/
+*.iml
+*.log
+logs/
+.env
+!.env.example

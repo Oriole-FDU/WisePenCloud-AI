@@ -21,9 +21,3 @@ dependencies = [
     "zeroentropy",
     "wisepen-common",
 ]
-
-[dependency-groups]
-dev = [
-    "pytest",
-    "pytest-asyncio",
-]
