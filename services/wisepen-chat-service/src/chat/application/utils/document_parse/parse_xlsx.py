@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from enum import StrEnum
 from pathlib import Path
 
 from .converters.xlsx import XlsxConverter
@@ -11,7 +10,6 @@ def parse_xlsx(
     file_path: str | Path,
     *,
     image_path: str | Path | None = None,
-    backend: XlsxBackend | str = XlsxBackend.OPENPYXL,
 ) -> str:
     file_path = Path(file_path)
     image_path = Path(image_path) if image_path is not None else None
@@ -19,8 +17,6 @@ def parse_xlsx(
         raise FileNotFoundError(file_path)
 
     return XlsxConverter().convert(file_path, image_path=image_path)
-
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Parse an XLSX into Markdown.")
