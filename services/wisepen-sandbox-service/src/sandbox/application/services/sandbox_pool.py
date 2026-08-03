@@ -65,11 +65,7 @@ class SandboxPool:
     async def mark_creating(self, record: SandboxRecord) -> None:
         await self._repository.save(record)
 
-    async def health_token(self, record: SandboxRecord) -> str:
-        # 健康 token 绑定 sandbox_id、状态版本和 fencing，避免过期健康检查误放回实例。
-        return f"{record.ref.sandbox_id}:{record.state_version}"
-
     async def prepare_readiness(self, record: SandboxRecord) -> tuple[str, int]:
-        token = await self.health_token(record)
+        token = f"{record.ref.sandbox_id}:{record.state_version}"
         generation = await self._repository.prepare_ready(record, token)
         return token, generation

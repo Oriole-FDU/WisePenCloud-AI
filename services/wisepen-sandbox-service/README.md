@@ -55,10 +55,10 @@ flowchart LR
 ### 3.1 `wisepen-sandbox-service`
 
 - `application/services`：维护 Pool、Scheduler 和 Watcher 的生命周期用例。
-- `domain`：保存领域实体、错误码、端口和 Repository 协议。
-- `core/storage/memory`：提供内存 Repository 和 LeaderLease 实现。
+- `domain`：保存领域实体、错误码、端口和 Repository 协议。Repository 按职责拆分为四个 Protocol：`SandboxRepository`（池与记录 CRUD）、`LeaseManager`（TurnLease 生命周期）、`BindingManager`（用户-容器绑定）和 `WorkspaceManager`（Session 工作区记录）。
+- `core/storage/memory`：提供内存实现。`MemorySandboxRepository` 作为组合根，内部持有共享 `_RepositoryState`（一个锁 + 所有索引），并实例化 `MemoryLeaseManager`、`MemoryBindingManager` 和 `MemoryWorkspaceManager` 三个子管理器。Scheduler 和 Watcher 通过 `getattr(repository, "lease_manager", repository)` 从 Repository 自动提取所需的子管理器，无需额外构造参数。
 - `core/storage/local` / `core/observability`：提供本地 Workspace Store 和 Metrics 实现。
-- `apis` / `main.py`：提供内部 API、路由和进程启动时的 Watcher 后台任务。
+- `apis` / `main.py`：提供内部 API、路由和进程启动时的 Watcher 后台任务。shutdown 时并行执行 Scheduler 优雅关闭和 `cleanup_owned()` Docker label 兜底清理，确保在 Docker 的 `stop_grace_period` 内完成。
 
 ### 3.2 `core.providers.aio_adapter`
 
@@ -126,10 +126,48 @@ WARMING
 
 ## 5. 端口与 API
 
-### 5.1 SandboxProvider
+### 5.1 领域端口（Protocol）
+
+Repository 层按职责拆分为四个 Protocol，Scheduler 和 Watcher 仅依赖各自所需的子集：
+
+```python
+class SandboxRepository(Protocol):
+    """池与 SandboxRecord CRUD + 原子 checkout。"""
+    @property
+    def metrics(self) -> MetricsPort: ...
+    async def save(self, record: SandboxRecord) -> None: ...
+    async def get(self, sandbox_id: str) -> SandboxRecord | None: ...
+    async def records_in(self, states: Iterable[SandboxState]) -> list[SandboxRecord]: ...
+    async def snapshot(self, *, min_ready, target_ready) -> PoolSnapshot: ...
+    async def transition(self, sandbox_id, expected, state, *, error=None) -> SandboxRecord: ...
+    async def checkout_ready(self, request_id, user_id, session_id,
+                             lease_ttl, user_idle_ttl, max_bindings) -> tuple[SandboxRecord, LeaseRecord]: ...
+    async def prepare_ready(self, record, readiness_token) -> int: ...
+    async def return_ready(self, sandbox_id, health_token, generation) -> SandboxRecord: ...
+    async def records_older_than(self, state, cutoff) -> list[SandboxRecord]: ...
+
+class LeaseManager(Protocol):
+    """TurnLease 生命周期。"""
+    async def find_lease / get_turn_lease / find_turn_request / active_turn_for_session / active_turns_for_sandbox: ...
+    async def close_lease / validate_lease / finish_release / expired_turn_leases: ...
+
+class BindingManager(Protocol):
+    """用户-容器绑定。"""
+    async def find_user_binding / binding_for_sandbox / user_bindings / idle_user_bindings / expired_idle_user_bindings: ...
+    async def activate_user_binding / clear_binding: ...
+
+class WorkspaceManager(Protocol):
+    """Session 工作区记录。"""
+    async def find_workspace / workspaces_for_user / mark_workspace_prepared / mark_workspace_dirty / remove_workspace: ...
+```
+
+`MemorySandboxRepository` 实现全部四个 Protocol，内部通过共享 `_RepositoryState`（一个 `asyncio.Lock` + 所有索引字典）保证原子性。Scheduler 和 Watcher 通过 `getattr(repository, "lease_manager", repository)` 自动提取子管理器；传入未拆分的 mock 时回退到直接使用 repository 自身，保持测试兼容。
+
+### 5.2 SandboxProvider
 
 ```python
 class SandboxProvider(Protocol):
+    async def validate_deployment(self) -> None: ...
     async def create(self, spec: SandboxSpec) -> SandboxRef: ...
     async def wait_ready(self, sandbox: SandboxRef, timeout_seconds: float) -> Health: ...
     async def health(self, sandbox: SandboxRef) -> Health: ...
@@ -137,12 +175,14 @@ class SandboxProvider(Protocol):
     async def activate(self, sandbox: SandboxRef, lease: SandboxLease) -> Endpoint: ...
     async def forward(self, sandbox: SandboxRef, request: ExecutionRequest) -> ExecutionResult: ...
     async def export_workspace(self, sandbox: SandboxRef, tenant_id: str, workspace_id: str) -> WorkspaceSnapshot: ...
+    async def checkpoint_workspace(self, sandbox: SandboxRef, tenant_id, workspace_id, lease_id, fencing_token) -> WorkspaceSnapshot: ...
+    async def delete_workspace(self, sandbox: SandboxRef, tenant_id: str, workspace_id: str) -> None: ...
     async def destroy(self, sandbox: SandboxRef, reason: str) -> None: ...
 ```
 
-Provider 方法由 Adapter 自己负责 HTTP/Docker 超时、可重试错误和 AIO 错误映射。destroy 对 404 幂等成功，平台原始异常不会直接泄漏到领域 API。
+Provider 方法由 Adapter 自己负责 HTTP/Docker 超时、可重试错误和 AIO 错误映射。destroy 对 404 幂等成功，平台原始异常不会直接泄漏到领域 API。`checkpoint_workspace` 与 `export_workspace` 的差异在于前者接受 fencing token 用于租约级校验；`FileTransferPort` 负责实际的 `docker cp` 传输。
 
-### 5.2 WorkspaceStore
+### 5.3 WorkspaceStore
 
 ```python
 class WorkspaceStore(Protocol):
@@ -152,7 +192,7 @@ class WorkspaceStore(Protocol):
 
 LocalWorkspaceStore 会校验 tenant/workspace 标识、相对路径、符号链接和路径穿越。缓存范围是 `user_id + session_id`。commit 采用完整快照替换语义：本次导出不存在的旧文件会从缓存中删除，并写入 manifest 记录 lease、fencing、文件数和字节数。普通 release 的 commit 失败会记录降级状态，健康实例仍可进入 `USER_IDLE`；最终回收时 commit 失败不阻止 destroy。未创建的 workspace 目录可表示为空快照。
 
-### 5.3 内部 API
+### 5.4 内部 API
 
 Sandbox API 与 Chat API 使用相同的接口表达约定：HTTP 端点按域位于 `sandbox.api.endpoints.health`、`pool` 和 `sandbox`；每个模块在顶层声明 `APIRouter` 和端点函数，并通过 `sandbox.container.Container` 注入 `SandboxPool` 或 `SandboxScheduler`。对应 Pydantic DTO 分别位于 `sandbox.api.schemas.health`、`pool` 和 `sandbox`，并由 `sandbox.api.schemas` 统一导出。业务接口使用 `R(code/msg/data)` 包装，并在端点上提供 `summary`、详细 `description` 和 `response_model`。健康探针保留裸 JSON 和 HTTP 503 语义，避免影响容器编排和负载均衡。
 
@@ -173,7 +213,7 @@ Sandbox API 与 Chat API 使用相同的接口表达约定：HTTP 端点按域�
 | `GET /internal/sandboxes/{sandbox_id}` | 无 | `R[SandboxStatusResponse]` | `LEASE_NOT_FOUND` |
 | `GET /internal/pool/metrics` | 无 | `R[PoolMetricsResponse]` | `SYSTEM_ERROR` |
 
-#### 5.3.1 分配、执行和释放示例
+#### 5.4.1 分配、执行和释放示例
 
 分配请求：
 
@@ -223,7 +263,7 @@ Sandbox API 与 Chat API 使用相同的接口表达约定：HTTP 端点按域�
 
 释放请求只需要 fencing token。释放入口先关闭本轮执行，再提交当前 session 的完整快照；成功响应为 `data.status = "released"`。重复释放保持幂等。删除 Chat session 使用 workspace delete；只有用户 TTL、LRU、管理端强制销毁或 shutdown 才销毁物理容器。
 
-#### 5.3.2 状态、指标和安全边界
+#### 5.4.2 状态、指标和安全边界
 
 状态接口返回生命周期状态、租约上下文和非敏感 endpoint 地址。`provider_id`、Provider metadata、endpoint token 和 readiness token 属于 Sandbox Service 内部信息，不会出现在状态响应中。allocate 响应中的 endpoint token 只服务于当前短期租约，释放后失效。
 
@@ -357,7 +397,7 @@ sequenceDiagram
 LeaderLease.acquire
   -> Scheduler.recover_expired()
   -> 清理 CREATING/WARMING 超时实例
-  -> 清理 DESTROYING 超时实例
+  -> 清理 DESTROYING 超时实例（先重试销毁，失败才标记 LOST）
   -> 读取 Pool snapshot 和 generation
   -> 计算缺口并创建预热实例
   -> health + return_ready
@@ -371,7 +411,9 @@ deficit = max(0, target_ready + reserve - ready - warming - creating)
 create_count = min(deficit, max_create_batch)
 ```
 
-Watcher 会排除 CREATING/WARMING 实例，避免并发重复创建；预热失败使用有限重试和退避。warmup timeout 或 destroy failure 后实例进入 LOST。两个 Watcher 在同一进程共享 LeaderLease 时只有一个可以执行补池决策；内存实现不宣称跨进程选主能力。
+Watcher 会排除 CREATING/WARMING 实例，避免并发重复创建；预热失败使用有限重试和退避。预热成功后的 `_recover_stale` 将容器标记为 DESTROYED（非 LOST）；预热阶段失败后的 cleanup 也根据销毁是否成功区分 DESTROYED 和 LOST。两个 Watcher 在同一进程共享 LeaderLease 时只有一个可以执行补池决策；LeaderLease 续期失败后持续重试而非放弃，避免续期瞬间中断导致的重复补池。
+
+**自适应空闲间隔**：连续 `idle_rounds_threshold`（默认 3）轮无需补池后，Watcher 将轮询间隔从 `interval_seconds`（默认 5s）提升至 `idle_interval_seconds`（默认 60s），以节省 leader 租约获取和快照计算开销。一旦检测到缺口（容器被 checkout），立即恢复 5s 的正常间隔。外部也可调用 `watcher.wakeup()` 主动退出空闲模式。
 
 ### 6.3 allocate、execute、release
 
@@ -606,6 +648,8 @@ WorkspaceStore commit 失败会记录 `workspace_checkpoint_degraded` 和 `last_
 | Shell/Python/Node/Shell 脚本超过 Nacos timeout | Sandbox 调用 AIO Shell kill 清理目标进程树，返回 `EXECUTION_TIMEOUT`，共享容器保持可用 |
 | destroy 超时 | `wait_for`、指数退避和有限重试，最终 LOST |
 | 租约过期 | Watcher 调用 `recover_expired`，checkpoint 当前 session 并释放 TurnLease；用户容器按是否仍有活动 turn 进入 `USER_ACTIVE` 或 `USER_IDLE` |
+| 服务关闭时容器残留 | `scheduler.shutdown()` 并行销毁（`asyncio.wait` + 8s 总超时），同时 `cleanup_owned()` 按 Docker label 批量 `docker rm -f`；docker-compose 设置 `stop_grace_period: 15s` 确保在 Docker SIGKILL 前完成 |
+| LeaderLease 续期瞬断 | 续期失败后持续重试而非退出，避免单次网络抖动导致双实例同时补池 |
 
 ## 7. AIO Adapter 实现细节
 
@@ -719,7 +763,7 @@ user cleanup          PASS  显式 user destroy 后容器与绑定回到基线
 
 ## 11. 已知限制与后续扩展
 
-- 当前 Repository 和 LeaderLease 是进程内实现，进程重启不会保留租约和 Pool 数据；跨进程选主需替换为外部存储/锁。LocalWorkspaceStore 已支持本地工作区缓存，但生产环境仍建议替换为对象存储或带元数据的外部持久化实现。
+- 当前 Repository 已按职责拆分为 `SandboxRepository`、`LeaseManager`、`BindingManager` 和 `WorkspaceManager` 四个 Protocol，但内存实现仍为单进程（共享 `_RepositoryState`）；跨进程状态共享需替换为 Redis/DB 后端。LeaderLease 同理。LocalWorkspaceStore 已支持本地工作区缓存，但生产环境仍建议替换为对象存储或带元数据的外部持久化实现。
 - AIO 镜像的 Docker 内置 healthcheck 可能因为 browser 子进程 SIGABRT 显示 `unhealthy`，但本次验证中 `/v1/sandbox` HTTP 接口可正常返回 200；生产环境应分别监控 Docker health 和 AIO HTTP health。
 - 同一用户的 session workspace 依靠路径策略、身份上下文、fencing 和局部锁做逻辑隔离；它们共享同一 OS 容器，不是针对同用户恶意代码的强安全边界。
 - 不设置每用户 session 或业务并发上限；需要结合 AIO/宿主机 CPU、内存和进程数指标做容量告警，必要时再增加资源级限流。

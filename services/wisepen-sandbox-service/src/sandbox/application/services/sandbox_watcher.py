@@ -17,8 +17,6 @@ from sandbox.domain.interfaces.sandbox_provider import SandboxProvider
 from sandbox.application.services.sandbox_pool import SandboxPool
 from sandbox.domain.repositories import SandboxRepository
 from sandbox.application.services.sandbox_scheduler import SandboxScheduler
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +49,8 @@ class Watcher:
         leader_lease_ttl_seconds: float = 90,
         leader_lease_renew_interval_seconds: float = 20,
         checkpoint_interval_seconds: float = 300,
+        idle_rounds_threshold: int = 3,
+        idle_interval_seconds: float = 60,
         metrics: MetricsPort | None = None,
     ) -> None:
         self._pool = pool
@@ -58,6 +58,7 @@ class Watcher:
         self._provider = provider
         self._spec = spec
         self._scheduler = scheduler
+        self._lease_manager = getattr(repository, "lease_manager", None)
         self._leader_lease = leader_lease
         self._leader_key = leader_key
         # 持有者标识用于区分多个服务实例的 watcher，内存实现和未来外部锁都依赖它释放租约。
@@ -77,6 +78,9 @@ class Watcher:
         self._leader_lease_renew_interval = leader_lease_renew_interval_seconds
         self._checkpoint_interval = max(1.0, checkpoint_interval_seconds)
         self._next_checkpoint_at = monotonic() + self._checkpoint_interval
+        self._idle_rounds = 0
+        self._idle_threshold = max(0, idle_rounds_threshold)
+        self._idle_interval = max(1.0, idle_interval_seconds)
         self._stop = asyncio.Event()
         self._reconcile_lock = asyncio.Lock()
         self._retry_count = 0
@@ -117,6 +121,18 @@ class Watcher:
                     self._target_ready + self._reserve - ready - warming - creating,
                 )
                 create_count = min(deficit, self._max_create_batch)
+                # 空闲检测：池满时逐渐降低轮询频率以节省资源。
+                if deficit > 0:
+                    if self._idle_rounds >= self._idle_threshold:
+                        info(
+                            "沙箱 watcher 检测到补池缺口，退出空闲模式",
+                            owner=self._owner,
+                            idle_rounds=self._idle_rounds,
+                            deficit=deficit,
+                        )
+                    self._idle_rounds = 0
+                else:
+                    self._idle_rounds += 1
                 info(
                     "沙箱 watcher 开始补池评估",
                     owner=self._owner,
@@ -129,6 +145,7 @@ class Watcher:
                     deficit=deficit,
                     create_count=create_count,
                     retry_count=self._retry_count,
+                    idle_rounds=self._idle_rounds,
                 )
                 if create_count == 0:
                     info(
@@ -200,14 +217,16 @@ class Watcher:
             )
             if not renewed:
                 error(
-                    "沙箱 watcher leader 租约续期失败",
+                    "沙箱 watcher leader 租约续期失败，将在下个周期重试",
                     owner=self._owner,
                     leader_key=self._leader_key,
                 )
-                return
 
     def _next_reconcile_delay(self) -> float:
         if self._retry_count == 0:
+            # 连续多轮无需补池时，拉大检查间隔以节省资源。
+            if self._idle_rounds >= self._idle_threshold:
+                return self._idle_interval
             return self._interval
         # 达到等级上限后维持最大退避但持续重试，防止短暂故障永久耗尽 READY 池。
         exponent = min(self._retry_count, self._warmup_max_retries) - 1
@@ -217,12 +236,12 @@ class Watcher:
         )
 
     async def _checkpoint_active_leases(self) -> None:
-        if not self._scheduler or monotonic() < self._next_checkpoint_at:
+        if not self._scheduler or not self._lease_manager or monotonic() < self._next_checkpoint_at:
             return
         self._next_checkpoint_at = monotonic() + self._checkpoint_interval
         records = await self._repository.records_in([SandboxState.USER_ACTIVE])
         for record in records:
-            for lease in await self._repository.active_turns_for_sandbox(record.ref.sandbox_id):
+            for lease in await self._lease_manager.active_turns_for_sandbox(record.ref.sandbox_id):
                 try:
                     await self._scheduler.checkpoint(
                         lease.lease_id,
@@ -247,8 +266,8 @@ class Watcher:
             image=self._spec.image,
             warmup_timeout_seconds=self._warmup_timeout,
         )
+        create_started = monotonic()
         try:
-            create_started = monotonic()
             ref = await self._provider.create(self._spec)
             self._metrics.observe_ms(
                 "warmup_create", (monotonic() - create_started) * 1000
@@ -371,6 +390,7 @@ class Watcher:
                     SandboxState.DESTROYING,
                     error=str(exc)[:200],
                 )
+            destroy_error: Exception | None = None
             try:
                 # 预热失败的容器同样要销毁；失败后进入 LOST，便于指标和人工排查。
                 started = monotonic()
@@ -391,28 +411,45 @@ class Watcher:
                     sandbox_id=ref.sandbox_id,
                     destroy_duration_ms=round((monotonic() - started) * 1000, 2),
                 )
-            except Exception as destroy_exc:
+            except Exception as _destroy_exc:
+                destroy_error = _destroy_exc
                 error(
                     "预热失败的沙箱容器销毁失败",
-                    exc=destroy_exc,
+                    exc=destroy_error,
                     sandbox_id=ref.sandbox_id,
                     provider_id=ref.provider_id,
                 )
-                raise
+                # 将原始错误和销毁错误一起抛出，方便上层定位根因。
+                raise RuntimeError(
+                    f"沙箱销毁失败（原始预热错误: {exc}）"
+                ) from destroy_error
             finally:
                 current = await self._repository.get(ref.sandbox_id)
                 if current and current.state == SandboxState.DESTROYING:
-                    await self._repository.transition(
-                        ref.sandbox_id,
-                        SandboxState.DESTROYING,
-                        SandboxState.LOST,
-                        error=str(exc)[:200],
-                    )
-                    info(
-                        "沙箱预热失败后已进入 LOST",
-                        sandbox_id=ref.sandbox_id,
-                        error_message=str(exc)[:200],
-                    )
+                    if destroy_error is not None:
+                        await self._repository.transition(
+                            ref.sandbox_id,
+                            SandboxState.DESTROYING,
+                            SandboxState.LOST,
+                            error=str(destroy_error)[:200],
+                        )
+                        info(
+                            "沙箱预热失败后已进入 LOST（销毁失败）",
+                            sandbox_id=ref.sandbox_id,
+                            destroy_error=str(destroy_error)[:200],
+                        )
+                    else:
+                        await self._repository.transition(
+                            ref.sandbox_id,
+                            SandboxState.DESTROYING,
+                            SandboxState.DESTROYED,
+                            error=str(exc)[:200],
+                        )
+                        info(
+                            "沙箱预热失败后已进入 DESTROYED（销毁成功）",
+                            sandbox_id=ref.sandbox_id,
+                            warmup_error=str(exc)[:200],
+                        )
             raise
 
     async def _recover_stale(self) -> None:
@@ -449,7 +486,7 @@ class Watcher:
                 await self._repository.transition(
                     record.ref.sandbox_id,
                     SandboxState.DESTROYING,
-                    SandboxState.LOST,
+                    SandboxState.DESTROYED,
                     error="warmup timeout",
                 )
             except Exception as exc:
@@ -475,15 +512,34 @@ class Watcher:
         )
         for record in stale_destroying:
             try:
-                # 销毁中超时说明前一次 destroy 已失控，标 LOST 后不再参与分配。
+                # 先尝试再次销毁，避免因临时 Docker 不可用导致资源泄漏。
+                await asyncio.wait_for(
+                    self._provider.destroy(record.ref, "destroy_timeout_retry"),
+                    timeout=self._destroy_timeout,
+                )
                 await self._repository.transition(
                     record.ref.sandbox_id,
                     SandboxState.DESTROYING,
-                    SandboxState.LOST,
-                    error="destroy timeout",
+                    SandboxState.DESTROYED,
+                    error="destroy timeout (retry succeeded)",
                 )
-            except ServiceException:
+            except Exception as exc:
                 self._metrics.increment("destroy_failures")
+                error(
+                    "清理 DESTROYING 超时沙箱失败，标记为 LOST",
+                    exc=exc,
+                    sandbox_id=record.ref.sandbox_id,
+                    provider_id=record.ref.provider_id,
+                )
+                try:
+                    await self._repository.transition(
+                        record.ref.sandbox_id,
+                        SandboxState.DESTROYING,
+                        SandboxState.LOST,
+                        error="destroy timeout (retry failed)",
+                    )
+                except ServiceException:
+                    self._metrics.increment("destroy_failures")
 
     async def run(self) -> None:
         while not self._stop.is_set():
@@ -497,3 +553,11 @@ class Watcher:
 
     def stop(self) -> None:
         self._stop.set()
+
+    def wakeup(self) -> None:
+        """由外部（例如 checkout 路径）调用，立即退出空闲模式。
+
+        Watcher 在空闲模式下使用较长的轮询间隔。调用此方法可以
+        主动唤醒 Watcher，使其在下一轮立即以正常频率评估补池需求。
+        """
+        self._idle_rounds = 0
