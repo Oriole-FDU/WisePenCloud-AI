@@ -57,6 +57,7 @@ def test_expand_renderer_uses_shared_tool_return_and_keeps_evidence_identity() -
                     "relation_type": "DEPENDS_ON",
                     "predicate": None,
                     "evidence_quotes": ["Alpha depends on Beta."],
+                    "evidence_source_ref_ids": ["source-1"],
                 }
             ],
             "paths": [{"node_ids": ["alpha", "beta"], "edge_ids": ["edge-1"]}],
@@ -65,19 +66,37 @@ def test_expand_renderer_uses_shared_tool_return_and_keeps_evidence_identity() -
     )
 
     edge = result["visible_result"]["edges"][0]
-    assert edge["relation_evidence"] == (
-        "Alpha --DEPENDS_ON--> Beta\nEvidence:\n1. Alpha depends on Beta."
-    )
+    assert edge == {
+        "edge_id": "edge-1",
+        "source_node_id": "alpha",
+        "source_label": "Alpha",
+        "target_node_id": "beta",
+        "target_label": "Beta",
+        "relation_type": "DEPENDS_ON",
+        "predicate": None,
+        "direction": "out",
+        "evidence_quotes": ["Alpha depends on Beta."],
+        "evidence_source_ref_ids": ["source-1"],
+        "evidence_content_indices": [1],
+    }
+    source = result["visible_result"]["sources"][0]
+    assert source["reading_blocks"][0]["reading_block_id"] == "block-1"
+    assert source["evidence"][0]["source_ref_id"] == "source-1"
+    assert source["frontier"] == {"parent": None, "previous": None, "next": None, "children": []}
     assert result["cacheable_texts"][0]["metadata"] == {
+        "resource_id": "resource-1",
+        "section_id": "section-1",
         "reading_block_id": "block-1",
         "section_path": ["Chapter 1"],
         "page_labels": ["1"],
         "anchor_labels": ["Paragraph 1"],
     }
     assert result["cacheable_texts"][1]["metadata"] == {
+        "resource_id": "resource-1",
+        "section_id": "section-1",
         "source_ref_id": "source-1",
         "section_path": ["Chapter 1"],
-        "page_label": "1",
+        "page_labels": ["1"],
         "anchor_labels": ["Paragraph 1"],
     }
 
@@ -100,7 +119,7 @@ def _section_view_payload() -> dict[str, object]:
         "section_id": "section-1",
         "title": "Chapter 1",
         "section_path": ["Chapter 1"],
-        "summary": "Summary",
+        "preview": "Preview",
         "has_content": True,
         "reading_blocks": [
             {
@@ -119,7 +138,7 @@ def _section_view_payload() -> dict[str, object]:
                 "section_id": "section-1",
                 "section_path": ["Chapter 1"],
                 "chunk_id": "chunk-1",
-                "page_label": "1",
+                "page_labels": ["1"],
                 "anchor_labels": ["Paragraph 1"],
             }
         ],

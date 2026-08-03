@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from rag.core.persistence.mongo.rag_content_projection_repository import (
-    _read_source_spans,
+from rag.core.persistence.mongo.content.content_repository import (
+    read_source_spans,
 )
 from rag.domain.entities.rag_content import (
     RagContentPartDocument,
@@ -27,7 +27,7 @@ def test_reads_source_span_across_content_parts() -> None:
         ),
     ]
 
-    content = _read_source_spans(
+    content = read_source_spans(
         documents,
         [RagSourceSpanDocument(start_offset=999_999, end_offset=1_000_002)],
     )

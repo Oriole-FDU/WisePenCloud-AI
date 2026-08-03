@@ -6,7 +6,7 @@ from dataclasses import replace
 from hashlib import sha256
 from typing import TYPE_CHECKING
 
-from rag.application.rag.repositories import RagContextIndexingCache
+from rag.application.rag.repositories import RagContextIndexingRepository
 from rag.utils.xml_markup import xml_cdata
 from .models import RagContentProjection, RagRetrievalChunk, RagSectionReadingBlock
 
@@ -45,14 +45,14 @@ class ContextIndexingService:
     - 当前内容在文档结构中的位置；
     - chunk 与局部上下文之间的关系。
 
-    所有生成结果通过 content_hash + prompt_version 缓存，避免重复调用模型。
+    所有生成结果通过内容和生成契约指纹持久复用，避免重复调用模型。
     """
 
-    __slots__ = ("_cache", "_client")
+    __slots__ = ("_client", "_repository")
 
-    def __init__(self, *, client: QueryClient, cache: RagContextIndexingCache) -> None:
+    def __init__(self, *, client: QueryClient, repository: RagContextIndexingRepository) -> None:
         self._client = client
-        self._cache = cache
+        self._repository = repository
 
     async def contextualize(self, projection: RagContentProjection) -> RagContentProjection:
         if not projection.retrieval_chunks:
@@ -61,18 +61,23 @@ class ContextIndexingService:
         blocks_by_id = {
             block.block_id: block for block in projection.reading_blocks
         }
-        cache_keys = tuple(
-            self._cache_key(chunk, blocks_by_id[chunk.reading_block_id])
+        context_keys = tuple(
+            self._context_key(chunk, blocks_by_id[chunk.reading_block_id])
             for chunk in projection.retrieval_chunks
         )
         chunks_by_key = dict(
-            zip(cache_keys, projection.retrieval_chunks, strict=True)
+            zip(context_keys, projection.retrieval_chunks, strict=True)
         )
 
-        # 批量读取已有缓存，避免重复生成。
+        # 批量读取已有派生结果，避免重复生成。
         contexts = {
             key: value.strip()
-            for key, value in (await self._cache.get_many(tuple(chunks_by_key))).items()
+            for key, value in (
+                await self._repository.get_many(
+                    resource_id=projection.resource_id,
+                    keys=tuple(chunks_by_key),
+                )
+            ).items()
             if value.strip()
         }
         missing = {key: chunk for key, chunk in chunks_by_key.items() if key not in contexts}
@@ -100,8 +105,11 @@ class ContextIndexingService:
                 key, indexing_context = result
                 contexts[key] = indexing_context
 
-            # 只缓存成功结果，失败任务由上层 Kafka 重试。
-            await self._cache.set_many({key: contexts[key] for key in missing if key in contexts})
+            # 只持久化成功结果，失败任务由上层 Kafka 重试。
+            await self._repository.set_many(
+                resource_id=projection.resource_id,
+                values={key: contexts[key] for key in missing if key in contexts},
+            )
 
             if failures:
                 raise failures[0]
@@ -109,28 +117,13 @@ class ContextIndexingService:
         contextualized_chunks = tuple(
             chunk.with_indexing_context(contexts[key])
             for key, chunk in zip(
-                cache_keys,
+                context_keys,
                 projection.retrieval_chunks,
                 strict=True,
             )
         )
-        summaries_by_section: dict[str, list[str]] = {}
-        for key, chunk in zip(cache_keys, projection.retrieval_chunks, strict=True):
-            summaries_by_section.setdefault(chunk.section_id, []).append(contexts[key])
-
         return replace(
             projection,
-            sections=tuple(
-                replace(
-                    section,
-                    summary=" ".join(
-                        dict.fromkeys(summaries_by_section[section.section_id])
-                    )[:500],
-                )
-                if section.section_id in summaries_by_section
-                else section
-                for section in projection.sections
-            ),
             retrieval_chunks=contextualized_chunks,
         )
 
@@ -183,14 +176,14 @@ class ContextIndexingService:
         except Exception as error:
             raise ContextIndexingError(f"context indexing failed for chunk {chunk.chunk_id}") from error
 
-    def _cache_key(
+    def _context_key(
             self,
             chunk: RagRetrievalChunk,
             reading_block: RagSectionReadingBlock,
     ) -> str:
-        """生成上下文缓存键。
+        """生成上下文派生结果复用键。
 
-        缓存依赖：
+        复用依赖：
         - prompt 版本；
         - 模型版本；
         - 推理模式；

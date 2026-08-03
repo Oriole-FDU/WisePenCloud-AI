@@ -61,7 +61,7 @@ class RagSectionDocument(Document):
     parent_section_id: str | None = None
     ordinal: int
     section_path: list[str] = Field(default_factory=list)
-    summary: str
+    preview: str
     own_start: int
     own_end: int
     subtree_end: int
@@ -123,7 +123,7 @@ class RagSourceRefDocument(Document):
     section_id: str
     section_path: list[str] = Field(default_factory=list)
     source_spans: list[RagSourceSpanDocument] = Field(min_length=1)
-    page_label: str | None = None
+    page_labels: list[str] = Field(default_factory=list)
     anchor_labels: list[str] = Field(default_factory=list)
 
     class Settings:
@@ -138,6 +138,38 @@ class RagSourceRefDocument(Document):
                 [("content_revision", ASCENDING), ("section_id", ASCENDING)],
                 name="idx_rag_source_ref_section",
             ),
+        ]
+
+
+class RagContextIndexingDocument(Document):
+    resource_id: str
+    context_key: str
+    indexing_context: str
+
+    class Settings:
+        name = "wisepen_rag_context_indexing"
+        indexes: ClassVar[list[IndexModel]] = [
+            IndexModel(
+                [("resource_id", ASCENDING), ("context_key", ASCENDING)],
+                name="idx_rag_context_indexing_resource_key",
+                unique=True,
+            )
+        ]
+
+
+class RagGraphExtractionDocument(Document):
+    resource_id: str
+    extraction_key: str
+    graph_payload: str
+
+    class Settings:
+        name = "wisepen_rag_graph_extraction"
+        indexes: ClassVar[list[IndexModel]] = [
+            IndexModel(
+                [("resource_id", ASCENDING), ("extraction_key", ASCENDING)],
+                name="idx_rag_graph_extraction_resource_key",
+                unique=True,
+            )
         ]
 
 

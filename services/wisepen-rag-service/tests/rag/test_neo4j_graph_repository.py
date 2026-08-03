@@ -26,7 +26,6 @@ from rag.application.rag.knowledge_navigation import (
     KnowledgeNavigationDirection,
 )
 from rag.application.rag.retrieval import (
-    RagPermissionFilterBuilder,
     RagPermissionScope,
 )
 from rag.application.rag.repositories import KnowledgeGraphProjectionSupersededError
@@ -80,7 +79,6 @@ async def test_repository_writes_acl_evidence_and_switches_revision_last() -> No
         driver=driver,
         database="neo4j",
         permission_authorizer=_PermissionAuthorizer(),
-        permission_filter_builder=RagPermissionFilterBuilder(),
     )
     projection = _projection()
     acl = _acl()
@@ -157,7 +155,6 @@ async def test_repository_initializes_schema_and_checks_applied_revision() -> No
         driver=driver,
         database="knowledge",
         permission_authorizer=_PermissionAuthorizer(),
-        permission_filter_builder=RagPermissionFilterBuilder(),
     )
 
     await repository.initialize()
@@ -263,7 +260,6 @@ async def test_expand_drops_path_rejected_by_local_acl_gate() -> None:
         driver=driver,
         database="neo4j",
         permission_authorizer=_PermissionAuthorizer(("resource-1",)),
-        permission_filter_builder=RagPermissionFilterBuilder(),
     )
 
     result = await repository.expand(
@@ -281,7 +277,6 @@ def _repository(driver: _Driver) -> Neo4jKnowledgeGraphRepository:
         driver=driver,
         database="neo4j",
         permission_authorizer=_PermissionAuthorizer(),
-        permission_filter_builder=RagPermissionFilterBuilder(),
     )
 
 

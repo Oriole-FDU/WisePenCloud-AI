@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from rag.application.rag.acl import RagPermissionAuthorizer
 from rag.application.rag.repositories import (
     RagCandidateRepository,
-    RagContentProjectionRepository,
+    RagContentCheckpointRepository,
 )
 from common.utils.ranking import (
     RankCandidate,
@@ -28,9 +28,9 @@ class RagCandidateRetriever:
 
     __slots__ = (
         "_candidate_repository",
+        "_checkpoint_repository",
         "_embedding_client",
         "_permission_authorizer",
-        "_projection_repository",
         "_ranking_pipeline",
     )
 
@@ -39,13 +39,13 @@ class RagCandidateRetriever:
             *,
             embedding_client: EmbeddingClient,
             candidate_repository: RagCandidateRepository,
-            projection_repository: RagContentProjectionRepository,
+            checkpoint_repository: RagContentCheckpointRepository,
             permission_authorizer: RagPermissionAuthorizer,
             ranking_pipeline: RankingPipeline,
     ) -> None:
         self._embedding_client = embedding_client
         self._candidate_repository = candidate_repository
-        self._projection_repository = projection_repository
+        self._checkpoint_repository = checkpoint_repository
         self._permission_authorizer = permission_authorizer
         self._ranking_pipeline = ranking_pipeline
 
@@ -81,7 +81,7 @@ class RagCandidateRetriever:
 
         # 版本过滤：只接受当前已经成功投影完成的内容版本，
         # 防止召回到旧 chunk（已被 delete_other_revisions 清理）或尚未应用的新版本。
-        applied_revisions = await self._projection_repository.get_applied_revisions(
+        applied_revisions = await self._checkpoint_repository.get_applied_revisions(
             [candidate.resource_id for candidate in candidates]
         )
         candidates = tuple(

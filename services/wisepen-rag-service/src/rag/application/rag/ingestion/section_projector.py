@@ -4,19 +4,21 @@ from dataclasses import replace
 from hashlib import sha256
 
 from common.utils.chunkers import (
+    BlockKind,
     ChunkDocument,
     LocatorKind,
     MarkdownChunker,
     SourceSpan,
+    TextBlock,
 )
 from .models import (
     RagContentProjection,
     RagDocumentContent,
     RagRetrievalChunk,
+    RagSectionNode,
     RagSectionReadingBlock,
     RagSourceRef,
 )
-from .section_tree import build_section_tree
 
 
 # 标题树 → Section ReadingBlock → 检索子块 的投影流水线。
@@ -52,14 +54,17 @@ class RagSectionProjector:
                 content_type="text/markdown",
             )
         )
+        content_starts_by_section_start = _section_content_starts(structure.blocks)
         sections = tuple(
             replace(
                 section,
-                summary=" ".join(
-                    content.markdown[section.own_start: section.own_end].split()
-                )[:500],
+                preview=_section_preview(
+                    content.markdown,
+                    section,
+                    content_starts_by_section_start,
+                ),
             )
-            for section in build_section_tree(
+            for section in _build_sections(
                 structure.blocks,
                 resource_id=content.resource_id,
                 document_version=content.document_version,
@@ -156,7 +161,7 @@ class RagSectionProjector:
                         content.markdown[span.start_offset: span.end_offset] for span in source_spans
                     )
                     child_index_text = (
-                        f"Section: {' > '.join(section.section_path)}\nSection summary: {section.summary}\n\n{child_raw_text}"
+                        f"Section: {' > '.join(section.section_path)}\nSection preview: {section.preview}\n\n{child_raw_text}"
                         if section.section_path
                         else child_raw_text
                     )
@@ -206,7 +211,7 @@ class RagSectionProjector:
                             section_id=section.section_id,
                             section_path=section.section_path,
                             source_spans=retrieval_chunk.source_spans,
-                            page_label=retrieval_chunk.page_labels[0] if retrieval_chunk.page_labels else None,
+                            page_labels=retrieval_chunk.page_labels,
                             anchor_labels=retrieval_chunk.anchor_labels,
                         )
                     )
@@ -244,6 +249,125 @@ def _render_source(
         source_map.append((cursor, cursor + len(fragment), span.start_offset))
         cursor += len(fragment)
     return "\n\n".join(fragments), tuple(source_map)
+
+
+def _build_sections(
+        blocks: tuple[TextBlock, ...],
+        *,
+        resource_id: str,
+        document_version: int,
+        text_length: int,
+) -> tuple[RagSectionNode, ...]:
+    """根据文档标题块构建层级化 Section 树。
+
+    Section 使用标题作为边界：
+    - own_start / own_end 表示当前标题直属覆盖范围；
+    - subtree_end 表示整个子树覆盖范围，会在遇到同级或更高层标题时闭合。
+    """
+    headings = tuple(block for block in blocks if block.block_kind is BlockKind.HEADING)
+
+    # 文档开头到第一个标题之间的内容属于 root section。
+    first_heading_start = headings[0].start_offset if headings else text_length
+    assert first_heading_start is not None
+
+    # root 节点不参与前缀式 ID 生成，但需要为顶层标题提供一个公共父节点和统一 subtree_end。
+    root = RagSectionNode(
+        section_id=_section_id(resource_id, document_version, "root"),
+        resource_id=resource_id,
+        document_version=document_version,
+        title="",
+        level=0,
+        parent_section_id=None,
+        ordinal=0,
+        section_path=(),
+        preview="",
+        own_start=0,
+        own_end=first_heading_start,
+        subtree_end=text_length,
+    )
+
+    sections = [root]
+    # open_sections 保存当前仍未闭合的标题链，栈顶即当前父级 Section 的索引。
+    open_sections: list[int] = []
+    # 记录每个父节点下已创建的子节点数，用于稳定排序。
+    child_counts: dict[str, int] = {}
+
+    for heading_index, heading in enumerate(headings):
+        assert heading.start_offset is not None
+        level = int(heading.metadata["heading_level"])
+
+        # 遇到同级或更高层标题时，原节点的 subtree_end 收敛到该标题开始处。
+        while open_sections and sections[open_sections[-1]].level >= level:
+            closed_index = open_sections.pop()
+            sections[closed_index] = replace(
+                sections[closed_index],
+                subtree_end=heading.start_offset,
+            )
+
+        parent = sections[open_sections[-1]] if open_sections else root
+        ordinal = child_counts.get(parent.section_id, 0)
+        child_counts[parent.section_id] = ordinal + 1
+
+        # own 范围从当前标题开始，到下一个标题开始（不区分层级）为止。
+        next_heading_start = (
+            headings[heading_index + 1].start_offset
+            if heading_index + 1 < len(headings)
+            else text_length
+        )
+        assert next_heading_start is not None
+
+        section = RagSectionNode(
+            section_id=_section_id(
+                resource_id,
+                document_version,
+                str(heading.start_offset),
+            ),
+            resource_id=resource_id,
+            document_version=document_version,
+            title=str(heading.metadata["title"]),
+            level=level,
+            parent_section_id=parent.section_id,
+            ordinal=ordinal,
+            section_path=heading.section_path,
+            preview="",
+            own_start=heading.start_offset,
+            own_end=next_heading_start,
+            subtree_end=text_length,
+        )
+        sections.append(section)
+        open_sections.append(len(sections) - 1)
+
+    return tuple(sections)
+
+
+def _section_id(resource_id: str, document_version: int, source_key: str) -> str:
+    """根据资源版本和标题位置生成稳定 Section ID。"""
+    value = "\0".join((resource_id, str(document_version), "section", source_key))
+    digest = sha256(value.encode("utf-8")).hexdigest()
+    return f"rsec_{digest[:32]}"
+
+
+def _section_content_starts(
+        blocks: tuple[TextBlock, ...],
+) -> dict[int, int]:
+    content_starts: dict[int, int] = {}
+    for block in blocks:
+        if block.block_kind is not BlockKind.HEADING:
+            continue
+        assert block.start_offset is not None
+        assert block.end_offset is not None
+        content_starts[block.start_offset] = block.end_offset
+    return content_starts
+
+
+def _section_preview(
+        markdown: str,
+        section: RagSectionNode,
+        content_starts_by_section_start: dict[int, int],
+) -> str:
+    # 标题本身已有 title/section_path 承载，preview 只暴露当前 Section 的直属正文。
+    start_offset = content_starts_by_section_start.get(section.own_start, section.own_start)
+    return " ".join(markdown[start_offset: section.own_end].split())[:500]
 
 
 def _reading_block_id(

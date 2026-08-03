@@ -33,6 +33,10 @@ class MongoRagAclProjectionRepository:
         self._resource_database_name = resource_database_name
 
     async def get_projection(self, resource_id: str) -> RagResourceAclProjection | None:
+        """读取 RAG 侧已经落库的 ACL 快照
+        核心用途：在鉴权链路中 RagPermissionAuthorizer.accessible_resource_ids() 
+        会调用它批量拿候选资源 ACL，然后逐个判断当前用户是否可读
+        """
         document = await RagAclProjectionDocument.find_one(
             RagAclProjectionDocument.resource_id == resource_id
         )
@@ -44,6 +48,9 @@ class MongoRagAclProjectionRepository:
         self,
         resource_ids: Sequence[str],
     ) -> dict[str, RagResourceAclProjection]:
+        """从上游权威 Resource 数据实时读取并转换成 RAG ACL 投影
+        核心用途：本地缺失或受到 ACL 重算事件时，需要从权威数据源刷新 ACL 投影
+        """
         unique_resource_ids = tuple(dict.fromkeys(resource_ids))
         if not unique_resource_ids:
             return {}

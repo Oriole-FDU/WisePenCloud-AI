@@ -12,11 +12,13 @@ from .common import section_view_payload, session_id
 
 _DESCRIPTION = (
     "Description:\n"
-    "Locate evidence and concepts in the user's private WisePen documents. Use this "
-    "as the first private-knowledge navigation call.\n\n"
+    "Call first when the answer may be in the user's private WisePen documents. "
+    "It returns grounded sections plus graph node anchors for follow-up navigation.\n\n"
     "Output:\n"
-    "Sources contain grounded evidence; use content_index to access exact text. Nodes "
-    "are navigation anchors, not evidence. Reuse state_id with expand or sections."
+    "Use sources[].evidence and sources[].reading_blocks previews to decide what "
+    "to read. Each content_index points to an exact cached text entry. Reuse "
+    "state_id with knowledge_navigate_sections for section text, or with "
+    "knowledge_navigate_expand for returned node_id values. Nodes are anchors, not evidence."
 )
 
 _QUERY = Annotated[

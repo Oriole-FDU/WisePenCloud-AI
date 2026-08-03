@@ -13,7 +13,7 @@ from rag.application.rag.acl import (
 from rag.application.rag.kafka_consumers import (
     RagAclRecalculateConsumer,
 )
-from rag.core.persistence.mongo.rag_acl_projection_repository import (
+from rag.core.persistence.mongo.acl import (
     MongoRagAclProjectionRepository,
 )
 from rag.domain.entities.rag_acl import RagAclProjectionDocument

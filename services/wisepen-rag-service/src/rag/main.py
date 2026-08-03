@@ -26,7 +26,9 @@ from rag.core.config.nacos import nacos_client_manager
 from rag.domain.entities import (
     RagAclProjectionDocument,
     RagContentPartDocument,
+    RagContextIndexingDocument,
     RagContentRevisionDocument,
+    RagGraphExtractionDocument,
     RagProjectionCheckpointDocument,
     RagSectionDocument,
     RagSectionReadingBlockDocument,
@@ -64,6 +66,8 @@ async def lifespan(app: FastAPI):
             RagAclProjectionDocument,
             RagContentRevisionDocument,
             RagContentPartDocument,
+            RagContextIndexingDocument,
+            RagGraphExtractionDocument,
             RagSectionReadingBlockDocument,
             RagProjectionCheckpointDocument,
             RagSectionDocument,

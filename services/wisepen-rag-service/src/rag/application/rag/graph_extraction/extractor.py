@@ -16,8 +16,8 @@ from neo4j_graphrag.experimental.components.schema import (
 from neo4j_graphrag.experimental.components.types import Neo4jGraph, TextChunk, TextChunks
 from neo4j_graphrag.llm.base import LLMInterfaceV2
 
-from rag.application.rag.repositories import KnowledgeGraphExtractionCache
-from .cache_codec import decode_cached_graph, encode_cached_graph, slice_window_graph
+from rag.application.rag.repositories import KnowledgeGraphExtractionRepository
+from .derived_payload_codec import decode_derived_graph, encode_derived_graph, slice_window_graph
 from .models import (
     KnowledgeEntityType,
     KnowledgeExtractionWindow,
@@ -30,19 +30,9 @@ from .relations import relation_descriptions, relation_pattern_allowed
 from .result_mapper import KnowledgeGraphResultMapper
 from .windows import render_extraction_window
 
-_REQUIRES_EXTRACTION_EXAMPLE = """
-Input: Transformer requires positional encoding to represent token order.
-Output: create Entity nodes for Transformer and positional encoding, then a REQUIRES relation with the exact sentence as evidence_quote.
-"""
-
-_NEGATIVE_EXTRACTION_EXAMPLE = """
-Input: The note discusses Alpha and Beta, but states no relationship between them.
-Output: do not create a relation.
-"""
-
-# Schema、抽取示例和 SDK 版本会自动进入缓存契约。
+# Schema 和 SDK 版本会自动进入复用契约。
 # 若其他规则改变 SDK 原始候选图却未反映在这些输入中，必须升级该版本；
-# Mapper 的纯后处理变化不需要升级，因为缓存命中后仍会重新执行 Mapper。
+# Mapper 的纯后处理变化不需要升级，因为派生结果命中后仍会重新执行 Mapper。
 _EXTRACTION_CACHE_VERSION = "knowledge_graph_extraction:v1"
 
 
@@ -51,11 +41,10 @@ class KnowledgeGraphExtractor:
 
     __slots__ = (
         "_active_relations",
-        "_cache",
-        "_cache_contract_hash",
-        "_cache_profile",
-        "_examples",
         "_extractor",
+        "_repository",
+        "_reuse_contract_hash",
+        "_reuse_profile",
         "_result_mapper",
         "_schema",
     )
@@ -64,14 +53,14 @@ class KnowledgeGraphExtractor:
             self,
             *,
             llm: LLMInterfaceV2,
-            cache: KnowledgeGraphExtractionCache | None = None,
-            cache_profile: str = "",
+            repository: KnowledgeGraphExtractionRepository | None = None,
+            reuse_profile: str = "",
             profiles: frozenset[KnowledgeRelationProfile] | None = None,
             max_concurrency: int = 5,
     ) -> None:
-        cache_profile = cache_profile.strip()
-        if cache is not None and not cache_profile:
-            raise ValueError("cache_profile is required when extraction cache is enabled")
+        reuse_profile = reuse_profile.strip()
+        if repository is not None and not reuse_profile:
+            raise ValueError("reuse_profile is required when extraction repository is enabled")
 
         if profiles is None:
             profiles = frozenset(
@@ -83,24 +72,20 @@ class KnowledgeGraphExtractor:
             )
 
         self._schema = _build_schema(profiles)
-        self._cache = cache
-        self._cache_profile = cache_profile
+        self._repository = repository
+        self._reuse_profile = reuse_profile
 
         # 实际启用关系以最终生成的 GraphSchema 为准，避免 Mapper 与 SDK 使用的关系集合发生偏差。
         self._active_relations = frozenset(
             KnowledgeRelationType(relationship.label) for relationship in self._schema.relationship_types
         )
         self._result_mapper = KnowledgeGraphResultMapper(self._active_relations)
-        self._examples = _NEGATIVE_EXTRACTION_EXAMPLE
-        if KnowledgeRelationType.REQUIRES in self._active_relations:
-            self._examples = _REQUIRES_EXTRACTION_EXAMPLE + "\n" + _NEGATIVE_EXTRACTION_EXAMPLE
-        self._cache_contract_hash = sha256(
+        self._reuse_contract_hash = sha256(
             "\0".join(
                 (
                     _EXTRACTION_CACHE_VERSION,
                     neo4j_graphrag_version,
                     self._schema.model_dump_json(exclude_none=True),
-                    self._examples,
                 )
             ).encode("utf-8")
         ).hexdigest()
@@ -120,22 +105,22 @@ class KnowledgeGraphExtractor:
         if not windows:
             return ()
 
-        # 未配置缓存时，直接批量执行 SDK 抽取。
-        if self._cache is None:
+        # 未配置持久复用仓储时，直接批量执行 SDK 抽取。
+        if self._repository is None:
             graph = await self._run_extractor(windows)
             return tuple(self._result_mapper.map(graph, window) for window in windows)
 
-        cache_keys = tuple(self._cache_key(window) for window in windows)
-        cached_payloads = await self._cache.get_many(cache_keys)
+        extraction_keys = tuple(self._extraction_key(window) for window in windows)
+        stored_payloads = await self._repository.get_many(extraction_keys)
 
-        # 使用输入下标保存结果，确保缓存命中与重新抽取混合时，最终结果仍严格对应原始 windows 顺序。
+        # 使用输入下标保存结果，确保复用命中与重新抽取混合时，最终结果仍严格对应原始 windows 顺序。
         results: dict[int, KnowledgeWindowExtraction] = {}
         missing: list[tuple[int, str, KnowledgeExtractionWindow]] = []
 
-        for index, (cache_key, window) in enumerate(zip(cache_keys, windows, strict=True)):
-            graph = decode_cached_graph(cached_payloads.get(cache_key), window.chunk_id)
+        for index, (extraction_key, window) in enumerate(zip(extraction_keys, windows, strict=True)):
+            graph = decode_derived_graph(stored_payloads.get(extraction_key), window.chunk_id)
             if graph is None:
-                missing.append((index, cache_key, window))
+                missing.append((index, extraction_key, window))
                 continue
 
             results[index] = self._result_mapper.map(graph, window)
@@ -143,15 +128,22 @@ class KnowledgeGraphExtractor:
         if missing:
             missing_windows = tuple(item[2] for item in missing)
             graph = await self._run_extractor(missing_windows)
-            cache_values = {}
+            cache_values_by_resource: dict[str, dict[str, str]] = {}
 
-            for index, cache_key, window in missing:
-                # SDK 返回的是多个窗口组成的聚合图。映射和缓存前先切出当前窗口所属的候选子图。
+            for index, extraction_key, window in missing:
+                # SDK 返回的是多个窗口组成的聚合图。映射和持久化前先切出当前窗口所属的候选子图。
                 window_graph = slice_window_graph(graph, window.chunk_id)
                 results[index] = self._result_mapper.map(window_graph, window)
-                cache_values[cache_key] = encode_cached_graph(window_graph, window.chunk_id)
+                cache_values_by_resource.setdefault(window.resource_id, {})[extraction_key] = encode_derived_graph(
+                    window_graph,
+                    window.chunk_id,
+                )
 
-            await self._cache.set_many(cache_values)
+            for resource_id, cache_values in cache_values_by_resource.items():
+                await self._repository.set_many(
+                    resource_id=resource_id,
+                    values=cache_values,
+                )
 
         return tuple(results[index] for index in range(len(windows)))
 
@@ -173,13 +165,12 @@ class KnowledgeGraphExtractor:
                 ]
             ),
             schema=self._schema,
-            examples=self._examples,
         )
 
-    def _cache_key(self, window: KnowledgeExtractionWindow) -> str:
-        """为影响候选图抽取结果的输入生成稳定缓存键。"""
+    def _extraction_key(self, window: KnowledgeExtractionWindow) -> str:
+        """为影响候选图抽取结果的输入生成稳定复用键。"""
         value = "\0".join(
-            (self._cache_contract_hash, self._cache_profile, render_extraction_window(window))
+            (self._reuse_contract_hash, self._reuse_profile, render_extraction_window(window))
         )
         return sha256(value.encode("utf-8")).hexdigest()
 

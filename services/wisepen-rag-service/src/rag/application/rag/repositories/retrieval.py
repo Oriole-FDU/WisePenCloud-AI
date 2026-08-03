@@ -46,15 +46,25 @@ class RagVectorIndexRepository(Protocol):
         ...
 
 
-class RagContextIndexingCache(Protocol):
-    """chunk 上下文补全结果的 KV 缓存接口（key -> rendered context 字符串）。"""
+class RagContextIndexingRepository(Protocol):
+    """chunk 上下文补全结果的资源内持久派生文本仓储。"""
 
-    async def get_many(self, keys: Sequence[str]) -> Mapping[str, str]:
-        """批量读取缓存项；未命中条目不会出现在返回结果中。"""
+    async def get_many(
+            self,
+            *,
+            resource_id: str,
+            keys: Sequence[str],
+    ) -> Mapping[str, str]:
+        """批量读取派生项；未命中条目不会出现在返回结果中。"""
         ...
 
-    async def set_many(self, values: Mapping[str, str]) -> None:
-        """批量写入缓存项；调用方应保证幂等。"""
+    async def set_many(
+            self,
+            *,
+            resource_id: str,
+            values: Mapping[str, str],
+    ) -> None:
+        """批量写入派生项；调用方应保证幂等。"""
         ...
 
 

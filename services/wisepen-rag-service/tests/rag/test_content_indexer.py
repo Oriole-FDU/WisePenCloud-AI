@@ -159,6 +159,7 @@ async def test_content_indexer_applies_only_after_vector_write() -> None:
     indexer = RagContentIndexer(
         projector=RagSectionProjector(),
         projection_repository=projection_repository,
+        checkpoint_repository=projection_repository,
         vector_repository=vector_repository,
         acl_repository=FakeAclRepository(local=_acl()),
         embedding_client=FakeEmbeddingClient([[0.1, 0.2]]),
@@ -184,6 +185,7 @@ async def test_content_indexer_refreshes_missing_acl_from_authoritative_resource
     indexer = RagContentIndexer(
         projector=RagSectionProjector(),
         projection_repository=FakeProjectionRepository(),
+        checkpoint_repository=FakeProjectionRepository(),
         vector_repository=FakeVectorRepository(),
         acl_repository=acl_repository,
         embedding_client=FakeEmbeddingClient([[0.1, 0.2]]),
@@ -201,6 +203,7 @@ async def test_content_indexer_does_not_apply_without_acl() -> None:
     indexer = RagContentIndexer(
         projector=RagSectionProjector(),
         projection_repository=projection_repository,
+        checkpoint_repository=projection_repository,
         vector_repository=FakeVectorRepository(),
         acl_repository=FakeAclRepository(),
         embedding_client=FakeEmbeddingClient([[0.1, 0.2]]),
@@ -219,6 +222,7 @@ async def test_content_indexer_does_not_apply_after_vector_failure() -> None:
     indexer = RagContentIndexer(
         projector=RagSectionProjector(),
         projection_repository=projection_repository,
+        checkpoint_repository=projection_repository,
         vector_repository=FakeVectorRepository(fail_upsert=True),
         acl_repository=FakeAclRepository(local=_acl()),
         embedding_client=FakeEmbeddingClient([[0.1, 0.2]]),
@@ -237,6 +241,7 @@ async def test_content_indexer_rejects_incomplete_embedding_response() -> None:
     indexer = RagContentIndexer(
         projector=RagSectionProjector(),
         projection_repository=projection_repository,
+        checkpoint_repository=projection_repository,
         vector_repository=FakeVectorRepository(),
         acl_repository=FakeAclRepository(local=_acl()),
         embedding_client=FakeEmbeddingClient([]),
@@ -258,6 +263,7 @@ async def test_content_indexer_only_embeds_missing_chunks() -> None:
     indexer = RagContentIndexer(
         projector=projector,
         projection_repository=FakeProjectionRepository(),
+        checkpoint_repository=FakeProjectionRepository(),
         vector_repository=FakeVectorRepository(reusable_vectors=reusable),
         acl_repository=FakeAclRepository(local=_acl()),
         embedding_client=embedding_client,
@@ -286,6 +292,7 @@ async def test_already_applied_retry_only_cleans_old_revisions() -> None:
     indexer = RagContentIndexer(
         projector=RagSectionProjector(),
         projection_repository=projection_repository,
+        checkpoint_repository=projection_repository,
         vector_repository=vector_repository,
         acl_repository=FakeAclRepository(local=_acl()),
         embedding_client=embedding_client,
@@ -307,6 +314,7 @@ async def test_context_indexing_failure_does_not_stage_projection() -> None:
     indexer = RagContentIndexer(
         projector=RagSectionProjector(),
         projection_repository=projection_repository,
+        checkpoint_repository=projection_repository,
         vector_repository=FakeVectorRepository(),
         acl_repository=FakeAclRepository(local=_acl()),
         embedding_client=FakeEmbeddingClient([[0.1, 0.2]]),

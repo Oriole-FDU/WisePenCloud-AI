@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from rag.application.rag.acl import RagResourceAclProjection
 from rag.application.rag.repositories import (
     RagAclProjectionRepository,
+    RagContentCheckpointRepository,
     RagContentProjectionRepository,
     RagVectorIndexRepository,
 )
@@ -38,6 +39,7 @@ class RagContentIndexer:
 
     __slots__ = (
         "_acl_repository",
+        "_checkpoint_repository",
         "_context_indexing",
         "_embedding_client",
         "_projection_repository",
@@ -50,6 +52,7 @@ class RagContentIndexer:
             *,
             projector: RagSectionProjector,
             projection_repository: RagContentProjectionRepository,
+            checkpoint_repository: RagContentCheckpointRepository,
             vector_repository: RagVectorIndexRepository,
             acl_repository: RagAclProjectionRepository,
             embedding_client: EmbeddingClient,
@@ -57,6 +60,7 @@ class RagContentIndexer:
     ) -> None:
         self._projector = projector
         self._projection_repository = projection_repository
+        self._checkpoint_repository = checkpoint_repository
         self._vector_repository = vector_repository
         self._acl_repository = acl_repository
         self._embedding_client = embedding_client
@@ -67,7 +71,7 @@ class RagContentIndexer:
         projection = self._projector.project(content)
 
         # 先在本地投影结果上做一次轻量预检，尽早跳过旧消息和已应用消息。
-        checkpoint = await self._projection_repository.get_checkpoint(projection.resource_id)
+        checkpoint = await self._checkpoint_repository.get_checkpoint(projection.resource_id)
         preflight_stage = prepare_projection_stage(projection, checkpoint)
 
         if preflight_stage.action is RagProjectionStageAction.STALE:
@@ -147,7 +151,7 @@ class RagContentIndexer:
         if acl_projection is not None:
             return acl_projection
 
-        # 本地缺失时回源加载，并补写本地 ACL 投影，避免下次再走权威源。
+        # 本地缺失时从权威源加载作为兜底手段，并补写本地 ACL 投影，避免下次再走权威源。
         acl_projection = await self._acl_repository.load_authoritative_projection(projection.resource_id)
         if acl_projection is None:
             raise RagContentIndexingError(f"resource ACL is unavailable for {projection.resource_id}")

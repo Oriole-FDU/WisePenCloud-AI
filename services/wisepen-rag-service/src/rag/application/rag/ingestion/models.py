@@ -5,6 +5,19 @@ from dataclasses import dataclass, replace
 from common.utils.chunkers import SourceSpan
 
 
+# SectionNode：标题树节点。对应“文档里的一个章节/小节”，有 section_path、父子关系、own_start/own_end/subtree_end。
+# SectionReadingBlock：Section 内的阅读块。解决“一个 Section 太长，不能一次全塞给模型”的问题；
+# RetrievalChunk：检索块。用于 embedding / BM25 / rerank，通常比 ReadingBlock 更小；命中后会提升回 ReadingBlock/Section。
+# SourceRef：证据指针。它不是正文块，而是“这个 RetrievalChunk 对应 Kafka Markdown 哪些 source spans”的稳定引用
+
+# Kafka Markdown
+#  -> parser TextBlock  临时解析块
+#  -> SectionNode       标题结构
+#  -> ReadingBlock      模型阅读窗口
+#  -> RetrievalChunk    检索/向量粒度
+#  -> SourceRef         精确回源指针
+
+
 @dataclass(frozen=True, slots=True)
 class RagDocumentContent:
     """Kafka 投递的原始文档事件载荷。"""
@@ -26,7 +39,7 @@ class RagSectionNode:
     parent_section_id: str | None  # 父 section ID；顶级为 None。
     ordinal: int  # 同级 section 中的顺序，从 0 开始。
     section_path: tuple[str, ...]  # 从根到当前 section 的标题链路。
-    summary: str  # 用于标题树检索和展开的简短内容描述。
+    preview: str  # 用于标题树导航的原文正文预览。
     own_start: int  # 当前 section 自身内容在 Markdown 中的起始 offset。
     own_end: int  # 当前 section 自身内容在 Markdown 中的结束 offset。
     subtree_end: int  # 含所有子 section 在内的结束 offset。
@@ -36,7 +49,7 @@ class RagSectionNode:
             "section_id": self.section_id,
             "title": self.title,
             "section_path": list(self.section_path),
-            "summary": self.summary,
+            "preview": self.preview,
             "has_content": self.own_end > self.own_start,
         }
 
@@ -87,7 +100,7 @@ class RagSourceRef:
     section_id: str  # 主 source 所在 section ID。
     section_path: tuple[str, ...]  # 主 source 所在 section 路径。
     source_spans: tuple[SourceSpan, ...]  # 该 SourceRef 覆盖的 Markdown 区间集合。
-    page_label: str | None = None  # 主 source 所在原文页码。
+    page_labels: tuple[str, ...] = ()  # 该 SourceRef 覆盖到的原文页码标签。
     anchor_labels: tuple[str, ...] = ()  # 主 source 涉及到的文档锚点。
 
 

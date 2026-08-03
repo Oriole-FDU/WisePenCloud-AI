@@ -12,11 +12,12 @@ from .common import StateId, section_view_payload, session_id
 
 _DESCRIPTION = (
     "Description:\n"
-    "Read selected private-document sections and reveal parent, previous, next, and "
-    "child navigation choices.\n\n"
+    "Read full text for section_id values already returned by locate, expand, or "
+    "a frontier entry. Use this when a section preview is relevant but incomplete.\n\n"
     "Output:\n"
-    "Use reading blocks and evidence as document context. Frontier entries indicate "
-    "where to continue reading and do not themselves prove semantic relations."
+    "reading_blocks contain the section text via content_index. evidence contains "
+    "the original hit snippets. frontier suggests adjacent or child sections to read next; "
+    "frontier entries are navigation choices, not evidence."
 )
 
 _SECTION_IDS = Annotated[

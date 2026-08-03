@@ -130,6 +130,7 @@ def _expand_payload(result: KnowledgeNavigationExpandResult) -> dict[str, Any]:
                 "relation_type": edge.relation_type.value,
                 "predicate": edge.predicate,
                 "evidence_quotes": list(edge.evidence_quotes),
+                "evidence_source_ref_ids": list(edge.evidence_source_ref_ids),
             }
             for edge in result.edges
         ],
@@ -185,6 +186,6 @@ def _source_payload(source: RagMaterializedSource) -> dict[str, Any]:
         "section_id": source_ref.section_id,
         "section_path": list(source_ref.section_path),
         "chunk_id": source_ref.chunk_id,
-        "page_label": source_ref.page_label,
+        "page_labels": list(source_ref.page_labels),
         "anchor_labels": list(source_ref.anchor_labels),
     }

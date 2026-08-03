@@ -58,7 +58,7 @@ def _section(
         parent_section_id=parent_section_id,
         ordinal=ordinal,
         section_path=(title,),
-        summary=f"{title} summary",
+        preview=f"{title} preview",
         own_start=ordinal * 10,
         own_end=ordinal * 10 + 10,
         subtree_end=ordinal * 10 + 10,

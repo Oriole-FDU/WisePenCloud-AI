@@ -1,7 +1,12 @@
 from .mongo import (
+    MongoKnowledgeGraphExtractionRepository,
     MongoRagAclProjectionRepository,
-    MongoRagContentProjectionRepository,
-    RagProjectionCommitError,
+    MongoRagContentCheckpointRepository,
+    MongoRagContextIndexingRepository,
+    MongoRagContentProjectionWriter,
+    MongoRagExtractionSourceRepository,
+    MongoRagSectionNavigationRepository,
+    MongoRagSourceRepository,
 )
 from .neo4j import Neo4jKnowledgeGraphRepository
 from .qdrant import (
@@ -9,21 +14,20 @@ from .qdrant import (
     QdrantRagVectorIndexRepository,
     RagVectorIndexError,
 )
-from .redis import (
-    RedisKnowledgeGraphExtractionCache,
-    RedisKnowledgeNavigationStateRepository,
-    RedisRagContextIndexingCache,
-)
+from .redis import RedisKnowledgeNavigationStateRepository
 
 __all__ = [
+    "MongoKnowledgeGraphExtractionRepository",
     "MongoRagAclProjectionRepository",
-    "MongoRagContentProjectionRepository",
+    "MongoRagContentCheckpointRepository",
+    "MongoRagContextIndexingRepository",
+    "MongoRagContentProjectionWriter",
+    "MongoRagExtractionSourceRepository",
+    "MongoRagSectionNavigationRepository",
+    "MongoRagSourceRepository",
     "Neo4jKnowledgeGraphRepository",
     "QdrantRagCandidateRepository",
     "QdrantRagVectorIndexRepository",
-    "RagProjectionCommitError",
     "RagVectorIndexError",
-    "RedisKnowledgeGraphExtractionCache",
     "RedisKnowledgeNavigationStateRepository",
-    "RedisRagContextIndexingCache",
 ]

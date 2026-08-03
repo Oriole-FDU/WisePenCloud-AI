@@ -28,15 +28,32 @@ class FakeQueryClient:
         return SimpleNamespace(content=self.responses.pop(0))
 
 
-class MemoryContextIndexingCache:
+class MemoryContextIndexingRepository:
     def __init__(self) -> None:
-        self.values: dict[str, str] = {}
+        self.values: dict[tuple[str, str], str] = {}
 
-    async def get_many(self, keys: Sequence[str]) -> Mapping[str, str]:
-        return {key: self.values[key] for key in keys if key in self.values}
+    async def get_many(
+            self,
+            *,
+            resource_id: str,
+            keys: Sequence[str],
+    ) -> Mapping[str, str]:
+        return {
+            key: self.values[(resource_id, key)]
+            for key in keys
+            if (resource_id, key) in self.values
+        }
 
-    async def set_many(self, values: Mapping[str, str]) -> None:
-        self.values.update(values)
+    async def set_many(
+            self,
+            *,
+            resource_id: str,
+            values: Mapping[str, str],
+    ) -> None:
+        self.values.update(
+            ((resource_id, key), value)
+            for key, value in values.items()
+        )
 
 
 def _projection() -> RagContentProjection:
@@ -50,12 +67,12 @@ def _projection() -> RagContentProjection:
 
 
 @pytest.mark.asyncio
-async def test_context_indexing_enriches_index_text_and_reuses_cache() -> None:
+async def test_context_indexing_enriches_index_text_and_reuses_repository() -> None:
     client = FakeQueryClient(
         ['{"indexing_context":"该片段解释反向传播中的梯度传递。"}']
     )
-    cache = MemoryContextIndexingCache()
-    service = ContextIndexingService(client=client, cache=cache)
+    repository = MemoryContextIndexingRepository()
+    service = ContextIndexingService(client=client, repository=repository)
     projection = _projection()
 
     first = await service.contextualize(projection)
@@ -66,9 +83,10 @@ async def test_context_indexing_enriches_index_text_and_reuses_cache() -> None:
         "Context: 该片段解释反向传播中的梯度传递。"
     )
     assert second.retrieval_chunks == first.retrieval_chunks
-    assert first.sections[1].summary == "该片段解释反向传播中的梯度传递。"
+    assert first.sections[1].preview == "梯度沿计算图从输出层传回输入层。"
+    assert second.sections == first.sections
     assert len(client.prompts) == 1
-    assert len(cache.values) == 1
+    assert len(repository.values) == 1
     prompt = client.prompts[0]
     assert "<section_path>" in prompt
     assert "<section_reading_block>" in prompt
@@ -81,8 +99,8 @@ async def test_context_indexing_enriches_index_text_and_reuses_cache() -> None:
 @pytest.mark.asyncio
 async def test_context_indexing_rejects_invalid_llm_output() -> None:
     service = ContextIndexingService(
-        client=FakeQueryClient(['{"summary":"missing field"}']),
-        cache=MemoryContextIndexingCache(),
+        client=FakeQueryClient(['{"wrong_field":"missing field"}']),
+        repository=MemoryContextIndexingRepository(),
     )
 
     with pytest.raises(ContextIndexingError, match="chunk"):
@@ -90,7 +108,7 @@ async def test_context_indexing_rejects_invalid_llm_output() -> None:
 
 
 @pytest.mark.asyncio
-async def test_context_indexing_caches_successes_before_retrying_failed_chunk() -> None:
+async def test_context_indexing_stores_successes_before_retrying_failed_chunk() -> None:
     projection = _projection()
     first_chunk = projection.retrieval_chunks[0]
     second_text = "链式法则给出复合函数的梯度。"
@@ -106,28 +124,28 @@ async def test_context_indexing_caches_successes_before_retrying_failed_chunk() 
             ),
         ),
     )
-    cache = MemoryContextIndexingCache()
+    repository = MemoryContextIndexingRepository()
     service = ContextIndexingService(
         client=FakeQueryClient(
             [
                 '{"indexing_context":"反向传播中的梯度传递。"}',
-                '{"summary":"missing field"}',
+                '{"wrong_field":"missing field"}',
             ]
         ),
-        cache=cache,
+        repository=repository,
     )
 
     with pytest.raises(ContextIndexingError):
         await service.contextualize(projection)
 
-    assert tuple(cache.values.values()) == ("反向传播中的梯度传递。",)
+    assert tuple(repository.values.values()) == ("反向传播中的梯度传递。",)
 
     retry_client = FakeQueryClient(
         ['{"indexing_context":"链式法则在梯度计算中的作用。"}']
     )
     result = await ContextIndexingService(
         client=retry_client,
-        cache=cache,
+        repository=repository,
     ).contextualize(projection)
 
     assert len(retry_client.prompts) == 1

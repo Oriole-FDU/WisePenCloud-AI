@@ -31,48 +31,69 @@ def session_id(ctx: Context) -> str:
 def section_view_payload(
     view: dict[str, Any],
     cacheable_texts: list[CacheableText],
+    source_content_indices: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     section_path = view["section_path"]
+    reading_blocks = []
+    for block in view["reading_blocks"]:
+        content_index = append_cacheable_text(
+            cacheable_texts,
+            block["raw_text"],
+            metadata={
+                "resource_id": view["resource_id"],
+                "section_id": view["section_id"],
+                "reading_block_id": block["block_id"],
+                "section_path": section_path,
+                "page_labels": block["page_labels"],
+                "anchor_labels": block["anchor_labels"],
+            },
+        )
+        reading_blocks.append(
+            {
+                "reading_block_id": block["block_id"],
+                "content_index": content_index,
+                "preview": preview(block["raw_text"]),
+                "page_labels": block["page_labels"],
+                "anchor_labels": block["anchor_labels"],
+            }
+        )
+
+    evidence = []
+    for source in view["evidence"]:
+        content_index = append_cacheable_text(
+            cacheable_texts,
+            source["content"],
+            metadata={
+                "resource_id": source["resource_id"],
+                "section_id": source["section_id"],
+                "source_ref_id": source["ref_id"],
+                "section_path": source["section_path"],
+                "page_labels": source["page_labels"],
+                "anchor_labels": source["anchor_labels"],
+            },
+        )
+        if source_content_indices is not None:
+            source_content_indices[source["ref_id"]] = content_index
+        evidence.append(
+            {
+                "source_ref_id": source["ref_id"],
+                "content_index": content_index,
+                "preview": preview(source["content"]),
+                "page_labels": source["page_labels"],
+                "anchor_labels": source["anchor_labels"],
+            }
+        )
+
     return {
         "resource_id": view["resource_id"],
         "section_id": view["section_id"],
         "title": view["title"],
         "section_path": section_path,
-        "summary": view["summary"],
+        "preview": view["preview"],
         "has_content": view["has_content"],
-        "reading_blocks": [
-            {
-                "content_index": append_cacheable_text(
-                    cacheable_texts,
-                    block["raw_text"],
-                    metadata={
-                        "reading_block_id": block["block_id"],
-                        "section_path": section_path,
-                        "page_labels": block["page_labels"],
-                        "anchor_labels": block["anchor_labels"],
-                    },
-                ),
-                "preview": preview(block["raw_text"]),
-            }
-            for block in view["reading_blocks"]
-        ],
-        "evidence": [
-            {
-                "content_index": append_cacheable_text(
-                    cacheable_texts,
-                    source["content"],
-                    metadata={
-                        "source_ref_id": source["ref_id"],
-                        "section_path": source["section_path"],
-                        "page_label": source.get("page_label"),
-                        "anchor_labels": source["anchor_labels"],
-                    },
-                ),
-                "preview": preview(source["content"]),
-            }
-            for source in view["evidence"]
-        ],
-        "frontier": view["frontier"],
+        "reading_blocks": reading_blocks,
+        "evidence": evidence,
+        "frontier": _frontier_payload(view["frontier"]),
     }
 
 
@@ -92,3 +113,26 @@ def preview(text: str) -> str:
     if len(value) <= _SOURCE_PREVIEW_CHARS:
         return value
     return f"{value[:_SOURCE_PREVIEW_CHARS].rstrip()}..."
+
+
+def _frontier_payload(frontier: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "parent": _section_choice_payload(frontier["parent"]),
+        "previous": _section_choice_payload(frontier["previous"]),
+        "next": _section_choice_payload(frontier["next"]),
+        "children": [
+            _section_choice_payload(child) for child in frontier["children"]
+        ],
+    }
+
+
+def _section_choice_payload(section: dict[str, Any] | None) -> dict[str, Any] | None:
+    if section is None:
+        return None
+    return {
+        "section_id": section["section_id"],
+        "title": section["title"],
+        "section_path": section["section_path"],
+        "preview": section["preview"],
+        "has_content": section["has_content"],
+    }

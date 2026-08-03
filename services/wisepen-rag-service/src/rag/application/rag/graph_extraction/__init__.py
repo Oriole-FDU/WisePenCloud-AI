@@ -1,4 +1,4 @@
-from .cache_codec import decode_cached_graph, encode_cached_graph, slice_window_graph
+from .derived_payload_codec import decode_derived_graph, encode_derived_graph, slice_window_graph
 from .extractor import KnowledgeGraphExtractor
 from .llm import QueryClientGraphRagLLM
 from .models import (
@@ -23,3 +23,30 @@ from .relations import (
 )
 from .result_mapper import KnowledgeGraphResultMapper
 from .windows import build_extraction_windows, render_extraction_window
+
+__all__ = [
+    "ExtractedKnowledgeNode",
+    "ExtractedKnowledgeRelation",
+    "KnowledgeAssertion",
+    "KnowledgeEntityType",
+    "KnowledgeEvidence",
+    "KnowledgeExtractionChunk",
+    "KnowledgeExtractionSource",
+    "KnowledgeExtractionWindow",
+    "KnowledgeGraphExtractor",
+    "KnowledgeGraphResultMapper",
+    "KnowledgeNodeKind",
+    "KnowledgeRelationProfile",
+    "KnowledgeRelationType",
+    "KnowledgeWindowExtraction",
+    "KnowledgeWindowSourceSpan",
+    "QueryClientGraphRagLLM",
+    "RELATION_PROFILES",
+    "build_extraction_windows",
+    "decode_derived_graph",
+    "encode_derived_graph",
+    "relation_descriptions",
+    "relation_pattern_allowed",
+    "render_extraction_window",
+    "slice_window_graph",
+]

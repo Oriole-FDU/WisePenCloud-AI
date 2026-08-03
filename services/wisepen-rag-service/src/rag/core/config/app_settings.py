@@ -14,6 +14,7 @@ class AppSettings(BaseModel):
 
     FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
 
+    # LLM 配置
     LLM_BASE_URL: str
     LLM_API_KEY: str
     QUERY_MODEL: str
@@ -22,6 +23,7 @@ class AppSettings(BaseModel):
     ZERO_ENTROPY_API_KEY: str = ""
     RERANKER_MODEL: str = "zerank-2"
 
+    # Kafka 配置
     KAFKA_BOOTSTRAP_SERVERS: str
     KAFKA_RESOURCE_ACL_RECALC_TOPIC: str = "wisepen-resource-acl-recalc-topic"
     KAFKA_RAG_ACL_RECALC_GROUP_ID: str = "wisepen-rag-acl-recalc-group"
@@ -32,6 +34,7 @@ class AppSettings(BaseModel):
     )
     KAFKA_RAG_RESOURCE_DESTROY_GROUP_ID: str = "wisepen-rag-resource-destroy-group"
 
+    # 数据库配置
     REDIS_URL: str
     MONGODB_URL: str
     MONGODB_DB_NAME: str
@@ -50,8 +53,6 @@ class AppSettings(BaseModel):
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = "password123"
     NEO4J_DATABASE: str = "neo4j"
-    RAG_GRAPH_EXTRACTION_CACHE_TTL_SECONDS: int = 30 * 24 * 3600
-    RAG_CONTEXT_INDEXING_CACHE_TTL_SECONDS: int = 30 * 24 * 3600
     RAG_NAVIGATION_STATE_TTL_SECONDS: int = 24 * 3600
 
 

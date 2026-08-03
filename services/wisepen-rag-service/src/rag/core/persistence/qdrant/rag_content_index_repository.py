@@ -67,6 +67,12 @@ class QdrantRagVectorIndexRepository:
         self,
         projection: RagContentProjection,
     ) -> dict[str, Sequence[float]]:
+        """
+        - 时机：内容已经 contextualize，准备 embedding 之前。
+        - 原理：根据 embedding_profile + index_text 生成 embedding_key，
+        从 Qdrant 里 scroll 同资源、同 embedding_key 的旧点，拿回可复用的 dense vector。
+        - 作用：避免相同检索文本重复调用 embedding 服务。
+        - 限制：collection 不存在或没有 chunk 时返回空 dict"""
         if (
             not projection.retrieval_chunks
             or not await self._client.collection_exists(self._collection_name)
@@ -125,6 +131,13 @@ class QdrantRagVectorIndexRepository:
         dense_vectors: Mapping[str, Sequence[float]],
         acl_projection: RagResourceAclProjection | None,
     ) -> None:
+        """ 把 staged projection 发布到 Qdrant 的核心写入。
+        - 时机：缺失 embedding 已补齐，Mongo projection 已进入 staged，但还没 apply_projection。
+        - 作用：把每个 retrieval chunk 写成 Qdrant point。
+        每个 point 包含 dense vector、Qdrant native BM25 sparse vector，
+        以及 content_revision/resource_id/chunk_id/reading_block_id/raw_text/section/source_ref_id/ACL payload
+        - 限制：有 ACL projection，且 ACL 的 resource_id 必须和内容一致。
+        """
         if not projection.retrieval_chunks:
             return
         if acl_projection is None:
@@ -198,6 +211,9 @@ class QdrantRagVectorIndexRepository:
         resource_id: str,
         keep_content_revision: str,
     ) -> None:
+        """删除同一资源下除当前 applied revision 外的旧向量。
+        三个调用点分别对应：发现消息已经 applied 后补偿清理、
+        并发阶段发现已 applied 后补偿清理、当前写入 apply 成功后的正常清理"""
         if not await self._client.collection_exists(self._collection_name):
             return
         await self._client.delete(
@@ -212,6 +228,10 @@ class QdrantRagVectorIndexRepository:
         )
 
     async def delete_resources(self, resource_ids: tuple[str, ...]) -> None:
+        """ 通过资源删除 kafka consumer 调用
+        consumer 中 逐个 target 调 delete_resources。
+        这里删除这些 resource 的全部 Qdrant points，不分 revision
+        """
         unique_resource_ids = tuple(dict.fromkeys(resource_ids))
         if (
             not unique_resource_ids
@@ -239,8 +259,11 @@ class QdrantRagVectorIndexRepository:
         self,
         projection: RagResourceAclProjection,
     ) -> None:
+        """通过 ACL 重算 consumer 调用，更新 Qdrant points 的 ACL 信息"""
         if not await self._client.collection_exists(self._collection_name):
             return
+        
+        # 更新同资源、且 acl_revision <= 新 revision 的点，避免旧 ACL 事件覆盖新 ACL payload。
         await self._client.set_payload(
             collection_name=self._collection_name,
             payload=_acl_payload(projection),
@@ -313,6 +336,7 @@ class QdrantRagVectorIndexRepository:
             self._collection_ready = True
 
     def _embedding_key(self, index_text: str) -> str:
+        """只要 embedding_profile 和 index_text 相同即可复用 embedding_key"""
         value = f"{self._embedding_profile}\0{index_text}"
         return sha256(value.encode("utf-8")).hexdigest()
 

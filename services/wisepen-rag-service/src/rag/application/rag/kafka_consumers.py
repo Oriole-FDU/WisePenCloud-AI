@@ -160,7 +160,13 @@ class RagAclRecalculateConsumer:
         )
 
     async def refresh(self, message: _AclRecalculateMessage) -> RagResourceAclProjection | None:
-        """读取权威 ACL 并刷新本地投影。"""
+        """读取权威 ACL 并刷新本地投影。
+        
+        一次 ACL 重算事件触发：
+        load_authoritative_projection 从 Java 服务端读取最新 ACL 投影
+        -> upsert_projection 更新本地 ACL 投影
+        -> update_acl_projection 同步到检索后端
+        """
         projection = await self._repository.load_authoritative_projection(message.resource_id)
         if projection is None:
             return None

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pytest
 from rag.application.rag.retrieval import (
-    RagPermissionFilterBuilder,
     RagPermissionScope,
+    build_neo4j_permission_predicate,
+    build_qdrant_permission_filter,
 )
 from rag.application.rag.acl import (
     RagComputedGroupAclProjection,
@@ -34,7 +35,7 @@ def test_permission_scope_uses_trusted_group_roles() -> None:
 
 
 def test_qdrant_filter_applies_resource_override_before_group_acl() -> None:
-    query = RagPermissionFilterBuilder().build_qdrant_filter(_scope())
+    query = build_qdrant_permission_filter(_scope())
     payload = query.model_dump(exclude_none=True)
 
     group_branch = payload["should"][2]
@@ -48,7 +49,7 @@ def test_qdrant_filter_applies_resource_override_before_group_acl() -> None:
 
 
 def test_neo4j_filter_uses_acl_nodes_and_same_override_priority() -> None:
-    predicate, params = RagPermissionFilterBuilder().build_neo4j_predicate(
+    predicate, params = build_neo4j_permission_predicate(
         _scope(),
         node_alias="resource",
     )
@@ -67,7 +68,7 @@ def test_neo4j_filter_uses_acl_nodes_and_same_override_priority() -> None:
 
 def test_neo4j_filter_rejects_query_injection_alias() -> None:
     with pytest.raises(ValueError, match="valid identifier"):
-        RagPermissionFilterBuilder().build_neo4j_predicate(
+        build_neo4j_permission_predicate(
             _scope(),
             node_alias="resource) MATCH (other",
         )

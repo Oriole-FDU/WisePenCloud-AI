@@ -61,6 +61,7 @@ def test_semantic_section_reading_block_can_cross_pages() -> None:
         assert block.section_id == chunk.section_id
         assert chunk.section_path == section.section_path
         assert source_ref.section_id == chunk.section_id
+        assert source_ref.page_labels == chunk.page_labels
         assert all(
             section.own_start <= span.start_offset < span.end_offset <= section.own_end
             for span in chunk.source_spans
@@ -98,7 +99,7 @@ def test_long_section_has_multiple_reading_blocks_without_changing_section() -> 
     assert len(projection.retrieval_chunks) > len(blocks)
 
 
-def test_section_tree_handles_heading_jumps_and_preface() -> None:
+def test_section_projector_handles_heading_jumps_and_preface() -> None:
     markdown = "前言。\n\n# A\n\nA 正文。\n\n### C\n\nC 正文。\n\n## B\n\nB 正文。"
     projection = RagSectionProjector().project(
         RagDocumentContent("resource-1", 1, markdown)

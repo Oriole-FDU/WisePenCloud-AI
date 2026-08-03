@@ -8,7 +8,8 @@ from rag.application.rag.repositories import (
     KnowledgeGraphProjectionRepository,
     KnowledgeGraphProjectionSupersededError,
     RagAclProjectionRepository,
-    RagContentProjectionRepository,
+    RagContentCheckpointRepository,
+    RagKnowledgeExtractionSourceRepository,
 )
 from .projector import build_knowledge_graph_projection
 
@@ -35,7 +36,8 @@ class KnowledgeGraphIndexer:
 
     __slots__ = (
         "_acl_repository",
-        "_content_repository",
+        "_checkpoint_repository",
+        "_extraction_source_repository",
         "_extractor",
         "_graph_repository",
     )
@@ -43,12 +45,14 @@ class KnowledgeGraphIndexer:
     def __init__(
             self,
             *,
-            content_repository: RagContentProjectionRepository,
+            extraction_source_repository: RagKnowledgeExtractionSourceRepository,
+            checkpoint_repository: RagContentCheckpointRepository,
             acl_repository: RagAclProjectionRepository,
             extractor: KnowledgeGraphExtractor,
             graph_repository: KnowledgeGraphProjectionRepository,
     ) -> None:
-        self._content_repository = content_repository
+        self._extraction_source_repository = extraction_source_repository
+        self._checkpoint_repository = checkpoint_repository
         self._acl_repository = acl_repository
         self._extractor = extractor
         self._graph_repository = graph_repository
@@ -63,8 +67,8 @@ class KnowledgeGraphIndexer:
                 action=KnowledgeGraphIndexAction.ALREADY_APPLIED,
             )
 
-        source = await self._content_repository.load_applied_extraction_source(resource_id)
-        checkpoint = await self._content_repository.get_checkpoint(resource_id)
+        source = await self._extraction_source_repository.load_applied_extraction_source(resource_id)
+        checkpoint = await self._checkpoint_repository.get_checkpoint(resource_id)
         if (
                 source is None
                 or checkpoint is None
@@ -87,7 +91,7 @@ class KnowledgeGraphIndexer:
         )
 
         # LLM 抽取期间正文可能再次更新，提交前重新校验版本。
-        checkpoint = await self._content_repository.get_checkpoint(resource_id)
+        checkpoint = await self._checkpoint_repository.get_checkpoint(resource_id)
         if checkpoint is None or checkpoint.applied_content_revision != content_revision:
             return KnowledgeGraphIndexResult(
                 relation_revision=None,

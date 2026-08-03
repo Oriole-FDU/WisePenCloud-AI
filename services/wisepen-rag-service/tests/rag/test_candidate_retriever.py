@@ -96,14 +96,14 @@ async def test_retriever_drops_non_applied_revisions_before_ranking() -> None:
         revision="revision-3",
         rank=1,
     )
-    projection_repository = _ProjectionRepository(
+    checkpoint_repository = _ProjectionRepository(
         {"resource-1": "revision-2", "resource-2": "revision-2"}
     )
     candidate_repository = _CandidateRepository((staged, current))
     retriever = RagCandidateRetriever(
         embedding_client=_EmbeddingClient(),
         candidate_repository=candidate_repository,
-        projection_repository=projection_repository,
+        checkpoint_repository=checkpoint_repository,
         permission_authorizer=_PermissionAuthorizer(),
         ranking_pipeline=RankingPipeline(fusion=WeightedRrfFusion()),
     )
@@ -120,7 +120,7 @@ async def test_retriever_drops_non_applied_revisions_before_ranking() -> None:
     )
 
     assert [hit.chunk_id for hit in hits] == ["current"]
-    assert projection_repository.requested_resource_ids == [
+    assert checkpoint_repository.requested_resource_ids == [
         ("resource-2", "resource-1")
     ]
     assert candidate_repository.requests[0].query_text == "查询"
@@ -140,7 +140,7 @@ async def test_retriever_returns_empty_when_no_candidate_is_applied() -> None:
                 ),
             )
         ),
-        projection_repository=_ProjectionRepository({"resource-1": "revision-1"}),
+        checkpoint_repository=_ProjectionRepository({"resource-1": "revision-1"}),
         permission_authorizer=_PermissionAuthorizer(),
         ranking_pipeline=RankingPipeline(fusion=WeightedRrfFusion()),
     )
@@ -175,7 +175,7 @@ async def test_retriever_selects_applied_revision_for_same_chunk_id() -> None:
     retriever = RagCandidateRetriever(
         embedding_client=_EmbeddingClient(),
         candidate_repository=_CandidateRepository((staged, applied)),
-        projection_repository=_ProjectionRepository({"resource-1": "revision-applied"}),
+        checkpoint_repository=_ProjectionRepository({"resource-1": "revision-applied"}),
         permission_authorizer=_PermissionAuthorizer(),
         ranking_pipeline=RankingPipeline(fusion=WeightedRrfFusion()),
     )
@@ -208,7 +208,7 @@ async def test_retriever_drops_candidate_rejected_by_local_acl_gate() -> None:
                 ),
             )
         ),
-        projection_repository=_ProjectionRepository({"resource-1": "revision-1"}),
+        checkpoint_repository=_ProjectionRepository({"resource-1": "revision-1"}),
         permission_authorizer=_PermissionAuthorizer(("resource-1",)),
         ranking_pipeline=RankingPipeline(fusion=WeightedRrfFusion()),
     )

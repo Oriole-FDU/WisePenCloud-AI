@@ -488,7 +488,7 @@ def _located_section() -> RagSectionView:
             section_id="section-current",
             section_path=("课程", "核心概念"),
             source_spans=(SourceSpan(20, 34),),
-            page_label="2",
+            page_labels=("2",),
             anchor_labels=("Definition 1",),
         ),
         content="核心概念的直接证据。",
@@ -503,7 +503,7 @@ def _located_section() -> RagSectionView:
         "核心概念",
         parent_section_id="section-root",
         ordinal=1,
-        summary="核心概念摘要",
+        preview="核心概念预览",
     )
     return RagSectionView(
         section=current,
@@ -531,7 +531,7 @@ def _section(
     *,
     parent_section_id: str | None = None,
     ordinal: int = 0,
-    summary: str | None = None,
+    preview: str | None = None,
 ) -> RagSectionNode:
     return RagSectionNode(
         section_id=section_id,
@@ -542,7 +542,7 @@ def _section(
         parent_section_id=parent_section_id,
         ordinal=ordinal,
         section_path=(title,),
-        summary=summary or f"{title}摘要",
+        preview=preview or f"{title}预览",
         own_start=ordinal * 10,
         own_end=ordinal * 10 + 10,
         subtree_end=ordinal * 10 + 10,

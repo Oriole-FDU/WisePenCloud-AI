@@ -45,14 +45,14 @@ class _QueryClient:
         return LLMResponse(content=self.content)
 
 
-class _MemoryExtractionCache:
+class _MemoryExtractionRepository:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
 
     async def get_many(self, keys):
         return {key: self.values[key] for key in keys if key in self.values}
 
-    async def set_many(self, values):
+    async def set_many(self, *, resource_id, values):
         self.values.update(values)
 
 
@@ -370,7 +370,7 @@ async def test_sdk_extractor_keeps_only_schema_valid_source_backed_graph() -> No
     assert "CURRENT_RESOURCE:" in prompt
     assert "resource_id: resource-1" in prompt
     assert "CURRENT_CHUNK:\nAlpha depends on Beta." in prompt
-    assert "then a REQUIRES relation" in prompt
+    assert "then a REQUIRES relation" not in prompt
     assert messages == []
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["name"] == "Neo4jGraph"
@@ -388,17 +388,17 @@ async def test_sdk_extractor_keeps_only_schema_valid_source_backed_graph() -> No
     assert "then a REQUIRES relation" not in core_client.calls[0][0]
 
 
-def test_extraction_cache_requires_non_empty_profile() -> None:
-    with pytest.raises(ValueError, match="cache_profile is required"):
+def test_extraction_repository_requires_non_empty_profile() -> None:
+    with pytest.raises(ValueError, match="reuse_profile is required"):
         KnowledgeGraphExtractor(
             llm=QueryClientGraphRagLLM(client=_QueryClient("{}")),
-            cache=_MemoryExtractionCache(),
-            cache_profile="  ",
+            repository=_MemoryExtractionRepository(),
+            reuse_profile="  ",
         )
 
 
 @pytest.mark.asyncio
-async def test_extraction_cache_relocates_evidence_for_new_revision() -> None:
+async def test_extraction_repository_relocates_evidence_for_new_revision() -> None:
     graph = Neo4jGraph.model_validate(
         {
             "nodes": [
@@ -435,11 +435,11 @@ async def test_extraction_cache_relocates_evidence_for_new_revision() -> None:
         }
     )
     client = _QueryClient(graph.model_dump_json())
-    cache = _MemoryExtractionCache()
+    repository = _MemoryExtractionRepository()
     extractor = KnowledgeGraphExtractor(
         llm=QueryClientGraphRagLLM(client=client),
-        cache=cache,
-        cache_profile="query-model",
+        repository=repository,
+        reuse_profile="query-model",
     )
     first = _window()
 
@@ -485,7 +485,7 @@ def _window() -> KnowledgeExtractionWindow:
         section_id="section-1",
         section_path=("架构", "依赖"),
         source_spans=(SourceSpan(start_offset=100, end_offset=122),),
-        page_label="4",
+        page_labels=("4",),
     )
     return KnowledgeExtractionWindow(
         resource_id="resource-1",

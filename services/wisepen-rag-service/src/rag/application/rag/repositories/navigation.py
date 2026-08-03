@@ -14,15 +14,20 @@ if TYPE_CHECKING:
     from rag.application.rag.retrieval.models import RagPermissionScope
 
 
-class KnowledgeGraphExtractionCache(Protocol):
-    """知识抽取 SDK 候选图的 KV 缓存，用于跨窗口复用 SDK 原始输出。"""
+class KnowledgeGraphExtractionRepository(Protocol):
+    """知识抽取 SDK 候选图的资源内持久派生结果仓储。"""
 
     async def get_many(self, keys: Sequence[str]) -> Mapping[str, str]:
-        """批量读取缓存项；未命中条目不会出现在返回结果中。"""
+        """批量读取派生项；未命中条目不会出现在返回结果中。"""
         ...
 
-    async def set_many(self, values: Mapping[str, str]) -> None:
-        """批量写入缓存项；调用方应保证幂等。"""
+    async def set_many(
+            self,
+            *,
+            resource_id: str,
+            values: Mapping[str, str],
+    ) -> None:
+        """批量写入派生项；调用方应保证幂等。"""
         ...
 
 

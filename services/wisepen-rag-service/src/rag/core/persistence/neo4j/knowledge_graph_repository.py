@@ -25,8 +25,8 @@ from rag.application.rag.graph_extraction import (
     KnowledgeRelationType,
 )
 from rag.application.rag.retrieval import (
-    RagPermissionFilterBuilder,
     RagPermissionScope,
+    build_neo4j_permission_predicate,
 )
 
 # ── 图数据库 Schema 初始化 ──────────────────────────────────────────
@@ -215,7 +215,6 @@ class Neo4jKnowledgeGraphRepository(
         "_database",
         "_driver",
         "_permission_authorizer",
-        "_permission_filter_builder",
     )
 
     def __init__(
@@ -224,12 +223,10 @@ class Neo4jKnowledgeGraphRepository(
         driver: AsyncDriver,
         database: str,
         permission_authorizer: RagPermissionAuthorizer,
-        permission_filter_builder: RagPermissionFilterBuilder,
     ) -> None:
         self._driver = driver
         self._database = database
         self._permission_authorizer = permission_authorizer
-        self._permission_filter_builder = permission_filter_builder
 
     async def initialize(self) -> None:
         """创建图数据库所需的唯一性约束和索引。"""
@@ -432,7 +429,7 @@ class Neo4jKnowledgeGraphRepository(
             return ()
         # 构建 Cypher 权限谓词，注入到查询的 WHERE 子句中
         acl_predicate, acl_params = (
-            self._permission_filter_builder.build_neo4j_predicate(
+            build_neo4j_permission_predicate(
                 permission_scope,
                 node_alias="resource",
             )
@@ -492,12 +489,12 @@ class Neo4jKnowledgeGraphRepository(
         pattern = _PATH_PATTERNS[(request.direction.value, request.max_depth)]
         # 构建权限谓词：evidence_acl 过滤关系来源资源的可读性，endpoint_acl 过滤路径端点节点的可读性
         evidence_acl, acl_params = (
-            self._permission_filter_builder.build_neo4j_predicate(
+            build_neo4j_permission_predicate(
                 request.permission_scope,
                 node_alias="evidence",
             )
         )
-        endpoint_acl, _ = self._permission_filter_builder.build_neo4j_predicate(
+        endpoint_acl, _ = build_neo4j_permission_predicate(
             request.permission_scope,
             node_alias="path_node",
         )

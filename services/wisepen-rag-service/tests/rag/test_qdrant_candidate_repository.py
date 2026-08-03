@@ -8,7 +8,6 @@ from qdrant_client import models as qdrant_models
 
 from rag.application.rag.retrieval import (
     RagCandidateRequest,
-    RagPermissionFilterBuilder,
     RagPermissionScope,
 )
 from rag.core.persistence.qdrant.rag_candidate_repository import (
@@ -60,7 +59,6 @@ async def test_qdrant_candidate_repository_uses_native_hybrid_query_and_acl_filt
     repository = QdrantRagCandidateRepository(
         client=client,
         collection_name="rag-test",
-        permission_filter_builder=RagPermissionFilterBuilder(),
         bm25_config=qdrant_models.Bm25Config(
             tokenizer=qdrant_models.TokenizerType.MULTILINGUAL
         ),
@@ -103,7 +101,6 @@ async def test_qdrant_candidate_repository_returns_empty_without_collection() ->
     repository = QdrantRagCandidateRepository(
         client=client,
         collection_name="rag-test",
-        permission_filter_builder=RagPermissionFilterBuilder(),
         bm25_config=qdrant_models.Bm25Config(),
     )
 
@@ -145,7 +142,6 @@ async def test_candidate_repository_preserves_same_chunk_across_revisions() -> N
     repository = QdrantRagCandidateRepository(
         client=client,
         collection_name="rag-test",
-        permission_filter_builder=RagPermissionFilterBuilder(),
         bm25_config=qdrant_models.Bm25Config(),
     )
 
@@ -183,7 +179,6 @@ async def test_candidate_repository_rejects_missing_payload() -> None:
     repository = QdrantRagCandidateRepository(
         client=client,
         collection_name="rag-test",
-        permission_filter_builder=RagPermissionFilterBuilder(),
         bm25_config=qdrant_models.Bm25Config(),
     )
 

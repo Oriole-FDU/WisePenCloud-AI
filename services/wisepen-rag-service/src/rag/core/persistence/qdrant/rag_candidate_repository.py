@@ -8,8 +8,8 @@ from qdrant_client.conversions import common_types as qdrant_types
 
 from rag.application.rag.retrieval import (
     RagCandidateRequest,
-    RagPermissionFilterBuilder,
     RagRetrievalCandidate,
+    build_qdrant_permission_filter,
 )
 from common.utils.ranking import ScoreSignal, ScoreSignalKind
 
@@ -44,7 +44,6 @@ class QdrantRagCandidateRepository:
         "_client",
         "_collection_name",
         "_dense_vector_name",
-        "_permission_filter_builder",
         "_sparse_vector_name",
     )
 
@@ -53,7 +52,6 @@ class QdrantRagCandidateRepository:
         *,
         client: AsyncQdrantClient,
         collection_name: str,
-        permission_filter_builder: RagPermissionFilterBuilder,
         bm25_config: qdrant_models.Bm25Config,
         dense_vector_name: str = "dense",
         sparse_vector_name: str = "sparse",
@@ -62,7 +60,6 @@ class QdrantRagCandidateRepository:
             raise ValueError("Qdrant server-side BM25 inference must be enabled")
         self._client = client
         self._collection_name = collection_name
-        self._permission_filter_builder = permission_filter_builder
         self._bm25_options = bm25_config.model_dump(
             mode="json",
             exclude_none=True,
@@ -108,9 +105,7 @@ class QdrantRagCandidateRepository:
 
     def _build_filter(self, request: RagCandidateRequest) -> qdrant_models.Filter:
         must: list[qdrant_models.Condition] = [
-            self._permission_filter_builder.build_qdrant_filter(
-                request.permission_scope
-            )
+            build_qdrant_permission_filter(request.permission_scope)
         ]
         resource_ids = tuple(dict.fromkeys(request.resource_ids))
         if resource_ids:

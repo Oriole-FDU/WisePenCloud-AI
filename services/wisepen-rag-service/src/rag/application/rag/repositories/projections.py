@@ -55,7 +55,7 @@ class RagAclProjectionTarget(Protocol):
 
 
 class RagContentProjectionRepository(Protocol):
-    """资源内容投影的两阶段写入与版本管理接口。"""
+    """资源内容投影的两阶段写入接口。"""
 
     async def stage_projection(
             self, projection: RagContentProjection
@@ -66,6 +66,10 @@ class RagContentProjectionRepository(Protocol):
     async def apply_projection(self, stage: RagProjectionStage) -> None:
         """通过 checkpoint CAS 将当前 staging revision 提升为 applied。"""
         ...
+
+
+class RagContentCheckpointRepository(Protocol):
+    """资源内容投影的版本检查点读取接口。"""
 
     async def get_checkpoint(
             self, resource_id: str
@@ -78,6 +82,10 @@ class RagContentProjectionRepository(Protocol):
     ) -> Mapping[str, str]:
         """批量读取各资源已应用的 content_revision，仅返回已存在条目。"""
         ...
+
+
+class RagKnowledgeExtractionSourceRepository(Protocol):
+    """图抽取读取当前 applied 正文投影的接口。"""
 
     async def load_applied_extraction_source(
             self, resource_id: str

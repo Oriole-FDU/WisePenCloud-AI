@@ -1,19 +1,39 @@
 from .navigation import (
-    KnowledgeGraphExtractionCache,
+    KnowledgeGraphExtractionRepository,
     KnowledgeGraphNavigationRepository,
     KnowledgeNavigationStateRepository,
 )
 from .projections import (
+    RagContentCheckpointRepository,
     KnowledgeGraphProjectionRepository,
     KnowledgeGraphProjectionSupersededError,
     RagAclProjectionRepository,
     RagAclProjectionTarget,
     RagContentProjectionRepository,
+    RagKnowledgeExtractionSourceRepository,
 )
 from .retrieval import (
     RagCandidateRepository,
-    RagContextIndexingCache,
+    RagContextIndexingRepository,
     RagSectionNavigationRepository,
     RagSourceRepository,
     RagVectorIndexRepository,
+)
+
+__all__ = (
+    "KnowledgeGraphExtractionRepository",
+    "KnowledgeGraphNavigationRepository",
+    "KnowledgeGraphProjectionRepository",
+    "KnowledgeGraphProjectionSupersededError",
+    "KnowledgeNavigationStateRepository",
+    "RagAclProjectionRepository",
+    "RagAclProjectionTarget",
+    "RagCandidateRepository",
+    "RagContentCheckpointRepository",
+    "RagContentProjectionRepository",
+    "RagContextIndexingRepository",
+    "RagKnowledgeExtractionSourceRepository",
+    "RagSectionNavigationRepository",
+    "RagSourceRepository",
+    "RagVectorIndexRepository",
 )

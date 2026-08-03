@@ -30,7 +30,7 @@ class RagPermissionAuthorizer:
     async def accessible_resource_ids(
             self, resource_ids: Iterable[str], scope: RagPermissionIdentity
     ) -> frozenset[str]:
-        """返回当前用户具有 VIEW 权限的资源 ID。"""
+        """从 RAG 侧读取 ACL 投影，返回当前用户具有 VIEW 权限的资源 ID。"""
         # 去重并保留原始顺序，减少无意义的批量查询。
         unique_resource_ids = tuple(dict.fromkeys(resource_ids))
         if not unique_resource_ids:

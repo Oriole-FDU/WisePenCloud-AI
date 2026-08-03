@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from neo4j_graphrag.experimental.components.types import Neo4jGraph
 
-# 缓存中的统一节点 ID 前缀。
-# SDK 候选图中的节点 ID 形如 "chunk_id:UUID"，直接缓存会绑定到具体 chunk；
-# 替换为统一前缀后，同一段窗口文本的抽取结果可以在 chunk_id 变化后继续命中缓存。
-_CACHED_NODE_PREFIX = "cached:"
+# 持久派生结果中的统一节点 ID 前缀。
+# SDK 候选图中的节点 ID 形如 "chunk_id:UUID"，直接保存会绑定到具体 chunk；
+# 替换为统一前缀后，同一段窗口文本的抽取结果可以在 chunk_id 变化后继续复用。
+_DERIVED_NODE_PREFIX = "derived:"
 
 
 def slice_window_graph(graph: Neo4jGraph, chunk_id: str) -> Neo4jGraph:
@@ -26,22 +26,22 @@ def slice_window_graph(graph: Neo4jGraph, chunk_id: str) -> Neo4jGraph:
     )
 
 
-def encode_cached_graph(graph: Neo4jGraph, chunk_id: str) -> str:
-    """将 chunk 绑定的图转换为可复用缓存格式。"""
+def encode_derived_graph(graph: Neo4jGraph, chunk_id: str) -> str:
+    """将 chunk 绑定的图转换为可复用派生结果格式。"""
     prefix = f"{chunk_id}:"
 
     normalized = Neo4jGraph(
         nodes=[
             node.model_copy(
-                update={"id": _replace_node_prefix(node.id, prefix, _CACHED_NODE_PREFIX)}
+                update={"id": _replace_node_prefix(node.id, prefix, _DERIVED_NODE_PREFIX)}
             )
             for node in graph.nodes
         ],
         relationships=[
             relation.model_copy(
                 update={
-                    "start_node_id": _replace_node_prefix(relation.start_node_id, prefix, _CACHED_NODE_PREFIX),
-                    "end_node_id": _replace_node_prefix(relation.end_node_id, prefix, _CACHED_NODE_PREFIX),
+                    "start_node_id": _replace_node_prefix(relation.start_node_id, prefix, _DERIVED_NODE_PREFIX),
+                    "end_node_id": _replace_node_prefix(relation.end_node_id, prefix, _DERIVED_NODE_PREFIX),
                 }
             )
             for relation in graph.relationships
@@ -51,8 +51,8 @@ def encode_cached_graph(graph: Neo4jGraph, chunk_id: str) -> str:
     return normalized.model_dump_json()
 
 
-def decode_cached_graph(payload: str | None, chunk_id: str) -> Neo4jGraph | None:
-    """从缓存恢复当前 chunk 对应的图。"""
+def decode_derived_graph(payload: str | None, chunk_id: str) -> Neo4jGraph | None:
+    """从持久派生结果恢复当前 chunk 对应的图。"""
     if payload is None:
         return None
 
@@ -66,7 +66,7 @@ def decode_cached_graph(payload: str | None, chunk_id: str) -> Neo4jGraph | None
         return Neo4jGraph(
             nodes=[
                 node.model_copy(
-                    update={"id": _replace_node_prefix(node.id, _CACHED_NODE_PREFIX, prefix)}
+                    update={"id": _replace_node_prefix(node.id, _DERIVED_NODE_PREFIX, prefix)}
                 )
                 for node in graph.nodes
             ],
@@ -74,10 +74,10 @@ def decode_cached_graph(payload: str | None, chunk_id: str) -> Neo4jGraph | None
                 relation.model_copy(
                     update={
                         "start_node_id": _replace_node_prefix(
-                            relation.start_node_id, _CACHED_NODE_PREFIX, prefix
+                            relation.start_node_id, _DERIVED_NODE_PREFIX, prefix
                         ),
                         "end_node_id": _replace_node_prefix(
-                            relation.end_node_id, _CACHED_NODE_PREFIX, prefix
+                            relation.end_node_id, _DERIVED_NODE_PREFIX, prefix
                         ),
                     }
                 )

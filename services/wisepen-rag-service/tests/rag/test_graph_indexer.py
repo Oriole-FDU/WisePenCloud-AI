@@ -92,8 +92,10 @@ async def test_graph_indexer_invalidates_before_extraction_and_applies_empty_gra
 ):
     events: list[str] = []
     graph_repository = _GraphRepository(events)
+    content_repository = _ContentRepository()
     indexer = KnowledgeGraphIndexer(
-        content_repository=_ContentRepository(),
+        extraction_source_repository=content_repository,
+        checkpoint_repository=content_repository,
         acl_repository=_AclRepository(),
         extractor=_Extractor(events),
         graph_repository=graph_repository,
@@ -114,8 +116,10 @@ async def test_graph_indexer_invalidates_before_extraction_and_applies_empty_gra
 @pytest.mark.asyncio
 async def test_graph_indexer_skips_already_applied_revision() -> None:
     events: list[str] = []
+    content_repository = _ContentRepository()
     indexer = KnowledgeGraphIndexer(
-        content_repository=_ContentRepository(),
+        extraction_source_repository=content_repository,
+        checkpoint_repository=content_repository,
         acl_repository=_AclRepository(),
         extractor=_Extractor(events),
         graph_repository=_GraphRepository(events, applied=True),
@@ -134,8 +138,10 @@ async def test_graph_indexer_skips_already_applied_revision() -> None:
 async def test_graph_indexer_drops_extraction_when_content_changed() -> None:
     events: list[str] = []
     graph_repository = _GraphRepository(events)
+    content_repository = _ContentRepository(("revision-1", "revision-2"))
     indexer = KnowledgeGraphIndexer(
-        content_repository=_ContentRepository(("revision-1", "revision-2")),
+        extraction_source_repository=content_repository,
+        checkpoint_repository=content_repository,
         acl_repository=_AclRepository(),
         extractor=_Extractor(events),
         graph_repository=graph_repository,
@@ -153,8 +159,10 @@ async def test_graph_indexer_drops_extraction_when_content_changed() -> None:
 @pytest.mark.asyncio
 async def test_graph_indexer_maps_neo4j_cas_failure_to_stale() -> None:
     events: list[str] = []
+    content_repository = _ContentRepository()
     indexer = KnowledgeGraphIndexer(
-        content_repository=_ContentRepository(),
+        extraction_source_repository=content_repository,
+        checkpoint_repository=content_repository,
         acl_repository=_AclRepository(),
         extractor=_Extractor(events),
         graph_repository=_GraphRepository(events, superseded=True),

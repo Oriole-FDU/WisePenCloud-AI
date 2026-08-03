@@ -16,11 +16,12 @@ from .common import StateId, section_view_payload, session_id
 
 _DESCRIPTION = (
     "Description:\n"
-    "Follow semantic relations from nodes returned by locate or an earlier expand. "
-    "Candidate paths are generated from graph constraints and ranked by query.\n\n"
+    "Follow graph relations from node_id values returned by locate or an earlier expand. "
+    "Use this when entity relationships could reveal related private-document evidence.\n\n"
     "Output:\n"
-    "Treat each path as a candidate reasoning chain. Use relation_evidence for the "
-    "readable relation statement and quotes, then ground claims in returned sources."
+    "paths are candidate reasoning chains. edges expose endpoint node IDs, direction, "
+    "relation type, evidence quotes, source_ref IDs, and evidence_content_indices. "
+    "Use those content indices and returned sources to ground claims."
 )
 
 _NODE_IDS = Annotated[
@@ -100,6 +101,11 @@ def register_expand_tool(mcp: FastMCP, client: RagServiceClient) -> None:
 
 def _render_expand_result(result: dict[str, Any]) -> dict[str, Any]:
     cacheable_texts: list[CacheableText] = []
+    source_content_indices: dict[str, int] = {}
+    sources = [
+        section_view_payload(source, cacheable_texts, source_content_indices)
+        for source in result["sources"]
+    ]
     edge_directions: dict[str, str] = {}
     edges_by_id = {edge["edge_id"]: edge for edge in result["edges"]}
     for path in result["paths"]:
@@ -116,37 +122,37 @@ def _render_expand_result(result: dict[str, Any]) -> dict[str, Any]:
             "state_id": result["state_id"],
             "nodes": result["nodes"],
             "edges": [
-                {
-                    "edge_id": edge["edge_id"],
-                    "relation_type": edge["relation_type"],
-                    "predicate": edge.get("predicate"),
-                    "direction": edge_directions[edge["edge_id"]],
-                    "relation_evidence": _relation_evidence(edge, node_labels),
-                }
+                _edge_payload(edge, edge_directions, node_labels, source_content_indices)
                 for edge in result["edges"]
             ],
             "paths": result["paths"],
-            "sources": [
-                section_view_payload(source, cacheable_texts)
-                for source in result["sources"]
-            ],
+            "sources": sources,
         },
         "cacheable_texts": cacheable_texts,
     }
 
 
-def _relation_evidence(edge: dict[str, Any], node_labels: dict[str, str]) -> str:
-    source_label = node_labels.get(edge["source_node_id"], edge["source_node_id"])
-    target_label = node_labels.get(edge["target_node_id"], edge["target_node_id"])
-    relation = edge["relation_type"]
-    if edge.get("predicate"):
-        relation = f"{relation} ({edge['predicate']})"
-
-    statement = f"{source_label} --{relation}--> {target_label}"
-    quotes = tuple(dict.fromkeys(edge["evidence_quotes"]))
-    if not quotes:
-        return statement
-    evidence = "\n".join(
-        f"{index}. {quote}" for index, quote in enumerate(quotes, start=1)
-    )
-    return f"{statement}\nEvidence:\n{evidence}"
+def _edge_payload(
+    edge: dict[str, Any],
+    edge_directions: dict[str, str],
+    node_labels: dict[str, str],
+    source_content_indices: dict[str, int],
+) -> dict[str, Any]:
+    source_ref_ids = tuple(dict.fromkeys(edge["evidence_source_ref_ids"]))
+    return {
+        "edge_id": edge["edge_id"],
+        "source_node_id": edge["source_node_id"],
+        "source_label": node_labels.get(edge["source_node_id"], edge["source_node_id"]),
+        "target_node_id": edge["target_node_id"],
+        "target_label": node_labels.get(edge["target_node_id"], edge["target_node_id"]),
+        "relation_type": edge["relation_type"],
+        "predicate": edge.get("predicate"),
+        "direction": edge_directions[edge["edge_id"]],
+        "evidence_quotes": list(dict.fromkeys(edge["evidence_quotes"])),
+        "evidence_source_ref_ids": list(source_ref_ids),
+        "evidence_content_indices": [
+            source_content_indices[source_ref_id]
+            for source_ref_id in source_ref_ids
+            if source_ref_id in source_content_indices
+        ],
+    }
