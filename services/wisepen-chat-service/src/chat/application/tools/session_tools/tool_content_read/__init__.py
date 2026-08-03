@@ -8,6 +8,8 @@ from .services.models import (
     ToolContentRankedReadItem,
     ToolContentRankedReadRequest,
     ToolContentRankedReadResult,
+    ToolContentSnapshotLocator,
+    ToolContentSnapshotResult,
     ToolContentWindow,
 )
 
@@ -21,5 +23,7 @@ __all__ = [
     "ToolContentRankedReadItem",
     "ToolContentRankedReadRequest",
     "ToolContentRankedReadResult",
+    "ToolContentSnapshotLocator",
+    "ToolContentSnapshotResult",
     "ToolContentWindow",
 ]

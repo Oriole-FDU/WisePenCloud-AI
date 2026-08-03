@@ -11,13 +11,20 @@ from rag.application.rag.graph_extraction import (
     KnowledgeExtractionSource,
 )
 from rag.application.rag.ingestion import (
+    RagContentLocator,
     RagSectionNode,
     RagSectionReadingBlock,
     RagSourceRef,
 )
+from rag.application.rag.resource_snapshot import (
+    RagResourceContentReadResult,
+    RagResourceContentWindow,
+    RagResourceSnapshot,
+)
 from rag.application.rag.section_navigation import RagSectionView
 from rag.domain.entities.rag_content import (
     RagContentPartDocument,
+    RagContentLocatorDocument,
     RagContentRevisionDocument,
     RagSectionDocument,
     RagSectionReadingBlockDocument,
@@ -28,6 +35,7 @@ from rag.domain.entities.rag_content import (
 from .version_repository import load_applied_content_revision
 
 CONTENT_PART_CHARACTERS = 1_000_000
+RESOURCE_CONTENT_READ_MAX_CHARS = 8000
 
 
 def to_section(document: RagSectionDocument) -> RagSectionNode:
@@ -145,6 +153,77 @@ def read_source_spans(
             raise RuntimeError("content parts do not cover source span")
         fragments.append("".join(span_fragments))
     return "\n\n".join(fragments)
+
+
+def read_content_range(
+    documents: list[RagContentPartDocument],
+    *,
+    start_offset: int,
+    end_offset: int,
+) -> str:
+    if start_offset >= end_offset:
+        return ""
+    return read_source_spans(
+        documents,
+        [RagSourceSpanDocument(start_offset=start_offset, end_offset=end_offset)],
+    )
+
+
+def normalize_content_offset(
+    value: int | None,
+    total_length: int,
+    *,
+    default: int,
+) -> int:
+    offset = default if value is None else value
+    if offset < 0:
+        offset += total_length
+    return min(max(offset, 0), total_length)
+
+
+def locator_window(
+    documents: list[RagContentPartDocument],
+    target_locator: RagContentLocatorDocument,
+    locator_documents: list[RagContentLocatorDocument],
+    *,
+    max_chars: int,
+) -> RagResourceContentWindow:
+    start_offset = target_locator.start_offset
+    requested_end = target_locator.end_offset
+    end_offset = min(requested_end, start_offset + max_chars)
+    text = read_content_range(
+        documents,
+        start_offset=start_offset,
+        end_offset=end_offset,
+    )
+    return RagResourceContentWindow(
+        text=text,
+        start_offset=start_offset,
+        end_offset=end_offset,
+        source_spans=(SourceSpan(start_offset, end_offset),) if start_offset < end_offset else (),
+        locator_names=tuple(dict.fromkeys(document.name for document in locator_documents)),
+        page_labels=_locator_labels(locator_documents, "page:"),
+        section_paths=tuple(
+            tuple(document.name.removeprefix("section:").split(" > "))
+            for document in locator_documents
+            if document.name.startswith("section:")
+        ),
+        anchor_labels=_locator_labels(locator_documents, "anchor:"),
+        truncated=end_offset < requested_end,
+    )
+
+
+def _locator_labels(
+    locator_documents: list[RagContentLocatorDocument],
+    prefix: str,
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            document.name.removeprefix(prefix)
+            for document in locator_documents
+            if document.name.startswith(prefix)
+        )
+    )
 
 
 class MongoRagExtractionSourceRepository:
@@ -422,3 +501,180 @@ class MongoRagSectionNavigationRepository:
                 )
             )
         return tuple(views)
+
+
+class MongoRagResourceSnapshotRepository:
+    """资源副本的 locator 快照与读取。"""
+
+    async def load_applied_resource_snapshot(
+        self,
+        *,
+        resource_id: str,
+    ) -> RagResourceSnapshot | None:
+        revision = await load_applied_content_revision(resource_id)
+        if revision is None:
+            return None
+
+        content = await RagContentRevisionDocument.find_one(
+            RagContentRevisionDocument.content_revision == revision
+        )
+        if content is None:
+            return None
+
+        locator_documents = (
+            await RagContentLocatorDocument.find(
+                RagContentLocatorDocument.content_revision == revision
+            )
+            .sort("locator_index")
+            .to_list()
+        )
+        total_length = await self._load_total_length(revision)
+        return RagResourceSnapshot(
+            resource_id=content.resource_id,
+            document_version=content.document_version,
+            content_revision=revision,
+            total_length=total_length,
+            locators=tuple(
+                RagContentLocator(
+                    locator_index=document.locator_index,
+                    name=document.name,
+                    kind=document.kind,
+                    start_offset=document.start_offset,
+                    end_offset=document.end_offset,
+                )
+                for document in locator_documents
+            ),
+        )
+
+    async def read_applied_resource_content(
+        self,
+        *,
+        resource_id: str,
+        locator_name: str | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        max_chars: int = RESOURCE_CONTENT_READ_MAX_CHARS,
+    ) -> RagResourceContentReadResult | None:
+        revision = await load_applied_content_revision(resource_id)
+        if revision is None:
+            return None
+
+        content = await RagContentRevisionDocument.find_one(
+            RagContentRevisionDocument.content_revision == revision
+        )
+        if content is None:
+            return None
+
+        content_parts = (
+            await RagContentPartDocument.find(
+                RagContentPartDocument.content_revision == revision
+            )
+            .sort("part_index")
+            .to_list()
+        )
+
+        if locator_name is not None:
+            locator_documents = (
+                await RagContentLocatorDocument.find(
+                    RagContentLocatorDocument.content_revision == revision,
+                    RagContentLocatorDocument.name == locator_name,
+                )
+                .sort("locator_index")
+                .to_list()
+            )
+            if not locator_documents:
+                return RagResourceContentReadResult(
+                    resource_id=resource_id,
+                    content_revision=revision,
+                    document_version=content.document_version,
+                    locator_name=locator_name,
+                    reason="locator_not_found",
+                )
+            windows: list[RagResourceContentWindow] = []
+            for locator_document in locator_documents:
+                overlapping_locators = (
+                    await RagContentLocatorDocument.find(
+                        RagContentLocatorDocument.content_revision == revision,
+                        RagContentLocatorDocument.start_offset
+                        < locator_document.end_offset,
+                        RagContentLocatorDocument.end_offset
+                        > locator_document.start_offset,
+                    )
+                    .sort("locator_index")
+                    .to_list()
+                )
+                windows.append(
+                    locator_window(
+                        content_parts,
+                        locator_document,
+                        overlapping_locators,
+                        max_chars=max_chars,
+                    )
+                )
+            return RagResourceContentReadResult(
+                resource_id=resource_id,
+                content_revision=revision,
+                document_version=content.document_version,
+                locator_name=locator_name,
+                windows=tuple(windows),
+            )
+
+        total_length = await self._load_total_length(revision)
+        normalized_start = normalize_content_offset(start, total_length, default=0)
+        requested_end = normalize_content_offset(end, total_length, default=total_length)
+        if requested_end <= normalized_start:
+            normalized_end = normalized_start
+        else:
+            normalized_end = min(requested_end, normalized_start + max_chars)
+        truncated = normalized_end < requested_end
+
+        locator_documents = (
+            await RagContentLocatorDocument.find(
+                RagContentLocatorDocument.content_revision == revision,
+                RagContentLocatorDocument.start_offset < normalized_end,
+                RagContentLocatorDocument.end_offset > normalized_start,
+            )
+            .sort("locator_index")
+            .to_list()
+        )
+        text = read_content_range(
+            content_parts,
+            start_offset=normalized_start,
+            end_offset=normalized_end,
+        )
+        window = RagResourceContentWindow(
+            text=text,
+            start_offset=normalized_start,
+            end_offset=normalized_end,
+            source_spans=(SourceSpan(normalized_start, normalized_end),)
+            if normalized_start < normalized_end
+            else (),
+            locator_names=tuple(dict.fromkeys(locator.name for locator in locator_documents)),
+            page_labels=_locator_labels(locator_documents, "page:"),
+            section_paths=tuple(
+                tuple(locator.name.removeprefix("section:").split(" > "))
+                for locator in locator_documents
+                if locator.name.startswith("section:")
+            ),
+            anchor_labels=_locator_labels(locator_documents, "anchor:"),
+            truncated=truncated,
+        )
+        return RagResourceContentReadResult(
+            resource_id=resource_id,
+            content_revision=revision,
+            document_version=content.document_version,
+            windows=(window,),
+        )
+
+    async def _load_total_length(self, content_revision: str) -> int:
+        part = (
+            await RagContentPartDocument.find(
+                RagContentPartDocument.content_revision == content_revision
+            )
+            .sort("-part_index")
+            .limit(1)
+            .to_list()
+        )
+        if not part:
+            return 0
+        return part[0].end_offset

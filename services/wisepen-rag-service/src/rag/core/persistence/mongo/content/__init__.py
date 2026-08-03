@@ -7,6 +7,7 @@ from .derived_repository import (
     MongoKnowledgeGraphExtractionRepository,
     MongoRagContextIndexingRepository,
 )
+from .content_repository import MongoRagResourceSnapshotRepository
 from .projection_writer import MongoRagContentProjectionWriter
 from .version_repository import MongoRagContentCheckpointRepository
 
@@ -16,6 +17,7 @@ __all__ = [
     "MongoRagContextIndexingRepository",
     "MongoRagContentProjectionWriter",
     "MongoRagExtractionSourceRepository",
+    "MongoRagResourceSnapshotRepository",
     "MongoRagSectionNavigationRepository",
     "MongoRagSourceRepository",
 ]

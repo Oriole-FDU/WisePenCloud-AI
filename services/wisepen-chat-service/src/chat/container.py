@@ -48,7 +48,7 @@ from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.output.cache import ToolOutputCache
 from chat.application.tools.common.tool_content_store import ToolContentStore
 from chat.application.tools.session_tools.tool_content_read.tools import (
-    ToolContentReadByLocatorTool,
+    ToolContentGetSnapshotTool,
     ToolContentRankedReadTool,
     ToolContentReadTool,
     ToolContentRegexReadTool,
@@ -336,8 +336,8 @@ class Container(containers.DeclarativeContainer):
         ToolContentReadTool,
         reader=tool_content_reader,
     )
-    tool_content_read_by_locator_tool = providers.Singleton(
-        ToolContentReadByLocatorTool,
+    tool_content_get_snapshot_tool = providers.Singleton(
+        ToolContentGetSnapshotTool,
         reader=tool_content_reader,
     )
     tool_content_regex_read_tool = providers.Singleton(
@@ -398,8 +398,8 @@ class Container(containers.DeclarativeContainer):
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
+        tool_content_get_snapshot_tool,
         tool_content_read_tool,
-        tool_content_read_by_locator_tool,
         tool_content_regex_read_tool,
         tool_content_ranked_read_tool,
         web_fetch_tool,

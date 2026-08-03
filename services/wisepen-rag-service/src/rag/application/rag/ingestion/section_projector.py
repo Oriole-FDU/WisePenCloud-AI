@@ -13,6 +13,7 @@ from common.utils.chunkers import (
 )
 from .models import (
     RagContentProjection,
+    RagContentLocator,
     RagDocumentContent,
     RagRetrievalChunk,
     RagSectionNode,
@@ -75,6 +76,17 @@ class RagSectionProjector:
         reading_blocks: list[RagSectionReadingBlock] = []
         retrieval_chunks: list[RagRetrievalChunk] = []
         source_refs: list[RagSourceRef] = []
+        content_locators = tuple(
+            RagContentLocator(
+                locator_index=index,
+                name=locator.name,
+                kind=locator.kind,
+                start_offset=locator.start_offset,
+                end_offset=locator.end_offset,
+            )
+            for index, locator in enumerate(structure.locators)
+            if locator.start_offset is not None and locator.end_offset is not None
+        )
         # 记录每个 Section 当前的 block ordinal，长 Section 会跨多个 block 编号递增。
         section_ordinals: dict[str, int] = {}
 
@@ -101,7 +113,7 @@ class RagSectionProjector:
                 # _render_source 同时返回 raw_text 与 local→source 坐标映射，
                 # 后续检索子块的 source_spans 需要靠这个映射把局部坐标平移回原文。
                 raw_text, source_map = _render_source(content.markdown, block_spans)
-                locators = tuple(
+                block_locators = tuple(
                     locator
                     for locator in structure.locators
                     if locator.start_offset is not None
@@ -121,14 +133,14 @@ class RagSectionProjector:
                     page_labels=tuple(
                         dict.fromkeys(
                             locator.name.removeprefix("page:")
-                            for locator in locators
+                            for locator in block_locators
                             if locator.kind is LocatorKind.PAGE
                         )
                     ),
                     anchor_labels=tuple(
                         dict.fromkeys(
                             locator.name.removeprefix("anchor:")
-                            for locator in locators
+                            for locator in block_locators
                             if locator.kind is LocatorKind.ANCHOR
                         )
                     ),
@@ -167,7 +179,7 @@ class RagSectionProjector:
                     )
                     child_locators = tuple(
                         locator
-                        for locator in locators
+                        for locator in block_locators
                         if locator.start_offset is not None
                         and locator.end_offset is not None
                         and any(
@@ -225,6 +237,7 @@ class RagSectionProjector:
             retrieval_chunks=tuple(retrieval_chunks),
             sections=sections,
             source_refs=tuple(source_refs),
+            locators=content_locators,
         )
 
 

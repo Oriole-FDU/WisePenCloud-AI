@@ -4,3 +4,11 @@ from .projector import (
     RagAclProjectionError,
     RagAclProjector,
 )
+
+__all__ = [
+    "RagAclProjectionError",
+    "RagAclProjector",
+    "RagComputedGroupAclProjection",
+    "RagPermissionAuthorizer",
+    "RagResourceAclProjection",
+]

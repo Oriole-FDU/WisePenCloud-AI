@@ -11,7 +11,7 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 
-from ..services.models import ToolContentLocatorReadResult
+from ..services.models import ToolContentSnapshotResult
 from ..services.reader import ToolContentReader
 
 _TIMEOUT_SECONDS = 300.0
@@ -21,24 +21,16 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         "content_id": {
             "type": "string",
             "minLength": 1,
-            "description": "One cnt_* id from a previous contents entry.",
-        },
-        "locator": {
-            "type": "string",
-            "minLength": 1,
-            "description": (
-                "Exact locator name returned by ranked read or another read, such as page:12, "
-                "section:Methods > Dataset, anchor:Figure 3, or anchor:Table 2."
-            ),
+            "description": "Required. One cnt_* id from a previous contents entry.",
         },
     },
-    "required": ["content_id", "locator"],
+    "required": ["content_id"],
     "additionalProperties": False,
 }
 
 
-class ToolContentReadByLocatorTool:
-    """按命名 locator 直接读取权威原文。"""
+class ToolContentGetSnapshotTool:
+    """读取缓存正文的结构快照，不返回正文。"""
 
     __slots__ = ("_definition", "_reader")
 
@@ -46,13 +38,18 @@ class ToolContentReadByLocatorTool:
         self._reader = reader
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
-                name="tool_content_read_by_locator",
+                name="tool_content_get_snapshot",
                 description=(
-                    "Read an exact named page, Markdown section, figure, table, or equation locator "
-                    "from cached source content. This bypasses retrieval chunks and slices the original "
-                    "text using the locator's authoritative offsets. Use locator names exposed by "
-                    "tool_content_ranked_read or previous read results. Repeated locator names return all "
-                    "matching source ranges."
+                    "Get the locator snapshot for one cached content_id without reading body text.\n\n"
+                    "WHEN TO TRIGGER:\n"
+                    "  - MUST trigger when you need the available page, section, figure, table, "
+                    "or equation locators before choosing what to read.\n"
+                    "  - SHOULD trigger before tool_content_read when you know the document but not "
+                    "the exact locator or offset.\n\n"
+                    "OUTPUT RULES:\n"
+                    "  - Returns total_length and locators with exact names, kinds, and offsets.\n"
+                    "  - Use a returned locator name with tool_content_read(locator=...).\n"
+                    "  - This tool does not return body text."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -74,17 +71,16 @@ class ToolContentReadByLocatorTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> ToolContentLocatorReadResult:
+    ) -> ToolContentSnapshotResult:
         del config
         try:
-            return await self._reader.read_locator(
+            return await self._reader.get_snapshot(
                 content_id=str(kwargs["content_id"]),
                 session_id=str(context["session_id"]),
-                locator_name=str(kwargs["locator"]).strip(),
             )
         except Exception as exc:
             raise ToolExecutionError(
-                reason="tool_content_read_by_locator_failed",
+                reason="tool_content_get_snapshot_failed",
                 detail_reason=str(exc),
                 retryable=False,
             ) from exc

@@ -68,8 +68,8 @@ class ToolContentRegexReadTool:
                     "Use this for exact names, identifiers, citations, headings, URLs, or other "
                     "literal patterns, including matches that cross retrieval chunk boundaries. "
                     "Results include absolute match offsets and bounded source context. Use "
-                    "tool_content_ranked_read for semantic retrieval, tool_content_read_by_locator "
-                    "for known page/section/anchor locators, and tool_content_read for known offsets."
+                    "tool_content_ranked_read for semantic retrieval, and tool_content_read for "
+                    "known page/section/anchor locators or known offsets."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),

@@ -5,6 +5,7 @@ from .mongo import (
     MongoRagContextIndexingRepository,
     MongoRagContentProjectionWriter,
     MongoRagExtractionSourceRepository,
+    MongoRagResourceSnapshotRepository,
     MongoRagSectionNavigationRepository,
     MongoRagSourceRepository,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "MongoRagContextIndexingRepository",
     "MongoRagContentProjectionWriter",
     "MongoRagExtractionSourceRepository",
+    "MongoRagResourceSnapshotRepository",
     "MongoRagSectionNavigationRepository",
     "MongoRagSourceRepository",
     "Neo4jKnowledgeGraphRepository",

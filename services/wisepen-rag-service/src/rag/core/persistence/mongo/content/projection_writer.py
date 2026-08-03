@@ -4,6 +4,7 @@ from beanie.operators import In
 from common.utils.chunkers import SourceSpan
 from rag.application.rag.ingestion import (
     RagContentProjection,
+    RagContentLocator,
     RagProjectionStage,
     RagProjectionStageAction,
     RagSectionNode,
@@ -15,6 +16,7 @@ from rag.domain.entities.rag_content import (
     RagContentPartDocument,
     RagContextIndexingDocument,
     RagContentRevisionDocument,
+    RagContentLocatorDocument,
     RagGraphExtractionDocument,
     RagProjectionCheckpointDocument,
     RagSectionDocument,
@@ -80,6 +82,20 @@ def source_ref_document(
         source_spans=span_documents(source_ref.source_spans),
         page_labels=list(source_ref.page_labels),
         anchor_labels=list(source_ref.anchor_labels),
+    )
+
+
+def content_locator_document(
+    content_revision: str,
+    locator: RagContentLocator,
+) -> RagContentLocatorDocument:
+    return RagContentLocatorDocument(
+        content_revision=content_revision,
+        locator_index=locator.locator_index,
+        name=locator.name,
+        kind=locator.kind,
+        start_offset=locator.start_offset,
+        end_offset=locator.end_offset,
     )
 
 
@@ -152,6 +168,7 @@ class MongoRagContentProjectionWriter:
             return
         for document_type in (
             RagContentPartDocument,
+            RagContentLocatorDocument,
             RagSectionDocument,
             RagSectionReadingBlockDocument,
             RagSourceRefDocument,
@@ -231,6 +248,9 @@ class MongoRagContentProjectionWriter:
         await RagContentPartDocument.find(
             RagContentPartDocument.content_revision == content_revision
         ).delete()
+        await RagContentLocatorDocument.find(
+            RagContentLocatorDocument.content_revision == content_revision
+        ).delete()
         await RagSectionDocument.find(
             RagSectionDocument.content_revision == content_revision
         ).delete()
@@ -264,4 +284,9 @@ class MongoRagContentProjectionWriter:
             await RagSourceRefDocument.insert_many(
                 source_ref_document(content_revision, source_ref)
                 for source_ref in projection.source_refs
+            )
+        if projection.locators:
+            await RagContentLocatorDocument.insert_many(
+                content_locator_document(content_revision, locator)
+                for locator in projection.locators
             )

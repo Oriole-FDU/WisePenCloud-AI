@@ -57,9 +57,9 @@ class ToolContentRankedReadTool:
                     "Rank semantic chunks from one or more cached contents and read the most "
                     "relevant source spans. Chunks follow Markdown section semantics rather than "
                     "physical page boundaries. Each result includes known page, section, and anchor "
-                    "locator names for deterministic follow-up reads. Use tool_content_read_by_locator "
-                    "for a complete located structure, regex read for exact patterns, or offset read "
-                    "for an already known range."
+                    "locator names for deterministic follow-up reads. Use tool_content_read with "
+                    "locator for a complete located structure, regex read for exact patterns, or "
+                    "start/end offsets for an already known range."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),

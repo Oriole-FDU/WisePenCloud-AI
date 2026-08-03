@@ -15,6 +15,7 @@ from .projections import (
 from .retrieval import (
     RagCandidateRepository,
     RagContextIndexingRepository,
+    RagResourceSnapshotRepository,
     RagSectionNavigationRepository,
     RagSourceRepository,
     RagVectorIndexRepository,
@@ -33,6 +34,7 @@ __all__ = (
     "RagContentProjectionRepository",
     "RagContextIndexingRepository",
     "RagKnowledgeExtractionSourceRepository",
+    "RagResourceSnapshotRepository",
     "RagSectionNavigationRepository",
     "RagSourceRepository",
     "RagVectorIndexRepository",

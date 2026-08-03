@@ -4,7 +4,7 @@ from hashlib import sha256
 
 from .models import RagContentProjection
 
-_CONTENT_PROJECTION_SCHEMA_VERSION = "rag_content_projection:v4"
+_CONTENT_PROJECTION_SCHEMA_VERSION = "rag_content_projection:v5"
 
 
 class RagProjectionStageAction(StrEnum):

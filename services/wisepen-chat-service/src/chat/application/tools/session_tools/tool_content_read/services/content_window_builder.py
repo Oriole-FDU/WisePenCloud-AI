@@ -4,11 +4,11 @@ from chat.application.tools.common.tool_content_store import (
     StoredToolContent,
     ToolContentChunk,
 )
-from common.utils.chunkers import SourceSpan, TextLocator
+from common.utils.chunkers import SourceSpan
 
 from .models import ToolContentWindow
 
-_DEFAULT_MAX_CHARS = 100_000
+_DEFAULT_MAX_CHARS = 8000
 
 
 class ToolContentWindowBuilder:
@@ -29,9 +29,10 @@ class ToolContentWindowBuilder:
         text_length = len(stored.text)
         normalized_start = _normalize_offset(start, text_length, default=0)
         requested_end = _normalize_offset(end, text_length, default=text_length)
-        if requested_end < normalized_start:
-            raise ValueError("end must not precede start")
-        normalized_end = min(requested_end, normalized_start + self._max_chars)
+        if requested_end <= normalized_start:
+            normalized_end = normalized_start
+        else:
+            normalized_end = min(requested_end, normalized_start + self._max_chars)
         return self._continuous_window(
             stored,
             start=normalized_start,
@@ -92,24 +93,11 @@ class ToolContentWindowBuilder:
         end: int,
         truncated: bool,
     ) -> ToolContentWindow:
-        locators = tuple(
-            locator
-            for locator in stored.locators
-            if locator.start_offset < end and locator.end_offset > start
-        )
         return ToolContentWindow(
             text=stored.text[start:end],
             start_offset=start,
             end_offset=end,
             source_spans=(SourceSpan(start, end),) if start < end else (),
-            locator_names=tuple(dict.fromkeys(locator.name for locator in locators)),
-            page_labels=_locator_labels(locators, "page:"),
-            section_paths=tuple(
-                tuple(locator.name.removeprefix("section:").split(" > "))
-                for locator in locators
-                if locator.name.startswith("section:")
-            ),
-            anchor_labels=_locator_labels(locators, "anchor:"),
             truncated=truncated,
             metadata=dict(stored.metadata),
         )
@@ -137,18 +125,5 @@ def _chunk_locator_names(chunk: ToolContentChunk) -> tuple[str, ...]:
                 *(f"page:{label}" for label in chunk.page_labels),
                 *(f"anchor:{label}" for label in chunk.anchor_labels),
             )
-        )
-    )
-
-
-def _locator_labels(
-    locators: tuple[TextLocator, ...],
-    prefix: str,
-) -> tuple[str, ...]:
-    return tuple(
-        dict.fromkeys(
-            locator.name.removeprefix(prefix)
-            for locator in locators
-            if locator.name.startswith(prefix)
         )
     )

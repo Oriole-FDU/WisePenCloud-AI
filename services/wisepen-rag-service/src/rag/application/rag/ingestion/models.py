@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from common.utils.chunkers import SourceSpan
+from rag.application.rag.resource_snapshot import RagContentLocator
 
 
 # SectionNode：标题树节点。对应“文档里的一个章节/小节”，有 section_path、父子关系、own_start/own_end/subtree_end。
@@ -116,3 +117,4 @@ class RagContentProjection:
     retrieval_chunks: tuple[RagRetrievalChunk, ...]  # 用于召回和排序的子块。
     sections: tuple[RagSectionNode, ...]  # 全部 section 树节点（扁平）。
     source_refs: tuple[RagSourceRef, ...]  # 全部 SourceRef 列表，作为证据回源入口。
+    locators: tuple[RagContentLocator, ...] = ()  # 资源副本支持的命名读取入口。

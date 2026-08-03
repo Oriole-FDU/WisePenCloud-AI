@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from common.utils.chunkers import SourceSpan
+from common.utils.chunkers import LocatorKind, SourceSpan
+
+
+@dataclass(frozen=True, slots=True)
+class ToolContentSnapshotLocator:
+    """缓存正文中的命名定位入口。"""
+
+    locator_index: int
+    name: str
+    kind: LocatorKind
+    start_offset: int
+    end_offset: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +65,16 @@ class ToolContentRegexMatch:
 class ToolContentRegexReadResult:
     matches: tuple[ToolContentRegexMatch, ...] = ()
     failed: tuple[ToolContentReadFailure, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ToolContentSnapshotResult:
+    content_id: str
+    content_type: str | None = None
+    total_length: int | None = None
+    locators: tuple[ToolContentSnapshotLocator, ...] = ()
+    metadata: dict[str, object] = field(default_factory=dict)
+    reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

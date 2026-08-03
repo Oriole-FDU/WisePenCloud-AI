@@ -5,6 +5,7 @@ from .content import (
     MongoRagContextIndexingRepository,
     MongoRagContentProjectionWriter,
     MongoRagExtractionSourceRepository,
+    MongoRagResourceSnapshotRepository,
     MongoRagSectionNavigationRepository,
     MongoRagSourceRepository,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "MongoRagContextIndexingRepository",
     "MongoRagContentProjectionWriter",
     "MongoRagExtractionSourceRepository",
+    "MongoRagResourceSnapshotRepository",
     "MongoRagSectionNavigationRepository",
     "MongoRagSourceRepository",
 ]

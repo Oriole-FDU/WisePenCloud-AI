@@ -1,10 +1,10 @@
-from .locator import ToolContentReadByLocatorTool
 from .ranked import ToolContentRankedReadTool
 from .range import ToolContentReadTool
 from .regex import ToolContentRegexReadTool
+from .snapshot import ToolContentGetSnapshotTool
 
 __all__ = [
-    "ToolContentReadByLocatorTool",
+    "ToolContentGetSnapshotTool",
     "ToolContentRankedReadTool",
     "ToolContentReadTool",
     "ToolContentRegexReadTool",

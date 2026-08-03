@@ -11,6 +11,8 @@ _DEFAULT_SERVICE_NAME = "wisepen-rag-service"
 _LOCATE_PATH = "/internal/rag/knowledge-navigation/locate"
 _EXPAND_PATH = "/internal/rag/knowledge-navigation/expand"
 _SECTIONS_PATH = "/internal/rag/knowledge-navigation/sections"
+_RESOURCE_SNAPSHOT_PATH = "/internal/rag/resources/snapshot"
+_RESOURCE_CONTENT_PATH = "/internal/rag/resources/content"
 
 
 class RagServiceClient:
@@ -82,6 +84,35 @@ class RagServiceClient:
                 "section_ids": list(section_ids),
             },
         )
+
+    async def get_resource_snapshot(
+        self,
+        *,
+        resource_id: str,
+    ) -> dict[str, Any]:
+        return await self._post(
+            _RESOURCE_SNAPSHOT_PATH,
+            {
+                "resource_id": resource_id,
+            },
+        )
+
+    async def read_resource_locator(
+        self,
+        *,
+        resource_id: str,
+        locator_name: str | None = None,
+        start: int | None = None,
+        end: int | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"resource_id": resource_id}
+        if locator_name is not None:
+            payload["locator_name"] = locator_name
+        if start is not None:
+            payload["start"] = start
+        if end is not None:
+            payload["end"] = end
+        return await self._post(_RESOURCE_CONTENT_PATH, payload)
 
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:

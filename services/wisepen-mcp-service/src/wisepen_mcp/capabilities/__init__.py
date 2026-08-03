@@ -29,3 +29,6 @@ def build_mcp_server(
     register_web_search_tools(mcp, web_search_service)
     return mcp
 
+
+__all__ = ["build_mcp_server"]
+

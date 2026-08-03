@@ -17,3 +17,6 @@ def register_skill_creator_tools(
     register_get_skill_info_tool(mcp, ai_asset_client)
     register_update_skill_info_tool(mcp, ai_asset_client)
     register_upload_skill_draft_asset_tool(mcp, ai_asset_client)
+
+
+__all__ = ["register_skill_creator_tools"]

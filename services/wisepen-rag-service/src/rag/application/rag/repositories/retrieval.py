@@ -9,6 +9,10 @@ if TYPE_CHECKING:
     from rag.application.rag.ingestion.models import RagContentProjection
     from rag.application.rag.ingestion.models import RagSectionReadingBlock
     from rag.application.rag.ingestion.revision import RagProjectionStage
+    from rag.application.rag.resource_snapshot.models import (
+        RagResourceContentReadResult,
+        RagResourceSnapshot,
+    )
     from rag.application.rag.retrieval.models import (
         RagCandidateRequest,
         RagRetrievalCandidate,
@@ -119,4 +123,27 @@ class RagSectionNavigationRepository(Protocol):
             section_ids: Sequence[str],
     ) -> tuple[RagSectionReadingBlock, ...]:
         """按 Section 和块内顺序读取完整的 applied ReadingBlock 列表。"""
+        ...
+
+
+class RagResourceSnapshotRepository(Protocol):
+    """资源副本的 locator 快照与按 locator/range 读取接口。"""
+
+    async def load_applied_resource_snapshot(
+            self,
+            *,
+            resource_id: str,
+    ) -> "RagResourceSnapshot | None":
+        """读取当前 applied revision 的 locator 快照。"""
+        ...
+
+    async def read_applied_resource_content(
+            self,
+            *,
+            resource_id: str,
+            locator_name: str | None = None,
+            start: int | None = None,
+            end: int | None = None,
+    ) -> "RagResourceContentReadResult | None":
+        """按 locator 或 offset range 读取当前 applied revision 的正文窗口。"""
         ...

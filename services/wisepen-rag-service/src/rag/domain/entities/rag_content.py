@@ -6,6 +6,8 @@ from beanie import Document
 from pydantic import BaseModel, Field
 from pymongo import ASCENDING, IndexModel
 
+from common.utils.chunkers import LocatorKind
+
 
 class RagSourceSpanDocument(BaseModel):
     start_offset: int
@@ -110,6 +112,29 @@ class RagSectionReadingBlockDocument(Document):
                     ("ordinal", ASCENDING),
                 ],
                 name="idx_rag_reading_block_section_order",
+            ),
+        ]
+
+
+class RagContentLocatorDocument(Document):
+    content_revision: str
+    locator_index: int
+    name: str
+    kind: LocatorKind
+    start_offset: int
+    end_offset: int
+
+    class Settings:
+        name = "wisepen_rag_content_locators"
+        indexes: ClassVar[list[IndexModel]] = [
+            IndexModel(
+                [("content_revision", ASCENDING), ("locator_index", ASCENDING)],
+                name="idx_rag_content_locator_revision_order",
+                unique=True,
+            ),
+            IndexModel(
+                [("content_revision", ASCENDING), ("name", ASCENDING)],
+                name="idx_rag_content_locator_revision_name",
             ),
         ]
 

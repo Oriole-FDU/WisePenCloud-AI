@@ -23,6 +23,8 @@ from .models import (
     ToolContentRankedReadItem,
     ToolContentRankedReadRequest,
     ToolContentRankedReadResult,
+    ToolContentSnapshotLocator,
+    ToolContentSnapshotResult,
 )
 
 _SEARCH_TIMEOUT_SECONDS = 0.05
@@ -106,6 +108,35 @@ class ToolContentReader:
                 )
                 for locator in locators
             ),
+        )
+
+    async def get_snapshot(
+        self,
+        *,
+        content_id: str,
+        session_id: str,
+    ) -> ToolContentSnapshotResult:
+        stored = await self._store.get(content_id=content_id, session_id=session_id)
+        if stored is None:
+            return ToolContentSnapshotResult(
+                content_id=content_id,
+                reason="content_not_found",
+            )
+        return ToolContentSnapshotResult(
+            content_id=content_id,
+            content_type=stored.content_type,
+            total_length=len(stored.text),
+            locators=tuple(
+                ToolContentSnapshotLocator(
+                    locator_index=index,
+                    name=locator.name,
+                    kind=locator.kind,
+                    start_offset=locator.start_offset,
+                    end_offset=locator.end_offset,
+                )
+                for index, locator in enumerate(stored.locators)
+            ),
+            metadata=dict(stored.metadata),
         )
 
     async def read_regex(

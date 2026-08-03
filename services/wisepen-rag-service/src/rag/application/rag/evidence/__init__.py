@@ -3,3 +3,10 @@ from .materializer import (
     RagEvidenceUnavailableError,
 )
 from .models import RagMaterializedHit, RagMaterializedSource
+
+__all__ = [
+    "RagEvidenceMaterializer",
+    "RagEvidenceUnavailableError",
+    "RagMaterializedHit",
+    "RagMaterializedSource",
+]

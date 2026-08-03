@@ -23,6 +23,7 @@ from rag.application.rag.kafka_consumers import (
     RagResourceDeletedConsumer,
 )
 from rag.application.rag.knowledge_navigation import KnowledgeNavigationService
+from rag.application.rag.resource_snapshot import RagResourceSnapshotService
 from rag.application.rag.retrieval import (
     RagCandidateRetriever,
 )
@@ -37,6 +38,7 @@ from rag.core.persistence import (
     MongoRagExtractionSourceRepository,
     MongoRagSectionNavigationRepository,
     MongoRagSourceRepository,
+    MongoRagResourceSnapshotRepository,
     Neo4jKnowledgeGraphRepository,
     QdrantRagCandidateRepository,
     QdrantRagVectorIndexRepository,
@@ -170,6 +172,9 @@ class Container(containers.DeclarativeContainer):
         MongoRagExtractionSourceRepository
     )
     source_repository = providers.Singleton(MongoRagSourceRepository)
+    resource_snapshot_repository = providers.Singleton(
+        MongoRagResourceSnapshotRepository
+    )
     section_navigation_repository = providers.Singleton(
         MongoRagSectionNavigationRepository
     )
@@ -273,6 +278,11 @@ class Container(containers.DeclarativeContainer):
         section_navigator=section_navigator,
         state_repository=navigation_state_repository,
         path_ranking_pipeline=providers.Object(KNOWLEDGE_GRAPH_PATH_PIPELINE),
+    )
+    resource_snapshot_service = providers.Singleton(
+        RagResourceSnapshotService,
+        permission_authorizer=permission_authorizer,
+        repository=resource_snapshot_repository,
     )
 
 

@@ -19,6 +19,7 @@ from common.web.exception_handlers import setup_global_exception_handlers
 from common.web.middleware import SecurityHeaderMiddleware
 from rag.api.router import api_router
 from rag.api.endpoints import navigation as navigation_endpoints
+from rag.api.endpoints import resources as resources_endpoints
 from rag.container import container
 from rag.core.config.app_settings import settings
 from rag.core.config.bootstrap_settings import bootstrap_settings
@@ -26,6 +27,7 @@ from rag.core.config.nacos import nacos_client_manager
 from rag.domain.entities import (
     RagAclProjectionDocument,
     RagContentPartDocument,
+    RagContentLocatorDocument,
     RagContextIndexingDocument,
     RagContentRevisionDocument,
     RagGraphExtractionDocument,
@@ -66,6 +68,7 @@ async def lifespan(app: FastAPI):
             RagAclProjectionDocument,
             RagContentRevisionDocument,
             RagContentPartDocument,
+            RagContentLocatorDocument,
             RagContextIndexingDocument,
             RagGraphExtractionDocument,
             RagSectionReadingBlockDocument,
@@ -112,7 +115,7 @@ async def lifespan(app: FastAPI):
         error("nacos instance deregister failed.", exc=exception)
 
 
-container.wire(modules=[navigation_endpoints])
+container.wire(modules=[navigation_endpoints, resources_endpoints])
 
 app = FastAPI(
     title=bootstrap_settings.APP_NAME,
