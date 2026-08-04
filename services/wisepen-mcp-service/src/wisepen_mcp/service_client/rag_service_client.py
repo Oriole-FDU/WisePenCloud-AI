@@ -97,7 +97,7 @@ class RagServiceClient:
             },
         )
 
-    async def read_resource_locator(
+    async def read_source(
         self,
         *,
         resource_id: str,

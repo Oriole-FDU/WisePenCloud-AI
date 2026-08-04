@@ -122,6 +122,16 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [
         "policy": _RAG_NAVIGATION_POLICY,
         "failure_reason": "Knowledge Navigation Sections Failed",
     },
+    {
+        "tool_name": "rag_get_resource_snapshot",
+        "policy": _RAG_NAVIGATION_POLICY,
+        "failure_reason": "Resource Snapshot Load Failed",
+    },
+    {
+        "tool_name": "rag_read_source",
+        "policy": _RAG_NAVIGATION_POLICY,
+        "failure_reason": "Resource Content Read Failed",
+    },
 
     # 3. Web Search
     {

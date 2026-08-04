@@ -63,8 +63,8 @@ def register_resource_tools(mcp: FastMCP, client: RagServiceClient) -> None:
             await client.get_resource_snapshot(resource_id=resource_id)
         )
 
-    @mcp.tool(name="rag_read_resource_locator", description=_READ_DESCRIPTION)
-    async def rag_read_resource_locator(
+    @mcp.tool(name="rag_read_source", description=_READ_DESCRIPTION)
+    async def rag_read_source(
         resource_id: _RESOURCE_ID,
         locator_name: _LOCATOR_NAME | None = None,
         start: Annotated[
@@ -82,7 +82,7 @@ def register_resource_tools(mcp: FastMCP, client: RagServiceClient) -> None:
                 "locator_name cannot be combined with start/end.",
             )
         return _render_read_result(
-            await client.read_resource_locator(
+            await client.read_source(
                 resource_id=resource_id,
                 locator_name=locator_name,
                 start=start,

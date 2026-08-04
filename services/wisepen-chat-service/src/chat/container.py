@@ -298,7 +298,7 @@ class Container(containers.DeclarativeContainer):
     )
     tool_content_reader = providers.Singleton(
         ToolContentReader,
-        max_window_chars=settings.TOOL_RESULT_MAX_CHARS,
+        max_window_chars=8000,
         ranking_pipeline=tool_content_ranked_read_pipeline,
         store=tool_content_store,
     )
