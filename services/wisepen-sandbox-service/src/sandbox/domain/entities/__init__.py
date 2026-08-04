@@ -1,4 +1,5 @@
 from sandbox.domain.entities.models import (
+    DiscoveredSandbox,
     DestroyReason,
     Endpoint,
     ExecutionRequest,
@@ -19,6 +20,7 @@ from sandbox.domain.entities.models import (
 )
 
 __all__ = [
+    "DiscoveredSandbox",
     "DestroyReason",
     "Endpoint",
     "ExecutionRequest",

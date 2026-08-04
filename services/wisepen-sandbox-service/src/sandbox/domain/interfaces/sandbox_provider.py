@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from sandbox.domain.entities import (
+    DiscoveredSandbox,
     Endpoint,
     ExecutionRequest,
     ExecutionResult,
@@ -25,6 +26,9 @@ class SandboxProvider(Protocol):
         ...
 
     async def health(self, sandbox: SandboxRef) -> Health:
+        ...
+
+    async def list_managed(self) -> list[DiscoveredSandbox]:
         ...
 
     async def prepare_workspace(

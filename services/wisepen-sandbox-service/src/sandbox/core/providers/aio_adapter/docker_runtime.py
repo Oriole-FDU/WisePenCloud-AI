@@ -23,6 +23,17 @@ class ContainerHandle:
     public_websocket_url: str | None = None
 
 
+@dataclass(frozen=True)
+class ManagedContainer:
+    container_id: str
+    container_name: str
+    labels: dict[str, str]
+    running: bool
+    endpoint: str | None = None
+    public_vnc_url: str | None = None
+    public_websocket_url: str | None = None
+
+
 class DockerCommandFailure(ServiceException):
     """保留 Docker CLI 的退出状态，供存在副作用的命令判定是否可恢复。"""
 
@@ -96,6 +107,9 @@ class DockerRuntime:
             "--label",
             f"wisepen.owner={self._owner_id}",
             "--label",
+            # 该 label 只表示创建时未绑定用户；用户绑定以 Repository/Mongo 为准。
+            "wisepen.binding=unbound",
+            "--label",
             f"wisepen.sandbox_id={name}",
             "-p",
             # 端口映射使用 host::containerPort，让 Docker 分配随机宿主机端口，避免并发预热冲突。
@@ -147,41 +161,16 @@ class DockerRuntime:
             container_id=container_id,
             image=image,
         )
-        api_host_port = self._host_port(container_id, self._config.api_port)
-        vnc_host_port = self._host_port(container_id, self._config.vnc_port)
-        endpoint = (
-            f"http://{name}:{self._config.api_port}"
-            if self._config.network
-            else f"http://{self._config.host}:{api_host_port}"
-        )
-        public_vnc_url = self._format_public_url(
-            self._config.public_vnc_url_template,
-            container_id,
-            name,
-            vnc_host_port,
-        )
-        public_websocket_url = self._format_public_url(
-            self._config.public_websocket_url_template,
-            container_id,
-            name,
-            vnc_host_port,
-        )
+        handle = self._container_handle(container_id, name)
         info(
             "Docker 解析 AIO 容器连接信息完成",
             container_id=container_id,
-            endpoint=endpoint,
-            api_host_port=api_host_port,
-            vnc_host_port=vnc_host_port,
+            endpoint=handle.endpoint,
             network=self._config.network,
-            has_public_vnc_url=public_vnc_url is not None,
-            has_public_websocket_url=public_websocket_url is not None,
+            has_public_vnc_url=handle.public_vnc_url is not None,
+            has_public_websocket_url=handle.public_websocket_url is not None,
         )
-        return ContainerHandle(
-            container_id,
-            endpoint,
-            public_vnc_url,
-            public_websocket_url,
-        )
+        return handle
 
     def _run_create(self, args: Sequence[str], container_name: str) -> str:
         """运行 docker run，并处理 CLI 在结果返回前被信号中断的情况。"""
@@ -319,6 +308,46 @@ class DockerRuntime:
                 "public VNC URL 模板非法",
             ) from exc
 
+    def _container_handle(self, container_id: str, container_name: str) -> ContainerHandle:
+        api_host_port = self._host_port(container_id, self._config.api_port)
+        vnc_host_port = self._host_port(container_id, self._config.vnc_port)
+        endpoint = (
+            f"http://{container_name}:{self._config.api_port}"
+            if self._config.network
+            else f"http://{self._config.host}:{api_host_port}"
+        )
+        return ContainerHandle(
+            container_id,
+            endpoint,
+            self._format_public_url(
+                self._config.public_vnc_url_template,
+                container_id,
+                container_name,
+                vnc_host_port,
+            ),
+            self._format_public_url(
+                self._config.public_websocket_url_template,
+                container_id,
+                container_name,
+                vnc_host_port,
+            ),
+        )
+
+    def _optional_container_handle(
+        self, container_id: str, container_name: str
+    ) -> ContainerHandle | None:
+        try:
+            return self._container_handle(container_id, container_name)
+        except ServiceException as exc:
+            # 启动认领只需要发现和销毁能力；退出或端口异常的容器不应阻断孤儿清理。
+            warn(
+                "Docker 发现容器但无法解析 endpoint，启动对账将按不可用处理",
+                exc=exc,
+                container_id=container_id,
+                container_name=container_name,
+            )
+            return None
+
     def remove(self, container_id: str) -> None:
         info("Docker 开始销毁 AIO 容器", container_id=container_id)
         try:
@@ -353,6 +382,58 @@ class DockerRuntime:
             count=len(container_ids),
         )
         return len(container_ids)
+
+    def list_managed(self) -> list[ManagedContainer]:
+        """List managed AIO containers for startup reconciliation.
+
+        This intentionally scans all Wisepen managed AIO workers instead of the
+        current owner id.  A restarted process gets a new owner label, while the
+        repository remains the authority that decides whether a discovered
+        container is current or orphaned.
+        """
+
+        raw = self._run(
+            [
+                self._config.docker_bin,
+                "ps",
+                "-aq",
+                "--filter",
+                "label=wisepen.managed=true",
+                "--filter",
+                "label=wisepen.role=aio-worker",
+            ]
+        )
+        managed: list[ManagedContainer] = []
+        for container_id in [value.strip() for value in raw.splitlines() if value.strip()]:
+            try:
+                payload = self.inspect(container_id)
+            except ServiceException as exc:
+                warn(
+                    "Docker 启动对账跳过无法 inspect 的容器",
+                    exc=exc,
+                    container_id=container_id,
+                )
+                continue
+            labels = payload.get("Config", {}).get("Labels") or {}
+            if not isinstance(labels, dict):
+                labels = {}
+            state = payload.get("State") or {}
+            running = bool(state.get("Running")) or state.get("Status") == "running"
+            container_name = str(payload.get("Name") or "").lstrip("/") or container_id
+            handle = self._optional_container_handle(container_id, container_name)
+            managed.append(
+                ManagedContainer(
+                    container_id=container_id,
+                    container_name=container_name,
+                    labels={str(key): str(value) for key, value in labels.items()},
+                    running=running,
+                    endpoint=handle.endpoint if handle else None,
+                    public_vnc_url=handle.public_vnc_url if handle else None,
+                    public_websocket_url=handle.public_websocket_url if handle else None,
+                )
+            )
+        info("Docker 启动对账发现 AIO 容器", count=len(managed))
+        return managed
 
     def inspect(self, container_id: str) -> dict:
         info("Docker 开始检查 AIO 容器", container_id=container_id)

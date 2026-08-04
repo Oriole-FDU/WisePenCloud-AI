@@ -79,6 +79,19 @@ class SandboxRef:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class DiscoveredSandbox:
+    """Runtime-discovered container used only for startup reconciliation.
+
+    Labels are discovery hints because Docker labels are immutable after create.
+    Repository state remains authoritative for ownership, binding and generation.
+    """
+
+    ref: SandboxRef
+    labels: dict[str, str] = field(default_factory=dict)
+    running: bool = True
+
+
 @dataclass
 class SandboxRecord:
     ref: SandboxRef

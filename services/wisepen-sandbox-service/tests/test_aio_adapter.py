@@ -125,6 +125,7 @@ def test_docker_runtime_builds_managed_container_commands():
     assert handle.endpoint.endswith(":49152")
     assert "wisepen.managed=true" in calls[0]
     assert "wisepen.role=aio-worker" in calls[0]
+    assert "wisepen.binding=unbound" in calls[0]
     assert any(value.startswith("wisepen.owner=wisepen-sandbox-service-") for value in calls[0])
     assert calls[0].count("-p") == 2
     assert "test-image" in calls[0]
@@ -164,6 +165,51 @@ def test_docker_runtime_passes_browser_no_sandbox_environment():
     )
 
     assert "BROWSER_NO_SANDBOX=--no-sandbox" in calls[0]
+
+
+def test_docker_runtime_lists_managed_containers_for_startup_reconcile():
+    calls = []
+
+    def runner(args, **kwargs):
+        calls.append(args)
+        if args[1] == "ps":
+            return SimpleNamespace(returncode=0, stdout="container-id\n", stderr="")
+        if args[1] == "inspect":
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    [
+                        {
+                            "Name": "/wisepen-aio-known",
+                            "Config": {
+                                "Labels": {
+                                    "wisepen.managed": "true",
+                                    "wisepen.role": "aio-worker",
+                                    "wisepen.binding": "unbound",
+                                }
+                            },
+                            "State": {"Running": True, "Status": "running"},
+                        }
+                    ]
+                ),
+                stderr="",
+            )
+        if args[1] == "port":
+            port = "49152" if "8080/tcp" in args else "49153"
+            return SimpleNamespace(returncode=0, stdout=f"127.0.0.1:{port}\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    runtime = DockerRuntime(AdapterConfig(image="test-image"), runner=runner)
+
+    containers = runtime.list_managed()
+
+    assert [call[1] for call in calls[:2]] == ["ps", "inspect"]
+    assert len(containers) == 1
+    assert containers[0].container_id == "container-id"
+    assert containers[0].container_name == "wisepen-aio-known"
+    assert containers[0].running is True
+    assert containers[0].endpoint == "http://127.0.0.1:49152"
+    assert containers[0].labels["wisepen.binding"] == "unbound"
 
 
 def test_docker_runtime_maps_command_failure_to_service_error():

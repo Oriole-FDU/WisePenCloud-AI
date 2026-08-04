@@ -6,9 +6,15 @@ from datetime import timedelta
 import pytest
 from common.core.exceptions import ServiceException
 
-from sandbox.application.services import SandboxPool, SandboxScheduler, Watcher
+from sandbox.application.services import (
+    SandboxPool,
+    SandboxScheduler,
+    SandboxStartupReconciler,
+    Watcher,
+)
 from sandbox.core.storage.memory import MemorySandboxRepository
 from sandbox.domain.entities import (
+    DiscoveredSandbox,
     Endpoint,
     ExecutionRequest,
     ExecutionResult,
@@ -111,6 +117,46 @@ class FakeProvider:
 
     async def destroy(self, sandbox: SandboxRef, reason: str) -> None:
         self.destroyed.append(sandbox.sandbox_id)
+
+
+class ReconcileProvider:
+    def __init__(
+        self,
+        discovered: list[DiscoveredSandbox],
+        *,
+        healthy: bool = True,
+    ) -> None:
+        self.discovered = discovered
+        self.healthy = healthy
+        self.health_checks: list[str] = []
+        self.destroyed: list[tuple[str, str]] = []
+
+    async def list_managed(self) -> list[DiscoveredSandbox]:
+        return list(self.discovered)
+
+    async def health(self, sandbox: SandboxRef) -> Health:
+        self.health_checks.append(sandbox.sandbox_id)
+        return Health(self.healthy, "ready" if self.healthy else "unhealthy")
+
+    async def destroy(self, sandbox: SandboxRef, reason: str) -> None:
+        self.destroyed.append((sandbox.sandbox_id, reason))
+
+
+def discovered_sandbox(
+    sandbox_id: str,
+    *,
+    provider_id: str | None = None,
+    running: bool = True,
+) -> DiscoveredSandbox:
+    return DiscoveredSandbox(
+        SandboxRef(
+            sandbox_id,
+            provider_id or f"provider-{sandbox_id}",
+            Endpoint(f"http://{sandbox_id}:8080"),
+        ),
+        labels={"wisepen.binding": "unbound"},
+        running=running,
+    )
 
 
 async def add_ready(provider: FakeProvider, repository: MemorySandboxRepository) -> None:
@@ -363,6 +409,122 @@ async def test_pool_consume_creates_replenish_demand_for_watcher() -> None:
     assert plan.create_count == 1
     assert await watcher.reconcile() == 1
     assert (await pool.snapshot()).counts[SandboxState.READY] == 2
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciler_destroys_orphan_discovered_container() -> None:
+    repository = MemorySandboxRepository()
+    provider = ReconcileProvider([discovered_sandbox("sb-orphan")])
+    reconciler = SandboxStartupReconciler(repository, provider)
+
+    result = await reconciler.reconcile()
+
+    assert result.orphan_destroyed == 1
+    assert provider.destroyed == [("sb-orphan", "startup_orphan")]
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciler_keeps_healthy_ready_authoritative_record() -> None:
+    repository = MemorySandboxRepository()
+    record = SandboxRecord(
+        SandboxRef("sb-ready", "provider-sb-ready", Endpoint("http://ready:8080")),
+        SandboxState.READY,
+    )
+    await repository.save(record)
+    provider = ReconcileProvider([discovered_sandbox("sb-ready")])
+    reconciler = SandboxStartupReconciler(repository, provider)
+
+    result = await reconciler.reconcile()
+
+    assert result.matched_ready == 1
+    assert provider.health_checks == ["sb-ready"]
+    assert provider.destroyed == []
+    assert (await repository.get("sb-ready")).state == SandboxState.READY
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciler_marks_missing_ready_record_lost() -> None:
+    repository = MemorySandboxRepository()
+    await repository.save(
+        SandboxRecord(SandboxRef("sb-missing", "provider-missing"), SandboxState.READY)
+    )
+    provider = ReconcileProvider([])
+    reconciler = SandboxStartupReconciler(repository, provider)
+
+    result = await reconciler.reconcile()
+
+    assert result.missing_marked_lost == 1
+    assert (await repository.get("sb-missing")).state == SandboxState.LOST
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciler_destroys_inflight_warmup_container() -> None:
+    repository = MemorySandboxRepository()
+    await repository.save(
+        SandboxRecord(SandboxRef("sb-warming", "provider-warming"), SandboxState.WARMING)
+    )
+    provider = ReconcileProvider([discovered_sandbox("sb-warming")])
+    reconciler = SandboxStartupReconciler(repository, provider)
+
+    result = await reconciler.reconcile()
+
+    assert result.inflight_destroyed == 1
+    assert provider.destroyed == [("sb-warming", "startup_inflight")]
+    assert (await repository.get("sb-warming")).state == SandboxState.DESTROYED
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciler_finishes_destroying_record() -> None:
+    repository = MemorySandboxRepository()
+    await repository.save(
+        SandboxRecord(
+            SandboxRef("sb-destroying", "provider-destroying"),
+            SandboxState.DESTROYING,
+        )
+    )
+    provider = ReconcileProvider([discovered_sandbox("sb-destroying")])
+    reconciler = SandboxStartupReconciler(repository, provider)
+
+    result = await reconciler.reconcile()
+
+    assert result.destroying_finished == 1
+    assert provider.destroyed == [("sb-destroying", "startup_destroying")]
+    assert (await repository.get("sb-destroying")).state == SandboxState.DESTROYED
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciler_does_not_destroy_authoritative_user_record() -> None:
+    repository = MemorySandboxRepository()
+    await repository.save(
+        SandboxRecord(
+            SandboxRef("sb-user", "provider-user"),
+            SandboxState.USER_ACTIVE,
+            owner_user_id="user-1",
+        )
+    )
+    provider = ReconcileProvider([discovered_sandbox("sb-user")])
+    reconciler = SandboxStartupReconciler(repository, provider)
+
+    result = await reconciler.reconcile()
+
+    assert result.orphan_destroyed == 0
+    assert provider.destroyed == []
+    assert (await repository.get("sb-user")).state == SandboxState.USER_ACTIVE
+
+
+def test_container_pool_startup_reconciler_uses_repository_and_provider() -> None:
+    from sandbox.container import Container
+
+    container = Container()
+    repository = MemorySandboxRepository()
+    provider = ReconcileProvider([])
+    container.repository.override(repository)
+    container.provider.override(provider)
+
+    reconciler = container.startup_reconciler()
+
+    assert reconciler._repository is repository
+    assert reconciler._provider is provider
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@ from dependency_injector import containers, providers
 
 from sandbox.application.services.sandbox_pool import SandboxPool
 from sandbox.application.services.sandbox_scheduler import SandboxScheduler
+from sandbox.application.services.sandbox_startup_reconciler import SandboxStartupReconciler
 from sandbox.application.services.sandbox_watcher import Watcher
 from sandbox.core.observability import MetricsCollector
 from sandbox.core.providers.aio_adapter.file_transfer import DockerWorkspaceTransfer
@@ -161,6 +162,11 @@ class Container(containers.DeclarativeContainer):
         user_idle_ttl_seconds=config.SANDBOX_USER_IDLE_TTL_SECONDS,
         max_user_bindings=config.SANDBOX_MAX_USER_BINDINGS,
         metrics=metrics,
+    )
+    startup_reconciler = providers.Singleton(
+        SandboxStartupReconciler,
+        repository=repository,
+        provider=provider,
     )
     leader_lease = providers.Singleton(MemoryLeaderLease)
     watcher = providers.Singleton(

@@ -5,6 +5,7 @@ import shlex
 from typing import Any
 
 from sandbox.domain.entities import (
+    DiscoveredSandbox,
     Endpoint,
     ExecutionRequest,
     ExecutionResult,
@@ -110,7 +111,7 @@ class AioSandboxProvider(SandboxProvider):
         )
         handle = await asyncio.to_thread(self._runtime.create, spec)
         ref = SandboxRef(
-            sandbox_id=f"sb_{handle.container_id[:16]}",
+            sandbox_id=self._sandbox_id(handle.container_id),
             provider_id=handle.container_id,
             endpoint=Endpoint(
                 handle.endpoint,
@@ -127,6 +128,10 @@ class AioSandboxProvider(SandboxProvider):
             image=spec.image,
         )
         return ref
+
+    @staticmethod
+    def _sandbox_id(container_id: str) -> str:
+        return f"sb_{container_id[:16]}"
 
     async def wait_ready(self, sandbox: SandboxRef, timeout_seconds: float) -> Health:
         client = self._client(sandbox)
@@ -365,6 +370,37 @@ class AioSandboxProvider(SandboxProvider):
 
     async def cleanup_owned(self) -> int:
         return await asyncio.to_thread(self._runtime.cleanup_owned)
+
+    async def list_managed(self) -> list[DiscoveredSandbox]:
+        containers = await asyncio.to_thread(self._runtime.list_managed)
+        discovered: list[DiscoveredSandbox] = []
+        for container in containers:
+            endpoint = (
+                Endpoint(
+                    container.endpoint,
+                    public_vnc_url=container.public_vnc_url,
+                    public_websocket_url=container.public_websocket_url,
+                )
+                if container.endpoint
+                else None
+            )
+            sandbox_id = self._sandbox_id(container.container_id)
+            discovered.append(
+                DiscoveredSandbox(
+                    SandboxRef(
+                        sandbox_id=sandbox_id,
+                        provider_id=container.container_id,
+                        endpoint=endpoint,
+                        metadata={
+                            "container_name": container.container_name,
+                            "label_sandbox_id": container.labels.get("wisepen.sandbox_id"),
+                        },
+                    ),
+                    labels=container.labels,
+                    running=container.running,
+                )
+            )
+        return discovered
 
     def _client(self, sandbox: SandboxRef) -> AioClient:
         if sandbox.endpoint is None:

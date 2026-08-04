@@ -55,6 +55,9 @@ async def lifespan(app):
         else:
             info("跳过部署环境验证（DEV 模式）。")
 
+        # 启动对账必须早于 watcher 补池：Repository 是权威，Docker label 只用于发现孤儿。
+        await container.startup_reconciler().reconcile()
+
         if use_nacos:
             await nacos_client_manager.register_instance()
         else:
