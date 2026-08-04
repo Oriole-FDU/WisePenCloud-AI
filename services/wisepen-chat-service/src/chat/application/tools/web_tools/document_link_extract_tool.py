@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from chat.application.tools.core import (
     ToolDefinition,
-    ToolExecutionError,
     ToolLLMSpec,
     ToolParametersSchema,
     ToolPolicy,
@@ -20,15 +20,20 @@ from .document_link_extract import (
 )
 
 
+MAX_URLS = 64
+
 _PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "url": {
-            "type": "string",
-            "minLength": 1,
+        "urls": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "minItems": 1,
+            "maxItems": MAX_URLS,
             "description": (
-                "One complete, publicly reachable direct URL to a PDF, DOCX, XLSX, or PPTX "
-                "document. Do not pass an HTML page, search query, site name, or relative URL."
+                "One or more complete, publicly reachable direct URLs to PDF, DOCX, XLSX, "
+                "or PPTX documents. Do not pass HTML pages, search queries, site names, "
+                "or relative URLs."
             ),
         },
         "pdf_method": {
@@ -38,11 +43,14 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "description": (
                 "PDF parsing method. exact uses the full document parser and is slower but "
                 "handles complex or scanned PDFs; fast reads the native PDF text layer. This "
-                "parameter has no effect for DOCX, XLSX, or PPTX documents."
+                "parameter is honored only when urls contains exactly one item. When urls "
+                "contains multiple items, the tool silently uses fast PDF parsing for every "
+                "PDF regardless of this value. This parameter has no effect for DOCX, XLSX, "
+                "or PPTX documents."
             ),
         },
     },
-    "required": ["url"],
+    "required": ["urls"],
     "additionalProperties": False,
 }
 
@@ -56,12 +64,15 @@ class DocumentLinkExtractTool:
             llm_spec=ToolLLMSpec(
                 name="document_link_extract",
                 description=(
-                    "Extract one known public binary document URL into Markdown. Supports PDF, "
-                    "DOCX, XLSX, and PPTX after validating the downloaded file bytes. Use exact "
-                    "PDF parsing for complex, scanned, formula-heavy, or table-heavy documents; "
-                    "use fast PDF parsing when the native text layer is sufficient. Use web_fetch "
-                    "for HTML pages or convenient fast consumption of direct PDF URLs. Other "
-                    "binary formats are rejected."
+                    "Extract one or more known public binary document URLs into Markdown. Supports "
+                    "PDF, DOCX, XLSX, and PPTX after validating the downloaded file bytes. Use exact "
+                    "PDF parsing for a single complex, scanned, formula-heavy, or table-heavy PDF; "
+                    "use fast PDF parsing when the native text layer is sufficient. If multiple "
+                    "urls are provided, the tool runs them concurrently and silently forces fast "
+                    "PDF parsing for every PDF, regardless of the pdf_method argument. Successful "
+                    "documents are returned even when other URLs fail; failed items include exception "
+                    "details in the visible result. Use web_fetch for HTML pages or convenient fast "
+                    "consumption of direct PDF URLs. Other binary formats are rejected."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -84,34 +95,56 @@ class DocumentLinkExtractTool:
         **kwargs: Any,
     ) -> ToolReturn:
         del context, config
-        url = str(kwargs["url"]).strip()
-        try:
-            markdown = await self._extractor.extract(
-                url,
-                pdf_method=PdfParseMethod(
-                    kwargs.get("pdf_method") or PdfParseMethod.EXACT
-                ),
-            )
-        except (UnsupportedDocumentTypeError, NotImplementedError, UrlSecurityError) as exc:
-            raise ToolExecutionError(
-                reason="document_link_extract_unsupported",
-                detail_reason=str(exc),
-                retryable=False,
-            ) from exc
-        except Exception as exc:
-            raise ToolExecutionError(
-                reason="document_link_extract_failed",
-                detail_reason=str(exc),
-                retryable=True,
-            ) from exc
+        urls = tuple(str(url).strip() for url in kwargs["urls"])
+        pdf_method = PdfParseMethod(kwargs.get("pdf_method") or PdfParseMethod.EXACT)
+        if len(urls) > 1:
+            pdf_method = PdfParseMethod.FAST
+        results = await asyncio.gather(
+            *(
+                self._extractor.extract(url, pdf_method=pdf_method)
+                for url in urls
+            ),
+            return_exceptions=True,
+        )
 
-        return ToolReturn(
-            visible_result={"source_url": url},
-            cacheable_texts=(
+        items: list[dict[str, Any]] = []
+        cacheable_texts: list[CacheableText] = []
+        for url, result in zip(urls, results, strict=True):
+            if isinstance(result, Exception):
+                unsupported = isinstance(
+                    result,
+                    (UnsupportedDocumentTypeError, NotImplementedError, UrlSecurityError),
+                )
+                items.append(
+                    {
+                        "source_url": url,
+                        "status": "failed",
+                        "reason": (
+                            "document_link_extract_unsupported"
+                            if unsupported
+                            else "document_link_extract_failed"
+                        ),
+                        "exception": {
+                            "type": type(result).__name__,
+                            "message": str(result),
+                        },
+                        "retryable": not unsupported,
+                    }
+                )
+                continue
+
+            items.append({"source_url": url, "status": "success"})
+            cacheable_texts.append(
                 CacheableText(
-                    text=markdown,
+                    text=result,
                     is_md=True,
                     metadata={"source_url": url},
-                ),
-            ),
+                )
+            )
+
+        return ToolReturn(
+            visible_result={
+                "items": tuple(items),
+            },
+            cacheable_texts=tuple(cacheable_texts),
         )

@@ -81,11 +81,11 @@ class KnowledgeAssertion(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgeExtractionChunk:
-    """图抽取需要的最小检索块视图。"""
+class KnowledgeExtractionBlock:
+    """图抽取使用的父级阅读块视图。"""
 
-    chunk_id: str
-    chunk_index: int
+    block_id: str
+    block_index: int
     section_id: str
     section_path: tuple[str, ...]
     raw_text: str
@@ -97,19 +97,20 @@ class KnowledgeExtractionSource:
     """当前 applied revision 的图抽取输入。"""
 
     resource_id: str
+    document_title: str
     document_version: int
     content_revision: str
     markdown: str
-    chunks: tuple[KnowledgeExtractionChunk, ...]
+    blocks: tuple[KnowledgeExtractionBlock, ...]
     source_refs: tuple[RagSourceRef, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeWindowSourceSpan:
-    """窗口内 chunk raw_text 区间到原文 Markdown 区间的双向映射。"""
+    """窗口内父块 raw_text 区间到原文 Markdown 区间的双向映射。"""
 
-    local_start: int  # 在 chunk raw_text 中的起始 offset。
-    local_end: int  # 在 chunk raw_text 中的结束 offset。
+    local_start: int  # 在父块 raw_text 中的起始 offset。
+    local_end: int  # 在父块 raw_text 中的结束 offset。
     source_start: int  # 在原始 Markdown 中的起始 offset。
     source_end: int  # 在原始 Markdown 中的结束 offset。
 
@@ -119,16 +120,19 @@ class KnowledgeExtractionWindow:
     """知识抽取窗口，作为 LLM 的最小工作单元。"""
 
     resource_id: str  # 当前私有资源 ID。
+    document_title: str  # 从标题树推导出的文档标题，缺失时为空。
     document_version: int  # 资源文档版本号。
     content_revision: str  # 内容投影的版本哈希。
-    chunk_id: str  # 窗口对应的 chunk ID。
-    chunk_index: int  # chunk 在文档中的顺序。
-    current_text: str  # 窗口内的 chunk raw_text（local_start/local_end 坐标基准）。
+    parent_id: str  # 窗口对应的 Section ReadingBlock ID。
+    parent_index: int  # 父块在文档中的顺序。
+    window_id: str  # 本次 SDK 调用的窗口 ID；parent 内滑窗时与 parent_id 分离。
+    window_index: int  # 同一父块内的滑窗顺序。
+    current_text: str  # 窗口内的父块 raw_text（local_start/local_end 坐标基准）。
     source_mappings: tuple[KnowledgeWindowSourceSpan, ...]  # local -> source 区间映射。
-    source_refs: tuple[RagSourceRef, ...]  # 该 chunk 可选 SourceRef，用于 evidence 落位。
+    source_refs: tuple[RagSourceRef, ...]  # 父块覆盖的 SourceRef，用于 evidence 落位。
     section_paths: tuple[tuple[str, ...], ...] = ()  # 窗口所在 section 路径集合。
-    previous_context: str = ""  # 同 section 上一 chunk 末尾上下文，仅用于消歧。
-    next_context: str = ""  # 同 section 下一 chunk 开头上下文，仅用于消歧。
+    previous_context: str = ""  # 同 section 上一父块末尾上下文，仅用于消歧。
+    next_context: str = ""  # 同 section 下一父块开头上下文，仅用于消歧。
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,8 +140,8 @@ class KnowledgeEvidence:
     """知识图谱节点或关系在原文中的精确证据。"""
 
     evidence_ref_id: str  # evidence 的稳定 ID，跨抽取运行保持一致。
-    source_ref_id: str  # 对应的 SourceRef ID。
-    chunk_id: str  # evidence 所在 chunk。
+    source_ref_ids: tuple[str, ...]  # 覆盖该 evidence 的 SourceRef ID。
+    parent_id: str  # evidence 所属 Section ReadingBlock。
     quote: str  # 已按原文 offset 校验的连续证据文本。
 
 
@@ -145,7 +149,7 @@ class KnowledgeEvidence:
 class ExtractedKnowledgeNode:
     """单窗口内由 SDK 抽取并经 Mapper 校验后的节点。"""
 
-    local_id: str  # 节点在当前窗口中的本地 ID（通常为 chunk_id:UUID）。
+    local_id: str  # 节点在当前窗口中的本地 ID（通常为 parent_id:UUID）。
     kind: KnowledgeNodeKind  # 节点种类。
     label: str  # 节点展示名。
     entity_type: KnowledgeEntityType | None = None  # 实体类型；Resource 与 ExternalSource 不设置。

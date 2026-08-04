@@ -28,8 +28,8 @@ class KnowledgeGraphResultMapper:
 
     def map(self, graph: Neo4jGraph, window: KnowledgeExtractionWindow) -> KnowledgeWindowExtraction:
         """校验候选节点与关系，并为有效结果绑定原文证据。"""
-        # SDK 使用 chunk_id 作为节点 ID 命名空间。当前窗口只接收属于本 chunk 的候选节点。
-        node_id_prefix = f"{window.chunk_id}:"
+        # SDK 使用 window_id 作为节点 ID 命名空间。parent 内滑窗不会互相串图。
+        node_id_prefix = f"{window.window_id}:"
         candidate_nodes = {
             node.id: node for node in graph.nodes if node.id.startswith(node_id_prefix)
         }
@@ -153,23 +153,24 @@ def _locate_evidence(window: KnowledgeExtractionWindow, raw_quote: object) -> Kn
         if source_span is not None:
             source_start, source_end = source_span
 
-            # 一个原文区间可能同时被多个 SourceRef 覆盖。优先选择覆盖 span 最短的引用；
-            # 长度相同时按 ref_id 排序，从而保证选择精度优先且不依赖列表顺序。
+            # parent 证据可能跨多个 retrieval child，收集所有相交 SourceRef 用于后续回源。
             matching_source_refs = [
-                (span.end_offset - span.start_offset, source_ref.ref_id, source_ref)
+                source_ref
                 for source_ref in window.source_refs
                 for span in source_ref.source_spans
-                if span.start_offset <= source_start and span.end_offset >= source_end
+                if span.start_offset < source_end and span.end_offset > source_start
             ]
 
             if matching_source_refs:
-                source_ref = min(matching_source_refs, key=lambda match: (match[0], match[1]))[2]
+                source_ref_ids = tuple(
+                    sorted({source_ref.ref_id for source_ref in matching_source_refs})
+                )
 
                 identity = "\0".join(
                     (
                         window.resource_id,
                         str(window.document_version),
-                        window.chunk_id,
+                        window.parent_id,
                         str(source_start),
                         str(source_end),
                         quote,
@@ -178,8 +179,8 @@ def _locate_evidence(window: KnowledgeExtractionWindow, raw_quote: object) -> Kn
 
                 return KnowledgeEvidence(
                     evidence_ref_id="knev_" + sha256(identity.encode("utf-8")).hexdigest()[:32],
-                    source_ref_id=source_ref.ref_id,
-                    chunk_id=window.chunk_id,
+                    source_ref_ids=source_ref_ids,
+                    parent_id=window.parent_id,
                     quote=quote,
                 )
 

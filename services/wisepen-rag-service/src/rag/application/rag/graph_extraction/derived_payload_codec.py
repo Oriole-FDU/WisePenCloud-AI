@@ -3,15 +3,15 @@ from __future__ import annotations
 from neo4j_graphrag.experimental.components.types import Neo4jGraph
 
 # 持久派生结果中的统一节点 ID 前缀。
-# SDK 候选图中的节点 ID 形如 "chunk_id:UUID"，直接保存会绑定到具体 chunk；
-# 替换为统一前缀后，同一段窗口文本的抽取结果可以在 chunk_id 变化后继续复用。
+# SDK 候选图中的节点 ID 形如 "parent_id:UUID"，直接保存会绑定到具体父块；
+# 替换为统一前缀后，同一段窗口文本的抽取结果可以在 parent_id 变化后继续复用。
 _DERIVED_NODE_PREFIX = "derived:"
 
 
-def slice_window_graph(graph: Neo4jGraph, chunk_id: str) -> Neo4jGraph:
-    """提取属于指定 chunk 的子图。"""
-    # 节点 ID 以 "chunk_id:" 开头作为窗口归属的强约束，避免误把其他窗口的节点带入。
-    prefix = f"{chunk_id}:"
+def slice_window_graph(graph: Neo4jGraph, parent_id: str) -> Neo4jGraph:
+    """提取属于指定父块窗口的子图。"""
+    # 节点 ID 以 "parent_id:" 开头作为窗口归属的强约束，避免误把其他窗口的节点带入。
+    prefix = f"{parent_id}:"
     nodes = tuple(node for node in graph.nodes if node.id.startswith(prefix))
     node_ids = {node.id for node in nodes}
 
@@ -26,9 +26,9 @@ def slice_window_graph(graph: Neo4jGraph, chunk_id: str) -> Neo4jGraph:
     )
 
 
-def encode_derived_graph(graph: Neo4jGraph, chunk_id: str) -> str:
-    """将 chunk 绑定的图转换为可复用派生结果格式。"""
-    prefix = f"{chunk_id}:"
+def encode_derived_graph(graph: Neo4jGraph, parent_id: str) -> str:
+    """将父块窗口绑定的图转换为可复用派生结果格式。"""
+    prefix = f"{parent_id}:"
 
     normalized = Neo4jGraph(
         nodes=[
@@ -51,8 +51,8 @@ def encode_derived_graph(graph: Neo4jGraph, chunk_id: str) -> str:
     return normalized.model_dump_json()
 
 
-def decode_derived_graph(payload: str | None, chunk_id: str) -> Neo4jGraph | None:
-    """从持久派生结果恢复当前 chunk 对应的图。"""
+def decode_derived_graph(payload: str | None, parent_id: str) -> Neo4jGraph | None:
+    """从持久派生结果恢复当前父块窗口对应的图。"""
     if payload is None:
         return None
 
@@ -61,7 +61,7 @@ def decode_derived_graph(payload: str | None, chunk_id: str) -> Neo4jGraph | Non
     except ValueError:
         return None
 
-    prefix = f"{chunk_id}:"
+    prefix = f"{parent_id}:"
     try:
         return Neo4jGraph(
             nodes=[

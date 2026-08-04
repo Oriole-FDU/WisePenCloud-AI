@@ -9,7 +9,7 @@ from rag.application.rag.graph_projection import (
     resource_node_id,
 )
 from rag.application.rag.knowledge_navigation import (
-    KnowledgeGraphExpandRequest,
+    KnowledgeGraphCypherRequest,
     KnowledgeMentionSource,
     KnowledgeNavigationEdge,
     KnowledgeNavigationNode,
@@ -127,8 +127,8 @@ UNWIND $mentions AS item
 MATCH (resource:ResourceNode {resource_id: $resource_id})
 MATCH (target:KnowledgeNode {node_id: item.node_id})
 MERGE (resource)-[mention:MENTIONS {mention_id: item.mention_id}]->(target)
-SET mention.chunk_id = item.chunk_id,
-    mention.source_ref_id = item.source_ref_id,
+SET mention.parent_id = item.parent_id,
+    mention.source_ref_ids = item.source_ref_ids,
     mention.evidence_quote = item.evidence_quote,
     mention.evidence_resource_id = $resource_id,
     mention.source_content_revision = $content_revision,
@@ -382,8 +382,8 @@ class Neo4jKnowledgeGraphRepository(
                 {
                     "mention_id": mention.mention_id,
                     "node_id": mention.node_id,
-                    "chunk_id": mention.chunk_id,
-                    "source_ref_id": mention.source_ref_id,
+                    "parent_id": mention.parent_id,
+                    "source_ref_ids": list(mention.source_ref_ids),
                     "evidence_quote": mention.evidence_quote,
                 }
                 for mention in projection.mentions
@@ -439,7 +439,7 @@ class Neo4jKnowledgeGraphRepository(
             UNWIND $sources AS item
             MATCH (resource:ResourceNode {{resource_id: item.resource_id}})
                   -[mention:MENTIONS]->(node:KnowledgeNode)
-            WHERE mention.chunk_id = item.chunk_id
+            WHERE item.source_ref_id IN mention.source_ref_ids
               AND resource.content_projection_revision = mention.source_content_revision
               AND resource.applied_relation_revision = mention.relation_revision
               AND {acl_predicate}
@@ -455,7 +455,7 @@ class Neo4jKnowledgeGraphRepository(
             LIMIT $limit
             """,
             sources=[
-                {"resource_id": item.resource_id, "chunk_id": item.chunk_id}
+                {"resource_id": item.resource_id, "source_ref_id": item.source_ref_id}
                 for item in dict.fromkeys(sources)
             ],
             limit=limit,
@@ -475,11 +475,11 @@ class Neo4jKnowledgeGraphRepository(
             for record in result.records
         )
 
-    async def expand(
+    async def cypher(
         self,
-        request: KnowledgeGraphExpandRequest,
+        request: KnowledgeGraphCypherRequest,
     ) -> tuple[KnowledgeNavigationPath, ...]:
-        """从种子节点出发沿 KNOWLEDGE_RELATION/MENTIONS 边展开导航路径，受权限过滤。"""
+        """从种子节点出发执行有界 Cypher 导航路径查询，受权限过滤。"""
         if (
             not request.seed_node_ids
             or request.limit <= 0
@@ -548,12 +548,12 @@ class Neo4jKnowledgeGraphRepository(
                      evidence_quotes: coalesce(
                        relation.evidence_quotes,
                        [relation.evidence_quote]
-                     ),
-                     evidence_source_ref_ids: coalesce(
-                       relation.evidence_source_ref_ids,
-                       [relation.source_ref_id]
-                     )
-                   }}] AS edges
+                      ),
+                      evidence_source_ref_ids: coalesce(
+                        relation.evidence_source_ref_ids,
+                        relation.source_ref_ids
+                      )
+                    }}] AS edges
             ORDER BY size(edges), nodes[-1].node_id
             LIMIT $limit
             """,

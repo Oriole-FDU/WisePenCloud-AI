@@ -38,7 +38,7 @@ ACL 是本服务的本地投影，但不是本服务推断出来的权限。RAG 
 
 ### 图谱用于导航，不替代检索
 
-知识图谱从已投影正文中抽取实体和关系，用于跨文档扩展、依赖追踪和关系解释。它不是全文检索引擎，也不替代 Qdrant 的首轮定位。典型流程是先 locate 找到相关 Section，再 expand 顺着实体关系继续探索。
+知识图谱从已投影正文中抽取实体和关系，用于跨文档扩展、依赖追踪和关系解释。它不是全文检索引擎，也不替代 Qdrant 的首轮定位。典型流程是先 locate 找到相关 Section，再 cypher 顺着实体关系继续探索。
 
 ### LLM 派生物可复用但不覆盖原文
 
@@ -51,7 +51,7 @@ Contextual indexing 和 GraphRAG SDK 抽取结果都按输入指纹持久化复�
 | Mongo | 内容 revision、Markdown parts、Section、ReadingBlock、SourceRef、ACL 投影、LLM 派生缓存 | 回源和版本事实源 |
 | Qdrant | RetrievalChunk 向量、BM25 sparse vector、revision、ACL payload、SourceRef 定位字段 | 权限感知混合召回 |
 | Neo4j | Resource、Entity、ExternalSource、关系、MENTIONS、ACL payload | 跨文档知识导航 |
-| Redis | navigation state | locate/sections/expand 之间的短期会话状态 |
+| Redis | navigation state | locate/sections/cypher 之间的短期会话状态 |
 
 ## 关键不变量
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 import regex
 
@@ -14,22 +15,26 @@ from chat.application.tools.common.tool_content_store import (
     ToolContentChunk,
     ToolContentStore,
 )
+from chat.application.utils.chunkers import LocatorKind, TextLocator
 from chat.application.utils.ranking import RankCandidate, RankQuery, RankRequest
 from chat.application.utils.ranking.pipeline import RankingPipeline
 
 from .content_window_builder import ToolContentWindowBuilder, chunk_text
 from .models import (
-    ToolContentLocatorReadResult,
+    ToolContentGroupedReadItem,
+    ToolContentGroupedReadResult,
     ToolContentReadFailure,
-    ToolContentReadResult,
-    ToolContentRegexMatch,
-    ToolContentRegexReadRequest,
-    ToolContentRegexReadResult,
-    ToolContentRankedReadItem,
-    ToolContentRankedReadRequest,
-    ToolContentRankedReadResult,
-    ToolContentSnapshotLocator,
+    ToolContentRangeReadResult,
+    ToolContentRegexSearchMatch,
+    ToolContentRegexSearchRequest,
+    ToolContentRegexSearchResult,
+    ToolContentSemanticSearchItem,
+    ToolContentSemanticSearchRequest,
+    ToolContentSemanticSearchResult,
+    ToolContentSnapshotAnchor,
+    ToolContentSnapshotPage,
     ToolContentSnapshotResult,
+    ToolContentSnapshotSection,
 )
 
 _SEARCH_TIMEOUT_SECONDS = 0.05
@@ -43,17 +48,17 @@ class ToolContentRegexTimeoutError(TimeoutError):
     """单次正则搜索超过执行时间限制。"""
 
 
-class ToolContentReader:
-    """按 offset、locator、正则或语义检索读取权威工具原文。"""
+class ToolContentService:
+    """按结构快照、search 和 read 三类语义访问权威工具原文。"""
 
     __slots__ = (
-        "_ranked_total_token_budget",
-        "_ranked_window_builder",
         "_read_total_token_budget",
         "_read_window_builder",
         "_regex_context_side_token_budget",
         "_regex_total_token_budget",
         "_ranking_pipeline",
+        "_semantic_search_total_token_budget",
+        "_semantic_search_window_builder",
         "_store",
     )
 
@@ -62,8 +67,8 @@ class ToolContentReader:
         *,
         read_window_token_budget: int,
         read_total_token_budget: int,
-        ranked_window_token_budget: int,
-        ranked_total_token_budget: int,
+        semantic_search_window_token_budget: int,
+        semantic_search_total_token_budget: int,
         regex_context_side_token_budget: int,
         regex_total_token_budget: int,
         ranking_pipeline: RankingPipeline,
@@ -72,8 +77,8 @@ class ToolContentReader:
         if min(
             read_window_token_budget,
             read_total_token_budget,
-            ranked_window_token_budget,
-            ranked_total_token_budget,
+            semantic_search_window_token_budget,
+            semantic_search_total_token_budget,
             regex_context_side_token_budget,
             regex_total_token_budget,
         ) < 1:
@@ -83,11 +88,11 @@ class ToolContentReader:
         self._read_window_builder = ToolContentWindowBuilder(
             token_budget=read_window_token_budget
         )
-        self._ranked_window_builder = ToolContentWindowBuilder(
-            token_budget=ranked_window_token_budget
+        self._semantic_search_window_builder = ToolContentWindowBuilder(
+            token_budget=semantic_search_window_token_budget
         )
         self._read_total_token_budget = read_total_token_budget
-        self._ranked_total_token_budget = ranked_total_token_budget
+        self._semantic_search_total_token_budget = semantic_search_total_token_budget
         self._regex_context_side_token_budget = regex_context_side_token_budget
         self._regex_total_token_budget = regex_total_token_budget
 
@@ -98,11 +103,14 @@ class ToolContentReader:
         session_id: str,
         start: int | None,
         end: int | None,
-    ) -> ToolContentReadResult:
+    ) -> ToolContentRangeReadResult:
         stored = await self._store.get(content_id=content_id, session_id=session_id)
         if stored is None:
-            return ToolContentReadResult(content_id=content_id, reason="content_not_found")
-        return ToolContentReadResult(
+            return ToolContentRangeReadResult(
+                content_id=content_id,
+                reason="content_not_found",
+            )
+        return ToolContentRangeReadResult(
             content_id=content_id,
             window=self._read_window_builder.build_range_window(
                 stored,
@@ -111,47 +119,58 @@ class ToolContentReader:
             ),
         )
 
-    async def read_locator(
+    async def read_pages(
         self,
         *,
         content_id: str,
         session_id: str,
-        locator_name: str,
-    ) -> ToolContentLocatorReadResult:
+        page_labels: tuple[str, ...],
+    ) -> ToolContentGroupedReadResult:
         stored = await self._store.get(content_id=content_id, session_id=session_id)
         if stored is None:
-            return ToolContentLocatorReadResult(
+            return ToolContentGroupedReadResult(
                 content_id=content_id,
-                locator=locator_name,
-                reason="content_not_found",
+                items=tuple(
+                    ToolContentGroupedReadItem(
+                        key=page_label,
+                        reason="content_not_found",
+                    )
+                    for page_label in page_labels
+                ),
             )
-        locators = tuple(
-            locator for locator in stored.locators if locator.name == locator_name
+        return self._read_locator_groups(
+            stored,
+            keys=tuple(dict.fromkeys(page_labels)),
+            kind="page",
+            locator_name=lambda page_label: f"page:{page_label}",
+            missing_reason="page_not_found",
         )
-        if not locators:
-            return ToolContentLocatorReadResult(
+
+    async def read_sections(
+        self,
+        *,
+        content_id: str,
+        session_id: str,
+        section_paths: tuple[str, ...],
+    ) -> ToolContentGroupedReadResult:
+        stored = await self._store.get(content_id=content_id, session_id=session_id)
+        if stored is None:
+            return ToolContentGroupedReadResult(
                 content_id=content_id,
-                locator=locator_name,
-                reason="locator_not_found",
+                items=tuple(
+                    ToolContentGroupedReadItem(
+                        key=section_path,
+                        reason="content_not_found",
+                    )
+                    for section_path in section_paths
+                ),
             )
-        windows = []
-        remaining = self._read_total_token_budget
-        for locator in locators:
-            if remaining <= 0:
-                break
-            window = self._read_window_builder.build_range_window(
-                stored,
-                start=locator.start_offset,
-                end=locator.end_offset,
-                token_budget=remaining,
-            )
-            windows.append(window)
-            remaining -= count_canonical_tokens(window.text)
-        return ToolContentLocatorReadResult(
-            content_id=content_id,
-            locator=locator_name,
-            windows=tuple(windows),
-            budget_exhausted=len(windows) < len(locators),
+        return self._read_locator_groups(
+            stored,
+            keys=tuple(dict.fromkeys(section_paths)),
+            kind="section",
+            locator_name=lambda section_path: f"section:{section_path}",
+            missing_reason="section_not_found",
         )
 
     async def get_snapshot(
@@ -170,38 +189,31 @@ class ToolContentReader:
             content_id=content_id,
             content_type=stored.content_type,
             total_length=len(stored.text),
-            locators=tuple(
-                ToolContentSnapshotLocator(
-                    locator_index=index,
-                    name=locator.name,
-                    kind=locator.kind,
-                    start_offset=locator.start_offset,
-                    end_offset=locator.end_offset,
-                )
-                for index, locator in enumerate(stored.locators)
-            ),
+            pages=_snapshot_pages(stored.locators),
+            sections=_snapshot_sections(stored.locators),
+            anchors=_snapshot_anchors(stored.locators),
             metadata=dict(stored.metadata),
         )
 
-    async def read_regex(
+    async def regex_search(
         self,
         *,
-        request: ToolContentRegexReadRequest,
+        request: ToolContentRegexSearchRequest,
         session_id: str,
-    ) -> ToolContentRegexReadResult:
+    ) -> ToolContentRegexSearchResult:
         stored_items, failed = await self._load_many(
             content_ids=request.content_ids,
             session_id=session_id,
         )
 
-        def scan_loaded() -> tuple[tuple[ToolContentRegexMatch, ...], bool]:
+        def scan_loaded() -> tuple[tuple[ToolContentRegexSearchMatch, ...], bool]:
             try:
                 compiled = regex.compile(request.pattern)
             except regex.error as exc:
                 raise ToolContentInvalidRegexError(str(exc)) from exc
 
             max_matches = max(request.max_matches, 0)
-            matches: list[ToolContentRegexMatch] = []
+            matches: list[ToolContentRegexSearchMatch] = []
             remaining = self._regex_total_token_budget
             for content_id, stored in stored_items:
                 try:
@@ -226,7 +238,7 @@ class ToolContentReader:
                             token_budget=remaining,
                         )
                         matches.append(
-                            ToolContentRegexMatch(
+                            ToolContentRegexSearchMatch(
                                 content_id=content_id,
                                 match_start=matched.start(),
                                 match_end=matched.end(),
@@ -247,18 +259,18 @@ class ToolContentReader:
             if request.max_matches > 0
             else ((), False)
         )
-        return ToolContentRegexReadResult(
+        return ToolContentRegexSearchResult(
             matches=matches,
             failed=failed,
             budget_exhausted=budget_exhausted,
         )
 
-    async def read_ranked(
+    async def semantic_search(
         self,
         *,
-        request: ToolContentRankedReadRequest,
+        request: ToolContentSemanticSearchRequest,
         session_id: str,
-    ) -> ToolContentRankedReadResult:
+    ) -> ToolContentSemanticSearchResult:
         stored_items, failed = await self._load_many(
             content_ids=request.content_ids,
             session_id=session_id,
@@ -291,7 +303,7 @@ class ToolContentReader:
                 )
 
         if not candidates or request.top_k <= 0:
-            return ToolContentRankedReadResult(failed=failed)
+            return ToolContentSemanticSearchResult(failed=failed)
         result = await self._ranking_pipeline.arank(
             RankRequest(
                 query=RankQuery(text=request.query.strip()),
@@ -301,8 +313,8 @@ class ToolContentReader:
             )
         )
 
-        ranked: list[ToolContentRankedReadItem] = []
-        remaining = self._ranked_total_token_budget
+        results: list[ToolContentSemanticSearchItem] = []
+        remaining = self._semantic_search_total_token_budget
         budget_exhausted = False
         for item in result.ranked:
             if remaining <= 0:
@@ -312,13 +324,13 @@ class ToolContentReader:
             if source is None:
                 continue
             content_id, stored, chunk = source
-            window = self._ranked_window_builder.build_source_window(
+            window = self._semantic_search_window_builder.build_source_window(
                 stored,
                 chunk=chunk,
                 token_budget=remaining,
             )
-            ranked.append(
-                ToolContentRankedReadItem(
+            results.append(
+                ToolContentSemanticSearchItem(
                     content_id=content_id,
                     rank=item.rank,
                     score=item.score,
@@ -327,9 +339,72 @@ class ToolContentReader:
                 )
             )
             remaining -= count_canonical_tokens(window.text)
-        return ToolContentRankedReadResult(
-            ranked=tuple(ranked),
+        return ToolContentSemanticSearchResult(
+            results=tuple(results),
             failed=failed,
+            budget_exhausted=budget_exhausted,
+        )
+
+    def _read_locator_groups(
+        self,
+        stored: StoredToolContent,
+        *,
+        keys: tuple[str, ...],
+        kind: str,
+        locator_name: Callable[[str], str],
+        missing_reason: str,
+    ) -> ToolContentGroupedReadResult:
+        locators_by_name: dict[str, list[TextLocator]] = {}
+        for locator in stored.locators:
+            locators_by_name.setdefault(locator.name, []).append(locator)
+
+        items: list[ToolContentGroupedReadItem] = []
+        remaining = self._read_total_token_budget
+        budget_exhausted = False
+        for key in keys:
+            if remaining <= 0:
+                budget_exhausted = True
+                items.append(
+                    ToolContentGroupedReadItem(
+                        key=key,
+                        reason=f"{kind}_budget_exhausted",
+                    )
+                )
+                continue
+
+            locators = tuple(locators_by_name.get(locator_name(key), ()))
+            if not locators:
+                items.append(
+                    ToolContentGroupedReadItem(
+                        key=key,
+                        reason=missing_reason,
+                    )
+                )
+                continue
+
+            windows = []
+            for locator in locators:
+                if remaining <= 0:
+                    budget_exhausted = True
+                    break
+                window = self._read_window_builder.build_range_window(
+                    stored,
+                    start=locator.start_offset,
+                    end=locator.end_offset,
+                    token_budget=remaining,
+                )
+                windows.append(window)
+                remaining -= count_canonical_tokens(window.text)
+            items.append(
+                ToolContentGroupedReadItem(
+                    key=key,
+                    windows=tuple(windows),
+                    reason=f"{kind}_budget_exhausted" if not windows else None,
+                )
+            )
+        return ToolContentGroupedReadResult(
+            content_id=stored.content_id,
+            items=tuple(items),
             budget_exhausted=budget_exhausted,
         )
 
@@ -373,6 +448,67 @@ class ToolContentReader:
             elif stored is not None:
                 stored_items.append((content_id, stored))
         return tuple(stored_items), tuple(failed)
+
+
+def _snapshot_pages(
+    locators: tuple[TextLocator, ...],
+) -> tuple[ToolContentSnapshotPage, ...]:
+    return tuple(
+        ToolContentSnapshotPage(
+            page_label=locator.name.removeprefix("page:"),
+            start_offset=locator.start_offset,
+            end_offset=locator.end_offset,
+        )
+        for locator in locators
+        if locator.kind is LocatorKind.PAGE
+    )
+
+
+def _snapshot_anchors(
+    locators: tuple[TextLocator, ...],
+) -> tuple[ToolContentSnapshotAnchor, ...]:
+    return tuple(
+        ToolContentSnapshotAnchor(
+            anchor_label=locator.name.removeprefix("anchor:"),
+            start_offset=locator.start_offset,
+            end_offset=locator.end_offset,
+        )
+        for locator in locators
+        if locator.kind is LocatorKind.ANCHOR
+    )
+
+
+def _snapshot_sections(
+    locators: tuple[TextLocator, ...],
+) -> tuple[ToolContentSnapshotSection, ...]:
+    section_locators = tuple(
+        locator for locator in locators if locator.kind is LocatorKind.SECTION
+    )
+    locator_by_path = {
+        tuple(locator.name.removeprefix("section:").split(" > ")): locator
+        for locator in section_locators
+    }
+    children_by_parent: dict[
+        tuple[str, ...],
+        list[tuple[str, ...]],
+    ] = {}
+    for path in locator_by_path:
+        children_by_parent.setdefault(path[:-1], []).append(path)
+    for children in children_by_parent.values():
+        children.sort(key=lambda path: locator_by_path[path].start_offset)
+
+    def build(path: tuple[str, ...]) -> ToolContentSnapshotSection:
+        locator = locator_by_path[path]
+        return ToolContentSnapshotSection(
+            title=path[-1],
+            section_path=" > ".join(path),
+            start_offset=locator.start_offset,
+            end_offset=locator.end_offset,
+            has_content=locator.end_offset > locator.start_offset,
+            children=tuple(build(child) for child in children_by_parent.get(path, [])),
+        )
+
+    return tuple(build(path) for path in children_by_parent.get((), []))
 
 
 def _regex_window_range(

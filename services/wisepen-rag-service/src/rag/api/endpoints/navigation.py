@@ -6,11 +6,11 @@ from fastapi import APIRouter, Depends
 from common.core.domain import R
 from common.core.exceptions import ServiceException
 from common.security import SecurityContextHolder, require_login
-from rag.api.schemas import ExpandRequest, LocateRequest, ReadSectionsRequest
+from rag.api.schemas import CypherRequest, LocateRequest, ReadSectionsRequest
 from rag.application.rag.evidence import RagMaterializedSource
 from rag.application.rag.ingestion import RagSectionNode, RagSectionReadingBlock
 from rag.application.rag.knowledge_navigation import (
-    KnowledgeNavigationExpandResult,
+    KnowledgeNavigationCypherResult,
     KnowledgeNavigationLocateResult,
     KnowledgeNavigationService,
     KnowledgeNavigationStateInvalidatedError,
@@ -48,17 +48,17 @@ async def locate(
     return R.success(_locate_payload(result))
 
 
-@router.post("/expand", response_model=R[dict[str, Any]])
+@router.post("/cypher", response_model=R[dict[str, Any]])
 @inject
-async def expand(
-    request: ExpandRequest,
+async def cypher(
+    request: CypherRequest,
     user_id: str = Depends(require_login),
     service: KnowledgeNavigationService = Depends(
         Provide[Container.knowledge_navigation_service]
     ),
 ) -> R[dict[str, Any]]:
     try:
-        result = await service.expand(
+        result = await service.cypher(
             state_id=request.state_id,
             node_ids=request.node_ids,
             query=request.query.strip() if request.query else None,
@@ -75,7 +75,7 @@ async def expand(
         raise ServiceException(RagErrorCode.NAVIGATION_STATE_INVALIDATED) from error
     except Exception as error:
         raise ServiceException(RagErrorCode.NAVIGATION_FAILED, str(error)) from error
-    return R.success(_expand_payload(result))
+    return R.success(_cypher_payload(result))
 
 
 @router.post("/sections", response_model=R[dict[str, Any]])
@@ -118,7 +118,7 @@ def _locate_payload(result: KnowledgeNavigationLocateResult) -> dict[str, Any]:
     }
 
 
-def _expand_payload(result: KnowledgeNavigationExpandResult) -> dict[str, Any]:
+def _cypher_payload(result: KnowledgeNavigationCypherResult) -> dict[str, Any]:
     return {
         "state_id": result.state_id,
         "nodes": [node.to_payload() for node in result.nodes],

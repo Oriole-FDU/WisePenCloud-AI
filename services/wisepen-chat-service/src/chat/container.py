@@ -46,17 +46,19 @@ from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.output.cache import ToolOutputCache
 from chat.application.tools.common.tool_content_store import ToolContentStore
-from chat.application.tools.session_tools.tool_content_read.tools import (
+from chat.application.tools.session_tools.tool_content.tools import (
     ToolContentGetSnapshotTool,
-    ToolContentRankedReadTool,
-    ToolContentReadTool,
-    ToolContentRegexReadTool,
+    ToolContentReadPagesTool,
+    ToolContentReadRangeTool,
+    ToolContentReadSectionsTool,
+    ToolContentRegexSearchTool,
+    ToolContentSemanticSearchTool,
 )
-from chat.application.tools.session_tools.tool_content_read.services.reader import (
-    ToolContentReader,
+from chat.application.tools.session_tools.tool_content.services.service import (
+    ToolContentService,
 )
 from chat.application.utils.ranking.presets import (
-    build_tool_content_ranked_read_pipeline,
+    build_tool_content_semantic_search_pipeline,
 )
 from chat.application.tools.core.mcp import (
     McpClient,
@@ -263,8 +265,8 @@ class Container(containers.DeclarativeContainer):
         KafkaProducerClient,
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
     )
-    tool_content_ranked_read_pipeline = providers.Singleton(
-        build_tool_content_ranked_read_pipeline,
+    tool_content_semantic_search_pipeline = providers.Singleton(
+        build_tool_content_semantic_search_pipeline,
     )
 
     tool_content_repository = providers.Singleton(
@@ -296,34 +298,46 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
-    tool_content_reader = providers.Singleton(
-        ToolContentReader,
+    tool_content_service = providers.Singleton(
+        ToolContentService,
         read_window_token_budget=settings.TOOL_CONTENT_READ_WINDOW_TOKEN_BUDGET,
         read_total_token_budget=settings.TOOL_CONTENT_READ_TOTAL_TOKEN_BUDGET,
-        ranked_window_token_budget=settings.TOOL_CONTENT_RANKED_WINDOW_TOKEN_BUDGET,
-        ranked_total_token_budget=settings.TOOL_CONTENT_RANKED_TOTAL_TOKEN_BUDGET,
+        semantic_search_window_token_budget=(
+            settings.TOOL_CONTENT_SEMANTIC_SEARCH_WINDOW_TOKEN_BUDGET
+        ),
+        semantic_search_total_token_budget=(
+            settings.TOOL_CONTENT_SEMANTIC_SEARCH_TOTAL_TOKEN_BUDGET
+        ),
         regex_context_side_token_budget=(
             settings.TOOL_CONTENT_REGEX_CONTEXT_SIDE_TOKEN_BUDGET
         ),
         regex_total_token_budget=settings.TOOL_CONTENT_REGEX_TOTAL_TOKEN_BUDGET,
-        ranking_pipeline=tool_content_ranked_read_pipeline,
+        ranking_pipeline=tool_content_semantic_search_pipeline,
         store=tool_content_store,
     )
-    tool_content_read_tool = providers.Singleton(
-        ToolContentReadTool,
-        reader=tool_content_reader,
+    tool_content_read_range_tool = providers.Singleton(
+        ToolContentReadRangeTool,
+        service=tool_content_service,
+    )
+    tool_content_read_pages_tool = providers.Singleton(
+        ToolContentReadPagesTool,
+        service=tool_content_service,
+    )
+    tool_content_read_sections_tool = providers.Singleton(
+        ToolContentReadSectionsTool,
+        service=tool_content_service,
     )
     tool_content_get_snapshot_tool = providers.Singleton(
         ToolContentGetSnapshotTool,
-        reader=tool_content_reader,
+        service=tool_content_service,
     )
-    tool_content_regex_read_tool = providers.Singleton(
-        ToolContentRegexReadTool,
-        reader=tool_content_reader,
+    tool_content_regex_search_tool = providers.Singleton(
+        ToolContentRegexSearchTool,
+        service=tool_content_service,
     )
-    tool_content_ranked_read_tool = providers.Singleton(
-        ToolContentRankedReadTool,
-        reader=tool_content_reader,
+    tool_content_semantic_search_tool = providers.Singleton(
+        ToolContentSemanticSearchTool,
+        service=tool_content_service,
     )
     web_content_cache_repository = providers.Singleton(
         RedisWebContentCacheRepository,
@@ -376,9 +390,11 @@ class Container(containers.DeclarativeContainer):
         load_skill_tool,
         load_skill_asset_tool,
         tool_content_get_snapshot_tool,
-        tool_content_read_tool,
-        tool_content_regex_read_tool,
-        tool_content_ranked_read_tool,
+        tool_content_read_range_tool,
+        tool_content_read_pages_tool,
+        tool_content_read_sections_tool,
+        tool_content_regex_search_tool,
+        tool_content_semantic_search_tool,
         web_fetch_tool,
         document_link_extract_tool,
         web_crawl_tool,

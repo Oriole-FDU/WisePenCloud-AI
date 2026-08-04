@@ -14,11 +14,15 @@ class RagResourceSnapshotNotFoundError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class RagResourceContentRequest:
+class RagPageContentRequest:
     resource_id: str
-    locator_name: str | None = None
-    start: int | None = None
-    end: int | None = None
+    page_labels: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RagSectionContentRequest:
+    resource_id: str
+    section_ids: tuple[str, ...]
 
 
 class RagResourceSnapshotService:
@@ -49,18 +53,31 @@ class RagResourceSnapshotService:
             raise RagResourceSnapshotNotFoundError(resource_id)
         return snapshot
 
-    async def read(
+    async def read_pages(
         self,
         *,
-        request: RagResourceContentRequest,
+        request: RagPageContentRequest,
         scope: RagPermissionScope,
     ) -> RagResourceContentReadResult:
         await self._ensure_access(request.resource_id, scope=scope)
-        result = await self._repository.read_applied_resource_content(
+        result = await self._repository.read_applied_page_content(
             resource_id=request.resource_id,
-            locator_name=request.locator_name,
-            start=request.start,
-            end=request.end,
+            page_labels=request.page_labels,
+        )
+        if result is None:
+            raise RagResourceSnapshotNotFoundError(request.resource_id)
+        return result
+
+    async def read_sections(
+        self,
+        *,
+        request: RagSectionContentRequest,
+        scope: RagPermissionScope,
+    ) -> RagResourceContentReadResult:
+        await self._ensure_access(request.resource_id, scope=scope)
+        result = await self._repository.read_applied_section_content(
+            resource_id=request.resource_id,
+            section_ids=request.section_ids,
         )
         if result is None:
             raise RagResourceSnapshotNotFoundError(request.resource_id)

@@ -99,9 +99,8 @@ class ToolContentWindowBuilder:
             start_offset=start,
             end_offset=end,
             source_spans=tuple(included_spans),
-            locator_names=_chunk_locator_names(chunk),
             page_labels=chunk.page_labels,
-            section_paths=chunk.section_paths,
+            section_paths=tuple(" > ".join(path) for path in chunk.section_paths),
             anchor_labels=chunk.anchor_labels,
             truncated=truncated,
             metadata=dict(stored.metadata),
@@ -130,10 +129,9 @@ class ToolContentWindowBuilder:
             start_offset=start,
             end_offset=end,
             source_spans=(SourceSpan(start, end),) if start < end else (),
-            locator_names=tuple(dict.fromkeys(locator.name for locator in locators)),
             page_labels=_locator_labels(locators, "page:"),
             section_paths=tuple(
-                tuple(locator.name.removeprefix("section:").split(" > "))
+                locator.name.removeprefix("section:")
                 for locator in locators
                 if locator.name.startswith("section:")
             ),
@@ -155,18 +153,6 @@ def _normalize_offset(value: int | None, text_length: int, *, default: int) -> i
     if offset < 0:
         offset += text_length
     return min(max(offset, 0), text_length)
-
-
-def _chunk_locator_names(chunk: ToolContentChunk) -> tuple[str, ...]:
-    return tuple(
-        dict.fromkeys(
-            (
-                *(f"section:{' > '.join(path)}" for path in chunk.section_paths),
-                *(f"page:{label}" for label in chunk.page_labels),
-                *(f"anchor:{label}" for label in chunk.anchor_labels),
-            )
-        )
-    )
 
 
 def _locator_labels(

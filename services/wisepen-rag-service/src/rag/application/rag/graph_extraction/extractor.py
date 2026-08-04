@@ -118,7 +118,7 @@ class KnowledgeGraphExtractor:
         missing: list[tuple[int, str, KnowledgeExtractionWindow]] = []
 
         for index, (extraction_key, window) in enumerate(zip(extraction_keys, windows, strict=True)):
-            graph = decode_derived_graph(stored_payloads.get(extraction_key), window.chunk_id)
+            graph = decode_derived_graph(stored_payloads.get(extraction_key), window.window_id)
             if graph is None:
                 missing.append((index, extraction_key, window))
                 continue
@@ -132,11 +132,11 @@ class KnowledgeGraphExtractor:
 
             for index, extraction_key, window in missing:
                 # SDK 返回的是多个窗口组成的聚合图。映射和持久化前先切出当前窗口所属的候选子图。
-                window_graph = slice_window_graph(graph, window.chunk_id)
+                window_graph = slice_window_graph(graph, window.window_id)
                 results[index] = self._result_mapper.map(window_graph, window)
                 cache_values_by_resource.setdefault(window.resource_id, {})[extraction_key] = encode_derived_graph(
                     window_graph,
-                    window.chunk_id,
+                    window.window_id,
                 )
 
             for resource_id, cache_values in cache_values_by_resource.items():
@@ -153,8 +153,8 @@ class KnowledgeGraphExtractor:
             chunks=TextChunks(
                 chunks=[
                     TextChunk(
-                        uid=window.chunk_id,
-                        index=window.chunk_index,
+                        uid=window.window_id,
+                        index=window.parent_index,
                         text=render_extraction_window(window),
                         metadata={
                             "resource_id": window.resource_id,
@@ -185,7 +185,7 @@ def _build_schema(profiles: frozenset[KnowledgeRelationProfile]) -> GraphSchema:
         PropertyType(
             name="evidence_quote",
             type="STRING",
-            description="<current_chunk> 中支持该关系的连续原文",
+            description="<current_parent> 中支持该关系的连续原文",
         ),
         PropertyType(
             name="assertion",
@@ -234,7 +234,7 @@ def _build_schema(profiles: frozenset[KnowledgeRelationProfile]) -> GraphSchema:
                     PropertyType(
                         name="evidence_quote",
                         type="STRING",
-                        description="<current_chunk> 中出现该实体的连续原文",
+                        description="<current_parent> 中出现该实体的连续原文",
                     ),
                 ],
                 additional_properties=False,
@@ -256,7 +256,7 @@ def _build_schema(profiles: frozenset[KnowledgeRelationProfile]) -> GraphSchema:
                     PropertyType(
                         name="evidence_quote",
                         type="STRING",
-                        description="<current_chunk> 中出现该来源的连续原文",
+                        description="<current_parent> 中出现该来源的连续原文",
                     ),
                 ],
                 additional_properties=False,

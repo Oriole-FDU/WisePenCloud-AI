@@ -2,29 +2,48 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from chat.application.utils.chunkers import LocatorKind, SourceSpan
+from chat.application.utils.chunkers import SourceSpan
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentSnapshotLocator:
-    """缓存正文中的命名定位入口。"""
+class ToolContentSnapshotPage:
+    """缓存正文中的页入口。"""
 
-    locator_index: int
-    name: str
-    kind: LocatorKind
+    page_label: str
     start_offset: int
     end_offset: int
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentRankedReadRequest:
+class ToolContentSnapshotSection:
+    """缓存正文中的 Section 结构节点。"""
+
+    title: str
+    section_path: str
+    start_offset: int
+    end_offset: int
+    has_content: bool
+    children: tuple["ToolContentSnapshotSection", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ToolContentSnapshotAnchor:
+    """缓存正文中的锚点入口。"""
+
+    anchor_label: str
+    start_offset: int
+    end_offset: int
+
+
+@dataclass(frozen=True, slots=True)
+class ToolContentSemanticSearchRequest:
     content_ids: tuple[str, ...]
     query: str
     top_k: int = 10
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentRegexReadRequest:
+class ToolContentRegexSearchRequest:
     content_ids: tuple[str, ...]
     pattern: str
     max_matches: int = 10
@@ -39,9 +58,8 @@ class ToolContentWindow:
     start_offset: int
     end_offset: int
     source_spans: tuple[SourceSpan, ...] = ()
-    locator_names: tuple[str, ...] = ()
     page_labels: tuple[str, ...] = ()
-    section_paths: tuple[tuple[str, ...], ...] = ()
+    section_paths: tuple[str, ...] = ()
     anchor_labels: tuple[str, ...] = ()
     truncated: bool = False
     metadata: dict[str, object] = field(default_factory=dict)
@@ -54,7 +72,7 @@ class ToolContentReadFailure:
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentRegexMatch:
+class ToolContentRegexSearchMatch:
     content_id: str
     match_start: int
     match_end: int
@@ -62,8 +80,8 @@ class ToolContentRegexMatch:
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentRegexReadResult:
-    matches: tuple[ToolContentRegexMatch, ...] = ()
+class ToolContentRegexSearchResult:
+    matches: tuple[ToolContentRegexSearchMatch, ...] = ()
     failed: tuple[ToolContentReadFailure, ...] = ()
     budget_exhausted: bool = False
 
@@ -73,13 +91,15 @@ class ToolContentSnapshotResult:
     content_id: str
     content_type: str | None = None
     total_length: int | None = None
-    locators: tuple[ToolContentSnapshotLocator, ...] = ()
+    pages: tuple[ToolContentSnapshotPage, ...] = ()
+    sections: tuple[ToolContentSnapshotSection, ...] = ()
+    anchors: tuple[ToolContentSnapshotAnchor, ...] = ()
     metadata: dict[str, object] = field(default_factory=dict)
     reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentRankedReadItem:
+class ToolContentSemanticSearchItem:
     content_id: str
     rank: int
     score: float
@@ -88,23 +108,28 @@ class ToolContentRankedReadItem:
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentRankedReadResult:
-    ranked: tuple[ToolContentRankedReadItem, ...] = ()
+class ToolContentSemanticSearchResult:
+    results: tuple[ToolContentSemanticSearchItem, ...] = ()
     failed: tuple[ToolContentReadFailure, ...] = ()
     budget_exhausted: bool = False
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentReadResult:
+class ToolContentRangeReadResult:
     content_id: str
     window: ToolContentWindow | None = None
     reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentLocatorReadResult:
-    content_id: str
-    locator: str
+class ToolContentGroupedReadItem:
+    key: str
     windows: tuple[ToolContentWindow, ...] = ()
     reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ToolContentGroupedReadResult:
+    content_id: str
+    items: tuple[ToolContentGroupedReadItem, ...] = ()
     budget_exhausted: bool = False

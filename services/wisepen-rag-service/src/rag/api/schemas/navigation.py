@@ -19,7 +19,7 @@ class LocateRequest(NavigationRequest):
     max_results: int = Field(default=10, ge=1, le=20)
 
 
-class ExpandRequest(NavigationRequest):
+class CypherRequest(NavigationRequest):
     state_id: NonEmptyText
     node_ids: tuple[NonEmptyText, ...] = Field(min_length=1, max_length=16)
     query: NonEmptyText | None = None

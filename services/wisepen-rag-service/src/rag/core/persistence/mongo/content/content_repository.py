@@ -4,22 +4,24 @@ from collections.abc import Sequence
 from hashlib import sha256
 
 from beanie.operators import In
-from rag.utils.chunkers import SourceSpan
+from rag.utils.chunkers import LocatorKind, SourceSpan
 from rag.application.rag.evidence import RagMaterializedSource
 from rag.application.rag.graph_extraction import (
-    KnowledgeExtractionChunk,
+    KnowledgeExtractionBlock,
     KnowledgeExtractionSource,
 )
 from rag.application.rag.ingestion import (
-    RagContentLocator,
     RagSectionNode,
     RagSectionReadingBlock,
     RagSourceRef,
 )
 from rag.application.rag.resource_snapshot import (
+    RagResourceContentItem,
     RagResourceContentReadResult,
     RagResourceContentWindow,
     RagResourceSnapshot,
+    RagResourceSnapshotPage,
+    RagResourceSnapshotSection,
 )
 from rag.application.rag.section_navigation import RagSectionView
 from rag.domain.entities.rag_content import (
@@ -184,9 +186,13 @@ def locator_window(
     documents: list[RagContentPartDocument],
     target_locator: RagContentLocatorDocument,
     locator_documents: list[RagContentLocatorDocument],
+    *,
+    max_chars: int | None = None,
 ) -> RagResourceContentWindow:
     start_offset = target_locator.start_offset
     end_offset = target_locator.end_offset
+    if max_chars is not None:
+        end_offset = min(end_offset, start_offset + max(max_chars, 0))
     text = read_content_range(
         documents,
         start_offset=start_offset,
@@ -197,7 +203,6 @@ def locator_window(
         start_offset=start_offset,
         end_offset=end_offset,
         source_spans=(SourceSpan(start_offset, end_offset),) if start_offset < end_offset else (),
-        locator_names=tuple(dict.fromkeys(document.name for document in locator_documents)),
         page_labels=_locator_labels(locator_documents, "page:"),
         section_paths=tuple(
             tuple(document.name.removeprefix("section:").split(" > "))
@@ -252,6 +257,19 @@ class MongoRagExtractionSourceRepository:
             )
             .to_list()
         )
+        reading_block_documents = (
+            await RagSectionReadingBlockDocument.find(
+                RagSectionReadingBlockDocument.content_revision == revision
+            )
+            .to_list()
+        )
+        section_documents = (
+            await RagSectionDocument.find(
+                RagSectionDocument.content_revision == revision
+            )
+            .to_list()
+        )
+        sections_by_id = {document.section_id: document for document in section_documents}
         source_ref_documents.sort(
             key=lambda document: (
                 document.source_spans[0].start_offset,
@@ -268,27 +286,102 @@ class MongoRagExtractionSourceRepository:
             to_source_ref(document)
             for document in source_ref_documents
         )
+        reading_block_documents.sort(
+            key=lambda document: (
+                sections_by_id[document.section_id].own_start,
+                document.ordinal,
+                document.block_id,
+            )
+        )
         return KnowledgeExtractionSource(
             resource_id=content.resource_id,
+            document_title=_document_title(tuple(section_documents)),
             document_version=content.document_version,
             content_revision=revision,
             markdown=markdown,
-            chunks=tuple(
-                KnowledgeExtractionChunk(
-                    chunk_id=source_ref.chunk_id,
-                    chunk_index=chunk_index,
-                    section_id=source_ref.section_id,
-                    section_path=source_ref.section_path,
-                    raw_text="\n\n".join(
-                        markdown[span.start_offset : span.end_offset]
-                        for span in source_ref.source_spans
-                    ),
-                    source_spans=source_ref.source_spans,
+            blocks=tuple(
+                KnowledgeExtractionBlock(
+                    block_id=document.block_id,
+                    block_index=block_index,
+                    section_id=document.section_id,
+                    section_path=tuple(sections_by_id[document.section_id].section_path),
+                    raw_text=document.raw_text,
+                    source_spans=to_spans(document.source_spans),
                 )
-                for chunk_index, source_ref in enumerate(source_refs)
+                for block_index, document in enumerate(reading_block_documents)
             ),
             source_refs=source_refs,
         )
+
+
+def _document_title(section_documents: tuple[RagSectionDocument, ...]) -> str:
+    top_level_sections = sorted(
+        (
+            document
+            for document in section_documents
+            if document.level == 1 and document.title.strip()
+        ),
+        key=lambda document: (document.own_start, document.ordinal),
+    )
+    if top_level_sections:
+        return top_level_sections[0].title.strip()
+
+    titled_sections = sorted(
+        (document for document in section_documents if document.title.strip()),
+        key=lambda document: (document.own_start, document.level, document.ordinal),
+    )
+    return titled_sections[0].title.strip() if titled_sections else ""
+
+
+def _build_snapshot_section_tree(
+    documents: list[RagSectionDocument],
+) -> tuple[RagResourceSnapshotSection, ...]:
+    children_by_parent: dict[str | None, list[RagSectionDocument]] = {}
+    for document in documents:
+        children_by_parent.setdefault(document.parent_section_id, []).append(document)
+    for children in children_by_parent.values():
+        children.sort(key=lambda section: section.ordinal)
+
+    def to_snapshot_section(document: RagSectionDocument) -> RagResourceSnapshotSection:
+        return RagResourceSnapshotSection(
+            section_id=document.section_id,
+            title=document.title,
+            level=document.level,
+            section_path=tuple(document.section_path),
+            has_content=document.own_end > document.own_start,
+            children=tuple(
+                to_snapshot_section(child)
+                for child in children_by_parent.get(document.section_id, [])
+            ),
+        )
+
+    return tuple(
+        to_snapshot_section(document)
+        for document in children_by_parent.get(None, [])
+    )
+
+
+def _section_block_window(
+    section: RagSectionDocument,
+    block: RagSectionReadingBlockDocument,
+) -> RagResourceContentWindow:
+    source_spans = to_spans(block.source_spans)
+    return RagResourceContentWindow(
+        text=block.raw_text,
+        start_offset=source_spans[0].start_offset,
+        end_offset=source_spans[-1].end_offset,
+        source_spans=source_spans,
+        page_labels=tuple(block.page_labels),
+        section_paths=(tuple(section.section_path),),
+        anchor_labels=tuple(block.anchor_labels),
+        metadata={
+            "section_id": section.section_id,
+            "section_path": list(section.section_path),
+            "title": section.title,
+            "block_id": block.block_id,
+            "ordinal": block.ordinal,
+        },
+    )
 
 
 class MongoRagSourceRepository:
@@ -499,7 +592,7 @@ class MongoRagSectionNavigationRepository:
 
 
 class MongoRagResourceSnapshotRepository:
-    """资源副本的 locator 快照与读取。"""
+    """资源副本的文档结构与读取。"""
 
     async def load_applied_resource_snapshot(
         self,
@@ -523,31 +616,34 @@ class MongoRagResourceSnapshotRepository:
             .sort("locator_index")
             .to_list()
         )
+        section_documents = (
+            await RagSectionDocument.find(
+                RagSectionDocument.content_revision == revision
+            )
+            .sort("level", "ordinal")
+            .to_list()
+        )
         total_length = await self._load_total_length(revision)
         return RagResourceSnapshot(
             resource_id=content.resource_id,
             document_version=content.document_version,
             content_revision=revision,
             total_length=total_length,
-            locators=tuple(
-                RagContentLocator(
-                    locator_index=document.locator_index,
-                    name=document.name,
-                    kind=document.kind,
-                    start_offset=document.start_offset,
-                    end_offset=document.end_offset,
+            pages=tuple(
+                RagResourceSnapshotPage(
+                    page_label=document.name.removeprefix("page:"),
                 )
                 for document in locator_documents
+                if document.kind is LocatorKind.PAGE
             ),
+            sections=_build_snapshot_section_tree(section_documents),
         )
 
-    async def read_applied_resource_content(
+    async def read_applied_page_content(
         self,
         *,
         resource_id: str,
-        locator_name: str | None = None,
-        start: int | None = None,
-        end: int | None = None,
+        page_labels: Sequence[str],
     ) -> RagResourceContentReadResult | None:
         revision = await load_applied_content_revision(resource_id)
         if revision is None:
@@ -567,94 +663,130 @@ class MongoRagResourceSnapshotRepository:
             .to_list()
         )
 
-        if locator_name is not None:
-            locator_documents = (
-                await RagContentLocatorDocument.find(
-                    RagContentLocatorDocument.content_revision == revision,
-                    RagContentLocatorDocument.name == locator_name,
-                )
-                .sort("locator_index")
-                .to_list()
+        unique_page_labels = tuple(dict.fromkeys(page_labels))
+        locator_names = tuple(f"page:{label}" for label in unique_page_labels)
+        page_locators = (
+            await RagContentLocatorDocument.find(
+                RagContentLocatorDocument.content_revision == revision,
+                In(RagContentLocatorDocument.name, locator_names),
             )
-            if not locator_documents:
-                return RagResourceContentReadResult(
-                    resource_id=resource_id,
-                    content_revision=revision,
-                    document_version=content.document_version,
-                    locator_name=locator_name,
-                    reason="locator_not_found",
+            .sort("locator_index")
+            .to_list()
+        )
+        locators_by_name: dict[str, list[RagContentLocatorDocument]] = {}
+        for locator_document in page_locators:
+            locators_by_name.setdefault(locator_document.name, []).append(locator_document)
+
+        items: list[RagResourceContentItem] = []
+        for page_label in unique_page_labels:
+            locator_name = f"page:{page_label}"
+            target_locators = locators_by_name.get(locator_name, [])
+            if not target_locators:
+                items.append(
+                    RagResourceContentItem(
+                        key=page_label,
+                        kind="page",
+                        reason="page_not_found",
+                    )
                 )
+                continue
+
             windows: list[RagResourceContentWindow] = []
-            for locator_document in locator_documents:
+            for target_locator in target_locators:
                 overlapping_locators = (
                     await RagContentLocatorDocument.find(
                         RagContentLocatorDocument.content_revision == revision,
-                        RagContentLocatorDocument.start_offset
-                        < locator_document.end_offset,
-                        RagContentLocatorDocument.end_offset
-                        > locator_document.start_offset,
+                        RagContentLocatorDocument.start_offset < target_locator.end_offset,
+                        RagContentLocatorDocument.end_offset > target_locator.start_offset,
                     )
                     .sort("locator_index")
                     .to_list()
                 )
                 windows.append(
-                    locator_window(
-                        content_parts,
-                        locator_document,
-                        overlapping_locators,
-                    )
+                    locator_window(content_parts, target_locator, overlapping_locators)
                 )
-            return RagResourceContentReadResult(
-                resource_id=resource_id,
-                content_revision=revision,
-                document_version=content.document_version,
-                locator_name=locator_name,
-                windows=tuple(windows),
+            items.append(
+                RagResourceContentItem(
+                    key=page_label,
+                    kind="page",
+                    windows=tuple(windows),
+                )
             )
-
-        total_length = await self._load_total_length(revision)
-        normalized_start = normalize_content_offset(start, total_length, default=0)
-        requested_end = normalize_content_offset(end, total_length, default=total_length)
-        if requested_end <= normalized_start:
-            normalized_end = normalized_start
-        else:
-            normalized_end = requested_end
-
-        locator_documents = (
-            await RagContentLocatorDocument.find(
-                RagContentLocatorDocument.content_revision == revision,
-                RagContentLocatorDocument.start_offset < normalized_end,
-                RagContentLocatorDocument.end_offset > normalized_start,
-            )
-            .sort("locator_index")
-            .to_list()
-        )
-        text = read_content_range(
-            content_parts,
-            start_offset=normalized_start,
-            end_offset=normalized_end,
-        )
-        window = RagResourceContentWindow(
-            text=text,
-            start_offset=normalized_start,
-            end_offset=normalized_end,
-            source_spans=(SourceSpan(normalized_start, normalized_end),)
-            if normalized_start < normalized_end
-            else (),
-            locator_names=tuple(dict.fromkeys(locator.name for locator in locator_documents)),
-            page_labels=_locator_labels(locator_documents, "page:"),
-            section_paths=tuple(
-                tuple(locator.name.removeprefix("section:").split(" > "))
-                for locator in locator_documents
-                if locator.name.startswith("section:")
-            ),
-            anchor_labels=_locator_labels(locator_documents, "anchor:"),
-        )
         return RagResourceContentReadResult(
             resource_id=resource_id,
             content_revision=revision,
             document_version=content.document_version,
-            windows=(window,),
+            items=tuple(items),
+        )
+
+    async def read_applied_section_content(
+        self,
+        *,
+        resource_id: str,
+        section_ids: Sequence[str],
+    ) -> RagResourceContentReadResult | None:
+        revision = await load_applied_content_revision(resource_id)
+        if revision is None:
+            return None
+
+        content = await RagContentRevisionDocument.find_one(
+            RagContentRevisionDocument.content_revision == revision
+        )
+        if content is None:
+            return None
+
+        unique_section_ids = tuple(dict.fromkeys(section_ids))
+        section_documents = await RagSectionDocument.find(
+            RagSectionDocument.content_revision == revision,
+            In(RagSectionDocument.section_id, unique_section_ids),
+        ).to_list()
+        sections_by_id = {
+            document.section_id: document for document in section_documents
+        }
+        block_documents = (
+            await RagSectionReadingBlockDocument.find(
+                RagSectionReadingBlockDocument.content_revision == revision,
+                In(RagSectionReadingBlockDocument.section_id, unique_section_ids),
+            )
+            .sort("section_id", "ordinal")
+            .to_list()
+        )
+        blocks_by_section: dict[str, list[RagSectionReadingBlockDocument]] = {}
+        for block_document in block_documents:
+            blocks_by_section.setdefault(block_document.section_id, []).append(
+                block_document
+            )
+
+        items: list[RagResourceContentItem] = []
+        for section_id in unique_section_ids:
+            section = sections_by_id.get(section_id)
+            if section is None:
+                items.append(
+                    RagResourceContentItem(
+                        key=section_id,
+                        kind="section",
+                        reason="section_not_found",
+                    )
+                )
+                continue
+
+            windows = tuple(
+                _section_block_window(section, block_document)
+                for block_document in blocks_by_section.get(section_id, [])
+            )
+            items.append(
+                RagResourceContentItem(
+                    key=section_id,
+                    kind="section",
+                    reason="section_empty" if not windows else None,
+                    windows=windows,
+                )
+            )
+        return RagResourceContentReadResult(
+            resource_id=resource_id,
+            content_revision=revision,
+            document_version=content.document_version,
+            items=tuple(items),
         )
 
     async def _load_total_length(self, content_revision: str) -> int:

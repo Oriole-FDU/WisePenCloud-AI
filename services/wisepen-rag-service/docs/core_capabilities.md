@@ -70,9 +70,11 @@ frontier 只帮助 Agent 决定下一步读哪里，不预加载相邻正文。�
 | --- | --- |
 | `locate` | 用自然语言问题找到相关 Section，并创建导航状态 |
 | `sections` | 读取已发现 Section 的完整 ReadingBlock，并扩展标题树 frontier |
-| `expand` | 从已发现图节点出发，在 Neo4j 中做有界关系遍历 |
+| `cypher` | 从已发现图节点出发，在 Neo4j 中做有界关系遍历 |
 
-`locate` 创建 Redis navigation state，记录用户、会话、初始问题、已展示图节点和已发现 Section。后续 `sections` 和 `expand` 必须携带同一个 `state_id` 与 `session_id`，并且只能请求已经出现在当前状态中的 Section 或节点；否则返回状态失效错误。
+按结构读取是独立能力，不依赖图抽取。它直接通过 page / section 入口回答“见某某章节”“见某某页”这类定位问题，稳定性和成本都比让图抽取兜底更合适。
+
+`locate` 创建 Redis navigation state，记录用户、会话、初始问题、已展示图节点和已发现 Section。后续 `sections` 和 `cypher` 必须携带同一个 `state_id` 与 `session_id`，并且只能请求已经出现在当前状态中的 Section 或节点；否则返回状态失效错误。
 
 知识图谱写入由内容索引后续触发：
 
@@ -85,7 +87,7 @@ applied content revision
   -> MENTIONS 连接 RetrievalChunk 和知识节点
 ```
 
-图谱关系必须带原文证据。`expand` 返回关系边、路径和 evidence 来源 Section；Agent 可以用这些来源继续读取正文，而不是只相信关系标签。
+图谱关系必须带原文证据。`cypher` 返回关系边、路径和 evidence 来源 Section；Agent 可以用这些来源继续读取正文，而不是只相信关系标签。
 
 ## 删除与重建
 

@@ -1,10 +1,11 @@
-from .navigation import ExpandRequest, LocateRequest, ReadSectionsRequest
-from .resources import ResourceContentRequest, ResourceRequest
+from .navigation import CypherRequest, LocateRequest, ReadSectionsRequest
+from .resources import PageContentRequest, ResourceRequest, SectionContentRequest
 
 __all__ = [
-    "ExpandRequest",
+    "PageContentRequest",
+    "CypherRequest",
     "LocateRequest",
     "ReadSectionsRequest",
-    "ResourceContentRequest",
     "ResourceRequest",
+    "SectionContentRequest",
 ]

@@ -29,7 +29,7 @@ from rag.utils.ranking import (
 )
 
 _CANDIDATE_LIMIT = 80
-_EXPAND_CANDIDATE_MULTIPLIER = 4
+_CYPHER_CANDIDATE_MULTIPLIER = 4
 
 
 class KnowledgeNavigationDirection(StrEnum):
@@ -41,12 +41,12 @@ class KnowledgeNavigationDirection(StrEnum):
 @dataclass(frozen=True, slots=True)
 class KnowledgeMentionSource:
     resource_id: str  # RAG 命中所属资源，用于定位 Neo4j Resource 节点。
-    chunk_id: str  # RAG 命中的 RetrievalChunk ID，用于反查该 chunk 的 MENTIONS。
+    source_ref_id: str  # RAG 命中的 SourceRef ID，用于反查覆盖该证据的 MENTIONS。
 
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeNavigationNode:
-    node_id: str  # Neo4j 中的稳定知识节点 ID，也是后续 expand 的 seed ID。
+    node_id: str  # Neo4j 中的稳定知识节点 ID，也是后续 cypher 的 seed ID。
     kind: KnowledgeNodeKind  # Entity、Resource 或 ExternalSource。
     label: str  # 面向 Agent 展示的节点名称。
     entity_type: KnowledgeEntityType | None = None  # Entity 的细分类型；Resource/ExternalSource 为 None。
@@ -89,13 +89,13 @@ class KnowledgeNavigationState:
     state_id: str  # Redis 导航状态 ID，由 locate 创建并由后续 tool 传回。
     user_id: str  # 状态所属用户，用于拒绝跨用户复用 state_id。
     session_id: str  # 状态所属聊天会话，用于拒绝跨会话复用 state_id。
-    root_query: str  # 创建该导航状态的初始问题，用作 expand 排序回退。
-    known_graph_node_ids: tuple[str, ...] = ()  # expand 可用的图节点白名单。
+    root_query: str  # 创建该导航状态的初始问题，用作 cypher 排序回退。
+    known_graph_node_ids: tuple[str, ...] = ()  # cypher 可用的图节点白名单。
     known_sections: tuple[tuple[str, str], ...] = ()  # section_id 与所属 resource_id。
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgeGraphExpandRequest:
+class KnowledgeGraphCypherRequest:
     seed_node_ids: tuple[str, ...]  # 本次遍历的起点，必须已出现在导航状态中。
     permission_scope: RagPermissionScope  # 当前用户身份，Neo4j 查询使用它构造 ACL 谓词。
     known_node_ids: tuple[str, ...] = ()  # 当前状态已经展示的节点，用于过滤重复路径。
@@ -113,8 +113,8 @@ class KnowledgeNavigationLocateResult:
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgeNavigationExpandResult:
-    state_id: str  # 本次 expand 使用的导航状态 ID。
+class KnowledgeNavigationCypherResult:
+    state_id: str  # 本次 cypher 使用的导航状态 ID。
     nodes: tuple[KnowledgeNavigationNode, ...]  # 本次保留路径中的去重节点。
     edges: tuple[KnowledgeNavigationEdge, ...]  # 本次保留路径中的去重关系边。
     paths: tuple[KnowledgeNavigationPath, ...]  # 至少发现一个新节点的有界遍历路径。
@@ -194,7 +194,7 @@ class KnowledgeNavigationService:
             sources=tuple(
                 KnowledgeMentionSource(
                     resource_id=source.source_ref.resource_id,
-                    chunk_id=source.source_ref.chunk_id,
+                    source_ref_id=source.source_ref.ref_id,
                 )
                 for view in views
                 for source in view.sources
@@ -304,7 +304,7 @@ class KnowledgeNavigationService:
             sections=sections,
         )
 
-    async def expand(
+    async def cypher(
         self,
         *,
         state_id: str,
@@ -316,8 +316,8 @@ class KnowledgeNavigationService:
         max_results: int,
         session_id: str,
         permission_scope: RagPermissionScope,
-    ) -> KnowledgeNavigationExpandResult:
-        """从已有节点继续展开知识关系。"""
+    ) -> KnowledgeNavigationCypherResult:
+        """从已有节点执行 Cypher 风格的有界关系遍历。"""
         # 校验导航状态归属，避免跨用户或跨会话访问。
         state = await self._state_repository.get(state_id)
 
@@ -335,11 +335,11 @@ class KnowledgeNavigationService:
         # Neo4j 只负责按图约束生成合法候选；自然语言意图在应用层排序，
         # 避免 query 改写遍历语义，也避免固定图顺序过早截断相关路径。
         candidate_limit = min(
-            max_results * _EXPAND_CANDIDATE_MULTIPLIER,
+            max_results * _CYPHER_CANDIDATE_MULTIPLIER,
             _CANDIDATE_LIMIT,
         )
-        paths = await self._graph_repository.expand(
-            KnowledgeGraphExpandRequest(
+        paths = await self._graph_repository.cypher(
+            KnowledgeGraphCypherRequest(
                 seed_node_ids=node_ids,
                 permission_scope=permission_scope,
                 known_node_ids=state.known_graph_node_ids,
@@ -406,13 +406,13 @@ class KnowledgeNavigationService:
             node.node_id for node in nodes if node.node_id not in state.known_graph_node_ids
         )
 
-        # 原子更新导航状态：新发现节点加入 known_node_ids，供下一次 expand 校验。
+        # 原子更新导航状态：新发现节点加入 known_node_ids，供下一次 cypher 校验。
         if not await self._state_repository.add_known_graph_nodes(
             state_id=state.state_id, node_ids=new_node_ids
         ):
             raise KnowledgeNavigationStateNotFoundError(state_id)
 
-        return KnowledgeNavigationExpandResult(
+        return KnowledgeNavigationCypherResult(
             state_id=state.state_id,
             nodes=nodes,
             edges=edges,

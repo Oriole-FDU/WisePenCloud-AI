@@ -112,9 +112,9 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [
         "failure_reason": "Knowledge Navigation Locate Failed",
     },
     {
-        "tool_name": "knowledge_navigate_expand",
+        "tool_name": "knowledge_navigate_cypher",
         "policy": _RAG_NAVIGATION_POLICY,
-        "failure_reason": "Knowledge Navigation Expand Failed",
+        "failure_reason": "Knowledge Navigation Cypher Failed",
     },
     {
         "tool_name": "knowledge_navigate_sections",
@@ -122,14 +122,19 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [
         "failure_reason": "Knowledge Navigation Sections Failed",
     },
     {
-        "tool_name": "rag_get_resource_snapshot",
+        "tool_name": "rag_get_document_structure",
         "policy": _RAG_NAVIGATION_POLICY,
-        "failure_reason": "Resource Snapshot Load Failed",
+        "failure_reason": "Document Structure Load Failed",
     },
     {
-        "tool_name": "rag_read_source",
+        "tool_name": "rag_get_page_content",
         "policy": _RAG_NAVIGATION_POLICY,
-        "failure_reason": "Resource Content Read Failed",
+        "failure_reason": "Page Content Read Failed",
+    },
+    {
+        "tool_name": "rag_get_section_content",
+        "policy": _RAG_NAVIGATION_POLICY,
+        "failure_reason": "Section Content Read Failed",
     },
 
     # 3. Web Search

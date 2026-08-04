@@ -14,9 +14,20 @@ from wisepen_mcp.service_client import RagServiceClient
 
 from .common import StateId, section_view_payload, session_id
 
-_DESCRIPTION = (
+_LOCATE_DESCRIPTION = (
     "Description:\n"
-    "Follow graph relations from node_id values returned by locate or an earlier expand. "
+    "Call first when the answer may be in the user's private WisePen documents. "
+    "It returns grounded sections plus graph node anchors for follow-up navigation.\n\n"
+    "Output:\n"
+    "Use sources[].evidence and sources[].reading_blocks previews to decide what "
+    "to read. Each content_index points to an exact cached text entry. Reuse "
+    "state_id with knowledge_navigate_sections for section text, or with "
+    "knowledge_navigate_cypher for returned node_id values. Nodes are anchors, not evidence."
+)
+
+_CYPHER_DESCRIPTION = (
+    "Description:\n"
+    "Follow graph relations from node_id values returned by locate or an earlier cypher. "
     "Use this when entity relationships could reveal related private-document evidence.\n\n"
     "Output:\n"
     "paths are candidate reasoning chains. edges expose endpoint node IDs, direction, "
@@ -24,10 +35,32 @@ _DESCRIPTION = (
     "Use those content indices and returned sources to ground claims."
 )
 
+_SECTIONS_DESCRIPTION = (
+    "Description:\n"
+    "Read full text for section_id values already returned by locate, cypher, or "
+    "a frontier entry. Use this when a section preview is relevant but incomplete.\n\n"
+    "Output:\n"
+    "reading_blocks contain the section text via content_index. evidence contains "
+    "the original hit snippets. frontier suggests adjacent or child sections to read next; "
+    "frontier entries are navigation choices, not evidence."
+)
+
+_QUERY = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1),
+    Field(
+        description=(
+            "The complete question or concept to answer from the user's private "
+            "documents. Include the subject and constraints needed to judge relevance."
+        ),
+    ),
+]
+
 _NODE_IDS = Annotated[
     tuple[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)], ...],
     Field(
-        min_length=1, max_length=16,
+        min_length=1,
+        max_length=16,
         description=(
             "Node IDs already returned in this navigation state. Each ID is a graph "
             "expansion seed; do not invent IDs from labels."
@@ -35,10 +68,42 @@ _NODE_IDS = Annotated[
     ),
 ]
 
+_SECTION_IDS = Annotated[
+    tuple[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)], ...],
+    Field(
+        min_length=1,
+        max_length=12,
+        description=(
+            "Section IDs already returned in sources or frontier entries. Select the "
+            "sections whose full reading blocks are needed."
+        ),
+    ),
+]
 
-def register_expand_tool(mcp: FastMCP, client: RagServiceClient) -> None:
-    @mcp.tool(name="knowledge_navigate_expand", description=_DESCRIPTION)
-    async def knowledge_navigate_expand(
+
+def register_navigation_tools(mcp: FastMCP, client: RagServiceClient) -> None:
+    @mcp.tool(name="knowledge_navigate_locate", description=_LOCATE_DESCRIPTION)
+    async def knowledge_navigate_locate(
+        query: _QUERY,
+        ctx: Context,
+        max_results: Annotated[
+            int,
+            Field(
+                ge=1, le=20,
+                description="Maximum number of relevant private-document results to return.",
+            ),
+        ] = 10,
+    ) -> dict[str, Any]:
+        return _render_locate_result(
+            await client.locate(
+                session_id=session_id(ctx),
+                query=query,
+                max_results=max_results,
+            )
+        )
+
+    @mcp.tool(name="knowledge_navigate_cypher", description=_CYPHER_DESCRIPTION)
+    async def knowledge_navigate_cypher(
         state_id: StateId,
         node_ids: _NODE_IDS,
         ctx: Context,
@@ -85,8 +150,8 @@ def register_expand_tool(mcp: FastMCP, client: RagServiceClient) -> None:
             Field(ge=1, le=20, description="Maximum number of ranked relation paths to return."),
         ] = 10,
     ) -> dict[str, Any]:
-        return _render_expand_result(
-            await client.expand(
+        return _render_cypher_result(
+            await client.cypher(
                 session_id=session_id(ctx),
                 state_id=state_id,
                 node_ids=node_ids,
@@ -98,8 +163,37 @@ def register_expand_tool(mcp: FastMCP, client: RagServiceClient) -> None:
             )
         )
 
+    @mcp.tool(name="knowledge_navigate_sections", description=_SECTIONS_DESCRIPTION)
+    async def knowledge_navigate_sections(
+        state_id: StateId,
+        section_ids: _SECTION_IDS,
+        ctx: Context,
+    ) -> dict[str, Any]:
+        return _render_sections_result(
+            await client.read_sections(
+                session_id=session_id(ctx),
+                state_id=state_id,
+                section_ids=section_ids,
+            )
+        )
 
-def _render_expand_result(result: dict[str, Any]) -> dict[str, Any]:
+
+def _render_locate_result(result: dict[str, Any]) -> dict[str, Any]:
+    cacheable_texts: list[CacheableText] = []
+    return {
+        "visible_result": {
+            "state_id": result["state_id"],
+            "nodes": result["nodes"],
+            "sources": [
+                section_view_payload(source, cacheable_texts)
+                for source in result["sources"]
+            ],
+        },
+        "cacheable_texts": cacheable_texts,
+    }
+
+
+def _render_cypher_result(result: dict[str, Any]) -> dict[str, Any]:
     cacheable_texts: list[CacheableText] = []
     source_content_indices: dict[str, int] = {}
     sources = [
@@ -127,6 +221,20 @@ def _render_expand_result(result: dict[str, Any]) -> dict[str, Any]:
             ],
             "paths": result["paths"],
             "sources": sources,
+        },
+        "cacheable_texts": cacheable_texts,
+    }
+
+
+def _render_sections_result(result: dict[str, Any]) -> dict[str, Any]:
+    cacheable_texts: list[CacheableText] = []
+    return {
+        "visible_result": {
+            "state_id": result["state_id"],
+            "sections": [
+                section_view_payload(section, cacheable_texts)
+                for section in result["sections"]
+            ],
         },
         "cacheable_texts": cacheable_texts,
     }

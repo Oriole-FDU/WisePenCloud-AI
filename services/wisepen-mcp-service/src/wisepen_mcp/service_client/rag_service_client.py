@@ -9,10 +9,11 @@ from wisepen_mcp.domain.error_codes import McpErrorCode
 
 _DEFAULT_SERVICE_NAME = "wisepen-rag-service"
 _LOCATE_PATH = "/internal/rag/knowledge-navigation/locate"
-_EXPAND_PATH = "/internal/rag/knowledge-navigation/expand"
+_CYPHER_PATH = "/internal/rag/knowledge-navigation/cypher"
 _SECTIONS_PATH = "/internal/rag/knowledge-navigation/sections"
-_RESOURCE_SNAPSHOT_PATH = "/internal/rag/resources/snapshot"
-_RESOURCE_CONTENT_PATH = "/internal/rag/resources/content"
+_DOCUMENT_STRUCTURE_PATH = "/internal/rag/resources/document-structure"
+_PAGE_CONTENT_PATH = "/internal/rag/resources/page-content"
+_SECTION_CONTENT_PATH = "/internal/rag/resources/section-content"
 
 
 class RagServiceClient:
@@ -43,7 +44,7 @@ class RagServiceClient:
             },
         )
 
-    async def expand(
+    async def cypher(
         self,
         *,
         session_id: str,
@@ -56,7 +57,7 @@ class RagServiceClient:
         max_results: int,
     ) -> dict[str, Any]:
         return await self._post(
-            _EXPAND_PATH,
+            _CYPHER_PATH,
             {
                 "session_id": session_id,
                 "state_id": state_id,
@@ -85,34 +86,45 @@ class RagServiceClient:
             },
         )
 
-    async def get_resource_snapshot(
+    async def get_document_structure(
         self,
         *,
         resource_id: str,
     ) -> dict[str, Any]:
         return await self._post(
-            _RESOURCE_SNAPSHOT_PATH,
+            _DOCUMENT_STRUCTURE_PATH,
             {
                 "resource_id": resource_id,
             },
         )
 
-    async def read_source(
+    async def get_page_content(
         self,
         *,
         resource_id: str,
-        locator_name: str | None = None,
-        start: int | None = None,
-        end: int | None = None,
+        page_labels: tuple[str, ...],
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {"resource_id": resource_id}
-        if locator_name is not None:
-            payload["locator_name"] = locator_name
-        if start is not None:
-            payload["start"] = start
-        if end is not None:
-            payload["end"] = end
-        return await self._post(_RESOURCE_CONTENT_PATH, payload)
+        return await self._post(
+            _PAGE_CONTENT_PATH,
+            {
+                "resource_id": resource_id,
+                "page_labels": list(page_labels),
+            },
+        )
+
+    async def get_section_content(
+        self,
+        *,
+        resource_id: str,
+        section_ids: tuple[str, ...],
+    ) -> dict[str, Any]:
+        return await self._post(
+            _SECTION_CONTENT_PATH,
+            {
+                "resource_id": resource_id,
+                "section_ids": list(section_ids),
+            },
+        )
 
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:

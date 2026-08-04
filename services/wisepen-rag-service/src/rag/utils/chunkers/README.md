@@ -90,10 +90,14 @@ text/markdown -> MarkdownChunker
 
 消费契约是：
 
-- `tool_content_ranked_read` 对语义 chunks 排序，再按 `source_spans` 回源；
-- `tool_content_read_by_locator` 按 locator 名称直接读取原文范围；
-- `tool_content_read` 按字符 offset 直接读取原文；
-- `tool_content_regex_read` 在完整原文上匹配，不受 chunk 边界影响。
+- `tool_content_get_snapshot` 返回 pages、section tree 和 anchors，不读取正文；
+- `tool_content_semantic_search` 对语义 chunks 排序，再按 `source_spans` 回源；
+- `tool_content_regex_search` 在完整原文上匹配，不受 chunk 边界影响；
+- `tool_content_read_range` 按字符 offset 直接读取原文；
+- `tool_content_read_pages` 按 page label 批量读取原文；
+- `tool_content_read_sections` 按 section path 批量读取原文。
+
+其中按结构读取（`tool_content_read_pages` / `tool_content_read_sections`）是独立能力，专门覆盖“见某某章节”“见某某页”这类稳定定位需求，不依赖图抽取，也不要求先做语义召回。
 
 不存在 selector、按页预过滤或相邻 chunk 展开。页码只是一种可定位的文档信息，不是分块策略。
 

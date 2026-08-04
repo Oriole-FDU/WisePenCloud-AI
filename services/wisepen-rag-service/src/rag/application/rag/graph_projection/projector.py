@@ -46,7 +46,7 @@ def build_knowledge_graph_projection(
     for extraction in extractions:
         for candidate in extraction.nodes:
             node = _resolve_node(candidate, resource_id=resource_id)
-            local_node_ids[(extraction.window.chunk_id, candidate.local_id)] = node.node_id
+            local_node_ids[(extraction.window.window_id, candidate.local_id)] = node.node_id
 
             # 同一节点可能在多个窗口中使用不同大小写或形式出现，固定选择排序最小的 label，
             # 保证结果不受抽取顺序影响。
@@ -65,8 +65,8 @@ def build_knowledge_graph_projection(
             mentions[mention_id] = KnowledgeMention(
                 mention_id=mention_id,
                 node_id=node.node_id,
-                chunk_id=evidence.chunk_id,
-                source_ref_id=evidence.source_ref_id,
+                parent_id=evidence.parent_id,
+                source_ref_ids=evidence.source_ref_ids,
                 evidence_quote=evidence.quote,
             )
 
@@ -77,8 +77,8 @@ def build_knowledge_graph_projection(
 
     for extraction in extractions:
         for relation in extraction.relations:
-            source_node_id = local_node_ids.get((extraction.window.chunk_id, relation.source_local_id))
-            target_node_id = local_node_ids.get((extraction.window.chunk_id, relation.target_local_id))
+            source_node_id = local_node_ids.get((extraction.window.window_id, relation.source_local_id))
+            target_node_id = local_node_ids.get((extraction.window.window_id, relation.target_local_id))
 
             # 关系端点未出现在当前窗口的节点结果中时，忽略该关系。
             if source_node_id is None or target_node_id is None:
@@ -114,7 +114,13 @@ def build_knowledge_graph_projection(
                 relation_type=relation_type,
                 predicate=predicate,
                 evidence_quotes=tuple(relation.evidence.quote for relation in ordered),
-                evidence_source_ref_ids=tuple(relation.evidence.source_ref_id for relation in ordered),
+                evidence_source_ref_ids=tuple(
+                    dict.fromkeys(
+                        source_ref_id
+                        for relation in ordered
+                        for source_ref_id in relation.evidence.source_ref_ids
+                    )
+                ),
             )
         )
 

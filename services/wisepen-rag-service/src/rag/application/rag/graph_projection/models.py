@@ -26,8 +26,8 @@ class KnowledgeMention:
 
     mention_id: str  # mention 的稳定 ID，绑定到关系版本。
     node_id: str  # 关联的实体节点 ID。
-    chunk_id: str  # mention 所在的内容 chunk。
-    source_ref_id: str  # mention 对应的 SourceRef ID。
+    parent_id: str  # mention 所属 Section ReadingBlock。
+    source_ref_ids: tuple[str, ...]  # mention 覆盖的 SourceRef ID。
     evidence_quote: str  # 经过 offset 校验的原文证据，用于 Agent 可读展示。
 
 

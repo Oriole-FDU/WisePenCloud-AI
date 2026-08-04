@@ -1,17 +1,29 @@
 from .models import (
     RagContentLocator,
+    RagResourceContentItem,
     RagResourceContentReadResult,
     RagResourceContentWindow,
     RagResourceSnapshot,
+    RagResourceSnapshotPage,
+    RagResourceSnapshotSection,
 )
-from .service import RagResourceContentRequest, RagResourceSnapshotNotFoundError, RagResourceSnapshotService
+from .service import (
+    RagPageContentRequest,
+    RagResourceSnapshotNotFoundError,
+    RagResourceSnapshotService,
+    RagSectionContentRequest,
+)
 
 __all__ = [
     "RagContentLocator",
+    "RagPageContentRequest",
+    "RagResourceContentItem",
     "RagResourceContentReadResult",
-    "RagResourceContentRequest",
     "RagResourceContentWindow",
     "RagResourceSnapshot",
     "RagResourceSnapshotNotFoundError",
+    "RagResourceSnapshotPage",
+    "RagResourceSnapshotSection",
     "RagResourceSnapshotService",
+    "RagSectionContentRequest",
 ]

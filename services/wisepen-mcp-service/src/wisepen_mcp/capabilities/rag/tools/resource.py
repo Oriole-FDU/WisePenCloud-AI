@@ -5,36 +5,41 @@ from typing import Annotated, Any
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field, StringConstraints
 
-from common.core.exceptions import ServiceException
-
 from wisepen_mcp.capabilities.core.tools import CacheableText
-from wisepen_mcp.domain.error_codes import McpErrorCode
 from wisepen_mcp.service_client import RagServiceClient
 
 from .common import append_cacheable_text, preview
 
-_SNAPSHOT_DESCRIPTION = (
+_STRUCTURE_DESCRIPTION = (
     "Description:\n"
-    "Call this first when you need the resource's parsed locator map. It returns "
-    "the current applied revision, total length, and all locator entries.\n\n"
+    "Call this first when you need the resource's parsed document structure. It returns "
+    "the current applied revision, page labels, and the full section tree without body text.\n\n"
     "Output:\n"
-    "Use locators[] to choose a section/page/anchor name for the next read call. "
-    "This tool does not return body content."
+    "Use pages[].page_label with rag_get_page_content, or sections[].section_id with "
+    "rag_get_section_content. This tool does not return body content."
 )
 
-_READ_DESCRIPTION = (
+_PAGE_CONTENT_DESCRIPTION = (
     "Description:\n"
-    "Read resource content by exact locator name or by Python-slice offset range. Use a locator "
-    "when the structure already points at the right section/page/anchor. Use start "
-    "and end when you only know the raw character span.\n\n"
+    "Read one or more pages from a resource by page labels returned by "
+    "rag_get_document_structure.\n\n"
     "Input:\n"
-    "Provide locator_name OR start/end. Offsets follow Python slice semantics: "
-    "start is inclusive, end is exclusive, negative offsets count from the end, "
-    "and omitted offsets read from the beginning or to the end.\n\n"
+    "Provide page_labels as a list, such as [\"5\", \"6\", \"12\"]. Keep requests tight.\n\n"
     "Output:\n"
-    "windows[] returns the selected text windows. Each window also gets a "
-    "content_index so downstream tools can reuse the cached text. Use "
-    "rag_get_resource_snapshot for the resource locator map."
+    "items[] is grouped by requested page label. Each window gets a content_index so "
+    "downstream tools can reuse the cached text."
+)
+
+_SECTION_CONTENT_DESCRIPTION = (
+    "Description:\n"
+    "Read one or more sections from a resource by section_id values returned by "
+    "rag_get_document_structure.\n\n"
+    "Input:\n"
+    "Provide section_ids as a list. A section read returns that section's own reading "
+    "blocks, not descendant sections; pass child section_ids too when you need them.\n\n"
+    "Output:\n"
+    "items[] is grouped by requested section_id. Each window gets a content_index so "
+    "downstream tools can reuse the cached text."
 )
 
 _RESOURCE_ID = Annotated[
@@ -43,71 +48,71 @@ _RESOURCE_ID = Annotated[
     Field(description="The private resource_id returned by upstream document ingestion."),
 ]
 
-_LOCATOR_NAME = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1),
+_PAGE_LABELS = Annotated[
+    tuple[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)], ...],
     Field(
-        description=(
-            "A locator name from rag_get_resource_snapshot, such as "
-            "\"section:训练流程 > 参数配置\" or \"page:12\"."
-        ),
+        min_length=1,
+        max_length=20,
+        description="Page labels from rag_get_document_structure, for example [\"5\", \"6\"].",
+    ),
+]
+
+_SECTION_IDS = Annotated[
+    tuple[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)], ...],
+    Field(
+        min_length=1,
+        max_length=20,
+        description="Section IDs from rag_get_document_structure.",
     ),
 ]
 
 
 def register_resource_tools(mcp: FastMCP, client: RagServiceClient) -> None:
-    @mcp.tool(name="rag_get_resource_snapshot", description=_SNAPSHOT_DESCRIPTION)
-    async def rag_get_resource_snapshot(resource_id: _RESOURCE_ID) -> dict[str, Any]:
-        return _render_snapshot_result(
-            await client.get_resource_snapshot(resource_id=resource_id)
+    @mcp.tool(name="rag_get_document_structure", description=_STRUCTURE_DESCRIPTION)
+    async def rag_get_document_structure(resource_id: _RESOURCE_ID) -> dict[str, Any]:
+        return _render_structure_result(
+            await client.get_document_structure(resource_id=resource_id)
         )
 
-    @mcp.tool(name="rag_read_source", description=_READ_DESCRIPTION)
-    async def rag_read_source(
+    @mcp.tool(name="rag_get_page_content", description=_PAGE_CONTENT_DESCRIPTION)
+    async def rag_get_page_content(
         resource_id: _RESOURCE_ID,
-        locator_name: _LOCATOR_NAME | None = None,
-        start: Annotated[
-            int | None,
-            Field(description="Optional inclusive character start offset. Negative values count from the end."),
-        ] = None,
-        end: Annotated[
-            int | None,
-            Field(description="Optional exclusive character end offset. Negative values count from the end."),
-        ] = None,
+        page_labels: _PAGE_LABELS,
     ) -> dict[str, Any]:
-        if locator_name is not None and (start is not None or end is not None):
-            raise ServiceException(
-                McpErrorCode.RAG_NAVIGATION_INVALID,
-                "locator_name cannot be combined with start/end.",
-            )
         return _render_read_result(
-            await client.read_source(
+            await client.get_page_content(
                 resource_id=resource_id,
-                locator_name=locator_name,
-                start=start,
-                end=end,
+                page_labels=page_labels,
+            )
+        )
+
+    @mcp.tool(name="rag_get_section_content", description=_SECTION_CONTENT_DESCRIPTION)
+    async def rag_get_section_content(
+        resource_id: _RESOURCE_ID,
+        section_ids: _SECTION_IDS,
+    ) -> dict[str, Any]:
+        return _render_read_result(
+            await client.get_section_content(
+                resource_id=resource_id,
+                section_ids=section_ids,
             )
         )
 
 
-def _render_snapshot_result(result: dict[str, Any]) -> dict[str, Any]:
+def _render_structure_result(result: dict[str, Any]) -> dict[str, Any]:
     return {
         "visible_result": {
             "resource_id": result["resource_id"],
             "document_version": result["document_version"],
             "content_revision": result["content_revision"],
             "total_length": result["total_length"],
-            "locators": [
+            "pages": [
                 {
-                    "locator_index": locator["locator_index"],
-                    "name": locator["name"],
-                    "kind": locator["kind"],
-                    "start_offset": locator["start_offset"],
-                    "end_offset": locator["end_offset"],
-                    "section_path": locator["section_path"],
+                    "page_label": page["page_label"],
                 }
-                for locator in result["locators"]
+                for page in result["pages"]
             ],
+            "sections": [_section_payload(section) for section in result["sections"]],
         },
         "cacheable_texts": [],
     }
@@ -115,20 +120,44 @@ def _render_snapshot_result(result: dict[str, Any]) -> dict[str, Any]:
 
 def _render_read_result(result: dict[str, Any]) -> dict[str, Any]:
     cacheable_texts: list[CacheableText] = []
-    windows = [
-        _window_payload(result, window, cacheable_texts)
-        for window in result["windows"]
+    items = [
+        _item_payload(
+            item,
+            [
+                _window_payload(result, window, cacheable_texts)
+                for window in item["windows"]
+            ],
+        )
+        for item in result["items"]
     ]
     return {
         "visible_result": {
             "resource_id": result["resource_id"],
             "content_revision": result["content_revision"],
             "document_version": result["document_version"],
-            "locator_name": result["locator_name"],
-            "reason": result["reason"],
-            "windows": windows,
+            "items": items,
         },
         "cacheable_texts": cacheable_texts,
+    }
+
+
+def _section_payload(section: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "section_id": section["section_id"],
+        "title": section["title"],
+        "level": section["level"],
+        "section_path": section["section_path"],
+        "has_content": section["has_content"],
+        "children": [_section_payload(child) for child in section["children"]],
+    }
+
+
+def _item_payload(item: dict[str, Any], windows: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "key": item["key"],
+        "kind": item["kind"],
+        "reason": item["reason"],
+        "windows": windows,
     }
 
 
@@ -147,6 +176,10 @@ def _window_payload(
             "start_offset": window["start_offset"],
             "end_offset": window["end_offset"],
             "source_spans": window["source_spans"],
+            "locator_names": window["locator_names"],
+            "page_labels": window["page_labels"],
+            "section_paths": window["section_paths"],
+            "anchor_labels": window["anchor_labels"],
         },
     )
     return {
@@ -155,5 +188,9 @@ def _window_payload(
         "start_offset": window["start_offset"],
         "end_offset": window["end_offset"],
         "source_spans": window["source_spans"],
+        "locator_names": window["locator_names"],
+        "page_labels": window["page_labels"],
+        "section_paths": window["section_paths"],
+        "anchor_labels": window["anchor_labels"],
         "metadata": window["metadata"],
     }

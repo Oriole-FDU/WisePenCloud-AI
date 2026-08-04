@@ -33,7 +33,7 @@ HTTP 接口经过 `SecurityHeaderMiddleware` 和登录校验。请求 body 不�
 
 | 字段 | 含义 |
 | --- | --- |
-| `state_id` | 后续 `sections`、`expand` 必须使用的导航状态 |
+| `state_id` | 后续 `sections`、`cypher` 必须使用的导航状态 |
 | `nodes` | 从命中 SourceRef 反查出的知识图谱节点 |
 | `sources` | 命中的 SectionView，包含正文 evidence、reading blocks 和 frontier |
 
@@ -56,9 +56,9 @@ HTTP 接口经过 `SecurityHeaderMiddleware` 和登录校验。请求 body 不�
 | `state_id` | 当前导航状态 |
 | `sections` | SectionView 列表，包含当前 Section 的完整 ReadingBlock |
 
-### `POST /internal/rag/knowledge-navigation/expand`
+### `POST /internal/rag/knowledge-navigation/cypher`
 
-从当前导航状态中已发现的图节点继续做有界关系展开。
+从当前导航状态中已发现的图节点继续做有界关系查询。
 
 请求：
 

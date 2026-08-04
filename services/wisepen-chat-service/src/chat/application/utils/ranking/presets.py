@@ -14,7 +14,7 @@ from chat.application.utils.ranking.scorers import (
 from chat.application.utils.ranking.tokenizer import ThuLacRankingTokenizer
 
 
-def build_tool_content_ranked_read_pipeline() -> RankingPipeline:
+def build_tool_content_semantic_search_pipeline() -> RankingPipeline:
     """构造工具内容窗口的词法检索和重排预设。"""
     from chat.core.config.app_settings import settings
 

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from rag.application.rag.knowledge_navigation import (
-        KnowledgeGraphExpandRequest,
+        KnowledgeGraphCypherRequest,
         KnowledgeMentionSource,
         KnowledgeNavigationNode,
         KnowledgeNavigationPath,
@@ -41,18 +41,18 @@ class KnowledgeGraphNavigationRepository(Protocol):
             permission_scope: RagPermissionScope,
             limit: int = 32,
     ) -> tuple[KnowledgeNavigationNode, ...]:
-        """根据 RAG 命中来源（resource_id + chunk_id）反查对应知识图谱节点，并完成 ACL 过滤。"""
+        """根据 RAG 命中来源（resource_id + source_ref_id）反查对应知识图谱节点，并完成 ACL 过滤。"""
         ...
 
-    async def expand(
-            self, request: KnowledgeGraphExpandRequest
+    async def cypher(
+            self, request: KnowledgeGraphCypherRequest
     ) -> tuple[KnowledgeNavigationPath, ...]:
         """从 seed 节点出发，按指定方向和关系集合在 ACL 范围内扩展图路径。"""
         ...
 
 
 class KnowledgeNavigationStateRepository(Protocol):
-    """知识导航会话状态的持久化接口，用于跨 expand 调用保留上下文。"""
+    """知识导航会话状态的持久化接口，用于跨 cypher 调用保留上下文。"""
 
     async def create(
             self,
