@@ -31,6 +31,9 @@ class SandboxProvider(Protocol):
     async def list_managed(self) -> list[DiscoveredSandbox]:
         ...
 
+    async def cleanup_owned(self) -> int:
+        ...
+
     async def prepare_workspace(
         self, sandbox: SandboxRef, workspace: WorkspaceSnapshot
     ) -> None:

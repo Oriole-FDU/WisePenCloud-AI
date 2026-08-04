@@ -19,11 +19,6 @@ class SandboxState(StrEnum):
     ALLOCATED = "allocated"
     USER_ACTIVE = "user_active"
     USER_IDLE = "user_idle"
-    # 旧状态仅用于兼容历史状态查询，新的用户级流程不再写入。
-    RUNNING = "running"
-    CHECKPOINTING = "checkpointing"
-    SESSION_IDLE = "session_idle"
-    SYNCING = "syncing"
     RETIRING = "retiring"
     DESTROYING = "destroying"
     DESTROYED = "destroyed"

@@ -35,10 +35,6 @@ _ALLOWED_TRANSITIONS: dict[SandboxState, frozenset[SandboxState]] = {
     SandboxState.USER_IDLE: frozenset(
         {SandboxState.USER_ACTIVE, SandboxState.RETIRING, SandboxState.DESTROYING}
     ),
-    SandboxState.RUNNING: frozenset({SandboxState.RETIRING, SandboxState.DESTROYING}),
-    SandboxState.CHECKPOINTING: frozenset({SandboxState.RETIRING, SandboxState.DESTROYING}),
-    SandboxState.SESSION_IDLE: frozenset({SandboxState.RETIRING, SandboxState.DESTROYING}),
-    SandboxState.SYNCING: frozenset({SandboxState.RETIRING, SandboxState.DESTROYING}),
     SandboxState.RETIRING: frozenset({SandboxState.DESTROYING}),
     SandboxState.DESTROYING: frozenset({SandboxState.DESTROYED, SandboxState.LOST}),
     SandboxState.DESTROYED: frozenset(),

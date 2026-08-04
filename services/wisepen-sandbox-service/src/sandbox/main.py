@@ -99,23 +99,18 @@ async def lifespan(app):
             scheduler_shutdown = asyncio.create_task(
                 container.scheduler().shutdown()
             )
-            provider = container.provider()
-            cleanup_owned = getattr(provider, "cleanup_owned", None)
-            cleanup_task_shutdown = (
-                asyncio.create_task(cleanup_owned())
-                if cleanup_owned is not None
-                else None
+            cleanup_task_shutdown = asyncio.create_task(
+                container.provider().cleanup_owned()
             )
             # 等待两路清理完成；任一失败只记日志不阻塞对方。
             scheduler_errors = await scheduler_shutdown
             for exc in scheduler_errors:
                 error("sandbox graceful shutdown failed.", exc=exc)
-            if cleanup_task_shutdown is not None:
-                try:
-                    count = await cleanup_task_shutdown
-                    info(f"label 兜底清理了 {count} 个残留容器。")
-                except Exception as exc:
-                    error("sandbox label 清理失败。", exc=exc)
+            try:
+                count = await cleanup_task_shutdown
+                info(f"label 兜底清理了 {count} 个残留容器。")
+            except Exception as exc:
+                error("sandbox label 清理失败。", exc=exc)
             if use_nacos:
                 try:
                     await nacos_client_manager.deregister_instance()

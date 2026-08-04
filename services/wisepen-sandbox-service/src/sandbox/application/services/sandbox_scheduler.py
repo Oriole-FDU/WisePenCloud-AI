@@ -92,7 +92,7 @@ class SandboxScheduler:
         self, request_id: str, user_id: str, session_id: str
     ) -> SandboxLease:
         existing = await self._lease_manager.find_turn_request(request_id)
-        record, lease = await self._pool.checkout(request_id, user_id, session_id)
+        record, lease = await self._pool.consume(request_id, user_id, session_id)
         # Idempotent retries must not restore or reactivate the workspace again.
         if existing is not None:
             return lease
@@ -253,10 +253,6 @@ class SandboxScheduler:
         self._metrics.increment("session_workspace_deletes")
         return True
 
-    # Compatibility alias for callers upgraded in a separate deployment step.
-    async def destroy_session(self, tenant_id: str, workspace_id: str) -> bool:
-        return await self.delete_workspace(tenant_id, workspace_id)
-
     async def destroy_user(self, user_id: str) -> bool:
         binding = await self._binding_manager.find_user_binding(user_id)
         if binding is None:
@@ -271,9 +267,6 @@ class SandboxScheduler:
             reclaimed += 1
             self._metrics.increment("user_ttl_reclaims")
         return reclaimed
-
-    async def reclaim_idle_sessions(self) -> int:
-        return await self.reclaim_idle_users()
 
     async def _retire_binding(
         self, binding: UserSandboxBindingRecord, reason: DestroyReason

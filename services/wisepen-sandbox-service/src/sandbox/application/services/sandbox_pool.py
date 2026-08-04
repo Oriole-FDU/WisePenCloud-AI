@@ -104,13 +104,6 @@ class SandboxPool:
         )
         return record, lease.as_lease()
 
-    async def checkout(
-        self, request_id: str, tenant_id: str, workspace_id: str
-    ) -> tuple[SandboxRecord, SandboxLease]:
-        """兼容旧调用名；新容器池语义统一称为 consume。"""
-
-        return await self.consume(request_id, tenant_id, workspace_id)
-
     async def snapshot(self) -> PoolSnapshot:
         return await self._repository.snapshot(
             min_ready=self._min_ready,
@@ -122,7 +115,7 @@ class SandboxPool:
     ) -> PoolMaintenancePlan:
         """计算本轮补池计划，不直接创建容器。
 
-        维持逻辑集中在 Pool，Watcher 只执行计划；这样 checkout 消费 READY 后，
+        维持逻辑集中在 Pool，Watcher 只执行计划；这样 consume 消费 READY 后，
         下一轮 watcher 会基于同一套规则发现缺口并补充。
         """
 

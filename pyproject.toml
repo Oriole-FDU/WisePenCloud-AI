@@ -9,6 +9,7 @@ dependencies = [
     "wisepen-mcp-service",
     "wisepen-common",
     "wisepen-sandbox-service",
+    "wisepen-sandbox-v1-service",
     "mcp>=1.27,<2",
     "pytest>=9.1.1",
 ]
@@ -26,3 +27,4 @@ wisepen-chat-service = { workspace = true }
 wisepen-mcp-service = { workspace = true }
 wisepen-common = { workspace = true }
 wisepen-sandbox-service = { workspace = true }
+wisepen-sandbox-v1-service = { workspace = true }

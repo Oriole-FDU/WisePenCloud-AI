@@ -61,14 +61,6 @@ def build_sandbox_mcp(session: SandboxSessionService) -> FastMCP:
         return {"status": "deleted" if deleted else "not_found"}
 
     @mcp.tool(
-        name="destroy_sandbox_session",
-        description="Compatibility alias for deleting the current session workspace.",
-    )
-    async def destroy_sandbox_session() -> dict[str, str]:
-        deleted = await session.delete_workspace()
-        return {"status": "deleted" if deleted else "not_found"}
-
-    @mcp.tool(
         name="read_file",
         description="Read a file from the current sandbox workspace. Use a relative path or /workspace/path; internal container paths are not supported.",
     )

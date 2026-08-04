@@ -5,10 +5,10 @@ from dataclasses import dataclass, replace
 from common.core.exceptions import ServiceException
 from common.logger import error, info, warn
 
-from sandbox.domain.entities import DiscoveredSandbox, SandboxRecord, SandboxState
-from sandbox.domain.error_codes import SandboxErrorCode
-from sandbox.domain.interfaces.sandbox_provider import SandboxProvider
-from sandbox.domain.repositories import SandboxRepository
+from sandbox_v1.domain.entities import DiscoveredSandbox, SandboxRecord, SandboxState
+from sandbox_v1.domain.error_codes import SandboxErrorCode
+from sandbox_v1.domain.interfaces.sandbox_provider import SandboxProvider
+from sandbox_v1.domain.repositories import SandboxRepository
 
 
 _POOL_AUTHORITY_STATES = (

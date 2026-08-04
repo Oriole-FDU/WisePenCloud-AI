@@ -14,6 +14,7 @@ members = [
     "wisepen-common",
     "wisepen-mcp-service",
     "wisepen-sandbox-service",
+    "wisepen-sandbox-v1-service",
     "wisepen-server-py",
 ]
 
@@ -3715,6 +3716,44 @@ requires-dist = [
 provides-extras = ["test", "mongo"]
 
 [[package]]
+name = "wisepen-sandbox-v1-service"
+version = "0.1.0"
+source = { editable = "services/wisepen-sandbox-v1-service" }
+dependencies = [
+    { name = "dependency-injector" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "wisepen-common" },
+]
+
+[package.optional-dependencies]
+test = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dependency-injector" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "httpx", marker = "extra == 'test'" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pytest", marker = "extra == 'test'" },
+    { name = "pytest-asyncio", marker = "extra == 'test'" },
+    { name = "pyyaml" },
+    { name = "uvicorn", extras = ["standard"] },
+    { name = "wisepen-common", editable = "services/wisepen-common" },
+]
+provides-extras = ["test"]
+
+[[package]]
 name = "wisepen-server-py"
 version = "0.1.0"
 source = { virtual = "." }
@@ -3726,6 +3765,7 @@ dependencies = [
     { name = "wisepen-common" },
     { name = "wisepen-mcp-service" },
     { name = "wisepen-sandbox-service" },
+    { name = "wisepen-sandbox-v1-service" },
 ]
 
 [package.metadata]
@@ -3737,6 +3777,7 @@ requires-dist = [
     { name = "wisepen-common", editable = "services/wisepen-common" },
     { name = "wisepen-mcp-service", editable = "services/wisepen-mcp-service" },
     { name = "wisepen-sandbox-service", editable = "services/wisepen-sandbox-service" },
+    { name = "wisepen-sandbox-v1-service", editable = "services/wisepen-sandbox-v1-service" },
 ]
 
 [[package]]
