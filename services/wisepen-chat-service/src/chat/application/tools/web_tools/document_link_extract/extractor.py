@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 
-from chat.application.tools.utils.url import validate_public_http_url_async
+from chat.application.utils.url_security import validate_public_http_url_async
 from chat.application.tools.web_tools.common import (
     WebContentCache,
     WebContentCacheRepository,

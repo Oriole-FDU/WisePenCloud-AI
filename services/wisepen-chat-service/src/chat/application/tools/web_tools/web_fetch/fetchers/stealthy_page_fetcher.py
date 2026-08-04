@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from chat.application.tools.utils.url import (
+from chat.application.utils.url_security import (
     UrlSecurityError,
     validate_public_http_url_async,
 )

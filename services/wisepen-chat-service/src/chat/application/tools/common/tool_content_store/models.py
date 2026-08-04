@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from common.utils.chunkers import LocatorKind, SourceSpan, TextLocator
+from chat.application.utils.chunkers import LocatorKind, SourceSpan, TextLocator
 
 
 @dataclass(frozen=True, slots=True)

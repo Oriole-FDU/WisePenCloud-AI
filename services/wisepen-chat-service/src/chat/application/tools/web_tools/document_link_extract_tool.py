@@ -11,7 +11,7 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 from chat.application.tools.core.output.tool_return import CacheableText, ToolReturn
-from chat.application.tools.utils.url import UrlSecurityError
+from chat.application.utils.url_security import UrlSecurityError
 
 from .document_link_extract import (
     DocumentLinkExtractor,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from common.utils.ranking import (
+from wisepen_mcp.utils.ranking import (
     RankCandidate,
     RankQuery,
     RankRequest,

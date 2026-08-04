@@ -4,7 +4,7 @@ from chat.application.tools.common.tool_content_store import (
     StoredToolContent,
     ToolContentChunk,
 )
-from common.utils.chunkers import SourceSpan
+from chat.application.utils.chunkers import SourceSpan
 
 from .models import ToolContentWindow
 

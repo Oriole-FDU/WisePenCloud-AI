@@ -15,7 +15,6 @@ dependencies = [
 members = [
     "services/*",   # 扫描 services 下的所有子文件夹
 ]
-exclude = ["services/wisepen-old"]
 
 [tool.uv.sources]
 wisepen-chat-service = { workspace = true }

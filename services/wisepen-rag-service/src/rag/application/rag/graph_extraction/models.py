@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from rag.application.rag.ingestion import RagSourceRef
-from common.utils.chunkers import SourceSpan
+from rag.utils.chunkers import SourceSpan
 
 
 class KnowledgeNodeKind(StrEnum):

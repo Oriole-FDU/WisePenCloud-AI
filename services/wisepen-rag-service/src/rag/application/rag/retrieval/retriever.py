@@ -7,7 +7,7 @@ from rag.application.rag.repositories import (
     RagCandidateRepository,
     RagContentCheckpointRepository,
 )
-from common.utils.ranking import (
+from rag.utils.ranking import (
     RankCandidate,
     RankQuery,
     RankRequest,

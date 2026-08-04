@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from beanie.operators import In
-from common.utils.chunkers import SourceSpan
+from rag.utils.chunkers import SourceSpan
 from rag.application.rag.ingestion import (
     RagContentProjection,
     RagContentLocator,

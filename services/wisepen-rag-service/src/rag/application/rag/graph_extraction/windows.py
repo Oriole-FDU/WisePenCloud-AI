@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from rag.application.rag.ingestion import RagSourceRef
+from rag.utils.xml_markup import xml_attr, xml_cdata
+
 from .models import (
     KnowledgeExtractionSource,
     KnowledgeExtractionWindow,
@@ -88,29 +90,29 @@ def build_extraction_windows(
 
 def render_extraction_window(window: KnowledgeExtractionWindow) -> str:
     """将知识抽取窗口渲染为 LLM 输入。"""
-    section_paths = "\n".join(" > ".join(path) for path in window.section_paths)
+    section_paths = "\n".join(
+        f"      <section_path>{xml_cdata(' > '.join(path))}</section_path>"
+        for path in window.section_paths
+    ) or f"      <section_path>{xml_cdata('(document root)')}</section_path>"
 
     return f"""EXTRACTION_RULES:
 - Extract general entities and explicit cross-document relations.
-- Extract only facts supported by CURRENT_CHUNK.
-- evidence_quote must be one exact continuous substring of CURRENT_CHUNK.
-- Context before and after CURRENT_CHUNK is only for disambiguation.
+- Extract only facts supported by <current_chunk>.
+- evidence_quote must be one exact continuous substring of <current_chunk>.
+- Context before and after <current_chunk> is only for disambiguation.
 - Use only node types, entity types, relation types and endpoint directions from the schema.
-- Use CURRENT_RESOURCE as the Resource node and copy its resource_id exactly.
+- Use <current_resource> as the Resource node and copy its resource_id exactly.
 - RELATED_TO requires a specific predicate.
 - Return no node or relation when evidence is insufficient.
 
-CURRENT_RESOURCE:
-resource_id: {window.resource_id}
-section_paths:
+<extraction_window>
+  <current_resource resource_id="{xml_attr(window.resource_id)}">
+    <section_paths>
 {section_paths}
-
-PREVIOUS_CONTEXT:
-{window.previous_context}
-
-CURRENT_CHUNK:
-{window.current_text}
-
-NEXT_CONTEXT:
-{window.next_context}
+    </section_paths>
+  </current_resource>
+  <previous_context>{xml_cdata(window.previous_context)}</previous_context>
+  <current_chunk>{xml_cdata(window.current_text)}</current_chunk>
+  <next_context>{xml_cdata(window.next_context)}</next_context>
+</extraction_window>
 """

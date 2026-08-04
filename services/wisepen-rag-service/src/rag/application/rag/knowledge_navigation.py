@@ -21,7 +21,7 @@ from rag.application.rag.retrieval import (
     RagRetrievalRequest,
 )
 from rag.application.rag.section_navigation import RagSectionNavigator, RagSectionView
-from common.utils.ranking import (
+from rag.utils.ranking import (
     RankCandidate,
     RankingPipeline,
     RankQuery,

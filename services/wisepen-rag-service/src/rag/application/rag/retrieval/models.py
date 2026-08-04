@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from common.utils.ranking import ScoreSignal
+from rag.utils.ranking import ScoreSignal
 from common.core.domain import GroupRoleType
 
 

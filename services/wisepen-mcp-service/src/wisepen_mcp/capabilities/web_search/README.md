@@ -8,7 +8,7 @@ FastMCP tool
     -> SearchSourceFactory
     -> provider searcher
     -> SearchPipeline
-    -> common.utils.ranking
+    -> wisepen_mcp.utils.ranking
     -> WebSearchToolResult
 
 ```

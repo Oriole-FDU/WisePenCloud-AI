@@ -185,7 +185,7 @@ def _build_schema(profiles: frozenset[KnowledgeRelationProfile]) -> GraphSchema:
         PropertyType(
             name="evidence_quote",
             type="STRING",
-            description="CURRENT_CHUNK 中支持该关系的连续原文",
+            description="<current_chunk> 中支持该关系的连续原文",
         ),
         PropertyType(
             name="assertion",
@@ -234,7 +234,7 @@ def _build_schema(profiles: frozenset[KnowledgeRelationProfile]) -> GraphSchema:
                     PropertyType(
                         name="evidence_quote",
                         type="STRING",
-                        description="CURRENT_CHUNK 中出现该实体的连续原文",
+                        description="<current_chunk> 中出现该实体的连续原文",
                     ),
                 ],
                 additional_properties=False,
@@ -256,7 +256,7 @@ def _build_schema(profiles: frozenset[KnowledgeRelationProfile]) -> GraphSchema:
                     PropertyType(
                         name="evidence_quote",
                         type="STRING",
-                        description="CURRENT_CHUNK 中出现该来源的连续原文",
+                        description="<current_chunk> 中出现该来源的连续原文",
                     ),
                 ],
                 additional_properties=False,

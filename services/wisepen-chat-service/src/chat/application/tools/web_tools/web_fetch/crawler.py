@@ -7,7 +7,7 @@ from urllib.parse import urljoin, urlparse
 
 from lxml import html as lxml_html
 
-from chat.application.tools.utils.url import (
+from chat.application.utils.url_security import (
     UrlSecurityError,
     validate_public_http_url_async,
 )
@@ -17,11 +17,10 @@ from chat.application.tools.web_tools.common import (
 )
 from common.logger import warn
 
-from .content.html_clean import clean_html
-from .content.quality import should_fallback
 from .core.errors import UrlFetchError, UrlFetchUnsupportedUrlError
 from .core.models import WebFetchResult
 from .fetchers import WebFetcher
+from .page_content import clean_html, should_fallback
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,23 +72,9 @@ class WebCrawler:
         results: list[WebFetchResult] = []
 
         while queue and len(results) < max_pages:
-            batch = [
-                queue.popleft()
-                for _ in range(
-                    min(
-                        len(queue),
-                        self._concurrency,
-                        max_pages - len(results),
-                    )
-                )
-            ]
+            batch = [queue.popleft() for _ in range(min(len(queue), self._concurrency, max_pages - len(results)))]
             pages = await asyncio.gather(
-                *(
-                    self._fetch_one(
-                        url,
-                    )
-                    for url, _ in batch
-                ),
+                *(self._fetch_one(url) for url, _ in batch),
                 return_exceptions=True,
             )
 

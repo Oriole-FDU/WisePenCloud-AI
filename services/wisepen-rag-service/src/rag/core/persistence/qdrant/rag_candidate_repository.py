@@ -11,7 +11,7 @@ from rag.application.rag.retrieval import (
     RagRetrievalCandidate,
     build_qdrant_permission_filter,
 )
-from common.utils.ranking import ScoreSignal, ScoreSignalKind
+from rag.utils.ranking import ScoreSignal, ScoreSignalKind
 
 _PAYLOAD_FIELDS = (
     "content_revision",

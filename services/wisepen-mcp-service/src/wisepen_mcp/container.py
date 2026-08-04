@@ -8,7 +8,7 @@ from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.core.config.bootstrap_settings import bootstrap_settings
 from wisepen_mcp.core.config.nacos import nacos_client_manager
 from wisepen_mcp.capabilities.web_search import WebSearchService
-from wisepen_mcp.capabilities.web_search.ranking import (
+from wisepen_mcp.utils.ranking.presets import (
     build_web_search_ranking_pipeline,
 )
 from wisepen_mcp.capabilities.web_search.services import (

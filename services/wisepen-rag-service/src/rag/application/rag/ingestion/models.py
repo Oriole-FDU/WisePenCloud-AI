@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from common.utils.chunkers import SourceSpan
+from rag.utils.chunkers import SourceSpan
 from rag.application.rag.resource_snapshot import RagContentLocator
 
 

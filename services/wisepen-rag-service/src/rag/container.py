@@ -45,9 +45,9 @@ from rag.core.persistence import (
     RedisKnowledgeNavigationStateRepository,
 )
 from rag.utils.llm_clients import build_embedding_client, build_query_client
-from rag.utils.ranking_presets import (
-    KNOWLEDGE_GRAPH_PATH_PIPELINE,
-    KNOWLEDGE_SEARCH_PIPELINE,
+from rag.utils.ranking.presets import (
+    build_knowledge_graph_path_ranking_pipeline,
+    build_knowledge_search_ranking_pipeline,
 )
 
 
@@ -246,6 +246,12 @@ class Container(containers.DeclarativeContainer):
         _build_rag_resource_deleted_kafka_consumer,
         consumer=resource_deleted_consumer,
     )
+    knowledge_search_ranking_pipeline = providers.Singleton(
+        build_knowledge_search_ranking_pipeline,
+    )
+    knowledge_graph_path_ranking_pipeline = providers.Singleton(
+        build_knowledge_graph_path_ranking_pipeline,
+    )
 
     candidate_retriever = providers.Singleton(
         RagCandidateRetriever,
@@ -253,7 +259,7 @@ class Container(containers.DeclarativeContainer):
         candidate_repository=candidate_repository,
         checkpoint_repository=content_checkpoint_repository,
         permission_authorizer=permission_authorizer,
-        ranking_pipeline=providers.Object(KNOWLEDGE_SEARCH_PIPELINE),
+        ranking_pipeline=knowledge_search_ranking_pipeline,
     )
     evidence_materializer = providers.Singleton(
         RagEvidenceMaterializer,
@@ -277,7 +283,7 @@ class Container(containers.DeclarativeContainer):
         evidence_materializer=evidence_materializer,
         section_navigator=section_navigator,
         state_repository=navigation_state_repository,
-        path_ranking_pipeline=providers.Object(KNOWLEDGE_GRAPH_PATH_PIPELINE),
+        path_ranking_pipeline=knowledge_graph_path_ranking_pipeline,
     )
     resource_snapshot_service = providers.Singleton(
         RagResourceSnapshotService,

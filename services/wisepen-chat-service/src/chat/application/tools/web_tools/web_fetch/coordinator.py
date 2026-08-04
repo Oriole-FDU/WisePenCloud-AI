@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from chat.application.tools.utils.url import UrlSecurityError
+from chat.application.utils.url_security import UrlSecurityError
 from chat.application.tools.web_tools.common import (
     WebContentCache,
     WebContentCacheRepository,
@@ -8,9 +8,6 @@ from chat.application.tools.web_tools.common import (
 from common.logger import warn
 
 from .batch_scheduler import FetchBatchScheduler, FetchJob
-from .content.html_clean import clean_html
-from .content.pdf_extract import extract_pdf_markdown
-from .content.quality import should_fallback
 from .core.errors import (
     UrlFetchError,
     UrlFetchHttpError,
@@ -21,6 +18,7 @@ from .core.models import (
     WebFetchResult,
 )
 from .fetchers import WebFetcher
+from .page_content import clean_html, extract_pdf_markdown, should_fallback
 
 
 _NOT_RETRYABLE_HTTP_STATUS_REASONS = {

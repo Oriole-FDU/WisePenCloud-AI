@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 
-from common.utils.chunkers import (
+from chat.application.utils.chunkers import (
     Chunk,
     ChunkDocument,
     MarkdownChunker,

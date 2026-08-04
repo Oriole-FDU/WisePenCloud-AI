@@ -6,7 +6,7 @@ from beanie import Document
 from pydantic import BaseModel, Field
 from pymongo import ASCENDING, IndexModel
 
-from common.utils.chunkers import LocatorKind
+from rag.utils.chunkers import LocatorKind
 
 
 class RagSourceSpanDocument(BaseModel):

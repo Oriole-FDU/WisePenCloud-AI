@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from hashlib import sha256
 
 from beanie.operators import In
-from common.utils.chunkers import SourceSpan
+from rag.utils.chunkers import SourceSpan
 from rag.application.rag.evidence import RagMaterializedSource
 from rag.application.rag.graph_extraction import (
     KnowledgeExtractionChunk,

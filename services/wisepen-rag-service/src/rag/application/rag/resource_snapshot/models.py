@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from common.utils.chunkers import LocatorKind, SourceSpan
+from rag.utils.chunkers import LocatorKind, SourceSpan
 
 
 @dataclass(frozen=True, slots=True)

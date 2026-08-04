@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from hashlib import sha256
 
-from common.utils.chunkers import (
+from rag.utils.chunkers import (
     BlockKind,
     ChunkDocument,
     LocatorKind,
