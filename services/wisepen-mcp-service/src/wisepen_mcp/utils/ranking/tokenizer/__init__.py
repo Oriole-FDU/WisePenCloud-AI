@@ -1,6 +1,5 @@
 from .base import RankingTokenizer
-from .jieba import JiebaRankingTokenizer
-from .thulac import ThuLacRankingTokenizer
+from .tokenizers import JiebaRankingTokenizer, ThuLacRankingTokenizer
 
 __all__ = [
     "JiebaRankingTokenizer",
