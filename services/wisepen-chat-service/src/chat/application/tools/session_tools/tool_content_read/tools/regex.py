@@ -43,9 +43,11 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         },
         "context_chars": {
             "type": "integer",
-            "default": 1000,
             "minimum": 0,
-            "description": "Source characters included before and after each exact match.",
+            "description": (
+                "Optional raw source characters included before and after each match. "
+                "When omitted, the reader chooses token-budgeted context automatically."
+            ),
         },
     },
     "required": ["content_ids", "pattern"],
@@ -67,7 +69,9 @@ class ToolContentRegexReadTool:
                     "Search complete cached source texts with a Python regular expression. "
                     "Use this for exact names, identifiers, citations, headings, URLs, or other "
                     "literal patterns, including matches that cross retrieval chunk boundaries. "
-                    "Results include absolute match offsets and bounded source context. Use "
+                    "Results include absolute match offsets and bounded source context. "
+                    "budget_exhausted indicates that more matches may require a narrower pattern. "
+                    "Use "
                     "tool_content_ranked_read for semantic retrieval, and tool_content_read for "
                     "known page/section/anchor locators or known offsets."
                 ),
@@ -112,7 +116,11 @@ class ToolContentRegexReadTool:
                     content_ids=tuple(str(value) for value in kwargs["content_ids"]),
                     pattern=pattern,
                     max_matches=max(int(kwargs.get("max_matches", 10)), 0),
-                    context_chars=max(int(kwargs.get("context_chars", 1000)), 0),
+                    context_chars=(
+                        max(int(kwargs["context_chars"]), 0)
+                        if "context_chars" in kwargs
+                        else None
+                    ),
                 ),
                 session_id=str(context["session_id"]),
             )

@@ -48,7 +48,6 @@ _RAG_NAVIGATION_POLICY = ToolPolicy(
     timeout_seconds=300.0,
     persist_output=True,
     required_context_keys=("session_id",),
-    max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
 )
 
 _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [

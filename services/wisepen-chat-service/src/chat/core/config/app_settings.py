@@ -101,10 +101,15 @@ class AppSettings(BaseModel):
     AGENT_MAX_ITERATIONS: int = 50
     # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
     TOOL_RESULT_MAX_CHARS: int = 4000
-    # 可缓存工具正文的单条模型可见预览预算；完整正文仍进入 ToolContentStore。
-    TOOL_CONTENT_PREVIEW_PER_MAX_CHARS: int = 8_000
-    # 可缓存工具正文的单次工具调用总预览预算，超过后按正文数量均分。
-    TOOL_CONTENT_PREVIEW_TOTAL_MAX_CHARS: int = 24_000
+    # 可缓存工具正文只在模型可见预览中计入预算；完整正文仍进入 ToolContentStore。
+    TOOL_CONTENT_PREVIEW_PER_TOKEN_BUDGET: int = 1_536
+    TOOL_CONTENT_PREVIEW_TOTAL_TOKEN_BUDGET: int = 8_192
+    TOOL_CONTENT_READ_WINDOW_TOKEN_BUDGET: int = 4_096
+    TOOL_CONTENT_READ_TOTAL_TOKEN_BUDGET: int = 8_192
+    TOOL_CONTENT_RANKED_WINDOW_TOKEN_BUDGET: int = 1_536
+    TOOL_CONTENT_RANKED_TOTAL_TOKEN_BUDGET: int = 8_192
+    TOOL_CONTENT_REGEX_CONTEXT_SIDE_TOKEN_BUDGET: int = 512
+    TOOL_CONTENT_REGEX_TOTAL_TOKEN_BUDGET: int = 8_192
     TOOL_CONTENT_DEFAULT_TTL_SECONDS: int = 1800
     TOOL_CONTENT_MAX_CHARS: int = 20_000_000
 

@@ -114,7 +114,6 @@ def _content_payload(result) -> dict[str, Any]:
                     }
                     for span in window.source_spans
                 ],
-                "truncated": window.truncated,
                 "metadata": window.metadata,
             }
             for window in result.windows

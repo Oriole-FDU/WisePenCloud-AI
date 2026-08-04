@@ -4,6 +4,11 @@ import asyncio
 
 import regex
 
+from chat.application.tools.common.canonical_token_budget import (
+    count_canonical_tokens,
+    truncate_canonical_prefix,
+    truncate_canonical_suffix,
+)
 from chat.application.tools.common.tool_content_store import (
     StoredToolContent,
     ToolContentChunk,
@@ -41,18 +46,50 @@ class ToolContentRegexTimeoutError(TimeoutError):
 class ToolContentReader:
     """按 offset、locator、正则或语义检索读取权威工具原文。"""
 
-    __slots__ = ("_ranking_pipeline", "_store", "_window_builder")
+    __slots__ = (
+        "_ranked_total_token_budget",
+        "_ranked_window_builder",
+        "_read_total_token_budget",
+        "_read_window_builder",
+        "_regex_context_side_token_budget",
+        "_regex_total_token_budget",
+        "_ranking_pipeline",
+        "_store",
+    )
 
     def __init__(
         self,
         *,
-        max_window_chars: int | None,
+        read_window_token_budget: int,
+        read_total_token_budget: int,
+        ranked_window_token_budget: int,
+        ranked_total_token_budget: int,
+        regex_context_side_token_budget: int,
+        regex_total_token_budget: int,
         ranking_pipeline: RankingPipeline,
         store: ToolContentStore,
     ) -> None:
+        if min(
+            read_window_token_budget,
+            read_total_token_budget,
+            ranked_window_token_budget,
+            ranked_total_token_budget,
+            regex_context_side_token_budget,
+            regex_total_token_budget,
+        ) < 1:
+            raise ValueError("tool content token budgets must be greater than 0")
         self._ranking_pipeline = ranking_pipeline
         self._store = store
-        self._window_builder = ToolContentWindowBuilder(max_chars=max_window_chars)
+        self._read_window_builder = ToolContentWindowBuilder(
+            token_budget=read_window_token_budget
+        )
+        self._ranked_window_builder = ToolContentWindowBuilder(
+            token_budget=ranked_window_token_budget
+        )
+        self._read_total_token_budget = read_total_token_budget
+        self._ranked_total_token_budget = ranked_total_token_budget
+        self._regex_context_side_token_budget = regex_context_side_token_budget
+        self._regex_total_token_budget = regex_total_token_budget
 
     async def read_range(
         self,
@@ -67,7 +104,7 @@ class ToolContentReader:
             return ToolContentReadResult(content_id=content_id, reason="content_not_found")
         return ToolContentReadResult(
             content_id=content_id,
-            window=self._window_builder.build_range_window(
+            window=self._read_window_builder.build_range_window(
                 stored,
                 start=start,
                 end=end,
@@ -97,17 +134,24 @@ class ToolContentReader:
                 locator=locator_name,
                 reason="locator_not_found",
             )
+        windows = []
+        remaining = self._read_total_token_budget
+        for locator in locators:
+            if remaining <= 0:
+                break
+            window = self._read_window_builder.build_range_window(
+                stored,
+                start=locator.start_offset,
+                end=locator.end_offset,
+                token_budget=remaining,
+            )
+            windows.append(window)
+            remaining -= count_canonical_tokens(window.text)
         return ToolContentLocatorReadResult(
             content_id=content_id,
             locator=locator_name,
-            windows=tuple(
-                self._window_builder.build_range_window(
-                    stored,
-                    start=locator.start_offset,
-                    end=locator.end_offset,
-                )
-                for locator in locators
-            ),
+            windows=tuple(windows),
+            budget_exhausted=len(windows) < len(locators),
         )
 
     async def get_snapshot(
@@ -150,46 +194,64 @@ class ToolContentReader:
             session_id=session_id,
         )
 
-        def scan_loaded() -> tuple[ToolContentRegexMatch, ...]:
+        def scan_loaded() -> tuple[tuple[ToolContentRegexMatch, ...], bool]:
             try:
                 compiled = regex.compile(request.pattern)
             except regex.error as exc:
                 raise ToolContentInvalidRegexError(str(exc)) from exc
 
             max_matches = max(request.max_matches, 0)
-            context_chars = max(request.context_chars, 0)
             matches: list[ToolContentRegexMatch] = []
+            remaining = self._regex_total_token_budget
             for content_id, stored in stored_items:
                 try:
                     for matched in compiled.finditer(
                         stored.text,
                         timeout=_SEARCH_TIMEOUT_SECONDS,
                     ):
+                        if remaining <= 0:
+                            return tuple(matches), True
+                        window_start, window_end = _regex_window_range(
+                            stored.text,
+                            match_start=matched.start(),
+                            match_end=matched.end(),
+                            context_chars=request.context_chars,
+                            context_side_token_budget=self._regex_context_side_token_budget,
+                            total_token_budget=remaining,
+                        )
+                        window = self._read_window_builder.build_range_window(
+                            stored,
+                            start=window_start,
+                            end=window_end,
+                            token_budget=remaining,
+                        )
                         matches.append(
                             ToolContentRegexMatch(
                                 content_id=content_id,
                                 match_start=matched.start(),
                                 match_end=matched.end(),
-                                window=self._window_builder.build_range_window(
-                                    stored,
-                                    start=max(matched.start() - context_chars, 0),
-                                    end=min(
-                                        matched.end() + context_chars,
-                                        len(stored.text),
-                                    ),
-                                ),
+                                window=window,
                             )
                         )
+                        remaining -= count_canonical_tokens(window.text)
                         if len(matches) >= max_matches:
-                            return tuple(matches)
+                            return tuple(matches), False
                 except TimeoutError as exc:
                     raise ToolContentRegexTimeoutError(
                         f"regex search exceeded {_SEARCH_TIMEOUT_SECONDS}s"
                     ) from exc
-            return tuple(matches)
+            return tuple(matches), False
 
-        matches = await asyncio.to_thread(scan_loaded) if request.max_matches > 0 else ()
-        return ToolContentRegexReadResult(matches=matches, failed=failed)
+        matches, budget_exhausted = (
+            await asyncio.to_thread(scan_loaded)
+            if request.max_matches > 0
+            else ((), False)
+        )
+        return ToolContentRegexReadResult(
+            matches=matches,
+            failed=failed,
+            budget_exhausted=budget_exhausted,
+        )
 
     async def read_ranked(
         self,
@@ -240,24 +302,36 @@ class ToolContentReader:
         )
 
         ranked: list[ToolContentRankedReadItem] = []
+        remaining = self._ranked_total_token_budget
+        budget_exhausted = False
         for item in result.ranked:
+            if remaining <= 0:
+                budget_exhausted = True
+                break
             source = sources.get(item.candidate_id)
             if source is None:
                 continue
             content_id, stored, chunk = source
+            window = self._ranked_window_builder.build_source_window(
+                stored,
+                chunk=chunk,
+                token_budget=remaining,
+            )
             ranked.append(
                 ToolContentRankedReadItem(
                     content_id=content_id,
                     rank=item.rank,
                     score=item.score,
                     chunk_index=chunk.chunk_index,
-                    window=self._window_builder.build_source_window(
-                        stored,
-                        chunk=chunk,
-                    ),
+                    window=window,
                 )
             )
-        return ToolContentRankedReadResult(ranked=tuple(ranked), failed=failed)
+            remaining -= count_canonical_tokens(window.text)
+        return ToolContentRankedReadResult(
+            ranked=tuple(ranked),
+            failed=failed,
+            budget_exhausted=budget_exhausted,
+        )
 
     async def _load_many(
         self,
@@ -299,3 +373,55 @@ class ToolContentReader:
             elif stored is not None:
                 stored_items.append((content_id, stored))
         return tuple(stored_items), tuple(failed)
+
+
+def _regex_window_range(
+    text: str,
+    *,
+    match_start: int,
+    match_end: int,
+    context_chars: int | None,
+    context_side_token_budget: int,
+    total_token_budget: int,
+) -> tuple[int, int]:
+    if context_chars is None:
+        _, before_start, _ = truncate_canonical_suffix(
+            text[:match_start],
+            context_side_token_budget,
+        )
+        _, after_length, _ = truncate_canonical_prefix(
+            text[match_end:],
+            context_side_token_budget,
+        )
+        candidate_start = before_start
+        candidate_end = match_end + after_length
+    else:
+        context_chars = max(context_chars, 0)
+        candidate_start = max(match_start - context_chars, 0)
+        candidate_end = min(match_end + context_chars, len(text))
+
+    if count_canonical_tokens(text[candidate_start:candidate_end]) <= total_token_budget:
+        return candidate_start, candidate_end
+
+    match_tokens = count_canonical_tokens(text[match_start:match_end])
+    if match_tokens >= total_token_budget:
+        return match_start, match_end
+
+    context_budget = total_token_budget - match_tokens
+    before_budget = context_budget // 2
+    _, before_offset, _ = truncate_canonical_suffix(
+        text[candidate_start:match_start],
+        before_budget,
+    )
+    start = candidate_start + before_offset
+    after_budget = context_budget - count_canonical_tokens(text[start:match_start])
+    _, after_length, _ = truncate_canonical_prefix(
+        text[match_end:candidate_end],
+        after_budget,
+    )
+    end = match_end + after_length
+    while count_canonical_tokens(text[start:end]) > total_token_budget and end > match_end:
+        end -= 1
+    while count_canonical_tokens(text[start:end]) > total_token_budget and start < match_start:
+        start += 1
+    return start, end

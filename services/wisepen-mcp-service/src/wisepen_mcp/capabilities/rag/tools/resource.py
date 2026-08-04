@@ -30,8 +30,7 @@ _READ_DESCRIPTION = (
     "Input:\n"
     "Provide locator_name OR start/end. Offsets follow Python slice semantics: "
     "start is inclusive, end is exclusive, negative offsets count from the end, "
-    "and omitted offsets read from the beginning or to the end. Returned text is "
-    "clipped to 8000 characters.\n\n"
+    "and omitted offsets read from the beginning or to the end.\n\n"
     "Output:\n"
     "windows[] returns the selected text windows. Each window also gets a "
     "content_index so downstream tools can reuse the cached text. Use "
@@ -148,7 +147,6 @@ def _window_payload(
             "start_offset": window["start_offset"],
             "end_offset": window["end_offset"],
             "source_spans": window["source_spans"],
-            "truncated": window["truncated"],
         },
     )
     return {
@@ -157,6 +155,5 @@ def _window_payload(
         "start_offset": window["start_offset"],
         "end_offset": window["end_offset"],
         "source_spans": window["source_spans"],
-        "truncated": window["truncated"],
         "metadata": window["metadata"],
     }

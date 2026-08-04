@@ -28,7 +28,7 @@ class ToolContentRegexReadRequest:
     content_ids: tuple[str, ...]
     pattern: str
     max_matches: int = 10
-    context_chars: int = 1000
+    context_chars: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +65,7 @@ class ToolContentRegexMatch:
 class ToolContentRegexReadResult:
     matches: tuple[ToolContentRegexMatch, ...] = ()
     failed: tuple[ToolContentReadFailure, ...] = ()
+    budget_exhausted: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +91,7 @@ class ToolContentRankedReadItem:
 class ToolContentRankedReadResult:
     ranked: tuple[ToolContentRankedReadItem, ...] = ()
     failed: tuple[ToolContentReadFailure, ...] = ()
+    budget_exhausted: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,3 +107,4 @@ class ToolContentLocatorReadResult:
     locator: str
     windows: tuple[ToolContentWindow, ...] = ()
     reason: str | None = None
+    budget_exhausted: bool = False

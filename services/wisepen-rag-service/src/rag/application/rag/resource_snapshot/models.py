@@ -39,7 +39,6 @@ class RagResourceContentWindow:
     page_labels: tuple[str, ...] = ()
     section_paths: tuple[tuple[str, ...], ...] = ()
     anchor_labels: tuple[str, ...] = ()
-    truncated: bool = False
     metadata: dict[str, object] = field(default_factory=dict)
 
 

@@ -35,7 +35,6 @@ from rag.domain.entities.rag_content import (
 from .version_repository import load_applied_content_revision
 
 CONTENT_PART_CHARACTERS = 1_000_000
-RESOURCE_CONTENT_READ_MAX_CHARS = 8000
 
 
 def to_section(document: RagSectionDocument) -> RagSectionNode:
@@ -185,12 +184,9 @@ def locator_window(
     documents: list[RagContentPartDocument],
     target_locator: RagContentLocatorDocument,
     locator_documents: list[RagContentLocatorDocument],
-    *,
-    max_chars: int,
 ) -> RagResourceContentWindow:
     start_offset = target_locator.start_offset
-    requested_end = target_locator.end_offset
-    end_offset = min(requested_end, start_offset + max_chars)
+    end_offset = target_locator.end_offset
     text = read_content_range(
         documents,
         start_offset=start_offset,
@@ -209,7 +205,6 @@ def locator_window(
             if document.name.startswith("section:")
         ),
         anchor_labels=_locator_labels(locator_documents, "anchor:"),
-        truncated=end_offset < requested_end,
     )
 
 
@@ -553,7 +548,6 @@ class MongoRagResourceSnapshotRepository:
         locator_name: str | None = None,
         start: int | None = None,
         end: int | None = None,
-        max_chars: int = RESOURCE_CONTENT_READ_MAX_CHARS,
     ) -> RagResourceContentReadResult | None:
         revision = await load_applied_content_revision(resource_id)
         if revision is None:
@@ -608,7 +602,6 @@ class MongoRagResourceSnapshotRepository:
                         content_parts,
                         locator_document,
                         overlapping_locators,
-                        max_chars=max_chars,
                     )
                 )
             return RagResourceContentReadResult(
@@ -625,8 +618,7 @@ class MongoRagResourceSnapshotRepository:
         if requested_end <= normalized_start:
             normalized_end = normalized_start
         else:
-            normalized_end = min(requested_end, normalized_start + max_chars)
-        truncated = normalized_end < requested_end
+            normalized_end = requested_end
 
         locator_documents = (
             await RagContentLocatorDocument.find(
@@ -657,7 +649,6 @@ class MongoRagResourceSnapshotRepository:
                 if locator.name.startswith("section:")
             ),
             anchor_labels=_locator_labels(locator_documents, "anchor:"),
-            truncated=truncated,
         )
         return RagResourceContentReadResult(
             resource_id=resource_id,

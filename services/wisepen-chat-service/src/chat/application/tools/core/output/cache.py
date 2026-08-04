@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from chat.application.tools.common.canonical_token_budget import (
+    bounded_canonical_token_count,
+    canonical_preview,
+)
 from chat.application.tools.common.tool_content_store import (
     ToolContentPutStatus,
     ToolContentReceipt,
@@ -14,29 +18,27 @@ from chat.application.tools.core.output.tool_return import (
 )
 from common.logger import warn
 
-_TRUNCATION_MARKER = "\n...\n"
-
 
 class ToolOutputCache:
     """将 ToolReturn 中可缓存的大文本存储，并生成模型可见的内容预览。"""
 
-    __slots__ = ("_content_store", "_per_max_chars", "_total_max_chars")
+    __slots__ = ("_content_store", "_per_token_budget", "_total_token_budget")
 
     def __init__(
         self,
         *,
         content_store: ToolContentStore,
-        per_max_chars: int,
-        total_max_chars: int,
+        per_token_budget: int,
+        total_token_budget: int,
     ) -> None:
-        if per_max_chars < 1:
-            raise ValueError("per_max_chars must be greater than 0")
-        if total_max_chars < 1:
-            raise ValueError("total_max_chars must be greater than 0")
+        if per_token_budget < 1:
+            raise ValueError("per_token_budget must be greater than 0")
+        if total_token_budget < 1:
+            raise ValueError("total_token_budget must be greater than 0")
 
         self._content_store = content_store
-        self._per_max_chars = per_max_chars
-        self._total_max_chars = total_max_chars
+        self._per_token_budget = per_token_budget
+        self._total_token_budget = total_token_budget
 
     async def process(
         self,
@@ -66,23 +68,45 @@ class ToolOutputCache:
                 session_id=session_id,
             )
         )
-        budget = self._preview_budget(cacheable_texts)
+        budgets = self._preview_budgets(cacheable_texts)
         payload["contents"] = tuple(
             self._content_payload(
                 content_index=index,
                 cacheable_text=cacheable_text,
                 receipt=receipts.get(index),
-                budget=budget,
+                budget=budgets[index],
             )
             for index, cacheable_text in enumerate(cacheable_texts)
         )
         return payload
 
-    def _preview_budget(self, cacheable_texts: tuple[CacheableText, ...]) -> int:
-        total_length = sum(len(cacheable_text.text) for cacheable_text in cacheable_texts)
-        if total_length >= self._total_max_chars:
-            return max(1, self._total_max_chars // len(cacheable_texts))
-        return self._per_max_chars
+    def _preview_budgets(
+        self,
+        cacheable_texts: tuple[CacheableText, ...],
+    ) -> tuple[int, ...]:
+        desired = tuple(
+            bounded_canonical_token_count(item.text, self._per_token_budget)
+            for item in cacheable_texts
+        )
+        if sum(desired) <= self._total_token_budget:
+            return desired
+
+        budgets = [0] * len(desired)
+        remaining = self._total_token_budget
+        ordered = sorted(range(len(desired)), key=desired.__getitem__)
+        for position, index in enumerate(ordered):
+            pending = len(ordered) - position
+            fair_share = remaining // pending
+            if desired[index] <= fair_share:
+                budgets[index] = desired[index]
+                remaining -= desired[index]
+                continue
+            for pending_index in ordered[position:]:
+                budgets[pending_index] = fair_share
+            for pending_index in ordered[position : position + remaining % pending]:
+                budgets[pending_index] += 1
+            break
+        return tuple(budgets)
 
     def _content_payload(
         self,
@@ -92,7 +116,7 @@ class ToolOutputCache:
         receipt: ToolContentReceipt | None,
         budget: int,
     ) -> dict[str, Any]:
-        preview, truncated = _preview_text(cacheable_text.text, budget)
+        preview, truncated = canonical_preview(cacheable_text.text, budget)
         item: dict[str, Any] = {
             "content_index": content_index,
             "text": preview,
@@ -158,18 +182,3 @@ class ToolOutputCache:
                 )
 
         return tuple(receipts)
-
-
-def _preview_text(text: str, budget: int) -> tuple[str, bool]:
-    if len(text) <= budget:
-        return text, False
-    if budget <= len(_TRUNCATION_MARKER):
-        return text[:budget], True
-
-    available = budget - len(_TRUNCATION_MARKER)
-    head_chars = available - available // 2
-    tail_chars = available // 2
-    return (
-        text[:head_chars] + _TRUNCATION_MARKER + text[-tail_chars:],
-        True,
-    )

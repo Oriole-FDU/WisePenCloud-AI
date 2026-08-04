@@ -28,6 +28,7 @@ dependencies = [
     "zeroentropy",
     "magika",
     "regex",
+    "tokenizers>=0.22,<1",
     "wisepen-common",
     "httpx",
     "anyio",
