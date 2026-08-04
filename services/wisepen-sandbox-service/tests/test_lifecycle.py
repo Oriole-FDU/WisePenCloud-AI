@@ -307,6 +307,65 @@ async def test_allocation_failure_destroys_new_user_container() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pool_maintenance_plan_counts_ready_and_inflight_warmups() -> None:
+    repository = MemorySandboxRepository()
+    pool = SandboxPool(repository, target_ready=3)
+    await repository.save(
+        SandboxRecord(SandboxRef("ready", "provider"), SandboxState.READY)
+    )
+    await repository.save(
+        SandboxRecord(SandboxRef("warming", "provider"), SandboxState.WARMING)
+    )
+    await repository.save(
+        SandboxRecord(SandboxRef("creating", "provider"), SandboxState.CREATING)
+    )
+
+    plan = await pool.maintenance_plan(reserve=1, max_create_batch=5)
+
+    assert plan.ready == 1
+    assert plan.warming == 1
+    assert plan.creating == 1
+    assert plan.target_ready == 3
+    assert plan.reserve == 1
+    assert plan.deficit == 1
+    assert plan.create_count == 1
+    assert plan.should_replenish is True
+
+
+@pytest.mark.asyncio
+async def test_pool_maintenance_plan_caps_replenish_batch() -> None:
+    repository = MemorySandboxRepository()
+    pool = SandboxPool(repository, target_ready=4)
+
+    plan = await pool.maintenance_plan(max_create_batch=2)
+
+    assert plan.deficit == 4
+    assert plan.create_count == 2
+
+
+@pytest.mark.asyncio
+async def test_pool_consume_creates_replenish_demand_for_watcher() -> None:
+    provider = FakeProvider()
+    repository = MemorySandboxRepository()
+    pool = SandboxPool(repository, min_ready=1, target_ready=2)
+    watcher = Watcher(
+        pool, repository, provider, SandboxSpec("test"), target_ready=2, min_ready=1
+    )
+    assert await watcher.reconcile() == 2
+
+    record, lease = await pool.consume("req", "user-1", "session")
+    plan = await pool.maintenance_plan(max_create_batch=2)
+
+    assert record.state == SandboxState.ALLOCATED
+    assert lease.sandbox_id == record.ref.sandbox_id
+    assert plan.ready == 1
+    assert plan.deficit == 1
+    assert plan.create_count == 1
+    assert await watcher.reconcile() == 1
+    assert (await pool.snapshot()).counts[SandboxState.READY] == 2
+
+
+@pytest.mark.asyncio
 async def test_watcher_fills_ready_deficit() -> None:
     provider = FakeProvider()
     repository = MemorySandboxRepository()

@@ -111,24 +111,20 @@ class Watcher:
                     await self._scheduler.reclaim_idle_users()
                     await self._checkpoint_active_leases()
                 await self._recover_stale()
-                snapshot = await self._pool.snapshot()
-                ready = snapshot.counts[SandboxState.READY]
-                warming = snapshot.counts[SandboxState.WARMING]
-                creating = snapshot.counts[SandboxState.CREATING]
-                self._metrics.readiness(ready, self._min_ready)
-                deficit = max(
-                    0,
-                    self._target_ready + self._reserve - ready - warming - creating,
+                # Pool 负责判断“当前供给是否足够”；Watcher 只按计划执行补充动作。
+                plan = await self._pool.maintenance_plan(
+                    reserve=self._reserve,
+                    max_create_batch=self._max_create_batch,
                 )
-                create_count = min(deficit, self._max_create_batch)
+                self._metrics.readiness(plan.ready, self._min_ready)
                 # 空闲检测：池满时逐渐降低轮询频率以节省资源。
-                if deficit > 0:
+                if plan.should_replenish:
                     if self._idle_rounds >= self._idle_threshold:
                         info(
                             "沙箱 watcher 检测到补池缺口，退出空闲模式",
                             owner=self._owner,
                             idle_rounds=self._idle_rounds,
-                            deficit=deficit,
+                            deficit=plan.deficit,
                         )
                     self._idle_rounds = 0
                 else:
@@ -136,18 +132,18 @@ class Watcher:
                 info(
                     "沙箱 watcher 开始补池评估",
                     owner=self._owner,
-                    ready=ready,
-                    warming=warming,
-                    creating=creating,
-                    target_ready=self._target_ready,
+                    ready=plan.ready,
+                    warming=plan.warming,
+                    creating=plan.creating,
+                    target_ready=plan.target_ready,
                     min_ready=self._min_ready,
-                    reserve=self._reserve,
-                    deficit=deficit,
-                    create_count=create_count,
+                    reserve=plan.reserve,
+                    deficit=plan.deficit,
+                    create_count=plan.create_count,
                     retry_count=self._retry_count,
                     idle_rounds=self._idle_rounds,
                 )
-                if create_count == 0:
+                if not plan.should_replenish:
                     info(
                         "沙箱 watcher 本轮不创建预热实例",
                         owner=self._owner,
@@ -158,7 +154,7 @@ class Watcher:
                     )
                     return 0
                 created = 0
-                for attempt in range(1, create_count + 1):
+                for attempt in range(1, plan.create_count + 1):
                     try:
                         await self._warm_one(attempt)
                     except Exception as exc:
