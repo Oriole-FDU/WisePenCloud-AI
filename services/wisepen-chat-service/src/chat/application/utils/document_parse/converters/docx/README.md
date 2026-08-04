@@ -77,13 +77,6 @@ markdown = parse_docx(
 
 图片二进制数据只有在传入 `image_path` 时才会被解压保存；公式、表格和文本框会尽量保留其内容与结构，但不保证与 Word 中的视觉效果完全一致。
 
-## 模块职责
+## 实现位置
 
-- `converter.py`：读取 DOCX 包，协调正文 block、分页和最终 Markdown 输出。
-- `inline.py`：解析段落和单元格中的文本、链接、图片、公式及引用。
-- `tables.py`：渲染普通 Markdown 表格和复杂 HTML 表格。
-- `numbering.py`：读取编号定义并生成列表前缀。
-- `styles.py`：读取样式并判断标题层级。
-- `formula.py`：将常见 OMML 公式转换为 LaTeX。
-- `notes.py`：读取和输出脚注、尾注。
-- `ooxml.py`：提供 OOXML 命名空间、节点和属性访问辅助函数。
+DOCX 解析实现集中在 `converter.py`。该文件读取 DOCX 包，并在同一处处理正文 block 顺序、分页、样式标题、编号、内联文本、链接、图片、公式、表格以及脚注/尾注输出。

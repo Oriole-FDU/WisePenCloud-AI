@@ -13,7 +13,7 @@ from ..core.errors import (
     UrlFetchUnsupportedUrlError,
 )
 from ..core.models import RawFetchOutput
-from ._utils import build_raw_fetch_output
+from .base import build_raw_fetch_output
 
 
 class StaticPageFetcher:

@@ -82,7 +82,7 @@ class XlsxConverter:
             if blocks:
                 sheet_pages.append((value_sheet.title, blocks))
 
-        # 复用 MinerU 的 sheet title 策略：只有多个非空 sheet 时才输出标题，
+        # 只有多个非空 sheet 时才输出标题，
         # 避免单 sheet 文件多一个没有检索价值的 heading。
         add_sheet_titles = len(sheet_pages) > 1
         pages: list[str] = []
