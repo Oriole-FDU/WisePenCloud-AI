@@ -1,8 +1,11 @@
 # src/chat/container.py
 
+from collections.abc import AsyncIterator
 from typing import List
 
+import redis.asyncio as redis
 from dependency_injector import containers, providers
+from scrapling.fetchers import AsyncStealthySession, FetcherSession
 from v2.nacos import NacosNamingService
 
 from chat.core.config.app_settings import settings
@@ -28,6 +31,8 @@ from chat.core.persistence import (
     MongoToolConfigRepository,
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
+    RedisToolContentRepository,
+    RedisWebContentCacheRepository,
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
@@ -38,10 +43,52 @@ from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillM
 from chat.application.tools.skill_tools import LoadSkillAssetTool
 from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
-from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
-from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
+from chat.application.tools.core.execution.dispatcher import ToolDispatcher
+from chat.application.tools.core.output.cache import ToolOutputCache
+from chat.application.tools.common.tool_content_store import ToolContentStore
+from chat.application.tools.session_tools.tool_content.tools import (
+    ToolContentGetSnapshotTool,
+    ToolContentReadPagesTool,
+    ToolContentReadRangeTool,
+    ToolContentReadSectionsTool,
+    ToolContentRegexSearchTool,
+    ToolContentSemanticSearchTool,
+)
+from chat.application.tools.session_tools.tool_content.services.service import (
+    ToolContentService,
+)
+from chat.application.utils.ranking.presets import (
+    build_tool_content_semantic_search_pipeline,
+)
+from chat.application.tools.core.mcp import (
+    McpClient,
+    McpToolCatalog,
+    SystemMcpToolCatalog,
+)
+from chat.application.tools.session_tools.get_historical_chat_messages_tool import (
+    GetHistoricalChatMessagesTool,
+)
+from chat.application.tools.web_tools import (
+    DocumentLinkExtractTool,
+    WebCrawlTool,
+    WebFetchTool,
+)
+from chat.application.tools.web_tools.document_link_extract import (
+    DocumentLinkExtractor,
+)
+from chat.application.tools.web_tools.web_fetch import (
+    FetchCoordinator,
+    StaticPageFetcher,
+    StealthyPageFetcher,
+    WebCrawler,
+)
 from chat.core.config.nacos import nacos_client_manager
-from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
+from chat.service_client import (
+    FileStorageClient,
+    AIAssetClient,
+    McpServiceClient,
+    ResourceClient,
+)
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
 from common.kafka.producer import KafkaProducerClient
@@ -53,10 +100,10 @@ async def _provide_nacos_naming() -> NacosNamingService:
 
 
 def _build_registry(
-        tool_providers: List[providers.Provider],
-        tool_config_repo: ToolConfigRepository,
-        mcp_tool_catalog: McpToolCatalog,
-        system_mcp_tool_catalog: SystemMcpToolCatalog,
+    tool_providers: List[providers.Provider],
+    tool_config_repo: ToolConfigRepository,
+    mcp_tool_catalog: McpToolCatalog,
+    system_mcp_tool_catalog: SystemMcpToolCatalog,
 ) -> ToolRegistry:
     """工厂函数：组装并返回已注册所有工具的 ToolRegistry 实例。"""
     registry = ToolRegistry(
@@ -75,8 +122,42 @@ def _get_iflytek_speech_config():
     return settings.SPEECH_CONFIG.IFLYTEK
 
 
+def _build_redis_client() -> redis.Redis:
+    return redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
+async def _provide_web_fetch_static_session() -> AsyncIterator[FetcherSession]:
+    async with FetcherSession(
+        impersonate="chrome",
+        stealthy_headers=True,
+        follow_redirects=False,
+        timeout=30.0,
+        retries=1,
+    ) as session:
+        yield session
+
+
+async def _provide_web_fetch_browser_session() -> AsyncIterator[AsyncStealthySession]:
+    session = AsyncStealthySession(
+        headless=True,
+        max_pages=3,
+        timeout=30_000,
+        disable_resources=True,
+        block_ads=True,
+        network_idle=False,
+        load_dom=True,
+        retries=1,
+    )
+    await session.start()
+    try:
+        yield session
+    finally:
+        await session.close()
+
+
 class Container(containers.DeclarativeContainer):
     """依赖注入容器，管理单例对象的生命周期。"""
+
     qwen_adapter = providers.Singleton(QwenAdapter)
     openai_adapter = providers.Singleton(OpenAIAdapter)
     anthropic_adapter = providers.Singleton(AnthropicAdapter)
@@ -103,8 +184,15 @@ class Container(containers.DeclarativeContainer):
     provider_repo = providers.Singleton(MongoProviderRepository)
     tool_config_repo = providers.Singleton(MongoToolConfigRepository)
     mcp_server_config_repo = providers.Singleton(MongoMcpServerConfigRepository)
-    hot_context_repo = providers.Singleton(RedisHotContext)
-    mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache)
+    redis_client = providers.Singleton(_build_redis_client)
+    hot_context_repo = providers.Singleton(
+        RedisHotContext,
+        redis_client=redis_client,
+    )
+    mcp_tool_discovery_cache_repo = providers.Singleton(
+        RedisMcpToolDiscoveryCache,
+        redis_client=redis_client,
+    )
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
     service_discovery = providers.Singleton(
@@ -138,7 +226,7 @@ class Container(containers.DeclarativeContainer):
         McpServiceClient,
         discovery=service_discovery,
         from_source_secret=settings.FROM_SOURCE_SECRET,
-        timeout=settings.RPC_DEFAULT_TIMEOUT,
+        timeout=settings.MCP_DEFAULT_TIMEOUT_SECONDS,
         default_strategy=settings.RPC_LB_STRATEGY,
     )
     mcp_client = providers.Singleton(
@@ -177,7 +265,20 @@ class Container(containers.DeclarativeContainer):
         KafkaProducerClient,
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
     )
+    tool_content_semantic_search_pipeline = providers.Singleton(
+        build_tool_content_semantic_search_pipeline,
+    )
 
+    tool_content_repository = providers.Singleton(
+        RedisToolContentRepository,
+        redis_client=redis_client,
+        ttl_seconds=settings.TOOL_CONTENT_DEFAULT_TTL_SECONDS,
+    )
+    tool_content_store = providers.Singleton(
+        ToolContentStore,
+        repository=tool_content_repository,
+        max_chars=settings.TOOL_CONTENT_MAX_CHARS,
+    )
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期
     # GetHistoricalChatMessagesTool
     search_history_tool = providers.Singleton(
@@ -197,10 +298,106 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
+    tool_content_service = providers.Singleton(
+        ToolContentService,
+        read_window_token_budget=settings.TOOL_CONTENT_READ_WINDOW_TOKEN_BUDGET,
+        read_total_token_budget=settings.TOOL_CONTENT_READ_TOTAL_TOKEN_BUDGET,
+        semantic_search_window_token_budget=(
+            settings.TOOL_CONTENT_SEMANTIC_SEARCH_WINDOW_TOKEN_BUDGET
+        ),
+        semantic_search_total_token_budget=(
+            settings.TOOL_CONTENT_SEMANTIC_SEARCH_TOTAL_TOKEN_BUDGET
+        ),
+        regex_context_side_token_budget=(
+            settings.TOOL_CONTENT_REGEX_CONTEXT_SIDE_TOKEN_BUDGET
+        ),
+        regex_total_token_budget=settings.TOOL_CONTENT_REGEX_TOTAL_TOKEN_BUDGET,
+        ranking_pipeline=tool_content_semantic_search_pipeline,
+        store=tool_content_store,
+    )
+    tool_content_read_range_tool = providers.Singleton(
+        ToolContentReadRangeTool,
+        service=tool_content_service,
+    )
+    tool_content_read_pages_tool = providers.Singleton(
+        ToolContentReadPagesTool,
+        service=tool_content_service,
+    )
+    tool_content_read_sections_tool = providers.Singleton(
+        ToolContentReadSectionsTool,
+        service=tool_content_service,
+    )
+    tool_content_get_snapshot_tool = providers.Singleton(
+        ToolContentGetSnapshotTool,
+        service=tool_content_service,
+    )
+    tool_content_regex_search_tool = providers.Singleton(
+        ToolContentRegexSearchTool,
+        service=tool_content_service,
+    )
+    tool_content_semantic_search_tool = providers.Singleton(
+        ToolContentSemanticSearchTool,
+        service=tool_content_service,
+    )
+    web_content_cache_repository = providers.Singleton(
+        RedisWebContentCacheRepository,
+        redis_client=redis_client,
+    )
+    web_fetch_static_session = providers.Resource(
+        _provide_web_fetch_static_session,
+    )
+    web_fetch_browser_session = providers.Resource(
+        _provide_web_fetch_browser_session,
+    )
+    web_static_page_fetcher = providers.Singleton(
+        StaticPageFetcher,
+        session=web_fetch_static_session,
+    )
+    web_browser_page_fetcher = providers.Singleton(
+        StealthyPageFetcher,
+        session=web_fetch_browser_session,
+    )
+    web_fetch_coordinator = providers.Singleton(
+        FetchCoordinator,
+        static_fetcher=web_static_page_fetcher,
+        stealthy_fetcher=web_browser_page_fetcher,
+        content_cache_repository=web_content_cache_repository,
+    )
+    web_crawler = providers.Singleton(
+        WebCrawler,
+        static_fetcher=web_static_page_fetcher,
+        stealthy_fetcher=web_browser_page_fetcher,
+        content_cache_repository=web_content_cache_repository,
+    )
+    web_fetch_tool = providers.Singleton(
+        WebFetchTool,
+        fetch_coordinator=web_fetch_coordinator,
+    )
+    document_link_extractor = providers.Singleton(
+        DocumentLinkExtractor,
+        content_cache_repository=web_content_cache_repository,
+    )
+    document_link_extract_tool = providers.Singleton(
+        DocumentLinkExtractTool,
+        extractor=document_link_extractor,
+    )
+    web_crawl_tool = providers.Singleton(
+        WebCrawlTool,
+        crawler=web_crawler,
+    )
     tool_providers = providers.List(
         search_history_tool,
         load_skill_tool,
         load_skill_asset_tool,
+        tool_content_get_snapshot_tool,
+        tool_content_read_range_tool,
+        tool_content_read_pages_tool,
+        tool_content_read_sections_tool,
+        tool_content_regex_search_tool,
+        tool_content_semantic_search_tool,
+        web_fetch_tool,
+        document_link_extract_tool,
+        web_crawl_tool,
     )
 
     tool_registry = providers.Singleton(
@@ -209,6 +406,17 @@ class Container(containers.DeclarativeContainer):
         tool_config_repo=tool_config_repo,
         mcp_tool_catalog=mcp_tool_catalog,
         system_mcp_tool_catalog=system_mcp_tool_catalog,
+    )
+
+    tool_output_cache = providers.Singleton(
+        ToolOutputCache,
+        content_store=tool_content_store,
+        per_token_budget=settings.TOOL_CONTENT_PREVIEW_PER_TOKEN_BUDGET,
+        total_token_budget=settings.TOOL_CONTENT_PREVIEW_TOTAL_TOKEN_BUDGET,
+    )
+    tool_dispatcher = providers.Singleton(
+        ToolDispatcher,
+        output_cache=tool_output_cache,
     )
 
     # Application 层组件
@@ -224,6 +432,7 @@ class Container(containers.DeclarativeContainer):
         message_repo=message_repo,
         hot_context_repo=hot_context_repo,
         tool_registry=tool_registry,
+        tool_dispatcher=tool_dispatcher,
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
         agent_resolver=agent_resolver,

@@ -51,17 +51,23 @@ class McpClient:
 
     async def list_tools(self, server: McpServerConnection) -> list[McpToolDescriptor]:
         url = await self._resolve_url(server)
-        async with streamable_http_client(
-            url,
-            http_client=AsyncClient(
-                headers=server.headers,
-                timeout=server.timeout_seconds or self._timeout,
-            ),
-            terminate_on_close=True,
-        ) as (read_stream, write_stream, _):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.list_tools()
+        timeout = (
+            self._timeout
+            if server.timeout_seconds is None
+            else server.timeout_seconds
+        )
+        async with AsyncClient(
+            headers=server.headers,
+            timeout=timeout,
+        ) as http_client:
+            async with streamable_http_client(
+                url,
+                http_client=http_client,
+                terminate_on_close=True,
+            ) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    result = await session.list_tools()
 
         descriptors: list[McpToolDescriptor] = []
         for item in result.tools or []:
@@ -79,20 +85,30 @@ class McpClient:
         server: McpServerConnection,
         tool_name: str,
         arguments: Mapping[str, Any],
+        *,
+        timeout_seconds: float | None = None,
     ) -> str:
         url = await self._resolve_url(server)
+        timeout = timeout_seconds
+        if timeout is None:
+            timeout = (
+                self._timeout
+                if server.timeout_seconds is None
+                else server.timeout_seconds
+            )
 
-        async with streamable_http_client(
-            url,
-            http_client=AsyncClient(
-                headers=server.headers,
-                timeout=server.timeout_seconds or self._timeout,
-            ),
-            terminate_on_close=True,
-        ) as (read_stream, write_stream, _):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, dict(arguments))
+        async with AsyncClient(
+            headers=server.headers,
+            timeout=timeout,
+        ) as http_client:
+            async with streamable_http_client(
+                url,
+                http_client=http_client,
+                terminate_on_close=True,
+            ) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    result = await session.call_tool(tool_name, dict(arguments))
 
         output = _stringify_tool_result(result)
         if getattr(result, "isError", False):

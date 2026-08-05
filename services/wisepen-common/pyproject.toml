@@ -11,6 +11,7 @@ dependencies = [
     "fastapi",
     "starlette",
     "pydantic",
+    "pydantic-settings",
     "loguru",
     "opentelemetry-api",
     "opentelemetry-sdk",

@@ -1,4 +1,4 @@
-﻿import yaml
+import yaml
 import asyncio
 import threading
 from typing import Literal
@@ -38,11 +38,21 @@ class AppSettings(BaseModel):
     MEMORY_RERANKER_ZE_MODEL: str
     ZERO_ENTROPY_API_KEY: str
 
+    RERANKER_MODEL: str  # 重排模型
+
     # 摘要模型
     SUMMARY_MODEL: str
 
     # 语音识别配置
     SPEECH_CONFIG: SpeechConfig | None = None
+
+    # PaddleOCR 云端服务
+    PADDLE_OCR_TOKEN: str = ""
+    PADDLE_OCR_API_URL: str = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
+    PADDLE_OCR_MODEL: str = "PaddleOCR-VL-1.6"
+
+    # MinerU PDF 解析服务
+    MINERU_API_URL: str = "http://wisepen-dev-server:8000/file_parse"
 
     # 安全配置
     # 与 APISIX 网关约定的请求来源 token
@@ -88,9 +98,20 @@ class AppSettings(BaseModel):
 
     # Agentic ReAct 循环
     # ReAct 最大推理迭代次数，防止工具调用产生无限循环
-    AGENT_MAX_ITERATIONS: int = 5
+    AGENT_MAX_ITERATIONS: int = 25
     # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
     TOOL_RESULT_MAX_CHARS: int = 4000
+    # 可缓存工具正文只在模型可见预览中计入预算；完整正文仍进入 ToolContentStore。
+    TOOL_CONTENT_PREVIEW_PER_TOKEN_BUDGET: int = 1_024
+    TOOL_CONTENT_PREVIEW_TOTAL_TOKEN_BUDGET: int = 8_192
+    TOOL_CONTENT_READ_WINDOW_TOKEN_BUDGET: int = 4_096
+    TOOL_CONTENT_READ_TOTAL_TOKEN_BUDGET: int = 8_192
+    TOOL_CONTENT_SEMANTIC_SEARCH_WINDOW_TOKEN_BUDGET: int = 1_024
+    TOOL_CONTENT_SEMANTIC_SEARCH_TOTAL_TOKEN_BUDGET: int = 8_192
+    TOOL_CONTENT_REGEX_CONTEXT_SIDE_TOKEN_BUDGET: int = 512
+    TOOL_CONTENT_REGEX_TOTAL_TOKEN_BUDGET: int = 8_192
+    TOOL_CONTENT_DEFAULT_TTL_SECONDS: int = 3600
+    TOOL_CONTENT_MAX_CHARS: int = 20_000_000
 
     # Skill 配置
 
@@ -106,7 +127,9 @@ class AppSettings(BaseModel):
 
     # 内部 RPC / 服务发现 配置
     # Nacos 服务发现客户端侧负载均衡策略：weighted_random | round_robin | random
-    RPC_LB_STRATEGY: Literal["weighted_random", "round_robin", "random"] = "weighted_random"
+    RPC_LB_STRATEGY: Literal["weighted_random", "round_robin", "random"] = (
+        "weighted_random"
+    )
     # 单次请求超时（秒）
     RPC_DEFAULT_TIMEOUT: float = 5.0
     # 单次调用最多额外重试次数（故障转移跨实例）；真实请求次数 = retries + 1
@@ -153,4 +176,3 @@ def load_settings() -> AppSettings:
 
 
 settings = load_settings()
-
