@@ -41,8 +41,8 @@ class QdrantRagVectorIndexRepository:
         dense_vector_size: int,
         embedding_profile: str,
         bm25_config: qdrant_models.Bm25Config,
-        dense_vector_name: str = "dense",
-        sparse_vector_name: str = "sparse",
+        dense_vector_name: str,
+        sparse_vector_name: str,
     ) -> None:
         if dense_vector_size <= 0:
             raise ValueError("dense_vector_size must be positive")

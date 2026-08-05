@@ -53,15 +53,12 @@ class KnowledgeGraphExtractor:
             self,
             *,
             llm: LLMInterfaceV2,
-            repository: KnowledgeGraphExtractionRepository | None = None,
-            reuse_profile: str = "",
+            repository: KnowledgeGraphExtractionRepository,
+            reuse_profile: str,
             profiles: frozenset[KnowledgeRelationProfile] | None = None,
             max_concurrency: int = 5,
     ) -> None:
         reuse_profile = reuse_profile.strip()
-        if repository is not None and not reuse_profile:
-            raise ValueError("reuse_profile is required when extraction repository is enabled")
-
         if profiles is None:
             profiles = frozenset(
                 {
@@ -104,11 +101,6 @@ class KnowledgeGraphExtractor:
         """批量抽取窗口知识图，并恢复为输入窗口顺序。"""
         if not windows:
             return ()
-
-        # 未配置持久复用仓储时，直接批量执行 SDK 抽取。
-        if self._repository is None:
-            graph = await self._run_extractor(windows)
-            return tuple(self._result_mapper.map(graph, window) for window in windows)
 
         extraction_keys = tuple(self._extraction_key(window) for window in windows)
         stored_payloads = await self._repository.get_many(extraction_keys)

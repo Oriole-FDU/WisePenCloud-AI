@@ -31,8 +31,9 @@ SearchQuery = Annotated[
 RankingQuery = Annotated[
     str,
     Field(
-        min_length=1,
-        description="Complete natural-language question used to rank the returned candidates.",
+        min_length=1,      
+        description="Complete natural-language question used to rank the returned candidates." \
+        "such as 'What is the best way to learn Python programming?'",
     ),
 ]
 SearchModeArgument = Annotated[

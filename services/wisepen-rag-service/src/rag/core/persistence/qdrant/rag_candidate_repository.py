@@ -53,8 +53,8 @@ class QdrantRagCandidateRepository:
         client: AsyncQdrantClient,
         collection_name: str,
         bm25_config: qdrant_models.Bm25Config,
-        dense_vector_name: str = "dense",
-        sparse_vector_name: str = "sparse",
+        dense_vector_name: str,
+        sparse_vector_name: str,
     ) -> None:
         if client.cloud_inference is not True:
             raise ValueError("Qdrant server-side BM25 inference must be enabled")

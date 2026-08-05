@@ -34,17 +34,11 @@ class RagSectionProjector:
 
     __slots__ = ("_reading_block_chunker", "_retrieval_chunker", "_structure_chunker")
 
-    def __init__(
-        self,
-        *,
-        structure_chunker: MarkdownChunker | None = None,
-        reading_block_chunker: MarkdownChunker | None = None,
-        retrieval_chunker: MarkdownChunker | None = None,
-    ) -> None:
-        self._structure_chunker = structure_chunker or MarkdownChunker()
-        self._reading_block_chunker = reading_block_chunker or MarkdownChunker()
+    def __init__(self) -> None:
+        self._structure_chunker = MarkdownChunker()
+        self._reading_block_chunker = MarkdownChunker()
         # 检索子块比 Section 更小，固定 800 字符硬上限。
-        self._retrieval_chunker = retrieval_chunker or MarkdownChunker(max_characters=800)
+        self._retrieval_chunker = MarkdownChunker(max_characters=800)
 
     def project(self, content: RagDocumentContent) -> RagContentProjection:
         # 第一次 chunk 解析只为得到 Heading、page marker 和 anchor 的原文范围，

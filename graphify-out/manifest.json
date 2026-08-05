@@ -1,0 +1,2207 @@
+{
+  "pyproject.toml": {
+    "mtime": 1785812692.7338753,
+    "ast_hash": "a618d388f56f5940fd569c3b770fbe1c",
+    "semantic_hash": "a618d388f56f5940fd569c3b770fbe1c"
+  },
+  "services/__init__.py": {
+    "mtime": 1784387031.0724828,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-chat-service/__init__.py": {
+    "mtime": 1784387031.0724828,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-chat-service/pyproject.toml": {
+    "mtime": 1785841275.5632553,
+    "ast_hash": "63188bfda6a79bf7c0704b7feabde62d",
+    "semantic_hash": "63188bfda6a79bf7c0704b7feabde62d"
+  },
+  "services/wisepen-chat-service/src/chat/__init__.py": {
+    "mtime": 1784387031.0734797,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-chat-service/src/chat/api/__init__.py": {
+    "mtime": 1784387031.0744793,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-chat-service/src/chat/api/converters/__init__.py": {
+    "mtime": 1784387031.0744793,
+    "ast_hash": "7e03341b7f73c5530e6138060b517853",
+    "semantic_hash": "7e03341b7f73c5530e6138060b517853"
+  },
+  "services/wisepen-chat-service/src/chat/api/converters/ui_message_converter.py": {
+    "mtime": 1784387031.0744793,
+    "ast_hash": "324a0358cbf7e5c48220f7997a7a7a03",
+    "semantic_hash": "324a0358cbf7e5c48220f7997a7a7a03"
+  },
+  "services/wisepen-chat-service/src/chat/api/endpoints/attachment.py": {
+    "mtime": 1784387031.0754793,
+    "ast_hash": "af3bf3167c55dea323af1df4d1c17a3c",
+    "semantic_hash": "af3bf3167c55dea323af1df4d1c17a3c"
+  },
+  "services/wisepen-chat-service/src/chat/api/endpoints/chat.py": {
+    "mtime": 1784387031.0754793,
+    "ast_hash": "6a0f1ad41a4968e99713d74809e6a0ac",
+    "semantic_hash": "6a0f1ad41a4968e99713d74809e6a0ac"
+  },
+  "services/wisepen-chat-service/src/chat/api/endpoints/memory.py": {
+    "mtime": 1784387031.0754793,
+    "ast_hash": "62401e498377a323dcc4dd4ca0136211",
+    "semantic_hash": "62401e498377a323dcc4dd4ca0136211"
+  },
+  "services/wisepen-chat-service/src/chat/api/endpoints/model.py": {
+    "mtime": 1784387031.0754793,
+    "ast_hash": "5830cdc6f04fbeaf1b9489ecb4d22388",
+    "semantic_hash": "5830cdc6f04fbeaf1b9489ecb4d22388"
+  },
+  "services/wisepen-chat-service/src/chat/api/endpoints/session.py": {
+    "mtime": 1784387031.0764792,
+    "ast_hash": "992f311475fbe1061e1cf6f0948888f0",
+    "semantic_hash": "992f311475fbe1061e1cf6f0948888f0"
+  },
+  "services/wisepen-chat-service/src/chat/api/endpoints/speech.py": {
+    "mtime": 1784387031.0769744,
+    "ast_hash": "b02dff71ad244d00cc6259e404dabc2e",
+    "semantic_hash": "b02dff71ad244d00cc6259e404dabc2e"
+  },
+  "services/wisepen-chat-service/src/chat/api/endpoints/tool.py": {
+    "mtime": 1784387031.0769744,
+    "ast_hash": "638000ca5ce3e26af547b21c4137743e",
+    "semantic_hash": "638000ca5ce3e26af547b21c4137743e"
+  },
+  "services/wisepen-chat-service/src/chat/api/router.py": {
+    "mtime": 1784387031.0769744,
+    "ast_hash": "c68484f6aebfabfcd7dceb5024fc507f",
+    "semantic_hash": "c68484f6aebfabfcd7dceb5024fc507f"
+  },
+  "services/wisepen-chat-service/src/chat/api/schemas/__init__.py": {
+    "mtime": 1784387031.0769744,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-chat-service/src/chat/api/schemas/attachment.py": {
+    "mtime": 1784387031.077979,
+    "ast_hash": "5f5aa3890d2c4775b532d410c78e5738",
+    "semantic_hash": "5f5aa3890d2c4775b532d410c78e5738"
+  },
+  "services/wisepen-chat-service/src/chat/api/schemas/chat.py": {
+    "mtime": 1784387031.077979,
+    "ast_hash": "174b84dc461feb692dad83ff33381ed7",
+    "semantic_hash": "174b84dc461feb692dad83ff33381ed7"
+  },
+  "services/wisepen-chat-service/src/chat/api/schemas/memory.py": {
+    "mtime": 1784387031.077979,
+    "ast_hash": "351a807313761edf52ec92f634abfcb6",
+    "semantic_hash": "351a807313761edf52ec92f634abfcb6"
+  },
+  "services/wisepen-chat-service/src/chat/api/schemas/model.py": {
+    "mtime": 1784387031.077979,
+    "ast_hash": "7bfad4f6cbbd75b2b76eba881712311d",
+    "semantic_hash": "7bfad4f6cbbd75b2b76eba881712311d"
+  },
+  "services/wisepen-chat-service/src/chat/api/schemas/session.py": {
+    "mtime": 1784387031.077979,
+    "ast_hash": "727d9d95686ab1cdb7e01532d66d303b",
+    "semantic_hash": "727d9d95686ab1cdb7e01532d66d303b"
+  },
+  "services/wisepen-chat-service/src/chat/api/schemas/speech.py": {
+    "mtime": 1784387031.077979,
+    "ast_hash": "df0f2f31500992d88114438015c16498",
+    "semantic_hash": "df0f2f31500992d88114438015c16498"
+  },
+  "services/wisepen-chat-service/src/chat/api/schemas/tool.py": {
+    "mtime": 1784387031.0794811,
+    "ast_hash": "3242e28c6afd103658091bfda7b79ed5",
+    "semantic_hash": "3242e28c6afd103658091bfda7b79ed5"
+  },
+  "services/wisepen-chat-service/src/chat/api/vercel_formats.py": {
+    "mtime": 1784387031.0794811,
+    "ast_hash": "c9851d19c9054063f8e97532a86be522",
+    "semantic_hash": "c9851d19c9054063f8e97532a86be522"
+  },
+  "services/wisepen-chat-service/src/chat/api/vercel_sse_mapper.py": {
+    "mtime": 1784387031.0794811,
+    "ast_hash": "622d7950d421d498afd70a7f581b7c1d",
+    "semantic_hash": "622d7950d421d498afd70a7f581b7c1d"
+  },
+  "services/wisepen-chat-service/src/chat/application/__init__.py": {
+    "mtime": 1784387031.0794811,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-chat-service/src/chat/application/agents/__init__.py": {
+    "mtime": 1784387031.080485,
+    "ast_hash": "d4b60fb961a824eaf40d9aa0a3131f19",
+    "semantic_hash": "d4b60fb961a824eaf40d9aa0a3131f19"
+  },
+  "services/wisepen-chat-service/src/chat/application/agents/default_agent.py": {
+    "mtime": 1784387031.080485,
+    "ast_hash": "cae81a90ffbdccd6a13559b9d719c9ed",
+    "semantic_hash": "cae81a90ffbdccd6a13559b9d719c9ed"
+  },
+  "services/wisepen-chat-service/src/chat/application/agents/models.py": {
+    "mtime": 1784387031.080485,
+    "ast_hash": "6e79d4ede7822052582c3d1a243ff3b6",
+    "semantic_hash": "6e79d4ede7822052582c3d1a243ff3b6"
+  },
+  "services/wisepen-chat-service/src/chat/application/agents/resolver.py": {
+    "mtime": 1784387031.081484,
+    "ast_hash": "830d5820c08b052bafbe8c6681a6635f",
+    "semantic_hash": "830d5820c08b052bafbe8c6681a6635f"
+  },
+  "services/wisepen-chat-service/src/chat/application/chat_context_assembler.py": {
+    "mtime": 1785134582.7274928,
+    "ast_hash": "847d807e649bc6c35f948d27baba9a25",
+    "semantic_hash": "847d807e649bc6c35f948d27baba9a25"
+  },
+  "services/wisepen-chat-service/src/chat/application/chat_turn_coordinator.py": {
+    "mtime": 1785435091.4871328,
+    "ast_hash": "b8051e1446ed3db6c08fa32ecb1ea525",
+    "semantic_hash": "b8051e1446ed3db6c08fa32ecb1ea525"
+  },
+  "services/wisepen-chat-service/src/chat/application/chat_turn_finalizer.py": {
+    "mtime": 1784387031.0824926,
+    "ast_hash": "b5601dd4dc4d7dfc1c84bf2d97823004",
+    "semantic_hash": "b5601dd4dc4d7dfc1c84bf2d97823004"
+  },
+  "services/wisepen-chat-service/src/chat/application/events/__init__.py": {
+    "mtime": 1784387031.0824926,
+    "ast_hash": "08809f7b2d05be13c1c61abd8e9d3ed8",
+    "semantic_hash": "08809f7b2d05be13c1c61abd8e9d3ed8"
+  },
+  "services/wisepen-chat-service/src/chat/application/events/base.py": {
+    "mtime": 1784387031.0824926,
+    "ast_hash": "a2e308069f21cac92ba319318c3105d8",
+    "semantic_hash": "a2e308069f21cac92ba319318c3105d8"
+  },
+  "services/wisepen-chat-service/src/chat/application/events/reasoning.py": {
+    "mtime": 1784387031.0834937,
+    "ast_hash": "e20f962ab7a9785a75eef94d7532b323",
+    "semantic_hash": "e20f962ab7a9785a75eef94d7532b323"
+  },
+  "services/wisepen-chat-service/src/chat/application/events/step.py": {
+    "mtime": 1784387031.0834937,
+    "ast_hash": "4301de00d273ee9c015c2ebb02d7688d",
+    "semantic_hash": "4301de00d273ee9c015c2ebb02d7688d"
+  },
+  "services/wisepen-chat-service/src/chat/application/events/text.py": {
+    "mtime": 1784387031.0834937,
+    "ast_hash": "37c8b163860bfa115ec2c5575e9c14df",
+    "semantic_hash": "37c8b163860bfa115ec2c5575e9c14df"
+  },
+  "services/wisepen-chat-service/src/chat/application/events/tool.py": {
+    "mtime": 1784387031.0834937,
+    "ast_hash": "21ac607c92473ad4d097947e10a5fc73",
+    "semantic_hash": "21ac607c92473ad4d097947e10a5fc73"
+  },
+  "services/wisepen-chat-service/src/chat/application/llm_provider_resolver.py": {
+    "mtime": 1784387031.0844843,
+    "ast_hash": "b91c17e60133bba3ef8d1b09bf12f6b3",
+    "semantic_hash": "b91c17e60133bba3ef8d1b09bf12f6b3"
+  },
+  "services/wisepen-chat-service/src/chat/application/query_loop_runtime.py": {
+    "mtime": 1784636007.3389392,
+    "ast_hash": "e845484b8c5b85b86acce1542c86a978",
+    "semantic_hash": "e845484b8c5b85b86acce1542c86a978"
+  },
+  "services/wisepen-chat-service/src/chat/application/token_counter.py": {
+    "mtime": 1785504439.7992837,
+    "ast_hash": "cc2b594f32a9340f72c766a9dab0daff",
+    "semantic_hash": "cc2b594f32a9340f72c766a9dab0daff"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/__init__.py": {
+    "mtime": 1784387031.0854924,
+    "ast_hash": "f84e7c9c482fc0fcda66fcf9d087a056",
+    "semantic_hash": "f84e7c9c482fc0fcda66fcf9d087a056"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/common/canonical_token_budget.py": {
+    "mtime": 1785841275.564767,
+    "ast_hash": "d6e67a44fee1534962153bbaad9abb39",
+    "semantic_hash": "d6e67a44fee1534962153bbaad9abb39"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/common/tool_content_store/__init__.py": {
+    "mtime": 1785595574.5404272,
+    "ast_hash": "e9504640b48efb04190bf18b95bab0c8",
+    "semantic_hash": "e9504640b48efb04190bf18b95bab0c8"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/common/tool_content_store/models.py": {
+    "mtime": 1785812333.8800366,
+    "ast_hash": "a4b19097095221e4b95044f94a04312e",
+    "semantic_hash": "a4b19097095221e4b95044f94a04312e"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/common/tool_content_store/repository.py": {
+    "mtime": 1784667583.6471987,
+    "ast_hash": "e5a6987e0459447e2efef5a8ad57932a",
+    "semantic_hash": "e5a6987e0459447e2efef5a8ad57932a"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/common/tool_content_store/store.py": {
+    "mtime": 1785812333.881037,
+    "ast_hash": "18c1d05478d33c76cbeedf6ca944fc6c",
+    "semantic_hash": "18c1d05478d33c76cbeedf6ca944fc6c"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/__init__.py": {
+    "mtime": 1784636007.3416946,
+    "ast_hash": "a86feca2f3183dd4de25839399f07a19",
+    "semantic_hash": "a86feca2f3183dd4de25839399f07a19"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/definition.py": {
+    "mtime": 1784555035.6667225,
+    "ast_hash": "645ee8bcf882658a33ad5350a4012cb5",
+    "semantic_hash": "645ee8bcf882658a33ad5350a4012cb5"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/execution/dispatcher.py": {
+    "mtime": 1784636007.3416946,
+    "ast_hash": "bf14ba10e2603af7b9252fb8ead0a3aa",
+    "semantic_hash": "bf14ba10e2603af7b9252fb8ead0a3aa"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/execution/executor.py": {
+    "mtime": 1784636007.3428507,
+    "ast_hash": "0480cf2753cb5d9ffa096ed90a4bca69",
+    "semantic_hash": "0480cf2753cb5d9ffa096ed90a4bca69"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/execution/hooks/base.py": {
+    "mtime": 1784387031.0874846,
+    "ast_hash": "862709c9ab4d5f307049f9a7ff30d0c2",
+    "semantic_hash": "862709c9ab4d5f307049f9a7ff30d0c2"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/execution/hooks/builtin.py": {
+    "mtime": 1784636007.3440392,
+    "ast_hash": "814cfd2fe59ecf56ca975c6462886529",
+    "semantic_hash": "814cfd2fe59ecf56ca975c6462886529"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/execution/result.py": {
+    "mtime": 1784636007.3452308,
+    "ast_hash": "410e9b4aab7f5f2b2318224875dd721a",
+    "semantic_hash": "410e9b4aab7f5f2b2318224875dd721a"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/llm/invocation.py": {
+    "mtime": 1784387031.0874846,
+    "ast_hash": "15967ba7c7479b2964966c9582865115",
+    "semantic_hash": "15967ba7c7479b2964966c9582865115"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/llm/renderer.py": {
+    "mtime": 1785402494.6559072,
+    "ast_hash": "5e46cc8279b24a1a40526cf6b6cee825",
+    "semantic_hash": "5e46cc8279b24a1a40526cf6b6cee825"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/mcp/__init__.py": {
+    "mtime": 1784387031.0889955,
+    "ast_hash": "3fdfefab34a1801f5bd96660a059ffe2",
+    "semantic_hash": "3fdfefab34a1801f5bd96660a059ffe2"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/mcp/mcp_client.py": {
+    "mtime": 1785500340.5981195,
+    "ast_hash": "886c8cd9cb46c696ee09412e156bb1ec",
+    "semantic_hash": "886c8cd9cb46c696ee09412e156bb1ec"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/mcp/mcp_tool_catalog.py": {
+    "mtime": 1784387031.0889955,
+    "ast_hash": "518cef952839a3afcb608fec6a331c2a",
+    "semantic_hash": "518cef952839a3afcb608fec6a331c2a"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/mcp/remote_tool.py": {
+    "mtime": 1785500340.6003225,
+    "ast_hash": "264cabfb66575f38a4a3257bf04f8a9f",
+    "semantic_hash": "264cabfb66575f38a4a3257bf04f8a9f"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/mcp/system_mcp_tool_catalog.py": {
+    "mtime": 1785859920.7056777,
+    "ast_hash": "bebd1de2fbfca1c253002a0244a6d085",
+    "semantic_hash": "bebd1de2fbfca1c253002a0244a6d085"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/output/__init__.py": {
+    "mtime": 1784636007.3468976,
+    "ast_hash": "bdcfb723c0342bca1f9640daaf125622",
+    "semantic_hash": "bdcfb723c0342bca1f9640daaf125622"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/output/cache.py": {
+    "mtime": 1785841275.5668542,
+    "ast_hash": "cc979d6909e98b2c64c27c77b277b528",
+    "semantic_hash": "cc979d6909e98b2c64c27c77b277b528"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/output/tool_return.py": {
+    "mtime": 1785400177.6230104,
+    "ast_hash": "e33948d3d3d7f17da60b15528e9d3081",
+    "semantic_hash": "e33948d3d3d7f17da60b15528e9d3081"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/core/registry.py": {
+    "mtime": 1784387031.0900116,
+    "ast_hash": "64673a18fffdfa3afdb077631c0b47ba",
+    "semantic_hash": "64673a18fffdfa3afdb077631c0b47ba"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/session_tools/__init__.py": {
+    "mtime": 1784429029.8366525,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/session_tools/get_historical_chat_messages_tool.py": {
+    "mtime": 1784636007.3592844,
+    "ast_hash": "0edfa3332abe6bda3e2bd583894a1dbc",
+    "semantic_hash": "0edfa3332abe6bda3e2bd583894a1dbc"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/session_tools/tool_content/__init__.py": {
+    "mtime": 1785925605.5124056,
+    "ast_hash": "0b8cc70d6d5ab639c3942b3d2b696332",
+    "semantic_hash": "0b8cc70d6d5ab639c3942b3d2b696332"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/session_tools/tool_content/services/__init__.py": {
+    "mtime": 1785859248.640411,
+    "ast_hash": "6bfde18d4159eb5478eee8fe423a71b1",
+    "semantic_hash": "6bfde18d4159eb5478eee8fe423a71b1"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/session_tools/tool_content/services/content_window_builder.py": {
+    "mtime": 1785859127.8820126,
+    "ast_hash": "b6959d6c684ecd101e71eef466776ac4",
+    "semantic_hash": "b6959d6c684ecd101e71eef466776ac4"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/session_tools/tool_content/services/models.py": {
+    "mtime": 1785925536.986484,
+    "ast_hash": "a44db38b1997cee1863036d2ea97e6f7",
+    "semantic_hash": "a44db38b1997cee1863036d2ea97e6f7"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/session_tools/tool_content/services/service.py": {
+    "mtime": 1785925578.9922328,
+    "ast_hash": "97d3c6c23a18c34f6726a239621ffde6",
+    "semantic_hash": "97d3c6c23a18c34f6726a239621ffde6"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/session_tools/tool_content/tools/__init__.py": {
+    "mtime": 1785858496.3635223,
+    "ast_hash": "68ceb7693961d9f8747a0e63397b52a6",
+    "semantic_hash": "68ceb7693961d9f8747a0e63397b52a6"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/session_tools/tool_content/tools/read.py": {
+    "mtime": 1785925595.437619,
+    "ast_hash": "d9e4084f643285c8622db9286bce766f",
+    "semantic_hash": "d9e4084f643285c8622db9286bce766f"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/session_tools/tool_content/tools/search.py": {
+    "mtime": 1785858696.0754802,
+    "ast_hash": "61dbdbd0b71b8ea02f6a659119d1e356",
+    "semantic_hash": "61dbdbd0b71b8ea02f6a659119d1e356"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/session_tools/tool_content/tools/snapshot.py": {
+    "mtime": 1785858706.992612,
+    "ast_hash": "0f1b0ed0b2ba0260b003e0b8b6b9629f",
+    "semantic_hash": "0f1b0ed0b2ba0260b003e0b8b6b9629f"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/skill_tools/__init__.py": {
+    "mtime": 1784387031.091011,
+    "ast_hash": "3ae381e918b36fd27b37178b79e173be",
+    "semantic_hash": "3ae381e918b36fd27b37178b79e173be"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/skill_tools/common/__init__.py": {
+    "mtime": 1784387031.091011,
+    "ast_hash": "056511626ee1635070b1e1df439c4d2b",
+    "semantic_hash": "056511626ee1635070b1e1df439c4d2b"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/skill_tools/common/checks.py": {
+    "mtime": 1784387031.091011,
+    "ast_hash": "65849b3b7b408ace6605129684675739",
+    "semantic_hash": "65849b3b7b408ace6605129684675739"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/skill_tools/common/placeholders.py": {
+    "mtime": 1784387031.0922306,
+    "ast_hash": "d922445318a167e0febd09ae140364f3",
+    "semantic_hash": "d922445318a167e0febd09ae140364f3"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/skill_tools/load_skill_asset_tool.py": {
+    "mtime": 1784387031.0922306,
+    "ast_hash": "321b95c2761ef0ffcf549f7595fa1290",
+    "semantic_hash": "321b95c2761ef0ffcf549f7595fa1290"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/skill_tools/load_skill_tool.py": {
+    "mtime": 1784387031.0922306,
+    "ast_hash": "571b76c27d0080ae61306fbcea7f83a3",
+    "semantic_hash": "571b76c27d0080ae61306fbcea7f83a3"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/skill_tools/utils/__init__.py": {
+    "mtime": 1784387031.0934532,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/skill_tools/utils/builtin_skills.py": {
+    "mtime": 1784387031.0937274,
+    "ast_hash": "8bf9e9755ab95c7e0e1142beac6f60c0",
+    "semantic_hash": "8bf9e9755ab95c7e0e1142beac6f60c0"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/skill_tools/utils/skill_matcher.py": {
+    "mtime": 1784387031.0937274,
+    "ast_hash": "d7baf25cefc49ead6236cfa502e4577f",
+    "semantic_hash": "d7baf25cefc49ead6236cfa502e4577f"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/__init__.py": {
+    "mtime": 1785554030.3221428,
+    "ast_hash": "011e1fce4847d0e8c4bf07381263fdf8",
+    "semantic_hash": "011e1fce4847d0e8c4bf07381263fdf8"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/common/__init__.py": {
+    "mtime": 1785643278.2323449,
+    "ast_hash": "a04745c481226671e3958d6122bad603",
+    "semantic_hash": "a04745c481226671e3958d6122bad603"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/common/cache.py": {
+    "mtime": 1785772085.6939223,
+    "ast_hash": "06c1dfd871fbecc0ee23d7738d7e10ce",
+    "semantic_hash": "06c1dfd871fbecc0ee23d7738d7e10ce"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/document_link_extract/__init__.py": {
+    "mtime": 1785554030.3144734,
+    "ast_hash": "76701334616ba326b088a38ece569b9d",
+    "semantic_hash": "76701334616ba326b088a38ece569b9d"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/document_link_extract/extractor.py": {
+    "mtime": 1785909511.8337007,
+    "ast_hash": "cd5ee48033e490c4ae0c96a321c546f2",
+    "semantic_hash": "cd5ee48033e490c4ae0c96a321c546f2"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/document_link_extract_tool.py": {
+    "mtime": 1785860340.488525,
+    "ast_hash": "5edf97a95b64cf6d043d172f47d67d2e",
+    "semantic_hash": "5edf97a95b64cf6d043d172f47d67d2e"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_crawl_tool.py": {
+    "mtime": 1785555566.493829,
+    "ast_hash": "07430920f1fa8faa2194558c1d53a7e5",
+    "semantic_hash": "07430920f1fa8faa2194558c1d53a7e5"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/__init__.py": {
+    "mtime": 1785553827.4226549,
+    "ast_hash": "59cb51179af8750bbb734cd6eb54ce0b",
+    "semantic_hash": "59cb51179af8750bbb734cd6eb54ce0b"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/batch_scheduler.py": {
+    "mtime": 1784635768.162055,
+    "ast_hash": "bda42c1bf3f27cbea62fbc3c1d78c7be",
+    "semantic_hash": "bda42c1bf3f27cbea62fbc3c1d78c7be"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/coordinator.py": {
+    "mtime": 1785813606.9902968,
+    "ast_hash": "bdf3f946a50ca888e31f7a75e4c1063f",
+    "semantic_hash": "bdf3f946a50ca888e31f7a75e4c1063f"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/core/__init__.py": {
+    "mtime": 1784635768.164049,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/core/errors.py": {
+    "mtime": 1784635768.164049,
+    "ast_hash": "ea4a50245de3196ebee0540de0bb7038",
+    "semantic_hash": "ea4a50245de3196ebee0540de0bb7038"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/core/models.py": {
+    "mtime": 1785553767.155622,
+    "ast_hash": "91a140e1354465775ab9cc39ef29bd1e",
+    "semantic_hash": "91a140e1354465775ab9cc39ef29bd1e"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/crawler.py": {
+    "mtime": 1785813606.9908574,
+    "ast_hash": "13cc81486712c81d97e70a4e08750e12",
+    "semantic_hash": "13cc81486712c81d97e70a4e08750e12"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/fetchers/__init__.py": {
+    "mtime": 1784635768.1650558,
+    "ast_hash": "5eac8cd4849e5cf21562d0827a05a0a0",
+    "semantic_hash": "5eac8cd4849e5cf21562d0827a05a0a0"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/fetchers/base.py": {
+    "mtime": 1785807085.2466178,
+    "ast_hash": "651b5ccde483e42666a4872815ee576c",
+    "semantic_hash": "651b5ccde483e42666a4872815ee576c"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/fetchers/static_page_fetcher.py": {
+    "mtime": 1785813606.991432,
+    "ast_hash": "1cbe0324a97634cd48dfdf5c166ea446",
+    "semantic_hash": "1cbe0324a97634cd48dfdf5c166ea446"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/fetchers/stealthy_page_fetcher.py": {
+    "mtime": 1785813606.9920356,
+    "ast_hash": "ef1add47ab3c0db8d195ffde38a020c7",
+    "semantic_hash": "ef1add47ab3c0db8d195ffde38a020c7"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch/page_content.py": {
+    "mtime": 1785811292.9423964,
+    "ast_hash": "8bfc3fd1ae1eacd2fa94af17f8f47173",
+    "semantic_hash": "8bfc3fd1ae1eacd2fa94af17f8f47173"
+  },
+  "services/wisepen-chat-service/src/chat/application/tools/web_tools/web_fetch_tool.py": {
+    "mtime": 1785675298.204511,
+    "ast_hash": "bb30f124e855c49c5c1264cc680dba40",
+    "semantic_hash": "bb30f124e855c49c5c1264cc680dba40"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/__init__.py": {
+    "mtime": 1784636007.367576,
+    "ast_hash": "30904edb506bd32d406559b8d3e2d343",
+    "semantic_hash": "30904edb506bd32d406559b8d3e2d343"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/__init__.py": {
+    "mtime": 1785595974.658729,
+    "ast_hash": "8d76599c29d8cc2d2291ecb17ee4ea84",
+    "semantic_hash": "8d76599c29d8cc2d2291ecb17ee4ea84"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/_utils/__init__.py": {
+    "mtime": 1784636007.3686852,
+    "ast_hash": "a98c37808f45ac2b92af180e34e65fc8",
+    "semantic_hash": "a98c37808f45ac2b92af180e34e65fc8"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/_utils/chunk_ids.py": {
+    "mtime": 1784977085.7296827,
+    "ast_hash": "f5b79ffe286b117c10933333ee3b3657",
+    "semantic_hash": "f5b79ffe286b117c10933333ee3b3657"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/_utils/recursive_splitter.py": {
+    "mtime": 1784980245.2661066,
+    "ast_hash": "00bcce9b61ff54513239f09fd364a9c5",
+    "semantic_hash": "00bcce9b61ff54513239f09fd364a9c5"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/markdown/__init__.py": {
+    "mtime": 1785595974.6551979,
+    "ast_hash": "40f19929d881b068c82a0db111b105c6",
+    "semantic_hash": "40f19929d881b068c82a0db111b105c6"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/markdown/chunker.py": {
+    "mtime": 1785595974.6526647,
+    "ast_hash": "ebbf88bda551e1134c135c71ef43c6b2",
+    "semantic_hash": "ebbf88bda551e1134c135c71ef43c6b2"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/markdown/locator.py": {
+    "mtime": 1785594362.9087696,
+    "ast_hash": "8b3d6b4884418ec2df60553d84ce12ec",
+    "semantic_hash": "8b3d6b4884418ec2df60553d84ce12ec"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/markdown/parser.py": {
+    "mtime": 1785495623.292566,
+    "ast_hash": "e4709bc1afc339c225a24fa02f3a58cb",
+    "semantic_hash": "e4709bc1afc339c225a24fa02f3a58cb"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/markdown/plugins.py": {
+    "mtime": 1785495588.9340913,
+    "ast_hash": "e4a11869a5adfbd48b31cb5ebad2cfd0",
+    "semantic_hash": "e4a11869a5adfbd48b31cb5ebad2cfd0"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/models.py": {
+    "mtime": 1785595574.5399227,
+    "ast_hash": "087f250cc701f8ff3573d386902c6605",
+    "semantic_hash": "087f250cc701f8ff3573d386902c6605"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/plain_text/__init__.py": {
+    "mtime": 1784636007.3749948,
+    "ast_hash": "e7f47688ea3649498bfe00729f6bb2d6",
+    "semantic_hash": "e7f47688ea3649498bfe00729f6bb2d6"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/chunkers/plain_text/chunker.py": {
+    "mtime": 1784980245.2671852,
+    "ast_hash": "db3ed29ed116fbc18f319fcffb17b1ec",
+    "semantic_hash": "db3ed29ed116fbc18f319fcffb17b1ec"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/__init__.py": {
+    "mtime": 1785662031.8544803,
+    "ast_hash": "bf70851f8f4b8d6307007a2661e4adc3",
+    "semantic_hash": "bf70851f8f4b8d6307007a2661e4adc3"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/converters/__init__.py": {
+    "mtime": 1785508525.7189865,
+    "ast_hash": "5018867a4640c3d9609bfa6530149efd",
+    "semantic_hash": "5018867a4640c3d9609bfa6530149efd"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/converters/docx/__init__.py": {
+    "mtime": 1785602313.401605,
+    "ast_hash": "eb8d4d473847e839882f160b97f0f32d",
+    "semantic_hash": "eb8d4d473847e839882f160b97f0f32d"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/converters/docx/converter.py": {
+    "mtime": 1785806746.4768107,
+    "ast_hash": "3ae69e0c3dcf6834e6484c0afaf98a7b",
+    "semantic_hash": "3ae69e0c3dcf6834e6484c0afaf98a7b"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/converters/image/__init__.py": {
+    "mtime": 1785662031.8544803,
+    "ast_hash": "836c19e89d783ac79028b31b50465366",
+    "semantic_hash": "836c19e89d783ac79028b31b50465366"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/converters/image/converter.py": {
+    "mtime": 1785662031.8524837,
+    "ast_hash": "ba4d0d023107d82d975acb826c42dc07",
+    "semantic_hash": "ba4d0d023107d82d975acb826c42dc07"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/converters/pdf/__init__.py": {
+    "mtime": 1785537520.807828,
+    "ast_hash": "98150382c3f30a05ae7297903b0e830a",
+    "semantic_hash": "98150382c3f30a05ae7297903b0e830a"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/converters/pdf/converter.py": {
+    "mtime": 1785806933.3579907,
+    "ast_hash": "c43d7fee36654b0b19633eefbcbbfcc9",
+    "semantic_hash": "c43d7fee36654b0b19633eefbcbbfcc9"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/converters/xlsx/__init__.py": {
+    "mtime": 1785642455.03274,
+    "ast_hash": "205232aef23329ae44b0ee82757820ce",
+    "semantic_hash": "205232aef23329ae44b0ee82757820ce"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/converters/xlsx/converter.py": {
+    "mtime": 1785806128.8128529,
+    "ast_hash": "a393f99dee3e649347cecc784dfabe56",
+    "semantic_hash": "a393f99dee3e649347cecc784dfabe56"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/errors.py": {
+    "mtime": 1785662031.851322,
+    "ast_hash": "119b3371052407090557e748a9cf5b4b",
+    "semantic_hash": "119b3371052407090557e748a9cf5b4b"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/extract_zip.py": {
+    "mtime": 1785596890.0553918,
+    "ast_hash": "92816e9addc4db4f7ee1e1daf3c51e69",
+    "semantic_hash": "92816e9addc4db4f7ee1e1daf3c51e69"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/parse_docx.py": {
+    "mtime": 1785602478.822835,
+    "ast_hash": "bfe16bd5b35c8ab861e6dccd3c86ed8d",
+    "semantic_hash": "bfe16bd5b35c8ab861e6dccd3c86ed8d"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/parse_image.py": {
+    "mtime": 1785596851.174227,
+    "ast_hash": "a7408c3f6bc697404332666623288dbb",
+    "semantic_hash": "a7408c3f6bc697404332666623288dbb"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/parse_pdf.py": {
+    "mtime": 1785596851.1697114,
+    "ast_hash": "4fdb1b6b4b2f6131f9885a1aa4e888cc",
+    "semantic_hash": "4fdb1b6b4b2f6131f9885a1aa4e888cc"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/parse_pptx.py": {
+    "mtime": 1785596990.5907667,
+    "ast_hash": "8969becf72569b55115102ba37ef65bd",
+    "semantic_hash": "8969becf72569b55115102ba37ef65bd"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/document_parse/parse_xlsx.py": {
+    "mtime": 1785772294.2889385,
+    "ast_hash": "d4460387ca31abd1a168e47126bd77c7",
+    "semantic_hash": "d4460387ca31abd1a168e47126bd77c7"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/file_type_detect.py": {
+    "mtime": 1784641380.745173,
+    "ast_hash": "f11decc3ebabf81af32a84b3aeff756e",
+    "semantic_hash": "f11decc3ebabf81af32a84b3aeff756e"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/__init__.py": {
+    "mtime": 1784636007.378967,
+    "ast_hash": "a147422f809e67d4f58524164752c29c",
+    "semantic_hash": "a147422f809e67d4f58524164752c29c"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/_utils.py": {
+    "mtime": 1784636007.378967,
+    "ast_hash": "fd1f901a06f00c837bb7fbe573e1ebfa",
+    "semantic_hash": "fd1f901a06f00c837bb7fbe573e1ebfa"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/core/__init__.py": {
+    "mtime": 1784636007.379543,
+    "ast_hash": "fc58efdbd5a4926fd43818eb4d9b4871",
+    "semantic_hash": "fc58efdbd5a4926fd43818eb4d9b4871"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/core/models.py": {
+    "mtime": 1785541164.4111261,
+    "ast_hash": "83b12032fd03b72ff2b63c0205a0d1aa",
+    "semantic_hash": "83b12032fd03b72ff2b63c0205a0d1aa"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/core/protocols.py": {
+    "mtime": 1784636007.3806715,
+    "ast_hash": "6abb1147d01e33c7f7ac2f1767031dbd",
+    "semantic_hash": "6abb1147d01e33c7f7ac2f1767031dbd"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/diversifiers/__init__.py": {
+    "mtime": 1784636007.3811796,
+    "ast_hash": "71c651d556d816a01fc86548a697f9b1",
+    "semantic_hash": "71c651d556d816a01fc86548a697f9b1"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/diversifiers/mmr_diversifier.py": {
+    "mtime": 1784636007.3818128,
+    "ast_hash": "5a6e8516e8d8af8d06bc6d1c463b27d6",
+    "semantic_hash": "5a6e8516e8d8af8d06bc6d1c463b27d6"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/fusion/__init__.py": {
+    "mtime": 1784636007.382328,
+    "ast_hash": "d516faa5b600def89a9a3c79240310fb",
+    "semantic_hash": "d516faa5b600def89a9a3c79240310fb"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/fusion/weighted_rrf_fusion.py": {
+    "mtime": 1784636007.3829079,
+    "ast_hash": "a5a63f8adb8dc362f4d11a6268d0114d",
+    "semantic_hash": "a5a63f8adb8dc362f4d11a6268d0114d"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/pipeline.py": {
+    "mtime": 1784636007.384039,
+    "ast_hash": "7244024b5513d1c7b943a7c9be45d283",
+    "semantic_hash": "7244024b5513d1c7b943a7c9be45d283"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/prefilters/__init__.py": {
+    "mtime": 1784636007.384039,
+    "ast_hash": "b3c78f578d48bef538e8617697acb753",
+    "semantic_hash": "b3c78f578d48bef538e8617697acb753"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/prefilters/keyword_prefilter.py": {
+    "mtime": 1784636007.3846002,
+    "ast_hash": "d871df17a1a0fc1de6b6a2ea0238d3d3",
+    "semantic_hash": "d871df17a1a0fc1de6b6a2ea0238d3d3"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/presets.py": {
+    "mtime": 1785858827.7030935,
+    "ast_hash": "dfa34dddf107119c701ad7bbd68909c0",
+    "semantic_hash": "dfa34dddf107119c701ad7bbd68909c0"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/rerankers/__init__.py": {
+    "mtime": 1784636007.3856702,
+    "ast_hash": "6763aaa10d7a5b049a563638a18f3f57",
+    "semantic_hash": "6763aaa10d7a5b049a563638a18f3f57"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/rerankers/zero_entropy_reranker.py": {
+    "mtime": 1784636007.3862038,
+    "ast_hash": "348114a2f355559954bbeed330704712",
+    "semantic_hash": "348114a2f355559954bbeed330704712"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/scorers/__init__.py": {
+    "mtime": 1784636007.3876443,
+    "ast_hash": "e7a3cbcca4f4bb3f7c522aaa594abf38",
+    "semantic_hash": "e7a3cbcca4f4bb3f7c522aaa594abf38"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/scorers/bm25_scorer.py": {
+    "mtime": 1785541164.4121382,
+    "ast_hash": "4289e1851007a9decd0c2d2b67bc2fc6",
+    "semantic_hash": "4289e1851007a9decd0c2d2b67bc2fc6"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/scorers/dense_vector_scorer.py": {
+    "mtime": 1784636007.3887143,
+    "ast_hash": "1e7f1ca6e78054e404c421757a494f7a",
+    "semantic_hash": "1e7f1ca6e78054e404c421757a494f7a"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/scorers/fielded_bm25_scorer.py": {
+    "mtime": 1785541164.413136,
+    "ast_hash": "4c3d88df4035994495203518dc20cff5",
+    "semantic_hash": "4c3d88df4035994495203518dc20cff5"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/tokenizer/__init__.py": {
+    "mtime": 1785846094.3874595,
+    "ast_hash": "b86324d87a061a95bc840b40fa030d24",
+    "semantic_hash": "b86324d87a061a95bc840b40fa030d24"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/tokenizer/base.py": {
+    "mtime": 1784636007.3904445,
+    "ast_hash": "8b060b64dbb948216e92ebba74892bac",
+    "semantic_hash": "8b060b64dbb948216e92ebba74892bac"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/ranking/tokenizer/tokenizers.py": {
+    "mtime": 1785846089.8621848,
+    "ast_hash": "9c68657cd80c04995e15bd09d27c3d6b",
+    "semantic_hash": "9c68657cd80c04995e15bd09d27c3d6b"
+  },
+  "services/wisepen-chat-service/src/chat/application/utils/url_security.py": {
+    "mtime": 1785813606.987286,
+    "ast_hash": "cdef8c85a58c60740556ee47597f9894",
+    "semantic_hash": "cdef8c85a58c60740556ee47597f9894"
+  },
+  "services/wisepen-chat-service/src/chat/container.py": {
+    "mtime": 1785859037.616028,
+    "ast_hash": "47f9f09d6bcd995dd766678cd65df865",
+    "semantic_hash": "47f9f09d6bcd995dd766678cd65df865"
+  },
+  "services/wisepen-chat-service/src/chat/core/config/app_settings.py": {
+    "mtime": 1785858816.27708,
+    "ast_hash": "7ad4577dd9f1229791f81251f17fe8a8",
+    "semantic_hash": "7ad4577dd9f1229791f81251f17fe8a8"
+  },
+  "services/wisepen-chat-service/src/chat/core/config/bootstrap_settings.py": {
+    "mtime": 1784387031.0966034,
+    "ast_hash": "ba4dc535bd5441a828500235ccfaaad1",
+    "semantic_hash": "ba4dc535bd5441a828500235ccfaaad1"
+  },
+  "services/wisepen-chat-service/src/chat/core/config/nacos.py": {
+    "mtime": 1784387031.0966034,
+    "ast_hash": "68efe447755f5b4b9170d01347a38ff2",
+    "semantic_hash": "68efe447755f5b4b9170d01347a38ff2"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/__init__.py": {
+    "mtime": 1785434492.0091355,
+    "ast_hash": "6075f4ea6f5501b4d0cb54cab40cbd0e",
+    "semantic_hash": "6075f4ea6f5501b4d0cb54cab40cbd0e"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/mongo/mcp_server_config_repository.py": {
+    "mtime": 1784387031.0976098,
+    "ast_hash": "1a55dad2d7bbf677a5daaa3a831dde64",
+    "semantic_hash": "1a55dad2d7bbf677a5daaa3a831dde64"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/mongo/message_repository.py": {
+    "mtime": 1784387031.0976098,
+    "ast_hash": "517ceb3cda5d34dfb6bdd0e8bdd13f78",
+    "semantic_hash": "517ceb3cda5d34dfb6bdd0e8bdd13f78"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/mongo/model_repository.py": {
+    "mtime": 1784387031.0986238,
+    "ast_hash": "1bc45ae7cf59b6b17a726af279cc62da",
+    "semantic_hash": "1bc45ae7cf59b6b17a726af279cc62da"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/mongo/provider_repository.py": {
+    "mtime": 1784387031.0986238,
+    "ast_hash": "e5f79a699a23e26d81c336932d9ef75b",
+    "semantic_hash": "e5f79a699a23e26d81c336932d9ef75b"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/mongo/session_repository.py": {
+    "mtime": 1784387031.0986238,
+    "ast_hash": "7bfa6a713e48ff897836e2110bede8bc",
+    "semantic_hash": "7bfa6a713e48ff897836e2110bede8bc"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/mongo/tool_config_repository.py": {
+    "mtime": 1784387031.0992439,
+    "ast_hash": "13fc5a54951cbde2333308a6df55866a",
+    "semantic_hash": "13fc5a54951cbde2333308a6df55866a"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/redis/base.py": {
+    "mtime": 1784636007.3969772,
+    "ast_hash": "d49e876c714b6de6c92c0478ab0e932e",
+    "semantic_hash": "d49e876c714b6de6c92c0478ab0e932e"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/redis/hot_context.py": {
+    "mtime": 1784636007.397521,
+    "ast_hash": "1d9e5c3dab6069418c999f6330e3ee94",
+    "semantic_hash": "1d9e5c3dab6069418c999f6330e3ee94"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/redis/mcp_tool_discovery_cache.py": {
+    "mtime": 1784636007.3985746,
+    "ast_hash": "78ba0ccbf3af2557daecea54bbe68d23",
+    "semantic_hash": "78ba0ccbf3af2557daecea54bbe68d23"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/redis/tool_content_repository.py": {
+    "mtime": 1785594806.314973,
+    "ast_hash": "e5b8cd1a3b9a4701a65188bf6c6d5f17",
+    "semantic_hash": "e5b8cd1a3b9a4701a65188bf6c6d5f17"
+  },
+  "services/wisepen-chat-service/src/chat/core/persistence/redis/web_content_cache_repository.py": {
+    "mtime": 1785556314.583562,
+    "ast_hash": "7f00cd5b2c1d92c35c5ff23dbc93ad31",
+    "semantic_hash": "7f00cd5b2c1d92c35c5ff23dbc93ad31"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/__init__.py": {
+    "mtime": 1784387031.10031,
+    "ast_hash": "49ef55fca8d45c2a2957d320ef9f703e",
+    "semantic_hash": "49ef55fca8d45c2a2957d320ef9f703e"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/llm/anthropic_adapter.py": {
+    "mtime": 1784387031.1008475,
+    "ast_hash": "9c0ce708acadfef4dd03955c34df8444",
+    "semantic_hash": "9c0ce708acadfef4dd03955c34df8444"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/llm/gemini_adapter.py": {
+    "mtime": 1784387031.1008475,
+    "ast_hash": "860ba34d48ed942c7b92775d8d92f86f",
+    "semantic_hash": "860ba34d48ed942c7b92775d8d92f86f"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/llm/litellm_adapter.py": {
+    "mtime": 1784387031.1013622,
+    "ast_hash": "d7ce867260dd6ff97707d1c641d2a5e5",
+    "semantic_hash": "d7ce867260dd6ff97707d1c641d2a5e5"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/llm/openai_adapter.py": {
+    "mtime": 1784387031.101908,
+    "ast_hash": "9bfb0a108c0ab0844798ea6f246b3ec3",
+    "semantic_hash": "9bfb0a108c0ab0844798ea6f246b3ec3"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/llm/qwen_adapter.py": {
+    "mtime": 1784387031.10243,
+    "ast_hash": "259bff7e8a50e4c8047c887ccca60351",
+    "semantic_hash": "259bff7e8a50e4c8047c887ccca60351"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/llm/utils.py": {
+    "mtime": 1784387031.10243,
+    "ast_hash": "f7415b50220d7739b17689344d993a3a",
+    "semantic_hash": "f7415b50220d7739b17689344d993a3a"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/memory/mem0_adapter.py": {
+    "mtime": 1784387031.1029594,
+    "ast_hash": "7877e24d775e0e62d8d4db061131f3f5",
+    "semantic_hash": "7877e24d775e0e62d8d4db061131f3f5"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/skill_assets/__init__.py": {
+    "mtime": 1784387031.103515,
+    "ast_hash": "90cc4486feb645921f1ce70f7c53cef2",
+    "semantic_hash": "90cc4486feb645921f1ce70f7c53cef2"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/skill_assets/oss_loader.py": {
+    "mtime": 1784387031.103515,
+    "ast_hash": "bbfd7c5975a7bb988c2e18d96368697a",
+    "semantic_hash": "bbfd7c5975a7bb988c2e18d96368697a"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/speech/__init__.py": {
+    "mtime": 1784387031.1040764,
+    "ast_hash": "e049b38c326ce1112a3eeed7ddddaa52",
+    "semantic_hash": "e049b38c326ce1112a3eeed7ddddaa52"
+  },
+  "services/wisepen-chat-service/src/chat/core/providers/speech/iflytek.py": {
+    "mtime": 1784387031.1040764,
+    "ast_hash": "5215d8abe381be0e3413c09cd6cd68ff",
+    "semantic_hash": "5215d8abe381be0e3413c09cd6cd68ff"
+  },
+  "services/wisepen-chat-service/src/chat/domain/__init__.py": {
+    "mtime": 1784387031.1046305,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-chat-service/src/chat/domain/entities/__init__.py": {
+    "mtime": 1785434492.0082395,
+    "ast_hash": "206276712e712d4f853547615e586796",
+    "semantic_hash": "206276712e712d4f853547615e586796"
+  },
+  "services/wisepen-chat-service/src/chat/domain/entities/file_storage.py": {
+    "mtime": 1784387031.1051917,
+    "ast_hash": "8e145fc283adf4dcbdfa4fa5e9fd5570",
+    "semantic_hash": "8e145fc283adf4dcbdfa4fa5e9fd5570"
+  },
+  "services/wisepen-chat-service/src/chat/domain/entities/mcp_tool_server_config.py": {
+    "mtime": 1784387031.1051917,
+    "ast_hash": "27f51c3b522ba40e241d68e9e0d431c3",
+    "semantic_hash": "27f51c3b522ba40e241d68e9e0d431c3"
+  },
+  "services/wisepen-chat-service/src/chat/domain/entities/message.py": {
+    "mtime": 1784387031.1051917,
+    "ast_hash": "e426277ec3d67244427d110eea29810f",
+    "semantic_hash": "e426277ec3d67244427d110eea29810f"
+  },
+  "services/wisepen-chat-service/src/chat/domain/entities/model.py": {
+    "mtime": 1785370333.8695524,
+    "ast_hash": "9a791e70f9fb6b105266b8bc6dba20a0",
+    "semantic_hash": "9a791e70f9fb6b105266b8bc6dba20a0"
+  },
+  "services/wisepen-chat-service/src/chat/domain/entities/provider.py": {
+    "mtime": 1784387031.105752,
+    "ast_hash": "89a4d1d103c89709ae239d665caa2724",
+    "semantic_hash": "89a4d1d103c89709ae239d665caa2724"
+  },
+  "services/wisepen-chat-service/src/chat/domain/entities/resource.py": {
+    "mtime": 1784387031.1063037,
+    "ast_hash": "7d4f8a50744a2a42201456d98527b26f",
+    "semantic_hash": "7d4f8a50744a2a42201456d98527b26f"
+  },
+  "services/wisepen-chat-service/src/chat/domain/entities/session.py": {
+    "mtime": 1784387031.1063037,
+    "ast_hash": "d73ea6e7a79d3f5ef4bc87ed4136ec0c",
+    "semantic_hash": "d73ea6e7a79d3f5ef4bc87ed4136ec0c"
+  },
+  "services/wisepen-chat-service/src/chat/domain/entities/skill.py": {
+    "mtime": 1784387031.1068468,
+    "ast_hash": "a30eaf2c4ca9ced40a3640769086fc45",
+    "semantic_hash": "a30eaf2c4ca9ced40a3640769086fc45"
+  },
+  "services/wisepen-chat-service/src/chat/domain/entities/tool_config.py": {
+    "mtime": 1784387031.1068468,
+    "ast_hash": "1e2559c85c17082fb15bc274d24dfba8",
+    "semantic_hash": "1e2559c85c17082fb15bc274d24dfba8"
+  },
+  "services/wisepen-chat-service/src/chat/domain/error_codes.py": {
+    "mtime": 1784387031.1078496,
+    "ast_hash": "9f6a623a0fccdc71d6ce5c68a82e2e2a",
+    "semantic_hash": "9f6a623a0fccdc71d6ce5c68a82e2e2a"
+  },
+  "services/wisepen-chat-service/src/chat/domain/interfaces/__init__.py": {
+    "mtime": 1784387031.1078496,
+    "ast_hash": "d0aeddee9fe73d7ea8c42232c827fbbd",
+    "semantic_hash": "d0aeddee9fe73d7ea8c42232c827fbbd"
+  },
+  "services/wisepen-chat-service/src/chat/domain/interfaces/file_loader.py": {
+    "mtime": 1784387031.1078496,
+    "ast_hash": "5e949398dba46e9317d873877f1408bb",
+    "semantic_hash": "5e949398dba46e9317d873877f1408bb"
+  },
+  "services/wisepen-chat-service/src/chat/domain/interfaces/llm.py": {
+    "mtime": 1784387031.1088521,
+    "ast_hash": "62fcd3dc1cc028a756d093c2b6e90e8d",
+    "semantic_hash": "62fcd3dc1cc028a756d093c2b6e90e8d"
+  },
+  "services/wisepen-chat-service/src/chat/domain/interfaces/memory.py": {
+    "mtime": 1784387031.1088521,
+    "ast_hash": "d4d1536543375380857dbfee72cdfb4b",
+    "semantic_hash": "d4d1536543375380857dbfee72cdfb4b"
+  },
+  "services/wisepen-chat-service/src/chat/domain/interfaces/speech.py": {
+    "mtime": 1784387031.1088521,
+    "ast_hash": "6bb664aa31732f9316bc698afc059eaf",
+    "semantic_hash": "6bb664aa31732f9316bc698afc059eaf"
+  },
+  "services/wisepen-chat-service/src/chat/domain/repositories/__init__.py": {
+    "mtime": 1784387031.1088521,
+    "ast_hash": "68124ca2740ed6fe9b54de6952925ba3",
+    "semantic_hash": "68124ca2740ed6fe9b54de6952925ba3"
+  },
+  "services/wisepen-chat-service/src/chat/domain/repositories/hot_context_repo.py": {
+    "mtime": 1784387031.10986,
+    "ast_hash": "6abb4590621b81ecebe2d731f47f7dc8",
+    "semantic_hash": "6abb4590621b81ecebe2d731f47f7dc8"
+  },
+  "services/wisepen-chat-service/src/chat/domain/repositories/mcp_server_config_repo.py": {
+    "mtime": 1784387031.10986,
+    "ast_hash": "ab7295f839334d28ab4788f4e7d2415c",
+    "semantic_hash": "ab7295f839334d28ab4788f4e7d2415c"
+  },
+  "services/wisepen-chat-service/src/chat/domain/repositories/mcp_tool_discovery_cache_repo.py": {
+    "mtime": 1784387031.10986,
+    "ast_hash": "7f0570814a608fe4f1e0eb482db1c213",
+    "semantic_hash": "7f0570814a608fe4f1e0eb482db1c213"
+  },
+  "services/wisepen-chat-service/src/chat/domain/repositories/message_repo.py": {
+    "mtime": 1784387031.10986,
+    "ast_hash": "2d21fe73c08196cacb1b9fd108a6b30f",
+    "semantic_hash": "2d21fe73c08196cacb1b9fd108a6b30f"
+  },
+  "services/wisepen-chat-service/src/chat/domain/repositories/model_repo.py": {
+    "mtime": 1784387031.1108644,
+    "ast_hash": "998de6430d8fdafc2afcf3610820ac9c",
+    "semantic_hash": "998de6430d8fdafc2afcf3610820ac9c"
+  },
+  "services/wisepen-chat-service/src/chat/domain/repositories/provider_repo.py": {
+    "mtime": 1784387031.1108644,
+    "ast_hash": "c92833eeffab9b8bdc73edc7e460e677",
+    "semantic_hash": "c92833eeffab9b8bdc73edc7e460e677"
+  },
+  "services/wisepen-chat-service/src/chat/domain/repositories/session_repo.py": {
+    "mtime": 1784387031.1108644,
+    "ast_hash": "171e388bbf17ac77ad212297b2e96490",
+    "semantic_hash": "171e388bbf17ac77ad212297b2e96490"
+  },
+  "services/wisepen-chat-service/src/chat/domain/repositories/tool_config_repo.py": {
+    "mtime": 1784387031.1123514,
+    "ast_hash": "6f1449a3f104a7631ebf3c08fb145b11",
+    "semantic_hash": "6f1449a3f104a7631ebf3c08fb145b11"
+  },
+  "services/wisepen-chat-service/src/chat/main.py": {
+    "mtime": 1785434492.0067482,
+    "ast_hash": "55d6b38e7c56a0ceac8c225fb348e641",
+    "semantic_hash": "55d6b38e7c56a0ceac8c225fb348e641"
+  },
+  "services/wisepen-chat-service/src/chat/service_client/__init__.py": {
+    "mtime": 1784387031.1131828,
+    "ast_hash": "25111a981f0f2216be06605bf06475d0",
+    "semantic_hash": "25111a981f0f2216be06605bf06475d0"
+  },
+  "services/wisepen-chat-service/src/chat/service_client/ai_asset_service_client.py": {
+    "mtime": 1784387031.1131828,
+    "ast_hash": "eb9d9221bba6b56d8de615e1075b3f81",
+    "semantic_hash": "eb9d9221bba6b56d8de615e1075b3f81"
+  },
+  "services/wisepen-chat-service/src/chat/service_client/file_storage_service_client.py": {
+    "mtime": 1784387031.1131828,
+    "ast_hash": "949e2ec4a56b730fadad3950db35bda1",
+    "semantic_hash": "949e2ec4a56b730fadad3950db35bda1"
+  },
+  "services/wisepen-chat-service/src/chat/service_client/mcp_service_client.py": {
+    "mtime": 1785500392.1254685,
+    "ast_hash": "7e164ac8cb6b2fbdf7ebec5b35086bb5",
+    "semantic_hash": "7e164ac8cb6b2fbdf7ebec5b35086bb5"
+  },
+  "services/wisepen-chat-service/src/chat/service_client/resource_service_client.py": {
+    "mtime": 1784387031.1144228,
+    "ast_hash": "2b765260157701b5e9966bdf3314c810",
+    "semantic_hash": "2b765260157701b5e9966bdf3314c810"
+  },
+  "services/wisepen-common/pyproject.toml": {
+    "mtime": 1785812551.7250912,
+    "ast_hash": "e644701d19e3dcff9e830c383805bd15",
+    "semantic_hash": "e644701d19e3dcff9e830c383805bd15"
+  },
+  "services/wisepen-common/src/__init__.py": {
+    "mtime": 1784387031.1148899,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-common/src/common/__init__.py": {
+    "mtime": 1784387031.1148899,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "services/wisepen-common/src/common/cloud/__init__.py": {
+    "mtime": 1784387031.1148899,
+    "ast_hash": "16990aebc5d1f841fec34c84212cc39d",
+    "semantic_hash": "16990aebc5d1f841fec34c84212cc39d"
+  },
+  "services/wisepen-common/src/common/cloud/nacos_client.py": {
+    "mtime": 1784387031.1148899,
+    "ast_hash": "4518199f138d6ec9180d2b8053a2ae9f",
+    "semantic_hash": "4518199f138d6ec9180d2b8053a2ae9f"
+  },
+  "services/wisepen-common/src/common/cloud/service_discovery.py": {
+    "mtime": 1784387031.1159053,
+    "ast_hash": "58b028b9712f7791959a76ed2d22b0ad",
+    "semantic_hash": "58b028b9712f7791959a76ed2d22b0ad"
+  },
+  "services/wisepen-common/src/common/core/config/__init__.py": {
+    "mtime": 1784387031.1159053,
+    "ast_hash": "730e70d102d4c941508ca8d44094813e",
+    "semantic_hash": "730e70d102d4c941508ca8d44094813e"
+  },
+  "services/wisepen-common/src/common/core/config/bootstrap_settings.py": {
+    "mtime": 1784387031.1159053,
+    "ast_hash": "59b4694dc4523027918148f3f7bdba19",
+    "semantic_hash": "59b4694dc4523027918148f3f7bdba19"
+  },
+  "services/wisepen-common/src/common/core/constants.py": {
+    "mtime": 1785435091.4850736,
+    "ast_hash": "662af2e30eb175a051a8816df753ff98",
+    "semantic_hash": "662af2e30eb175a051a8816df753ff98"
+  },
+  "services/wisepen-common/src/common/core/domain/__init__.py": {
+    "mtime": 1784387031.1169,
+    "ast_hash": "6fcf7369909236855a6a6bc441846a72",
+    "semantic_hash": "6fcf7369909236855a6a6bc441846a72"
+  },
+  "services/wisepen-common/src/common/core/domain/enums.py": {
+    "mtime": 1784387031.1169,
+    "ast_hash": "92ccd1bca591fdcc22b7da3b010cf761",
+    "semantic_hash": "92ccd1bca591fdcc22b7da3b010cf761"
+  },
+  "services/wisepen-common/src/common/core/domain/responses.py": {
+    "mtime": 1784387031.1169,
+    "ast_hash": "5140bfb219998eb64d869545c09a99fe",
+    "semantic_hash": "5140bfb219998eb64d869545c09a99fe"
+  },
+  "services/wisepen-common/src/common/core/exceptions.py": {
+    "mtime": 1784387031.1169,
+    "ast_hash": "e9413f9745458e06724aac2635e436f4",
+    "semantic_hash": "e9413f9745458e06724aac2635e436f4"
+  },
+  "services/wisepen-common/src/common/gray/context.py": {
+    "mtime": 1784387031.1181097,
+    "ast_hash": "9aae86fb083f12b3691d6fd499162e25",
+    "semantic_hash": "9aae86fb083f12b3691d6fd499162e25"
+  },
+  "services/wisepen-common/src/common/http/__init__.py": {
+    "mtime": 1784387031.1181097,
+    "ast_hash": "a3b3237f4d5354f36de67deb7e77e887",
+    "semantic_hash": "a3b3237f4d5354f36de67deb7e77e887"
+  },
+  "services/wisepen-common/src/common/http/rpc_client.py": {
+    "mtime": 1784387031.1181097,
+    "ast_hash": "b8c7c476d025a4810f60c4b7c96c63d7",
+    "semantic_hash": "b8c7c476d025a4810f60c4b7c96c63d7"
+  },
+  "services/wisepen-common/src/common/kafka/__init__.py": {
+    "mtime": 1784387031.1191134,
+    "ast_hash": "26f4a84a7f00d8ea581e160339e73258",
+    "semantic_hash": "26f4a84a7f00d8ea581e160339e73258"
+  },
+  "services/wisepen-common/src/common/kafka/consumer.py": {
+    "mtime": 1784387031.1191134,
+    "ast_hash": "377fe077581038d9960334c1116d3ab3",
+    "semantic_hash": "377fe077581038d9960334c1116d3ab3"
+  },
+  "services/wisepen-common/src/common/kafka/producer.py": {
+    "mtime": 1784387031.1191134,
+    "ast_hash": "ba89e61d40dc6561590efde2ba549b10",
+    "semantic_hash": "ba89e61d40dc6561590efde2ba549b10"
+  },
+  "services/wisepen-common/src/common/logger.py": {
+    "mtime": 1784387031.1191134,
+    "ast_hash": "02083941feb86d8b02e3555a9fe227c0",
+    "semantic_hash": "02083941feb86d8b02e3555a9fe227c0"
+  },
+  "services/wisepen-common/src/common/observability.py": {
+    "mtime": 1784387031.1191134,
+    "ast_hash": "c952c4b6c76308ddca891755f16e53a5",
+    "semantic_hash": "c952c4b6c76308ddca891755f16e53a5"
+  },
+  "services/wisepen-common/src/common/security/__init__.py": {
+    "mtime": 1784387031.1201124,
+    "ast_hash": "2d3625ae8cce729a1a3320cf467b6b92",
+    "semantic_hash": "2d3625ae8cce729a1a3320cf467b6b92"
+  },
+  "services/wisepen-common/src/common/security/context.py": {
+    "mtime": 1784387031.1201124,
+    "ast_hash": "b8581bb9298a71eec477a44074710c63",
+    "semantic_hash": "b8581bb9298a71eec477a44074710c63"
+  },
+  "services/wisepen-common/src/common/security/dependencies.py": {
+    "mtime": 1784387031.1201124,
+    "ast_hash": "2749c9a1a0c544e3e9143060c72d37d6",
+    "semantic_hash": "2749c9a1a0c544e3e9143060c72d37d6"
+  },
+  "services/wisepen-common/src/common/security/exceptions.py": {
+    "mtime": 1784387031.1201124,
+    "ast_hash": "72154f66a8c43d5c99dfb575ea3192e6",
+    "semantic_hash": "72154f66a8c43d5c99dfb575ea3192e6"
+  },
+  "services/wisepen-common/src/common/web/exception_handlers.py": {
+    "mtime": 1784387031.1211202,
+    "ast_hash": "4a35fc84578aec40ebab215e45e5bb8e",
+    "semantic_hash": "4a35fc84578aec40ebab215e45e5bb8e"
+  },
+  "services/wisepen-common/src/common/web/middleware/__init__.py": {
+    "mtime": 1784387031.1211202,
+    "ast_hash": "34bcbc8b057498fc364a986222adf098",
+    "semantic_hash": "34bcbc8b057498fc364a986222adf098"
+  },
+  "services/wisepen-common/src/common/web/middleware/security_header.py": {
+    "mtime": 1784387031.1211202,
+    "ast_hash": "ecb05a320a02c8ee25e13e28c896b25c",
+    "semantic_hash": "ecb05a320a02c8ee25e13e28c896b25c"
+  },
+  "services/wisepen-mcp-service/pyproject.toml": {
+    "mtime": 1785812508.885045,
+    "ast_hash": "71953b0e34ccaadbd0cff2074ceb2add",
+    "semantic_hash": "71953b0e34ccaadbd0cff2074ceb2add"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/__init__.py": {
+    "mtime": 1784387031.122113,
+    "ast_hash": "676593a7d094628a492ee40b8ebda5d7",
+    "semantic_hash": "676593a7d094628a492ee40b8ebda5d7"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/__init__.py": {
+    "mtime": 1785776648.913065,
+    "ast_hash": "94e888732c288b0463a35931976f1e69",
+    "semantic_hash": "94e888732c288b0463a35931976f1e69"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/core/__init__.py": {
+    "mtime": 1785494054.0140266,
+    "ast_hash": "c97aa54295d19167d67e3df890422b63",
+    "semantic_hash": "c97aa54295d19167d67e3df890422b63"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/core/tools.py": {
+    "mtime": 1785470097.2608843,
+    "ast_hash": "38814888163ef1c7ae93a9df5f523f1f",
+    "semantic_hash": "38814888163ef1c7ae93a9df5f523f1f"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/rag/__init__.py": {
+    "mtime": 1785434045.8956134,
+    "ast_hash": "13db800bf062b4ea8fe301d9f682e037",
+    "semantic_hash": "13db800bf062b4ea8fe301d9f682e037"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/rag/models.py": {
+    "mtime": 1785434342.7866957,
+    "ast_hash": "edd3ac2326f218df3430904df338df89",
+    "semantic_hash": "edd3ac2326f218df3430904df338df89"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/rag/tools/__init__.py": {
+    "mtime": 1785859996.0459232,
+    "ast_hash": "b60d5eaaee3f3e5a61ab1c929cbebec7",
+    "semantic_hash": "b60d5eaaee3f3e5a61ab1c929cbebec7"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/rag/tools/common.py": {
+    "mtime": 1785767170.5881228,
+    "ast_hash": "f43918feeb4d8c9187bf4e2ae49a4a45",
+    "semantic_hash": "f43918feeb4d8c9187bf4e2ae49a4a45"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/rag/tools/navigation.py": {
+    "mtime": 1785859982.3663943,
+    "ast_hash": "1636b3c431d2ffe5d5e2700a5029bdac",
+    "semantic_hash": "1636b3c431d2ffe5d5e2700a5029bdac"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/rag/tools/resource.py": {
+    "mtime": 1785924950.6936069,
+    "ast_hash": "8745c73ed61b547d6c148b979a396c9b",
+    "semantic_hash": "8745c73ed61b547d6c148b979a396c9b"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/skill_creator/__init__.py": {
+    "mtime": 1785776648.9186594,
+    "ast_hash": "2d5ec35b4a0b95c1b5a29fc6aeb5245b",
+    "semantic_hash": "2d5ec35b4a0b95c1b5a29fc6aeb5245b"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/skill_creator/create_skill_info.py": {
+    "mtime": 1784387031.122113,
+    "ast_hash": "230fbff4b3a4d000284cb8a5f7773b18",
+    "semantic_hash": "230fbff4b3a4d000284cb8a5f7773b18"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/skill_creator/get_skill_info.py": {
+    "mtime": 1784387031.1236153,
+    "ast_hash": "e14faf578906c5effe21ae3651c22f23",
+    "semantic_hash": "e14faf578906c5effe21ae3651c22f23"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/skill_creator/update_skill_info.py": {
+    "mtime": 1784387031.1236153,
+    "ast_hash": "71028a2ad58a743a4a12b587da09080b",
+    "semantic_hash": "71028a2ad58a743a4a12b587da09080b"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/skill_creator/upload_skill_draft_asset.py": {
+    "mtime": 1784387031.1236153,
+    "ast_hash": "712e377b57a1a81259dd413003e32cdc",
+    "semantic_hash": "712e377b57a1a81259dd413003e32cdc"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/__init__.py": {
+    "mtime": 1785432694.2816963,
+    "ast_hash": "19a7802ce42c4671c2a5317da787ee9d",
+    "semantic_hash": "19a7802ce42c4671c2a5317da787ee9d"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/__init__.py": {
+    "mtime": 1785432694.2801847,
+    "ast_hash": "b210dd5ef82d5f075dac0a759cffd8da",
+    "semantic_hash": "b210dd5ef82d5f075dac0a759cffd8da"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/models.py": {
+    "mtime": 1785556334.5931013,
+    "ast_hash": "e9b453be9f0d3df1d447446a7dc0506b",
+    "semantic_hash": "e9b453be9f0d3df1d447446a7dc0506b"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/pipeline.py": {
+    "mtime": 1785812333.8968854,
+    "ast_hash": "2cf6b9223d9f0380839c65ff101fc827",
+    "semantic_hash": "2cf6b9223d9f0380839c65ff101fc827"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/providers/__init__.py": {
+    "mtime": 1785129775.8365805,
+    "ast_hash": "15b452c2ee35f9fb2eb70f16fedec299",
+    "semantic_hash": "15b452c2ee35f9fb2eb70f16fedec299"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/providers/_utils.py": {
+    "mtime": 1784636007.3510673,
+    "ast_hash": "ffb6de5147064931909d0da802714675",
+    "semantic_hash": "ffb6de5147064931909d0da802714675"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/providers/anysearch.py": {
+    "mtime": 1784636007.3520718,
+    "ast_hash": "80dc9ad5039ee06d3f292959e9536079",
+    "semantic_hash": "80dc9ad5039ee06d3f292959e9536079"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/providers/baidu_qianfan.py": {
+    "mtime": 1784636007.3532848,
+    "ast_hash": "62b505bd18810efce135bd7a9ceb6e67",
+    "semantic_hash": "62b505bd18810efce135bd7a9ceb6e67"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/providers/base.py": {
+    "mtime": 1784636007.3532848,
+    "ast_hash": "da0ab5fd243e8af1271da6c802bbec5e",
+    "semantic_hash": "da0ab5fd243e8af1271da6c802bbec5e"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/providers/exa.py": {
+    "mtime": 1784636007.3542845,
+    "ast_hash": "b14e969a1eef53d2935e28d28608f02e",
+    "semantic_hash": "b14e969a1eef53d2935e28d28608f02e"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/providers/firecrawl.py": {
+    "mtime": 1785129775.8443694,
+    "ast_hash": "de97dce5340cb6347096fca51ec82e9c",
+    "semantic_hash": "de97dce5340cb6347096fca51ec82e9c"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/providers/models.py": {
+    "mtime": 1784636007.3542845,
+    "ast_hash": "c9c0e2ab63a9eb4cc10046abece0bb27",
+    "semantic_hash": "c9c0e2ab63a9eb4cc10046abece0bb27"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/providers/platform_default.py": {
+    "mtime": 1784636007.3552842,
+    "ast_hash": "ddce69c534a96e0f7fb9b0aebbee7438",
+    "semantic_hash": "ddce69c534a96e0f7fb9b0aebbee7438"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/providers/tavily.py": {
+    "mtime": 1784636007.3562768,
+    "ast_hash": "4cd5e6d016e305d3d21d73db9b504392",
+    "semantic_hash": "4cd5e6d016e305d3d21d73db9b504392"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/providers/tinyfish.py": {
+    "mtime": 1785129775.8433533,
+    "ast_hash": "b7484ad63f94de027d0ae9ba245fd20c",
+    "semantic_hash": "b7484ad63f94de027d0ae9ba245fd20c"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/service.py": {
+    "mtime": 1785556334.5985394,
+    "ast_hash": "329cb85d1a2f7d6c1a9bd3b6f2d6d773",
+    "semantic_hash": "329cb85d1a2f7d6c1a9bd3b6f2d6d773"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/services/sources.py": {
+    "mtime": 1785556283.944065,
+    "ast_hash": "58d7394c36ead0a0e77a5bece2c630de",
+    "semantic_hash": "58d7394c36ead0a0e77a5bece2c630de"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/capabilities/web_search/tools.py": {
+    "mtime": 1785472760.6613984,
+    "ast_hash": "e6f4b7196737a52826b91393cc8f6553",
+    "semantic_hash": "e6f4b7196737a52826b91393cc8f6553"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/container.py": {
+    "mtime": 1785813945.7873905,
+    "ast_hash": "da7b0a3dce3453d9f9fdc2685e776abb",
+    "semantic_hash": "da7b0a3dce3453d9f9fdc2685e776abb"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/core/__init__.py": {
+    "mtime": 1784387031.1246202,
+    "ast_hash": "676593a7d094628a492ee40b8ebda5d7",
+    "semantic_hash": "676593a7d094628a492ee40b8ebda5d7"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/core/config/__init__.py": {
+    "mtime": 1784387031.1246202,
+    "ast_hash": "676593a7d094628a492ee40b8ebda5d7",
+    "semantic_hash": "676593a7d094628a492ee40b8ebda5d7"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/core/config/app_settings.py": {
+    "mtime": 1785429110.1063106,
+    "ast_hash": "90981d3be83c3fb0a2de6dfb7248c3fc",
+    "semantic_hash": "90981d3be83c3fb0a2de6dfb7248c3fc"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/core/config/bootstrap_settings.py": {
+    "mtime": 1784387031.1246202,
+    "ast_hash": "142ef72ed4ed95af7a3ccbd029525cc1",
+    "semantic_hash": "142ef72ed4ed95af7a3ccbd029525cc1"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/core/config/nacos.py": {
+    "mtime": 1784387031.1246202,
+    "ast_hash": "ae9616ba0534c4bb80822ff9f490725d",
+    "semantic_hash": "ae9616ba0534c4bb80822ff9f490725d"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/domain/__init__.py": {
+    "mtime": 1784387031.1256201,
+    "ast_hash": "676593a7d094628a492ee40b8ebda5d7",
+    "semantic_hash": "676593a7d094628a492ee40b8ebda5d7"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/domain/entities/__init__.py": {
+    "mtime": 1784387031.1256201,
+    "ast_hash": "4362377c0a86dead457389c552609bad",
+    "semantic_hash": "4362377c0a86dead457389c552609bad"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/domain/entities/skill.py": {
+    "mtime": 1784387031.1256201,
+    "ast_hash": "86323b59d2b98ccdbb7b44e038eb73e8",
+    "semantic_hash": "86323b59d2b98ccdbb7b44e038eb73e8"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/domain/error_codes.py": {
+    "mtime": 1785434063.8874283,
+    "ast_hash": "fb1a8aa4fdce3249835e5baf157f9911",
+    "semantic_hash": "fb1a8aa4fdce3249835e5baf157f9911"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/main.py": {
+    "mtime": 1785434063.889058,
+    "ast_hash": "d3821def203b3b2d82b89d761e6aab7d",
+    "semantic_hash": "d3821def203b3b2d82b89d761e6aab7d"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/service_client/__init__.py": {
+    "mtime": 1785433958.960346,
+    "ast_hash": "b624f3673c4917bbe0dd54610a2a53a8",
+    "semantic_hash": "b624f3673c4917bbe0dd54610a2a53a8"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/service_client/ai_asset_service_client.py": {
+    "mtime": 1784387031.1278741,
+    "ast_hash": "d2a6622c7c13db1569eee3b2c594ec9a",
+    "semantic_hash": "d2a6622c7c13db1569eee3b2c594ec9a"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/service_client/rag_service_client.py": {
+    "mtime": 1785859883.4287925,
+    "ast_hash": "1de482285aed094c9b75d1916670a5c2",
+    "semantic_hash": "1de482285aed094c9b75d1916670a5c2"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/__init__.py": {
+    "mtime": 1785812397.5454147,
+    "ast_hash": "97232e9da28875d5d91f48ee3552d849",
+    "semantic_hash": "97232e9da28875d5d91f48ee3552d849"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/__init__.py": {
+    "mtime": 1784636007.378967,
+    "ast_hash": "a147422f809e67d4f58524164752c29c",
+    "semantic_hash": "a147422f809e67d4f58524164752c29c"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/_utils.py": {
+    "mtime": 1784636007.378967,
+    "ast_hash": "fd1f901a06f00c837bb7fbe573e1ebfa",
+    "semantic_hash": "fd1f901a06f00c837bb7fbe573e1ebfa"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/core/__init__.py": {
+    "mtime": 1784636007.379543,
+    "ast_hash": "fc58efdbd5a4926fd43818eb4d9b4871",
+    "semantic_hash": "fc58efdbd5a4926fd43818eb4d9b4871"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/core/models.py": {
+    "mtime": 1785541164.4111261,
+    "ast_hash": "83b12032fd03b72ff2b63c0205a0d1aa",
+    "semantic_hash": "83b12032fd03b72ff2b63c0205a0d1aa"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/core/protocols.py": {
+    "mtime": 1784636007.3806715,
+    "ast_hash": "6abb1147d01e33c7f7ac2f1767031dbd",
+    "semantic_hash": "6abb1147d01e33c7f7ac2f1767031dbd"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/diversifiers/__init__.py": {
+    "mtime": 1784636007.3811796,
+    "ast_hash": "71c651d556d816a01fc86548a697f9b1",
+    "semantic_hash": "71c651d556d816a01fc86548a697f9b1"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/diversifiers/mmr_diversifier.py": {
+    "mtime": 1784636007.3818128,
+    "ast_hash": "5a6e8516e8d8af8d06bc6d1c463b27d6",
+    "semantic_hash": "5a6e8516e8d8af8d06bc6d1c463b27d6"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/fusion/__init__.py": {
+    "mtime": 1784636007.382328,
+    "ast_hash": "d516faa5b600def89a9a3c79240310fb",
+    "semantic_hash": "d516faa5b600def89a9a3c79240310fb"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/fusion/weighted_rrf_fusion.py": {
+    "mtime": 1784636007.3829079,
+    "ast_hash": "a5a63f8adb8dc362f4d11a6268d0114d",
+    "semantic_hash": "a5a63f8adb8dc362f4d11a6268d0114d"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/pipeline.py": {
+    "mtime": 1784636007.384039,
+    "ast_hash": "7244024b5513d1c7b943a7c9be45d283",
+    "semantic_hash": "7244024b5513d1c7b943a7c9be45d283"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/prefilters/__init__.py": {
+    "mtime": 1784636007.384039,
+    "ast_hash": "b3c78f578d48bef538e8617697acb753",
+    "semantic_hash": "b3c78f578d48bef538e8617697acb753"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/prefilters/keyword_prefilter.py": {
+    "mtime": 1784636007.3846002,
+    "ast_hash": "d871df17a1a0fc1de6b6a2ea0238d3d3",
+    "semantic_hash": "d871df17a1a0fc1de6b6a2ea0238d3d3"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/presets.py": {
+    "mtime": 1785814037.5631993,
+    "ast_hash": "5909e2bb46138bdf81ac967b8fe8ea4e",
+    "semantic_hash": "5909e2bb46138bdf81ac967b8fe8ea4e"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/rerankers/__init__.py": {
+    "mtime": 1784636007.3856702,
+    "ast_hash": "6763aaa10d7a5b049a563638a18f3f57",
+    "semantic_hash": "6763aaa10d7a5b049a563638a18f3f57"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/rerankers/zero_entropy_reranker.py": {
+    "mtime": 1784636007.3862038,
+    "ast_hash": "348114a2f355559954bbeed330704712",
+    "semantic_hash": "348114a2f355559954bbeed330704712"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/scorers/__init__.py": {
+    "mtime": 1784636007.3876443,
+    "ast_hash": "e7a3cbcca4f4bb3f7c522aaa594abf38",
+    "semantic_hash": "e7a3cbcca4f4bb3f7c522aaa594abf38"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/scorers/bm25_scorer.py": {
+    "mtime": 1785541164.4121382,
+    "ast_hash": "4289e1851007a9decd0c2d2b67bc2fc6",
+    "semantic_hash": "4289e1851007a9decd0c2d2b67bc2fc6"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/scorers/dense_vector_scorer.py": {
+    "mtime": 1784636007.3887143,
+    "ast_hash": "1e7f1ca6e78054e404c421757a494f7a",
+    "semantic_hash": "1e7f1ca6e78054e404c421757a494f7a"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/scorers/fielded_bm25_scorer.py": {
+    "mtime": 1785541164.413136,
+    "ast_hash": "4c3d88df4035994495203518dc20cff5",
+    "semantic_hash": "4c3d88df4035994495203518dc20cff5"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/tokenizer/__init__.py": {
+    "mtime": 1785896131.6614468,
+    "ast_hash": "b86324d87a061a95bc840b40fa030d24",
+    "semantic_hash": "b86324d87a061a95bc840b40fa030d24"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/tokenizer/base.py": {
+    "mtime": 1784636007.3904445,
+    "ast_hash": "8b060b64dbb948216e92ebba74892bac",
+    "semantic_hash": "8b060b64dbb948216e92ebba74892bac"
+  },
+  "services/wisepen-mcp-service/src/wisepen_mcp/utils/ranking/tokenizer/tokenizers.py": {
+    "mtime": 1785846140.3077953,
+    "ast_hash": "9c68657cd80c04995e15bd09d27c3d6b",
+    "semantic_hash": "9c68657cd80c04995e15bd09d27c3d6b"
+  },
+  "services/wisepen-rag-service/pyproject.toml": {
+    "mtime": 1785812495.9285028,
+    "ast_hash": "71b7a4a5c7efc41d47a57a4fd1db0023",
+    "semantic_hash": "71b7a4a5c7efc41d47a57a4fd1db0023"
+  },
+  "services/wisepen-rag-service/src/rag/__init__.py": {
+    "mtime": 1785433682.6958132,
+    "ast_hash": "3effae9d519dc09a82ca1378b75babef",
+    "semantic_hash": "3effae9d519dc09a82ca1378b75babef"
+  },
+  "services/wisepen-rag-service/src/rag/api/__init__.py": {
+    "mtime": 1785433815.013931,
+    "ast_hash": "0534d8f634fdb9bcefe52991242a0b8b",
+    "semantic_hash": "0534d8f634fdb9bcefe52991242a0b8b"
+  },
+  "services/wisepen-rag-service/src/rag/api/endpoints/__init__.py": {
+    "mtime": 1785774058.8452568,
+    "ast_hash": "9bb5d6788ab26452beb14e62bfe10b38",
+    "semantic_hash": "9bb5d6788ab26452beb14e62bfe10b38"
+  },
+  "services/wisepen-rag-service/src/rag/api/endpoints/navigation.py": {
+    "mtime": 1785860525.0694644,
+    "ast_hash": "429f67810e697e46d6f53b8ca9f06ca4",
+    "semantic_hash": "429f67810e697e46d6f53b8ca9f06ca4"
+  },
+  "services/wisepen-rag-service/src/rag/api/endpoints/resources.py": {
+    "mtime": 1785860705.314509,
+    "ast_hash": "58326151f8fbeb4c50f59b0f01eb05b3",
+    "semantic_hash": "58326151f8fbeb4c50f59b0f01eb05b3"
+  },
+  "services/wisepen-rag-service/src/rag/api/router.py": {
+    "mtime": 1785774071.2087684,
+    "ast_hash": "96e0629463bdccbf2b5e3eab3001ce4e",
+    "semantic_hash": "96e0629463bdccbf2b5e3eab3001ce4e"
+  },
+  "services/wisepen-rag-service/src/rag/api/schemas/__init__.py": {
+    "mtime": 1785860067.9393036,
+    "ast_hash": "54047b8df148927759beb24ccbf5230f",
+    "semantic_hash": "54047b8df148927759beb24ccbf5230f"
+  },
+  "services/wisepen-rag-service/src/rag/api/schemas/navigation.py": {
+    "mtime": 1785860058.2065349,
+    "ast_hash": "d4fda3aea9cf8c18cee2d7ff335e8518",
+    "semantic_hash": "d4fda3aea9cf8c18cee2d7ff335e8518"
+  },
+  "services/wisepen-rag-service/src/rag/api/schemas/resources.py": {
+    "mtime": 1785857510.827257,
+    "ast_hash": "5866b76e2f6b3d821e69d208a62874bd",
+    "semantic_hash": "5866b76e2f6b3d821e69d208a62874bd"
+  },
+  "services/wisepen-rag-service/src/rag/application/__init__.py": {
+    "mtime": 1785433682.6968303,
+    "ast_hash": "34bb0f734ea6bfc45d6d22521244e06c",
+    "semantic_hash": "34bb0f734ea6bfc45d6d22521244e06c"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/__init__.py": {
+    "mtime": 1785023827.4119208,
+    "ast_hash": "b3463bab0d134e76c3cc4f8b935e360a",
+    "semantic_hash": "b3463bab0d134e76c3cc4f8b935e360a"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/acl/__init__.py": {
+    "mtime": 1785776648.9023104,
+    "ast_hash": "411f435812a8be80521b5973380eee71",
+    "semantic_hash": "411f435812a8be80521b5973380eee71"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/acl/authorizer.py": {
+    "mtime": 1785723238.442576,
+    "ast_hash": "a1690dd708613899b772b8a198d52145",
+    "semantic_hash": "a1690dd708613899b772b8a198d52145"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/acl/models.py": {
+    "mtime": 1785061298.1452024,
+    "ast_hash": "cfb1e780bc00e4baeb8c929608fcd9f3",
+    "semantic_hash": "cfb1e780bc00e4baeb8c929608fcd9f3"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/acl/projector.py": {
+    "mtime": 1785403465.44521,
+    "ast_hash": "42a9d575cd12a174b0cd4dce6caedc51",
+    "semantic_hash": "42a9d575cd12a174b0cd4dce6caedc51"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/evidence/__init__.py": {
+    "mtime": 1785776648.9048426,
+    "ast_hash": "cc6fd0ebabe4c9a5689c62eb3166d37c",
+    "semantic_hash": "cc6fd0ebabe4c9a5689c62eb3166d37c"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/evidence/materializer.py": {
+    "mtime": 1785433457.495702,
+    "ast_hash": "592103e95ffb45f525df8b89d10e0d74",
+    "semantic_hash": "592103e95ffb45f525df8b89d10e0d74"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/evidence/models.py": {
+    "mtime": 1785433457.4969358,
+    "ast_hash": "f77b9b1f4404fa91135caffbc334cc5f",
+    "semantic_hash": "f77b9b1f4404fa91135caffbc334cc5f"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_extraction/__init__.py": {
+    "mtime": 1785855030.4493787,
+    "ast_hash": "0b492768a1bf714a4dfe4c05d4ef65ac",
+    "semantic_hash": "0b492768a1bf714a4dfe4c05d4ef65ac"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_extraction/derived_payload_codec.py": {
+    "mtime": 1785855932.3217623,
+    "ast_hash": "9c5d9c3cf7d42debc957e5c5ddff27b1",
+    "semantic_hash": "9c5d9c3cf7d42debc957e5c5ddff27b1"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_extraction/extractor.py": {
+    "mtime": 1785930965.207322,
+    "ast_hash": "e91e84426c735f0c06c72b4c8ba61187",
+    "semantic_hash": "e91e84426c735f0c06c72b4c8ba61187"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_extraction/llm.py": {
+    "mtime": 1785433457.504105,
+    "ast_hash": "98c975dd45809678fdc664dba5b1b7e6",
+    "semantic_hash": "98c975dd45809678fdc664dba5b1b7e6"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_extraction/models.py": {
+    "mtime": 1785856143.6752024,
+    "ast_hash": "efe7186cca4eeff2e44d6619abbeb439",
+    "semantic_hash": "efe7186cca4eeff2e44d6619abbeb439"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_extraction/relations.py": {
+    "mtime": 1785403465.3694806,
+    "ast_hash": "1bb4d52c26fa1001b5d032b8e8019273",
+    "semantic_hash": "1bb4d52c26fa1001b5d032b8e8019273"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_extraction/result_mapper.py": {
+    "mtime": 1785856345.6381733,
+    "ast_hash": "b09b2d171c820a4eaea9d5d8d614297c",
+    "semantic_hash": "b09b2d171c820a4eaea9d5d8d614297c"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_extraction/windows.py": {
+    "mtime": 1785856314.9811797,
+    "ast_hash": "e44e503e02e3b4731b6f2bc70432ba6b",
+    "semantic_hash": "e44e503e02e3b4731b6f2bc70432ba6b"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_projection/__init__.py": {
+    "mtime": 1785776648.9079773,
+    "ast_hash": "5266c28740fae5c2e2eb7b6c9d52e3f5",
+    "semantic_hash": "5266c28740fae5c2e2eb7b6c9d52e3f5"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_projection/graph_indexer.py": {
+    "mtime": 1785726693.927416,
+    "ast_hash": "2ef25188d2824c2235e9b5fafc34566b",
+    "semantic_hash": "2ef25188d2824c2235e9b5fafc34566b"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_projection/models.py": {
+    "mtime": 1785854976.7088013,
+    "ast_hash": "bf912e475fd7a048e748bb478adc9d35",
+    "semantic_hash": "bf912e475fd7a048e748bb478adc9d35"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/graph_projection/projector.py": {
+    "mtime": 1785856358.5389583,
+    "ast_hash": "91fc75bec7f485a29041dc91e9c96219",
+    "semantic_hash": "91fc75bec7f485a29041dc91e9c96219"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/ingestion/__init__.py": {
+    "mtime": 1785924801.2483425,
+    "ast_hash": "4ae047bee0ecd08831558b3149b2804d",
+    "semantic_hash": "4ae047bee0ecd08831558b3149b2804d"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/ingestion/content_indexer.py": {
+    "mtime": 1785726669.612158,
+    "ast_hash": "1d2928bcc15d694251edb0c1e997eb11",
+    "semantic_hash": "1d2928bcc15d694251edb0c1e997eb11"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/ingestion/context_indexing.py": {
+    "mtime": 1785750037.764742,
+    "ast_hash": "dc632038ab12c409cee125318b96ed3d",
+    "semantic_hash": "dc632038ab12c409cee125318b96ed3d"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/ingestion/models.py": {
+    "mtime": 1785924771.132607,
+    "ast_hash": "b327e894fca31285d36d8e7058df93c8",
+    "semantic_hash": "b327e894fca31285d36d8e7058df93c8"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/ingestion/revision.py": {
+    "mtime": 1785776129.0442653,
+    "ast_hash": "8a71e2c1b02632c17230233ae7ab90a3",
+    "semantic_hash": "8a71e2c1b02632c17230233ae7ab90a3"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/ingestion/section_projector.py": {
+    "mtime": 1785932094.246094,
+    "ast_hash": "c605cfea27fd65af3006c6050cda5ff1",
+    "semantic_hash": "c605cfea27fd65af3006c6050cda5ff1"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/kafka_consumers.py": {
+    "mtime": 1785723144.4995866,
+    "ast_hash": "3b7989f3606df560c1bca99597b117e1",
+    "semantic_hash": "3b7989f3606df560c1bca99597b117e1"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/knowledge_navigation.py": {
+    "mtime": 1785860498.2141562,
+    "ast_hash": "c615bafff159a5f35193a301c2894f2e",
+    "semantic_hash": "c615bafff159a5f35193a301c2894f2e"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/repositories/__init__.py": {
+    "mtime": 1785774571.2268124,
+    "ast_hash": "a935dd77af5dac6cc2167695b80c8078",
+    "semantic_hash": "a935dd77af5dac6cc2167695b80c8078"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/repositories/navigation.py": {
+    "mtime": 1785860508.8993435,
+    "ast_hash": "7d08f4a14c617f1c87b225c5bf145cb8",
+    "semantic_hash": "7d08f4a14c617f1c87b225c5bf145cb8"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/repositories/projections.py": {
+    "mtime": 1785726645.442223,
+    "ast_hash": "56e59b7a8567134bfe9691a137ed0cb5",
+    "semantic_hash": "56e59b7a8567134bfe9691a137ed0cb5"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/repositories/retrieval.py": {
+    "mtime": 1785857371.358492,
+    "ast_hash": "4b9084ad6342ba247d492d78f635ff57",
+    "semantic_hash": "4b9084ad6342ba247d492d78f635ff57"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/resource_snapshot/__init__.py": {
+    "mtime": 1785924759.2520318,
+    "ast_hash": "1f7735f575411d5940954fe2ce9869b7",
+    "semantic_hash": "1f7735f575411d5940954fe2ce9869b7"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/resource_snapshot/models.py": {
+    "mtime": 1785924746.1180532,
+    "ast_hash": "2f7da0cab2143c82aba40221ef4dc1c3",
+    "semantic_hash": "2f7da0cab2143c82aba40221ef4dc1c3"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/resource_snapshot/service.py": {
+    "mtime": 1785857347.9876788,
+    "ast_hash": "032303d5f26ed0d01e88e0f582c341c5",
+    "semantic_hash": "032303d5f26ed0d01e88e0f582c341c5"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/retrieval/__init__.py": {
+    "mtime": 1785724018.4664614,
+    "ast_hash": "116a6ecae25eb9a192f489b88bcf450b",
+    "semantic_hash": "116a6ecae25eb9a192f489b88bcf450b"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/retrieval/models.py": {
+    "mtime": 1785812333.892126,
+    "ast_hash": "835f4809237c234c2d14b667c0680a44",
+    "semantic_hash": "835f4809237c234c2d14b667c0680a44"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/retrieval/permission_filter.py": {
+    "mtime": 1785723793.7826762,
+    "ast_hash": "7d97d47005960d690ef6aa6aba7622fc",
+    "semantic_hash": "7d97d47005960d690ef6aa6aba7622fc"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/retrieval/retriever.py": {
+    "mtime": 1785812333.8926563,
+    "ast_hash": "abb99b5fc1d799e1713e17d66dba1fc0",
+    "semantic_hash": "abb99b5fc1d799e1713e17d66dba1fc0"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/section_navigation/__init__.py": {
+    "mtime": 1785776648.9110467,
+    "ast_hash": "9a8179ca0e7db7f9b915fbdad252c933",
+    "semantic_hash": "9a8179ca0e7db7f9b915fbdad252c933"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/section_navigation/models.py": {
+    "mtime": 1785433457.5567188,
+    "ast_hash": "63cb56446b3ce14d425223ed0f66c1e3",
+    "semantic_hash": "63cb56446b3ce14d425223ed0f66c1e3"
+  },
+  "services/wisepen-rag-service/src/rag/application/rag/section_navigation/navigator.py": {
+    "mtime": 1785433457.5588036,
+    "ast_hash": "1ac9f890a2de356e89dbc081f5c5db79",
+    "semantic_hash": "1ac9f890a2de356e89dbc081f5c5db79"
+  },
+  "services/wisepen-rag-service/src/rag/container.py": {
+    "mtime": 1785932107.128209,
+    "ast_hash": "468e79b5781eaf46a9d3a8376d0084fe",
+    "semantic_hash": "468e79b5781eaf46a9d3a8376d0084fe"
+  },
+  "services/wisepen-rag-service/src/rag/core/__init__.py": {
+    "mtime": 1785433682.6968303,
+    "ast_hash": "a8f46b504279d9861b9750c63b9c1115",
+    "semantic_hash": "a8f46b504279d9861b9750c63b9c1115"
+  },
+  "services/wisepen-rag-service/src/rag/core/config/__init__.py": {
+    "mtime": 1785433682.698346,
+    "ast_hash": "06b2b0c6d97b3ebc43e76e4376b613ee",
+    "semantic_hash": "06b2b0c6d97b3ebc43e76e4376b613ee"
+  },
+  "services/wisepen-rag-service/src/rag/core/config/app_settings.py": {
+    "mtime": 1785932107.126209,
+    "ast_hash": "699fc465fcb51f1f52f741406aca7338",
+    "semantic_hash": "699fc465fcb51f1f52f741406aca7338"
+  },
+  "services/wisepen-rag-service/src/rag/core/config/bootstrap_settings.py": {
+    "mtime": 1785433682.6998603,
+    "ast_hash": "11ce18bd2ff7133846f21cdca8c5e38d",
+    "semantic_hash": "11ce18bd2ff7133846f21cdca8c5e38d"
+  },
+  "services/wisepen-rag-service/src/rag/core/config/nacos.py": {
+    "mtime": 1785433682.6998603,
+    "ast_hash": "689ab26b49428e85f3c8d8dfaadf67bf",
+    "semantic_hash": "689ab26b49428e85f3c8d8dfaadf67bf"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/__init__.py": {
+    "mtime": 1785773942.0028546,
+    "ast_hash": "a8a2f99672929e6bca7cd71db667c294",
+    "semantic_hash": "a8a2f99672929e6bca7cd71db667c294"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/mongo/__init__.py": {
+    "mtime": 1785773890.8814654,
+    "ast_hash": "302c46a1140f55cede675765bddf5095",
+    "semantic_hash": "302c46a1140f55cede675765bddf5095"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/mongo/acl/__init__.py": {
+    "mtime": 1785727006.1420805,
+    "ast_hash": "bf6fe8eec27387bceb40d73c89bab094",
+    "semantic_hash": "bf6fe8eec27387bceb40d73c89bab094"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/mongo/acl/projection_repository.py": {
+    "mtime": 1785723005.2791336,
+    "ast_hash": "035b1f1df2d1f38922801e6226a05f89",
+    "semantic_hash": "035b1f1df2d1f38922801e6226a05f89"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/mongo/content/__init__.py": {
+    "mtime": 1785773902.605538,
+    "ast_hash": "795213dd2e8fd654354811c518a81ebb",
+    "semantic_hash": "795213dd2e8fd654354811c518a81ebb"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/mongo/content/content_repository.py": {
+    "mtime": 1785925340.2923236,
+    "ast_hash": "55f842c4e536ecfa09c851fe3ad0387f",
+    "semantic_hash": "55f842c4e536ecfa09c851fe3ad0387f"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/mongo/content/derived_repository.py": {
+    "mtime": 1785767830.5742702,
+    "ast_hash": "fa9f508395efbc8a1bdcdd4cadbfa05d",
+    "semantic_hash": "fa9f508395efbc8a1bdcdd4cadbfa05d"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/mongo/content/projection_writer.py": {
+    "mtime": 1785924860.7362695,
+    "ast_hash": "28afe6cc76da35faf36757354c1e1896",
+    "semantic_hash": "28afe6cc76da35faf36757354c1e1896"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/mongo/content/version_repository.py": {
+    "mtime": 1785767612.20849,
+    "ast_hash": "5666afc8e8210bace32d6d6de9f0bd22",
+    "semantic_hash": "5666afc8e8210bace32d6d6de9f0bd22"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/neo4j/__init__.py": {
+    "mtime": 1785433682.7045712,
+    "ast_hash": "61f62e3d1bde8c2d20d42d2d3cb147f0",
+    "semantic_hash": "61f62e3d1bde8c2d20d42d2d3cb147f0"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/neo4j/knowledge_graph_repository.py": {
+    "mtime": 1785860517.3906214,
+    "ast_hash": "6b89122ec961ababbd30f415c24637ec",
+    "semantic_hash": "6b89122ec961ababbd30f415c24637ec"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/qdrant/__init__.py": {
+    "mtime": 1785433682.7040575,
+    "ast_hash": "ec3122b86eea937f7ce5583bd907ee63",
+    "semantic_hash": "ec3122b86eea937f7ce5583bd907ee63"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/qdrant/rag_candidate_repository.py": {
+    "mtime": 1785932177.5785117,
+    "ast_hash": "48afa66cf91a8bdd5904fc04acc7482e",
+    "semantic_hash": "48afa66cf91a8bdd5904fc04acc7482e"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/qdrant/rag_content_index_repository.py": {
+    "mtime": 1785932177.5785117,
+    "ast_hash": "15842d87ec1b02234284f38d5699872a",
+    "semantic_hash": "15842d87ec1b02234284f38d5699872a"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/redis/__init__.py": {
+    "mtime": 1785749683.4616196,
+    "ast_hash": "4b442f3839b035eb832f1d7d75db0e79",
+    "semantic_hash": "4b442f3839b035eb832f1d7d75db0e79"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/redis/base.py": {
+    "mtime": 1785433682.7024236,
+    "ast_hash": "6133bdd2aa67728a2026a5e17d664768",
+    "semantic_hash": "6133bdd2aa67728a2026a5e17d664768"
+  },
+  "services/wisepen-rag-service/src/rag/core/persistence/redis/knowledge_navigation_state_repository.py": {
+    "mtime": 1785433457.5747578,
+    "ast_hash": "20560f7f3e97fbed86a75c86ed71f9a7",
+    "semantic_hash": "20560f7f3e97fbed86a75c86ed71f9a7"
+  },
+  "services/wisepen-rag-service/src/rag/domain/__init__.py": {
+    "mtime": 1785433682.7014084,
+    "ast_hash": "3f0197f4f7b91796bad67c33eb2bae8d",
+    "semantic_hash": "3f0197f4f7b91796bad67c33eb2bae8d"
+  },
+  "services/wisepen-rag-service/src/rag/domain/entities/__init__.py": {
+    "mtime": 1785924871.5439181,
+    "ast_hash": "bd0f04da8dd7df0c5087b4fcf8d867ef",
+    "semantic_hash": "bd0f04da8dd7df0c5087b4fcf8d867ef"
+  },
+  "services/wisepen-rag-service/src/rag/domain/entities/rag_acl.py": {
+    "mtime": 1785144955.828364,
+    "ast_hash": "8004f6fa257fbd99d13ed5ccf800c002",
+    "semantic_hash": "8004f6fa257fbd99d13ed5ccf800c002"
+  },
+  "services/wisepen-rag-service/src/rag/domain/entities/rag_content.py": {
+    "mtime": 1785925005.5937276,
+    "ast_hash": "ba1d027c52bc9df559ecd57c387c5efd",
+    "semantic_hash": "ba1d027c52bc9df559ecd57c387c5efd"
+  },
+  "services/wisepen-rag-service/src/rag/domain/error_codes.py": {
+    "mtime": 1785433755.9563572,
+    "ast_hash": "637745f25010dd7163bae56a8120256f",
+    "semantic_hash": "637745f25010dd7163bae56a8120256f"
+  },
+  "services/wisepen-rag-service/src/rag/main.py": {
+    "mtime": 1785924871.5459292,
+    "ast_hash": "fa5ad2af4556b8ca9ef2c12963b39438",
+    "semantic_hash": "fa5ad2af4556b8ca9ef2c12963b39438"
+  },
+  "services/wisepen-rag-service/src/rag/utils/__init__.py": {
+    "mtime": 1785433682.7064824,
+    "ast_hash": "15f73e8672bacae671cd2c4e137d8312",
+    "semantic_hash": "15f73e8672bacae671cd2c4e137d8312"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/__init__.py": {
+    "mtime": 1785595974.658729,
+    "ast_hash": "8d76599c29d8cc2d2291ecb17ee4ea84",
+    "semantic_hash": "8d76599c29d8cc2d2291ecb17ee4ea84"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/_utils/__init__.py": {
+    "mtime": 1784636007.3686852,
+    "ast_hash": "a98c37808f45ac2b92af180e34e65fc8",
+    "semantic_hash": "a98c37808f45ac2b92af180e34e65fc8"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/_utils/chunk_ids.py": {
+    "mtime": 1784977085.7296827,
+    "ast_hash": "f5b79ffe286b117c10933333ee3b3657",
+    "semantic_hash": "f5b79ffe286b117c10933333ee3b3657"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/_utils/recursive_splitter.py": {
+    "mtime": 1784980245.2661066,
+    "ast_hash": "00bcce9b61ff54513239f09fd364a9c5",
+    "semantic_hash": "00bcce9b61ff54513239f09fd364a9c5"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/markdown/__init__.py": {
+    "mtime": 1785595974.6551979,
+    "ast_hash": "40f19929d881b068c82a0db111b105c6",
+    "semantic_hash": "40f19929d881b068c82a0db111b105c6"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/markdown/chunker.py": {
+    "mtime": 1785595974.6526647,
+    "ast_hash": "ebbf88bda551e1134c135c71ef43c6b2",
+    "semantic_hash": "ebbf88bda551e1134c135c71ef43c6b2"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/markdown/locator.py": {
+    "mtime": 1785594362.9087696,
+    "ast_hash": "8b3d6b4884418ec2df60553d84ce12ec",
+    "semantic_hash": "8b3d6b4884418ec2df60553d84ce12ec"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/markdown/parser.py": {
+    "mtime": 1785495623.292566,
+    "ast_hash": "e4709bc1afc339c225a24fa02f3a58cb",
+    "semantic_hash": "e4709bc1afc339c225a24fa02f3a58cb"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/markdown/plugins.py": {
+    "mtime": 1785495588.9340913,
+    "ast_hash": "e4a11869a5adfbd48b31cb5ebad2cfd0",
+    "semantic_hash": "e4a11869a5adfbd48b31cb5ebad2cfd0"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/models.py": {
+    "mtime": 1785595574.5399227,
+    "ast_hash": "087f250cc701f8ff3573d386902c6605",
+    "semantic_hash": "087f250cc701f8ff3573d386902c6605"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/plain_text/__init__.py": {
+    "mtime": 1784636007.3749948,
+    "ast_hash": "e7f47688ea3649498bfe00729f6bb2d6",
+    "semantic_hash": "e7f47688ea3649498bfe00729f6bb2d6"
+  },
+  "services/wisepen-rag-service/src/rag/utils/chunkers/plain_text/chunker.py": {
+    "mtime": 1784980245.2671852,
+    "ast_hash": "db3ed29ed116fbc18f319fcffb17b1ec",
+    "semantic_hash": "db3ed29ed116fbc18f319fcffb17b1ec"
+  },
+  "services/wisepen-rag-service/src/rag/utils/llm_clients/__init__.py": {
+    "mtime": 1784636007.376635,
+    "ast_hash": "727d589a4bbf68e6a4671f6316a57d95",
+    "semantic_hash": "727d589a4bbf68e6a4671f6316a57d95"
+  },
+  "services/wisepen-rag-service/src/rag/utils/llm_clients/embedding.py": {
+    "mtime": 1785433457.5811462,
+    "ast_hash": "3136c0bf4197ffc3ed0a8aa46400b23f",
+    "semantic_hash": "3136c0bf4197ffc3ed0a8aa46400b23f"
+  },
+  "services/wisepen-rag-service/src/rag/utils/llm_clients/query.py": {
+    "mtime": 1785433457.5834913,
+    "ast_hash": "ff324c30376e3ac915be8c6047259bcc",
+    "semantic_hash": "ff324c30376e3ac915be8c6047259bcc"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/__init__.py": {
+    "mtime": 1784636007.378967,
+    "ast_hash": "a147422f809e67d4f58524164752c29c",
+    "semantic_hash": "a147422f809e67d4f58524164752c29c"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/_utils.py": {
+    "mtime": 1784636007.378967,
+    "ast_hash": "fd1f901a06f00c837bb7fbe573e1ebfa",
+    "semantic_hash": "fd1f901a06f00c837bb7fbe573e1ebfa"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/core/__init__.py": {
+    "mtime": 1784636007.379543,
+    "ast_hash": "fc58efdbd5a4926fd43818eb4d9b4871",
+    "semantic_hash": "fc58efdbd5a4926fd43818eb4d9b4871"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/core/models.py": {
+    "mtime": 1785541164.4111261,
+    "ast_hash": "83b12032fd03b72ff2b63c0205a0d1aa",
+    "semantic_hash": "83b12032fd03b72ff2b63c0205a0d1aa"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/core/protocols.py": {
+    "mtime": 1784636007.3806715,
+    "ast_hash": "6abb1147d01e33c7f7ac2f1767031dbd",
+    "semantic_hash": "6abb1147d01e33c7f7ac2f1767031dbd"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/diversifiers/__init__.py": {
+    "mtime": 1784636007.3811796,
+    "ast_hash": "71c651d556d816a01fc86548a697f9b1",
+    "semantic_hash": "71c651d556d816a01fc86548a697f9b1"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/diversifiers/mmr_diversifier.py": {
+    "mtime": 1784636007.3818128,
+    "ast_hash": "5a6e8516e8d8af8d06bc6d1c463b27d6",
+    "semantic_hash": "5a6e8516e8d8af8d06bc6d1c463b27d6"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/fusion/__init__.py": {
+    "mtime": 1784636007.382328,
+    "ast_hash": "d516faa5b600def89a9a3c79240310fb",
+    "semantic_hash": "d516faa5b600def89a9a3c79240310fb"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/fusion/weighted_rrf_fusion.py": {
+    "mtime": 1784636007.3829079,
+    "ast_hash": "a5a63f8adb8dc362f4d11a6268d0114d",
+    "semantic_hash": "a5a63f8adb8dc362f4d11a6268d0114d"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/pipeline.py": {
+    "mtime": 1784636007.384039,
+    "ast_hash": "7244024b5513d1c7b943a7c9be45d283",
+    "semantic_hash": "7244024b5513d1c7b943a7c9be45d283"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/prefilters/__init__.py": {
+    "mtime": 1784636007.384039,
+    "ast_hash": "b3c78f578d48bef538e8617697acb753",
+    "semantic_hash": "b3c78f578d48bef538e8617697acb753"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/prefilters/keyword_prefilter.py": {
+    "mtime": 1784636007.3846002,
+    "ast_hash": "d871df17a1a0fc1de6b6a2ea0238d3d3",
+    "semantic_hash": "d871df17a1a0fc1de6b6a2ea0238d3d3"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/presets.py": {
+    "mtime": 1785814037.564708,
+    "ast_hash": "2d1badefaa23642a40e94a9b9f717385",
+    "semantic_hash": "2d1badefaa23642a40e94a9b9f717385"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/rerankers/__init__.py": {
+    "mtime": 1784636007.3856702,
+    "ast_hash": "6763aaa10d7a5b049a563638a18f3f57",
+    "semantic_hash": "6763aaa10d7a5b049a563638a18f3f57"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/rerankers/zero_entropy_reranker.py": {
+    "mtime": 1784636007.3862038,
+    "ast_hash": "348114a2f355559954bbeed330704712",
+    "semantic_hash": "348114a2f355559954bbeed330704712"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/scorers/__init__.py": {
+    "mtime": 1784636007.3876443,
+    "ast_hash": "e7a3cbcca4f4bb3f7c522aaa594abf38",
+    "semantic_hash": "e7a3cbcca4f4bb3f7c522aaa594abf38"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/scorers/bm25_scorer.py": {
+    "mtime": 1785541164.4121382,
+    "ast_hash": "4289e1851007a9decd0c2d2b67bc2fc6",
+    "semantic_hash": "4289e1851007a9decd0c2d2b67bc2fc6"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/scorers/dense_vector_scorer.py": {
+    "mtime": 1784636007.3887143,
+    "ast_hash": "1e7f1ca6e78054e404c421757a494f7a",
+    "semantic_hash": "1e7f1ca6e78054e404c421757a494f7a"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/scorers/fielded_bm25_scorer.py": {
+    "mtime": 1785541164.413136,
+    "ast_hash": "4c3d88df4035994495203518dc20cff5",
+    "semantic_hash": "4c3d88df4035994495203518dc20cff5"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/tokenizer/__init__.py": {
+    "mtime": 1785896132.8388734,
+    "ast_hash": "b86324d87a061a95bc840b40fa030d24",
+    "semantic_hash": "b86324d87a061a95bc840b40fa030d24"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/tokenizer/base.py": {
+    "mtime": 1784636007.3904445,
+    "ast_hash": "8b060b64dbb948216e92ebba74892bac",
+    "semantic_hash": "8b060b64dbb948216e92ebba74892bac"
+  },
+  "services/wisepen-rag-service/src/rag/utils/ranking/tokenizer/tokenizers.py": {
+    "mtime": 1785846135.4468138,
+    "ast_hash": "9c68657cd80c04995e15bd09d27c3d6b",
+    "semantic_hash": "9c68657cd80c04995e15bd09d27c3d6b"
+  },
+  "services/wisepen-rag-service/src/rag/utils/xml_markup.py": {
+    "mtime": 1784636007.3937461,
+    "ast_hash": "056282b64b4e38f109002e64139e0124",
+    "semantic_hash": "056282b64b4e38f109002e64139e0124"
+  }
+}

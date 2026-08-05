@@ -40,14 +40,14 @@ wisepen-mcp-service RAG tools
 
 ## 核心能力
 
-| 能力 | 说明 |
-| --- | --- |
-| 内容投影 | 把 Markdown 投影成 Section、ReadingBlock、RetrievalChunk 和 SourceRef，形成 Agent 可遍历的阅读骨架 |
-| 章节队列 | 通过 Section frontier 暴露 parent、previous、next、children，让 Agent 能按文档结构逐步读 |
-| 权限感知召回 | 在 Qdrant 中执行 dense + BM25 混合召回，同时携带 ACL 与 applied revision 过滤 |
-| 证据回源 | 所有最终正文都从 Mongo 内容投影按 SourceRef 精确回读，不信任模型生成的 offset |
-| 图扩展 | 用 Neo4j 保存概念、依赖、引用和来源关系，让 Agent 能像追调用链一样追知识链 |
-| 派生物复用 | Contextual indexing 和 GraphRAG 抽取结果按输入指纹持久化，减少重复 LLM 调用 |
+| 能力         | 说明                                                                                               |
+| ------------ | -------------------------------------------------------------------------------------------------- |
+| 内容投影     | 把 Markdown 投影成 Section、ReadingBlock、RetrievalChunk 和 SourceRef，形成 Agent 可遍历的阅读骨架 |
+| 章节队列     | 通过 Section frontier 暴露 parent、previous、next、children，让 Agent 能按文档结构逐步读           |
+| 权限感知召回 | 在 Qdrant 中执行 dense + BM25 混合召回，同时携带 ACL 与 applied revision 过滤                      |
+| 证据回源     | 所有最终正文都从 Mongo 内容投影按 SourceRef 精确回读，不信任模型生成的 offset                      |
+| 图扩展       | 用 Neo4j 保存概念、依赖、引用和来源关系，让 Agent 能像追调用链一样追知识链                         |
+| 派生物复用   | Contextual indexing 和 GraphRAG 抽取结果按输入指纹持久化，减少重复 LLM 调用                        |
 
 ## Agent 阅读循环
 

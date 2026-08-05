@@ -128,12 +128,16 @@ class Container(containers.DeclarativeContainer):
         dense_vector_size=settings.EMBEDDING_DIMENSIONS,
         embedding_profile=settings.EMBEDDING_MODEL,
         bm25_config=qdrant_bm25_config,
+        dense_vector_name=settings.QDRANT_RAG_DENSE_VECTOR_NAME,
+        sparse_vector_name=settings.QDRANT_RAG_SPARSE_VECTOR_NAME,
     )
     candidate_repository = providers.Singleton(
         QdrantRagCandidateRepository,
         client=qdrant_client,
         collection_name=settings.QDRANT_RAG_COLLECTION_NAME,
         bm25_config=qdrant_bm25_config,
+        dense_vector_name=settings.QDRANT_RAG_DENSE_VECTOR_NAME,
+        sparse_vector_name=settings.QDRANT_RAG_SPARSE_VECTOR_NAME,
     )
     acl_projector = providers.Singleton(RagAclProjector)
     acl_projection_repository = providers.Singleton(
@@ -215,6 +219,7 @@ class Container(containers.DeclarativeContainer):
         reuse_profile=(
             f"{settings.LLM_BASE_URL}|{settings.QUERY_MODEL}|thinking=default"
         ),
+        max_concurrency=settings.KNOWLEDGE_GRAPH_EXTRACTION_MAX_CONCURRENCY,
     )
     knowledge_graph_indexer = providers.Singleton(
         KnowledgeGraphIndexer,

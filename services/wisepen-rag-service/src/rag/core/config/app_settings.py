@@ -43,6 +43,8 @@ class AppSettings(BaseModel):
     QDRANT_PORT: int = 6333
     QDRANT_PASSWORD: str = ""
     QDRANT_RAG_COLLECTION_NAME: str = "wisepen_rag_retrieval_chunks"
+    QDRANT_RAG_DENSE_VECTOR_NAME: str = "dense"
+    QDRANT_RAG_SPARSE_VECTOR_NAME: str = "sparse"
     QDRANT_RAG_BM25_TOKENIZER: Literal[
         "prefix",
         "whitespace",
@@ -53,6 +55,9 @@ class AppSettings(BaseModel):
     NEO4J_USER: str = "neo4j"
     NEO4J_PASSWORD: str = "password123"
     NEO4J_DATABASE: str = "neo4j"
+
+    # rag 参数配置
+    KNOWLEDGE_GRAPH_EXTRACTION_MAX_CONCURRENCY: int = 5
     RAG_NAVIGATION_STATE_TTL_SECONDS: int = 24 * 3600
 
 
