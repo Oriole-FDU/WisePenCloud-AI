@@ -121,7 +121,7 @@ class DocumentLinkExtractor:
                 timeout=_DOWNLOAD_TIMEOUT_SECONDS,
             ) as client:
                 async with client.stream("GET", url) as response:
-                    self._check_response(url, response)
+                    self._check_response(response)
                     headers = {
                         name.lower(): value
                         for name, value in response.headers.items()
@@ -158,7 +158,7 @@ class DocumentLinkExtractor:
 
         return bytes(content), headers, document_type
 
-    def _check_response(self, requested_url: str, response: httpx.Response) -> None:
+    def _check_response(self,response: httpx.Response) -> None:
         status = response.status_code
         if 300 <= status < 400:
             raise DocumentLinkExtractError("Document URL redirects are not allowed.")

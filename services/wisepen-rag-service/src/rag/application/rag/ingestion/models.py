@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from rag.utils.chunkers import SourceSpan
-from rag.application.rag.resource_snapshot import RagContentLocator
 
 
 # SectionNode：标题树节点。对应“文档里的一个章节/小节”，有 section_path、父子关系、own_start/own_end/subtree_end。
@@ -106,6 +105,16 @@ class RagSourceRef:
 
 
 @dataclass(frozen=True, slots=True)
+class RagPageRange:
+    """文档页码对应的稳定原文范围。"""
+
+    page_index: int  # 页在文档中的顺序。
+    page_label: str  # 对外可请求的页码标签。
+    start_offset: int  # 页范围在 Markdown 中的起始 offset。
+    end_offset: int  # 页范围在 Markdown 中的结束 offset。
+
+
+@dataclass(frozen=True, slots=True)
 class RagContentProjection:
     """资源级别的稳定内容投影，作为多后端 RAG 的统一基础。"""
 
@@ -117,4 +126,4 @@ class RagContentProjection:
     retrieval_chunks: tuple[RagRetrievalChunk, ...]  # 用于召回和排序的子块。
     sections: tuple[RagSectionNode, ...]  # 全部 section 树节点（扁平）。
     source_refs: tuple[RagSourceRef, ...]  # 全部 SourceRef 列表，作为证据回源入口。
-    locators: tuple[RagContentLocator, ...] = ()  # 资源副本支持的命名读取入口。
+    pages: tuple[RagPageRange, ...] = ()  # 可按页读取的原文范围。

@@ -2,18 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from rag.utils.chunkers import LocatorKind, SourceSpan
-
-
-@dataclass(frozen=True, slots=True)
-class RagContentLocator:
-    """资源副本中的命名定位。"""
-
-    locator_index: int
-    name: str
-    kind: LocatorKind
-    start_offset: int
-    end_offset: int
+from rag.utils.chunkers import SourceSpan
 
 
 @dataclass(frozen=True, slots=True)

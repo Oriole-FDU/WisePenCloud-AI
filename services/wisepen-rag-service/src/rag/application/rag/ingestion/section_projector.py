@@ -13,8 +13,8 @@ from rag.utils.chunkers import (
 )
 from .models import (
     RagContentProjection,
-    RagContentLocator,
     RagDocumentContent,
+    RagPageRange,
     RagRetrievalChunk,
     RagSectionNode,
     RagSectionReadingBlock,
@@ -47,7 +47,8 @@ class RagSectionProjector:
         self._retrieval_chunker = retrieval_chunker or MarkdownChunker(max_characters=800)
 
     def project(self, content: RagDocumentContent) -> RagContentProjection:
-        # 第一次 chunk 解析只为得到 Heading 边界和 locator，blocks 留作 Section 树构建。
+        # 第一次 chunk 解析只为得到 Heading、page marker 和 anchor 的原文范围，
+        # blocks 留作 Section 树构建。
         structure = self._structure_chunker.chunk(
             document=ChunkDocument(
                 text=content.markdown,
@@ -76,16 +77,20 @@ class RagSectionProjector:
         reading_blocks: list[RagSectionReadingBlock] = []
         retrieval_chunks: list[RagRetrievalChunk] = []
         source_refs: list[RagSourceRef] = []
-        content_locators = tuple(
-            RagContentLocator(
-                locator_index=index,
-                name=locator.name,
-                kind=locator.kind,
-                start_offset=locator.start_offset,
-                end_offset=locator.end_offset,
+        pages = tuple(
+            RagPageRange(
+                page_index=index,
+                page_label=page_range.name.removeprefix("page:"),
+                start_offset=page_range.start_offset,
+                end_offset=page_range.end_offset,
             )
-            for index, locator in enumerate(structure.locators)
-            if locator.start_offset is not None and locator.end_offset is not None
+            for index, page_range in enumerate(
+                text_range
+                for text_range in structure.locators
+                if text_range.kind is LocatorKind.PAGE
+                and text_range.start_offset is not None
+                and text_range.end_offset is not None
+            )
         )
         # 记录每个 Section 当前的 block ordinal，长 Section 会跨多个 block 编号递增。
         section_ordinals: dict[str, int] = {}
@@ -113,13 +118,14 @@ class RagSectionProjector:
                 # _render_source 同时返回 raw_text 与 local→source 坐标映射，
                 # 后续检索子块的 source_spans 需要靠这个映射把局部坐标平移回原文。
                 raw_text, source_map = _render_source(content.markdown, block_spans)
-                block_locators = tuple(
-                    locator
-                    for locator in structure.locators
-                    if locator.start_offset is not None
-                    and locator.end_offset is not None
+                block_ranges = tuple(
+                    text_range
+                    for text_range in structure.locators
+                    if text_range.start_offset is not None
+                    and text_range.end_offset is not None
                     and any(
-                        span.start_offset < locator.end_offset and span.end_offset > locator.start_offset
+                        span.start_offset < text_range.end_offset
+                        and span.end_offset > text_range.start_offset
                         for span in block_spans
                     )
                 )
@@ -132,16 +138,16 @@ class RagSectionProjector:
                     source_spans=block_spans,
                     page_labels=tuple(
                         dict.fromkeys(
-                            locator.name.removeprefix("page:")
-                            for locator in block_locators
-                            if locator.kind is LocatorKind.PAGE
+                            text_range.name.removeprefix("page:")
+                            for text_range in block_ranges
+                            if text_range.kind is LocatorKind.PAGE
                         )
                     ),
                     anchor_labels=tuple(
                         dict.fromkeys(
-                            locator.name.removeprefix("anchor:")
-                            for locator in block_locators
-                            if locator.kind is LocatorKind.ANCHOR
+                            text_range.name.removeprefix("anchor:")
+                            for text_range in block_ranges
+                            if text_range.kind is LocatorKind.ANCHOR
                         )
                     ),
                 )
@@ -177,13 +183,14 @@ class RagSectionProjector:
                         if section.section_path
                         else child_raw_text
                     )
-                    child_locators = tuple(
-                        locator
-                        for locator in block_locators
-                        if locator.start_offset is not None
-                        and locator.end_offset is not None
+                    child_ranges = tuple(
+                        text_range
+                        for text_range in block_ranges
+                        if text_range.start_offset is not None
+                        and text_range.end_offset is not None
                         and any(
-                            span.start_offset < locator.end_offset and span.end_offset > locator.start_offset
+                            span.start_offset < text_range.end_offset
+                            and span.end_offset > text_range.start_offset
                             for span in source_spans
                         )
                     )
@@ -198,16 +205,16 @@ class RagSectionProjector:
                         source_spans=source_spans,
                         page_labels=tuple(
                             dict.fromkeys(
-                                locator.name.removeprefix("page:")
-                                for locator in child_locators
-                                if locator.kind is LocatorKind.PAGE
+                                text_range.name.removeprefix("page:")
+                                for text_range in child_ranges
+                                if text_range.kind is LocatorKind.PAGE
                             )
                         ),
                         anchor_labels=tuple(
                             dict.fromkeys(
-                                locator.name.removeprefix("anchor:")
-                                for locator in child_locators
-                                if locator.kind is LocatorKind.ANCHOR
+                                text_range.name.removeprefix("anchor:")
+                                for text_range in child_ranges
+                                if text_range.kind is LocatorKind.ANCHOR
                             )
                         ),
                     )
@@ -237,7 +244,7 @@ class RagSectionProjector:
             retrieval_chunks=tuple(retrieval_chunks),
             sections=sections,
             source_refs=tuple(source_refs),
-            locators=content_locators,
+            pages=pages,
         )
 
 

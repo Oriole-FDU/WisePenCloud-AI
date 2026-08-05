@@ -46,12 +46,12 @@ Contextual indexing 和 GraphRAG SDK 抽取结果都按输入指纹持久化复�
 
 ## 持久化角色
 
-| 后端 | 保存内容 | 角色 |
-| --- | --- | --- |
-| Mongo | 内容 revision、Markdown parts、Section、ReadingBlock、SourceRef、ACL 投影、LLM 派生缓存 | 回源和版本事实源 |
-| Qdrant | RetrievalChunk 向量、BM25 sparse vector、revision、ACL payload、SourceRef 定位字段 | 权限感知混合召回 |
-| Neo4j | Resource、Entity、ExternalSource、关系、MENTIONS、ACL payload | 跨文档知识导航 |
-| Redis | navigation state | locate/sections/cypher 之间的短期会话状态 |
+| 后端   | 保存内容                                                                                | 角色                                      |
+| ------ | --------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Mongo  | 内容 revision、Markdown parts、Section、ReadingBlock、SourceRef、ACL 投影、LLM 派生缓存 | 回源和版本事实源                          |
+| Qdrant | RetrievalChunk 向量、BM25 sparse vector、revision、ACL payload、SourceRef 定位字段      | 权限感知混合召回                          |
+| Neo4j  | Resource、Entity、ExternalSource、关系、MENTIONS、ACL payload                           | 跨文档知识导航                            |
+| Redis  | navigation state                                                                        | locate/sections/cypher 之间的短期会话状态 |
 
 ## 关键不变量
 

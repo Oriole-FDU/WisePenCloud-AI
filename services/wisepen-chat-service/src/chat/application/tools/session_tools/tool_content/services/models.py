@@ -122,14 +122,28 @@ class ToolContentRangeReadResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentGroupedReadItem:
-    key: str
+class ToolContentPageReadItem:
+    page_label: str
     windows: tuple[ToolContentWindow, ...] = ()
     reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class ToolContentGroupedReadResult:
+class ToolContentPageReadResult:
     content_id: str
-    items: tuple[ToolContentGroupedReadItem, ...] = ()
+    items: tuple[ToolContentPageReadItem, ...] = ()
+    budget_exhausted: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ToolContentSectionReadItem:
+    section_path: str
+    windows: tuple[ToolContentWindow, ...] = ()
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ToolContentSectionReadResult:
+    content_id: str
+    items: tuple[ToolContentSectionReadItem, ...] = ()
     budget_exhausted: bool = False

@@ -23,12 +23,12 @@ DocumentReady
 
 核心产物：
 
-| 产物 | 用途 |
-| --- | --- |
-| `Section` | 标题树节点，保存标题路径、父子关系、正文范围和原文 preview |
-| `ReadingBlock` | Section 内的阅读单位，长 Section 会拆成多个有序 block |
-| `RetrievalChunk` | 检索单位，用于 embedding、Qdrant BM25 和 rerank |
-| `SourceRef` | 从 chunk 回到原始 Markdown source span 的证据指针 |
+| 产物             | 用途                                                       |
+| ---------------- | ---------------------------------------------------------- |
+| `Section`        | 标题树节点，保存标题路径、父子关系、正文范围和原文 preview |
+| `ReadingBlock`   | Section 内的阅读单位，长 Section 会拆成多个有序 block      |
+| `RetrievalChunk` | 检索单位，用于 embedding、Qdrant BM25 和 rerank            |
+| `SourceRef`      | 从 chunk 回到原始 Markdown source span 的证据指针          |
 
 Contextual indexing 只增强 `RetrievalChunk.index_text`，不改变 raw text、source span、Section 范围或 evidence 定位。派生 context 按 prompt/model/输入指纹持久化到 Mongo，稳定内容可以跨重试复用。
 
@@ -53,12 +53,12 @@ locate(query)
 
 `SectionView` 由几部分组成：
 
-| 字段 | 含义 |
-| --- | --- |
-| 当前 Section | 命中或读取的标题树节点 |
-| `reading_blocks` | 当前 Section 内可读正文 |
-| `evidence` | SourceRef 回源后的精确证据 |
-| `frontier` | parent、previous、next、children 的轻量结构信息 |
+| 字段             | 含义                                            |
+| ---------------- | ----------------------------------------------- |
+| 当前 Section     | 命中或读取的标题树节点                          |
+| `reading_blocks` | 当前 Section 内可读正文                         |
+| `evidence`       | SourceRef 回源后的精确证据                      |
+| `frontier`       | parent、previous、next、children 的轻量结构信息 |
 
 frontier 只帮助 Agent 决定下一步读哪里，不预加载相邻正文。完整正文必须通过 `sections` 按 Section ID 再读。
 
@@ -66,11 +66,11 @@ frontier 只帮助 Agent 决定下一步读哪里，不预加载相邻正文。�
 
 知识导航让 Agent 在私有资料中逐步阅读，而不是一次性塞入大量上下文。它由三个动作组成：
 
-| 动作 | 作用 |
-| --- | --- |
-| `locate` | 用自然语言问题找到相关 Section，并创建导航状态 |
+| 动作       | 作用                                                          |
+| ---------- | ------------------------------------------------------------- |
+| `locate`   | 用自然语言问题找到相关 Section，并创建导航状态                |
 | `sections` | 读取已发现 Section 的完整 ReadingBlock，并扩展标题树 frontier |
-| `cypher` | 从已发现图节点出发，在 Neo4j 中做有界关系遍历 |
+| `cypher`   | 从已发现图节点出发，在 Neo4j 中做有界关系遍历                 |
 
 按结构读取是独立能力，不依赖图抽取。它直接通过 page / section 入口回答“见某某章节”“见某某页”这类定位问题，稳定性和成本都比让图抽取兜底更合适。
 

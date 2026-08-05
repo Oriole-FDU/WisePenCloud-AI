@@ -1,5 +1,4 @@
 from .models import (
-    RagContentLocator,
     RagResourceContentItem,
     RagResourceContentReadResult,
     RagResourceContentWindow,
@@ -15,7 +14,6 @@ from .service import (
 )
 
 __all__ = [
-    "RagContentLocator",
     "RagPageContentRequest",
     "RagResourceContentItem",
     "RagResourceContentReadResult",

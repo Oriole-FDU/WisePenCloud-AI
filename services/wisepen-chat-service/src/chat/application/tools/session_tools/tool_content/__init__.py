@@ -1,11 +1,13 @@
 from .services.models import (
-    ToolContentGroupedReadItem,
-    ToolContentGroupedReadResult,
+    ToolContentPageReadItem,
+    ToolContentPageReadResult,
     ToolContentRangeReadResult,
     ToolContentReadFailure,
     ToolContentRegexSearchMatch,
     ToolContentRegexSearchRequest,
     ToolContentRegexSearchResult,
+    ToolContentSectionReadItem,
+    ToolContentSectionReadResult,
     ToolContentSemanticSearchItem,
     ToolContentSemanticSearchRequest,
     ToolContentSemanticSearchResult,
@@ -17,13 +19,15 @@ from .services.models import (
 )
 
 __all__ = [
-    "ToolContentGroupedReadItem",
-    "ToolContentGroupedReadResult",
+    "ToolContentPageReadItem",
+    "ToolContentPageReadResult",
     "ToolContentRangeReadResult",
     "ToolContentReadFailure",
     "ToolContentRegexSearchMatch",
     "ToolContentRegexSearchRequest",
     "ToolContentRegexSearchResult",
+    "ToolContentSectionReadItem",
+    "ToolContentSectionReadResult",
     "ToolContentSemanticSearchItem",
     "ToolContentSemanticSearchRequest",
     "ToolContentSemanticSearchResult",

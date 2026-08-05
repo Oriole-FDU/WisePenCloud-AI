@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from hashlib import sha256
 
 from beanie.operators import In
-from rag.utils.chunkers import LocatorKind, SourceSpan
+from rag.utils.chunkers import SourceSpan
 from rag.application.rag.evidence import RagMaterializedSource
 from rag.application.rag.graph_extraction import (
     KnowledgeExtractionBlock,
@@ -26,8 +26,8 @@ from rag.application.rag.resource_snapshot import (
 from rag.application.rag.section_navigation import RagSectionView
 from rag.domain.entities.rag_content import (
     RagContentPartDocument,
-    RagContentLocatorDocument,
     RagContentRevisionDocument,
+    RagPageDocument,
     RagSectionDocument,
     RagSectionReadingBlockDocument,
     RagSourceRefDocument,
@@ -182,15 +182,16 @@ def normalize_content_offset(
     return min(max(offset, 0), total_length)
 
 
-def locator_window(
+def page_window(
     documents: list[RagContentPartDocument],
-    target_locator: RagContentLocatorDocument,
-    locator_documents: list[RagContentLocatorDocument],
+    page: RagPageDocument,
+    section_documents: list[RagSectionDocument],
+    reading_block_documents: list[RagSectionReadingBlockDocument],
     *,
     max_chars: int | None = None,
 ) -> RagResourceContentWindow:
-    start_offset = target_locator.start_offset
-    end_offset = target_locator.end_offset
+    start_offset = page.start_offset
+    end_offset = page.end_offset
     if max_chars is not None:
         end_offset = min(end_offset, start_offset + max(max_chars, 0))
     text = read_content_range(
@@ -202,27 +203,27 @@ def locator_window(
         text=text,
         start_offset=start_offset,
         end_offset=end_offset,
-        source_spans=(SourceSpan(start_offset, end_offset),) if start_offset < end_offset else (),
-        page_labels=_locator_labels(locator_documents, "page:"),
-        section_paths=tuple(
-            tuple(document.name.removeprefix("section:").split(" > "))
-            for document in locator_documents
-            if document.name.startswith("section:")
+        source_spans=(
+            (SourceSpan(start_offset, end_offset),)
+            if start_offset < end_offset
+            else ()
         ),
-        anchor_labels=_locator_labels(locator_documents, "anchor:"),
-    )
-
-
-def _locator_labels(
-    locator_documents: list[RagContentLocatorDocument],
-    prefix: str,
-) -> tuple[str, ...]:
-    return tuple(
-        dict.fromkeys(
-            document.name.removeprefix(prefix)
-            for document in locator_documents
-            if document.name.startswith(prefix)
-        )
+        page_labels=(page.page_label,),
+        section_paths=tuple(
+            dict.fromkeys(
+                tuple(document.section_path)
+                for document in section_documents
+                if document.section_path
+            )
+        ),
+        anchor_labels=tuple(
+            dict.fromkeys(
+                anchor_label
+                for block in reading_block_documents
+                for anchor_label in block.anchor_labels
+            )
+        ),
+        metadata={"page_label": page.page_label},
     )
 
 
@@ -381,6 +382,16 @@ def _section_block_window(
             "block_id": block.block_id,
             "ordinal": block.ordinal,
         },
+    )
+
+
+def _reading_block_overlaps(
+    block: RagSectionReadingBlockDocument,
+    page: RagPageDocument,
+) -> bool:
+    return any(
+        span.start_offset < page.end_offset and span.end_offset > page.start_offset
+        for span in block.source_spans
     )
 
 
@@ -609,11 +620,11 @@ class MongoRagResourceSnapshotRepository:
         if content is None:
             return None
 
-        locator_documents = (
-            await RagContentLocatorDocument.find(
-                RagContentLocatorDocument.content_revision == revision
+        page_documents = (
+            await RagPageDocument.find(
+                RagPageDocument.content_revision == revision
             )
-            .sort("locator_index")
+            .sort("page_index")
             .to_list()
         )
         section_documents = (
@@ -631,10 +642,9 @@ class MongoRagResourceSnapshotRepository:
             total_length=total_length,
             pages=tuple(
                 RagResourceSnapshotPage(
-                    page_label=document.name.removeprefix("page:"),
+                    page_label=document.page_label,
                 )
-                for document in locator_documents
-                if document.kind is LocatorKind.PAGE
+                for document in page_documents
             ),
             sections=_build_snapshot_section_tree(section_documents),
         )
@@ -664,24 +674,37 @@ class MongoRagResourceSnapshotRepository:
         )
 
         unique_page_labels = tuple(dict.fromkeys(page_labels))
-        locator_names = tuple(f"page:{label}" for label in unique_page_labels)
-        page_locators = (
-            await RagContentLocatorDocument.find(
-                RagContentLocatorDocument.content_revision == revision,
-                In(RagContentLocatorDocument.name, locator_names),
+        page_documents = (
+            await RagPageDocument.find(
+                RagPageDocument.content_revision == revision,
+                In(RagPageDocument.page_label, unique_page_labels),
             )
-            .sort("locator_index")
+            .sort("page_index")
             .to_list()
         )
-        locators_by_name: dict[str, list[RagContentLocatorDocument]] = {}
-        for locator_document in page_locators:
-            locators_by_name.setdefault(locator_document.name, []).append(locator_document)
+        pages_by_label: dict[str, list[RagPageDocument]] = {}
+        for page_document in page_documents:
+            pages_by_label.setdefault(page_document.page_label, []).append(page_document)
+
+        section_documents = (
+            await RagSectionDocument.find(
+                RagSectionDocument.content_revision == revision
+            )
+            .sort("level", "ordinal")
+            .to_list()
+        )
+        reading_block_documents = (
+            await RagSectionReadingBlockDocument.find(
+                RagSectionReadingBlockDocument.content_revision == revision
+            )
+            .sort("section_id", "ordinal")
+            .to_list()
+        )
 
         items: list[RagResourceContentItem] = []
         for page_label in unique_page_labels:
-            locator_name = f"page:{page_label}"
-            target_locators = locators_by_name.get(locator_name, [])
-            if not target_locators:
+            pages = pages_by_label.get(page_label, [])
+            if not pages:
                 items.append(
                     RagResourceContentItem(
                         key=page_label,
@@ -692,18 +715,25 @@ class MongoRagResourceSnapshotRepository:
                 continue
 
             windows: list[RagResourceContentWindow] = []
-            for target_locator in target_locators:
-                overlapping_locators = (
-                    await RagContentLocatorDocument.find(
-                        RagContentLocatorDocument.content_revision == revision,
-                        RagContentLocatorDocument.start_offset < target_locator.end_offset,
-                        RagContentLocatorDocument.end_offset > target_locator.start_offset,
-                    )
-                    .sort("locator_index")
-                    .to_list()
-                )
+            for page in pages:
+                overlapping_sections = [
+                    section
+                    for section in section_documents
+                    if section.own_start < page.end_offset
+                    and section.own_end > page.start_offset
+                ]
+                overlapping_blocks = [
+                    block
+                    for block in reading_block_documents
+                    if _reading_block_overlaps(block, page)
+                ]
                 windows.append(
-                    locator_window(content_parts, target_locator, overlapping_locators)
+                    page_window(
+                        content_parts,
+                        page,
+                        overlapping_sections,
+                        overlapping_blocks,
+                    )
                 )
             items.append(
                 RagResourceContentItem(

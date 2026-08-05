@@ -11,7 +11,11 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 
-from ..services.models import ToolContentGroupedReadResult, ToolContentRangeReadResult
+from ..services.models import (
+    ToolContentPageReadResult,
+    ToolContentRangeReadResult,
+    ToolContentSectionReadResult,
+)
 from ..services.service import ToolContentService
 
 _TIMEOUT_SECONDS = 300.0
@@ -153,7 +157,7 @@ class ToolContentReadPagesTool:
                     "  - You need sections; use tool_content_read_sections.\n"
                     "  - You only know a semantic question or exact phrase; search first.\n\n"
                     "OUTPUT RULES:\n"
-                    "  - items[] is grouped by requested page label.\n"
+                    "  - items[].page_label echoes the requested page label.\n"
                     "  - budget_exhausted indicates that later page windows were omitted."
                 ),
                 parameters_schema=ToolParametersSchema(_PAGES_PARAMETERS_SCHEMA),
@@ -170,7 +174,7 @@ class ToolContentReadPagesTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> ToolContentGroupedReadResult:
+    ) -> ToolContentPageReadResult:
         del config
         try:
             return await self._service.read_pages(
@@ -207,7 +211,7 @@ class ToolContentReadSectionsTool:
                     "INPUT RULES:\n"
                     "  - section_paths are exact strings from snapshot, joined with \" > \".\n"
                     "OUTPUT RULES:\n"
-                    "  - items[] is grouped by requested section_path.\n"
+                    "  - items[].section_path echoes the requested section_path.\n"
                     "  - budget_exhausted indicates that later section windows were omitted."
                 ),
                 parameters_schema=ToolParametersSchema(_SECTIONS_PARAMETERS_SCHEMA),
@@ -224,7 +228,7 @@ class ToolContentReadSectionsTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> ToolContentGroupedReadResult:
+    ) -> ToolContentSectionReadResult:
         del config
         try:
             return await self._service.read_sections(

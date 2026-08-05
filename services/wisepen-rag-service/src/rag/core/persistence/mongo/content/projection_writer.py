@@ -4,7 +4,7 @@ from beanie.operators import In
 from rag.utils.chunkers import SourceSpan
 from rag.application.rag.ingestion import (
     RagContentProjection,
-    RagContentLocator,
+    RagPageRange,
     RagProjectionStage,
     RagProjectionStageAction,
     RagSectionNode,
@@ -16,8 +16,8 @@ from rag.domain.entities.rag_content import (
     RagContentPartDocument,
     RagContextIndexingDocument,
     RagContentRevisionDocument,
-    RagContentLocatorDocument,
     RagGraphExtractionDocument,
+    RagPageDocument,
     RagProjectionCheckpointDocument,
     RagSectionDocument,
     RagSectionReadingBlockDocument,
@@ -85,17 +85,16 @@ def source_ref_document(
     )
 
 
-def content_locator_document(
+def page_document(
     content_revision: str,
-    locator: RagContentLocator,
-) -> RagContentLocatorDocument:
-    return RagContentLocatorDocument(
+    page: RagPageRange,
+) -> RagPageDocument:
+    return RagPageDocument(
         content_revision=content_revision,
-        locator_index=locator.locator_index,
-        name=locator.name,
-        kind=locator.kind,
-        start_offset=locator.start_offset,
-        end_offset=locator.end_offset,
+        page_index=page.page_index,
+        page_label=page.page_label,
+        start_offset=page.start_offset,
+        end_offset=page.end_offset,
     )
 
 
@@ -168,7 +167,7 @@ class MongoRagContentProjectionWriter:
             return
         for document_type in (
             RagContentPartDocument,
-            RagContentLocatorDocument,
+            RagPageDocument,
             RagSectionDocument,
             RagSectionReadingBlockDocument,
             RagSourceRefDocument,
@@ -248,8 +247,8 @@ class MongoRagContentProjectionWriter:
         await RagContentPartDocument.find(
             RagContentPartDocument.content_revision == content_revision
         ).delete()
-        await RagContentLocatorDocument.find(
-            RagContentLocatorDocument.content_revision == content_revision
+        await RagPageDocument.find(
+            RagPageDocument.content_revision == content_revision
         ).delete()
         await RagSectionDocument.find(
             RagSectionDocument.content_revision == content_revision
@@ -285,8 +284,8 @@ class MongoRagContentProjectionWriter:
                 source_ref_document(content_revision, source_ref)
                 for source_ref in projection.source_refs
             )
-        if projection.locators:
-            await RagContentLocatorDocument.insert_many(
-                content_locator_document(content_revision, locator)
-                for locator in projection.locators
+        if projection.pages:
+            await RagPageDocument.insert_many(
+                page_document(content_revision, page)
+                for page in projection.pages
             )
