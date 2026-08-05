@@ -13,7 +13,6 @@ members = [
     "wisepen-chat-service",
     "wisepen-common",
     "wisepen-mcp-service",
-    "wisepen-sandbox-service",
     "wisepen-sandbox-v1-service",
     "wisepen-server-py",
 ]
@@ -3672,50 +3671,6 @@ requires-dist = [
 ]
 
 [[package]]
-name = "wisepen-sandbox-service"
-version = "0.2.0"
-source = { editable = "services/wisepen-sandbox-service" }
-dependencies = [
-    { name = "dependency-injector" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "mcp" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyyaml" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "wisepen-common" },
-]
-
-[package.optional-dependencies]
-mongo = [
-    { name = "pymongo" },
-]
-test = [
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "dependency-injector" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "httpx", marker = "extra == 'test'" },
-    { name = "mcp", specifier = ">=1.27,<2" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pymongo", marker = "extra == 'mongo'" },
-    { name = "pytest", marker = "extra == 'test'" },
-    { name = "pytest-asyncio", marker = "extra == 'test'" },
-    { name = "pyyaml" },
-    { name = "uvicorn", extras = ["standard"] },
-    { name = "wisepen-common", editable = "services/wisepen-common" },
-]
-provides-extras = ["test", "mongo"]
-
-[[package]]
 name = "wisepen-sandbox-v1-service"
 version = "0.1.0"
 source = { editable = "services/wisepen-sandbox-v1-service" }
@@ -3764,7 +3719,6 @@ dependencies = [
     { name = "wisepen-chat-service" },
     { name = "wisepen-common" },
     { name = "wisepen-mcp-service" },
-    { name = "wisepen-sandbox-service" },
     { name = "wisepen-sandbox-v1-service" },
 ]
 
@@ -3776,7 +3730,6 @@ requires-dist = [
     { name = "wisepen-chat-service", editable = "services/wisepen-chat-service" },
     { name = "wisepen-common", editable = "services/wisepen-common" },
     { name = "wisepen-mcp-service", editable = "services/wisepen-mcp-service" },
-    { name = "wisepen-sandbox-service", editable = "services/wisepen-sandbox-service" },
     { name = "wisepen-sandbox-v1-service", editable = "services/wisepen-sandbox-v1-service" },
 ]
 

@@ -31,6 +31,9 @@ ENV/
 .uv/
 .uv-cache/
 
+# Legacy sandbox service is kept locally during the v1 migration, but no longer tracked.
+services/wisepen-sandbox-service/
+
 # PyCharm / VS Code
 .idea/
 .vscode/

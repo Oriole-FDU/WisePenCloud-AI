@@ -8,7 +8,6 @@ dependencies = [
     "wisepen-chat-service",
     "wisepen-mcp-service",
     "wisepen-common",
-    "wisepen-sandbox-service",
     "wisepen-sandbox-v1-service",
     "mcp>=1.27,<2",
     "pytest>=9.1.1",
@@ -16,7 +15,10 @@ dependencies = [
 
 [tool.uv.workspace]
 members = [
-    "services/*",   # 扫描 services 下的所有子文件夹
+    "services/wisepen-chat-service",
+    "services/wisepen-common",
+    "services/wisepen-mcp-service",
+    "services/wisepen-sandbox-v1-service",
 ]
 
 [tool.pytest.ini_options]
@@ -26,5 +28,4 @@ asyncio_mode = "auto"
 wisepen-chat-service = { workspace = true }
 wisepen-mcp-service = { workspace = true }
 wisepen-common = { workspace = true }
-wisepen-sandbox-service = { workspace = true }
 wisepen-sandbox-v1-service = { workspace = true }
