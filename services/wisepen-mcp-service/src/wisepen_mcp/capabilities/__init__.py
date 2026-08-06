@@ -13,6 +13,8 @@ def build_mcp_server(
     *,
     ai_asset_client: AIAssetClient,
     rag_service_client: RagServiceClient,
+    rag_direct_text_window_char_budget: int = 24_000,
+    rag_direct_text_total_char_budget: int = 48_000,
     web_search_service: WebSearchService,
 ) -> FastMCP:
     mcp = FastMCP(
@@ -25,7 +27,12 @@ def build_mcp_server(
         ),
     )
     register_skill_creator_tools(mcp, ai_asset_client)
-    register_rag_tools(mcp, rag_service_client)
+    register_rag_tools(
+        mcp,
+        rag_service_client,
+        direct_text_window_char_budget=rag_direct_text_window_char_budget,
+        direct_text_total_char_budget=rag_direct_text_total_char_budget,
+    )
     register_web_search_tools(mcp, web_search_service)
     return mcp
 

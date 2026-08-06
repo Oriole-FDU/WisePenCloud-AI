@@ -39,7 +39,7 @@ _WEB_SEARCH_POLICY = ToolPolicy(
     risk_level=ToolRiskLevel.LOW,
     timeout_seconds=100.0,
     persist_output=True,
-    max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+    max_output_chars=None,
 )
 
 _RAG_NAVIGATION_POLICY = ToolPolicy(
@@ -79,7 +79,7 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [
         "failure_reason": "Skill Info Load Failed",
     },
     {
-        "tool_name": "update_skill_info",  
+        "tool_name": "update_skill_info",
         "policy": ToolPolicy(
             expose_by_default=False,
             risk_level=ToolRiskLevel.MEDIUM,

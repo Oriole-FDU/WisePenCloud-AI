@@ -5,22 +5,27 @@ from typing import Annotated, Any
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field, StringConstraints
 
-from wisepen_mcp.capabilities.core.tools import CacheableText
 from wisepen_mcp.capabilities.rag.models import (
     KnowledgeNavigationDirection,
     KnowledgeRelationType,
 )
 from wisepen_mcp.service_client import RagServiceClient
 
-from .common import StateId, section_view_payload, session_id
+from .common import (
+    RagTextRenderBudget,
+    RagTextRenderRouter,
+    StateId,
+    section_view_payload,
+    session_id,
+)
 
 _LOCATE_DESCRIPTION = (
     "Description:\n"
     "Call first when the answer may be in the user's private WisePen documents. "
     "It returns grounded sections plus graph node anchors for follow-up navigation.\n\n"
     "Output:\n"
-    "Use sources[].evidence and sources[].reading_blocks previews to decide what "
-    "to read. Each content_index points to an exact cached text entry. Reuse "
+    "Use sources[].evidence and sources[].reading_blocks text directly when present; "
+    "oversized entries expose cache content_index for follow-up range reads. Reuse "
     "state_id with knowledge_navigate_sections for section text, or with "
     "knowledge_navigate_cypher for returned node_id values. Nodes are anchors, not evidence."
 )
@@ -31,8 +36,8 @@ _CYPHER_DESCRIPTION = (
     "Use this when entity relationships could reveal related private-document evidence.\n\n"
     "Output:\n"
     "paths are candidate reasoning chains. edges expose endpoint node IDs, direction, "
-    "relation type, evidence quotes, source_ref IDs, and evidence_content_indices. "
-    "Use those content indices and returned sources to ground claims."
+    "relation type, evidence quotes, and source_ref IDs. Oversized returned sources "
+    "also expose evidence_content_indices for follow-up range reads."
 )
 
 _SECTIONS_DESCRIPTION = (
@@ -40,7 +45,8 @@ _SECTIONS_DESCRIPTION = (
     "Read full text for section_id values already returned by locate, cypher, or "
     "a frontier entry. Use this when a section preview is relevant but incomplete.\n\n"
     "Output:\n"
-    "reading_blocks contain the section text via content_index. evidence contains "
+    "reading_blocks contain section text directly when it fits the safe read budget. "
+    "Oversized blocks expose content_index for follow-up range reads. evidence contains "
     "the original hit snippets. frontier suggests adjacent or child sections to read next; "
     "frontier entries are navigation choices, not evidence."
 )
@@ -81,7 +87,12 @@ _SECTION_IDS = Annotated[
 ]
 
 
-def register_navigation_tools(mcp: FastMCP, client: RagServiceClient) -> None:
+def register_navigation_tools(
+    mcp: FastMCP,
+    client: RagServiceClient,
+    *,
+    text_budget: RagTextRenderBudget,
+) -> None:
     @mcp.tool(name="knowledge_navigate_locate", description=_LOCATE_DESCRIPTION)
     async def knowledge_navigate_locate(
         query: _QUERY,
@@ -99,7 +110,8 @@ def register_navigation_tools(mcp: FastMCP, client: RagServiceClient) -> None:
                 session_id=session_id(ctx),
                 query=query,
                 max_results=max_results,
-            )
+            ),
+            text_budget=text_budget,
         )
 
     @mcp.tool(name="knowledge_navigate_cypher", description=_CYPHER_DESCRIPTION)
@@ -160,7 +172,8 @@ def register_navigation_tools(mcp: FastMCP, client: RagServiceClient) -> None:
                 direction=direction.value,
                 max_depth=max_depth,
                 max_results=max_results,
-            )
+            ),
+            text_budget=text_budget,
         )
 
     @mcp.tool(name="knowledge_navigate_sections", description=_SECTIONS_DESCRIPTION)
@@ -174,30 +187,39 @@ def register_navigation_tools(mcp: FastMCP, client: RagServiceClient) -> None:
                 session_id=session_id(ctx),
                 state_id=state_id,
                 section_ids=section_ids,
-            )
+            ),
+            text_budget=text_budget,
         )
 
 
-def _render_locate_result(result: dict[str, Any]) -> dict[str, Any]:
-    cacheable_texts: list[CacheableText] = []
+def _render_locate_result(
+    result: dict[str, Any],
+    *,
+    text_budget: RagTextRenderBudget,
+) -> dict[str, Any]:
+    text_router = RagTextRenderRouter(text_budget)
     return {
         "visible_result": {
             "state_id": result["state_id"],
             "nodes": result["nodes"],
             "sources": [
-                section_view_payload(source, cacheable_texts)
+                section_view_payload(source, text_router)
                 for source in result["sources"]
             ],
         },
-        "cacheable_texts": cacheable_texts,
+        "cacheable_texts": text_router.cacheable_texts,
     }
 
 
-def _render_cypher_result(result: dict[str, Any]) -> dict[str, Any]:
-    cacheable_texts: list[CacheableText] = []
+def _render_cypher_result(
+    result: dict[str, Any],
+    *,
+    text_budget: RagTextRenderBudget,
+) -> dict[str, Any]:
+    text_router = RagTextRenderRouter(text_budget)
     source_content_indices: dict[str, int] = {}
     sources = [
-        section_view_payload(source, cacheable_texts, source_content_indices)
+        section_view_payload(source, text_router, source_content_indices)
         for source in result["sources"]
     ]
     edge_directions: dict[str, str] = {}
@@ -222,21 +244,25 @@ def _render_cypher_result(result: dict[str, Any]) -> dict[str, Any]:
             "paths": result["paths"],
             "sources": sources,
         },
-        "cacheable_texts": cacheable_texts,
+        "cacheable_texts": text_router.cacheable_texts,
     }
 
 
-def _render_sections_result(result: dict[str, Any]) -> dict[str, Any]:
-    cacheable_texts: list[CacheableText] = []
+def _render_sections_result(
+    result: dict[str, Any],
+    *,
+    text_budget: RagTextRenderBudget,
+) -> dict[str, Any]:
+    text_router = RagTextRenderRouter(text_budget)
     return {
         "visible_result": {
             "state_id": result["state_id"],
             "sections": [
-                section_view_payload(section, cacheable_texts)
+                section_view_payload(section, text_router)
                 for section in result["sections"]
             ],
         },
-        "cacheable_texts": cacheable_texts,
+        "cacheable_texts": text_router.cacheable_texts,
     }
 
 
@@ -247,7 +273,7 @@ def _edge_payload(
     source_content_indices: dict[str, int],
 ) -> dict[str, Any]:
     source_ref_ids = tuple(dict.fromkeys(edge["evidence_source_ref_ids"]))
-    return {
+    payload = {
         "edge_id": edge["edge_id"],
         "source_node_id": edge["source_node_id"],
         "source_label": node_labels.get(edge["source_node_id"], edge["source_node_id"]),
@@ -258,9 +284,12 @@ def _edge_payload(
         "direction": edge_directions[edge["edge_id"]],
         "evidence_quotes": list(dict.fromkeys(edge["evidence_quotes"])),
         "evidence_source_ref_ids": list(source_ref_ids),
-        "evidence_content_indices": [
-            source_content_indices[source_ref_id]
-            for source_ref_id in source_ref_ids
-            if source_ref_id in source_content_indices
-        ],
     }
+    evidence_content_indices = [
+        source_content_indices[source_ref_id]
+        for source_ref_id in source_ref_ids
+        if source_ref_id in source_content_indices
+    ]
+    if evidence_content_indices:
+        payload["evidence_content_indices"] = evidence_content_indices
+    return payload

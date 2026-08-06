@@ -5,10 +5,9 @@ from typing import Annotated, Any
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field, StringConstraints
 
-from wisepen_mcp.capabilities.core.tools import CacheableText
 from wisepen_mcp.service_client import RagServiceClient
 
-from .common import append_cacheable_text, preview
+from .common import RagTextRenderBudget, RagTextRenderRouter
 
 _STRUCTURE_DESCRIPTION = (
     "Description:\n"
@@ -26,8 +25,9 @@ _PAGE_CONTENT_DESCRIPTION = (
     "Input:\n"
     "Provide page_labels as a list, such as [\"5\", \"6\", \"12\"]. Keep requests tight.\n\n"
     "Output:\n"
-    "items[] is grouped by requested page label. Each window gets a content_index so "
-    "downstream tools can reuse the cached text."
+    "items[] is grouped by requested page label. Windows return text directly while "
+    "they fit the safe read budget; oversized windows expose a cache content_index "
+    "for follow-up range reads."
 )
 
 _SECTION_CONTENT_DESCRIPTION = (
@@ -38,8 +38,9 @@ _SECTION_CONTENT_DESCRIPTION = (
     "Provide section_ids as a list. A section read returns that section's own reading "
     "blocks, not descendant sections; pass child section_ids too when you need them.\n\n"
     "Output:\n"
-    "items[] is grouped by requested section_id. Each window gets a content_index so "
-    "downstream tools can reuse the cached text."
+    "items[] is grouped by requested section_id. Windows return text directly while "
+    "they fit the safe read budget; oversized windows expose a cache content_index "
+    "for follow-up range reads."
 )
 
 _RESOURCE_ID = Annotated[
@@ -67,7 +68,12 @@ _SECTION_IDS = Annotated[
 ]
 
 
-def register_resource_tools(mcp: FastMCP, client: RagServiceClient) -> None:
+def register_resource_tools(
+    mcp: FastMCP,
+    client: RagServiceClient,
+    *,
+    text_budget: RagTextRenderBudget,
+) -> None:
     @mcp.tool(name="rag_get_document_structure", description=_STRUCTURE_DESCRIPTION)
     async def rag_get_document_structure(resource_id: _RESOURCE_ID) -> dict[str, Any]:
         return _render_structure_result(
@@ -83,7 +89,8 @@ def register_resource_tools(mcp: FastMCP, client: RagServiceClient) -> None:
             await client.get_page_content(
                 resource_id=resource_id,
                 page_labels=page_labels,
-            )
+            ),
+            text_budget=text_budget,
         )
 
     @mcp.tool(name="rag_get_section_content", description=_SECTION_CONTENT_DESCRIPTION)
@@ -95,7 +102,8 @@ def register_resource_tools(mcp: FastMCP, client: RagServiceClient) -> None:
             await client.get_section_content(
                 resource_id=resource_id,
                 section_ids=section_ids,
-            )
+            ),
+            text_budget=text_budget,
         )
 
 
@@ -118,13 +126,17 @@ def _render_structure_result(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _render_read_result(result: dict[str, Any]) -> dict[str, Any]:
-    cacheable_texts: list[CacheableText] = []
+def _render_read_result(
+    result: dict[str, Any],
+    *,
+    text_budget: RagTextRenderBudget,
+) -> dict[str, Any]:
+    text_router = RagTextRenderRouter(text_budget)
     items = [
         _item_payload(
             item,
             [
-                _window_payload(result, window, cacheable_texts)
+                _window_payload(result, window, text_router)
                 for window in item["windows"]
             ],
         )
@@ -137,7 +149,7 @@ def _render_read_result(result: dict[str, Any]) -> dict[str, Any]:
             "document_version": result["document_version"],
             "items": items,
         },
-        "cacheable_texts": cacheable_texts,
+        "cacheable_texts": text_router.cacheable_texts,
     }
 
 
@@ -164,10 +176,9 @@ def _item_payload(item: dict[str, Any], windows: list[dict[str, Any]]) -> dict[s
 def _window_payload(
     result: dict[str, Any],
     window: dict[str, Any],
-    cacheable_texts: list[CacheableText],
+    text_router: RagTextRenderRouter,
 ) -> dict[str, Any]:
-    content_index = append_cacheable_text(
-        cacheable_texts,
+    text_payload = text_router.text_payload(
         window["text"],
         metadata={
             "resource_id": result["resource_id"],
@@ -182,13 +193,11 @@ def _window_payload(
         },
     )
     return {
-        "content_index": content_index,
-        "preview": preview(window["text"]),
+        **text_payload,
         "start_offset": window["start_offset"],
         "end_offset": window["end_offset"],
         "source_spans": window["source_spans"],
         "page_labels": window["page_labels"],
         "section_paths": window["section_paths"],
         "anchor_labels": window["anchor_labels"],
-        "metadata": window["metadata"],
     }

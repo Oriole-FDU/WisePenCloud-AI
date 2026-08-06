@@ -35,6 +35,8 @@ os.environ["NO_PROXY"] = no_proxy
 mcp_server = build_mcp_server(
     ai_asset_client=container.ai_asset_client(),
     rag_service_client=container.rag_service_client(),
+    rag_direct_text_window_char_budget=settings.RAG_DIRECT_TEXT_WINDOW_CHAR_BUDGET,
+    rag_direct_text_total_char_budget=settings.RAG_DIRECT_TEXT_TOTAL_CHAR_BUDGET,
     web_search_service=container.web_search_service(),
 )
 mcp_app = mcp_server.streamable_http_app()
