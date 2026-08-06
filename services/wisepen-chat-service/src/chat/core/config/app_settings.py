@@ -102,7 +102,7 @@ class AppSettings(BaseModel):
     # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
     TOOL_RESULT_MAX_CHARS: int = 4000
     # 可缓存工具正文只在模型可见预览中计入预算；完整正文仍进入 ToolContentStore。
-    TOOL_CONTENT_PREVIEW_PER_TOKEN_BUDGET: int = 1_024
+    TOOL_CONTENT_PREVIEW_PER_TOKEN_BUDGET: int = 2_048
     TOOL_CONTENT_PREVIEW_TOTAL_TOKEN_BUDGET: int = 8_192
     TOOL_CONTENT_READ_WINDOW_TOKEN_BUDGET: int = 4_096
     TOOL_CONTENT_READ_TOTAL_TOKEN_BUDGET: int = 8_192
