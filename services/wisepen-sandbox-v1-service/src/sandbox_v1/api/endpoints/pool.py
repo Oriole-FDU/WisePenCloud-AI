@@ -13,7 +13,7 @@ router = APIRouter(prefix="/internal", tags=["pool"])
 
 
 @router.get(
-    "/pool/metrics",
+    "/poolMetrics",
     response_model=R[PoolMetricsResponse],
     status_code=200,
     summary="查询沙箱池指标",

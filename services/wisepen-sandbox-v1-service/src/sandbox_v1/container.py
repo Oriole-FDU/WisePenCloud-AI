@@ -13,22 +13,26 @@ from sandbox_v1.domain.entities import SandboxSpec
 
 
 def _sandbox_spec(image: str) -> SandboxSpec:
-    """Build the provider-neutral spec used by the pool replenisher."""
+    """构造 watcher 补池时使用的 provider-neutral 创建规格。"""
+
     return SandboxSpec(image=image)
 
 
 class Container(containers.DeclarativeContainer):
-    """Dependency graph for the container-pool core.
+    """沙箱池核心的依赖注入图。
 
-    The concrete runtime provider is deliberately a dependency. Docker/AIO
-    selection belongs to a later integration layer and is not part of this
-    service's core implementation.
+    Repository、Pool、StartupReconciler 和 Watcher 属于本服务核心；具体
+    Docker/AIO runtime provider 由部署层注入，避免核心服务绑定某个运行时实现。
     """
 
+    # 运行时配置由 main.py 从 AppSettings 注入。
     config = providers.Configuration()
 
+    # 共享的进程内指标和 Repository，是 Pool/Watcher/Reconciler 的权威状态来源。
     metrics = providers.Singleton(MetricsCollector)
     repository = providers.Singleton(MemorySandboxRepository, metrics=metrics)
+
+    # Pool 是用户消费和容量计划门面，不直接创建或销毁 runtime 容器。
     pool = providers.Singleton(
         SandboxPool,
         repository=repository,
@@ -37,13 +41,17 @@ class Container(containers.DeclarativeContainer):
         max_user_bindings=config.SANDBOX_MAX_USER_BINDINGS,
     )
 
-    # Deployment code must override this port with its container runtime.
+    # 部署层必须用具体容器运行时覆盖该端口。
     provider = providers.Dependency()
+
+    # 启动对账负责把 provider 发现容器与 Repository 权威记录重新对齐。
     startup_reconciler = providers.Singleton(
         SandboxStartupReconciler,
         repository=repository,
         provider=provider,
     )
+
+    # Watcher 按 Pool 计划补池，并处理 warmup、失败清理和 stale 回收。
     watcher = providers.Singleton(
         Watcher,
         pool=pool,

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dependency_injector.wiring import Provide, inject
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
+from common.core.domain import R
+from common.core.exceptions import ServiceException
+from sandbox_v1.domain.error_codes import SandboxErrorCode
 
 from sandbox_v1.api.schemas import (
     HealthResponse,
@@ -17,8 +20,8 @@ router = APIRouter(tags=["health"])
 
 
 @router.get(
-    "/healthz",
-    response_model=HealthResponse,
+    "/health",
+    response_model=R[HealthResponse],
     summary="检查服务存活状态",
     description="""
 - 用途：确认 Sandbox Service 进程仍在运行。
@@ -28,13 +31,13 @@ router = APIRouter(tags=["health"])
 - 响应：返回 `{"status":"ok"}`，HTTP 200。
 """,
 )
-async def healthz() -> HealthResponse:
-    return HealthResponse(status="ok")
+async def health() -> R[HealthResponse]:
+    return R.success(data=HealthResponse(status="ok"))
 
 
 @router.get(
-    "/readyz",
-    response_model=ReadinessResponse,
+    "/ready",
+    response_model=R[ReadinessResponse],
     responses={
         503: {
             "model": ReadinessErrorResponse,
@@ -52,23 +55,16 @@ async def healthz() -> HealthResponse:
 """,
 )
 @inject
-async def readyz(
+async def ready(
     pool: SandboxPool = Depends(Provide[Container.pool]),
 ) -> ReadinessResponse:
     snapshot = await pool.snapshot()
     ready = snapshot.counts.get(SandboxState.READY, 0)
     if ready < snapshot.min_ready:
         # 就绪状态代表是否有足够预热实例承接新请求，不等同于进程存活。
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "MIN_READY_NOT_REACHED",
-                "ready": ready,
-                "min_ready": snapshot.min_ready,
-            },
-        )
-    return ReadinessResponse(
+        raise ServiceException(SandboxErrorCode.POOL_EMPTY)
+    return R.success(data=ReadinessResponse(
         status = "ready",
         ready = ready,
         min_ready = snapshot.min_ready,
-    )
+    ))

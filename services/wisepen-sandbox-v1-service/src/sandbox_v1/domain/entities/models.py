@@ -7,10 +7,18 @@ from typing import Any
 
 
 def utc_now() -> datetime:
+    """返回带 UTC timezone 的当前时间，供记录时间戳使用。"""
+
     return datetime.now(timezone.utc)
 
 
 class SandboxState(StrEnum):
+    """沙箱生命周期状态。
+
+    CREATING/WARMING/READY 属于池供给路径，USER_ACTIVE/RETIRING 属于用户绑定
+    路径，DESTROYING/DESTROYED/LOST 属于清理和失败落态路径。
+    """
+
     CREATING = "creating"
     WARMING = "warming"
     READY = "ready"
@@ -23,6 +31,8 @@ class SandboxState(StrEnum):
 
 @dataclass(frozen=True)
 class Health:
+    """provider 返回的容器健康状态。"""
+
     healthy: bool
     status: str = "unknown"
     version: str | None = None
@@ -42,12 +52,16 @@ class SandboxSpec:
 
 @dataclass(frozen=True)
 class Endpoint:
+    """沙箱实例对服务内部暴露的访问入口。"""
+
     base_url: str
     token: str | None = None
 
 
 @dataclass(frozen=True)
 class SandboxRef:
+    """跨 Repository 和 Provider 传递的沙箱引用。"""
+
     sandbox_id: str
     provider_id: str
     endpoint: Endpoint | None = None
@@ -65,6 +79,8 @@ class DiscoveredSandbox:
 
 @dataclass
 class SandboxRecord:
+    """Repository 中的沙箱权威记录。"""
+
     ref: SandboxRef
     state: SandboxState
     created_at: datetime = field(default_factory=utc_now)
@@ -91,6 +107,8 @@ class UserSandboxBindingRecord:
 
 @dataclass(frozen=True)
 class PoolSnapshot:
+    """某一时刻的池状态和指标快照。"""
+
     generation: int
     counts: dict[SandboxState, int]
     empty_checkouts: int = 0
@@ -99,11 +117,16 @@ class PoolSnapshot:
     target_ready: int = 0
 
     def as_dict(self) -> dict[str, Any]:
+        """展开为 API/日志友好的 dict，包括固定字段、指标和各状态计数。"""
+
         return {
+            # 固定快照字段。
             "generation": self.generation,
             "empty_checkouts": self.empty_checkouts,
             "min_ready": self.min_ready,
             "target_ready": self.target_ready,
+            # 指标收集器输出。
             **self.metrics,
+            # 每个状态按 state.value 展开，缺失状态按 0 输出。
             **{state.value: self.counts.get(state, 0) for state in SandboxState},
         }
