@@ -4,11 +4,6 @@ import asyncio
 
 import regex
 
-from chat.application.tools.common.canonical_token_budget import (
-    count_canonical_tokens,
-    truncate_canonical_prefix,
-    truncate_canonical_suffix,
-)
 from chat.application.tools.common.tool_content_store import (
     StoredToolContent,
     ToolContentChunk,
@@ -53,8 +48,8 @@ class ToolContentService:
     """按结构快照、search 和 read 三类语义访问权威工具原文。
 
     service 只从 `ToolContentStore` 读取权威原文和解析结果，再把它们转换为
-    模型可见的窗口。字符 offset 用于定位原文，canonical token budget 用于
-    控制模型输出；两者由 window builder 协同维护，但不能互相替代。
+    模型可见的窗口。字符 offset 用于定位原文，字符预算用于控制工具正文
+    输出规模；真正的 prompt token 水位仍由 chat context 组装层统一负责。
 
     各类读取共享“单次请求总预算”，而不是共享某个窗口的预算：
     page/section 会按请求顺序消费总预算，regex 会按命中顺序消费总预算，
@@ -63,12 +58,12 @@ class ToolContentService:
     """
 
     __slots__ = (
-        "_read_total_token_budget",
+        "_read_total_char_budget",
         "_read_window_builder",
-        "_regex_context_side_token_budget",
-        "_regex_total_token_budget",
+        "_regex_context_side_char_budget",
+        "_regex_total_char_budget",
         "_ranking_pipeline",
-        "_semantic_search_total_token_budget",
+        "_semantic_search_total_char_budget",
         "_semantic_search_window_builder",
         "_store",
     )
@@ -76,12 +71,12 @@ class ToolContentService:
     def __init__(
         self,
         *,
-        read_window_token_budget: int,
-        read_total_token_budget: int,
-        semantic_search_window_token_budget: int,
-        semantic_search_total_token_budget: int,
-        regex_context_side_token_budget: int,
-        regex_total_token_budget: int,
+        read_window_char_budget: int,
+        read_total_char_budget: int,
+        semantic_search_window_char_budget: int,
+        semantic_search_total_char_budget: int,
+        regex_context_side_char_budget: int,
+        regex_total_char_budget: int,
         ranking_pipeline: RankingPipeline,
         store: ToolContentStore,
     ) -> None:
@@ -92,26 +87,26 @@ class ToolContentService:
         """
 
         if min(
-            read_window_token_budget,
-            read_total_token_budget,
-            semantic_search_window_token_budget,
-            semantic_search_total_token_budget,
-            regex_context_side_token_budget,
-            regex_total_token_budget,
+            read_window_char_budget,
+            read_total_char_budget,
+            semantic_search_window_char_budget,
+            semantic_search_total_char_budget,
+            regex_context_side_char_budget,
+            regex_total_char_budget,
         ) < 1:
-            raise ValueError("tool content token budgets must be greater than 0")
+            raise ValueError("tool content character budgets must be greater than 0")
         self._ranking_pipeline = ranking_pipeline
         self._store = store
         self._read_window_builder = ToolContentWindowBuilder(
-            token_budget=read_window_token_budget
+            char_budget=read_window_char_budget
         )
         self._semantic_search_window_builder = ToolContentWindowBuilder(
-            token_budget=semantic_search_window_token_budget
+            char_budget=semantic_search_window_char_budget
         )
-        self._read_total_token_budget = read_total_token_budget
-        self._semantic_search_total_token_budget = semantic_search_total_token_budget
-        self._regex_context_side_token_budget = regex_context_side_token_budget
-        self._regex_total_token_budget = regex_total_token_budget
+        self._read_total_char_budget = read_total_char_budget
+        self._semantic_search_total_char_budget = semantic_search_total_char_budget
+        self._regex_context_side_char_budget = regex_context_side_char_budget
+        self._regex_total_char_budget = regex_total_char_budget
 
     async def read_range(
         self,
@@ -177,7 +172,7 @@ class ToolContentService:
                 ).append(text_range)
 
         items: list[ToolContentPageReadItem] = []
-        remaining = self._read_total_token_budget
+        remaining = self._read_total_char_budget
         budget_exhausted = False
         for page_label in unique_page_labels:
             if remaining <= 0:
@@ -215,10 +210,10 @@ class ToolContentService:
                     stored,
                     start=page_range.start_offset,
                     end=page_range.end_offset,
-                    token_budget=remaining,
+                    char_budget=remaining,
                 )
                 windows.append(window)
-                remaining -= count_canonical_tokens(window.text)
+                remaining -= len(window.text)
                 if window.truncated:
                     # builder 已保留预算内的部分内容。这里不能丢弃它，只需
                     # 标记 item 和 result，通知调用方当前 page 不是完整正文。
@@ -248,7 +243,7 @@ class ToolContentService:
         """按 section path 读取多个 section，并返回每个 section 的独立状态。
 
         section path 是 snapshot 暴露的结构语义，不是存储层 locator 名称。
-        和 page 读取一样，所有请求共享一个总 token 预算，并保留预算内的
+        和 page 读取一样，所有请求共享一个总字符预算，并保留预算内的
         部分窗口。
         """
 
@@ -277,7 +272,7 @@ class ToolContentService:
                 ).append(text_range)
 
         items: list[ToolContentSectionReadItem] = []
-        remaining = self._read_total_token_budget
+        remaining = self._read_total_char_budget
         budget_exhausted = False
         for section_path in unique_section_paths:
             if remaining <= 0:
@@ -315,10 +310,10 @@ class ToolContentService:
                     stored,
                     start=section_range.start_offset,
                     end=section_range.end_offset,
-                    token_budget=remaining,
+                    char_budget=remaining,
                 )
                 windows.append(window)
-                remaining -= count_canonical_tokens(window.text)
+                remaining -= len(window.text)
                 if window.truncated:
                     # 保留 builder 返回的部分窗口，并显式传播截断原因。
                     budget_exhausted = True
@@ -370,7 +365,7 @@ class ToolContentService:
         """在多个工具内容中执行 regex 搜索并返回带上下文的窗口。
 
         regex 匹配本身发生在完整原文上，命中位置因此保持原始字符 offset；
-        只有命中周围的上下文窗口受到 token 预算限制。搜索在工作线程执行，
+        只有命中周围的上下文窗口受到字符预算限制。搜索在工作线程执行，
         以便 regex 库的超时保护不会阻塞事件循环。
         """
 
@@ -387,7 +382,7 @@ class ToolContentService:
 
             max_matches = max(request.max_matches, 0)
             matches: list[ToolContentRegexSearchMatch] = []
-            remaining = self._regex_total_token_budget
+            remaining = self._regex_total_char_budget
             for content_id, stored in stored_items:
                 try:
                     for matched in compiled.finditer(
@@ -403,14 +398,14 @@ class ToolContentService:
                             match_start=matched.start(),
                             match_end=matched.end(),
                             context_chars=request.context_chars,
-                            context_side_token_budget=self._regex_context_side_token_budget,
-                            total_token_budget=remaining,
+                            context_side_char_budget=self._regex_context_side_char_budget,
+                            total_char_budget=remaining,
                         )
                         window = self._read_window_builder.build_range_window(
                             stored,
                             start=window_start,
                             end=window_end,
-                            token_budget=remaining,
+                            char_budget=remaining,
                         )
                         matches.append(
                             ToolContentRegexSearchMatch(
@@ -420,10 +415,10 @@ class ToolContentService:
                                 window=window,
                             )
                         )
-                        remaining -= count_canonical_tokens(window.text)
+                        remaining -= len(window.text)
                         if len(matches) >= max_matches:
                             # max_matches 是业务数量上限，优先级高于继续消耗
-                            # token 预算；当前已返回的窗口仍然是合法结果。
+                            # 字符预算；当前已返回的窗口仍然是合法结果。
                             return tuple(matches), False
                 except TimeoutError as exc:
                     raise ToolContentRegexTimeoutError(
@@ -452,7 +447,7 @@ class ToolContentService:
 
         ranking 阶段只处理可检索文本和结构字段；正文窗口在排名之后生成，
         因此候选数量、排名数量和最终可返回窗口数量分别受 `top_k`、排序
-        结果以及总 token 预算约束。
+        结果以及总字符预算约束。
         """
 
         stored_items, failed = await self._load_many(
@@ -500,7 +495,7 @@ class ToolContentService:
         )
 
         results: list[ToolContentSemanticSearchItem] = []
-        remaining = self._semantic_search_total_token_budget
+        remaining = self._semantic_search_total_char_budget
         budget_exhausted = False
         for item in result.ranked:
             if remaining <= 0:
@@ -514,7 +509,7 @@ class ToolContentService:
             window = self._semantic_search_window_builder.build_source_window(
                 stored,
                 chunk=chunk,
-                token_budget=remaining,
+                char_budget=remaining,
             )
             results.append(
                 ToolContentSemanticSearchItem(
@@ -525,7 +520,7 @@ class ToolContentService:
                     window=window,
                 )
             )
-            remaining -= count_canonical_tokens(window.text)
+            remaining -= len(window.text)
         return ToolContentSemanticSearchResult(
             results=tuple(results),
             failed=failed,
@@ -663,62 +658,36 @@ def _regex_window_range(
     match_start: int,
     match_end: int,
     context_chars: int | None,
-    context_side_token_budget: int,
-    total_token_budget: int,
+    context_side_char_budget: int,
+    total_char_budget: int,
 ) -> tuple[int, int]:
     """计算包含 regex 命中且不超过总预算的原文字符范围。
 
-    先按请求选择上下文：未指定 `context_chars` 时使用两侧 token 预算，
+    先按请求选择上下文：未指定 `context_chars` 时使用两侧字符预算，
     指定后先按字符扩展。若候选范围仍超出总预算，再固定命中内容，
-    从两侧按预算分配并做最终字符级回退。
+    从两侧按预算分配。
     """
 
     if context_chars is None:
-        # suffix/prefix helper 返回的是相对输入片段的字符 offset；这里的
-        # before_start 仍然是完整文本前缀中的坐标，after_length 是尾部
-        # 片段长度，所以可直接与 match_end 相加。
-        _, before_start, _ = truncate_canonical_suffix(
-            text[:match_start],
-            context_side_token_budget,
-        )
-        _, after_length, _ = truncate_canonical_prefix(
-            text[match_end:],
-            context_side_token_budget,
-        )
-        candidate_start = before_start
-        candidate_end = match_end + after_length
+        # 未指定字符上下文时，按默认的单侧字符预算从命中点向两侧扩展。
+        candidate_start = max(match_start - context_side_char_budget, 0)
+        candidate_end = min(match_end + context_side_char_budget, len(text))
     else:
         context_chars = max(context_chars, 0)
         candidate_start = max(match_start - context_chars, 0)
         candidate_end = min(match_end + context_chars, len(text))
 
-    if count_canonical_tokens(text[candidate_start:candidate_end]) <= total_token_budget:
+    if len(text[candidate_start:candidate_end]) <= total_char_budget:
         # 常见路径：上下文选择本身已经满足总预算，无需再次分配。
         return candidate_start, candidate_end
 
-    match_tokens = count_canonical_tokens(text[match_start:match_end])
-    if match_tokens >= total_token_budget:
-        # 命中本身就达到预算时，保留完整命中优先于返回无关上下文。
+    match_chars = len(text[match_start:match_end])
+    if match_chars >= total_char_budget:
+        # 命中本身已超过预算时，窗口以命中为中心；后续 builder 会按字符预算裁剪。
         return match_start, match_end
 
-    context_budget = total_token_budget - match_tokens
+    context_budget = total_char_budget - match_chars
     before_budget = context_budget // 2
-    _, before_offset, _ = truncate_canonical_suffix(
-        text[candidate_start:match_start],
-        before_budget,
-    )
-    start = candidate_start + before_offset
-    after_budget = context_budget - count_canonical_tokens(text[start:match_start])
-    _, after_length, _ = truncate_canonical_prefix(
-        text[match_end:candidate_end],
-        after_budget,
-    )
-    end = match_end + after_length
-
-    # 预算按两侧独立估算后，tokenizer 仍可能在 start/match/end 边界产生
-    # 合并差异，因此最终必须以完整窗口重新计数，而不是相信预算相加。
-    while count_canonical_tokens(text[start:end]) > total_token_budget and end > match_end:
-        end -= 1
-    while count_canonical_tokens(text[start:end]) > total_token_budget and start < match_start:
-        start += 1
-    return start, end
+    start = max(match_start - before_budget, candidate_start)
+    after_budget = context_budget - len(text[start:match_start])
+    return start, min(match_end + after_budget, candidate_end)

@@ -2,10 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from chat.application.tools.common.canonical_token_budget import (
-    bounded_canonical_token_count,
-    canonical_preview,
-)
 from chat.application.tools.common.tool_content_store import (
     ToolContentPutStatus,
     ToolContentReceipt,
@@ -18,33 +14,35 @@ from chat.application.tools.core.output.tool_return import (
 )
 from common.logger import warn
 
+_TRUNCATION_MARKER = "\n...\n"
+
 
 class ToolOutputCache:
     """将 ToolReturn 中可缓存的大文本存储，并生成模型可见的内容预览。
 
     这层只处理输出治理，不决定工具业务语义。它做两件事：
     1. 把 `cacheable_texts` 逐段写入 `ToolContentStore`，换回稳定的 `content_id`；
-    2. 按模型预算构造预览内容，并把 `content_id`、`total_length` 和其他
+    2. 按字符预算构造预览内容，并把 `content_id`、`total_length` 和其他
        读取凭证塞回返回 payload。
     """
 
-    __slots__ = ("_content_store", "_per_token_budget", "_total_token_budget")
+    __slots__ = ("_content_store", "_per_char_budget", "_total_char_budget")
 
     def __init__(
         self,
         *,
         content_store: ToolContentStore,
-        per_token_budget: int,
-        total_token_budget: int,
+        per_char_budget: int,
+        total_char_budget: int,
     ) -> None:
-        if per_token_budget < 1:
-            raise ValueError("per_token_budget must be greater than 0")
-        if total_token_budget < 1:
-            raise ValueError("total_token_budget must be greater than 0")
+        if per_char_budget < 1:
+            raise ValueError("per_char_budget must be greater than 0")
+        if total_char_budget < 1:
+            raise ValueError("total_char_budget must be greater than 0")
 
         self._content_store = content_store
-        self._per_token_budget = per_token_budget
-        self._total_token_budget = total_token_budget
+        self._per_char_budget = per_char_budget
+        self._total_char_budget = total_char_budget
 
     async def process(
         self,
@@ -80,7 +78,7 @@ class ToolOutputCache:
                 content_index=index,
                 cacheable_text=cacheable_text,
                 receipt=receipts.get(index),
-                budget=budgets[index],
+                char_budget=budgets[index],
             )
             for index, cacheable_text in enumerate(cacheable_texts)
         )
@@ -90,19 +88,19 @@ class ToolOutputCache:
         self,
         cacheable_texts: tuple[CacheableText, ...],
     ) -> tuple[int, ...]:
-        """为每段 preview 分配 token 预算，优先保留更短、更容易完整展示的内容。"""
+        """为每段 preview 分配字符预算，优先保留更短、更容易完整展示的内容。"""
 
         desired = tuple(
-            bounded_canonical_token_count(item.text, self._per_token_budget)
+            min(len(item.text), self._per_char_budget)
             for item in cacheable_texts
         )
-        if sum(desired) <= self._total_token_budget:
+        if sum(desired) <= self._total_char_budget:
             return desired
 
         # 总预算不够时，先按“每段想要多少预算”从小到大排序。
         # 这样短文本会优先拿到完整预览，长文本不会一上来就吞掉总预算。
         budgets = [0] * len(desired)
-        remaining = self._total_token_budget
+        remaining = self._total_char_budget
         # 这里保存的是原始下标顺序，后面还要把预算写回对应的 contents 项。
         ordered = sorted(range(len(desired)), key=desired.__getitem__)
         for position, index in enumerate(ordered):
@@ -119,7 +117,7 @@ class ToolOutputCache:
             # 这样最终会形成一个平滑的截断边界，而不是只截断某一段。
             for pending_index in ordered[position:]:
                 budgets[pending_index] = fair_share
-            # 余数按原始排序顺序往前补，确保总和刚好等于 total_token_budget。
+            # 余数按原始排序顺序往前补，确保总和刚好等于 total_char_budget。
             for pending_index in ordered[position : position + remaining % pending]:
                 budgets[pending_index] += 1
             break
@@ -131,11 +129,11 @@ class ToolOutputCache:
         content_index: int,
         cacheable_text: CacheableText,
         receipt: ToolContentReceipt | None,
-        budget: int,
+        char_budget: int,
     ) -> dict[str, Any]:
         """把一段正文渲染成最终 payload 项，并附加可追溯的入库回执。"""
 
-        preview, truncated = canonical_preview(cacheable_text.text, budget)
+        preview, truncated = _preview_text(cacheable_text.text, char_budget)
         item: dict[str, Any] = {
             "content_index": content_index,
             "text": preview,
@@ -206,3 +204,24 @@ class ToolOutputCache:
                 )
 
         return tuple(receipts)
+
+
+def _preview_text(text: str, char_budget: int) -> tuple[str, bool]:
+    """按字符预算生成模型可见 preview。
+
+    这个裁剪策略只属于工具输出 payload：超预算时保留头尾，方便模型同时
+    看到开篇语义和末尾线索；完整原文仍由 ToolContentStore 保存。
+    """
+
+    if len(text) <= char_budget:
+        return text, False
+    if char_budget <= 0:
+        return "", True
+    if char_budget <= len(_TRUNCATION_MARKER):
+        return text[:char_budget], True
+
+    available = char_budget - len(_TRUNCATION_MARKER)
+    head_budget = available - available // 2
+    tail_budget = available // 2
+    tail = text[-tail_budget:] if tail_budget else ""
+    return text[:head_budget] + _TRUNCATION_MARKER + tail, True

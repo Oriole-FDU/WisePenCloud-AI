@@ -41,7 +41,7 @@ class ToolContentSemanticSearchRequest:
 
     content_ids: tuple[str, ...]  # 搜索范围；每个 id 的加载失败独立返回。
     query: str  # 交给 ranking pipeline 的自然语言查询。
-    top_k: int = 10  # 排名阶段最多保留的候选数，之后仍受输出 token 总预算限制。
+    top_k: int = 10  # 排名阶段最多保留的候选数，之后仍受输出字符总预算限制。
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,8 +50,8 @@ class ToolContentRegexSearchRequest:
 
     content_ids: tuple[str, ...]  # 搜索范围；单个内容失败不阻断其他内容。
     pattern: str  # 由 regex 库编译和执行的模式。
-    max_matches: int = 10  # 匹配数量上限，不等于返回正文 token 数上限。
-    context_chars: int | None = None  # 指定后按字符扩展，否则按 token 预算扩展上下文。
+    max_matches: int = 10  # 匹配数量上限，不等于返回正文字数上限。
+    context_chars: int | None = None  # 指定后按字符扩展，否则按默认单侧字符预算扩展。
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,7 +59,7 @@ class ToolContentWindow:
     """从权威原文读取出的、可直接交给模型的上下文窗口。
 
     `start_offset`、`end_offset` 和 `source_spans` 保留原文字符坐标；
-    `text` 才是经过 token 预算裁剪后实际返回给模型的内容。两套信息必须
+    `text` 才是经过字符预算裁剪后实际返回给模型的内容。两套信息必须
     同时存在，因为调用方需要既能显示上下文，也能继续定位原文。
     """
 
@@ -70,7 +70,7 @@ class ToolContentWindow:
     page_labels: tuple[str, ...] = ()  # 与窗口字符范围相交的 page 标签。
     section_paths: tuple[str, ...] = ()  # 与窗口字符范围相交的 section 路径。
     anchor_labels: tuple[str, ...] = ()  # 与窗口字符范围相交的附属 anchor。
-    truncated: bool = False  # True 表示原请求范围超过本窗口 token 预算。
+    truncated: bool = False  # True 表示原请求范围超过本窗口字符预算。
     metadata: dict[str, object] = field(default_factory=dict)  # 原始工具内容的来源元数据。
 
 
@@ -123,7 +123,7 @@ class ToolContentSemanticSearchItem:
     rank: int  # ranking pipeline 给出的名次。
     score: float  # ranking pipeline 给出的相关性分数。
     chunk_index: int  # 命中 chunk 在该内容中的稳定索引。
-    window: ToolContentWindow  # 从命中 chunk 生成并受 token 预算限制的窗口。
+    window: ToolContentWindow  # 从命中 chunk 生成并受字符预算限制的窗口。
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,31 +4,27 @@ from chat.application.tools.common.tool_content_store import (
     StoredToolContent,
     ToolContentChunk,
 )
-from chat.application.tools.common.canonical_token_budget import (
-    count_canonical_tokens,
-    truncate_canonical_prefix,
-)
 from chat.application.utils.chunkers import SourceSpan, TextLocator
 
 from .models import ToolContentWindow
 
 
 class ToolContentWindowBuilder:
-    """从权威原文构建带字符坐标和 token 预算保护的模型窗口。
+    """从权威原文构建带字符坐标和字符预算保护的模型窗口。
 
     这个 builder 同时服务于两类输入：连续字符范围和由多个 source span
     组成的检索 chunk。前者可以直接返回一段连续原文，后者需要在片段之间
-    插入分隔符并重新验证最终 token 数，因此两条路径不能简单合并。
+    插入分隔符并记录每段原文坐标，因此两条路径不能简单合并。
     """
 
-    __slots__ = ("_token_budget",)
+    __slots__ = ("_char_budget",)
 
-    def __init__(self, *, token_budget: int) -> None:
+    def __init__(self, *, char_budget: int) -> None:
         """设置单个窗口的上限；调用方的共享总预算由 service 负责。"""
 
-        if token_budget < 1:
-            raise ValueError("token_budget must be greater than 0")
-        self._token_budget = token_budget
+        if char_budget < 1:
+            raise ValueError("char_budget must be greater than 0")
+        self._char_budget = char_budget
 
     def build_range_window(
         self,
@@ -36,12 +32,12 @@ class ToolContentWindowBuilder:
         *,
         start: int | None,
         end: int | None,
-        token_budget: int | None = None,
+        char_budget: int | None = None,
     ) -> ToolContentWindow:
         """读取一个连续字符范围，并在必要时从尾部截断。
 
         `start` 和 `end` 使用 Python 半开区间语义，允许负数并会被限制到
-        原文范围内。token 预算只影响最终 `end`，不会改变原文坐标体系。
+        原文范围内。字符预算只影响最终 `end`，不会改变原文坐标体系。
         """
 
         text_length = len(stored.text)
@@ -51,12 +47,11 @@ class ToolContentWindowBuilder:
             normalized_end = normalized_start
             truncated = False
         else:
-            # 先在请求范围内按 canonical token 边界截断，再把相对 offset
-            # 平移回完整原文坐标，避免把 token offset 暴露给上层。
-            _, included_chars, truncated = truncate_canonical_prefix(
-                stored.text[normalized_start:requested_end],
-                self._resolve_budget(token_budget),
-            )
+            # 先在请求范围内按字符预算截断，再把相对 offset 平移回完整原文坐标。
+            budget = self._resolve_budget(char_budget)
+            requested_length = requested_end - normalized_start
+            included_chars = min(requested_length, budget)
+            truncated = requested_length > budget
             normalized_end = normalized_start + included_chars
         return self._continuous_window(
             stored,
@@ -70,15 +65,15 @@ class ToolContentWindowBuilder:
         stored: StoredToolContent,
         *,
         chunk: ToolContentChunk,
-        token_budget: int | None = None,
+        char_budget: int | None = None,
     ) -> ToolContentWindow:
         """把 chunk 的多个原文片段拼成一个受预算保护的窗口。
 
         chunk 的 source spans 可能不连续；拼接时插入的两个换行属于返回文本，
-        也会占用 canonical token 预算，但不属于任何一个原文 span。
+        也会占用字符预算，但不属于任何一个原文 span。
         """
 
-        budget = self._resolve_budget(token_budget)
+        budget = self._resolve_budget(char_budget)
         fragments: list[str] = []
         included_spans: list[SourceSpan] = []
         truncated = False
@@ -86,25 +81,16 @@ class ToolContentWindowBuilder:
             prefix = "\n\n".join(fragments)
             if prefix:
                 prefix += "\n\n"
-            available = budget - count_canonical_tokens(prefix)
+            available = budget - len(prefix)
             if available <= 0:
                 # 前面的片段和分隔符已经用尽窗口预算，后面的 source span
                 # 不能再返回；已收集的片段仍然是有效的部分结果。
                 truncated = True
                 break
             fragment = stored.text[span.start_offset : span.end_offset]
-            fragment, included_chars, fragment_truncated = truncate_canonical_prefix(
-                fragment,
-                available,
-            )
-            while fragment and count_canonical_tokens(prefix + fragment) > budget:
-                # 分别计算 prefix 和 fragment 仍不够，因为 tokenizer 可能在
-                # 拼接边界重新合并 token；每次减少一个预算单位直到最终文本合规。
-                available -= 1
-                fragment, included_chars, fragment_truncated = truncate_canonical_prefix(
-                    stored.text[span.start_offset : span.end_offset],
-                    available,
-                )
+            included_chars = min(len(fragment), available)
+            fragment_truncated = len(fragment) > available
+            fragment = fragment[:included_chars]
             if not fragment and span.start_offset < span.end_offset:
                 truncated = True
                 break
@@ -113,7 +99,7 @@ class ToolContentWindowBuilder:
                 SourceSpan(span.start_offset, span.start_offset + included_chars)
             )
             if fragment_truncated or span_index < len(chunk.source_spans) - 1 and (
-                count_canonical_tokens("\n\n".join(fragments)) >= budget
+                len("\n\n".join(fragments)) >= budget
             ):
                 # 当前片段已被裁剪，或后面仍有未处理片段但预算已满。
                 # 两种情况都意味着窗口不是 chunk 的完整展开。
@@ -134,14 +120,14 @@ class ToolContentWindowBuilder:
             metadata=dict(stored.metadata),
         )
 
-    def _resolve_budget(self, token_budget: int | None) -> int:
+    def _resolve_budget(self, char_budget: int | None) -> int:
         """把本次剩余预算限制在 builder 自身允许的窗口上限内。"""
 
-        if token_budget is None:
-            return self._token_budget
+        if char_budget is None:
+            return self._char_budget
         # service 传入的是共享总预算的剩余值，不能让一次调用超过单窗口
-        # 上限；至少保留一个 token，避免下层收到无效的零预算请求。
-        return max(1, min(token_budget, self._token_budget))
+        # 上限；至少保留一个字符，避免下层收到无效的零预算请求。
+        return max(1, min(char_budget, self._char_budget))
 
     def _continuous_window(
         self,
@@ -176,7 +162,7 @@ class ToolContentWindowBuilder:
 
 
 def chunk_text(stored: StoredToolContent, chunk: ToolContentChunk) -> str:
-    """提取 chunk 的原文片段，用于 ranking，不负责 token 截断。"""
+    """提取 chunk 的原文片段，用于 ranking，不负责字符预算截断。"""
 
     return "\n\n".join(
         stored.text[span.start_offset : span.end_offset].strip()

@@ -9,7 +9,7 @@ class CacheableText:
     """一段需要被工具输出治理链处理的完整正文。
 
     这里保存的是权威原文，不是已经裁剪给模型看的 preview。输出缓存会
-    先把它交给 `ToolContentStore` 持久化，再根据 token 预算生成 preview；
+    先把它交给 `ToolContentStore` 持久化，再根据字符预算生成 preview；
     后续 read/search 工具通过入库返回的 `content_id` 重新读取这份原文。
     """
 

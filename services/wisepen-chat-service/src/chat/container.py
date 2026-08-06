@@ -300,18 +300,18 @@ class Container(containers.DeclarativeContainer):
     )
     tool_content_service = providers.Singleton(
         ToolContentService,
-        read_window_token_budget=settings.TOOL_CONTENT_READ_WINDOW_TOKEN_BUDGET,
-        read_total_token_budget=settings.TOOL_CONTENT_READ_TOTAL_TOKEN_BUDGET,
-        semantic_search_window_token_budget=(
-            settings.TOOL_CONTENT_SEMANTIC_SEARCH_WINDOW_TOKEN_BUDGET
+        read_window_char_budget=settings.TOOL_CONTENT_READ_WINDOW_CHAR_BUDGET,
+        read_total_char_budget=settings.TOOL_CONTENT_READ_TOTAL_CHAR_BUDGET,
+        semantic_search_window_char_budget=(
+            settings.TOOL_CONTENT_SEMANTIC_SEARCH_WINDOW_CHAR_BUDGET
         ),
-        semantic_search_total_token_budget=(
-            settings.TOOL_CONTENT_SEMANTIC_SEARCH_TOTAL_TOKEN_BUDGET
+        semantic_search_total_char_budget=(
+            settings.TOOL_CONTENT_SEMANTIC_SEARCH_TOTAL_CHAR_BUDGET
         ),
-        regex_context_side_token_budget=(
-            settings.TOOL_CONTENT_REGEX_CONTEXT_SIDE_TOKEN_BUDGET
+        regex_context_side_char_budget=(
+            settings.TOOL_CONTENT_REGEX_CONTEXT_SIDE_CHAR_BUDGET
         ),
-        regex_total_token_budget=settings.TOOL_CONTENT_REGEX_TOTAL_TOKEN_BUDGET,
+        regex_total_char_budget=settings.TOOL_CONTENT_REGEX_TOTAL_CHAR_BUDGET,
         ranking_pipeline=tool_content_semantic_search_pipeline,
         store=tool_content_store,
     )
@@ -411,8 +411,8 @@ class Container(containers.DeclarativeContainer):
     tool_output_cache = providers.Singleton(
         ToolOutputCache,
         content_store=tool_content_store,
-        per_token_budget=settings.TOOL_CONTENT_PREVIEW_PER_TOKEN_BUDGET,
-        total_token_budget=settings.TOOL_CONTENT_PREVIEW_TOTAL_TOKEN_BUDGET,
+        per_char_budget=settings.TOOL_CONTENT_PREVIEW_PER_CHAR_BUDGET,
+        total_char_budget=settings.TOOL_CONTENT_PREVIEW_TOTAL_CHAR_BUDGET,
     )
     tool_dispatcher = providers.Singleton(
         ToolDispatcher,
