@@ -1,0 +1,569 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import shutil
+import stat
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path, PurePosixPath
+
+from common.core.exceptions import ServiceException
+
+from sandbox_v1.domain.entities import (
+    WorkspaceEvictionReason,
+    WorkspaceRestoreOutcome,
+    WorkspaceSnapshotRef,
+    utc_now,
+)
+from sandbox_v1.domain.error_codes import SandboxErrorCode
+
+
+_SCHEMA_VERSION = 1
+
+
+@dataclass(frozen=True)
+class _FsEntry:
+    relative_path: str
+    mode: int
+    mtime_ns: int
+
+
+@dataclass(frozen=True)
+class _SnapshotMetadata:
+    ref: WorkspaceSnapshotRef
+    user_id: str
+    session_id: str
+    directories: list[_FsEntry]
+    files: list[_FsEntry]
+
+
+class LocalWorkspaceSnapshotCache:
+    """Filesystem-backed host cache for Workspace snapshots.
+
+    A snapshot generation is immutable once published. Rebuild uses the
+    tombstone's exact snapshot_id instead of "latest", which keeps logical
+    delete and explicit rebuild deterministic even if later recycle snapshots
+    are added in another phase.
+    """
+
+    def __init__(
+        self,
+        *,
+        cache_root: str | Path,
+        ttl_seconds: int = 7 * 24 * 60 * 60,
+        max_bytes: int = 0,
+        high_watermark_ratio: float = 0.8,
+        target_watermark_ratio: float = 0.7,
+    ) -> None:
+        self._cache_root = Path(cache_root)
+        self._snapshot_root = self._cache_root / "snapshots"
+        self._tmp_root = self._cache_root / ".tmp"
+        self._ttl = timedelta(seconds=max(1, ttl_seconds))
+        self._max_bytes = max(0, max_bytes)
+        self._high_ratio = max(0.01, min(1.0, high_watermark_ratio))
+        self._target_ratio = max(0.0, min(self._high_ratio, target_watermark_ratio))
+
+    async def snapshot(
+        self,
+        *,
+        workspace_key: str,
+        user_id: str,
+        session_id: str,
+        source_path: Path,
+    ) -> WorkspaceSnapshotRef | None:
+        return await asyncio.to_thread(
+            self._snapshot_sync,
+            workspace_key,
+            user_id,
+            session_id,
+            source_path,
+        )
+
+    async def restore(
+        self,
+        snapshot: WorkspaceSnapshotRef | None,
+        *,
+        target_path: Path,
+    ) -> WorkspaceRestoreOutcome:
+        return await asyncio.to_thread(self._restore_sync, snapshot, target_path)
+
+    async def evict_expired(self) -> list[WorkspaceSnapshotRef]:
+        return await asyncio.to_thread(self._evict_expired_sync)
+
+    async def evict_lru(self) -> list[WorkspaceSnapshotRef]:
+        return await asyncio.to_thread(self._evict_lru_sync)
+
+    async def mark_unrecoverable(
+        self,
+        snapshot: WorkspaceSnapshotRef,
+        reason: WorkspaceEvictionReason,
+    ) -> WorkspaceSnapshotRef:
+        return await asyncio.to_thread(
+            self._mark_unrecoverable_sync,
+            snapshot,
+            reason,
+        )
+
+    def _snapshot_sync(
+        self,
+        workspace_key: str,
+        user_id: str,
+        session_id: str,
+        source_path: Path,
+    ) -> WorkspaceSnapshotRef | None:
+        self._validate_component(workspace_key, "workspace_key")
+        if not source_path.exists():
+            return None
+        if source_path.is_symlink() or not source_path.is_dir():
+            raise ServiceException(
+                SandboxErrorCode.WORKSPACE_SNAPSHOT_REJECTED,
+                "workspace root must be a real directory",
+            )
+
+        snapshot_id = f"{utc_now().strftime('%Y%m%d%H%M%S%f')}_{uuid.uuid4().hex}"
+        key_root = self._snapshot_root / workspace_key
+        final_dir = key_root / snapshot_id
+        tmp_dir = self._tmp_root / f"{workspace_key}_{snapshot_id}"
+        data_dir = tmp_dir / "files"
+
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+        data_dir.mkdir(parents=True, exist_ok=False)
+
+        try:
+            directories, files, total_bytes = self._copy_workspace_tree(
+                source_path,
+                data_dir,
+            )
+            ref = WorkspaceSnapshotRef(
+                workspace_key=workspace_key,
+                snapshot_id=snapshot_id,
+                total_bytes=total_bytes,
+                file_count=len(files),
+                directory_count=len(directories),
+            )
+            metadata = _SnapshotMetadata(
+                ref=ref,
+                user_id=user_id,
+                session_id=session_id,
+                directories=directories,
+                files=files,
+            )
+            self._write_metadata(tmp_dir / "metadata.json", metadata)
+
+            key_root.mkdir(parents=True, exist_ok=True)
+            tmp_dir.replace(final_dir)
+            self._publish_current_pointer(key_root, snapshot_id)
+            return ref
+        except Exception:
+            if tmp_dir.exists():
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+
+    def _copy_workspace_tree(
+        self,
+        source_root: Path,
+        target_root: Path,
+    ) -> tuple[list[_FsEntry], list[_FsEntry], int]:
+        directories: list[_FsEntry] = []
+        files: list[_FsEntry] = []
+        total_bytes = 0
+
+        root_stat = source_root.stat(follow_symlinks=False)
+        directories.append(self._entry(".", root_stat))
+
+        for current_root, dir_names, file_names in os.walk(source_root):
+            current = Path(current_root)
+
+            for dirname in list(dir_names):
+                src = current / dirname
+                rel = self._relative_to_root(src, source_root)
+                src_stat = src.stat(follow_symlinks=False)
+                if stat.S_ISLNK(src_stat.st_mode) or not stat.S_ISDIR(src_stat.st_mode):
+                    # The cache never follows symlinks or serializes device/FIFO
+                    # nodes. Restoring those would escape the Workspace contract.
+                    raise ServiceException(
+                        SandboxErrorCode.WORKSPACE_SNAPSHOT_REJECTED,
+                        f"unsupported workspace entry: {rel}",
+                    )
+                dst = self._safe_join(target_root, rel)
+                dst.mkdir(parents=True, exist_ok=True)
+                directories.append(self._entry(rel, src_stat))
+
+            for filename in file_names:
+                src = current / filename
+                rel = self._relative_to_root(src, source_root)
+                src_stat = src.stat(follow_symlinks=False)
+                if stat.S_ISLNK(src_stat.st_mode) or not stat.S_ISREG(src_stat.st_mode):
+                    raise ServiceException(
+                        SandboxErrorCode.WORKSPACE_SNAPSHOT_REJECTED,
+                        f"unsupported workspace entry: {rel}",
+                    )
+                dst = self._safe_join(target_root, rel)
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst, follow_symlinks=False)
+                os.chmod(dst, stat.S_IMODE(src_stat.st_mode))
+                files.append(self._entry(rel, src_stat))
+                total_bytes += src_stat.st_size
+
+        self._apply_directory_metadata(target_root, directories)
+        return directories, files, total_bytes
+
+    def _restore_sync(
+        self,
+        snapshot: WorkspaceSnapshotRef | None,
+        target_path: Path,
+    ) -> WorkspaceRestoreOutcome:
+        if snapshot is None:
+            self._replace_with_empty_dir(target_path)
+            return WorkspaceRestoreOutcome(
+                restored_from_snapshot=False,
+                unrecoverable_reason="snapshot_missing",
+            )
+
+        metadata = self._read_metadata(snapshot.workspace_key, snapshot.snapshot_id)
+        if metadata is None:
+            self._replace_with_empty_dir(target_path)
+            return WorkspaceRestoreOutcome(
+                restored_from_snapshot=False,
+                snapshot_id=snapshot.snapshot_id,
+                unrecoverable_reason="snapshot_missing",
+            )
+        if not metadata.ref.recoverable:
+            self._replace_with_empty_dir(target_path)
+            return WorkspaceRestoreOutcome(
+                restored_from_snapshot=False,
+                snapshot_id=snapshot.snapshot_id,
+                unrecoverable_reason=metadata.ref.unrecoverable_reason
+                or "snapshot_unrecoverable",
+            )
+
+        source_data = (
+            self._snapshot_dir(snapshot.workspace_key, snapshot.snapshot_id) / "files"
+        )
+        if not source_data.exists():
+            self._replace_with_empty_dir(target_path)
+            return WorkspaceRestoreOutcome(
+                restored_from_snapshot=False,
+                snapshot_id=snapshot.snapshot_id,
+                unrecoverable_reason="snapshot_missing",
+            )
+
+        self._replace_with_empty_dir(target_path)
+        for directory in metadata.directories:
+            self._safe_join(target_path, directory.relative_path).mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+        for file_entry in metadata.files:
+            src = self._safe_join(source_data, file_entry.relative_path)
+            dst = self._safe_join(target_path, file_entry.relative_path)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst, follow_symlinks=False)
+            os.chmod(dst, file_entry.mode)
+            os.utime(dst, ns=(file_entry.mtime_ns, file_entry.mtime_ns))
+
+        self._apply_directory_metadata(target_path, metadata.directories)
+        self._touch_snapshot(metadata.ref)
+        return WorkspaceRestoreOutcome(
+            restored_from_snapshot=True,
+            snapshot_id=snapshot.snapshot_id,
+        )
+
+    def _evict_expired_sync(self) -> list[WorkspaceSnapshotRef]:
+        cutoff = utc_now() - self._ttl
+        evicted: list[WorkspaceSnapshotRef] = []
+        for metadata in self._iter_metadata():
+            if not metadata.ref.recoverable:
+                continue
+            if metadata.ref.last_accessed_at <= cutoff:
+                evicted.append(
+                    self._mark_unrecoverable_sync(
+                        metadata.ref,
+                        WorkspaceEvictionReason.TTL,
+                    )
+                )
+        return evicted
+
+    def _evict_lru_sync(self) -> list[WorkspaceSnapshotRef]:
+        if self._max_bytes <= 0:
+            return []
+
+        metadata = [item for item in self._iter_metadata() if item.ref.recoverable]
+        total_bytes = sum(item.ref.total_bytes for item in metadata)
+        high_bytes = int(self._max_bytes * self._high_ratio)
+        target_bytes = int(self._max_bytes * self._target_ratio)
+        if total_bytes <= high_bytes:
+            return []
+
+        evicted: list[WorkspaceSnapshotRef] = []
+        for item in sorted(metadata, key=lambda value: value.ref.last_accessed_at):
+            if total_bytes <= target_bytes:
+                break
+            evicted_ref = self._mark_unrecoverable_sync(
+                item.ref,
+                WorkspaceEvictionReason.LRU,
+            )
+            evicted.append(evicted_ref)
+            total_bytes -= item.ref.total_bytes
+        return evicted
+
+    def _mark_unrecoverable_sync(
+        self,
+        snapshot: WorkspaceSnapshotRef,
+        reason: WorkspaceEvictionReason,
+    ) -> WorkspaceSnapshotRef:
+        metadata = self._read_metadata(snapshot.workspace_key, snapshot.snapshot_id)
+        if metadata is None:
+            return WorkspaceSnapshotRef(
+                workspace_key=snapshot.workspace_key,
+                snapshot_id=snapshot.snapshot_id,
+                created_at=snapshot.created_at,
+                last_accessed_at=snapshot.last_accessed_at,
+                total_bytes=snapshot.total_bytes,
+                file_count=snapshot.file_count,
+                directory_count=snapshot.directory_count,
+                recoverable=False,
+                unrecoverable_reason=reason.value,
+                unrecoverable_at=utc_now(),
+            )
+
+        ref = WorkspaceSnapshotRef(
+            workspace_key=metadata.ref.workspace_key,
+            snapshot_id=metadata.ref.snapshot_id,
+            created_at=metadata.ref.created_at,
+            last_accessed_at=metadata.ref.last_accessed_at,
+            total_bytes=metadata.ref.total_bytes,
+            file_count=metadata.ref.file_count,
+            directory_count=metadata.ref.directory_count,
+            recoverable=False,
+            unrecoverable_reason=reason.value,
+            unrecoverable_at=utc_now(),
+        )
+        updated = _SnapshotMetadata(
+            ref=ref,
+            user_id=metadata.user_id,
+            session_id=metadata.session_id,
+            directories=metadata.directories,
+            files=metadata.files,
+        )
+        snapshot_dir = self._snapshot_dir(ref.workspace_key, ref.snapshot_id)
+
+        # Eviction frees cache bytes but deliberately leaves metadata behind.
+        # That metadata is the unrecoverable marker used by rebuild to create an
+        # empty Workspace with an explainable reason.
+        self._write_metadata(snapshot_dir / "metadata.json", updated)
+        shutil.rmtree(snapshot_dir / "files", ignore_errors=True)
+        return ref
+
+    def _iter_metadata(self) -> list[_SnapshotMetadata]:
+        if not self._snapshot_root.exists():
+            return []
+
+        result: list[_SnapshotMetadata] = []
+        for metadata_path in self._snapshot_root.glob("*/*/metadata.json"):
+            metadata = self._read_metadata_path(metadata_path)
+            if metadata is not None:
+                result.append(metadata)
+        return result
+
+    def _touch_snapshot(self, snapshot: WorkspaceSnapshotRef) -> None:
+        metadata = self._read_metadata(snapshot.workspace_key, snapshot.snapshot_id)
+        if metadata is None:
+            return
+        touched = WorkspaceSnapshotRef(
+            workspace_key=metadata.ref.workspace_key,
+            snapshot_id=metadata.ref.snapshot_id,
+            created_at=metadata.ref.created_at,
+            last_accessed_at=utc_now(),
+            total_bytes=metadata.ref.total_bytes,
+            file_count=metadata.ref.file_count,
+            directory_count=metadata.ref.directory_count,
+            recoverable=metadata.ref.recoverable,
+            unrecoverable_reason=metadata.ref.unrecoverable_reason,
+            unrecoverable_at=metadata.ref.unrecoverable_at,
+        )
+        self._write_metadata(
+            self._snapshot_dir(touched.workspace_key, touched.snapshot_id)
+            / "metadata.json",
+            _SnapshotMetadata(
+                ref=touched,
+                user_id=metadata.user_id,
+                session_id=metadata.session_id,
+                directories=metadata.directories,
+                files=metadata.files,
+            ),
+        )
+
+    def _snapshot_dir(self, workspace_key: str, snapshot_id: str) -> Path:
+        self._validate_component(workspace_key, "workspace_key")
+        self._validate_component(snapshot_id, "snapshot_id")
+        return self._snapshot_root / workspace_key / snapshot_id
+
+    def _read_metadata(
+        self,
+        workspace_key: str,
+        snapshot_id: str,
+    ) -> _SnapshotMetadata | None:
+        return self._read_metadata_path(
+            self._snapshot_dir(workspace_key, snapshot_id) / "metadata.json"
+        )
+
+    def _read_metadata_path(self, metadata_path: Path) -> _SnapshotMetadata | None:
+        if not metadata_path.exists():
+            return None
+        raw = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if raw.get("schema_version") != _SCHEMA_VERSION:
+            return None
+        ref = WorkspaceSnapshotRef(
+            workspace_key=raw["workspace_key"],
+            snapshot_id=raw["snapshot_id"],
+            created_at=self._parse_datetime(raw["created_at"]),
+            last_accessed_at=self._parse_datetime(raw["last_accessed_at"]),
+            total_bytes=int(raw.get("total_bytes") or 0),
+            file_count=int(raw.get("file_count") or 0),
+            directory_count=int(raw.get("directory_count") or 0),
+            recoverable=bool(raw.get("recoverable", True)),
+            unrecoverable_reason=raw.get("unrecoverable_reason"),
+            unrecoverable_at=(
+                self._parse_datetime(raw["unrecoverable_at"])
+                if raw.get("unrecoverable_at") else None
+            ),
+        )
+        return _SnapshotMetadata(
+            ref=ref,
+            user_id=raw["user_id"],
+            session_id=raw["session_id"],
+            directories=[
+                _FsEntry(
+                    relative_path=item["path"],
+                    mode=int(item["mode"]),
+                    mtime_ns=int(item["mtime_ns"]),
+                )
+                for item in raw.get("directories", [])
+            ],
+            files=[
+                _FsEntry(
+                    relative_path=item["path"],
+                    mode=int(item["mode"]),
+                    mtime_ns=int(item["mtime_ns"]),
+                )
+                for item in raw.get("files", [])
+            ],
+        )
+
+    def _write_metadata(self, metadata_path: Path, metadata: _SnapshotMetadata) -> None:
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": _SCHEMA_VERSION,
+            "workspace_key": metadata.ref.workspace_key,
+            "snapshot_id": metadata.ref.snapshot_id,
+            "user_id": metadata.user_id,
+            "session_id": metadata.session_id,
+            "created_at": metadata.ref.created_at.isoformat(),
+            "last_accessed_at": metadata.ref.last_accessed_at.isoformat(),
+            "total_bytes": metadata.ref.total_bytes,
+            "file_count": metadata.ref.file_count,
+            "directory_count": metadata.ref.directory_count,
+            "recoverable": metadata.ref.recoverable,
+            "unrecoverable_reason": metadata.ref.unrecoverable_reason,
+            "unrecoverable_at": (
+                metadata.ref.unrecoverable_at.isoformat()
+                if metadata.ref.unrecoverable_at else None
+            ),
+            "directories": [
+                {
+                    "path": item.relative_path,
+                    "mode": item.mode,
+                    "mtime_ns": item.mtime_ns,
+                }
+                for item in metadata.directories
+            ],
+            "files": [
+                {
+                    "path": item.relative_path,
+                    "mode": item.mode,
+                    "mtime_ns": item.mtime_ns,
+                }
+                for item in metadata.files
+            ],
+        }
+        tmp_path = metadata_path.with_suffix(".json.tmp")
+        tmp_path.write_text(
+            json.dumps(payload, ensure_ascii=True, sort_keys=True),
+            encoding="utf-8",
+        )
+        tmp_path.replace(metadata_path)
+
+    def _publish_current_pointer(self, key_root: Path, snapshot_id: str) -> None:
+        pointer = key_root / "current.json"
+        tmp_pointer = key_root / "current.json.tmp"
+        tmp_pointer.write_text(
+            json.dumps({"snapshot_id": snapshot_id}, ensure_ascii=True),
+            encoding="utf-8",
+        )
+        tmp_pointer.replace(pointer)
+
+    @staticmethod
+    def _entry(relative_path: str, value: os.stat_result) -> _FsEntry:
+        return _FsEntry(
+            relative_path=relative_path,
+            mode=stat.S_IMODE(value.st_mode),
+            mtime_ns=value.st_mtime_ns,
+        )
+
+    @staticmethod
+    def _relative_to_root(path: Path, root: Path) -> str:
+        relative = path.relative_to(root).as_posix()
+        return relative or "."
+
+    @staticmethod
+    def _safe_join(root: Path, relative_path: str) -> Path:
+        relative = PurePosixPath(relative_path)
+        if relative_path == ".":
+            return root
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ServiceException(
+                SandboxErrorCode.WORKSPACE_PATH_UNSAFE,
+                f"unsafe snapshot path: {relative_path}",
+            )
+        return root.joinpath(*relative.parts)
+
+    @staticmethod
+    def _apply_directory_metadata(root: Path, directories: list[_FsEntry]) -> None:
+        for directory in sorted(
+            directories,
+            key=lambda item: item.relative_path.count("/"),
+            reverse=True,
+        ):
+            path = LocalWorkspaceSnapshotCache._safe_join(
+                root,
+                directory.relative_path,
+            )
+            os.chmod(path, directory.mode)
+            os.utime(path, ns=(directory.mtime_ns, directory.mtime_ns))
+
+    @staticmethod
+    def _replace_with_empty_dir(path: Path) -> None:
+        if path.exists() or path.is_symlink():
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        path.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _parse_datetime(value: str) -> datetime:
+        return datetime.fromisoformat(value)
+
+    @staticmethod
+    def _validate_component(value: str, label: str) -> None:
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+        if not value or any(char not in allowed for char in value):
+            raise ServiceException(
+                SandboxErrorCode.WORKSPACE_PATH_UNSAFE,
+                f"unsafe {label}: {value}",
+            )

@@ -7,8 +7,14 @@ from sandbox_v1.application.services.sandbox_startup_reconciler import (
     SandboxStartupReconciler,
 )
 from sandbox_v1.application.services.sandbox_watcher import Watcher
+from sandbox_v1.application.services.workspace_eviction import WorkspaceEvictionWorker
+from sandbox_v1.application.services.workspace_service import WorkspaceService
 from sandbox_v1.core.observability import MetricsCollector
-from sandbox_v1.core.storage.memory import MemorySandboxRepository
+from sandbox_v1.core.storage.filesystem import LocalWorkspaceSnapshotCache
+from sandbox_v1.core.storage.memory import (
+    MemorySandboxRepository,
+    MemoryWorkspaceRepository,
+)
 from sandbox_v1.domain.entities import SandboxSpec
 
 
@@ -31,6 +37,29 @@ class Container(containers.DeclarativeContainer):
     # 共享的进程内指标和 Repository，是 Pool/Watcher/Reconciler 的权威状态来源。
     metrics = providers.Singleton(MetricsCollector)
     repository = providers.Singleton(MemorySandboxRepository, metrics=metrics)
+
+    # WorkspaceRepository 和 WorkspaceCache 是 WorkspaceService 的依赖。
+    workspace_repository = providers.Singleton(MemoryWorkspaceRepository)
+    workspace_cache = providers.Singleton(
+        LocalWorkspaceSnapshotCache,
+        cache_root=config.SANDBOX_WORKSPACE_CACHE_ROOT,
+        ttl_seconds=config.SANDBOX_WORKSPACE_SNAPSHOT_TTL_SECONDS,
+        max_bytes=config.SANDBOX_WORKSPACE_CACHE_MAX_BYTES,
+        high_watermark_ratio=config.SANDBOX_WORKSPACE_CACHE_HIGH_WATERMARK_RATIO,
+        target_watermark_ratio=config.SANDBOX_WORKSPACE_CACHE_TARGET_WATERMARK_RATIO,
+    )
+    workspace_service = providers.Singleton(
+        WorkspaceService,
+        repository=workspace_repository,
+        cache=workspace_cache,
+        workspace_root=config.SANDBOX_WORKSPACE_ROOT,
+        metrics=metrics,
+    )
+    workspace_eviction_worker = providers.Singleton(
+        WorkspaceEvictionWorker,
+        workspace_service=workspace_service,
+        interval_seconds=config.SANDBOX_WORKSPACE_EVICTION_INTERVAL_SECONDS,
+    )
 
     # Pool 是用户消费和容量计划门面，不直接创建或销毁 runtime 容器。
     pool = providers.Singleton(

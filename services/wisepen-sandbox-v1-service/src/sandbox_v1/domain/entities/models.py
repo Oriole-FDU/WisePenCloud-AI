@@ -29,6 +29,30 @@ class SandboxState(StrEnum):
     LOST = "lost"
 
 
+class WorkspaceState(StrEnum):
+    ACTIVE = "active"
+    DELETING = "deleting"
+    DELETED = "deleted"
+    RESTORING = "restoring"
+
+
+class WorkspaceLifecycleStatus(StrEnum):
+    WORKSPACE_READY = "workspace_ready"
+    WORKSPACE_DELETED = "workspace_deleted"
+    WORKSPACE_RESTORING = "workspace_restoring"
+
+
+class WorkspaceRestoreStartStatus(StrEnum):
+    STARTED = "started"
+    ALREADY_ACTIVE = "already_active"
+    RESTORING = "restoring"
+
+
+class WorkspaceEvictionReason(StrEnum):
+    TTL = "ttl"
+    LRU = "lru"
+
+
 @dataclass(frozen=True)
 class Health:
     """provider 返回的容器健康状态。"""
@@ -103,6 +127,77 @@ class UserSandboxBindingRecord:
     updated_at: datetime = field(default_factory=utc_now)
     last_active_at: datetime = field(default_factory=utc_now)
     reuse_count: int = 0
+
+
+@dataclass(frozen=True)
+class WorkspaceSnapshotRef:
+    """Stable pointer to one host-side workspace cache generation."""
+
+    workspace_key: str
+    snapshot_id: str
+    created_at: datetime = field(default_factory=utc_now)
+    last_accessed_at: datetime = field(default_factory=utc_now)
+    total_bytes: int = 0
+    file_count: int = 0
+    directory_count: int = 0
+    recoverable: bool = True
+    unrecoverable_reason: str | None = None
+    unrecoverable_at: datetime | None = None
+
+
+@dataclass
+class WorkspaceRecord:
+    """Workspace metadata owned by the repository boundary.
+
+    The physical directory is runtime-owned. This record only tracks lifecycle
+    state and the tombstone snapshot Chat can explicitly rebuild from.
+    """
+
+    user_id: str
+    session_id: str
+    workspace_key: str
+    state: WorkspaceState = WorkspaceState.ACTIVE
+    workspace_path: str | None = None
+    tombstone_snapshot: WorkspaceSnapshotRef | None = None
+    generation: int = 0
+    state_version: int = 0
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+    last_accessed_at: datetime = field(default_factory=utc_now)
+    deleted_at: datetime | None = None
+    restore_started_at: datetime | None = None
+    restored_at: datetime | None = None
+    last_error: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkspaceRestoreStart:
+    """Repository decision for a rebuild request.
+
+    The caller performs filesystem restore only when status is STARTED. A
+    RESTORING decision is returned immediately so Chat can retry later.
+    """
+
+    status: WorkspaceRestoreStartStatus
+    record: WorkspaceRecord
+
+
+@dataclass(frozen=True)
+class WorkspaceRestoreOutcome:
+    restored_from_snapshot: bool
+    snapshot_id: str | None = None
+    unrecoverable_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkspaceLifecycleResult:
+    user_id: str
+    session_id: str
+    status: WorkspaceLifecycleStatus
+    workspace_path: str | None = None
+    snapshot_id: str | None = None
+    restored_from_snapshot: bool = False
+    unrecoverable_reason: str | None = None
 
 
 @dataclass(frozen=True)

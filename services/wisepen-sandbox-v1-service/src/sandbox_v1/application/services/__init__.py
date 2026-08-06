@@ -4,6 +4,8 @@ from sandbox_v1.application.services.sandbox_startup_reconciler import (
     StartupReconcileResult,
 )
 from sandbox_v1.application.services.sandbox_watcher import Watcher
+from sandbox_v1.application.services.workspace_eviction import WorkspaceEvictionWorker
+from sandbox_v1.application.services.workspace_service import WorkspaceService
 
 __all__ = [
     "PoolMaintenancePlan",
@@ -11,4 +13,6 @@ __all__ = [
     "SandboxStartupReconciler",
     "StartupReconcileResult",
     "Watcher",
+    "WorkspaceEvictionWorker",
+    "WorkspaceService",
 ]
