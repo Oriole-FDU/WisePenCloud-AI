@@ -23,6 +23,8 @@ class AppSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     FROM_SOURCE_SECRET: str
+    MONGODB_URL: str
+    MONGODB_DB_NAME: str
     SANDBOX_IMAGE: str
     SANDBOX_MAX_USER_BINDINGS: int = 20
     SANDBOX_TARGET_READY: int

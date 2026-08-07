@@ -19,8 +19,13 @@ from sandbox_v1.domain.entities.models import (
     WorkspaceState,
     utc_now,
 )
+from sandbox_v1.domain.entities.transitions import (
+    SANDBOX_ALLOWED_TRANSITIONS,
+    can_transition,
+)
 
 __all__ = [
+    "SANDBOX_ALLOWED_TRANSITIONS",
     "DiscoveredSandbox",
     "Endpoint",
     "Health",
@@ -39,5 +44,6 @@ __all__ = [
     "WorkspaceRestoreStartStatus",
     "WorkspaceSnapshotRef",
     "WorkspaceState",
+    "can_transition",
     "utc_now",
 ]

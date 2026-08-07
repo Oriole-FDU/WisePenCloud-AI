@@ -11,9 +11,9 @@ from sandbox_v1.application.services.workspace_eviction import WorkspaceEviction
 from sandbox_v1.application.services.workspace_service import WorkspaceService
 from sandbox_v1.core.observability import MetricsCollector
 from sandbox_v1.core.storage.filesystem import LocalWorkspaceSnapshotCache
-from sandbox_v1.core.storage.memory import (
-    MemorySandboxRepository,
-    MemoryWorkspaceRepository,
+from sandbox_v1.core.storage.mongo import (
+    MongoSandboxRepository,
+    MongoWorkspaceRepository,
 )
 from sandbox_v1.domain.entities import SandboxSpec
 
@@ -22,6 +22,17 @@ def _sandbox_spec(image: str) -> SandboxSpec:
     """构造 watcher 补池时使用的 provider-neutral 创建规格。"""
 
     return SandboxSpec(image=image)
+
+
+def _mongo_client(url: str):
+    """Create the async Mongo client lazily so imports stay dependency-light."""
+    from pymongo import AsyncMongoClient
+
+    return AsyncMongoClient(url)
+
+
+def _mongo_database(client, database_name: str):
+    return client[database_name]
 
 
 class Container(containers.DeclarativeContainer):
@@ -36,10 +47,21 @@ class Container(containers.DeclarativeContainer):
 
     # 共享的进程内指标和 Repository，是 Pool/Watcher/Reconciler 的权威状态来源。
     metrics = providers.Singleton(MetricsCollector)
-    repository = providers.Singleton(MemorySandboxRepository, metrics=metrics)
-
-    # WorkspaceRepository 和 WorkspaceCache 是 WorkspaceService 的依赖。
-    workspace_repository = providers.Singleton(MemoryWorkspaceRepository)
+    mongo_client = providers.Singleton(_mongo_client, url=config.MONGODB_URL)
+    mongo_database = providers.Singleton(
+        _mongo_database,
+        client=mongo_client,
+        database_name=config.MONGODB_DB_NAME,
+    )
+    repository = providers.Singleton(
+        MongoSandboxRepository,
+        database=mongo_database,
+        metrics=metrics,
+    )
+    workspace_repository = providers.Singleton(
+        MongoWorkspaceRepository,
+        database=mongo_database,
+    )
     workspace_cache = providers.Singleton(
         LocalWorkspaceSnapshotCache,
         cache_root=config.SANDBOX_WORKSPACE_CACHE_ROOT,

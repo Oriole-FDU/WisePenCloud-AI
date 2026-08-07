@@ -8,13 +8,13 @@ from sandbox_v1.domain.entities import (
 )
 from sandbox_v1.domain.interfaces import MetricsPort, SandboxProvider
 from sandbox_v1.application.services import SandboxPool, SandboxStartupReconciler, Watcher
-from sandbox_v1.core.storage import MemorySandboxRepository
+from sandbox_v1.core.storage import MongoSandboxRepository
 from sandbox_v1.core.observability import MetricsCollector
 
 __all__ = [
     "Endpoint",
     "Health",
-    "MemorySandboxRepository",
+    "MongoSandboxRepository",
     "PoolSnapshot",
     "SandboxPool",
     "SandboxProvider",

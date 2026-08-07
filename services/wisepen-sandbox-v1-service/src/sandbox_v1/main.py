@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 from contextlib import asynccontextmanager, suppress
 
@@ -38,6 +39,25 @@ def _use_nacos() -> bool:
     }
 
 
+async def _initialize_storage() -> None:
+    for repository in (
+        container.repository(),
+        container.workspace_repository(),
+    ):
+        initialize = getattr(repository, "initialize", None)
+        if initialize is not None:
+            await initialize()
+
+
+async def _close_mongo_client() -> None:
+    close = getattr(container.mongo_client(), "close", None)
+    if close is None:
+        return
+    result = close()
+    if inspect.isawaitable(result):
+        await result
+
+
 @asynccontextmanager
 async def lifespan(app):
     """管理 FastAPI 生命周期内的沙箱核心启动与停机。
@@ -52,6 +72,7 @@ async def lifespan(app):
     workspace_eviction_task = None
     use_nacos = False
     try:
+        await _initialize_storage()
         workspace_eviction_task = asyncio.create_task(
             container.workspace_eviction_worker().run()
         )
@@ -100,6 +121,11 @@ async def lifespan(app):
                 await nacos_client_manager.deregister_instance()
             except Exception as exc:
                 error("Nacos instance deregistration failed", exc=exc)
+
+        try:
+            await _close_mongo_client()
+        except Exception as exc:
+            error("Mongo client close failed", exc=exc)
 
 
 app = create_app(lifespan=lifespan)

@@ -9,6 +9,7 @@ dependencies = [
     "httpx",
     "pydantic",
     "pydantic-settings",
+    "pymongo",
     "pyyaml",
     "uvicorn[standard]",
     "wisepen-common",

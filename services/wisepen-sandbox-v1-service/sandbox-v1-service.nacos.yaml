@@ -1,5 +1,7 @@
 # Local settings for the container-pool core.
 FROM_SOURCE_SECRET: local-dev
+MONGODB_URL: mongodb://localhost:27017
+MONGODB_DB_NAME: wisepen_dev
 SANDBOX_IMAGE: wisepen-aio:latest
 
 SANDBOX_MAX_USER_BINDINGS: 20
