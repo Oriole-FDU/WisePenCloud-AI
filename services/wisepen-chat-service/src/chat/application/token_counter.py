@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Any, Dict, List, Optional
 
@@ -7,11 +8,16 @@ from chat.domain.entities import ChatMessage, Role
 
 
 class TokenCounter:
-    """ 基于LiteLLM 的 Token 估算器，provider usage 缺失时作为兜底来源 """
+    """基于 LiteLLM 的本地 Token 估算器，provider usage 缺失时作为兜底来源。"""
 
     async def count_text(self, text: str, model_name: str = "gpt-4o") -> int:
         try:
-            return litellm.token_counter(model=model_name, text=text)
+            # acount_tokens 会优先请求 provider；本地同步计数改在线程池执行。
+            return await asyncio.to_thread(
+                litellm.token_counter,
+                model=model_name,
+                text=text,
+            )
         except Exception:
             return max(1, len(text))
 
@@ -23,8 +29,8 @@ class TokenCounter:
     ) -> int:
         payload = self._convert_messages(messages)
         try:
-            # 计数只用于本地上下文和兜底计费，不能调用 provider 的远程计数接口。
-            return litellm.token_counter(
+            return await asyncio.to_thread(
+                litellm.token_counter,
                 model=model_name,
                 messages=payload,
                 tools=tools,

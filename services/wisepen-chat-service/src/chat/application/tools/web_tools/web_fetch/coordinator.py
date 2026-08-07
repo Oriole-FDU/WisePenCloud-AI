@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from chat.application.utils.url_security import UrlSecurityError
 from chat.application.tools.web_tools.common import (
     WebContentCache,
@@ -170,7 +172,9 @@ class FetchCoordinator:
                 False,
             )
 
-        markdown = clean_html(
+        # trafilatura 清洗是同步 CPU 密集任务，不能占用批量抓取共用的事件循环。
+        markdown = await asyncio.to_thread(
+            clean_html,
             raw.raw_html or "",
             url=raw.source_url,
         )

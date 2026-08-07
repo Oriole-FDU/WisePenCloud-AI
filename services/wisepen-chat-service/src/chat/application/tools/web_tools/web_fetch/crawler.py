@@ -148,7 +148,12 @@ class WebCrawler:
         if raw.raw_html is None:
             return None
 
-        markdown = clean_html(raw.raw_html, url=raw.source_url)
+        # 页面批量并发抓取时，HTML 清洗必须在线程池中执行，避免阻塞 BFS 调度。
+        markdown = await asyncio.to_thread(
+            clean_html,
+            raw.raw_html,
+            url=raw.source_url,
+        )
         needs_fallback = should_fallback(
             raw=raw,
             markdown=markdown,
@@ -162,7 +167,8 @@ class WebCrawler:
             else:
                 if fallback.raw_html is not None:
                     raw = fallback
-                    markdown = clean_html(
+                    markdown = await asyncio.to_thread(
+                        clean_html,
                         raw.raw_html,
                         url=raw.source_url,
                     )

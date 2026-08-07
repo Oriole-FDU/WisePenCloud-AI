@@ -138,15 +138,19 @@ async def _provide_web_fetch_static_session() -> AsyncIterator[FetcherSession]:
 
 
 async def _provide_web_fetch_browser_session() -> AsyncIterator[AsyncStealthySession]:
+    # stealthy 是静态抓取失败后的通用浏览器兜底：保留页面资源并短暂等待渲染，
+    # 不让所有页面承担 network-idle 和挑战求解的重型路径。
     session = AsyncStealthySession(
         headless=True,
         max_pages=3,
         timeout=30_000,
-        disable_resources=True,
+        disable_resources=False,
         block_ads=True,
         network_idle=False,
         load_dom=True,
-        retries=1,
+        wait=500,
+        solve_cloudflare=False,
+        retries=2,
     )
     await session.start()
     try:
