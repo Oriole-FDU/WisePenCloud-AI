@@ -79,10 +79,15 @@ class RankingTokenizer:
         for match in _TOKEN_PATTERN.finditer(text):
             value = match.group(0)
             if match.lastgroup == "cjk":
-                tokens.extend(self._tokenize_cjk(value))
-                tokens.extend(
-                    value[index] + value[index + 1] for index in range(len(value) - 1)
-                )
+                segmented_tokens = self._tokenize_cjk(value)
+                tokens.extend(segmented_tokens)
+
+                # 只过滤分词与补充 bigram 的跨来源重叠；分词结果和原文中的真实重复仍计入 TF。
+                segmented_token_set = set(segmented_tokens)
+                for index in range(len(value) - 1):
+                    bigram = value[index] + value[index + 1]
+                    if bigram not in segmented_token_set:
+                        tokens.append(bigram)
                 continue
 
             if not _COMMON_SEPARATOR_PATTERN.search(value):
