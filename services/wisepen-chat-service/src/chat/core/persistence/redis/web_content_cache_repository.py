@@ -8,13 +8,14 @@ from hashlib import sha256
 from redis.asyncio import Redis
 
 from chat.application.tools.web_tools.common import WebContentCacheValue
+from chat.domain.repositories import WebContentCacheRepository
 
 from .base import RedisRepository
 
 _VALUE_KEY_PREFIX = "wisepen:web_content_cache:value:"
 
 
-class RedisWebContentCacheRepository(RedisRepository):
+class RedisWebContentCacheRepository(RedisRepository, WebContentCacheRepository):
     def __init__(self, *, redis_client: Redis) -> None:
         super().__init__(redis_client=redis_client)
 

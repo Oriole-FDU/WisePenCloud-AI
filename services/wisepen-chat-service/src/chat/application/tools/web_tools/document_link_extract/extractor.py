@@ -10,8 +10,8 @@ import httpx
 from chat.application.utils.url_security import validate_public_http_url_async
 from chat.application.tools.web_tools.common import (
     WebContentCache,
-    WebContentCacheRepository,
 )
+from chat.domain.repositories import WebContentCacheRepository
 from chat.application.utils.document_parse.parse_docx import parse_docx
 from chat.application.utils.document_parse.parse_pdf import (
     fast_parse_pdf,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from typing import Protocol
+from chat.domain.repositories import WebContentCacheRepository
 
 from common.logger import info, warn
 
@@ -16,17 +16,6 @@ class WebContentCacheValue:
     expire_at: datetime
     raw_html: str | None = None
     cache_variant: str = ""
-
-
-class WebContentCacheRepository(Protocol):
-    async def get_value(
-        self,
-        *,
-        url: str,
-        cache_variant: str = "",
-    ) -> WebContentCacheValue | None: ...
-
-    async def set_value(self, value: WebContentCacheValue) -> None: ...
 
 
 _DEFAULT_TTL = timedelta(hours=2)

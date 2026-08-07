@@ -13,8 +13,8 @@ from chat.application.utils.url_security import (
 )
 from chat.application.tools.web_tools.common import (
     WebContentCache,
-    WebContentCacheRepository,
 )
+from chat.domain.repositories import WebContentCacheRepository
 from common.logger import warn
 
 from .core.errors import UrlFetchError, UrlFetchUnsupportedUrlError

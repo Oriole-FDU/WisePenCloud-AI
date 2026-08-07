@@ -5,8 +5,8 @@ import asyncio
 from chat.application.utils.url_security import UrlSecurityError
 from chat.application.tools.web_tools.common import (
     WebContentCache,
-    WebContentCacheRepository,
 )
+from chat.domain.repositories import WebContentCacheRepository
 from common.logger import warn
 
 from .batch_scheduler import FetchBatchScheduler, FetchJob

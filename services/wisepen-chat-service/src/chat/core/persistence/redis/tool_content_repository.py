@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from chat.application.tools.common.tool_content_store import (
-    StoredToolContent,
-    ToolContentRepository,
-)
+from chat.application.tools.common.tool_content_store import StoredToolContent
 from chat.core.persistence.redis.base import RedisRepository
+from chat.domain.repositories import ToolContentRepository
 from pydantic import TypeAdapter
 from redis.asyncio import Redis
 

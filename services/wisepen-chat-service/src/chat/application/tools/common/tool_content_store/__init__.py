@@ -3,7 +3,6 @@ from .models import (
     ToolContentChunk,
     ToolContentReceipt,
 )
-from .repository import ToolContentRepository
 from .store import ToolContentPutResult, ToolContentPutStatus, ToolContentStore
 
 __all__ = [
@@ -12,6 +11,5 @@ __all__ = [
     "ToolContentPutResult",
     "ToolContentPutStatus",
     "ToolContentReceipt",
-    "ToolContentRepository",
     "ToolContentStore",
 ]
