@@ -6,7 +6,7 @@ from dataclasses import replace
 from hashlib import sha256
 from typing import TYPE_CHECKING
 
-from rag.application.rag.repositories import RagContextIndexingRepository
+from rag.domain.repositories import RagContextIndexingRepository
 from rag.utils.xml_markup import xml_cdata
 from .models import RagContentProjection, RagRetrievalChunk, RagSectionReadingBlock
 

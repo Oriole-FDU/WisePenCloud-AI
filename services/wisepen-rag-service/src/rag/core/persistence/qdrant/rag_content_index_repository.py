@@ -14,13 +14,17 @@ from rag.application.rag.ingestion import (
     RagContentProjection,
     RagProjectionStage,
 )
+from rag.domain.repositories import RagAclProjectionTarget, RagVectorIndexRepository
 
 
 class RagVectorIndexError(RuntimeError):
     """Qdrant 内容投影不完整或不符合 collection 契约。"""
 
 
-class QdrantRagVectorIndexRepository:
+class QdrantRagVectorIndexRepository(
+    RagVectorIndexRepository,
+    RagAclProjectionTarget,
+):
     __slots__ = (
         "_bm25_options",
         "_client",

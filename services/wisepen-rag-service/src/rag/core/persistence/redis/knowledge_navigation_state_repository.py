@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from redis.asyncio import Redis
 
 from rag.application.rag.knowledge_navigation import KnowledgeNavigationState
-from rag.application.rag.repositories import KnowledgeNavigationStateRepository
+from rag.domain.repositories import KnowledgeNavigationStateRepository
 from rag.core.persistence.redis.base import RedisRepository
 
 _KEY_PREFIX = "wisepen:rag:navigation_state:"

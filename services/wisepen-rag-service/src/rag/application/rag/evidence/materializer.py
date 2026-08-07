@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Mapping, Sequence
 
 from rag.application.rag.acl import RagPermissionAuthorizer
-from rag.application.rag.repositories import RagSourceRepository
+from rag.domain.repositories import RagSourceRepository
 from rag.application.rag.retrieval import RagPermissionScope, RagRetrievalCandidate
 from .models import RagMaterializedHit, RagMaterializedSource
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rag.application.rag.acl import RagPermissionAuthorizer
-from rag.application.rag.repositories import (
+from rag.domain.repositories import (
     RagCandidateRepository,
     RagContentCheckpointRepository,
 )

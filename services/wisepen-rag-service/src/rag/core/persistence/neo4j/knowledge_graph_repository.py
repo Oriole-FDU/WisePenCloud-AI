@@ -4,10 +4,8 @@ from neo4j import AsyncDriver, RoutingControl
 
 from rag.application.rag.acl import RagPermissionAuthorizer, RagResourceAclProjection
 from rag.application.rag.graph_extraction import KnowledgeNodeKind
-from rag.application.rag.graph_projection import (
-    KnowledgeGraphProjection,
-    resource_node_id,
-)
+from rag.application.rag.graph_projection.models import KnowledgeGraphProjection
+from rag.application.rag.graph_projection.projector import resource_node_id
 from rag.application.rag.knowledge_navigation import (
     KnowledgeGraphCypherRequest,
     KnowledgeMentionSource,
@@ -15,10 +13,11 @@ from rag.application.rag.knowledge_navigation import (
     KnowledgeNavigationNode,
     KnowledgeNavigationPath,
 )
-from rag.application.rag.repositories import (
+from rag.domain.repositories import (
     KnowledgeGraphNavigationRepository,
     KnowledgeGraphProjectionRepository,
     KnowledgeGraphProjectionSupersededError,
+    RagAclProjectionTarget,
 )
 from rag.application.rag.graph_extraction import (
     KnowledgeEntityType,
@@ -210,6 +209,7 @@ _PATH_PATTERNS = {
 class Neo4jKnowledgeGraphRepository(
     KnowledgeGraphProjectionRepository,
     KnowledgeGraphNavigationRepository,
+    RagAclProjectionTarget,
 ):
     __slots__ = (
         "_database",

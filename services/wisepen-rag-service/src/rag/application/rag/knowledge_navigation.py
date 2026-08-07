@@ -11,7 +11,7 @@ from rag.application.rag.graph_extraction import (
     KnowledgeNodeKind,
     KnowledgeRelationType,
 )
-from rag.application.rag.repositories import (
+from rag.domain.repositories import (
     KnowledgeGraphNavigationRepository,
     KnowledgeNavigationStateRepository,
 )

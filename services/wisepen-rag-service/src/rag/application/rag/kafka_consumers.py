@@ -13,7 +13,7 @@ from rag.application.rag.ingestion import (
     RagDocumentContent,
     RagProjectionStageAction,
 )
-from rag.application.rag.repositories import (
+from rag.domain.repositories import (
     RagAclProjectionRepository,
     RagAclProjectionTarget,
 )

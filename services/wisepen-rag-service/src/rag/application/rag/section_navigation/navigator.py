@@ -9,7 +9,7 @@ from rag.application.rag.evidence import (
     RagMaterializedSource,
 )
 from rag.application.rag.ingestion.models import RagSectionReadingBlock
-from rag.application.rag.repositories import RagSectionNavigationRepository
+from rag.domain.repositories import RagSectionNavigationRepository
 from .models import RagSectionView
 
 

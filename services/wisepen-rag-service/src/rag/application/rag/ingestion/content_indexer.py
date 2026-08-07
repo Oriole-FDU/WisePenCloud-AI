@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from rag.application.rag.acl import RagResourceAclProjection
-from rag.application.rag.repositories import (
+from rag.domain.repositories import (
     RagAclProjectionRepository,
     RagContentCheckpointRepository,
     RagContentProjectionRepository,

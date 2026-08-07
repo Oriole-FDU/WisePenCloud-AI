@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from beanie.operators import In
 from pymongo import UpdateOne
 
-from rag.application.rag.repositories import (
+from rag.domain.repositories import (
     KnowledgeGraphExtractionRepository,
     RagContextIndexingRepository,
 )

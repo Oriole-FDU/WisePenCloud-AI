@@ -11,6 +11,7 @@ from rag.application.rag.retrieval import (
     RagRetrievalCandidate,
     build_qdrant_permission_filter,
 )
+from rag.domain.repositories import RagCandidateRepository
 from rag.utils.ranking import ScoreSignal, ScoreSignalKind
 
 _PAYLOAD_FIELDS = (
@@ -38,7 +39,7 @@ class _CandidatePayload(TypedDict):
     source_ref_id: str
 
 
-class QdrantRagCandidateRepository:
+class QdrantRagCandidateRepository(RagCandidateRepository):
     __slots__ = (
         "_bm25_options",
         "_client",

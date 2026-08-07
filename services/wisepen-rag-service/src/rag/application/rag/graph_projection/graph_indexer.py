@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from rag.application.rag.graph_extraction import KnowledgeGraphExtractor, build_extraction_windows
-from rag.application.rag.repositories import (
+from rag.domain.repositories import (
     KnowledgeGraphProjectionRepository,
     KnowledgeGraphProjectionSupersededError,
     RagAclProjectionRepository,

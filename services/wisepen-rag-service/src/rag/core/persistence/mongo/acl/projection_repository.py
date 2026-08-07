@@ -10,6 +10,7 @@ from rag.application.rag.acl import (
     RagComputedGroupAclProjection,
     RagResourceAclProjection,
 )
+from rag.domain.repositories import RagAclProjectionRepository
 from rag.domain.entities.rag_acl import (
     RagAclProjectionDocument,
     RagComputedGroupAclDocument,
@@ -18,7 +19,7 @@ from rag.domain.entities.rag_acl import (
 _RESOURCE_COLLECTION = "wisepen_resource_items"
 
 
-class MongoRagAclProjectionRepository:
+class MongoRagAclProjectionRepository(RagAclProjectionRepository):
     """读取 Java Resource 权威集合并保存 RAG ACL 派生投影。"""
 
     __slots__ = ("_projector", "_resource_database_name")

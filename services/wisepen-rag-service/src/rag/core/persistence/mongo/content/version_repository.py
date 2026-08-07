@@ -5,9 +5,10 @@ from collections.abc import Sequence
 from beanie.operators import In
 from rag.application.rag.ingestion import RagProjectionCheckpoint
 from rag.domain.entities.rag_content import RagProjectionCheckpointDocument
+from rag.domain.repositories import RagContentCheckpointRepository
 
 
-class MongoRagContentCheckpointRepository:
+class MongoRagContentCheckpointRepository(RagContentCheckpointRepository):
     """版本侧仓储：读取正文投影 checkpoint 和当前 applied revision。"""
 
     async def get_checkpoint(

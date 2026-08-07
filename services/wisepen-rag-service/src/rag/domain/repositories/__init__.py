@@ -4,11 +4,11 @@ from .navigation import (
     KnowledgeNavigationStateRepository,
 )
 from .projections import (
-    RagContentCheckpointRepository,
     KnowledgeGraphProjectionRepository,
     KnowledgeGraphProjectionSupersededError,
     RagAclProjectionRepository,
     RagAclProjectionTarget,
+    RagContentCheckpointRepository,
     RagContentProjectionRepository,
     RagKnowledgeExtractionSourceRepository,
 )

@@ -16,7 +16,7 @@ from neo4j_graphrag.experimental.components.schema import (
 from neo4j_graphrag.experimental.components.types import Neo4jGraph, TextChunk, TextChunks
 from neo4j_graphrag.llm.base import LLMInterfaceV2
 
-from rag.application.rag.repositories import KnowledgeGraphExtractionRepository
+from rag.domain.repositories import KnowledgeGraphExtractionRepository
 from .derived_payload_codec import decode_derived_graph, encode_derived_graph, slice_window_graph
 from .models import (
     KnowledgeEntityType,

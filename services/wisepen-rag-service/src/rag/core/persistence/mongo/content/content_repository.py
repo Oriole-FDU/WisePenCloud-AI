@@ -33,13 +33,19 @@ from rag.domain.entities.rag_content import (
     RagSourceRefDocument,
     RagSourceSpanDocument,
 )
+from rag.domain.repositories import (
+    RagKnowledgeExtractionSourceRepository,
+    RagResourceSnapshotRepository,
+    RagSectionNavigationRepository,
+    RagSourceRepository,
+)
 
 from .version_repository import load_applied_content_revision
 
 CONTENT_PART_CHARACTERS = 1_000_000
 
 
-class MongoRagExtractionSourceRepository:
+class MongoRagExtractionSourceRepository(RagKnowledgeExtractionSourceRepository):
     """为知识图谱抽取读取当前 applied 正文和 SourceRef。"""
 
     async def load_applied_extraction_source(
@@ -125,7 +131,8 @@ class MongoRagExtractionSourceRepository:
             ),
             source_refs=source_refs,
         )
-class MongoRagSourceRepository:
+
+class MongoRagSourceRepository(RagSourceRepository):
     """按 applied revision 回读 evidence 原文和 Section 阅读块。"""
 
     async def load_applied_reading_blocks(
@@ -203,7 +210,7 @@ class MongoRagSourceRepository:
         )
 
 
-class MongoRagSectionNavigationRepository:
+class MongoRagSectionNavigationRepository(RagSectionNavigationRepository):
     """按 applied revision 读取 Section frontier 和 Section 正文块。"""
 
     async def load_applied_section_reading_blocks(
@@ -332,7 +339,7 @@ class MongoRagSectionNavigationRepository:
         return tuple(views)
 
 
-class MongoRagResourceSnapshotRepository:
+class MongoRagResourceSnapshotRepository(RagResourceSnapshotRepository):
     """资源副本的文档结构与读取。"""
 
     async def load_applied_resource_snapshot(
@@ -772,18 +779,6 @@ def _read_content_range(
         documents,
         [RagSourceSpanDocument(start_offset=start_offset, end_offset=end_offset)],
     )
-
-
-def _normalize_content_offset(
-    value: int | None,
-    total_length: int,
-    *,
-    default: int,
-) -> int:
-    offset = default if value is None else value
-    if offset < 0:
-        offset += total_length
-    return min(max(offset, 0), total_length)
 
 
 def _page_window(

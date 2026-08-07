@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol
 
-from rag.application.rag.repositories import RagAclProjectionRepository
+from rag.domain.repositories import RagAclProjectionRepository
 from .models import RagResourceAclProjection
 
 
