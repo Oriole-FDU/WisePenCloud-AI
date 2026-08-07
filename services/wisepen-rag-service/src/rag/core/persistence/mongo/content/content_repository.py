@@ -39,194 +39,6 @@ from .version_repository import load_applied_content_revision
 CONTENT_PART_CHARACTERS = 1_000_000
 
 
-def to_section(document: RagSectionDocument) -> RagSectionNode:
-    return RagSectionNode(
-        section_id=document.section_id,
-        resource_id=document.resource_id,
-        document_version=document.document_version,
-        title=document.title,
-        level=document.level,
-        parent_section_id=document.parent_section_id,
-        ordinal=document.ordinal,
-        section_path=tuple(document.section_path),
-        preview=document.preview,
-        own_start=document.own_start,
-        own_end=document.own_end,
-        subtree_end=document.subtree_end,
-    )
-
-
-def to_reading_block(
-    document: RagSectionReadingBlockDocument,
-) -> RagSectionReadingBlock:
-    return RagSectionReadingBlock(
-        block_id=document.block_id,
-        section_id=document.section_id,
-        ordinal=document.ordinal,
-        raw_text=document.raw_text,
-        source_spans=to_spans(document.source_spans),
-        page_labels=tuple(document.page_labels),
-        anchor_labels=tuple(document.anchor_labels),
-    )
-
-
-def to_source_ref(document: RagSourceRefDocument) -> RagSourceRef:
-    return RagSourceRef(
-        ref_id=document.ref_id,
-        resource_id=document.resource_id,
-        document_version=document.document_version,
-        chunk_id=document.chunk_id,
-        section_id=document.section_id,
-        section_path=tuple(document.section_path),
-        source_spans=to_spans(document.source_spans),
-        page_labels=tuple(document.page_labels),
-        anchor_labels=tuple(document.anchor_labels),
-    )
-
-
-def to_spans(documents: list[RagSourceSpanDocument]) -> tuple[SourceSpan, ...]:
-    return tuple(
-        SourceSpan(
-            start_offset=document.start_offset,
-            end_offset=document.end_offset,
-        )
-        for document in documents
-    )
-
-
-def join_content_parts(documents: list[RagContentPartDocument]) -> str:
-    expected_start = 0
-    content: list[str] = []
-    for document in documents:
-        if document.start_offset != expected_start:
-            raise RuntimeError(
-                f"content revision {document.content_revision} has discontinuous parts"
-            )
-        if document.end_offset - document.start_offset != len(document.text):
-            raise RuntimeError(
-                f"content revision {document.content_revision} has an invalid part range"
-            )
-        content.append(document.text)
-        expected_start = document.end_offset
-    return "".join(content)
-
-
-def part_indexes(start_offset: int, end_offset: int) -> range:
-    if start_offset < 0 or end_offset <= start_offset:
-        raise RuntimeError("source span has an invalid range")
-    return range(
-        start_offset // CONTENT_PART_CHARACTERS,
-        (end_offset - 1) // CONTENT_PART_CHARACTERS + 1,
-    )
-
-
-def read_source_spans(
-    documents: list[RagContentPartDocument],
-    spans: list[RagSourceSpanDocument],
-) -> str:
-    fragments: list[str] = []
-    for span in spans:
-        cursor = span.start_offset
-        span_fragments: list[str] = []
-        for document in documents:
-            if document.end_offset - document.start_offset != len(document.text):
-                raise RuntimeError(
-                    f"content revision {document.content_revision} has an invalid part range"
-                )
-            if document.end_offset <= cursor:
-                continue
-            if document.start_offset >= span.end_offset:
-                break
-            if document.start_offset > cursor:
-                raise RuntimeError("content parts do not cover source span")
-
-            fragment_end = min(document.end_offset, span.end_offset)
-            span_fragments.append(
-                document.text[
-                    cursor - document.start_offset : fragment_end
-                    - document.start_offset
-                ]
-            )
-            cursor = fragment_end
-            if cursor == span.end_offset:
-                break
-        if cursor != span.end_offset:
-            raise RuntimeError("content parts do not cover source span")
-        fragments.append("".join(span_fragments))
-    return "\n\n".join(fragments)
-
-
-def read_content_range(
-    documents: list[RagContentPartDocument],
-    *,
-    start_offset: int,
-    end_offset: int,
-) -> str:
-    if start_offset >= end_offset:
-        return ""
-    return read_source_spans(
-        documents,
-        [RagSourceSpanDocument(start_offset=start_offset, end_offset=end_offset)],
-    )
-
-
-def normalize_content_offset(
-    value: int | None,
-    total_length: int,
-    *,
-    default: int,
-) -> int:
-    offset = default if value is None else value
-    if offset < 0:
-        offset += total_length
-    return min(max(offset, 0), total_length)
-
-
-def page_window(
-    documents: list[RagContentPartDocument],
-    page: RagPageDocument,
-    section_documents: list[RagSectionDocument],
-    reading_block_documents: list[RagSectionReadingBlockDocument],
-    *,
-    max_chars: int | None = None,
-) -> RagResourceContentWindow:
-    start_offset = page.start_offset
-    end_offset = page.end_offset
-    if max_chars is not None:
-        end_offset = min(end_offset, start_offset + max(max_chars, 0))
-    text = read_content_range(
-        documents,
-        start_offset=start_offset,
-        end_offset=end_offset,
-    )
-    return RagResourceContentWindow(
-        text=text,
-        start_offset=start_offset,
-        end_offset=end_offset,
-        source_spans=(
-            (SourceSpan(start_offset, end_offset),)
-            if start_offset < end_offset
-            else ()
-        ),
-        page_labels=(page.page_label,),
-        section_paths=tuple(
-            dict.fromkeys(
-                tuple(document.section_path)
-                for document in section_documents
-                if document.section_path
-            )
-        ),
-        anchor_labels=tuple(
-            dict.fromkeys(
-                anchor_label
-                for block in reading_block_documents
-                for anchor_label in block.anchor_labels
-            )
-        ),
-        metadata={"page_label": page.page_label},
-    )
-
-
 class MongoRagExtractionSourceRepository:
     """为知识图谱抽取读取当前 applied 正文和 SourceRef。"""
 
@@ -278,13 +90,13 @@ class MongoRagExtractionSourceRepository:
                 document.ref_id,
             )
         )
-        markdown = join_content_parts(content_parts)
+        markdown = _join_content_parts(content_parts)
         if sha256(markdown.encode("utf-8")).hexdigest() != content.content_hash:
             raise RuntimeError(
                 f"applied content revision {revision} has an invalid content hash"
             )
         source_refs = tuple(
-            to_source_ref(document)
+            _to_source_ref(document)
             for document in source_ref_documents
         )
         reading_block_documents.sort(
@@ -307,94 +119,12 @@ class MongoRagExtractionSourceRepository:
                     section_id=document.section_id,
                     section_path=tuple(sections_by_id[document.section_id].section_path),
                     raw_text=document.raw_text,
-                    source_spans=to_spans(document.source_spans),
+                    source_spans=_to_spans(document.source_spans),
                 )
                 for block_index, document in enumerate(reading_block_documents)
             ),
             source_refs=source_refs,
         )
-
-
-def _document_title(section_documents: tuple[RagSectionDocument, ...]) -> str:
-    top_level_sections = sorted(
-        (
-            document
-            for document in section_documents
-            if document.level == 1 and document.title.strip()
-        ),
-        key=lambda document: (document.own_start, document.ordinal),
-    )
-    if top_level_sections:
-        return top_level_sections[0].title.strip()
-
-    titled_sections = sorted(
-        (document for document in section_documents if document.title.strip()),
-        key=lambda document: (document.own_start, document.level, document.ordinal),
-    )
-    return titled_sections[0].title.strip() if titled_sections else ""
-
-
-def _build_snapshot_section_tree(
-    documents: list[RagSectionDocument],
-) -> tuple[RagResourceSnapshotSection, ...]:
-    children_by_parent: dict[str | None, list[RagSectionDocument]] = {}
-    for document in documents:
-        children_by_parent.setdefault(document.parent_section_id, []).append(document)
-    for children in children_by_parent.values():
-        children.sort(key=lambda section: section.ordinal)
-
-    def to_snapshot_section(document: RagSectionDocument) -> RagResourceSnapshotSection:
-        return RagResourceSnapshotSection(
-            section_id=document.section_id,
-            title=document.title,
-            level=document.level,
-            section_path=tuple(document.section_path),
-            has_content=document.own_end > document.own_start,
-            children=tuple(
-                to_snapshot_section(child)
-                for child in children_by_parent.get(document.section_id, [])
-            ),
-        )
-
-    return tuple(
-        to_snapshot_section(document)
-        for document in children_by_parent.get(None, [])
-    )
-
-
-def _section_block_window(
-    section: RagSectionDocument,
-    block: RagSectionReadingBlockDocument,
-) -> RagResourceContentWindow:
-    source_spans = to_spans(block.source_spans)
-    return RagResourceContentWindow(
-        text=block.raw_text,
-        start_offset=source_spans[0].start_offset,
-        end_offset=source_spans[-1].end_offset,
-        source_spans=source_spans,
-        page_labels=tuple(block.page_labels),
-        section_paths=(tuple(section.section_path),),
-        anchor_labels=tuple(block.anchor_labels),
-        metadata={
-            "section_id": section.section_id,
-            "section_path": list(section.section_path),
-            "title": section.title,
-            "block_id": block.block_id,
-            "ordinal": block.ordinal,
-        },
-    )
-
-
-def _reading_block_overlaps(
-    block: RagSectionReadingBlockDocument,
-    page: RagPageDocument,
-) -> bool:
-    return any(
-        span.start_offset < page.end_offset and span.end_offset > page.start_offset
-        for span in block.source_spans
-    )
-
-
 class MongoRagSourceRepository:
     """按 applied revision 回读 evidence 原文和 Section 阅读块。"""
 
@@ -417,7 +147,7 @@ class MongoRagSourceRepository:
         ).to_list()
         by_id = {document.block_id: document for document in documents}
         return tuple(
-            to_reading_block(by_id[block_id])
+            _to_reading_block(by_id[block_id])
             for block_id in unique_ids
             if block_id in by_id
         )
@@ -451,7 +181,7 @@ class MongoRagSourceRepository:
                 part_index
                 for document in ordered_documents
                 for span in document.source_spans
-                for part_index in part_indexes(span.start_offset, span.end_offset)
+                for part_index in _part_indexes(span.start_offset, span.end_offset)
             }
         )
         content_parts = (
@@ -466,8 +196,8 @@ class MongoRagSourceRepository:
         )
         return tuple(
             RagMaterializedSource(
-                source_ref=to_source_ref(document),
-                content=read_source_spans(content_parts, document.source_spans),
+                source_ref=_to_source_ref(document),
+                content=_read_source_spans(content_parts, document.source_spans),
             )
             for document in ordered_documents
         )
@@ -502,7 +232,7 @@ class MongoRagSectionNavigationRepository:
                 document.ordinal,
             )
         )
-        return tuple(to_reading_block(document) for document in documents)
+        return tuple(_to_reading_block(document) for document in documents)
 
     async def load_applied_section_views(
         self,
@@ -585,16 +315,16 @@ class MongoRagSectionNavigationRepository:
             )
             views.append(
                 RagSectionView(
-                    section=to_section(current),
+                    section=_to_section(current),
                     parent=(
-                        to_section(context_by_id[current.parent_section_id])
+                        _to_section(context_by_id[current.parent_section_id])
                         if current.parent_section_id in context_by_id
                         else None
                     ),
-                    previous=to_section(previous) if previous is not None else None,
-                    next=to_section(next_section) if next_section is not None else None,
+                    previous=_to_section(previous) if previous is not None else None,
+                    next=_to_section(next_section) if next_section is not None else None,
                     children=tuple(
-                        to_section(child)
+                        _to_section(child)
                         for child in children_by_parent.get(current.section_id, [])
                     ),
                 )
@@ -728,7 +458,7 @@ class MongoRagResourceSnapshotRepository:
                     if _reading_block_overlaps(block, page)
                 ]
                 windows.append(
-                    page_window(
+                    _page_window(
                         content_parts,
                         page,
                         overlapping_sections,
@@ -831,3 +561,271 @@ class MongoRagResourceSnapshotRepository:
         if not part:
             return 0
         return part[0].end_offset
+
+
+def _document_title(section_documents: tuple[RagSectionDocument, ...]) -> str:
+    top_level_sections = sorted(
+        (
+            document
+            for document in section_documents
+            if document.level == 1 and document.title.strip()
+        ),
+        key=lambda document: (document.own_start, document.ordinal),
+    )
+    if top_level_sections:
+        return top_level_sections[0].title.strip()
+
+    titled_sections = sorted(
+        (document for document in section_documents if document.title.strip()),
+        key=lambda document: (document.own_start, document.level, document.ordinal),
+    )
+    return titled_sections[0].title.strip() if titled_sections else ""
+
+
+def _build_snapshot_section_tree(
+    documents: list[RagSectionDocument],
+) -> tuple[RagResourceSnapshotSection, ...]:
+    children_by_parent: dict[str | None, list[RagSectionDocument]] = {}
+    for document in documents:
+        children_by_parent.setdefault(document.parent_section_id, []).append(document)
+    for children in children_by_parent.values():
+        children.sort(key=lambda section: section.ordinal)
+
+    def to_snapshot_section(document: RagSectionDocument) -> RagResourceSnapshotSection:
+        return RagResourceSnapshotSection(
+            section_id=document.section_id,
+            title=document.title,
+            level=document.level,
+            section_path=tuple(document.section_path),
+            has_content=document.own_end > document.own_start,
+            children=tuple(
+                to_snapshot_section(child)
+                for child in children_by_parent.get(document.section_id, [])
+            ),
+        )
+
+    return tuple(
+        to_snapshot_section(document)
+        for document in children_by_parent.get(None, [])
+    )
+
+
+def _section_block_window(
+    section: RagSectionDocument,
+    block: RagSectionReadingBlockDocument,
+) -> RagResourceContentWindow:
+    source_spans = _to_spans(block.source_spans)
+    return RagResourceContentWindow(
+        text=block.raw_text,
+        start_offset=source_spans[0].start_offset,
+        end_offset=source_spans[-1].end_offset,
+        source_spans=source_spans,
+        page_labels=tuple(block.page_labels),
+        section_paths=(tuple(section.section_path),),
+        anchor_labels=tuple(block.anchor_labels),
+        metadata={
+            "section_id": section.section_id,
+            "section_path": list(section.section_path),
+            "title": section.title,
+            "block_id": block.block_id,
+            "ordinal": block.ordinal,
+        },
+    )
+
+
+def _reading_block_overlaps(
+    block: RagSectionReadingBlockDocument,
+    page: RagPageDocument,
+) -> bool:
+    return any(
+        span.start_offset < page.end_offset and span.end_offset > page.start_offset
+        for span in block.source_spans
+    )
+
+
+def _to_section(document: RagSectionDocument) -> RagSectionNode:
+    return RagSectionNode(
+        section_id=document.section_id,
+        resource_id=document.resource_id,
+        document_version=document.document_version,
+        title=document.title,
+        level=document.level,
+        parent_section_id=document.parent_section_id,
+        ordinal=document.ordinal,
+        section_path=tuple(document.section_path),
+        preview=document.preview,
+        own_start=document.own_start,
+        own_end=document.own_end,
+        subtree_end=document.subtree_end,
+    )
+
+
+def _to_reading_block(
+    document: RagSectionReadingBlockDocument,
+) -> RagSectionReadingBlock:
+    return RagSectionReadingBlock(
+        block_id=document.block_id,
+        section_id=document.section_id,
+        ordinal=document.ordinal,
+        raw_text=document.raw_text,
+        source_spans=_to_spans(document.source_spans),
+        page_labels=tuple(document.page_labels),
+        anchor_labels=tuple(document.anchor_labels),
+    )
+
+
+def _to_source_ref(document: RagSourceRefDocument) -> RagSourceRef:
+    return RagSourceRef(
+        ref_id=document.ref_id,
+        resource_id=document.resource_id,
+        document_version=document.document_version,
+        chunk_id=document.chunk_id,
+        section_id=document.section_id,
+        section_path=tuple(document.section_path),
+        source_spans=_to_spans(document.source_spans),
+        page_labels=tuple(document.page_labels),
+        anchor_labels=tuple(document.anchor_labels),
+    )
+
+
+def _to_spans(documents: list[RagSourceSpanDocument]) -> tuple[SourceSpan, ...]:
+    return tuple(
+        SourceSpan(
+            start_offset=document.start_offset,
+            end_offset=document.end_offset,
+        )
+        for document in documents
+    )
+
+
+def _join_content_parts(documents: list[RagContentPartDocument]) -> str:
+    expected_start = 0
+    content: list[str] = []
+    for document in documents:
+        if document.start_offset != expected_start:
+            raise RuntimeError(
+                f"content revision {document.content_revision} has discontinuous parts"
+            )
+        if document.end_offset - document.start_offset != len(document.text):
+            raise RuntimeError(
+                f"content revision {document.content_revision} has an invalid part range"
+            )
+        content.append(document.text)
+        expected_start = document.end_offset
+    return "".join(content)
+
+
+def _part_indexes(start_offset: int, end_offset: int) -> range:
+    if start_offset < 0 or end_offset <= start_offset:
+        raise RuntimeError("source span has an invalid range")
+    return range(
+        start_offset // CONTENT_PART_CHARACTERS,
+        (end_offset - 1) // CONTENT_PART_CHARACTERS + 1,
+    )
+
+
+def _read_source_spans(
+    documents: list[RagContentPartDocument],
+    spans: list[RagSourceSpanDocument],
+) -> str:
+    fragments: list[str] = []
+    for span in spans:
+        cursor = span.start_offset
+        span_fragments: list[str] = []
+        for document in documents:
+            if document.end_offset - document.start_offset != len(document.text):
+                raise RuntimeError(
+                    f"content revision {document.content_revision} has an invalid part range"
+                )
+            if document.end_offset <= cursor:
+                continue
+            if document.start_offset >= span.end_offset:
+                break
+            if document.start_offset > cursor:
+                raise RuntimeError("content parts do not cover source span")
+
+            fragment_end = min(document.end_offset, span.end_offset)
+            span_fragments.append(
+                document.text[
+                    cursor - document.start_offset : fragment_end
+                    - document.start_offset
+                ]
+            )
+            cursor = fragment_end
+            if cursor == span.end_offset:
+                break
+        if cursor != span.end_offset:
+            raise RuntimeError("content parts do not cover source span")
+        fragments.append("".join(span_fragments))
+    return "\n\n".join(fragments)
+
+
+def _read_content_range(
+    documents: list[RagContentPartDocument],
+    *,
+    start_offset: int,
+    end_offset: int,
+) -> str:
+    if start_offset >= end_offset:
+        return ""
+    return _read_source_spans(
+        documents,
+        [RagSourceSpanDocument(start_offset=start_offset, end_offset=end_offset)],
+    )
+
+
+def _normalize_content_offset(
+    value: int | None,
+    total_length: int,
+    *,
+    default: int,
+) -> int:
+    offset = default if value is None else value
+    if offset < 0:
+        offset += total_length
+    return min(max(offset, 0), total_length)
+
+
+def _page_window(
+    documents: list[RagContentPartDocument],
+    page: RagPageDocument,
+    section_documents: list[RagSectionDocument],
+    reading_block_documents: list[RagSectionReadingBlockDocument],
+    *,
+    max_chars: int | None = None,
+) -> RagResourceContentWindow:
+    start_offset = page.start_offset
+    end_offset = page.end_offset
+    if max_chars is not None:
+        end_offset = min(end_offset, start_offset + max(max_chars, 0))
+    text = _read_content_range(
+        documents,
+        start_offset=start_offset,
+        end_offset=end_offset,
+    )
+    return RagResourceContentWindow(
+        text=text,
+        start_offset=start_offset,
+        end_offset=end_offset,
+        source_spans=(
+            (SourceSpan(start_offset, end_offset),)
+            if start_offset < end_offset
+            else ()
+        ),
+        page_labels=(page.page_label,),
+        section_paths=tuple(
+            dict.fromkeys(
+                tuple(document.section_path)
+                for document in section_documents
+                if document.section_path
+            )
+        ),
+        anchor_labels=tuple(
+            dict.fromkeys(
+                anchor_label
+                for block in reading_block_documents
+                for anchor_label in block.anchor_labels
+            )
+        ),
+        metadata={"page_label": page.page_label},
+    )
