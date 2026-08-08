@@ -16,6 +16,8 @@ from sandbox_v1.domain.entities import (
 
 
 def _datetime(value: Any) -> datetime:
+    """把 Mongo document 中的时间值规范为带 timezone 的 datetime。"""
+
     if isinstance(value, datetime):
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
@@ -24,12 +26,16 @@ def _datetime(value: Any) -> datetime:
 
 
 def _optional_datetime(value: Any) -> datetime | None:
+    """解析可空 datetime 字段。"""
+
     if value is None:
         return None
     return _datetime(value)
 
 
 def endpoint_to_doc(endpoint: Endpoint | None) -> dict[str, Any] | None:
+    """把 Endpoint 转成可嵌入 Mongo document 的结构。"""
+
     if endpoint is None:
         return None
     return {
@@ -39,6 +45,8 @@ def endpoint_to_doc(endpoint: Endpoint | None) -> dict[str, Any] | None:
 
 
 def endpoint_from_doc(doc: dict[str, Any] | None) -> Endpoint | None:
+    """从 Mongo document 嵌套结构还原 Endpoint。"""
+
     if doc is None:
         return None
     return Endpoint(
@@ -48,6 +56,8 @@ def endpoint_from_doc(doc: dict[str, Any] | None) -> Endpoint | None:
 
 
 def sandbox_ref_to_doc(ref: SandboxRef) -> dict[str, Any]:
+    """把 SandboxRef 转成 sandbox collection 的公共字段。"""
+
     return {
         "sandbox_id": ref.sandbox_id,
         "provider_id": ref.provider_id,
@@ -57,6 +67,8 @@ def sandbox_ref_to_doc(ref: SandboxRef) -> dict[str, Any]:
 
 
 def sandbox_ref_from_doc(doc: dict[str, Any]) -> SandboxRef:
+    """从 sandbox document 还原 SandboxRef。"""
+
     return SandboxRef(
         sandbox_id=doc["sandbox_id"],
         provider_id=doc["provider_id"],
@@ -66,6 +78,8 @@ def sandbox_ref_from_doc(doc: dict[str, Any]) -> SandboxRef:
 
 
 def sandbox_record_to_doc(record: SandboxRecord) -> dict[str, Any]:
+    """把 SandboxRecord 序列化为 Mongo sandbox document。"""
+
     ref_doc = sandbox_ref_to_doc(record.ref)
     return {
         "_id": record.ref.sandbox_id,
@@ -82,6 +96,8 @@ def sandbox_record_to_doc(record: SandboxRecord) -> dict[str, Any]:
 
 
 def sandbox_record_from_doc(doc: dict[str, Any]) -> SandboxRecord:
+    """从 Mongo sandbox document 还原 SandboxRecord。"""
+
     return SandboxRecord(
         ref=sandbox_ref_from_doc(doc),
         state=SandboxState(doc["state"]),
@@ -96,6 +112,8 @@ def sandbox_record_from_doc(doc: dict[str, Any]) -> SandboxRecord:
 
 
 def user_binding_to_doc(binding: UserSandboxBindingRecord) -> dict[str, Any]:
+    """把用户绑定记录序列化为 Mongo binding document。"""
+
     return {
         "_id": binding.user_id,
         "user_binding_id": binding.user_binding_id,
@@ -109,6 +127,8 @@ def user_binding_to_doc(binding: UserSandboxBindingRecord) -> dict[str, Any]:
 
 
 def user_binding_from_doc(doc: dict[str, Any]) -> UserSandboxBindingRecord:
+    """从 Mongo binding document 还原用户绑定记录。"""
+
     return UserSandboxBindingRecord(
         user_binding_id=doc["user_binding_id"],
         sandbox_id=doc["sandbox_id"],
@@ -123,6 +143,8 @@ def user_binding_from_doc(doc: dict[str, Any]) -> UserSandboxBindingRecord:
 def workspace_snapshot_to_doc(
     snapshot: WorkspaceSnapshotRef | None,
 ) -> dict[str, Any] | None:
+    """把 WorkspaceSnapshotRef 转成 tombstone_snapshot 嵌套 document。"""
+
     if snapshot is None:
         return None
     return {
@@ -142,6 +164,8 @@ def workspace_snapshot_to_doc(
 def workspace_snapshot_from_doc(
     doc: dict[str, Any] | None,
 ) -> WorkspaceSnapshotRef | None:
+    """从 tombstone_snapshot 嵌套 document 还原 WorkspaceSnapshotRef。"""
+
     if doc is None:
         return None
     return WorkspaceSnapshotRef(
@@ -159,6 +183,8 @@ def workspace_snapshot_from_doc(
 
 
 def workspace_record_to_doc(record: WorkspaceRecord) -> dict[str, Any]:
+    """把 WorkspaceRecord 序列化为 Mongo workspace document。"""
+
     return {
         "_id": record.workspace_key,
         "user_id": record.user_id,
@@ -180,6 +206,8 @@ def workspace_record_to_doc(record: WorkspaceRecord) -> dict[str, Any]:
 
 
 def workspace_record_from_doc(doc: dict[str, Any]) -> WorkspaceRecord:
+    """从 Mongo workspace document 还原 WorkspaceRecord。"""
+
     return WorkspaceRecord(
         user_id=doc["user_id"],
         session_id=doc["session_id"],

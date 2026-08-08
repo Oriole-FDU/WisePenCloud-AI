@@ -40,6 +40,9 @@ def _use_nacos() -> bool:
 
 
 async def _initialize_storage() -> None:
+    """初始化所有带 initialize hook 的持久化 Repository。"""
+
+    # sandbox/workspace Mongo repository 都在这里创建索引并 ping 数据库。
     for repository in (
         container.repository(),
         container.workspace_repository(),
@@ -50,6 +53,8 @@ async def _initialize_storage() -> None:
 
 
 async def _close_mongo_client() -> None:
+    """关闭 Mongo client，兼容同步或异步 close 实现。"""
+
     close = getattr(container.mongo_client(), "close", None)
     if close is None:
         return
@@ -62,9 +67,9 @@ async def _close_mongo_client() -> None:
 async def lifespan(app):
     """管理 FastAPI 生命周期内的沙箱核心启动与停机。
 
-    启动时先探测是否注入 runtime provider；若存在则校验部署、执行启动对账，
-    并启动 watcher 后台维护任务。随后按环境开关注册 Nacos。停机时反向清理：
-    停止 watcher、清理本进程拥有的 runtime 资源，并注销 Nacos 实例。
+    启动时初始化 Mongo 存储和 workspace 快照淘汰任务；若注入 runtime provider，
+    则校验部署、执行启动对账并启动 sandbox watcher。停机时反向取消后台任务、
+    清理 runtime 资源，并关闭 Mongo client。
     """
 
     runtime_provider = None
@@ -72,11 +77,15 @@ async def lifespan(app):
     workspace_eviction_task = None
     use_nacos = False
     try:
+        # 先初始化持久化存储，确保 Repository 索引就绪。
         await _initialize_storage()
+
+        # workspace 快照淘汰独立于 runtime provider，服务启动后始终运行。
         workspace_eviction_task = asyncio.create_task(
             container.workspace_eviction_worker().run()
         )
 
+        # provider 是部署层注入的可选依赖；未注入时 watcher 保持休眠。
         try:
             runtime_provider = container.provider()
         except Exception:
@@ -85,6 +94,7 @@ async def lifespan(app):
             info("sandbox runtime provider is not configured; watcher is dormant")
 
         if runtime_provider is not None:
+            # runtime provider 可用时，先校验部署，再对账历史容器，最后启动后台补池。
             await runtime_provider.validate_deployment()
             await container.startup_reconciler().reconcile()
             watcher_task = asyncio.create_task(container.watcher().run())
@@ -94,14 +104,14 @@ async def lifespan(app):
         info("sandbox pool core started", service=bootstrap_settings.SERVICE_NAME)
         yield
     finally:
-        
+        # 停止 workspace 淘汰任务，避免停机期间继续标记快照。
         if workspace_eviction_task:
             container.workspace_eviction_worker().stop()
             workspace_eviction_task.cancel()
             with suppress(asyncio.CancelledError):
                 await workspace_eviction_task
 
-        # 先停止 watcher，避免停机期间继续创建或销毁容器。
+        # 停止 watcher，避免停机期间继续创建或销毁容器。
         if watcher_task:
             container.watcher().stop()
             watcher_task.cancel()

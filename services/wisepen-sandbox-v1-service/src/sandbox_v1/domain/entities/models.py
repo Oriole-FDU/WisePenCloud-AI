@@ -30,6 +30,12 @@ class SandboxState(StrEnum):
 
 
 class WorkspaceState(StrEnum):
+    """Workspace 生命周期状态。
+
+    ACTIVE 表示物理目录可使用，DELETING 表示正在快照/删除，DELETED 表示
+    tombstone 已提交，RESTORING 表示某个请求已经占用恢复流程。
+    """
+
     ACTIVE = "active"
     DELETING = "deleting"
     DELETED = "deleted"
@@ -37,18 +43,24 @@ class WorkspaceState(StrEnum):
 
 
 class WorkspaceLifecycleStatus(StrEnum):
+    """WorkspaceService 对外返回的生命周期结果状态。"""
+
     WORKSPACE_READY = "workspace_ready"
     WORKSPACE_DELETED = "workspace_deleted"
     WORKSPACE_RESTORING = "workspace_restoring"
 
 
 class WorkspaceRestoreStartStatus(StrEnum):
+    """Repository 对 rebuild 请求的并发决策。"""
+
     STARTED = "started"
     ALREADY_ACTIVE = "already_active"
     RESTORING = "restoring"
 
 
 class WorkspaceEvictionReason(StrEnum):
+    """快照被标记不可恢复的淘汰原因。"""
+
     TTL = "ttl"
     LRU = "lru"
 
@@ -131,7 +143,11 @@ class UserSandboxBindingRecord:
 
 @dataclass(frozen=True)
 class WorkspaceSnapshotRef:
-    """Stable pointer to one host-side workspace cache generation."""
+    """一个 host-side Workspace 快照 generation 的稳定引用。
+
+    Repository 只保存这个引用和可恢复状态；快照实际文件与 metadata 由
+    WorkspaceCache 管理。
+    """
 
     workspace_key: str
     snapshot_id: str
@@ -147,10 +163,10 @@ class WorkspaceSnapshotRef:
 
 @dataclass
 class WorkspaceRecord:
-    """Workspace metadata owned by the repository boundary.
+    """Repository 边界拥有的 Workspace 生命周期元数据。
 
-    The physical directory is runtime-owned. This record only tracks lifecycle
-    state and the tombstone snapshot Chat can explicitly rebuild from.
+    物理目录由运行时/文件系统拥有；该记录只跟踪生命周期状态，以及 Chat 可显式
+    rebuild 使用的 tombstone 快照。
     """
 
     user_id: str
@@ -172,10 +188,10 @@ class WorkspaceRecord:
 
 @dataclass(frozen=True)
 class WorkspaceRestoreStart:
-    """Repository decision for a rebuild request.
+    """Repository 对一次 rebuild 请求的并发决策。
 
-    The caller performs filesystem restore only when status is STARTED. A
-    RESTORING decision is returned immediately so Chat can retry later.
+    只有 STARTED 才允许调用方执行文件恢复；RESTORING 表示已有恢复进行中，
+    调用方应立即返回并让 Chat 后续重试。
     """
 
     status: WorkspaceRestoreStartStatus
@@ -184,6 +200,8 @@ class WorkspaceRestoreStart:
 
 @dataclass(frozen=True)
 class WorkspaceRestoreOutcome:
+    """WorkspaceCache 执行 restore 后返回的结果。"""
+
     restored_from_snapshot: bool
     snapshot_id: str | None = None
     unrecoverable_reason: str | None = None
@@ -191,6 +209,8 @@ class WorkspaceRestoreOutcome:
 
 @dataclass(frozen=True)
 class WorkspaceLifecycleResult:
+    """WorkspaceService 面向 API/调用方返回的生命周期结果。"""
+
     user_id: str
     session_id: str
     status: WorkspaceLifecycleStatus

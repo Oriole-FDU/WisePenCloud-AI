@@ -11,11 +11,7 @@ from sandbox_v1.domain.entities import (
 
 
 class SandboxProvider(Protocol):
-    """核心容器生命周期端口。
-
-    v1 临时服务只需要创建、健康检查、启动发现和销毁。File/Process/Browser
-    会在对应阶段用新的 capability 端口接入，不沿用旧通用 forward 协议。
-    """
+    """核心容器生命周期端口。"""
 
     async def validate_deployment(self) -> None:
         """启动前校验当前 provider 部署是否可用。"""

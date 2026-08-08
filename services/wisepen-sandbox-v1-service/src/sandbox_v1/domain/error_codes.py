@@ -2,16 +2,12 @@ from common.core.domain import IErrorCode
 
 
 class SandboxErrorCode(IErrorCode):
-    """Error codes used by the container-pool core."""
 
-    POOL_EMPTY = (46001, "sandbox pool has no READY container")
-    INVALID_CONSUME_REQUEST = (46005, "consume request identifiers are required")
-    INVALID_STATE_TRANSITION = (46006, "invalid sandbox state transition")
-    SANDBOX_UNAVAILABLE = (46009, "sandbox service is temporarily unavailable")
-    USER_SANDBOX_CAPACITY = (46014, "user sandbox capacity has been reached")
-    INVALID_WORKSPACE_REQUEST = (46101, "workspace request identifiers are required")
-    WORKSPACE_SNAPSHOT_REJECTED = (
-        46102,
-        "workspace snapshot contains unsupported files",
-    )
-    WORKSPACE_PATH_UNSAFE = (46103, "workspace path is outside the managed root")
+    POOL_EMPTY = (46001, "沙箱池中没有可用的 READY 容器")
+    INVALID_CONSUME_REQUEST = (46005, "消费请求必须提供标识信息")
+    INVALID_STATE_TRANSITION = (46006, "无效的沙箱状态转换")
+    SANDBOX_UNAVAILABLE = (46009, "沙箱服务暂时不可用")
+    USER_SANDBOX_CAPACITY = (46014, "用户的沙箱数量已达到容量上限")
+    INVALID_WORKSPACE_REQUEST = (46101, "工作区请求必须提供标识信息")
+    WORKSPACE_SNAPSHOT_REJECTED = (46102, "工作区快照包含不支持的文件")
+    WORKSPACE_PATH_UNSAFE = (46103, "工作区路径位于受管根目录之外")

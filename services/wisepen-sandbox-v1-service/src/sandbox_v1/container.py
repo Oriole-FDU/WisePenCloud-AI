@@ -25,13 +25,16 @@ def _sandbox_spec(image: str) -> SandboxSpec:
 
 
 def _mongo_client(url: str):
-    """Create the async Mongo client lazily so imports stay dependency-light."""
+    """延迟构造异步 Mongo client，避免导入阶段强依赖 pymongo。"""
+
     from pymongo import AsyncMongoClient
 
     return AsyncMongoClient(url)
 
 
 def _mongo_database(client, database_name: str):
+    """从异步 Mongo client 取得配置指定的 database。"""
+
     return client[database_name]
 
 
@@ -45,7 +48,7 @@ class Container(containers.DeclarativeContainer):
     # 运行时配置由 main.py 从 AppSettings 注入。
     config = providers.Configuration()
 
-    # 共享的进程内指标和 Repository，是 Pool/Watcher/Reconciler 的权威状态来源。
+    # 指标在进程内共享；Mongo client/database 是所有持久化 Repository 的依赖。
     metrics = providers.Singleton(MetricsCollector)
     mongo_client = providers.Singleton(_mongo_client, url=config.MONGODB_URL)
     mongo_database = providers.Singleton(
@@ -53,6 +56,8 @@ class Container(containers.DeclarativeContainer):
         client=mongo_client,
         database_name=config.MONGODB_DB_NAME,
     )
+
+    # Mongo Repository 取代旧内存实现，跨进程/重启持久化 sandbox 和 workspace 状态。
     repository = providers.Singleton(
         MongoSandboxRepository,
         database=mongo_database,
@@ -62,6 +67,8 @@ class Container(containers.DeclarativeContainer):
         MongoWorkspaceRepository,
         database=mongo_database,
     )
+
+    # WorkspaceService 组合 Mongo 生命周期记录和本地文件系统快照缓存。
     workspace_cache = providers.Singleton(
         LocalWorkspaceSnapshotCache,
         cache_root=config.SANDBOX_WORKSPACE_CACHE_ROOT,
@@ -77,6 +84,8 @@ class Container(containers.DeclarativeContainer):
         workspace_root=config.SANDBOX_WORKSPACE_ROOT,
         metrics=metrics,
     )
+
+    # 快照淘汰 worker 只依赖 service，按配置周期执行 TTL/LRU 清理。
     workspace_eviction_worker = providers.Singleton(
         WorkspaceEvictionWorker,
         workspace_service=workspace_service,

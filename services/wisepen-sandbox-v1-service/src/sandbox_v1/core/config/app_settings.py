@@ -17,14 +17,18 @@ class AppSettings(BaseModel):
     """沙箱池核心运行配置。
 
     这些配置只覆盖 v1 core 的池容量、warmup、销毁、重试和鉴权参数。应用启动
-    前会先完成校验，避免非法水位或超时配置进入依赖注入图。
+    前会由 Nacos 提供完整配置。Mongo 配置用于持久化 sandbox/workspace 权威状态，
+    Workspace 配置用于受管目录、快照缓存和后台淘汰策略。
     """
 
     model_config = ConfigDict(extra="forbid")
 
+    # 内部调用鉴权与 Mongo 权威存储配置。
     FROM_SOURCE_SECRET: str
     MONGODB_URL: str
     MONGODB_DB_NAME: str
+
+    # sandbox 池容量、warmup、销毁和重试配置。
     SANDBOX_IMAGE: str
     SANDBOX_MAX_USER_BINDINGS: int = 20
     SANDBOX_TARGET_READY: int
@@ -37,6 +41,8 @@ class AppSettings(BaseModel):
     SANDBOX_WARMUP_RETRY_BACKOFF_SECONDS: float
     SANDBOX_WARMUP_RETRY_MAX_BACKOFF_SECONDS: float
     SANDBOX_WATCHER_INTERVAL_SECONDS: float
+
+    # workspace 受管目录、快照缓存容量和后台淘汰配置。
     SANDBOX_WORKSPACE_ROOT: str = "./data/workspaces"
     SANDBOX_WORKSPACE_CACHE_ROOT: str = "./data/workspace-cache"
     SANDBOX_WORKSPACE_SNAPSHOT_TTL_SECONDS: int = 7 * 24 * 60 * 60
@@ -66,7 +72,10 @@ def _run_async(coro):
 
 
 def load_settings() -> AppSettings:
+    """从 Nacos 拉取 sandbox v1 core 配置并构造 AppSettings。"""
+
     try:
+        # 当前服务启动严格依赖 Nacos 配置；拉取失败直接暴露启动错误。
         info("nacos app config pulling.")
         raw_yaml = _run_async(nacos_client_manager.pull_config())
         config_dict = yaml.safe_load(raw_yaml) if raw_yaml else {}
