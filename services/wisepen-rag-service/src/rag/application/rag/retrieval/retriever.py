@@ -16,6 +16,7 @@ from rag.utils.ranking import (
 )
 from .models import (
     RagCandidateRequest,
+    RagRetrievalCandidate,
     RagRetrievalRequest,
     RagRetrievalResult,
     RagRetrievalStatus,
@@ -143,23 +144,34 @@ class RagCandidateRetriever:
                 ),
                 # 把候选携带的召回信号（Qdrant RRF、Neo4j boost 等）一并交给排序层做融合。
                 signals=tuple(signal for candidate in candidates for signal in candidate.signals),
-                top_k=request.top_k,
+                # ReadingBlock 去重发生在 chunk 排序之后，因此先保留候选水位内的完整排序。
+                top_k=request.candidate_limit,
                 candidate_limit=request.candidate_limit,
             )
         )
 
         candidates_by_id = {candidate.chunk_id: candidate for candidate in candidates}
 
-        # 排序结果只引用仍然存在且已通过前置校验的候选，防止排序层引到被过滤掉的 chunk。
-        selected = tuple(
-            candidates_by_id[item.candidate_id]
-            for item in ranking.ranked
-            if item.candidate_id in candidates_by_id
-        )
         if ranking.decision is None:
             raise RagRetrievalError(
                 "knowledge search ranking pipeline did not produce a relevance decision"
             )
+
+        # RetrievalChunk 只是评分单位；最终窗口按 ReadingBlock 去重，避免同一窗口
+        # 的相邻 chunk 占满 top-k，同时保留同一 Section 中独立命中的多个窗口。
+        selected: list[RagRetrievalCandidate] = []
+        selected_block_keys: set[tuple[str, str]] = set()
+        for item in ranking.ranked:
+            candidate = candidates_by_id.get(item.candidate_id)
+            if candidate is None:
+                continue
+            block_key = (candidate.resource_id, candidate.reading_block_id)
+            if block_key in selected_block_keys:
+                continue
+            selected_block_keys.add(block_key)
+            selected.append(candidate)
+            if len(selected) == request.top_k:
+                break
 
         status = RagRetrievalStatus(ranking.decision.value)
         info(
@@ -167,10 +179,10 @@ class RagCandidateRetriever:
             status=status.value,
             decision_score=ranking.decision_score,
             total_candidate_count=ranking.total_candidates,
-            selected_candidate_count=len(selected),
+            selected_reading_block_count=len(selected),
             resource_scoped=bool(request.resource_ids),
         )
         return RagRetrievalResult(
             status=status,
-            candidates=selected,
+            candidates=tuple(selected),
         )

@@ -1,0 +1,91 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="640" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101828"/>
+      <stop offset="0.55" stop-color="#182230"/>
+      <stop offset="1" stop-color="#243B53"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="150" y1="120" x2="1130" y2="520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="0.45" stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#020617" flood-opacity="0.35"/>
+    </filter>
+    <style>
+      .title { font: 700 54px Inter, Segoe UI, Arial, sans-serif; fill: #F8FAFC; }
+      .subtitle { font: 400 24px Inter, Segoe UI, Arial, sans-serif; fill: #CBD5E1; }
+      .label { font: 700 23px Inter, Segoe UI, Arial, sans-serif; fill: #F8FAFC; }
+      .small { font: 500 17px Inter, Segoe UI, Arial, sans-serif; fill: #CBD5E1; }
+      .tiny { font: 600 14px Inter, Segoe UI, Arial, sans-serif; fill: #94A3B8; letter-spacing: 0.4px; }
+      .card { fill: rgba(15, 23, 42, 0.86); stroke: rgba(226, 232, 240, 0.16); stroke-width: 1.2; }
+      .core { fill: rgba(15, 23, 42, 0.96); stroke: url(#accent); stroke-width: 2.4; }
+      .line { stroke: rgba(203, 213, 225, 0.5); stroke-width: 2.2; }
+      .accent-line { stroke: url(#accent); stroke-width: 3; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="640" rx="32" fill="url(#bg)"/>
+  <path d="M77 558C210 414 315 456 448 361C589 261 620 130 790 128C957 126 1037 249 1200 146" stroke="url(#accent)" stroke-width="2" opacity="0.25"/>
+  <path d="M88 482C238 366 384 421 532 313C687 199 771 238 915 196C1032 162 1118 107 1202 90" stroke="url(#accent)" stroke-width="2" opacity="0.18"/>
+
+  <text x="70" y="86" class="title">WisePen RAG Service</text>
+  <text x="72" y="124" class="subtitle">Let AI read knowledge bases like codebases.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="72" y="190" width="214" height="128" rx="22" class="card"/>
+    <text x="100" y="236" class="label">Knowledge Base</text>
+    <text x="100" y="270" class="small">documents · sections</text>
+    <text x="100" y="296" class="small">pages · references</text>
+    <text x="100" y="322" class="small">structured or plain</text>
+
+    <rect x="386" y="164" width="508" height="180" rx="28" class="core"/>
+    <text x="426" y="222" class="label">Agent Knowledge Reading Core</text>
+    <text x="426" y="258" class="small">locate entry · read complete context</text>
+    <text x="426" y="288" class="small">follow structure · traverse relations</text>
+    <text x="426" y="318" class="small">verify every conclusion against source</text>
+
+    <rect x="994" y="190" width="214" height="128" rx="22" class="card"/>
+    <text x="1022" y="236" class="label">AI Reading Loop</text>
+    <text x="1022" y="270" class="small">locate · read</text>
+    <text x="1022" y="296" class="small">expand · navigate</text>
+    <text x="1022" y="322" class="small">verify · cite</text>
+
+    <rect x="96" y="422" width="212" height="112" rx="20" class="card"/>
+    <text x="124" y="464" class="label">Structure Map</text>
+    <text x="124" y="496" class="small">title tree · frontier</text>
+    <text x="124" y="522" class="small">page · section reads</text>
+
+    <rect x="380" y="422" width="212" height="112" rx="20" class="card"/>
+    <text x="408" y="464" class="label">Hybrid Locate</text>
+    <text x="408" y="496" class="small">dense + BM25</text>
+    <text x="408" y="522" class="small">rerank · block top-k</text>
+
+    <rect x="664" y="422" width="212" height="112" rx="20" class="card"/>
+    <text x="692" y="464" class="label">Knowledge Graph</text>
+    <text x="692" y="496" class="small">sectioned documents</text>
+    <text x="692" y="522" class="small">evidence-backed paths</text>
+
+    <rect x="948" y="422" width="212" height="112" rx="20" class="card"/>
+    <text x="976" y="464" class="label">Safe Fallback</text>
+    <text x="976" y="496" class="small">parent-child RAG</text>
+    <text x="976" y="522" class="small">plaintext still readable</text>
+  </g>
+
+  <path d="M286 254H386" class="accent-line"/>
+  <path d="M894 254H994" class="accent-line"/>
+  <path d="M486 344V422" class="line"/>
+  <path d="M612 344L528 422" class="line"/>
+  <path d="M706 344L748 422" class="line"/>
+  <path d="M790 344L1000 422" class="line"/>
+
+  <circle cx="386" cy="254" r="6" fill="#38BDF8"/>
+  <circle cx="894" cy="254" r="6" fill="#34D399"/>
+  <circle cx="486" cy="422" r="5" fill="#A78BFA"/>
+  <circle cx="528" cy="422" r="5" fill="#A78BFA"/>
+  <circle cx="748" cy="422" r="5" fill="#A78BFA"/>
+  <circle cx="1000" cy="422" r="5" fill="#A78BFA"/>
+
+  <text x="72" y="594" class="tiny">LOCATE · READ · EXPAND · VERIFY — KNOWLEDGE NAVIGATION FOR AI AGENTS</text>
+</svg>

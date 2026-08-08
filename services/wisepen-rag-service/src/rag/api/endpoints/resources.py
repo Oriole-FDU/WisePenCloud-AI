@@ -107,6 +107,7 @@ def _snapshot_payload(result) -> dict[str, Any]:
         "resource_id": result.resource_id,
         "document_version": result.document_version,
         "content_revision": result.content_revision,
+        "structure_mode": result.structure_mode.value,
         "total_length": result.total_length,
         "pages": [
             {

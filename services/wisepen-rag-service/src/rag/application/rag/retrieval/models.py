@@ -83,5 +83,5 @@ class RagRetrievalRequest:
     permission_scope: RagPermissionScope  # 检索上下文身份，决定 ACL 过滤与可见资源。
     lexical_query: str | None = None  # BM25 词法查询；None 时回退到 semantic_query。
     resource_ids: tuple[str, ...] = ()  # 资源白名单；空表示不限制。
-    top_k: int = 10  # 最终返回的命中数量。
+    top_k: int = 10  # 最终返回的 ReadingBlock 窗口数量。
     candidate_limit: int = 80  # 召回阶段的最大候选数量，决定后续精排规模。

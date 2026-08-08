@@ -112,7 +112,16 @@ _APPLY_REVISION = """
 MATCH (resource:ResourceNode {resource_id: $resource_id})
 WHERE resource.content_projection_revision = $content_revision
 SET resource.applied_relation_revision = $relation_revision
+REMOVE resource.skipped_content_revision
 RETURN true AS revision_applied
+"""
+
+_MARK_PROJECTION_SKIPPED = """
+MATCH (resource:ResourceNode {resource_id: $resource_id})
+WHERE resource.content_projection_revision = $content_revision
+SET resource.skipped_content_revision = $content_revision,
+    resource.applied_relation_revision = null
+RETURN true AS revision_skipped
 """
 
 _CLEAN_OLD_RELATIONS = """
@@ -132,6 +141,11 @@ _DELETE_RESOURCE_RELATIONS = """
 MATCH ()-[relation:KNOWLEDGE_RELATION]->()
 WHERE relation.evidence_resource_id IN $resource_ids
 DELETE relation
+"""
+
+_DELETE_RESOURCE_MENTIONS = """
+MATCH (:ResourceNode {resource_id: $resource_id})-[mention:MENTIONS]->()
+DELETE mention
 """
 
 _DELETE_RESOURCE_NODES = """
@@ -197,6 +211,24 @@ class Neo4jKnowledgeGraphProjectionRepository(
         )
         return bool(result.records and result.records[0]["applied"])
 
+    async def is_projection_skipped(
+        self,
+        *,
+        resource_id: str,
+        content_revision: str,
+    ) -> bool:
+        result = await self._driver.execute_query(
+            """
+            MATCH (resource:ResourceNode {resource_id: $resource_id})
+            RETURN resource.content_projection_revision = $content_revision
+               AND resource.skipped_content_revision = $content_revision AS skipped
+            """,
+            resource_id=resource_id,
+            content_revision=content_revision,
+            database_=self._database,
+        )
+        return bool(result.records and result.records[0]["skipped"])
+
     async def invalidate_projection(
         self,
         *,
@@ -210,12 +242,49 @@ class Neo4jKnowledgeGraphProjectionRepository(
             SET resource.resource_id = $resource_id,
                 resource.content_projection_revision = $content_revision,
                 resource.applied_relation_revision = null
+            REMOVE resource.skipped_content_revision
             """,
             node_id=resource_node_id(resource_id),
             resource_id=resource_id,
             content_revision=content_revision,
             database_=self._database,
         )
+
+    async def skip_projection(
+        self,
+        *,
+        resource_id: str,
+        content_revision: str,
+    ) -> None:
+        """清理旧图后最后发布 skipped revision，保证失败重试能够继续收敛。"""
+        await self.invalidate_projection(
+            resource_id=resource_id,
+            content_revision=content_revision,
+        )
+        await self._driver.execute_query(
+            _DELETE_RESOURCE_RELATIONS,
+            resource_ids=[resource_id],
+            database_=self._database,
+        )
+        await self._driver.execute_query(
+            _DELETE_RESOURCE_MENTIONS,
+            resource_id=resource_id,
+            database_=self._database,
+        )
+        await self._driver.execute_query(
+            _DELETE_ORPHAN_NODES,
+            database_=self._database,
+        )
+        result = await self._driver.execute_query(
+            _MARK_PROJECTION_SKIPPED,
+            resource_id=resource_id,
+            content_revision=content_revision,
+            database_=self._database,
+        )
+        if not result.records:
+            raise KnowledgeGraphProjectionSupersededError(
+                f"content revision {content_revision} was superseded"
+            )
 
     async def update_acl_projection(
         self,

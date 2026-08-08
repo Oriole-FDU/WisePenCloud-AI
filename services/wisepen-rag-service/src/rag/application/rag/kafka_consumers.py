@@ -10,6 +10,7 @@ from rag.application.rag.graph_projection import KnowledgeGraphIndexer
 from rag.application.rag.ingestion import (
     RagContentIndexer,
     RagContentIndexResult,
+    RagContentProjectionMode,
     RagDocumentContent,
     RagProjectionStageAction,
 )
@@ -86,9 +87,14 @@ class RagDocumentReadyConsumer:
 
         relation_result = None
 
-        # STALE 表示内容投影没有实际更新，无需重新执行图谱抽取。
+        # 非结构化正文只保留朴素混合检索；图谱仓储负责清理旧 revision 并记录跳过状态。
         if result.stage.action is not RagProjectionStageAction.STALE:
-            relation_result = await self._graph_indexer.index(
+            graph_operation = (
+                self._graph_indexer.index
+                if result.projection_mode is RagContentProjectionMode.SECTIONED
+                else self._graph_indexer.skip
+            )
+            relation_result = await graph_operation(
                 resource_id=result.stage.resource_id,
                 content_revision=result.stage.content_revision,
             )
@@ -98,6 +104,7 @@ class RagDocumentReadyConsumer:
             resource_id=result.stage.resource_id,
             document_version=result.stage.document_version,
             content_revision=result.stage.content_revision,
+            projection_mode=result.projection_mode.value,
             action=result.stage.action.value,
             indexed_chunk_count=result.indexed_chunk_count,
             embedded_chunk_count=result.embedded_chunk_count,

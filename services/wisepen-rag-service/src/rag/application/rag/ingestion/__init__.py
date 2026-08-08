@@ -2,6 +2,7 @@ from .content_indexer import RagContentIndexer, RagContentIndexingError, RagCont
 from .context_indexing import ContextIndexingError, ContextIndexingService
 from .models import (
     RagContentProjection,
+    RagContentProjectionMode,
     RagDocumentContent,
     RagPageRange,
     RagRetrievalChunk,
@@ -24,6 +25,7 @@ __all__ = (
     "RagContentIndexingError",
     "RagContentIndexResult",
     "RagContentProjection",
+    "RagContentProjectionMode",
     "RagDocumentContent",
     "RagPageRange",
     "RagProjectionCheckpoint",

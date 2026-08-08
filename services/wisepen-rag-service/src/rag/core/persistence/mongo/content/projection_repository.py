@@ -160,6 +160,7 @@ class MongoRagContentProjectionWriter(RagContentProjectionRepository):
             resource_id=projection.resource_id,
             document_version=projection.document_version,
             content_hash=projection.content_hash,
+            projection_mode=projection.mode.value,
         ).insert()
         content_parts = _content_part_documents(content_revision, projection.markdown)
         if content_parts:

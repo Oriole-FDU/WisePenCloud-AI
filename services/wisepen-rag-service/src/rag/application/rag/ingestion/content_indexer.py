@@ -12,7 +12,7 @@ from rag.domain.repositories import (
     RagVectorIndexRepository,
 )
 from .context_indexing import ContextIndexingService
-from .models import RagContentProjection, RagDocumentContent
+from .models import RagContentProjection, RagContentProjectionMode, RagDocumentContent
 from .revision import RagProjectionStage, RagProjectionStageAction, prepare_projection_stage
 from .section_projector import RagSectionProjector
 
@@ -29,6 +29,7 @@ class RagContentIndexResult:
     """一次内容索引任务的执行结果。"""
 
     stage: RagProjectionStage
+    projection_mode: RagContentProjectionMode
     indexed_chunk_count: int
     embedded_chunk_count: int = 0
     reused_vector_count: int = 0
@@ -75,7 +76,11 @@ class RagContentIndexer:
         preflight_stage = prepare_projection_stage(projection, checkpoint)
 
         if preflight_stage.action is RagProjectionStageAction.STALE:
-            return RagContentIndexResult(stage=preflight_stage, indexed_chunk_count=0)
+            return RagContentIndexResult(
+                stage=preflight_stage,
+                projection_mode=projection.mode,
+                indexed_chunk_count=0,
+            )
 
         if preflight_stage.action is RagProjectionStageAction.ALREADY_APPLIED:
             # 清理历史 revision，修复上次成功应用后清理中断的情况。
@@ -85,19 +90,26 @@ class RagContentIndexer:
             )
             return RagContentIndexResult(
                 stage=preflight_stage,
+                projection_mode=projection.mode,
                 indexed_chunk_count=len(projection.retrieval_chunks),
             )
 
         # 向量索引必须携带 ACL；有 Chunk 时不允许在 ACL 缺失下继续写入。
         acl_projection = await self._load_acl_projection(projection)
 
-        # indexing_context 会进入 embedding 输入，因此必须在 stage 和向量复用前完成。
-        projection = await self._context_indexing.contextualize(projection)
+        # flat-text 的降级目标是朴素混合检索，不为合成 Section 调用 LLM 生成上下文。
+        if projection.mode is RagContentProjectionMode.SECTIONED:
+            # indexing_context 会进入 embedding 输入，因此必须在 stage 和向量复用前完成。
+            projection = await self._context_indexing.contextualize(projection)
 
         # 在仓储层再次判断，防止预检之后出现并发的新版本。
         stage = await self._projection_repository.stage_projection(projection)
         if stage.action is RagProjectionStageAction.STALE:
-            return RagContentIndexResult(stage=stage, indexed_chunk_count=0)
+            return RagContentIndexResult(
+                stage=stage,
+                projection_mode=projection.mode,
+                indexed_chunk_count=0,
+            )
 
         if stage.action is RagProjectionStageAction.ALREADY_APPLIED:
             # 预检时未应用，但 stage 时已应用：说明并发处理已成功覆盖，做相同的清理收尾。
@@ -106,6 +118,7 @@ class RagContentIndexer:
             )
             return RagContentIndexResult(
                 stage=stage,
+                projection_mode=projection.mode,
                 indexed_chunk_count=len(projection.retrieval_chunks),
             )
 
@@ -131,6 +144,7 @@ class RagContentIndexer:
 
         return RagContentIndexResult(
             stage=stage,
+            projection_mode=projection.mode,
             indexed_chunk_count=len(projection.retrieval_chunks),
             embedded_chunk_count=embedded_chunk_count,
             reused_vector_count=(len(projection.retrieval_chunks) - embedded_chunk_count),

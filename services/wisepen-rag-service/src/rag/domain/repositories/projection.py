@@ -119,6 +119,16 @@ class KnowledgeGraphProjectionRepository(ABC):
         pass
 
     @abstractmethod
+    async def is_projection_skipped(
+        self,
+        *,
+        resource_id: str,
+        content_revision: str,
+    ) -> bool:
+        """判断指定正文 revision 是否已明确跳过图谱投影。"""
+        pass
+
+    @abstractmethod
     async def invalidate_projection(
         self,
         *,
@@ -135,6 +145,16 @@ class KnowledgeGraphProjectionRepository(ABC):
         projection: KnowledgeGraphProjection,
     ) -> None:
         """按 revision 提交图投影；并发版本冲突时抛出 superseded 异常。"""
+        pass
+
+    @abstractmethod
+    async def skip_projection(
+        self,
+        *,
+        resource_id: str,
+        content_revision: str,
+    ) -> None:
+        """清理资源旧图并将当前正文 revision 标记为已跳过。"""
         pass
 
     @abstractmethod

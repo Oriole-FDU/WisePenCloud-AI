@@ -21,6 +21,8 @@ class KnowledgeGraphIndexingError(RuntimeError):
 class KnowledgeGraphIndexAction(StrEnum):
     APPLIED = "applied"
     ALREADY_APPLIED = "already_applied"
+    SKIPPED = "skipped"
+    ALREADY_SKIPPED = "already_skipped"
     STALE = "stale"
 
 
@@ -118,4 +120,43 @@ class KnowledgeGraphIndexer:
             relation_revision=projection.relation_revision,
             action=KnowledgeGraphIndexAction.APPLIED,
             projected_relation_count=len(projection.edges),
+        )
+
+    async def skip(
+            self,
+            *,
+            resource_id: str,
+            content_revision: str,
+    ) -> KnowledgeGraphIndexResult:
+        """清理非结构化正文的旧图，并幂等记录当前 revision 不构建图谱。"""
+        if await self._graph_repository.is_projection_skipped(
+                resource_id=resource_id,
+                content_revision=content_revision,
+        ):
+            return KnowledgeGraphIndexResult(
+                relation_revision=None,
+                action=KnowledgeGraphIndexAction.ALREADY_SKIPPED,
+            )
+
+        checkpoint = await self._checkpoint_repository.get_checkpoint(resource_id)
+        if checkpoint is None or checkpoint.applied_content_revision != content_revision:
+            return KnowledgeGraphIndexResult(
+                relation_revision=None,
+                action=KnowledgeGraphIndexAction.STALE,
+            )
+
+        try:
+            await self._graph_repository.skip_projection(
+                resource_id=resource_id,
+                content_revision=content_revision,
+            )
+        except KnowledgeGraphProjectionSupersededError:
+            return KnowledgeGraphIndexResult(
+                relation_revision=None,
+                action=KnowledgeGraphIndexAction.STALE,
+            )
+
+        return KnowledgeGraphIndexResult(
+            relation_revision=None,
+            action=KnowledgeGraphIndexAction.SKIPPED,
         )

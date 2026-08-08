@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from beanie.operators import In
 from rag.utils.chunkers import SourceSpan
 from rag.application.rag.ingestion import (
+    RagContentProjectionMode,
     RagSectionNode,
     RagSectionReadingBlock,
 )
@@ -204,6 +205,7 @@ class MongoRagResourceSnapshotRepository(RagResourceSnapshotRepository):
             resource_id=content.resource_id,
             document_version=content.document_version,
             content_revision=revision,
+            structure_mode=RagContentProjectionMode(content.projection_mode),
             total_length=total_length,
             pages=tuple(
                 RagResourceSnapshotPage(

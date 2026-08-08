@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import StrEnum
 
 from rag.utils.chunkers import SourceSpan
+
+
+class RagContentProjectionMode(StrEnum):
+    """正文投影采用的结构模式。"""
+
+    SECTIONED = "sectioned"
+    FLAT_TEXT = "flat_text"
+    EMPTY = "empty"
 
 
 # SectionNode：标题树节点。对应“文档里的一个章节/小节”，有 section_path、父子关系、own_start/own_end/subtree_end。
@@ -118,6 +127,7 @@ class RagPageRange:
 class RagContentProjection:
     """资源级别的稳定内容投影，作为多后端 RAG 的统一基础。"""
 
+    mode: RagContentProjectionMode  # 决定索引增强和图谱投影策略。
     resource_id: str  # 投影所属资源。
     document_version: int  # 资源文档版本号。
     content_hash: str  # 全文内容哈希，用于变更检测。

@@ -25,21 +25,29 @@ class RagSectionNavigator:
             self,
             hits: tuple[RagMaterializedHit, ...],
     ) -> tuple[RagSectionView, ...]:
-        """把检索命中提升为 SectionView，每个 Section 保留 ranking 最高的命中。"""
-        # 按 (resource_id, section_id) 批量加载 Section 视图（含轻量 frontier）。
-        views = await self._load_views(
-            tuple(
+        """把命中窗口按 Section 聚合为可继续导航的视图。"""
+        keys = tuple(
+            dict.fromkeys(
                 (hit.resource_id, hit.section_id)
                 for hit in hits
             )
         )
+        views = await self._load_views(keys)
         return tuple(
             replace(
-                views[(hit.resource_id, hit.section_id)],
-                sources=(hit.source,),
-                reading_blocks=(hit.reading_block,),
+                views[key],
+                sources=tuple(
+                    hit.source
+                    for hit in hits
+                    if (hit.resource_id, hit.section_id) == key
+                ),
+                reading_blocks=tuple(
+                    hit.reading_block
+                    for hit in hits
+                    if (hit.resource_id, hit.section_id) == key
+                ),
             )
-            for hit in hits
+            for key in keys
         )
 
     async def build_sources(

@@ -17,6 +17,7 @@ class RagContentRevisionDocument(Document):
     resource_id: str
     document_version: int
     content_hash: str
+    projection_mode: str
 
     class Settings:
         name = "wisepen_rag_content_revisions"

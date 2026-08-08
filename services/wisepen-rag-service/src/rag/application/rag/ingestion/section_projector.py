@@ -8,11 +8,15 @@ from rag.utils.chunkers import (
     ChunkDocument,
     LocatorKind,
     MarkdownChunker,
+    PlainTextChunker,
+    PlainTextChunkerConfig,
     SourceSpan,
     TextBlock,
+    TextLocator,
 )
 from .models import (
     RagContentProjection,
+    RagContentProjectionMode,
     RagDocumentContent,
     RagPageRange,
     RagRetrievalChunk,
@@ -22,23 +26,31 @@ from .models import (
 )
 
 
-# 标题树 → Section ReadingBlock → 检索子块 的投影流水线。
-# 三个独立的 MarkdownChunker 负责不同粒度的切分：
-#   - structure_chunker：按标题语义切出 Heading 边界，用于构建 Section 树。
-#   - reading_block_chunker：在单个 Section 内部再次切分，避免长 Section 一次性返回过大正文。
-#   - retrieval_chunker：在 ReadingBlock 内切出 embedding/BM25 用的更小检索子块。
+# 结构化正文保留标题树，flat text 则用固定父子窗口维持基础阅读和检索能力。
 
 
 class RagSectionProjector:
     """将 Markdown 投影为标题树、Section 阅读块和检索子块。"""
 
-    __slots__ = ("_reading_block_chunker", "_retrieval_chunker", "_structure_chunker")
+    __slots__ = (
+        "_flat_retrieval_chunker",
+        "_flat_section_chunker",
+        "_reading_block_chunker",
+        "_retrieval_chunker",
+        "_structure_chunker",
+    )
 
     def __init__(self) -> None:
         self._structure_chunker = MarkdownChunker()
         self._reading_block_chunker = MarkdownChunker()
         # 检索子块比 Section 更小，固定 800 字符硬上限。
         self._retrieval_chunker = MarkdownChunker(max_characters=800)
+        self._flat_section_chunker = PlainTextChunker(
+            PlainTextChunkerConfig(chunk_size=6000, chunk_overlap=0)
+        )
+        self._flat_retrieval_chunker = PlainTextChunker(
+            PlainTextChunkerConfig(chunk_size=800, chunk_overlap=100)
+        )
 
     def project(self, content: RagDocumentContent) -> RagContentProjection:
         # 第一次 chunk 解析只为得到 Heading、page marker 和 anchor 的原文范围，
@@ -50,6 +62,57 @@ class RagSectionProjector:
                 content_type="text/markdown",
             )
         )
+        mode = _projection_mode(structure.blocks)
+        content_hash = sha256(content.markdown.encode("utf-8")).hexdigest()
+        pages = tuple(
+            RagPageRange(
+                page_index=index,
+                page_label=page_range.name.removeprefix("page:"),
+                start_offset=page_range.start_offset,
+                end_offset=page_range.end_offset,
+            )
+            for index, page_range in enumerate(
+                text_range
+                for text_range in structure.locators
+                if text_range.kind is LocatorKind.PAGE
+            )
+        )
+
+        if mode is RagContentProjectionMode.EMPTY:
+            return RagContentProjection(
+                mode=mode,
+                resource_id=content.resource_id,
+                document_version=content.document_version,
+                content_hash=content_hash,
+                markdown=content.markdown,
+                reading_blocks=(),
+                retrieval_chunks=(),
+                sections=(),
+                source_refs=(),
+                pages=pages,
+            )
+
+        if mode is RagContentProjectionMode.FLAT_TEXT:
+            sections, reading_blocks, retrieval_chunks, source_refs = (
+                self._project_flat_text(
+                    content,
+                    blocks=structure.blocks,
+                    locators=structure.locators,
+                )
+            )
+            return RagContentProjection(
+                mode=mode,
+                resource_id=content.resource_id,
+                document_version=content.document_version,
+                content_hash=content_hash,
+                markdown=content.markdown,
+                reading_blocks=reading_blocks,
+                retrieval_chunks=retrieval_chunks,
+                sections=sections,
+                source_refs=source_refs,
+                pages=pages,
+            )
+
         content_starts_by_section_start = _section_content_starts(structure.blocks)
         sections = tuple(
             replace(
@@ -71,21 +134,6 @@ class RagSectionProjector:
         reading_blocks: list[RagSectionReadingBlock] = []
         retrieval_chunks: list[RagRetrievalChunk] = []
         source_refs: list[RagSourceRef] = []
-        pages = tuple(
-            RagPageRange(
-                page_index=index,
-                page_label=page_range.name.removeprefix("page:"),
-                start_offset=page_range.start_offset,
-                end_offset=page_range.end_offset,
-            )
-            for index, page_range in enumerate(
-                text_range
-                for text_range in structure.locators
-                if text_range.kind is LocatorKind.PAGE
-                and text_range.start_offset is not None
-                and text_range.end_offset is not None
-            )
-        )
         # 记录每个 Section 当前的 block ordinal，长 Section 会跨多个 block 编号递增。
         section_ordinals: dict[str, int] = {}
 
@@ -112,17 +160,7 @@ class RagSectionProjector:
                 # _render_source 同时返回 raw_text 与 local→source 坐标映射，
                 # 后续检索子块的 source_spans 需要靠这个映射把局部坐标平移回原文。
                 raw_text, source_map = _render_source(content.markdown, block_spans)
-                block_ranges = tuple(
-                    text_range
-                    for text_range in structure.locators
-                    if text_range.start_offset is not None
-                    and text_range.end_offset is not None
-                    and any(
-                        span.start_offset < text_range.end_offset
-                        and span.end_offset > text_range.start_offset
-                        for span in block_spans
-                    )
-                )
+                block_ranges = _overlapping_locators(structure.locators, block_spans)
                 ordinal = section_ordinals.get(section.section_id, 0)
                 reading_block = RagSectionReadingBlock(
                     block_id=_reading_block_id(content, section.section_id, block_spans),
@@ -130,20 +168,8 @@ class RagSectionProjector:
                     ordinal=ordinal,
                     raw_text=raw_text,
                     source_spans=block_spans,
-                    page_labels=tuple(
-                        dict.fromkeys(
-                            text_range.name.removeprefix("page:")
-                            for text_range in block_ranges
-                            if text_range.kind is LocatorKind.PAGE
-                        )
-                    ),
-                    anchor_labels=tuple(
-                        dict.fromkeys(
-                            text_range.name.removeprefix("anchor:")
-                            for text_range in block_ranges
-                            if text_range.kind is LocatorKind.ANCHOR
-                        )
-                    ),
+                    page_labels=_locator_labels(block_ranges, LocatorKind.PAGE),
+                    anchor_labels=_locator_labels(block_ranges, LocatorKind.ANCHOR),
                 )
                 reading_blocks.append(reading_block)
                 section_ordinals[section.section_id] = ordinal + 1
@@ -158,17 +184,7 @@ class RagSectionProjector:
                     )
                 )
                 for child in child_result.chunks:
-                    source_spans = tuple(
-                        dict.fromkeys(
-                            SourceSpan(
-                                start_offset=source_start + max(local.start_offset, local_start) - local_start,
-                                end_offset=source_start + min(local.end_offset, local_end) - local_start,
-                            )
-                            for local in child.source_spans
-                            for local_start, local_end, source_start in source_map
-                            if local.start_offset < local_end and local.end_offset > local_start
-                        )
-                    )
+                    source_spans = _map_source_spans(child.source_spans, source_map)
                     child_raw_text = "\n\n".join(
                         content.markdown[span.start_offset: span.end_offset] for span in source_spans
                     )
@@ -177,17 +193,7 @@ class RagSectionProjector:
                         if section.section_path
                         else child_raw_text
                     )
-                    child_ranges = tuple(
-                        text_range
-                        for text_range in block_ranges
-                        if text_range.start_offset is not None
-                        and text_range.end_offset is not None
-                        and any(
-                            span.start_offset < text_range.end_offset
-                            and span.end_offset > text_range.start_offset
-                            for span in source_spans
-                        )
-                    )
+                    child_ranges = _overlapping_locators(block_ranges, source_spans)
                     retrieval_chunk = RagRetrievalChunk(
                         chunk_id=_retrieval_chunk_id(reading_block.block_id, source_spans),
                         chunk_index=len(retrieval_chunks),
@@ -197,48 +203,155 @@ class RagSectionProjector:
                         raw_text=child_raw_text,
                         index_text=child_index_text,
                         source_spans=source_spans,
-                        page_labels=tuple(
-                            dict.fromkeys(
-                                text_range.name.removeprefix("page:")
-                                for text_range in child_ranges
-                                if text_range.kind is LocatorKind.PAGE
-                            )
-                        ),
-                        anchor_labels=tuple(
-                            dict.fromkeys(
-                                text_range.name.removeprefix("anchor:")
-                                for text_range in child_ranges
-                                if text_range.kind is LocatorKind.ANCHOR
-                            )
-                        ),
+                        page_labels=_locator_labels(child_ranges, LocatorKind.PAGE),
+                        anchor_labels=_locator_labels(child_ranges, LocatorKind.ANCHOR),
                     )
                     retrieval_chunks.append(retrieval_chunk)
-                    # 1:1 关系：每个 retrieval chunk 对应一个 SourceRef，便于证据回源。
-                    ref_key = "\0".join((retrieval_chunk.chunk_id, section.section_id))
                     source_refs.append(
-                        RagSourceRef(
-                            ref_id=f"rsrc_{sha256(ref_key.encode('utf-8')).hexdigest()[:32]}",
-                            resource_id=content.resource_id,
-                            document_version=content.document_version,
-                            chunk_id=retrieval_chunk.chunk_id,
-                            section_id=section.section_id,
-                            section_path=section.section_path,
-                            source_spans=retrieval_chunk.source_spans,
-                            page_labels=retrieval_chunk.page_labels,
-                            anchor_labels=retrieval_chunk.anchor_labels,
+                        _source_ref(
+                            content,
+                            section=section,
+                            retrieval_chunk=retrieval_chunk,
                         )
                     )
 
         return RagContentProjection(
+            mode=mode,
             resource_id=content.resource_id,
             document_version=content.document_version,
-            content_hash=sha256(content.markdown.encode("utf-8")).hexdigest(),
+            content_hash=content_hash,
             markdown=content.markdown,
             reading_blocks=tuple(reading_blocks),
             retrieval_chunks=tuple(retrieval_chunks),
             sections=sections,
             source_refs=tuple(source_refs),
             pages=pages,
+        )
+
+    def _project_flat_text(
+            self,
+            content: RagDocumentContent,
+            *,
+            blocks: tuple[TextBlock, ...],
+            locators: tuple[TextLocator, ...],
+    ) -> tuple[
+        tuple[RagSectionNode, ...],
+        tuple[RagSectionReadingBlock, ...],
+        tuple[RagRetrievalChunk, ...],
+        tuple[RagSourceRef, ...],
+    ]:
+        """把无标题正文降级为可检索、可直接读取的合成 Section。"""
+        effective_spans = tuple(
+            SourceSpan(block.start_offset, block.end_offset)
+            for block in blocks
+            if block.block_kind is not BlockKind.PAGE_MARKER
+            and block.text.strip()
+            and block.start_offset is not None
+            and block.end_offset is not None
+        )
+        plain_text, document_source_map = _render_source(
+            content.markdown,
+            effective_spans,
+        )
+        section_chunks = self._flat_section_chunker.chunk(
+            document=ChunkDocument(
+                text=plain_text,
+                document_id=content.resource_id,
+                content_type="text/plain",
+            )
+        ).chunks
+
+        sections: list[RagSectionNode] = []
+        reading_blocks: list[RagSectionReadingBlock] = []
+        retrieval_chunks: list[RagRetrievalChunk] = []
+        source_refs: list[RagSourceRef] = []
+
+        for section_index, section_chunk in enumerate(section_chunks):
+            section_spans = _map_source_spans(
+                section_chunk.source_spans,
+                document_source_map,
+            )
+            section_text, section_source_map = _render_source(
+                content.markdown,
+                section_spans,
+            )
+            title = f"全文片段 {section_index + 1}"
+            section = RagSectionNode(
+                section_id=_section_id(
+                    content.resource_id,
+                    content.document_version,
+                    "flat:" + _span_key(section_spans),
+                ),
+                resource_id=content.resource_id,
+                document_version=content.document_version,
+                title=title,
+                level=1,
+                parent_section_id=None,
+                ordinal=section_index,
+                section_path=(title,),
+                preview=" ".join(section_text.split())[:500],
+                own_start=section_spans[0].start_offset,
+                own_end=section_spans[-1].end_offset,
+                subtree_end=section_spans[-1].end_offset,
+            )
+            sections.append(section)
+
+            section_ranges = _overlapping_locators(locators, section_spans)
+            reading_block = RagSectionReadingBlock(
+                block_id=_reading_block_id(content, section.section_id, section_spans),
+                section_id=section.section_id,
+                ordinal=0,
+                raw_text=section_text,
+                source_spans=section_spans,
+                page_labels=_locator_labels(section_ranges, LocatorKind.PAGE),
+                anchor_labels=_locator_labels(section_ranges, LocatorKind.ANCHOR),
+            )
+            reading_blocks.append(reading_block)
+
+            child_chunks = self._flat_retrieval_chunker.chunk(
+                document=ChunkDocument(
+                    text=section_text,
+                    document_id=reading_block.block_id,
+                    content_type="text/plain",
+                )
+            ).chunks
+            for child in child_chunks:
+                source_spans = _map_source_spans(
+                    child.source_spans,
+                    section_source_map,
+                )
+                child_raw_text = "\n\n".join(
+                    content.markdown[span.start_offset: span.end_offset]
+                    for span in source_spans
+                )
+                child_ranges = _overlapping_locators(section_ranges, source_spans)
+                retrieval_chunk = RagRetrievalChunk(
+                    chunk_id=_retrieval_chunk_id(reading_block.block_id, source_spans),
+                    chunk_index=len(retrieval_chunks),
+                    reading_block_id=reading_block.block_id,
+                    section_id=section.section_id,
+                    section_path=section.section_path,
+                    raw_text=child_raw_text,
+                    # 合成标题不是原文语义，flat 模式只索引真实正文。
+                    index_text=child_raw_text,
+                    source_spans=source_spans,
+                    page_labels=_locator_labels(child_ranges, LocatorKind.PAGE),
+                    anchor_labels=_locator_labels(child_ranges, LocatorKind.ANCHOR),
+                )
+                retrieval_chunks.append(retrieval_chunk)
+                source_refs.append(
+                    _source_ref(
+                        content,
+                        section=section,
+                        retrieval_chunk=retrieval_chunk,
+                    )
+                )
+
+        return (
+            tuple(sections),
+            tuple(reading_blocks),
+            tuple(retrieval_chunks),
+            tuple(source_refs),
         )
 
 
@@ -263,6 +376,94 @@ def _render_source(
         source_map.append((cursor, cursor + len(fragment), span.start_offset))
         cursor += len(fragment)
     return "\n\n".join(fragments), tuple(source_map)
+
+
+def _projection_mode(
+        blocks: tuple[TextBlock, ...],
+) -> RagContentProjectionMode:
+    if any(block.block_kind is BlockKind.HEADING for block in blocks):
+        return RagContentProjectionMode.SECTIONED
+    if any(
+        block.block_kind is not BlockKind.PAGE_MARKER and block.text.strip()
+        for block in blocks
+    ):
+        return RagContentProjectionMode.FLAT_TEXT
+    return RagContentProjectionMode.EMPTY
+
+
+def _map_source_spans(
+        local_spans: tuple[SourceSpan, ...],
+        source_map: tuple[tuple[int, int, int], ...],
+) -> tuple[SourceSpan, ...]:
+    """把分块器的局部字符范围还原到原始 Markdown 坐标。"""
+    return tuple(
+        dict.fromkeys(
+            SourceSpan(
+                start_offset=source_start + max(local.start_offset, local_start) - local_start,
+                end_offset=source_start + min(local.end_offset, local_end) - local_start,
+            )
+            for local in local_spans
+            for local_start, local_end, source_start in source_map
+            if local.start_offset < local_end and local.end_offset > local_start
+        )
+    )
+
+
+def _overlapping_locators(
+        locators: tuple[TextLocator, ...],
+        source_spans: tuple[SourceSpan, ...],
+) -> tuple[TextLocator, ...]:
+    return tuple(
+        locator
+        for locator in locators
+        if any(
+            span.start_offset < locator.end_offset
+            and span.end_offset > locator.start_offset
+            for span in source_spans
+        )
+    )
+
+
+def _locator_labels(
+        locators: tuple[TextLocator, ...],
+        kind: LocatorKind,
+) -> tuple[str, ...]:
+    prefix = f"{kind.value}:"
+    return tuple(
+        dict.fromkeys(
+            locator.name.removeprefix(prefix)
+            for locator in locators
+            if locator.kind is kind
+        )
+    )
+
+
+def _source_ref(
+        content: RagDocumentContent,
+        *,
+        section: RagSectionNode,
+        retrieval_chunk: RagRetrievalChunk,
+) -> RagSourceRef:
+    """建立 RetrievalChunk 到权威 Markdown span 的一对一证据引用。"""
+    ref_key = "\0".join((retrieval_chunk.chunk_id, section.section_id))
+    return RagSourceRef(
+        ref_id=f"rsrc_{sha256(ref_key.encode('utf-8')).hexdigest()[:32]}",
+        resource_id=content.resource_id,
+        document_version=content.document_version,
+        chunk_id=retrieval_chunk.chunk_id,
+        section_id=section.section_id,
+        section_path=section.section_path,
+        source_spans=retrieval_chunk.source_spans,
+        page_labels=retrieval_chunk.page_labels,
+        anchor_labels=retrieval_chunk.anchor_labels,
+    )
+
+
+def _span_key(source_spans: tuple[SourceSpan, ...]) -> str:
+    return ";".join(
+        f"{span.start_offset}:{span.end_offset}"
+        for span in source_spans
+    )
 
 
 def _build_sections(

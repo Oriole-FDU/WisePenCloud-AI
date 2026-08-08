@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from rag.application.rag.acl import RagPermissionAuthorizer
+from rag.application.rag.ingestion import RagContentProjectionMode
 from rag.domain.repositories import RagResourceSnapshotRepository
 from rag.application.rag.retrieval import RagPermissionScope
 from rag.utils.chunkers import SourceSpan
@@ -17,6 +18,7 @@ class RagResourceSnapshot:
     resource_id: str
     document_version: int
     content_revision: str
+    structure_mode: RagContentProjectionMode
     total_length: int
     pages: tuple["RagResourceSnapshotPage", ...] = ()
     sections: tuple["RagResourceSnapshotSection", ...] = ()
