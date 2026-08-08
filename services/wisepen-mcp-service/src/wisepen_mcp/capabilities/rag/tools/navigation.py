@@ -24,6 +24,8 @@ _LOCATE_DESCRIPTION = (
     "Call first when the answer may be in the user's private WisePen documents. "
     "It returns grounded sections plus graph node anchors for follow-up navigation.\n\n"
     "Output:\n"
+    "retrieval_status is relevant, uncertain, or irrelevant. Uncertain sources "
+    "are leads for follow-up navigation rather than sufficient evidence. "
     "Use sources[].evidence and sources[].reading_blocks text directly when present; "
     "oversized entries expose cache content_index for follow-up range reads. Reuse "
     "state_id with knowledge_navigate_sections for section text, or with "
@@ -51,13 +53,32 @@ _SECTIONS_DESCRIPTION = (
     "frontier entries are navigation choices, not evidence."
 )
 
-_QUERY = Annotated[
+_SEMANTIC_QUERY = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
     Field(
         description=(
-            "The complete question or concept to answer from the user's private "
-            "documents. Include the subject and constraints needed to judge relevance."
+            "A self-contained natural-language information need used for dense retrieval, "
+            "relevance reranking, and follow-up graph-path ranking over the user's private "
+            "documents. "
+            "State one coherent information need; resolve pronouns and conversational "
+            "references; include the subject, sought fact or relationship, and relevant "
+            "scope, time, or document constraints. Do not reduce it to keywords, include "
+            "tool instructions, or supply the expected answer."
+        ),
+    ),
+]
+
+_LEXICAL_QUERY = Annotated[
+    str | None,
+    StringConstraints(strip_whitespace=True, min_length=1),
+    Field(
+        description=(
+            "Optional compact query used only for BM25 lexical retrieval. Include exact "
+            "names, identifiers, error codes, titles, dates, quoted phrases, and domain "
+            "terms likely to occur verbatim in the source. Omit it when there are no "
+            "reliable lexical anchors; semantic_query will then be used as the fallback. "
+            "Do not invent terms."
         ),
     ),
 ]
@@ -95,8 +116,9 @@ def register_navigation_tools(
 ) -> None:
     @mcp.tool(name="knowledge_navigate_locate", description=_LOCATE_DESCRIPTION)
     async def knowledge_navigate_locate(
-        query: _QUERY,
+        semantic_query: _SEMANTIC_QUERY,
         ctx: Context,
+        lexical_query: _LEXICAL_QUERY = None,
         max_results: Annotated[
             int,
             Field(
@@ -108,7 +130,8 @@ def register_navigation_tools(
         return _render_locate_result(
             await client.locate(
                 session_id=session_id(ctx),
-                query=query,
+                semantic_query=semantic_query,
+                lexical_query=lexical_query,
                 max_results=max_results,
             ),
             text_budget=text_budget,
@@ -201,6 +224,7 @@ def _render_locate_result(
     return {
         "visible_result": {
             "state_id": result["state_id"],
+            "retrieval_status": result["retrieval_status"],
             "nodes": result["nodes"],
             "sources": [
                 section_view_payload(source, text_router)

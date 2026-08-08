@@ -21,7 +21,9 @@ TOOL_DESCRIPTION = (
     "Output:\n"
     "Returns relevance-ordered source candidates with URLs and excerpts. Use those "
     "candidates as evidence. supplier_answer, when present, is only a provider summary "
-    "and should be checked against the sources."
+    "and should be checked against the sources. In the final response, every conclusion "
+    "supported by a returned URL must cite it with an inline Markdown link in the form "
+    "[brief description, usually the official website name](exact URL)."
 )
 
 SearchQuery = Annotated[

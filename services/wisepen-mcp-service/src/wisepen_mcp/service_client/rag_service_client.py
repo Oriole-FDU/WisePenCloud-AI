@@ -32,14 +32,16 @@ class RagServiceClient:
         self,
         *,
         session_id: str,
-        query: str,
+        semantic_query: str,
         max_results: int,
+        lexical_query: str | None = None,
     ) -> dict[str, Any]:
         return await self._post(
             _LOCATE_PATH,
             {
                 "session_id": session_id,
-                "query": query,
+                "semantic_query": semantic_query,
+                "lexical_query": lexical_query,
                 "max_results": max_results,
             },
         )
