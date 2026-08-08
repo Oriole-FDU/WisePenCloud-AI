@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
         ],
     )
     await container.neo4j_driver().verify_connectivity()
-    await container.knowledge_graph_repository().initialize()
+    await container.knowledge_graph_projection_repository().initialize()
 
     try:
         await nacos_client_manager.register_instance()

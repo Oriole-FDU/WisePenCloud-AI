@@ -36,7 +36,8 @@ async def locate(
 ) -> R[dict[str, Any]]:
     try:
         result = await service.locate(
-            query=request.query.strip(),
+            semantic_query=request.semantic_query,
+            lexical_query=request.lexical_query,
             max_results=request.max_results,
             session_id=request.session_id,
             permission_scope=_permission_scope(user_id),
@@ -113,6 +114,7 @@ def _permission_scope(user_id: str) -> RagPermissionScope:
 def _locate_payload(result: KnowledgeNavigationLocateResult) -> dict[str, Any]:
     return {
         "state_id": result.state_id,
+        "retrieval_status": result.retrieval_status.value,
         "nodes": [node.to_payload() for node in result.nodes],
         "sources": [_section_view_payload(source) for source in result.sources],
     }

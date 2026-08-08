@@ -82,14 +82,14 @@ class QdrantRagCandidateRepository(RagCandidateRepository):
             collection_name=self._collection_name,
             prefetch=[
                 qdrant_models.Prefetch(
-                    query=list(request.query_vector),
+                    query=list(request.semantic_vector),
                     using=self._dense_vector_name,
                     filter=query_filter,
                     limit=request.limit,
                 ),
                 qdrant_models.Prefetch(
                     query=qdrant_models.Document(
-                        text=request.query_text,
+                        text=request.lexical_query,
                         model="qdrant/bm25",
                         options=self._bm25_options,
                     ),

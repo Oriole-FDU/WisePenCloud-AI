@@ -19,6 +19,7 @@ from rag.application.rag.retrieval import (
     RagCandidateRetriever,
     RagPermissionScope,
     RagRetrievalRequest,
+    RagRetrievalStatus,
 )
 from rag.application.rag.section_navigation import RagSectionNavigator, RagSectionView
 from rag.utils.ranking import (
@@ -108,6 +109,7 @@ class KnowledgeGraphCypherRequest:
 @dataclass(frozen=True, slots=True)
 class KnowledgeNavigationLocateResult:
     state_id: str  # locate 创建的导航状态 ID。
+    retrieval_status: RagRetrievalStatus  # 当前来源能否作为可靠证据。
     nodes: tuple[KnowledgeNavigationNode, ...]  # RAG 命中 chunk 通过 MENTIONS 反查出的图节点。
     sources: tuple[RagSectionView, ...]  # 命中 Section 的正文证据和标题树 frontier。
 
@@ -170,21 +172,23 @@ class KnowledgeNavigationService:
     async def locate(
         self,
         *,
-        query: str,
+        semantic_query: str,
         max_results: int,
         session_id: str,
         permission_scope: RagPermissionScope,
+        lexical_query: str | None = None,
     ) -> KnowledgeNavigationLocateResult:
         """根据查询建立知识导航初始状态。"""
         request = RagRetrievalRequest(
-            query=query,
+            semantic_query=semantic_query,
+            lexical_query=lexical_query,
             permission_scope=permission_scope,
             top_k=max_results,
             candidate_limit=_CANDIDATE_LIMIT,
         )
-        candidates = await self._retriever.retrieve(request)
+        retrieval = await self._retriever.retrieve(request)
         materialized_hits = await self._evidence_materializer.materialize(
-            candidates=candidates,
+            candidates=retrieval.candidates,
             permission_scope=permission_scope,
         )
         views = await self._section_navigator.build_hits(materialized_hits)
@@ -217,13 +221,14 @@ class KnowledgeNavigationService:
         state = await self._state_repository.create(
             user_id=permission_scope.user_id,
             session_id=session_id,
-            root_query=query,
+            root_query=semantic_query,
             known_graph_node_ids=tuple(node.node_id for node in nodes),
             known_sections=known_sections,
         )
 
         return KnowledgeNavigationLocateResult(
             state_id=state.state_id,
+            retrieval_status=retrieval.status,
             nodes=nodes,
             sources=views,
         )

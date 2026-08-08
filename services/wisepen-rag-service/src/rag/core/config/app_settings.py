@@ -59,6 +59,9 @@ class AppSettings(BaseModel):
     # rag 参数配置
     KNOWLEDGE_GRAPH_EXTRACTION_MAX_CONCURRENCY: int = 5
     RAG_NAVIGATION_STATE_TTL_SECONDS: int = 24 * 3600
+    RAG_RERANK_RELEVANCE_LOW_WATERMARK: float = 0.2  # 低于此值明确拒绝。
+    RAG_RERANK_RELEVANCE_HIGH_WATERMARK: float = 0.6  # 达到此值可作为证据。
+    RAG_RERANK_UNCERTAIN_LIMIT: int = 3  # 灰区最多返回的探索候选数。
 
 
 def _run_async(coro):

@@ -12,26 +12,9 @@ if TYPE_CHECKING:
         KnowledgeNavigationPath,
         KnowledgeNavigationState,
     )
+    from rag.application.rag.ingestion.models import RagSectionReadingBlock
     from rag.application.rag.retrieval.models import RagPermissionScope
-
-
-class KnowledgeGraphExtractionRepository(ABC):
-    """知识抽取 SDK 候选图的资源内持久派生结果仓储。"""
-
-    @abstractmethod
-    async def get_many(self, keys: Sequence[str]) -> Mapping[str, str]:
-        """批量读取派生项；未命中条目不会出现在返回结果中。"""
-        pass
-
-    @abstractmethod
-    async def set_many(
-        self,
-        *,
-        resource_id: str,
-        values: Mapping[str, str],
-    ) -> None:
-        """批量写入派生项；调用方应保证幂等。"""
-        pass
+    from rag.application.rag.section_navigation.models import RagSectionView
 
 
 class KnowledgeGraphNavigationRepository(ABC):
@@ -96,4 +79,28 @@ class KnowledgeNavigationStateRepository(ABC):
         sections: Mapping[str, str],
     ) -> bool:
         """追加 Section 及其可信资源归属；状态已删除或过期时返回 False。"""
+        pass
+
+
+class RagSectionNavigationRepository(ABC):
+    """标题树节点和轻量 frontier 的读取接口。"""
+
+    @abstractmethod
+    async def load_applied_section_views(
+        self,
+        *,
+        resource_id: str,
+        section_ids: Sequence[str],
+    ) -> tuple[RagSectionView, ...]:
+        """按请求顺序读取 Section 及其轻量 frontier。"""
+        pass
+
+    @abstractmethod
+    async def load_applied_section_reading_blocks(
+        self,
+        *,
+        resource_id: str,
+        section_ids: Sequence[str],
+    ) -> tuple[RagSectionReadingBlock, ...]:
+        """按 Section 和块内顺序读取完整 ReadingBlock 列表。"""
         pass

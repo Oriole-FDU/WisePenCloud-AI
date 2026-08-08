@@ -1,6 +1,6 @@
 from .acl import MongoRagAclProjectionRepository
 from .content import (
-    MongoKnowledgeGraphExtractionRepository,
+    MongoKnowledgeGraphDerivedRepository,
     MongoRagContentCheckpointRepository,
     MongoRagContextIndexingRepository,
     MongoRagContentProjectionWriter,
@@ -12,7 +12,7 @@ from .content import (
 
 __all__ = [
     "MongoRagAclProjectionRepository",
-    "MongoKnowledgeGraphExtractionRepository",
+    "MongoKnowledgeGraphDerivedRepository",
     "MongoRagContentCheckpointRepository",
     "MongoRagContextIndexingRepository",
     "MongoRagContentProjectionWriter",

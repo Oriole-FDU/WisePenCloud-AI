@@ -3,6 +3,10 @@ from zeroentropy import AsyncZeroEntropy
 from rag.utils.ranking import RankingPipeline
 from rag.utils.ranking.diversifiers import MmrDiversifier, MmrDiversifierConfig
 from rag.utils.ranking.fusion import WeightedRrfFusion
+from rag.utils.ranking.relevance_gate import (
+    HighLowRelevanceGate,
+    HighLowRelevanceGateConfig,
+)
 from rag.utils.ranking.rerankers import (
     ZeroEntropyReranker,
     ZeroEntropyRerankerConfig,
@@ -39,6 +43,7 @@ def build_knowledge_search_ranking_pipeline() -> RankingPipeline:
     return RankingPipeline(
         fusion=WeightedRrfFusion(),
         reranker=_build_zero_entropy_reranker(),
+        gate=_build_knowledge_search_relevance_gate(),
         diversifiers=(
             MmrDiversifier(
                 tokenizer=tokenizer,
@@ -57,4 +62,16 @@ def _build_zero_entropy_reranker() -> ZeroEntropyReranker:
     return ZeroEntropyReranker(
         client=AsyncZeroEntropy(api_key=settings.ZERO_ENTROPY_API_KEY),
         config=ZeroEntropyRerankerConfig(model=settings.RERANKER_MODEL),
+    )
+
+
+def _build_knowledge_search_relevance_gate() -> HighLowRelevanceGate:
+    from rag.core.config.app_settings import settings
+
+    return HighLowRelevanceGate(
+        config=HighLowRelevanceGateConfig(
+            low_watermark=settings.RAG_RERANK_RELEVANCE_LOW_WATERMARK,
+            high_watermark=settings.RAG_RERANK_RELEVANCE_HIGH_WATERMARK,
+            uncertain_limit=settings.RAG_RERANK_UNCERTAIN_LIMIT,
+        )
     )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 
 from rag.utils.ranking import ScoreSignal
 from common.core.domain import GroupRoleType
@@ -35,8 +36,8 @@ class RagPermissionScope:
 class RagCandidateRequest:
     """一次召回请求的完整入参。"""
 
-    query_text: str  # 召回查询文本，用于 BM25 等文本召回信号。
-    query_vector: Sequence[float]  # 与 query_text 对应的稠密向量，用于向量召回。
+    lexical_query: str  # 仅用于 BM25 的词法查询，已在应用层完成缺省回退。
+    semantic_vector: Sequence[float]  # semantic_query 的稠密向量，仅用于向量召回。
     permission_scope: RagPermissionScope  # 用于在召回阶段下发 ACL 过滤条件。
     resource_ids: tuple[str, ...] = ()  # 限定召回范围；空表示不限制。
     limit: int = 80  # 单次召回的最大候选数量（向量召回 top_k）。
@@ -58,12 +59,29 @@ class RagRetrievalCandidate:
     signals: tuple[ScoreSignal, ...]  # 召回阶段产出的原始打分信号，供排序层融合。
 
 
+class RagRetrievalStatus(StrEnum):
+    """一次知识检索对可用证据的集合级判定。"""
+
+    RELEVANT = "relevant"
+    UNCERTAIN = "uncertain"
+    IRRELEVANT = "irrelevant"
+
+
+@dataclass(frozen=True, slots=True)
+class RagRetrievalResult:
+    """候选检索结果及其集合级相关性判定。"""
+
+    status: RagRetrievalStatus  # API 和 Agent 用于决定采用、探索或放弃。
+    candidates: tuple[RagRetrievalCandidate, ...]  # 已按对应水位筛选的候选。
+
+
 @dataclass(frozen=True, slots=True)
 class RagRetrievalRequest:
     """完整 RAG 检索请求。"""
 
-    query: str  # 原始查询文本，会同时用于 embedding 与精排。
+    semantic_query: str  # 完整自然语言意图，用于 embedding、精排和后续导航。
     permission_scope: RagPermissionScope  # 检索上下文身份，决定 ACL 过滤与可见资源。
+    lexical_query: str | None = None  # BM25 词法查询；None 时回退到 semantic_query。
     resource_ids: tuple[str, ...] = ()  # 资源白名单；空表示不限制。
     top_k: int = 10  # 最终返回的命中数量。
     candidate_limit: int = 80  # 召回阶段的最大候选数量，决定后续精排规模。

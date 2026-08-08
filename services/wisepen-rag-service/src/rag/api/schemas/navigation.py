@@ -15,7 +15,8 @@ class NavigationRequest(BaseModel):
 
 
 class LocateRequest(NavigationRequest):
-    query: NonEmptyText
+    semantic_query: NonEmptyText
+    lexical_query: NonEmptyText | None = None
     max_results: int = Field(default=10, ge=1, le=20)
 
 

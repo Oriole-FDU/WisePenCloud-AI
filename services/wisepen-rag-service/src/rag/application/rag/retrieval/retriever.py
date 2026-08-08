@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from common.logger import info
 from rag.application.rag.acl import RagPermissionAuthorizer
 from rag.domain.repositories import (
     RagCandidateRepository,
@@ -13,7 +14,12 @@ from rag.utils.ranking import (
     RankRequest,
     RankingPipeline,
 )
-from .models import RagCandidateRequest, RagRetrievalCandidate, RagRetrievalRequest
+from .models import (
+    RagCandidateRequest,
+    RagRetrievalRequest,
+    RagRetrievalResult,
+    RagRetrievalStatus,
+)
 
 if TYPE_CHECKING:
     from rag.utils.llm_clients.embedding import EmbeddingClient
@@ -21,6 +27,12 @@ if TYPE_CHECKING:
 
 class RagRetrievalError(RuntimeError):
     """RAG 查询输入或依赖结果不符合检索契约。"""
+
+
+_EMPTY_RETRIEVAL_RESULT = RagRetrievalResult(
+    status=RagRetrievalStatus.IRRELEVANT,
+    candidates=(),
+)
 
 
 class RagCandidateRetriever:
@@ -52,32 +64,39 @@ class RagCandidateRetriever:
     async def retrieve(
             self,
             request: RagRetrievalRequest,
-    ) -> tuple[RagRetrievalCandidate, ...]:
+    ) -> RagRetrievalResult:
         """执行完整 RAG 检索流程。"""
-        query = request.query.strip()
-        if not query:
-            raise RagRetrievalError("query must not be empty")
+        semantic_query = request.semantic_query.strip()
+        if not semantic_query:
+            raise RagRetrievalError("semantic_query must not be empty")
+        lexical_query = (
+            request.lexical_query.strip()
+            if request.lexical_query is not None
+            else semantic_query
+        )
+        if not lexical_query:
+            raise RagRetrievalError("lexical_query must not be empty when provided")
         if not request.permission_scope.user_id.strip():
             raise RagRetrievalError("permission scope user_id must not be empty")
         if request.top_k <= 0 or request.candidate_limit <= 0:
-            return ()
+            return _EMPTY_RETRIEVAL_RESULT
 
-        # Query embedding 只生成一次，供后续向量召回使用。
-        embedding = await self._embedding_client.aembed([query])
+        # 词法查询不会进入 embedding；它可能是缺少语法结构的标识符和术语集合。
+        embedding = await self._embedding_client.aembed([semantic_query])
         if len(embedding.embeddings) != 1:
             raise RagRetrievalError("query embedding response must contain one vector")
 
         candidates = await self._candidate_repository.retrieve_candidates(
             RagCandidateRequest(
-                query_text=query,
-                query_vector=embedding.embeddings[0],
+                lexical_query=lexical_query,
+                semantic_vector=embedding.embeddings[0],
                 permission_scope=request.permission_scope,
                 resource_ids=request.resource_ids,
                 limit=request.candidate_limit,
             )
         )
         if not candidates:
-            return ()
+            return _EMPTY_RETRIEVAL_RESULT
 
         # 版本过滤：只接受当前已经成功投影完成的内容版本，
         # 防止召回到旧 chunk（已被 delete_other_revisions 清理）或尚未应用的新版本。
@@ -90,7 +109,7 @@ class RagCandidateRetriever:
             if applied_revisions.get(candidate.resource_id) == candidate.content_revision
         )
         if not candidates:
-            return ()
+            return _EMPTY_RETRIEVAL_RESULT
 
         # 最终权限门：即使底层召回带有 ACL filter，也再次基于本地权威投影确认。
         accessible_resource_ids = await self._permission_authorizer.accessible_resource_ids(
@@ -101,12 +120,12 @@ class RagCandidateRetriever:
             candidate for candidate in candidates if candidate.resource_id in accessible_resource_ids
         )
         if not candidates:
-            return ()
+            return _EMPTY_RETRIEVAL_RESULT
 
         # prior_rank 与 group_key 在排序层共同决定"同资源去重"和"跨资源融合"。
         ranking = await self._ranking_pipeline.arank(
             RankRequest(
-                query=RankQuery(text=query),
+                query=RankQuery(text=semantic_query),
                 candidates=tuple(
                     RankCandidate(
                         candidate_id=candidate.chunk_id,
@@ -132,8 +151,26 @@ class RagCandidateRetriever:
         candidates_by_id = {candidate.chunk_id: candidate for candidate in candidates}
 
         # 排序结果只引用仍然存在且已通过前置校验的候选，防止排序层引到被过滤掉的 chunk。
-        return tuple(
+        selected = tuple(
             candidates_by_id[item.candidate_id]
             for item in ranking.ranked
             if item.candidate_id in candidates_by_id
+        )
+        if ranking.decision is None:
+            raise RagRetrievalError(
+                "knowledge search ranking pipeline did not produce a relevance decision"
+            )
+
+        status = RagRetrievalStatus(ranking.decision.value)
+        info(
+            "rag retrieval relevance evaluated.",
+            status=status.value,
+            decision_score=ranking.decision_score,
+            total_candidate_count=ranking.total_candidates,
+            selected_candidate_count=len(selected),
+            resource_scoped=bool(request.resource_ids),
+        )
+        return RagRetrievalResult(
+            status=status,
+            candidates=selected,
         )

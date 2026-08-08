@@ -3,6 +3,8 @@ from .models import (
     RagPermissionScope,
     RagRetrievalCandidate,
     RagRetrievalRequest,
+    RagRetrievalResult,
+    RagRetrievalStatus,
 )
 from .permission_filter import (
     build_neo4j_permission_predicate,
@@ -17,6 +19,8 @@ __all__ = (
     "RagRetrievalCandidate",
     "RagRetrievalError",
     "RagRetrievalRequest",
+    "RagRetrievalResult",
+    "RagRetrievalStatus",
     "build_neo4j_permission_predicate",
     "build_qdrant_permission_filter",
 )

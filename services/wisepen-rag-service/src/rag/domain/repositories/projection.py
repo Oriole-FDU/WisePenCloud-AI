@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from rag.application.rag.acl.models import RagResourceAclProjection
-    from rag.application.rag.graph_extraction.models import KnowledgeExtractionSource
     from rag.application.rag.graph_projection.models import KnowledgeGraphProjection
     from rag.application.rag.ingestion.models import RagContentProjection
     from rag.application.rag.ingestion.revision import (
@@ -98,18 +97,6 @@ class RagContentCheckpointRepository(ABC):
         resource_ids: Sequence[str],
     ) -> Mapping[str, str]:
         """批量读取各资源已应用的 content_revision。"""
-        pass
-
-
-class RagKnowledgeExtractionSourceRepository(ABC):
-    """图抽取读取当前 applied 正文投影的接口。"""
-
-    @abstractmethod
-    async def load_applied_extraction_source(
-        self,
-        resource_id: str,
-    ) -> KnowledgeExtractionSource | None:
-        """读取当前 applied revision 的图抽取输入。"""
         pass
 
 

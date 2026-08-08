@@ -6,7 +6,7 @@ from beanie.operators import In
 from pymongo import UpdateOne
 
 from rag.domain.repositories import (
-    KnowledgeGraphExtractionRepository,
+    KnowledgeGraphDerivedRepository,
     RagContextIndexingRepository,
 )
 from rag.domain.entities.rag_content import (
@@ -75,7 +75,7 @@ class MongoRagContextIndexingRepository(RagContextIndexingRepository):
         ).delete()
 
 
-class MongoKnowledgeGraphExtractionRepository(KnowledgeGraphExtractionRepository):
+class MongoKnowledgeGraphDerivedRepository(KnowledgeGraphDerivedRepository):
     """按资源持久化 GraphRAG SDK 候选图派生结果。"""
 
     async def get_many(self, keys: Sequence[str]) -> Mapping[str, str]:

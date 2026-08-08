@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from beanie.operators import In
 from rag.utils.chunkers import SourceSpan
 from rag.application.rag.ingestion import (
     RagContentProjection,
     RagPageRange,
+    RagProjectionCheckpoint,
     RagProjectionStage,
     RagProjectionStageAction,
     RagSectionNode,
@@ -24,11 +27,12 @@ from rag.domain.entities.rag_content import (
     RagSourceRefDocument,
     RagSourceSpanDocument,
 )
-from rag.domain.repositories import RagContentProjectionRepository
+from rag.domain.repositories import (
+    RagContentCheckpointRepository,
+    RagContentProjectionRepository,
+)
 
-from .version_repository import load_content_checkpoint
-
-CONTENT_PART_CHARACTERS = 1_000_000
+from .common import CONTENT_PART_CHARACTERS, load_content_checkpoint
 
 
 class MongoRagContentProjectionWriter(RagContentProjectionRepository):
@@ -181,6 +185,31 @@ class MongoRagContentProjectionWriter(RagContentProjectionRepository):
                 for page in projection.pages
             )
 
+
+class MongoRagContentCheckpointRepository(RagContentCheckpointRepository):
+    """读取正文投影 checkpoint 和当前 applied revision。"""
+
+    async def get_checkpoint(
+        self,
+        resource_id: str,
+    ) -> RagProjectionCheckpoint | None:
+        return await load_content_checkpoint(resource_id)
+
+    async def get_applied_revisions(
+        self,
+        resource_ids: Sequence[str],
+    ) -> dict[str, str]:
+        unique_resource_ids = tuple(dict.fromkeys(resource_ids))
+        if not unique_resource_ids:
+            return {}
+        documents = await RagProjectionCheckpointDocument.find(
+            In(RagProjectionCheckpointDocument.resource_id, unique_resource_ids)
+        ).to_list()
+        return {
+            document.resource_id: document.applied_content_revision
+            for document in documents
+            if document.applied_content_revision is not None
+        }
 
 
 def _section_document(

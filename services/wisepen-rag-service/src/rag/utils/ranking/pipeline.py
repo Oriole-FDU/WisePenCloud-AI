@@ -9,6 +9,8 @@ from .core import (
     Fusion,
     Prefilter,
     RankCandidate,
+    RankDecision,
+    RankGate,
     RankedCandidate,
     RankRequest,
     RankResult,
@@ -26,6 +28,7 @@ class RankingPipeline:
     scorers: tuple[Scorer, ...] = ()
     fusion: Fusion | None = None
     reranker: Reranker | None = None
+    gate: RankGate | None = None
     diversifiers: tuple[Diversifier, ...] = ()
 
     def rank(self, request: RankRequest) -> RankResult:
@@ -41,12 +44,22 @@ class RankingPipeline:
             )
 
         ranked = ranked[: request.candidate_limit]
+        decision: RankDecision | None = None
+        decision_score: float | None = None
+        if self.gate is not None:
+            gate_result = self.gate.evaluate(ranked=ranked)
+            ranked = gate_result.ranked
+            decision = gate_result.decision
+            decision_score = gate_result.decision_score
+
         for diversifier in self.diversifiers:
             ranked = assign_ranks(diversifier.diversify(ranked=ranked))
 
         return RankResult(
             ranked=assign_ranks(ranked[: request.top_k]),
             total_candidates=len(request.candidates),
+            decision=decision,
+            decision_score=decision_score,
         )
 
     async def arank(self, request: RankRequest) -> RankResult:
@@ -63,6 +76,15 @@ class RankingPipeline:
             ranked = await self.reranker.rerank(query=request.query, ranked=ranked)
             ranked = assign_ranks(ranked)[: request.candidate_limit]
 
+        decision: RankDecision | None = None
+        decision_score: float | None = None
+        if self.gate is not None:
+            # 绝对相关性必须在 MMR 的查询内归一化之前判断。
+            gate_result = self.gate.evaluate(ranked=ranked)
+            ranked = gate_result.ranked
+            decision = gate_result.decision
+            decision_score = gate_result.decision_score
+
         for diversifier in self.diversifiers:
             ranked = assign_ranks(
                 await asyncio.to_thread(diversifier.diversify, ranked=ranked)
@@ -71,6 +93,8 @@ class RankingPipeline:
         return RankResult(
             ranked=assign_ranks(ranked[: request.top_k]),
             total_candidates=len(request.candidates),
+            decision=decision,
+            decision_score=decision_score,
         )
 
     def _rank_before_reranker(

@@ -1,18 +1,22 @@
-from .content_repository import (
-    MongoRagExtractionSourceRepository,
-    MongoRagSectionNavigationRepository,
-    MongoRagSourceRepository,
-)
 from .derived_repository import (
-    MongoKnowledgeGraphExtractionRepository,
+    MongoKnowledgeGraphDerivedRepository,
     MongoRagContextIndexingRepository,
 )
-from .content_repository import MongoRagResourceSnapshotRepository
-from .projection_writer import MongoRagContentProjectionWriter
-from .version_repository import MongoRagContentCheckpointRepository
+from .projection_repository import (
+    MongoRagContentCheckpointRepository,
+    MongoRagContentProjectionWriter,
+)
+from .resource_repository import (
+    MongoRagResourceSnapshotRepository,
+    MongoRagSectionNavigationRepository,
+)
+from .source_repository import (
+    MongoRagExtractionSourceRepository,
+    MongoRagSourceRepository,
+)
 
 __all__ = [
-    "MongoKnowledgeGraphExtractionRepository",
+    "MongoKnowledgeGraphDerivedRepository",
     "MongoRagContentCheckpointRepository",
     "MongoRagContextIndexingRepository",
     "MongoRagContentProjectionWriter",

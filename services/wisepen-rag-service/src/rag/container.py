@@ -30,7 +30,7 @@ from rag.application.rag.retrieval import (
 from rag.application.rag.section_navigation import RagSectionNavigator
 from rag.core.config.app_settings import settings
 from rag.core.persistence import (
-    MongoKnowledgeGraphExtractionRepository,
+    MongoKnowledgeGraphDerivedRepository,
     MongoRagAclProjectionRepository,
     MongoRagContentCheckpointRepository,
     MongoRagContextIndexingRepository,
@@ -39,7 +39,8 @@ from rag.core.persistence import (
     MongoRagSectionNavigationRepository,
     MongoRagSourceRepository,
     MongoRagResourceSnapshotRepository,
-    Neo4jKnowledgeGraphRepository,
+    Neo4jKnowledgeGraphNavigationRepository,
+    Neo4jKnowledgeGraphProjectionRepository,
     QdrantRagCandidateRepository,
     QdrantRagVectorIndexRepository,
     RedisKnowledgeNavigationStateRepository,
@@ -149,8 +150,13 @@ class Container(containers.DeclarativeContainer):
         RagPermissionAuthorizer,
         repository=acl_projection_repository,
     )
-    knowledge_graph_repository = providers.Singleton(
-        Neo4jKnowledgeGraphRepository,
+    knowledge_graph_projection_repository = providers.Singleton(
+        Neo4jKnowledgeGraphProjectionRepository,
+        driver=neo4j_driver,
+        database=settings.NEO4J_DATABASE,
+    )
+    knowledge_graph_navigation_repository = providers.Singleton(
+        Neo4jKnowledgeGraphNavigationRepository,
         driver=neo4j_driver,
         database=settings.NEO4J_DATABASE,
         permission_authorizer=permission_authorizer,
@@ -160,7 +166,7 @@ class Container(containers.DeclarativeContainer):
         repository=acl_projection_repository,
         projection_targets=providers.List(
             vector_index_repository,
-            knowledge_graph_repository,
+            knowledge_graph_projection_repository,
         ),
     )
     acl_kafka_consumer = providers.Singleton(
@@ -186,7 +192,7 @@ class Container(containers.DeclarativeContainer):
         MongoRagContextIndexingRepository
     )
     graph_extraction_repository = providers.Singleton(
-        MongoKnowledgeGraphExtractionRepository
+        MongoKnowledgeGraphDerivedRepository
     )
     section_projector = providers.Singleton(RagSectionProjector)
     embedding_client = providers.Singleton(build_embedding_client)
@@ -227,7 +233,7 @@ class Container(containers.DeclarativeContainer):
         checkpoint_repository=content_checkpoint_repository,
         acl_repository=acl_projection_repository,
         extractor=graph_extractor,
-        graph_repository=knowledge_graph_repository,
+        graph_repository=knowledge_graph_projection_repository,
     )
     document_ready_consumer = providers.Singleton(
         RagDocumentReadyConsumer,
@@ -244,7 +250,7 @@ class Container(containers.DeclarativeContainer):
             acl_projection_repository,
             content_projection_writer,
             vector_index_repository,
-            knowledge_graph_repository,
+            knowledge_graph_projection_repository,
         ),
     )
     resource_deleted_kafka_consumer = providers.Singleton(
@@ -284,7 +290,7 @@ class Container(containers.DeclarativeContainer):
         KnowledgeNavigationService,
         retriever=candidate_retriever,
         permission_authorizer=permission_authorizer,
-        graph_repository=knowledge_graph_repository,
+        graph_repository=knowledge_graph_navigation_repository,
         evidence_materializer=evidence_materializer,
         section_navigator=section_navigator,
         state_repository=navigation_state_repository,

@@ -1,5 +1,6 @@
 from .core import (
     RankCandidate,
+    RankDecision,
     RankedCandidate,
     RankQuery,
     RankRequest,
@@ -11,6 +12,7 @@ from .pipeline import RankingPipeline
 
 __all__ = [
     "RankCandidate",
+    "RankDecision",
     "RankedCandidate",
     "RankingPipeline",
     "RankQuery",
