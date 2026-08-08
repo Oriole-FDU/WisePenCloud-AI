@@ -12,7 +12,9 @@ from .common import RagTextRenderBudget, RagTextRenderRouter
 _STRUCTURE_DESCRIPTION = (
     "Description:\n"
     "Call this first when you need the resource's parsed document structure. It returns "
-    "the current applied revision, page labels, and the full section tree without body text.\n\n"
+    "the current applied revision, structure_mode, page labels, and the full section tree "
+    "without body text. flat_text resources expose generated full-text segments that remain "
+    "directly readable through rag_get_section_content.\n\n"
     "Output:\n"
     "Use pages[].page_label with rag_get_page_content, or sections[].section_id with "
     "rag_get_section_content. This tool does not return body content."
@@ -113,6 +115,7 @@ def _render_structure_result(result: dict[str, Any]) -> dict[str, Any]:
             "resource_id": result["resource_id"],
             "document_version": result["document_version"],
             "content_revision": result["content_revision"],
+            "structure_mode": result["structure_mode"],
             "total_length": result["total_length"],
             "pages": [
                 {

@@ -123,7 +123,10 @@ def register_navigation_tools(
             int,
             Field(
                 ge=1, le=20,
-                description="Maximum number of relevant private-document results to return.",
+                description=(
+                    "Maximum number of relevant reading windows to return. Multiple windows "
+                    "from the same section are grouped into one source entry."
+                ),
             ),
         ] = 10,
     ) -> dict[str, Any]:
