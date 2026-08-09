@@ -7,10 +7,12 @@ dependencies = [
     "fastapi",
     "dependency_injector",
     "httpx",
+    "beanie",
     "pydantic",
     "pydantic-settings",
     "pymongo",
     "pyyaml",
+    "redis[asyncio]",
     "uvicorn[standard]",
     "wisepen-common",
 ]
