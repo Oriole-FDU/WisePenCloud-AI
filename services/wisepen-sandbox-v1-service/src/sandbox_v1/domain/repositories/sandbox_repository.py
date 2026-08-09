@@ -43,3 +43,11 @@ class SandboxRepository(Protocol):
     ) -> SandboxDocument:
         """为用户原子分配一个 READY 沙箱，或在容量/空池时抛出领域异常"""
         ...
+
+    async def change_state(
+        self,
+        sandbox_id: str,
+        state: SandboxState,
+    ) -> SandboxDocument | None:
+        """更新 sandbox 生命周期状态，并返回更新后的记录"""
+        ...

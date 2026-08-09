@@ -33,38 +33,3 @@ router = APIRouter(tags=["health"])
 )
 async def health() -> R[HealthResponse]:
     return R.success(data=HealthResponse(status="ok"))
-
-
-@router.get(
-    "/ready",
-    response_model=R[ReadinessResponse],
-    responses={
-        503: {
-            "model": ReadinessErrorResponse,
-            "description": "READY 实例数低于 min_ready，服务暂不能承接新的分配请求。",
-        }
-    },
-    summary="检查服务就绪状态",
-    description="""
-- 用途：确认预热池中有足够 READY 实例承接新的沙箱租约。
-- 请求：无请求参数；就绪阈值来自 Pool 配置。
-- 约束：READY 数量必须达到 min_ready；进程存活但 Pool 未达到阈值时仍视为未就绪。
-- 处理：读取 Pool 快照并比较当前 READY 数量与 min_ready，不创建或修改沙箱实例。
-- 失败：READY 数量不足 -> HTTP 503，detail.code 为 `MIN_READY_NOT_REACHED`。
-- 响应：就绪时返回 status、ready 和 min_ready，HTTP 200。
-""",
-)
-@inject
-async def ready(
-    pool: SandboxPool = Depends(Provide[Container.pool]),
-) -> ReadinessResponse:
-    snapshot = await pool.snapshot()
-    ready = snapshot.counts.get(SandboxState.READY, 0)
-    if ready < snapshot.min_ready:
-        # 就绪状态代表是否有足够预热实例承接新请求，不等同于进程存活。
-        raise ServiceException(SandboxErrorCode.POOL_EMPTY)
-    return R.success(data=ReadinessResponse(
-        status = "ready",
-        ready = ready,
-        min_ready = snapshot.min_ready,
-    ))

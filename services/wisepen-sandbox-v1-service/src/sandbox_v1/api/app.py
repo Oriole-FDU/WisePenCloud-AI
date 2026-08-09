@@ -9,7 +9,7 @@ from common.core.exceptions import ServiceException
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from sandbox_v1.api.endpoints import health, pool, workspace
+from sandbox_v1.api.endpoints import health
 
 
 def create_app(

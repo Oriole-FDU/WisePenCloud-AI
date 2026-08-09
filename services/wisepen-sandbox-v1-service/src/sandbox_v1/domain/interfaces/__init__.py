@@ -1,9 +1,8 @@
-from sandbox_v1.domain.interfaces.metrics import MetricsPort
-from sandbox_v1.domain.interfaces.sandbox_provider import SandboxProvider
-from sandbox_v1.domain.interfaces.workspace_cache import WorkspaceCache
+from sandbox_v1.domain.interfaces.container_manager import ContainerManager, ContainerStatus
+from sandbox_v1.domain.interfaces.sandbox_registry import SandboxRegistry
 
 __all__ = [
-    "MetricsPort",
-    "SandboxProvider",
-    "WorkspaceCache",
+    "SandboxRegistry",
+    "ContainerManager",
+    "ContainerStatus",
 ]

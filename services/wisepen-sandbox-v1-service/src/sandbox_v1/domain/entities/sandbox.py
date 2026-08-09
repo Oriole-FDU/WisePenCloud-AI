@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
+from uuid import uuid4
 
 from beanie import Document
 from pydantic import BaseModel, Field
@@ -9,7 +10,6 @@ from pymongo import ASCENDING, DESCENDING, IndexModel
 class SandboxState(StrEnum):
     """沙箱生命周期状态。"""
 
-    CREATING = "creating"
     WARMING = "warming"
     READY = "ready"
     USER_ACTIVE = "user_active"
@@ -29,7 +29,8 @@ class SandboxEndpointRef(BaseModel):
 class SandboxDocument(Document):
     """沙箱记录"""
 
-    sandbox_id: str = Field(..., description="沙箱 ID")
+    sandbox_id: str = Field(default_factory=lambda: uuid4().hex, description="沙箱 ID")
+    container_id: str = Field(..., description="容器 ID")
     provider_id: str = Field(..., description="创建该沙箱的 provider ID")
     endpoint: SandboxEndpointRef | None = Field(default=None, description="沙箱访问入口")
 
@@ -56,7 +57,6 @@ class SandboxDocument(Document):
 
 
 SANDBOX_ALLOWED_TRANSITIONS: dict[SandboxState, frozenset[SandboxState]] = {
-    SandboxState.CREATING: frozenset({SandboxState.WARMING, SandboxState.DESTROYING}),
     SandboxState.WARMING: frozenset({SandboxState.READY, SandboxState.DESTROYING}),
     SandboxState.READY: frozenset({SandboxState.USER_ACTIVE, SandboxState.DESTROYING}),
     SandboxState.USER_ACTIVE: frozenset({SandboxState.RETIRING, SandboxState.DESTROYING}),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Iterable
 
 from common.core.exceptions import ServiceException
@@ -75,3 +76,20 @@ class MongoSandboxRepository(SandboxRepository):
         if sandbox is None:
             raise ServiceException(SandboxErrorCode.POOL_EMPTY,"sandbox pool has no READY container")
         return sandbox
+
+    async def change_state(
+        self,
+        sandbox_id: str,
+        state: SandboxState,
+    ) -> SandboxDocument | None:
+        return SandboxDocument.find_one(
+            SandboxDocument.sandbox_id == sandbox_id,
+        ).update(
+            {
+                "$set": {
+                    "state": state,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+            response_type=UpdateResponse.NEW_DOCUMENT,
+        )

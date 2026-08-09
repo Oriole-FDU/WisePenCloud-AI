@@ -27,6 +27,7 @@ class AppSettings(BaseModel):
     FROM_SOURCE_SECRET: str
     MONGODB_URL: str
     MONGODB_DB_NAME: str
+    REDIS_URL: str
 
     # sandbox 池容量、warmup、销毁和重试配置。
     SANDBOX_IMAGE: str
