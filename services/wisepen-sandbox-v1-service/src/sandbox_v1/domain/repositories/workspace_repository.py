@@ -3,109 +3,54 @@ from __future__ import annotations
 from typing import Protocol
 
 from sandbox_v1.domain.entities import (
-    WorkspaceRecord,
-    WorkspaceRestoreStart,
-    WorkspaceSnapshotRef,
+    SessionWorkspaceDocument,
+    WorkspaceExportBundleRef,
+    WorkspaceState,
 )
 
 
 class WorkspaceRepository(Protocol):
-    """Workspace 生命周期状态与 tombstone 快照指针的权威存储端口。"""
+    """SessionWorkspaceDocument 的 Mongo 权威仓储端口"""
 
-    async def get(self, user_id: str, session_id: str) -> WorkspaceRecord | None:
-        """按用户和会话读取 Workspace 记录。"""
+    async def save(self, workspace: SessionWorkspaceDocument) -> None:
+        """保存或覆盖一条 workspace 记录"""
         ...
 
-    async def ensure_active(
+    async def get_by_user_session(
         self,
-        *,
         user_id: str,
         session_id: str,
-        workspace_key: str,
+    ) -> SessionWorkspaceDocument | None:
+        """按 user_id 和 session_id 读取 workspace 记录"""
+        ...
+
+    async def get_by_id(
+        self,
+        workspace_id: str,
+    ) -> SessionWorkspaceDocument | None:
+        """按 workspace id 读取 workspace 记录"""
+        ...
+
+    async def set_new_workspace_path(
+        self,
+        workspace_id: str,
         workspace_path: str,
-    ) -> WorkspaceRecord:
-        """创建或激活 Workspace；已删除记录不能被隐式复活。"""
+    ) -> SessionWorkspaceDocument | None:
+        """更新 workspace_path，并返回更新后的记录"""
         ...
 
-    async def begin_delete(
+    async def set_export_bundle(
         self,
-        *,
-        user_id: str,
-        session_id: str,
-        workspace_key: str,
-        workspace_path: str,
-    ) -> WorkspaceRecord:
-        """声明进入 DELETING，供快照和物理目录删除流程使用。"""
+        workspace_id: str,
+        export_bundle: WorkspaceExportBundleRef | None,
+    ) -> SessionWorkspaceDocument | None:
+        """更新 export_bundle，并返回更新后的记录"""
         ...
 
-    async def finish_delete(
+    async def change_state(
         self,
-        *,
-        user_id: str,
-        session_id: str,
-        snapshot: WorkspaceSnapshotRef | None,
-    ) -> WorkspaceRecord:
-        """提交逻辑删除结果和 tombstone 快照，落到 DELETED。"""
-        ...
-
-    async def remember_snapshot(
-        self,
-        *,
-        user_id: str,
-        session_id: str,
-        snapshot: WorkspaceSnapshotRef,
-    ) -> WorkspaceRecord:
-        """更新可恢复快照指针，不改变 Workspace 生命周期状态。"""
-        ...
-
-    async def fail_delete(
-        self,
-        *,
-        user_id: str,
-        session_id: str,
-        error: str,
-    ) -> WorkspaceRecord:
-        """删除失败时回滚状态并记录错误。"""
-        ...
-
-    async def begin_restore(
-        self,
-        *,
-        user_id: str,
-        session_id: str,
-        workspace_key: str,
-        workspace_path: str,
-    ) -> WorkspaceRestoreStart:
-        """以并发安全方式尝试抢占 RESTORING 状态。"""
-        ...
-
-    async def finish_restore(
-        self,
-        *,
-        user_id: str,
-        session_id: str,
-        restored_from_snapshot: bool,
-        snapshot: WorkspaceSnapshotRef | None,
-        unrecoverable_reason: str | None = None,
-    ) -> WorkspaceRecord:
-        """提交 restore 结果并落到 ACTIVE。"""
-        ...
-
-    async def fail_restore(
-        self,
-        *,
-        user_id: str,
-        session_id: str,
-        error: str,
-    ) -> WorkspaceRecord:
-        """恢复失败时回滚为 DELETED，并保留重试所需 tombstone。"""
-        ...
-
-    async def mark_snapshot_unrecoverable(
-        self,
-        snapshot: WorkspaceSnapshotRef,
-        *,
-        reason: str,
-    ) -> None:
-        """把引用指定快照的 tombstone 标记为不可恢复。"""
+        workspace_id: str,
+        state: WorkspaceState,
+    ) -> SessionWorkspaceDocument | None:
+        """更新 workspace 生命周期状态，并返回更新后的记录"""
         ...
