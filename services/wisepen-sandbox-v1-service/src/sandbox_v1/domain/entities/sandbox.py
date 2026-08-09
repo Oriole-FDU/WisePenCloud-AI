@@ -69,5 +69,4 @@ SANDBOX_ALLOWED_TRANSITIONS: dict[SandboxState, frozenset[SandboxState]] = {
 
 def can_transition(expected: SandboxState, state: SandboxState) -> bool:
     """判断 expected -> state 是否为合法的沙箱状态迁移。"""
-
     return state in SANDBOX_ALLOWED_TRANSITIONS[expected]
