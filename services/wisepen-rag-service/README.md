@@ -145,7 +145,7 @@ Heading 被投影为稳定的 Section 树，保留 `section_path`、父子关系
 
 ```text
 plaintext-like Markdown
-  -> 4000 chars, overlap 0
+  -> 6000 chars, overlap 0
      -> synthetic Section: 全文片段 N
      -> ReadingBlock: model-readable parent
         -> 800 chars, overlap 100
@@ -155,7 +155,7 @@ plaintext-like Markdown
 即使一份文档没有任何标题，系统仍然保证：
 
 - dense + BM25 混合检索和 rerank 正常工作；
-- 细粒度 child 负责召回，命中后提升到 4000 字符 parent；
+- 细粒度 child 负责召回，命中后提升到 6000 字符 parent；
 - 多个命中父窗口可同时进入 ReadingBlock top-k；
 - 合成 Section 支持 document structure 和 section content 直读；
 - page marker 不进入索引正文，但 page label 与原文 offset 仍被保留；

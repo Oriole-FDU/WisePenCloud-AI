@@ -249,6 +249,8 @@ class Container(containers.DeclarativeContainer):
         targets=providers.List(
             acl_projection_repository,
             content_projection_writer,
+            context_indexing_repository,
+            graph_extraction_repository,
             vector_index_repository,
             knowledge_graph_projection_repository,
         ),

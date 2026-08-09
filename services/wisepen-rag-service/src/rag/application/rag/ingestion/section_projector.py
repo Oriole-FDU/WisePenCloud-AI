@@ -46,7 +46,7 @@ class RagSectionProjector:
         # 检索子块比 Section 更小，固定 800 字符硬上限。
         self._retrieval_chunker = MarkdownChunker(max_characters=800)
         self._flat_section_chunker = PlainTextChunker(
-            PlainTextChunkerConfig(chunk_size=4000, chunk_overlap=0)
+            PlainTextChunkerConfig(chunk_size=6000, chunk_overlap=0)
         )
         self._flat_retrieval_chunker = PlainTextChunker(
             PlainTextChunkerConfig(chunk_size=800, chunk_overlap=100)

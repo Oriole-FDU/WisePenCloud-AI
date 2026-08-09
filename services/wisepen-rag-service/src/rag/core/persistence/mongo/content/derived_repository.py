@@ -67,6 +67,7 @@ class MongoRagContextIndexingRepository(RagContextIndexingRepository):
         )
 
     async def delete_resources(self, resource_ids: tuple[str, ...]) -> None:
+        """按资源删除 Contextual Indexing 派生结果。"""
         unique_resource_ids = tuple(dict.fromkeys(resource_ids))
         if not unique_resource_ids:
             return
@@ -119,3 +120,12 @@ class MongoKnowledgeGraphDerivedRepository(KnowledgeGraphDerivedRepository):
                 for extraction_key, graph_payload in values.items()
             ]
         )
+
+    async def delete_resources(self, resource_ids: tuple[str, ...]) -> None:
+        """按资源删除 GraphRAG 候选图派生结果。"""
+        unique_resource_ids = tuple(dict.fromkeys(resource_ids))
+        if not unique_resource_ids:
+            return
+        await RagGraphExtractionDocument.find(
+            In(RagGraphExtractionDocument.resource_id, unique_resource_ids)
+        ).delete()

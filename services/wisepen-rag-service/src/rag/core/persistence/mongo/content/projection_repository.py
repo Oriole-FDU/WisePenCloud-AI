@@ -17,9 +17,7 @@ from rag.application.rag.ingestion import (
 )
 from rag.domain.entities.rag_content import (
     RagContentPartDocument,
-    RagContextIndexingDocument,
     RagContentRevisionDocument,
-    RagGraphExtractionDocument,
     RagPageDocument,
     RagProjectionCheckpointDocument,
     RagSectionDocument,
@@ -51,12 +49,6 @@ class MongoRagContentProjectionWriter(RagContentProjectionRepository):
         # checkpoint 先删除，后续清理失败时查询链路也会立即 fail closed。
         await RagProjectionCheckpointDocument.find(
             In(RagProjectionCheckpointDocument.resource_id, unique_resource_ids)
-        ).delete()
-        await RagContextIndexingDocument.find(
-            In(RagContextIndexingDocument.resource_id, unique_resource_ids)
-        ).delete()
-        await RagGraphExtractionDocument.find(
-            In(RagGraphExtractionDocument.resource_id, unique_resource_ids)
         ).delete()
         if not content_revisions:
             return

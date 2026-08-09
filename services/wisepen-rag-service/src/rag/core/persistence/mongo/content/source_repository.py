@@ -264,9 +264,3 @@ def _part_indexes(start_offset: int, end_offset: int) -> range:
         start_offset // CONTENT_PART_CHARACTERS,
         (end_offset - 1) // CONTENT_PART_CHARACTERS + 1,
     )
-    if start_offset < 0 or end_offset <= start_offset:
-        raise RuntimeError("source span has an invalid range")
-    return range(
-        start_offset // CONTENT_PART_CHARACTERS,
-        (end_offset - 1) // CONTENT_PART_CHARACTERS + 1,
-    )
