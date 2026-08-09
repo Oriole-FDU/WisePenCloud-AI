@@ -31,6 +31,7 @@ class AppSettings(BaseModel):
 
     # sandbox 池容量、warmup、销毁和重试配置。
     SANDBOX_IMAGE: str
+    SANDBOX_PROVIDER_ID: str = "default"
     SANDBOX_MAX_USER_BINDINGS: int = 20
     SANDBOX_TARGET_READY: int
     SANDBOX_MIN_READY: int

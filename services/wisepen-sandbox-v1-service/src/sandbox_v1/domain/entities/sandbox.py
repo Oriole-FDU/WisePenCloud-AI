@@ -31,6 +31,7 @@ class SandboxDocument(Document):
 
     sandbox_id: str = Field(default_factory=lambda: uuid4().hex, description="沙箱 ID")
     container_id: str = Field(..., description="容器 ID")
+    container_ip: str | None = Field(default=None, description="容器 IP")
     provider_id: str = Field(..., description="创建该沙箱的 provider ID")
     endpoint: SandboxEndpointRef | None = Field(default=None, description="沙箱访问入口")
 
