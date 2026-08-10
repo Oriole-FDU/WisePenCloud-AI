@@ -5,11 +5,14 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from common.core.exceptions import ServiceException
+
 from sandbox_v1.domain.entities import SandboxDocument, SandboxEndpointRef, SandboxState
 from sandbox_v1.domain.repositories import SandboxRepository
+from sandbox_v1.domain.error_codes import SandboxErrorCode
 
 if TYPE_CHECKING:
-    from sandbox_v1.domain.interfaces.container_manager import ContainerManager
+    from sandbox_v1.application.container_manager import ContainerManager
 
 
 class SandboxSpecInfo(BaseModel):
@@ -40,7 +43,7 @@ class SandboxRegistry:
         endpoint: SandboxEndpointRef | None = None,
     ) -> None:
         if container_manager is None:
-            from sandbox_v1.domain.interfaces.container_manager import ContainerManager
+            from sandbox_v1.application.container_manager import ContainerManager
 
             container_manager = ContainerManager()
         self._sandbox_repository = sandbox_repository
@@ -70,7 +73,7 @@ class SandboxRegistry:
             resolved_provider_id = settings.SANDBOX_PROVIDER_ID
 
         if not sandbox_provider_info.container_ip:
-            raise ValueError("sandbox provider info missing container_ip")
+            raise ServiceException(SandboxErrorCode.PROVIDER_INFO_MISSING,"sandbox provider info missing container_ip")
 
         now = datetime.now(timezone.utc)
         sandbox = SandboxDocument(
@@ -85,7 +88,7 @@ class SandboxRegistry:
         return sandbox
 
     async def check_ready(self, sandbox: SandboxDocument) -> bool:
-        from sandbox_v1.domain.interfaces.container_manager import ContainerStatus
+        from sandbox_v1.application.container_manager import ContainerStatus
 
         container_status = await self._container_manager.check_container_status(sandbox.container_id)
         return container_status == ContainerStatus.RUNNING

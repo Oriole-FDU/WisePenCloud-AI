@@ -36,6 +36,4 @@ def create_app(
         )
 
     app.include_router(health.router)
-    app.include_router(pool.router)
-    app.include_router(workspace.router)
     return app

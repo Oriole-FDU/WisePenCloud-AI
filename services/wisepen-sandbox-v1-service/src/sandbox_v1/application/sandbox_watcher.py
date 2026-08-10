@@ -4,10 +4,10 @@ import asyncio
 from datetime import timedelta, datetime, timezone
 
 from common.logger import error
-from sandbox_v1.application.sandbox_registry import SandboxProviderInfo
+from sandbox_v1.application.sandbox_registry import SandboxProviderInfo, SandboxRegistry
+from sandbox_v1.application.container_manager import ContainerManager, ContainerStatus
 from sandbox_v1.core.config.app_settings import settings
 from sandbox_v1.domain.entities import SandboxDocument, SandboxState
-from sandbox_v1.domain.interfaces import SandboxRegistry, ContainerManager, ContainerStatus
 from sandbox_v1.domain.repositories import SandboxRepository
 
 
@@ -33,9 +33,7 @@ class Watcher:
         # 同一时刻只允许进行一次容器状态检查
         async with self._lock:
             # 获取 MongoDB 中 就绪和正在预热的容器
-            sandboxes = await self._sandbox_repository.get_by_states(
-                [SandboxState.READY, SandboxState.WARMING, SandboxState.DESTROYING]
-            )
+            sandboxes = await self._sandbox_repository.get_by_states([SandboxState.READY, SandboxState.WARMING, SandboxState.DESTROYING])
 
             ready_count = 0
             warming_count = 0
@@ -92,9 +90,7 @@ class Watcher:
             try:
                 container_id = await self._container_manager.create(sandbox_provider_info.start_spec.image)
                 container_ip = await self._container_manager.get_container_ip(container_id)
-                sandbox_provider_info_with_ip = sandbox_provider_info.model_copy(
-                    update={"container_ip": container_ip}
-                )
+                sandbox_provider_info_with_ip = sandbox_provider_info.model_copy(update={"container_ip": container_ip})
                 await self._sandbox_registry.register_container(
                     container_id=container_id,
                     sandbox_provider_info=sandbox_provider_info_with_ip,
@@ -135,7 +131,5 @@ class Watcher:
                 continue
 
     def stop(self) -> None:
-        """请求 watcher 循环停止。"""
-
-        # 只设置停止信号，不等待 run 协程退出。
+        # 请求 watcher 循环停止
         self._stop.set()
