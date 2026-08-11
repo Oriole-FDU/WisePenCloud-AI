@@ -4,7 +4,7 @@ from typing import Any
 from uuid import uuid4
 
 from beanie import Document
-from pydantic import BaseModel, Field
+from pydantic import Field
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
 class SandboxState(StrEnum):
@@ -19,29 +19,21 @@ class SandboxState(StrEnum):
     LOST = "lost"
 
 
-class SandboxEndpointRef(BaseModel):
-    """沙箱对服务内部暴露的访问入口"""
-
-    base_url: str = Field(..., description="沙箱内服务基地址")
-    token: str | None = Field(default=None, description="访问令牌")
-
-
 class SandboxDocument(Document):
     """沙箱记录"""
 
     sandbox_id: str = Field(default_factory=lambda: uuid4().hex, description="沙箱 ID")
     container_id: str = Field(..., description="容器 ID")
-    container_ip: str | None = Field(default=None, description="容器 IP")
     provider_id: str = Field(..., description="创建该沙箱的 provider ID")
-    endpoint: SandboxEndpointRef | None = Field(default=None, description="沙箱访问入口")
+    base_url: str | None = Field(default=None, description="沙箱服务基地址")
 
     metadata: dict[str, Any] = Field(default_factory=dict, description="沙箱附加元数据")
 
     state: SandboxState = Field(..., description="沙箱当前生命周期状态")
-    created_at: datetime = Field(default=datetime.now(timezone.utc), description="沙箱创建时间")
-    updated_at: datetime = Field(default=datetime.now(timezone.utc), description="沙箱记录更新时间")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="沙箱创建时间")
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="沙箱记录更新时间")
     bind_user_id: str | None = Field(default=None, description="当前绑定的用户 ID")
-    bind_at: datetime = Field(default=datetime.now(timezone.utc), description="绑定发生时间")
+    bind_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="绑定发生时间")
     last_error: str | None = Field(default=None, description="最近一次错误信息")
 
     class Settings:
@@ -51,8 +43,8 @@ class SandboxDocument(Document):
             IndexModel([("provider_id", ASCENDING)], name="idx_provider_id"),
             IndexModel([("state", ASCENDING), ("updated_at", ASCENDING)], name="idx_state_updated_at"),
             IndexModel(
-                [("owner_user_id", ASCENDING), ("state", ASCENDING), ("updated_at", DESCENDING)],
-                name="idx_owner_state_updated",
+                [("bind_user_id", ASCENDING), ("state", ASCENDING), ("updated_at", DESCENDING)],
+                name="idx_bind_state_updated",
             ),
         ]
 

@@ -41,7 +41,7 @@ class MongoWorkspaceRepository(WorkspaceRepository):
         workspace_id: str,
         workspace_path: str,
     ) -> SessionWorkspaceDocument | None:
-        return SessionWorkspaceDocument.find_one(
+        return await SessionWorkspaceDocument.find_one(
             SessionWorkspaceDocument.id == workspace_id,
         ).update(
             {
@@ -58,7 +58,7 @@ class MongoWorkspaceRepository(WorkspaceRepository):
         workspace_id: str,
         export_bundle: WorkspaceExportBundleRef | None,
     ) -> SessionWorkspaceDocument | None:
-        return SessionWorkspaceDocument.find_one(
+        return await SessionWorkspaceDocument.find_one(
             SessionWorkspaceDocument.id == workspace_id,
         ).update(
             {
@@ -75,7 +75,7 @@ class MongoWorkspaceRepository(WorkspaceRepository):
         workspace_id: str,
         state: WorkspaceState,
     ) -> SessionWorkspaceDocument | None:
-        return SessionWorkspaceDocument.find_one(
+        return await SessionWorkspaceDocument.find_one(
             SessionWorkspaceDocument.id == workspace_id,
         ).update(
             {

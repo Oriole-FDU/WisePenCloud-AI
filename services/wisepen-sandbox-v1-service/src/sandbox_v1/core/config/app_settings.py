@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import threading
-from pathlib import Path
 
 import yaml
 from common.logger import error, info
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict
 
 from sandbox_v1.core.config.bootstrap_settings import bootstrap_settings
 from sandbox_v1.core.config.nacos import nacos_client_manager
@@ -43,6 +41,8 @@ class AppSettings(BaseModel):
     SANDBOX_WARMUP_RETRY_BACKOFF_SECONDS: float
     SANDBOX_WARMUP_RETRY_MAX_BACKOFF_SECONDS: float
     SANDBOX_WATCHER_INTERVAL_SECONDS: float
+    SANDBOX_DOCKER_ENDPOINT_HOST: str = "127.0.0.1"
+    SANDBOX_AIO_HEALTH_TIMEOUT_SECONDS: float = 5.0
 
     # workspace 受管目录、快照缓存容量和后台淘汰配置。
     SANDBOX_WORKSPACE_ROOT: str = "./data/workspaces"

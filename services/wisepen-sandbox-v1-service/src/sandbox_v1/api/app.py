@@ -4,10 +4,7 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 
-from common.core.domain import R
-from common.core.exceptions import ServiceException
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 
 from sandbox_v1.api.endpoints import health
 
@@ -27,13 +24,6 @@ def create_app(
         ],
         lifespan=lifespan,
     )
-
-    @app.exception_handler(ServiceException)
-    async def service_exception_handler(request: Request, exc: ServiceException):
-        return JSONResponse(
-            status_code=200,
-            content=R(code=exc.code, msg=exc.msg, data=None).model_dump(),
-        )
 
     app.include_router(health.router)
     return app

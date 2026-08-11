@@ -4,7 +4,7 @@ import asyncio
 from datetime import timedelta, datetime, timezone
 
 from common.logger import error
-from sandbox_v1.application.sandbox_registry import SandboxProviderInfo, SandboxRegistry
+from sandbox_v1.domain.interfaces import SandboxProvider, SandboxProviderInfo
 from sandbox_v1.application.container_manager import ContainerManager, ContainerStatus
 from sandbox_v1.core.config.app_settings import settings
 from sandbox_v1.domain.entities import SandboxDocument, SandboxState
@@ -18,11 +18,11 @@ class Watcher:
     def __init__(
         self,
         sandbox_repository: SandboxRepository,
-        sandbox_registry: SandboxRegistry,
+        sandbox_provider: SandboxProvider,
         container_manager: ContainerManager
     ) -> None:
         self._sandbox_repository = sandbox_repository
-        self._sandbox_registry = sandbox_registry
+        self._sandbox_provider = sandbox_provider
         self._container_manager = container_manager
         self._stop = asyncio.Event()
         self._lock = asyncio.Lock()
@@ -41,7 +41,7 @@ class Watcher:
             for sandbox in sandboxes:
 
                 if sandbox.state == SandboxState.READY:
-                    sandbox_ready = await self._sandbox_registry.check_ready(sandbox)
+                    sandbox_ready = await self._sandbox_provider.check_ready(sandbox.provider_id, sandbox.base_url)
                     if sandbox_ready:
                         ready_count += 1
                     else:
@@ -49,7 +49,7 @@ class Watcher:
 
                 elif sandbox.state == SandboxState.WARMING:
                     # 检查正在预热的容器的实际状态
-                    sandbox_ready = await self._sandbox_registry.check_ready(sandbox)
+                    sandbox_ready = await self._sandbox_provider.check_ready(sandbox.provider_id, sandbox.base_url)
                     if sandbox_ready: # 如果已经预热好，就新增就绪数，并更新状态
                         ready_count += 1
                         await self._sandbox_repository.change_state(sandbox.sandbox_id, SandboxState.READY)
@@ -78,24 +78,27 @@ class Watcher:
             # 尝试预热容器到指定数量，连续三次失败即终止
             return await self.warm_sandboxes(settings.SANDBOX_TARGET_READY - existing)
 
-    async def warm_sandboxes(self, plan_quantity: int):
+    async def warm_sandboxes(self, plan_quantity: int) -> int:
         # 尝试预热容器到指定数量，连续三次失败即终止
         created = 0
         failures = 0
 
-        sandbox_provider_info: SandboxProviderInfo = self._sandbox_registry.get_sandbox_provider_info(settings.SANDBOX_PROVIDER_ID)
+        sandbox_provider_info: SandboxProviderInfo = self._sandbox_provider.get_sandbox_provider_info(settings.SANDBOX_PROVIDER_ID)
 
-        while created < plan_quantity and failures < 3:
+        while created < plan_quantity and failures < settings.SANDBOX_WARMUP_MAX_RETRIES:
             container_id: str | None = None
             try:
-                container_id = await self._container_manager.create(sandbox_provider_info.start_spec.image)
-                container_ip = await self._container_manager.get_container_ip(container_id)
-                sandbox_provider_info_with_ip = sandbox_provider_info.model_copy(update={"container_ip": container_ip})
-                await self._sandbox_registry.register_container(
+                container_id = await self._container_manager.create(sandbox_provider_info.image)
+                base_url = await self._container_manager.get_container_base_url(container_id)
+                sandbox_provider_info_with_endpoint = sandbox_provider_info.model_copy(update={"base_url": base_url})
+                sandbox = SandboxDocument(
                     container_id=container_id,
-                    sandbox_provider_info=sandbox_provider_info_with_ip,
                     provider_id=settings.SANDBOX_PROVIDER_ID,
+                    base_url=sandbox_provider_info_with_endpoint.base_url,
+                    state=SandboxState.WARMING,
+                    updated_at=datetime.now(timezone.utc)
                 )
+                await self._sandbox_repository.save(sandbox)
                 created += 1
                 failures = 0
             except Exception as exc:
@@ -109,7 +112,7 @@ class Watcher:
 
         return created
 
-    async def force_destroy_specified_sandbox(self, sandboxes: list[SandboxDocument]):
+    async def force_destroy_specified_sandbox(self, sandboxes: list[SandboxDocument]) -> None:
         # 强制销毁指定的容器
         for sandbox in sandboxes:
             try:
@@ -121,7 +124,10 @@ class Watcher:
     async def run(self) -> None:
         # 循环维护沙箱池
         while not self._stop.is_set():
-            await self.maintain_sandbox_pool()
+            try:
+                await self.maintain_sandbox_pool()
+            except Exception as exc:
+                error("sandbox watcher iteration failed", exc=exc)
             try:
                 await asyncio.wait_for(
                     self._stop.wait(),
