@@ -13,7 +13,7 @@ members = [
     "wisepen-chat-service",
     "wisepen-common",
     "wisepen-mcp-service",
-    "wisepen-sandbox-v1-service",
+    "wisepen-sandbox-service",
     "wisepen-server-py",
 ]
 
@@ -3640,10 +3640,11 @@ requires-dist = [
 ]
 
 [[package]]
-name = "wisepen-sandbox-v1-service"
+name = "wisepen-sandbox-service"
 version = "0.1.0"
-source = { editable = "services/wisepen-sandbox-v1-service" }
+source = { editable = "services/wisepen-sandbox-service" }
 dependencies = [
+    { name = "beanie" },
     { name = "dependency-injector" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -3651,22 +3652,22 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pymongo" },
     { name = "pyyaml" },
+    { name = "redis" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "wisepen-common" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "beanie" },
     { name = "dependency-injector" },
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "httpx", marker = "extra == 'test'" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pymongo" },
-    { name = "pytest", marker = "extra == 'test'" },
-    { name = "pytest-asyncio", marker = "extra == 'test'" },
     { name = "pyyaml" },
+    { name = "redis", extras = ["asyncio"] },
     { name = "uvicorn", extras = ["standard"] },
     { name = "wisepen-common", editable = "services/wisepen-common" },
 ]
@@ -3681,7 +3682,7 @@ dependencies = [
     { name = "wisepen-chat-service" },
     { name = "wisepen-common" },
     { name = "wisepen-mcp-service" },
-    { name = "wisepen-sandbox-v1-service" },
+    { name = "wisepen-sandbox-service" },
 ]
 
 [package.metadata]
@@ -3691,7 +3692,7 @@ requires-dist = [
     { name = "wisepen-chat-service", editable = "services/wisepen-chat-service" },
     { name = "wisepen-common", editable = "services/wisepen-common" },
     { name = "wisepen-mcp-service", editable = "services/wisepen-mcp-service" },
-    { name = "wisepen-sandbox-v1-service", editable = "services/wisepen-sandbox-v1-service" },
+    { name = "wisepen-sandbox-service", editable = "services/wisepen-sandbox-service" },
 ]
 
 [[package]]
