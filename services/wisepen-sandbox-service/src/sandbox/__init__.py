@@ -1,1 +1,0 @@
-"""WisePen Sandbox service package."""
