@@ -15,6 +15,7 @@ COPY pyproject.toml uv.lock ./
 COPY services/wisepen-common/pyproject.toml         services/wisepen-common/pyproject.toml
 COPY services/wisepen-chat-service/pyproject.toml   services/wisepen-chat-service/pyproject.toml
 COPY services/wisepen-mcp-service/pyproject.toml    services/wisepen-mcp-service/pyproject.toml
+COPY services/wisepen-sandbox-service/pyproject.toml services/wisepen-sandbox-service/pyproject.toml
 
 # 预装第三方依赖（不安装 workspace 包本身，纯缓存层）
 RUN uv sync --frozen --no-dev --no-install-workspace
