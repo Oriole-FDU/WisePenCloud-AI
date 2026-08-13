@@ -3,7 +3,7 @@ from enum import StrEnum
 
 from beanie import Document
 from pydantic import BaseModel, Field
-from pymongo import ASCENDING, IndexModel
+from pymongo import ASCENDING, DESCENDING, IndexModel
 
 
 class WorkspaceState(StrEnum):
@@ -13,6 +13,7 @@ class WorkspaceState(StrEnum):
     EXPORTING = "exporting"
     DETACHED = "detached"
     IMPORTING = "importing"
+    LOST = "lost"
 
 
 class WorkspaceExportBundleRef(BaseModel):
@@ -36,7 +37,8 @@ class SessionWorkspaceDocument(Document):
     session_id: str = Field(..., description="所属会话 ID")
     state: WorkspaceState = Field(default=WorkspaceState.ATTACHED, description="当前 workspace 状态")
 
-    workspace_path: str | None = Field(default=None, description="当前 workspace 的物理路径") # 仅当其在容器中时存在
+    sandbox_id: str | None = Field(default=None, description="当前关联的沙箱 ID")
+    workspace_path: str | None = Field(default=None, description="容器内 workspace 的物理路径")
 
     export_bundle: WorkspaceExportBundleRef | None = Field(default=None, description="导出的 workspace 数据包")
 
@@ -46,3 +48,11 @@ class SessionWorkspaceDocument(Document):
 
     class Settings:
         name = "wisepen_sandbox_session_workspace"
+        indexes = [
+            IndexModel([("id", ASCENDING)], unique=True, name="uniq_workspace_id"),
+            IndexModel(
+                [("user_id", ASCENDING), ("session_id", ASCENDING), ("updated_at", DESCENDING)],
+                name="idx_user_session_updated",
+            ),
+            IndexModel([("sandbox_id", ASCENDING), ("state", ASCENDING)], name="idx_sandbox_state"),
+        ]

@@ -1,9 +1,11 @@
 import asyncio
 import re
 from enum import StrEnum
+from pathlib import Path, PurePosixPath
 
 from common.core.exceptions import ServiceException
 
+from sandbox.core.config.app_settings import settings
 from sandbox.domain.error_codes import SandboxErrorCode
 
 
@@ -77,6 +79,55 @@ class ContainerManager:
 
         endpoint_host = concrete_hosts.pop() if concrete_hosts else "127.0.0.1"
         return f"http://{endpoint_host}:{host_ports.pop()}"
+
+    async def create_workspace_directory(
+        self,
+        container_id: str,
+        workspace_id: str,
+    ) -> str:
+        """在容器内创建指定 workspace 的目录，并返回容器路径。"""
+        workspace_path = str(PurePosixPath(settings.SANDBOX_CONTAINER_WORKSPACE_ROOT) / workspace_id)
+        returncode, _, stderr = await self._docker("exec", container_id, "mkdir", workspace_path)
+        if returncode != 0:
+            raise ServiceException(
+                SandboxErrorCode.DOCKER_RUNTIME_FAILED,
+                f"docker mkdir workspace directory failed: {stderr}",
+            )
+        return workspace_path
+
+    async def restore_cached_workspace(
+        self,
+        container_id: str,
+        workspace_id: str,
+    ) -> str:
+        """将宿主机缓存的 workspace 恢复至容器内同名目录。"""
+        cache_path = Path(settings.SANDBOX_WORKSPACE_CACHE_ROOT) / workspace_id
+        if not cache_path.is_dir():
+            raise ServiceException(
+                SandboxErrorCode.DOCKER_RUNTIME_FAILED,
+                f"workspace cache directory does not exist: {cache_path}",
+            )
+
+        workspace_path = await self.create_workspace_directory(container_id, workspace_id)
+        returncode, _, stderr = await self._docker(
+            "cp",
+            f"{cache_path}/.",
+            f"{container_id}:{workspace_path}",
+        )
+        if returncode == 0:
+            return workspace_path
+
+        cleanup_returncode, _, cleanup_stderr = await self._docker(
+            "exec",
+            container_id,
+            "rm",
+            "-rf",
+            workspace_path,
+        )
+        message = f"docker cp workspace restore failed: {stderr}"
+        if cleanup_returncode != 0:
+            message = f"{message}; docker workspace cleanup failed: {cleanup_stderr}"
+        raise ServiceException(SandboxErrorCode.DOCKER_RUNTIME_FAILED, message)
 
     async def _docker(self, *args: str) -> tuple[int, str, str]:
         try:

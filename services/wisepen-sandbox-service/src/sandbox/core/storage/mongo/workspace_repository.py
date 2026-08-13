@@ -26,6 +26,7 @@ class MongoWorkspaceRepository(WorkspaceRepository):
         return await SessionWorkspaceDocument.find_one(
             SessionWorkspaceDocument.user_id == user_id,
             SessionWorkspaceDocument.session_id == session_id,
+            sort=[("updated_at", -1)],
         )
 
     async def get_by_id(
@@ -47,6 +48,45 @@ class MongoWorkspaceRepository(WorkspaceRepository):
             {
                 "$set": {
                     "workspace_path": workspace_path,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            },
+            response_type=UpdateResponse.NEW_DOCUMENT,
+        )
+
+    async def set_attached_workspace(
+        self,
+        workspace_id: str,
+        sandbox_id: str,
+        workspace_path: str,
+    ) -> SessionWorkspaceDocument | None:
+        now = datetime.now(timezone.utc)
+        return await SessionWorkspaceDocument.find_one(
+            SessionWorkspaceDocument.id == workspace_id,
+        ).update(
+            {
+                "$set": {
+                    "sandbox_id": sandbox_id,
+                    "workspace_path": workspace_path,
+                    "state": WorkspaceState.ATTACHED,
+                    "updated_at": now,
+                    "last_accessed_at": now,
+                }
+            },
+            response_type=UpdateResponse.NEW_DOCUMENT,
+        )
+
+    async def clear_runtime_binding(
+        self,
+        workspace_id: str,
+    ) -> SessionWorkspaceDocument | None:
+        return await SessionWorkspaceDocument.find_one(
+            SessionWorkspaceDocument.id == workspace_id,
+        ).update(
+            {
+                "$set": {
+                    "sandbox_id": None,
+                    "workspace_path": None,
                     "updated_at": datetime.now(timezone.utc),
                 }
             },
