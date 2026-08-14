@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from chat.domain.entities import ChatMessage
     from chat.domain.repositories.model_repo import ModelRequestInfo
 
+
 @dataclass
 class SuspendedTurnContext:
     model_info: ModelRequestInfo
@@ -30,6 +31,13 @@ class SuspendedTurnContext:
     turn_suspension: TurnSuspension
 
 
+# 运行时用 Any，避免 Pydantic 解析 SuspendedTurnContext 内的 TYPE_CHECKING 前向引用。
+if TYPE_CHECKING:
+    SuspendedContextField = SuspendedTurnContext
+else:
+    SuspendedContextField = Any
+
+
 def _encode_context(value: SuspendedTurnContext) -> str:
     return base64.b64encode(
         pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
@@ -40,7 +48,7 @@ class SuspendedChat(Document):
     """未完成 Chat Turn 的临时恢复缓存"""
     session_id: str
     user_id: str
-    context: SuspendedTurnContext
+    context: SuspendedContextField
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

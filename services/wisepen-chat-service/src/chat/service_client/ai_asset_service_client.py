@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, List, Mapping, Optional, Set
+from typing import Any, List, Mapping, Optional, Set, TYPE_CHECKING
 
 import httpx
 
@@ -9,9 +9,13 @@ from chat.domain.entities.skill import SkillInfo, SkillAssetUploadInitResult, Sk
 from common.core.exceptions import RpcError
 from common.http.rpc_client import RpcClient
 
+if TYPE_CHECKING:
+    from chat.application.agents.models import Agent
+
 
 _DEFAULT_SERVICE_NAME = "wisepen-ai-asset-service"
 _GET_SKILL_PATH = "/internal/skill/getSkillByResourceId"
+_GET_AGENT_PATH = "/internal/agent/getAgentByResourceId"
 _LIST_PUBLISHED_SKILLS_META_PATH = "/internal/skill/listPublishedSkillsMetaByResourceIds"
 _CREATE_SKILL_PATH = "/skill/createSkill"
 _CHANGE_SKILL_INFO_PATH = "/skill/changeSkillInfo"
@@ -41,6 +45,31 @@ class AIAssetClient:
 
     async def get_published_skill(self, skill_id: str) -> Optional[Skill]:
         return await self._get_skill_by_resource_id(skill_id)
+
+    async def get_agent_with_version(self, agent_id: str, agent_version: int) -> Optional["Agent"]:
+        return await self._get_agent_by_resource_id(agent_id, agent_version)
+
+    async def get_published_agent(self, agent_id: str) -> Optional["Agent"]:
+        return await self._get_agent_by_resource_id(agent_id)
+
+    async def _get_agent_by_resource_id(self, resource_id: str, agent_version: int = None) -> Optional["Agent"]:
+        from chat.application.agents.models import Agent
+
+        try:
+            data = await self._rpc.get(
+                self._service_name,
+                _GET_AGENT_PATH,
+                params={"resourceId": resource_id, "agentVersion": agent_version},
+            )
+        except RpcError as e:
+            raise e
+        if not isinstance(data, dict):
+            raise RpcError(
+                service_name=self._service_name,
+                path=_GET_AGENT_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return Agent.from_response(data)
 
     async def _get_skill_by_resource_id(self, resource_id: str, skill_version: int = None) -> Optional[Skill]:
         try:

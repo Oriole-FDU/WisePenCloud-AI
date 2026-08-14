@@ -1,4 +1,10 @@
 from chat.application.agents.default_agent import DEFAULT_AGENT_ID, build_default_agent
+from chat.application.agents.agent_assets import AgentAssetMeta
+from chat.application.agents.asset_loader import (
+    AgentAssetLoader,
+    AgentAssetNotFoundError,
+    AgentAssetUnavailableError,
+)
 from chat.application.agents.models import (
     Agent,
     AgentMemoryPolicy,
@@ -6,12 +12,16 @@ from chat.application.agents.models import (
     AgentToolAndSkillPolicy,
     AgentSpec,
 )
-from chat.application.agents.resolver import AgentResolver, CompositeAgentResolver, DefaultAgentResolver
+from chat.application.agents.resolver import AgentResolver, CompositeAgentResolver, DefaultAgentResolver, RemoteAgentResolver
 
 __all__ = [
     "DEFAULT_AGENT_ID",
     "build_default_agent",
     "Agent",
+    "AgentAssetMeta",
+    "AgentAssetLoader",
+    "AgentAssetNotFoundError",
+    "AgentAssetUnavailableError",
     "AgentMemoryPolicy",
     "AgentModelPolicy",
     "AgentToolAndSkillPolicy",
@@ -19,4 +29,5 @@ __all__ = [
     "AgentResolver",
     "CompositeAgentResolver",
     "DefaultAgentResolver",
+    "RemoteAgentResolver",
 ]

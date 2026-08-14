@@ -79,6 +79,13 @@ async def lifespan(app: FastAPI):
             await oss_file_loader.start()
         except Exception as e:
             error("file loader start failed.", exc=e)
+    # 预留：Agent 资产尚未进入 Chat，先保留加载器生命周期。
+    agent_oss_file_loader = container.agent_oss_file_loader()
+    if getattr(agent_oss_file_loader, "start", None) is not None:
+        try:
+            await agent_oss_file_loader.start()
+        except Exception as e:
+            error("agent asset loader start failed.", exc=e)
 
     info("service ready.", service=bootstrap_settings.SERVICE_NAME, port=bootstrap_settings.SERVICE_PORT)
 
@@ -99,6 +106,13 @@ async def lifespan(app: FastAPI):
             await oss_file_loader.stop()
         except Exception as e:
             error("file loader stop failed.", exc=e)
+    # 预留：Agent 资产尚未进入 Chat，先保留加载器生命周期。
+    agent_oss_file_loader = container.agent_oss_file_loader()
+    if getattr(agent_oss_file_loader, "stop", None) is not None:
+        try:
+            await agent_oss_file_loader.stop()
+        except Exception as e:
+            error("agent asset loader stop failed.", exc=e)
     try:
         await container.rpc_client().aclose()
     except Exception as e:

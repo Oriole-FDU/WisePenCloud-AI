@@ -154,6 +154,13 @@ class AppSettings(BaseModel):
     # GC 扫描周期（秒）
     OSS_CACHE_GC_INTERVAL_SECONDS: int = 30 * 60
 
+    # 预留：Agent 资产本地磁盘缓存（与 Skill 资产隔离，尚未进入 Chat 使用链路）
+    AGENT_OSS_CACHE_DIR: str = "/var/agent_oss_cache"
+    # 缓存文件 TTL：mtime 距今超过该秒数 → GC 清理（默认 6 小时）
+    AGENT_OSS_CACHE_TTL_SECONDS: int = 6 * 3600
+    # GC 扫描周期（秒）
+    AGENT_OSS_CACHE_GC_INTERVAL_SECONDS: int = 30 * 60
+
 
 def _run_async(coro):
     """在新线程的独立事件循环中执行协程，兼容 uvicorn 启动时已有运行中事件循环的场景。"""
