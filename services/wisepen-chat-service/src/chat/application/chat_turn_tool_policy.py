@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Optional, Set
 
 from chat.application.agents.models import AgentToolAndSkillPolicy
 from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
+from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.skill import SkillMeta
 
 _CURRENT_NOTE_EDITOR_SKILL_ID = "builtin:current-note-editor"
@@ -14,6 +16,14 @@ _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
 _SESSION_TOOL_NAMES = frozenset({"get_historical_chat_messages"})
 _IMAGE_ATTACHMENT_TOOL_NAMES = frozenset({"load_image_attachment"})
 _CURRENT_NOTE_EDIT_TOOL_NAMES = frozenset({"read_current_note_for_edit", "apply_current_note_edits"})
+_CACHED_TOOL_OUTPUT_TOOL_NAMES = frozenset({
+    "inspect_cached_tool_output_structure",
+    "read_cached_tool_output_by_page",
+    "read_cached_tool_output_by_range",
+    "read_cached_tool_output_by_section",
+    "search_cached_tool_output_by_regex",
+    "search_cached_tool_output_by_semantics",
+})
 
 
 @dataclass(frozen=False)
@@ -35,8 +45,8 @@ class ChatTurnToolPolicyBuilder:
         tool_and_skill_policy: AgentToolAndSkillPolicy,
         user_query: str,
         frontend_states: list[dict[str, Any]] | None,
+        chat_history_record_messages: list[ChatMessage],
         has_session_summary: bool,
-        has_history_image_record: bool,
         session_id: str,
         user_id: str,
         temporary_attachment_refs: Any,
@@ -84,9 +94,12 @@ class ChatTurnToolPolicyBuilder:
         if has_session_summary:
             # 如有压缩摘要，则暴露会话工具，用于召回被压缩的上下文
             expose_tool_name_set.update(_SESSION_TOOL_NAMES)
-        if has_history_image_record:
+        if has_history_image_record(chat_history_record_messages):
             # 如历史上下文中有图片，则暴露图片附件读取工具
             expose_tool_name_set.update(_IMAGE_ATTACHMENT_TOOL_NAMES)
+        if has_cached_tool_output(chat_history_record_messages) or tool_and_skill_policy.enable_use_tool:
+            # 工具列表在本轮开始前固定；本轮任一工具产生 content_id 后，需要这些工具继续读取缓存正文
+            expose_tool_name_set.update(_CACHED_TOOL_OUTPUT_TOOL_NAMES)
 
         return ChatTurnToolPolicyResult(
             available_skills=available_skills,
@@ -117,3 +130,28 @@ def find_opened_note_resource(frontend_states: list[dict[str, Any]] | None) -> d
         if resource_type == "note" or viewer == "note":
             return value
     return None
+
+
+def has_history_image_record(chat_history_record_messages: list[ChatMessage]) -> bool:
+    return any(
+        msg.role == Role.USER and any(attachment.is_image for attachment in msg.attachments)
+        for msg in chat_history_record_messages
+    )
+
+
+def has_cached_tool_output(chat_history_record_messages: list[ChatMessage]) -> bool:
+    for msg in chat_history_record_messages:
+        if msg.role != Role.TOOL or not msg.content:
+            continue
+        try:
+            payload = json.loads(msg.content)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        contents = payload.get("contents")
+        if not isinstance(contents, list):
+            continue
+        if any(isinstance(item, dict) and item.get("content_id") for item in contents):
+            return True
+    return False

@@ -245,20 +245,15 @@ class ChatTurnCoordinator:
 
         # 构建本轮可用的工具和Skill
 
-        has_history_image_record = any(
-            msg.role == Role.USER and any(attachment.is_image for attachment in msg.attachments)
-            for msg in chat_history_record_messages
-        )
         has_session_summary = chat_turn_context.session_summary is not None
-
         tool_policy = await self._tool_policy_builder.build(
             user_id=user_id,
             session_id=session_id,
             tool_and_skill_policy=tool_and_skill_policy,
             user_query=user_query,
             frontend_states=frontend_states,
+            chat_history_record_messages=chat_history_record_messages,
             has_session_summary=has_session_summary,
-            has_history_image_record=has_history_image_record,
             temporary_attachment_refs=temp_attachments,
             tool_selection_default_enabled=tool_selection_default_enabled,
             tool_selection_overrides=tool_selection_overrides,

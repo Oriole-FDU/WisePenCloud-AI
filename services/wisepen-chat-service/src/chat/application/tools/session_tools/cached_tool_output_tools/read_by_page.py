@@ -11,6 +11,7 @@ from chat.application.tools.core import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolSelectionMode,
     ToolUISpec,
 )
 from chat.application.tools.core.output_cache.cache_store import (
@@ -226,7 +227,8 @@ def _page_locators_by_label(
 
 def _policy() -> ToolPolicy:
     return ToolPolicy(
-        expose_by_default=True,
+        expose_by_default=False,
+        selection_mode=ToolSelectionMode.CONTEXTUAL,
         persist_output=True,
         risk_level=ToolRiskLevel.LOW,
         required_context_keys=("session_id",),

@@ -11,6 +11,7 @@ from chat.application.tools.core import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolSelectionMode,
     ToolUISpec,
 )
 from chat.application.tools.core.output_cache.cache_store import ToolContentStore as CachedToolOutputStore
@@ -92,7 +93,8 @@ class CachedToolOutputInspectStructureTool:
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
             policy=ToolPolicy(
-                expose_by_default=True,
+                expose_by_default=False,
+                selection_mode=ToolSelectionMode.CONTEXTUAL,
                 persist_output=True,
                 risk_level=ToolRiskLevel.LOW,
                 required_context_keys=("session_id",),
