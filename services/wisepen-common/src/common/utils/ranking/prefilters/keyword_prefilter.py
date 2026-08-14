@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
 import unicodedata
+from dataclasses import dataclass, field
 
 from ..core import (
     RankCandidate,
@@ -60,7 +59,7 @@ class KeywordPrefilter:
 
         # 关键词由上游明确传入，避免过滤器从自然语言 query 中自行猜测硬约束。
         if not isinstance(raw_keywords, list | tuple):
-            raise ValueError(
+            raise TypeError(
                 'KeywordPrefilter requires query.metadata["keywords"], and must be list or tuple.'
             )
 

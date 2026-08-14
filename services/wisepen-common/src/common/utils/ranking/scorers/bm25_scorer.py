@@ -25,7 +25,7 @@ class BM25ScorerConfig:
 class BM25Scorer:
     """基于 candidate.text 的 BM25 词法相关性打分器。"""
 
-    __slots__ = ("tokenizer", "config")
+    __slots__ = ("config", "tokenizer")
 
     def __init__(
             self,

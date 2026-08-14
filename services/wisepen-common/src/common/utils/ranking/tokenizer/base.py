@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-
 import unicodedata
 
 _TOKEN_PATTERN = re.compile(
