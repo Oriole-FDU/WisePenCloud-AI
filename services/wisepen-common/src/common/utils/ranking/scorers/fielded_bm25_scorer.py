@@ -32,7 +32,7 @@ class FieldedBM25ScorerConfig:
 class FieldedBM25Scorer:
     """基于 RankCandidate.fields 的多字段 BM25 打分器。"""
 
-    __slots__ = ("tokenizer", "config")
+    __slots__ = ("config", "tokenizer")
 
     def __init__(
             self,

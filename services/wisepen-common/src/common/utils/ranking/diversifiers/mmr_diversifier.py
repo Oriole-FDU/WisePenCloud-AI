@@ -18,7 +18,7 @@ class MmrDiversifierConfig:
 class MmrDiversifier:
     """基于 Jaccard 相似度和同组抑制的多样性控制器。"""
 
-    __slots__ = ("tokenizer", "config")
+    __slots__ = ("config", "tokenizer")
 
     def __init__(
             self,
@@ -98,8 +98,7 @@ class MmrDiversifier:
                                 cfg.same_group_similarity,
                             )
 
-                        if lexical_similarity > max_similarity:
-                            max_similarity = lexical_similarity
+                        max_similarity = max(max_similarity, lexical_similarity)
 
                     diversity_penalty = max_similarity
 

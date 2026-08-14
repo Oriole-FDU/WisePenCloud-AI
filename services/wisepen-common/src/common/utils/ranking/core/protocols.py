@@ -5,6 +5,7 @@ from typing import Protocol
 from .models import (
     RankCandidate,
     RankedCandidate,
+    RankGateResult,
     RankQuery,
     ScoreSignal,
 )
@@ -76,6 +77,18 @@ class Reranker(Protocol):
             ranked: tuple[RankedCandidate, ...],
     ) -> tuple[RankedCandidate, ...]:
         """对已有排序结果进行二次重排。"""
+        ...
+
+
+class RankGate(Protocol):
+    """排序门控协议，在模型重排后决定候选是否足以进入下游。"""
+
+    def evaluate(
+        self,
+        *,
+        ranked: tuple[RankedCandidate, ...],
+    ) -> RankGateResult:
+        """返回门控判定以及允许进入多样化阶段的候选。"""
         ...
 
 

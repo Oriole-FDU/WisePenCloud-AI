@@ -18,6 +18,14 @@ class ScoreSignalKind(StrEnum):
     DIVERSITY = "diversity"  # 多样性信号，例如 MMR
 
 
+class RankDecision(StrEnum):
+    """排序门控对当前候选集给出的相关性判定。"""
+
+    RELEVANT = "relevant"
+    UNCERTAIN = "uncertain"
+    IRRELEVANT = "irrelevant"
+
+
 @dataclass(frozen=True, slots=True)
 class RankQuery:
     """排序查询对象。"""
@@ -96,3 +104,14 @@ class RankResult:
 
     ranked: tuple[RankedCandidate, ...]  # 最终排序结果
     total_candidates: int  # 输入候选总数
+    decision: RankDecision | None = None  # 未配置门控时为空
+    decision_score: float | None = None  # 门控判断时看到的最高候选分数
+
+
+@dataclass(frozen=True, slots=True)
+class RankGateResult:
+    """排序门控的候选选择结果和集合级判定。"""
+
+    ranked: tuple[RankedCandidate, ...]  # 允许进入多样化阶段的候选。
+    decision: RankDecision  # 对当前候选集的集合级判断。
+    decision_score: float | None  # 门控前的最高分；空候选时为空。
