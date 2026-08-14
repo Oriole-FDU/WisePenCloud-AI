@@ -215,6 +215,7 @@ class RpcClient:
         if user_id:
             merged_headers[SecurityConstants.HEADER_USER_ID] = user_id
             merged_headers[SecurityConstants.HEADER_IDENTITY_TYPE] = str(SecurityContextHolder.get_identity_type().code)
+            merged_headers[SecurityConstants.HEADER_USER_STATUS] = str(SecurityContextHolder.get_user_status())
             merged_headers[SecurityConstants.HEADER_GROUP_ROLE_MAP] = jsonlib.dumps({
                 str(group_id): role.code for group_id, role in SecurityContextHolder.get_group_role_map().items()
             }, ensure_ascii=False)

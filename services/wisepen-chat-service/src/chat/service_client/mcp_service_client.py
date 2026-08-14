@@ -107,9 +107,11 @@ class McpServiceClient:
         headers[SecurityConstants.HEADER_FROM_SOURCE] = self._from_source_secret
         user_id = SecurityContextHolder.get_user_id()
         identity_type = SecurityContextHolder.get_identity_type()
+        user_status = SecurityContextHolder.get_user_status()
         if user_id:
             headers[SecurityConstants.HEADER_USER_ID] = user_id
             headers[SecurityConstants.HEADER_IDENTITY_TYPE] = str(identity_type.code)
+            headers[SecurityConstants.HEADER_USER_STATUS] = str(user_status)
             headers[SecurityConstants.HEADER_GROUP_ROLE_MAP] = json.dumps({
                 str(group_id): role.code
                 for group_id, role in SecurityContextHolder.get_group_role_map().items()

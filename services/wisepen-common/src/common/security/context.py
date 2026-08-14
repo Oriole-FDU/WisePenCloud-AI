@@ -40,6 +40,14 @@ class SecurityContextHolder:
         return SecurityContextHolder._get("identity_type")
 
     @staticmethod
+    def set_user_status(status: int):
+        SecurityContextHolder._set("user_status", int(status))
+
+    @staticmethod
+    def get_user_status() -> Optional[int]:
+        return SecurityContextHolder._get("user_status")
+
+    @staticmethod
     def set_group_role_map(json_str: str):
         """将 JSON 字符串反序列化，code → GroupRoleType 枚举，存入上下文。"""
         if not json_str:

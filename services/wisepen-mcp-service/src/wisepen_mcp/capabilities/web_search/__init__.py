@@ -48,7 +48,7 @@ def register_web_search_tools(
 
     web_search_ranking_pipeline = RankingPipeline(
         scorers=(web_search_fielded_bm25_scorer,),
-        fusion=WeightedRrfFusion,
+        fusion=WeightedRrfFusion(),
         reranker=web_search_zero_entropy_reranker,
     )
 

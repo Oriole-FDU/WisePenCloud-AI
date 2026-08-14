@@ -2,6 +2,7 @@ class SecurityConstants:
     COOKIE_AUTHORIZATION_TOKEN = "authorization"
     HEADER_USER_ID = "X-User-Id"
     HEADER_IDENTITY_TYPE = "X-Identity-Type"
+    HEADER_USER_STATUS = "X-User-Status"
     HEADER_GROUP_ROLE_MAP = "X-Group-Role-Map"
     HEADER_FROM_SOURCE = "X-From-Source"
 
