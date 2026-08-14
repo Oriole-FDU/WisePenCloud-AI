@@ -164,7 +164,7 @@ class ToolRegistry:
             if not _is_tool_selected: # 未被选中，跳过
                 continue
 
-            if not skill_exposure_satisfaction: # 暴露的技能不满足工具要求
+            if policy.required_allowed_builtin_skill_ids and not skill_exposure_satisfaction: # 暴露的技能不满足工具要求
                 continue
 
             # CONTEXTUAL 工具必须靠 explicitly_exposed 显式启用 或 加载了要求的 Skill

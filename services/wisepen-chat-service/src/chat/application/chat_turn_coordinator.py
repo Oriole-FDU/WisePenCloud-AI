@@ -24,7 +24,7 @@ from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.query_loop_runtime import QueryLoopRuntime
 from chat.application.agents import (
     AgentResolver,
-    DefaultAgentResolver, AgentSpec,
+    DefaultAgentResolver, AgentSpec, DEFAULT_AGENT_ID,
 )
 from chat.application.events import StepFinishEvent, ErrorEvent
 from chat.api.vercel_sse_mapper import to_vercel_sse
@@ -167,7 +167,15 @@ class ChatTurnCoordinator:
         chat_turn_context.user_id = user_id
         # 获取当前对话的 Agent
         session = await self._session_repo.get_session_for_user(session_id, user_id)
-        agent = await self._agent_resolver.resolve(session.agent_id)
+        if (
+            session.agent_id
+            and session.agent_id != DEFAULT_AGENT_ID
+            and (session.agent_version is None or session.agent_version <= 0)
+        ):
+            raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
+        agent = await self._agent_resolver.resolve(session.agent_id, session.agent_version)
+        if agent is None:
+            raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
 
         chat_turn_context.agent_spec = agent.spec
         memory_policy = chat_turn_context.agent_spec.memory_policy

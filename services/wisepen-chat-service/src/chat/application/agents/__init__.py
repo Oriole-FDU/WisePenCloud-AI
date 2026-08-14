@@ -6,7 +6,7 @@ from chat.application.agents.models import (
     AgentToolAndSkillPolicy,
     AgentSpec,
 )
-from chat.application.agents.resolver import AgentResolver, CompositeAgentResolver, DefaultAgentResolver
+from chat.application.agents.resolver import AgentResolver, CompositeAgentResolver, DefaultAgentResolver, RemoteAgentResolver
 
 __all__ = [
     "DEFAULT_AGENT_ID",
@@ -19,4 +19,5 @@ __all__ = [
     "AgentResolver",
     "CompositeAgentResolver",
     "DefaultAgentResolver",
+    "RemoteAgentResolver",
 ]
