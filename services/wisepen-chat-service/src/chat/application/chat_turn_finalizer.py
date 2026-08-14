@@ -53,6 +53,7 @@ class ChatTurnFinalizer:
         model_info: ModelRequestInfo,
         token_usage: int,
         billing_group_id: Optional[str] = None,
+        skip_first_user_message: bool = False,
     ) -> None:
         """完成正式消息持久化，并在成功后执行计费。"""
         await self.persist_messages(
@@ -60,6 +61,7 @@ class ChatTurnFinalizer:
             session_id=session_id,
             chat_record_messages=chat_record_messages,
             memory_policy=memory_policy,
+            skip_first_user_message=skip_first_user_message,
         )
         try:
             await self.send_token_billing(
@@ -132,7 +134,8 @@ class ChatTurnFinalizer:
         user_id: str,
         session_id: str,
         chat_record_messages: List[ChatMessage],
-        memory_policy: AgentMemoryPolicy
+        memory_policy: AgentMemoryPolicy,
+        skip_first_user_message: bool = False,
     ) -> None:
         """后台统一处理所有存储逻辑: Redis 追加 → placeholder 裁剪 → MongoDB 落盘 → Memory 摄入"""
 
@@ -154,8 +157,7 @@ class ChatTurnFinalizer:
         # MongoDB 落盘 (落占位符处理的消息内容)
         if memory_policy.enable_persistence_chat_memory:
             try:
-                # 本轮第一条 user message 已在模型执行前持久化，这里只归档后续 assistant/tool 消息。
-                messages_for_archive = chat_record_messages[1:]
+                messages_for_archive = chat_record_messages[1:] if skip_first_user_message else chat_record_messages
                 for msg in messages_for_archive:
                     if msg.content: msg.build_search_tokens() # 构建搜索向量 (缓解中文分词问题)
 

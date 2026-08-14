@@ -138,7 +138,7 @@ class ChatTurnCoordinator:
             cancel_requested=cancel_requested,
         ):
             yield event
-        self.set_background_task(background_tasks, chat_turn_context)
+        self.set_background_task(background_tasks, chat_turn_context, skip_first_user_message=False)
 
         await self._suspended_chat_repo.delete_by_id(suspended_chat_id)
 
@@ -316,7 +316,7 @@ class ChatTurnCoordinator:
                 cancel_requested=cancel_requested,
         ):
             yield event
-        self.set_background_task(background_tasks, chat_turn_context)
+        self.set_background_task(background_tasks, chat_turn_context, skip_first_user_message=True)
 
     async def query_llm(
             self,
@@ -380,7 +380,13 @@ class ChatTurnCoordinator:
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
 
-    def set_background_task(self, background_tasks, chat_turn_context: ChatTurnContext):
+    def set_background_task(
+        self,
+        background_tasks,
+        chat_turn_context: ChatTurnContext,
+        *,
+        skip_first_user_message: bool,
+    ):
         # 使用 FastAPI 的 BackgroundTasks 在响应返回给用户后，异步执行
         if background_tasks is not None:
             background_tasks.add_task(
@@ -392,6 +398,7 @@ class ChatTurnCoordinator:
                 model_info=chat_turn_context.model_info,
                 token_usage=chat_turn_context.token_usage,
                 billing_group_id=chat_turn_context.agent_spec.billing_group_id,
+                skip_first_user_message=skip_first_user_message,
             )
             # 调用轻量级模型生成并更新会话的全局摘要
             if (chat_turn_context.agent_spec.memory_policy.enable_chat_memory
@@ -461,6 +468,7 @@ class ChatTurnCoordinator:
             model_info=unfinished_chat.context.model_info,
             token_usage=unfinished_chat.context.token_usage,
             billing_group_id=unfinished_chat.context.agent_spec.billing_group_id,
+            skip_first_user_message=True,
         )
         # 调用轻量级模型生成并更新会话的全局摘要
         if (unfinished_chat.context.agent_spec.memory_policy.enable_chat_memory
