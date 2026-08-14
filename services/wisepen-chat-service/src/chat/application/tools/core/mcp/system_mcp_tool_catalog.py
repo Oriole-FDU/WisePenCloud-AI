@@ -114,7 +114,7 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
             required_allowed_builtin_skill_ids=("builtin:current-note-editor",),
             max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
         ),
-        "ui_spec": ToolUISpec(display_name="读取当前笔记", description="读取当前打开笔记的编辑上下文。"),
+        "ui_spec": ToolUISpec(display_name="读取当前笔记", description="读取当前已经打开的笔记的编辑上下文。"),
         "failure_reason": "Current Note Read Failed",
     }, {
         "tool_name": "apply_current_note_edits",
@@ -128,8 +128,43 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
             required_allowed_builtin_skill_ids=("builtin:current-note-editor",),
             max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
         ),
-        "ui_spec": ToolUISpec(display_name="应用当前笔记编辑", description="将结构化编辑建议应用到当前打开笔记。"),
+        "ui_spec": ToolUISpec(display_name="应用当前笔记编辑", description="将结构化编辑建议应用到当前已经打开的笔记。"),
         "failure_reason": "Current Note Edit Apply Failed",
+    },
+    # User Resource Tools
+    {
+        "tool_name": "search_user_resources",
+        "ui_spec": ToolUISpec(display_name="搜索用户资源", description="搜索当前用户可见的笔记和文档资源。"),
+        "policy": ToolPolicy(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=15.0,
+            persist_output=True,
+            max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+        ),
+        "failure_reason": "User Resource Search Failed",
+    }, {
+        "tool_name": "read_note_resource_text",
+        "ui_spec": ToolUISpec(display_name="快速读取笔记文本", description="读取当前用户可见（无需已经打开）笔记的纯文本内容，用于快速了解，不能用于编辑。"),
+        "policy": ToolPolicy(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=20.0,
+            persist_output=True,
+            max_output_chars=None,
+        ),
+        "failure_reason": "Note Resource Text Read Failed",
+    }, {
+        "tool_name": "read_document_resource_text",
+        "ui_spec": ToolUISpec(display_name="读取文档资源文本", description="读取当前用户可见（无需已经打开）文档资源的转换或抽取文本。"),
+        "policy": ToolPolicy(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=20.0,
+            persist_output=True,
+            max_output_chars=None,
+        ),
+        "failure_reason": "Document Resource Text Read Failed",
     },
     # Web Search Tools
     {

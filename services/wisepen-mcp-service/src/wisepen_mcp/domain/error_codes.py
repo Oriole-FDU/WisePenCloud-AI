@@ -6,6 +6,7 @@ class McpErrorCode(IErrorCode):
     SKILL_ASSET_INVALID = (41002, "Skill 资产不合法")
     SKILL_NOT_FOUND = (41003, "Skill 不存在")
     NOTE_AI_REQUEST_INVALID = (41004, "Note AI 请求不合法")
+    RESOURCE_REQUEST_INVALID = (41005, "Resource 请求不合法")
     WEB_SEARCH_INVALID = (41010, "Web Search 参数不合法")
     WEB_SEARCH_CONFIG_MISSING = (41011, "Web Search 配置缺失")
     WEB_SEARCH_CREDENTIAL_INVALID = (41012, "Web Search 凭证不可用")
