@@ -39,6 +39,22 @@ class WorkspaceRepository(Protocol):
         """更新 workspace_path，并返回更新后的记录"""
         ...
 
+    async def set_attached_workspace(
+        self,
+        workspace_id: str,
+        sandbox_id: str,
+        workspace_path: str,
+    ) -> SessionWorkspaceDocument | None:
+        """写入运行时沙箱关联和容器内工作区路径。"""
+        ...
+
+    async def clear_runtime_binding(
+        self,
+        workspace_id: str,
+    ) -> SessionWorkspaceDocument | None:
+        """清空当前沙箱关联和容器内工作区路径。"""
+        ...
+
     async def set_export_bundle(
         self,
         workspace_id: str,

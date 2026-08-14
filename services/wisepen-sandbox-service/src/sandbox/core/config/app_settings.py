@@ -43,8 +43,8 @@ class AppSettings(BaseModel):
     # 状态检查时间间隔
     SANDBOX_WATCHER_INTERVAL_SECONDS: float
 
-    # workspace 受管目录、快照缓存容量和后台淘汰配置。
-    SANDBOX_WORKSPACE_ROOT: str = "./data/workspaces"
+    # workspace 容器目录、快照缓存容量和后台淘汰配置。
+    SANDBOX_CONTAINER_WORKSPACE_ROOT: str = "./data/workspaces"
     SANDBOX_WORKSPACE_CACHE_ROOT: str = "./data/workspace-cache"
     SANDBOX_WORKSPACE_SNAPSHOT_TTL_SECONDS: int = 7 * 24 * 60 * 60
     SANDBOX_WORKSPACE_CACHE_MAX_BYTES: int = 0
