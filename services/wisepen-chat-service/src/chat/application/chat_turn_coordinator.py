@@ -260,6 +260,10 @@ class ChatTurnCoordinator:
         # 构建本轮可用的工具和Skill
 
         has_session_summary = chat_turn_context.session_summary is not None
+        agent_on_demand_skill_ids = chat_turn_context.agent_spec.tool_and_skill_policy.on_demand_skill_ids
+        if user_defined_on_demand_skill_ids is None: user_defined_on_demand_skill_ids = set()
+        if agent_on_demand_skill_ids is None: agent_on_demand_skill_ids = set()
+
         tool_policy = await self._tool_policy_builder.build(
             user_id=user_id,
             session_id=session_id,
@@ -271,7 +275,7 @@ class ChatTurnCoordinator:
             temporary_attachment_refs=temp_attachments,
             tool_selection_default_enabled=tool_selection_default_enabled,
             tool_selection_overrides=tool_selection_overrides,
-            user_defined_on_demand_skill_ids=user_defined_on_demand_skill_ids,
+            user_defined_on_demand_skill_ids=user_defined_on_demand_skill_ids | agent_on_demand_skill_ids,
         )
         available_skills = tool_policy.available_skills
 
