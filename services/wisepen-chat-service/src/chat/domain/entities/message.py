@@ -4,11 +4,11 @@ from typing import Dict, Any, Optional, List, TYPE_CHECKING
 from datetime import datetime, timezone
 from copy import deepcopy
 from beanie import Document
-from pydantic import Field, BaseModel
+from pydantic import Field, BaseModel, ConfigDict
 from pymongo import IndexModel, ASCENDING
 
 from chat.domain.entities.model import ModelFamily, ModelScope
-from chat.domain.entities.provider import ProviderType
+from chat.domain.entities.provider import ProviderScope, ProviderType
 
 if TYPE_CHECKING:
     from chat.domain.repositories.model_repo import ModelRequestInfo
@@ -45,12 +45,15 @@ class MessageAttachmentRef(BaseModel):
 
 class MessageModelInfo(BaseModel):
     """消息持久化用的模型安全快照"""
+    model_config = ConfigDict(populate_by_name=True)
+
     model_id: str
     provider_id: str
+    provider_scope: Optional[ProviderScope] = None
     provider_type: ProviderType
     model_family: ModelFamily
     model_name: str
-    scope: ModelScope
+    model_scope: ModelScope
     support_tools: bool
     context_window_tokens: Optional[int] = None
     max_output_tokens: Optional[int] = None
@@ -61,10 +64,11 @@ class MessageModelInfo(BaseModel):
         return cls(
             model_id=str(model_request.model_id),
             provider_id=str(model_request.provider_id),
+            provider_scope=model_request.provider_scope,
             provider_type=model_request.provider_type,
             model_family=model_request.model.model_family,
             model_name=model_request.model_name,
-            scope=model_request.scope,
+            model_scope=model_request.model_scope,
             support_tools=model_request.support_tools,
             context_window_tokens=model_request.context_window_tokens,
             max_output_tokens=model_request.max_output_tokens,

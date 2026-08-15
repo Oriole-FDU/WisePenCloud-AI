@@ -2,7 +2,7 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from chat.domain.entities.model import ModelFamily, ModelScope, ModelType
+from chat.domain.entities.model import ModelFamily, ModelScope
 from chat.domain.entities.provider import ProviderScope, ProviderType
 
 
@@ -33,7 +33,6 @@ class ModelResponse(BaseModel):
     id: str
     scope: ModelScope
     display_name: str
-    type: ModelType
     model_family: ModelFamily
     billing_ratio: int
     support_thinking: bool
@@ -50,7 +49,7 @@ class AvailableModelsResponse(BaseModel):
     user_models: List[ModelResponse] = Field(default_factory=list)
 
 
-class ListUserModelsResponse(BaseModel):
+class ListModelsResponse(BaseModel):
     models: List[ModelResponse] = Field(default_factory=list)
 
 
@@ -80,7 +79,6 @@ class DeleteUserProviderRequest(BaseModel):
 
 class CreateUserModelRequest(BaseModel):
     display_name: str
-    type: ModelType = ModelType.CUSTOM_MODEL
     model_family: ModelFamily = ModelFamily.GENERIC
     billing_ratio: int = 1
     support_thinking: bool = False
@@ -93,7 +91,6 @@ class CreateUserModelRequest(BaseModel):
 class UpdateUserModelRequest(BaseModel):
     model_id: str
     display_name: Optional[str] = None
-    type: Optional[ModelType] = None
     model_family: Optional[ModelFamily] = None
     billing_ratio: Optional[int] = None
     support_thinking: Optional[bool] = None

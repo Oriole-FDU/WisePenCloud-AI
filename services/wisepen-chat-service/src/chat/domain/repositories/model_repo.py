@@ -5,7 +5,7 @@ from typing import Any, List, Optional
 from beanie import PydanticObjectId
 
 from chat.domain.entities.model import Model, ModelScope, ModelProviderMapping
-from chat.domain.entities.provider import Provider, ProviderType
+from chat.domain.entities.provider import Provider, ProviderScope, ProviderType
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,7 @@ class ModelRequestInfo:
         return self.provider.api_key
 
     @property
-    def scope(self) -> ModelScope:
+    def model_scope(self) -> ModelScope:
         return self.model.scope
 
     @property
@@ -58,8 +58,25 @@ class ModelRequestInfo:
         return self.model.owner_user_id
 
     @property
+    def provider_owner_user_id(self) -> Optional[str]:
+        return self.mapping.owner_user_id
+
+    @property
+    def provider_scope(self) -> ProviderScope:
+        return self.provider.scope
+
+    @property
     def billing_ratio(self) -> int:
         return self.model.billing_ratio
+
+    @property
+    def is_billable(self) -> bool:
+        return self.provider.scope == ProviderScope.SYSTEM and self.model.billing_ratio > 0
+
+    def billable_tokens(self, token_usage: int) -> int:
+        if token_usage <= 0 or not self.is_billable:
+            return 0
+        return token_usage * self.model.billing_ratio
 
     @property
     def support_tools(self) -> bool:
@@ -82,7 +99,7 @@ class ModelRepository(ABC):
     async def get_model(self, model_id: PydanticObjectId, user_id: Optional[str] = None) -> Model: pass
 
     @abstractmethod
-    async def list_models_and_mappings(self, user_id: Optional[str] = None) -> List[ModelInfo]: pass
+    async def list_models_and_mappings(self, model_scope: ModelScope, user_id: Optional[str] = None) -> List[ModelInfo]: pass
 
     @abstractmethod
     async def list_models_by_provider_id(self, provider_id: PydanticObjectId, user_id: Optional[str] = None) -> List[ModelInfo]: pass
@@ -108,7 +125,6 @@ class ModelRepository(ABC):
         provider_id: PydanticObjectId,
         provider_model_name: str,
         user_id: Optional[str] = None,
-        *,
         is_preferred: bool = True,
         is_active: bool = True,
     ) -> ModelProviderMapping:
@@ -127,9 +143,8 @@ class ModelRepository(ABC):
     async def resolve_model_for_chat(
             self,
             model_id: PydanticObjectId,
-            user_id: Optional[str] = None,
+            user_id: str,
             provider_id: Optional[PydanticObjectId] = None,
-            scope = None,
             runtime_options: Optional[dict[str, Any]] = None,
     ) -> ModelRequestInfo:
         pass

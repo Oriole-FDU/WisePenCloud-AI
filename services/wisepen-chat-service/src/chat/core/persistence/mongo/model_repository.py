@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from beanie import PydanticObjectId
+from beanie.odm.operators.find.logical import Or, And
 from pymongo.errors import DuplicateKeyError
 
 from chat.domain.entities.model import Model, ModelProviderMapping, ModelScope
@@ -31,12 +32,18 @@ class MongoModelRepository(ModelRepository):
 
     async def list_models_and_mappings(
         self,
+        model_scope: ModelScope,
         user_id: Optional[str] = None,
     ) -> List[ModelInfo]:
-        models = await Model.find(
-            Model.scope == self._scope_for(user_id),
-            Model.owner_user_id == user_id,
-        ).sort("-is_active", "-updated_at").to_list()
+        if model_scope == ModelScope.SYSTEM:
+            models = await Model.find(
+                Model.scope == ModelScope.SYSTEM
+            ).sort("-is_active", "-updated_at").to_list()
+        else:
+            models = await Model.find(
+                Model.scope == ModelScope.USER,
+                Model.owner_user_id == user_id
+            ).sort("-is_active", "-updated_at").to_list()
 
         return [
             ModelInfo(
@@ -52,8 +59,10 @@ class MongoModelRepository(ModelRepository):
         user_id: Optional[str],
     ) -> List[ModelProviderMapping]:
         return await ModelProviderMapping.find(
-            ModelProviderMapping.model_id == model.id,
-            ModelProviderMapping.owner_user_id == user_id,
+            {
+                "model_id": model.id,
+                "owner_user_id": {"$in": [user_id, None]},
+            }
         ).sort("-is_active", "-is_preferred", "+priority", "+created_at").to_list()
 
     async def list_models_by_provider_id(
@@ -68,11 +77,7 @@ class MongoModelRepository(ModelRepository):
 
         result: List[ModelInfo] = []
         for mapping in mappings:
-            model = await Model.find_one(
-                Model.id == mapping.model_id,
-                Model.scope == self._scope_for(user_id),
-                Model.owner_user_id == user_id,
-            )
+            model = await self._find_accessible_model(mapping.model_id, user_id)
             if model is not None:
                 result.append(ModelInfo(model=model, mappings=[mapping]))
 
@@ -108,8 +113,6 @@ class MongoModelRepository(ModelRepository):
 
         if "display_name" in updates:
             model.display_name = updates["display_name"]
-        if "type" in updates:
-            model.type = updates["type"]
         if "model_family" in updates:
             model.model_family = updates["model_family"]
         if "runtime_options" in updates:
@@ -161,19 +164,17 @@ class MongoModelRepository(ModelRepository):
         provider_id: PydanticObjectId,
         provider_model_name: str,
         user_id: Optional[str] = None,
-        *,
         is_preferred: bool = True,
         is_active: bool = True,
     ) -> ModelProviderMapping:
-        model = await self.get_model(model_id, user_id)
+        model = await self._find_accessible_model(model_id, user_id)
+        if model is None: raise ServiceException(ChatErrorCode.MODEL_NOT_FOUND)
 
         provider = await Provider.find_one(
             Provider.id == provider_id,
-            Provider.scope == self._provider_scope_for(user_id),
             Provider.owner_user_id == user_id,
         )
-        if provider is None:
-            raise ServiceException(ChatErrorCode.PROVIDER_NOT_FOUND)
+        if provider is None: raise ServiceException(ChatErrorCode.PROVIDER_NOT_FOUND)
 
         mapping = await ModelProviderMapping.find_one(
             ModelProviderMapping.model_id == model_id,
@@ -244,7 +245,8 @@ class MongoModelRepository(ModelRepository):
         provider_id: PydanticObjectId,
         user_id: Optional[str] = None,
     ) -> None:
-        await self.get_model(model_id, user_id)
+        model = await self._find_accessible_model(model_id, user_id)
+        if model is None: raise ServiceException(ChatErrorCode.MODEL_NOT_FOUND)
 
         mapping = await ModelProviderMapping.find_one(
             ModelProviderMapping.model_id == model_id,
@@ -282,13 +284,12 @@ class MongoModelRepository(ModelRepository):
     async def resolve_model_for_chat(
         self,
         model_id: PydanticObjectId,
-        user_id: Optional[str] = None,
+        user_id: str = None,
         provider_id: Optional[PydanticObjectId] = None,
-        scope: Optional[ModelScope] = None,
         runtime_options: Optional[dict[str, Any]] = None
     ) -> ModelRequestInfo:
         runtime_options = runtime_options or {}
-        model = await self._find_chat_model(model_id, user_id, scope)
+        model = await self._find_accessible_model(model_id, user_id, active_only=True)
         if model is None:
             raise ServiceException(ChatErrorCode.MODEL_NOT_FOUND)
 
@@ -297,68 +298,65 @@ class MongoModelRepository(ModelRepository):
             mapping = await ModelProviderMapping.find_one(
                 ModelProviderMapping.model_id == model.id,
                 ModelProviderMapping.provider_id == provider_id,
-                ModelProviderMapping.owner_user_id == model.owner_user_id,
                 ModelProviderMapping.is_active == True,
-            )
+            ) # 检索指定的 provider-model 映射
+            if mapping is None: # 未找到 provider_id 对应的提供者，报错
+                raise ServiceException(ChatErrorCode.MODEL_MAPPING_NOT_FOUND)
+            if mapping.owner_user_id is not None and mapping.owner_user_id != user_id: # 不是系统提供者也不是该用户的提供者
+                raise ServiceException(ChatErrorCode.MODEL_MAPPING_NOT_FOUND)
         else:
             mappings = await ModelProviderMapping.find(
                 ModelProviderMapping.model_id == model.id,
-                ModelProviderMapping.owner_user_id == model.owner_user_id,
+                ModelProviderMapping.owner_user_id == user_id,
                 ModelProviderMapping.is_active == True,
-            ).sort("-is_preferred", "+priority", "+created_at").limit(1).to_list()
-
-            mapping = mappings[0] if mappings else None
-
-        if mapping is None:
-            raise ServiceException(ChatErrorCode.MODEL_MAPPING_NOT_FOUND)
+            ).sort("-is_preferred", "+priority", "+created_at").limit(1).to_list() # 检索该用户最优先的可用 provider-model 映射
+            if mappings: mapping = mappings[0]
+            else:# 未能找到
+                # 模型是用户自定义模型，不可能有系统提供者，报错
+                if model.scope is not ModelScope.SYSTEM: raise ServiceException(ChatErrorCode.MODEL_MAPPING_NOT_FOUND)
+                else: # 降级尝试使用系统提供者
+                    mappings = await ModelProviderMapping.find(
+                        ModelProviderMapping.model_id == model.id,
+                        ModelProviderMapping.owner_user_id == None, # 系统映射没有 owner_user_id
+                        ModelProviderMapping.is_active == True,
+                    ).sort("-is_preferred", "+priority", "+created_at").limit(1).to_list()
+                    # 仍然没有，报错
+                    if mappings: mapping = mappings[0]
+                    else: raise ServiceException(ChatErrorCode.MODEL_MAPPING_NOT_FOUND)
 
         provider = await Provider.find_one(
             Provider.id == mapping.provider_id,
-            Provider.scope == self._provider_scope_for(model.owner_user_id),
-            Provider.owner_user_id == model.owner_user_id,
+            Provider.owner_user_id == mapping.owner_user_id,
             Provider.is_active == True,
         )
-        if provider is None:
-            raise ServiceException(ChatErrorCode.PROVIDER_NOT_FOUND)
+        if provider is None: raise ServiceException(ChatErrorCode.PROVIDER_NOT_FOUND)
 
         return ModelRequestInfo(model=model, mapping=mapping, provider=provider, runtime_options=runtime_options)
 
-    async def _find_chat_model(
+    async def _find_accessible_model(
         self,
         model_id: PydanticObjectId,
         user_id: Optional[str],
-        scope: Optional[ModelScope],
+        active_only: bool = False,
     ) -> Optional[Model]:
-        if scope is not None:
-            owner_user_id = user_id if scope == ModelScope.USER else None
-            return await Model.find_one(
-                Model.id == model_id,
-                Model.scope == scope,
-                Model.owner_user_id == owner_user_id,
-                Model.is_active == True,
-            )
-
         if user_id is not None:
-            user_model = await Model.find_one(
+            user_filters = [
                 Model.id == model_id,
                 Model.scope == ModelScope.USER,
                 Model.owner_user_id == user_id,
-                Model.is_active == True,
-            )
+            ]
+            if active_only: user_filters.append(Model.is_active == True)
+            user_model = await Model.find_one(*user_filters)
             if user_model is not None:
                 return user_model
 
-        return await Model.find_one(
+        system_filters = [
             Model.id == model_id,
-            Model.scope == ModelScope.SYSTEM,
-            Model.owner_user_id == None,
-            Model.is_active == True,
-        )
+            Model.scope == ModelScope.SYSTEM
+        ]
+        if active_only: system_filters.append(Model.is_active == True)
+        return await Model.find_one(*system_filters)
 
     @staticmethod
     def _scope_for(user_id: Optional[str]) -> ModelScope:
         return ModelScope.USER if user_id is not None else ModelScope.SYSTEM
-
-    @staticmethod
-    def _provider_scope_for(user_id: Optional[str]) -> ProviderScope:
-        return ProviderScope.USER if user_id is not None else ProviderScope.SYSTEM

@@ -11,7 +11,6 @@ from chat.domain.error_codes import ChatErrorCode
 
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
-from chat.domain.entities.model import ModelScope
 from chat.domain.interfaces.llm import TextCompletionProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository, ProviderRepository
@@ -104,26 +103,27 @@ class ChatTurnFinalizer:
         if token_usage == 0:
             return
 
-        billable_token_usage = token_usage * model_info.billing_ratio if model_info.scope == ModelScope.SYSTEM else 0
+        # 计费只看本次实际使用的 Provider：用户自带 Provider 与免费官方模型都只累计用量，不扣钱包余额
+        billable_token_usage = model_info.billable_tokens(token_usage)
 
         await self.provider_repo.increment_usage(
             provider_id=model_info.provider_id,
-            user_id=model_info.owner_user_id,
+            user_id=model_info.provider_owner_user_id,
             token_usage=token_usage,
             billable_token_usage=billable_token_usage,
         )
 
-        if model_info.scope != ModelScope.SYSTEM:
+        if billable_token_usage <= 0:
             billing_group_id = None
 
         value = {
             "userId": user_id,
             "groupId": billing_group_id,
             "usageTokens": token_usage,
+            "billableTokens": billable_token_usage,
             "billingRatio": model_info.billing_ratio,
             "traceId": uuid.uuid4().hex,
             "modelName": model_info.model.display_name,
-            "modelType": model_info.model.type.value,
             "requestTime": datetime.now(timezone.utc).isoformat(),
         }
 

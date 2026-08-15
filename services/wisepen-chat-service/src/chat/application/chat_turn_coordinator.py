@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Set, Awaitable, Callable
+
 from beanie import PydanticObjectId
 from fastapi import BackgroundTasks
+import redis.asyncio as redis
 
 from chat.application.tools import ToolScope
 from chat.domain.entities.suspended_chat import SuspendedTurnContext, SuspendedChat
@@ -73,6 +75,7 @@ class ChatTurnCoordinator:
             tool_policy_builder: ChatTurnToolPolicyBuilder,
             oss_file_loader: OssFileLoader,
             agent_resolver: AgentResolver | None = None,
+            redis_client: redis.Redis | None = None,
     ):
         self._memory = memory
         self._model_repo = model_repo
@@ -97,6 +100,7 @@ class ChatTurnCoordinator:
         )
         self._tool_policy_builder = tool_policy_builder
         self._agent_resolver = agent_resolver or DefaultAgentResolver()
+        self._redis = redis_client or redis.from_url(settings.REDIS_URL, decode_responses=True)
 
         self._suspended_chat_repo = suspended_chat_repo
 
@@ -128,6 +132,11 @@ class ChatTurnCoordinator:
             # 挂起前的消息和 token 由首次批次处理；恢复批次只记录新增工具结果和回复。
             chat_record_messages=[],
             token_usage=0,
+        )
+        await self._ensure_billable_chat_allowed(
+            user_id=user_id,
+            billing_group_id=chat_turn_context.agent_spec.billing_group_id,
+            model_info=chat_turn_context.model_info,
         )
 
         async for event in self.query_llm(
@@ -199,6 +208,11 @@ class ChatTurnCoordinator:
             user_id=user_id,
             provider_id=provider_id,
             runtime_options=runtime_options or {}
+        )
+        await self._ensure_billable_chat_allowed(
+            user_id=user_id,
+            billing_group_id=chat_turn_context.agent_spec.billing_group_id,
+            model_info=chat_turn_context.model_info,
         )
 
         # Token窗口尺寸
@@ -487,3 +501,22 @@ class ChatTurnCoordinator:
             )
 
         await self._suspended_chat_repo.delete_by_id(unfinished_chat_id)
+
+    async def _ensure_billable_chat_allowed(
+        self,
+        *,
+        user_id: str,
+        billing_group_id: Optional[str],
+        model_info: ModelRequestInfo,
+    ) -> None:
+        if not model_info.is_billable:
+            return
+
+        # 只有付费官方 Provider 需要检查钱包熔断；免费模型和用户自带 Provider 即使余额耗尽也允许继续使用
+        block_keys = [f"wisepen:chat:block:user:{user_id}"]
+        if billing_group_id is not None:
+            block_keys.append(f"wisepen:chat:block:group:{billing_group_id}")
+            block_keys.append(f"wisepen:chat:block:member:{billing_group_id}:{user_id}")
+
+        if await self._redis.exists(*block_keys) > 0:
+            raise ServiceException(ChatErrorCode.CHAT_WALLET_BLOCKED)

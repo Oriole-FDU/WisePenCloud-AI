@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from enum import Enum, IntEnum
+from enum import Enum
 from typing import Optional
 
 from beanie import Document, PydanticObjectId
@@ -9,13 +9,6 @@ from pymongo import ASCENDING, DESCENDING, IndexModel
 class ModelScope(str, Enum):
     SYSTEM = "SYSTEM"  # 平台内置模型
     USER = "USER"      # 用户自定义模型
-
-class ModelType(IntEnum):
-    CUSTOM_MODEL = 0
-    STANDARD_MODEL = 1
-    ADVANCED_MODEL = 2
-    UNKNOWN_MODEL = 3
-
 
 class ModelFamily(str, Enum):
     QWEN = "QWEN"
@@ -34,7 +27,6 @@ class Model(Document):
     scope: ModelScope = Field(default=ModelScope.SYSTEM, description="模型作用域")
     owner_user_id: Optional[str] = Field(default=None, description="USER 作用域下的归属用户 ID")
 
-    type: ModelType = Field(default=ModelType.CUSTOM_MODEL, description="模型展示分组类型")
     model_family: ModelFamily = Field(default=ModelFamily.GENERIC, description="模型协议族")
 
     billing_ratio: int = Field(default=1, description="计费倍率")
@@ -57,10 +49,6 @@ class Model(Document):
                 [("scope", ASCENDING), ("owner_user_id", ASCENDING), ("is_active", ASCENDING),
                  ("updated_at", DESCENDING)],
                 name="idx_model_scope_owner_active_updated",
-            ),
-            IndexModel(
-                [("scope", ASCENDING), ("owner_user_id", ASCENDING), ("type", ASCENDING), ("is_active", ASCENDING)],
-                name="idx_model_scope_owner_type_active",
             ),
             IndexModel(
                 [("scope", ASCENDING), ("owner_user_id", ASCENDING), ("display_name", ASCENDING)],

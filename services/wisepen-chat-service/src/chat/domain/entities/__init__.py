@@ -2,7 +2,7 @@
 from .message import ChatMessage, VisionImage, MessageAttachmentRef, MessageModelInfo, Role, ToolCallMessage
 from .session import AttachmentRef, ChatSession, ResourceAttachmentRef, TemporaryAttachmentRef
 from .file_storage import StorageRecord, UploadInitResponse
-from .model import ModelType, ModelFamily, ModelScope, Model, ModelProviderMapping
+from .model import ModelFamily, ModelScope, Model, ModelProviderMapping
 from .provider import Provider, ProviderScope, ProviderType
 from .resource import ResourceItemInfo, ResourcePermission
 from .skill import Skill, SkillMeta, SkillAssetMeta
@@ -14,7 +14,7 @@ __all__ = [
     "ChatMessage", "VisionImage", "MessageAttachmentRef", "MessageModelInfo", "Role", "ToolCallMessage",
     "AttachmentRef", "ChatSession", "ResourceAttachmentRef", "TemporaryAttachmentRef",
     "StorageRecord", "UploadInitResponse",
-    "ModelType", "ModelFamily", "ModelScope", "Model", "ModelProviderMapping",
+    "ModelFamily", "ModelScope", "Model", "ModelProviderMapping",
     "Provider", "ProviderScope", "ProviderType",
     "ResourceItemInfo", "ResourcePermission",
     "Skill", "SkillMeta", "SkillAssetMeta",

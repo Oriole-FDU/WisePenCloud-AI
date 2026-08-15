@@ -10,6 +10,7 @@ class ChatErrorCode(IErrorCode):
     CHAT_REQUEST_INVALID = (40005, "completions 请求参数不合法")
     CHAT_TURN_IN_PROGRESS = (40006, "当前会话已有正在运行的对话")
     CHAT_ACTIVE_TURN_NOT_FOUND = (40007, "当前会话没有正在运行的对话")
+    CHAT_WALLET_BLOCKED = (40008, "当前余额或额度不足，无法使用付费模型")
 
     # --- Provider 相关 ---
     PROVIDER_NOT_FOUND = (40011, "供应商不存在")
