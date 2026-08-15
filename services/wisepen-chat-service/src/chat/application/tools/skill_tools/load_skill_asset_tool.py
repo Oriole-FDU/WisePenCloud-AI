@@ -81,7 +81,7 @@ class LoadSkillAssetTool:
                 },
                 "path": {
                     "type": "string",
-                    "description": "Relative POSIX path of the asset, exactly as listed in the skill's assets manifest (e.g. 'references/citation-styles.md').",
+                    "description": "Relative POSIX path of the asset, exactly as listed in the skill's assets manifest (e.g. '/references/citation-styles.md').",
                 },
             },
             "required": ["skill_id", "path"],
