@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Any
 
+from chat.application.agents.models import Agent
 from chat.domain.entities import ChatSession, ResourceAttachmentRef, TemporaryAttachmentRef
 
 
@@ -68,6 +69,10 @@ class SessionResponse(BaseModel):
     resource_attachment_refs: List[ResourceAttachmentRefResponse] = Field(default_factory=list)
     agent_id: Optional[str] = None
     agent_version: Optional[int] = None
+    agent: Optional[Agent] = None
+    last_selected_skill_ids: List[str] = Field(default_factory=list)
+    last_tool_selection_default_enabled: Optional[bool] = None
+    last_tool_selection_overrides: dict[str, bool] = Field(default_factory=dict)
 
     @classmethod
     def from_entity(cls, session: ChatSession) -> "SessionResponse":
@@ -89,6 +94,9 @@ class SessionResponse(BaseModel):
             ],
             agent_id=session.agent_id,
             agent_version=session.agent_version,
+            last_selected_skill_ids=list(session.last_selected_skill_ids),
+            last_tool_selection_default_enabled=session.last_tool_selection_default_enabled,
+            last_tool_selection_overrides=dict(session.last_tool_selection_overrides),
         )
 
 

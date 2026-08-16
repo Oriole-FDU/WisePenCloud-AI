@@ -43,3 +43,14 @@ class SessionRepository(ABC):
         agent_version: int | None,
     ) -> ChatSession:
         pass
+
+    @abstractmethod
+    async def set_session_capability_preferences(
+        self,
+        session_id: str,
+        user_id: str,
+        last_selected_skill_ids: list[str] | None,
+        last_tool_selection_default_enabled: bool | None,
+        last_tool_selection_overrides: dict[str, bool] | None,
+    ) -> ChatSession:
+        pass

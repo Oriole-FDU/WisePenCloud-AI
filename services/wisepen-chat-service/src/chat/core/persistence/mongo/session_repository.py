@@ -88,6 +88,25 @@ class MongoSessionRepository(SessionRepository):
         await session.save()
         return session
 
+    async def set_session_capability_preferences(
+        self,
+        session_id: str,
+        user_id: str,
+        last_selected_skill_ids: list[str] | None,
+        last_tool_selection_default_enabled: bool | None,
+        last_tool_selection_overrides: dict[str, bool] | None,
+    ) -> ChatSession:
+        session = await self._safe_get_session(session_id, user_id)
+        if last_selected_skill_ids is not None:
+            session.last_selected_skill_ids = list(last_selected_skill_ids)
+        if last_tool_selection_default_enabled is not None:
+            session.last_tool_selection_default_enabled = last_tool_selection_default_enabled
+        if last_tool_selection_overrides is not None:
+            session.last_tool_selection_overrides = dict(last_tool_selection_overrides)
+        session.updated_at = datetime.now(timezone.utc)
+        await session.save()
+        return session
+
     async def _safe_get_session(self, session_id: str, user_id: str) -> ChatSession:
         """安全获取会话，查不到（不存在或不属于该用户）统一抛 SESSION_NOT_FOUND，防止枚举他人 session_id。"""
         session = await ChatSession.find_one(

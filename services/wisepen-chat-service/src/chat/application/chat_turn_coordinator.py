@@ -187,6 +187,22 @@ class ChatTurnCoordinator:
             raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
 
         chat_turn_context.agent_spec = agent.spec
+        if (
+            user_defined_on_demand_skill_ids is not None
+            or tool_selection_default_enabled is not None
+            or tool_selection_overrides is not None
+        ):
+            await self._session_repo.set_session_capability_preferences(
+                session_id=session_id,
+                user_id=user_id,
+                last_selected_skill_ids=(
+                    sorted(user_defined_on_demand_skill_ids)
+                    if user_defined_on_demand_skill_ids is not None
+                    else None
+                ),
+                last_tool_selection_default_enabled=tool_selection_default_enabled,
+                last_tool_selection_overrides=tool_selection_overrides,
+            )
         memory_policy = chat_turn_context.agent_spec.memory_policy
         tool_and_skill_policy = chat_turn_context.agent_spec.tool_and_skill_policy
         model_policy = chat_turn_context.agent_spec.model_policy

@@ -6,10 +6,17 @@ from chat.api.schemas.session import (
     PinSessionRequest, SetSessionAgentRequest, UIMessageResponse,
 )
 from chat.api.converters import convert_to_ui_messages
+from chat.api.tool_response_converter import build_tool_response
 from chat.application.agents import AgentResolver
+from chat.application.tools.core import ToolRegistry
 from chat.domain.entities import ChatSession
 from chat.domain.error_codes import ChatErrorCode
-from chat.domain.repositories import SessionRepository, MessageRepository, SuspendedChatRepository
+from chat.domain.repositories import (
+    MessageRepository,
+    SessionRepository,
+    SuspendedChatRepository,
+    ToolConfigRepository,
+)
 from chat.container import Container
 
 from common.security import require_login
@@ -27,9 +34,9 @@ router = APIRouter()
 - 用途：获取当前用户的单个聊天会话详情，用于进入会话或刷新会话状态。
 - 请求：session_id 指定目标会话。
 - 约束：当前用户必须已登录；目标会话必须属于当前用户。
-- 处理：按当前用户和会话 ID 查询会话，并组装基础信息、未删除的临时附件、资源附件和绑定 Agent 信息；不读取历史消息。
+- 处理：按当前用户和会话 ID 查询会话，并组装基础信息、未删除的临时附件、资源附件、绑定 Agent 信息，以及上次保存的 Skill / Tool 选择偏好；Tool 覆盖项会按当前用户可见、已启用且已完成配置的工具过滤；不读取历史消息。
 - 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND。
-- 响应：返回会话详情。
+- 响应：返回会话详情，用于前端恢复当前会话状态和上次用户选择。
 """,
 )
 @inject
@@ -37,9 +44,41 @@ async def get_session(
         session_id: str,
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+        agent_resolver: AgentResolver = Depends(Provide[Container.agent_resolver]),
+        tool_registry: ToolRegistry = Depends(Provide[Container.tool_registry]),
+        tool_config_repo: ToolConfigRepository = Depends(Provide[Container.tool_config_repo]),
 ):
+    # 会话存在性、归属校验
     session = await session_repo.get_session_for_user(session_id, user_id)
-    return R.success(data=SessionResponse.from_entity(session))
+    response = SessionResponse.from_entity(session)
+    # 解析当前会话绑定的 Agent
+    agent = await agent_resolver.resolve(session.agent_id, session.agent_version)
+    if agent is not None:
+        response.agent = agent
+
+    response.last_selected_skill_ids = session.last_selected_skill_ids
+    response.last_tool_selection_default_enabled = session.last_tool_selection_default_enabled
+
+    last_tool_selection_overrides: dict[str, bool] = {}
+    if session.last_tool_selection_overrides:
+        tool_configs = {
+            config.tool_name: config
+            for config in await tool_config_repo.list_tool_configs(user_id)
+        }
+        all_tools = await tool_registry.available_tools(user_id)
+
+        for tool_name, enabled in session.last_tool_selection_overrides.items():
+            tool = all_tools.get(tool_name)
+            if tool is None:
+                continue
+
+            tool_response = build_tool_response(tool, tool_configs.get(tool_name))
+            # 保留可用的工具
+            if tool_response.enabled and tool_response.configured:
+                last_tool_selection_overrides[tool_name] = enabled
+
+    response.last_tool_selection_overrides = last_tool_selection_overrides
+    return R.success(data=response)
 
 
 @router.post(
