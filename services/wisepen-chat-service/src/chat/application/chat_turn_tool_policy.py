@@ -97,8 +97,9 @@ class ChatTurnToolPolicyBuilder:
         if has_history_image_record(chat_history_record_messages):
             # 如历史上下文中有图片，则暴露图片附件读取工具
             expose_tool_name_set.update(_IMAGE_ATTACHMENT_TOOL_NAMES)
-        if has_cached_tool_output(chat_history_record_messages) or tool_and_skill_policy.enable_use_tool:
-            # 工具列表在本轮开始前固定；本轮任一工具产生 content_id 后，需要这些工具继续读取缓存正文
+
+        if tool_and_skill_policy.enable_use_tool:
+            # 只要开启了工具，工具输出缓存系列工具就始终加载
             expose_tool_name_set.update(_CACHED_TOOL_OUTPUT_TOOL_NAMES)
 
         return ChatTurnToolPolicyResult(
@@ -137,21 +138,3 @@ def has_history_image_record(chat_history_record_messages: list[ChatMessage]) ->
         msg.role == Role.USER and any(attachment.is_image for attachment in msg.attachments)
         for msg in chat_history_record_messages
     )
-
-
-def has_cached_tool_output(chat_history_record_messages: list[ChatMessage]) -> bool:
-    for msg in chat_history_record_messages:
-        if msg.role != Role.TOOL or not msg.content:
-            continue
-        try:
-            payload = json.loads(msg.content)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        contents = payload.get("contents")
-        if not isinstance(contents, list):
-            continue
-        if any(isinstance(item, dict) and item.get("content_id") for item in contents):
-            return True
-    return False

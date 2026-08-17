@@ -1,4 +1,5 @@
 import asyncio
+import json
 import uuid
 from typing import AsyncIterator, Awaitable, Callable, Iterator, List, Optional, Union
 
@@ -37,6 +38,15 @@ from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent
 from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.core.exceptions import ServiceException
 from common.logger import warn
+
+_CACHED_TOOL_OUTPUT_TOOL_NAMES = frozenset({
+    "inspect_cached_tool_output_structure",
+    "read_cached_tool_output_by_page",
+    "read_cached_tool_output_by_range",
+    "read_cached_tool_output_by_section",
+    "search_cached_tool_output_by_regex",
+    "search_cached_tool_output_by_semantics",
+})
 
 
 class _StepEventInterpreter:
@@ -183,6 +193,11 @@ class QueryLoopRuntime:
             if cancel_requested is not None and await cancel_requested():
                 yield StepFinishEvent(is_finished=False, token_usage=0, aborted=True)
                 return
+
+            tool_scope.suppress_schemas(
+                _CACHED_TOOL_OUTPUT_TOOL_NAMES,
+                suppressed=not _has_cached_tool_output(messages),
+            )
 
             step_finish_event: Optional[StepFinishEvent] = None
             # 把当前 messages、模型参数 和 tool_scope 委派给 _run_single_step()
@@ -530,3 +545,30 @@ class QueryLoopRuntime:
             content=warning_text,
         )
         yield StepFinishEvent(is_finished=True, final_assistant_message=final_message, token_usage=0)
+
+
+def _has_cached_tool_output(messages: list[ChatMessage]) -> bool:
+    for msg in messages:
+        if msg.role != Role.TOOL or not msg.content:
+            continue
+        try:
+            payload = json.loads(msg.content)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict) or payload.get("status") != "success":
+            continue
+        output = payload.get("output")
+        if not isinstance(output, str):
+            continue
+        try:
+            output_payload = json.loads(output)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(output_payload, dict):
+            continue
+        contents = output_payload.get("contents")
+        if not isinstance(contents, list):
+            continue
+        if any(isinstance(item, dict) and item.get("content_id") for item in contents):
+            return True
+    return False

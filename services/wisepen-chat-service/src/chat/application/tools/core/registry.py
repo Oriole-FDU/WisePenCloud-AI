@@ -27,7 +27,11 @@ class ToolScope:
         self._tools = dict(tools)
         self._context = dict(context or {})
         self._configs = { name: dict(config) for name, config in (configs or {}).items() if name in self._tools}
-        self._schemas: list[dict[str, Any]] = [schema_renderer(tool.definition.llm_spec) for tool in self._tools.values()]
+        self._schemas: dict[str, dict[str, Any]] = {
+            name: schema_renderer(tool.definition.llm_spec)
+            for name, tool in self._tools.items()
+        }
+        self._suppressed_schema_tool_names: set[str] = set()
         self._client_tool_capabilities = [
             client_tool_capability
             for client_tool_capability in (client_tool_capabilities or [])
@@ -35,7 +39,17 @@ class ToolScope:
         ]
 
     def schemas(self) -> list[dict[str, Any]]:
-        return list(self._schemas)
+        return [
+            schema
+            for name, schema in self._schemas.items()
+            if name not in self._suppressed_schema_tool_names
+        ]
+
+    def suppress_schemas(self, tool_names: set[str], suppressed: bool = True) -> None:
+        if suppressed:
+            self._suppressed_schema_tool_names.update(tool_names)
+        else:
+            self._suppressed_schema_tool_names.difference_update(tool_names)
 
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
