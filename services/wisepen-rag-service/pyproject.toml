@@ -1,5 +1,5 @@
 [project]
-name = "wisepen-rag-service-v2"
+name = "wisepen-rag-service"
 version = "0.1.0"
 description = "WisePen RAG service v2"
 requires-python = ">=3.11"
