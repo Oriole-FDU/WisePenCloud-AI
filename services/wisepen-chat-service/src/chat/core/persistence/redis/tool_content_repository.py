@@ -7,8 +7,8 @@ from chat.domain.repositories import ToolContentRepository
 from pydantic import TypeAdapter
 from redis.asyncio import Redis
 
-_CONTENT_KEY_PREFIX = "wisepen:tool_content:v2:item:"
-_SESSION_KEY_PREFIX = "wisepen:tool_content:v2:session:"
+_CONTENT_KEY_PREFIX = "wisepen:tool_content:v3:item:"
+_SESSION_KEY_PREFIX = "wisepen:tool_content:v3:session:"
 _STORED_CONTENT_ADAPTER = TypeAdapter(StoredToolContent)
 
 

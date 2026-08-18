@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, field
+
+from common.utils.document import SourceSpan
 
 from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent as StoredCachedToolOutput,
+)
+from chat.application.tools.core.output_cache.cache_store import (
     ToolContentChunk as CachedToolOutputChunk,
 )
-from common.utils.chunkers import SourceSpan, TextLocator
 
 
 @dataclass(slots=True)
@@ -17,7 +19,7 @@ class CachedToolOutputWindow:
     end_offset: int
     source_spans: list[SourceSpan] = field(default_factory=list)
     page_labels: list[str] = field(default_factory=list)
-    section_paths: list[str] = field(default_factory=list)
+    section_ids: list[str] = field(default_factory=list)
     anchor_labels: list[str] = field(default_factory=list)
     truncated: bool = False
     metadata: dict[str, object] = field(default_factory=dict)
@@ -105,14 +107,18 @@ class CachedToolOutputWindowBuilder:
 
         start = min((span.start_offset for span in included_spans), default=0)
         end = max((span.end_offset for span in included_spans), default=0)
+        page_labels, section_ids, anchor_labels = _structure_labels(
+            stored,
+            included_spans,
+        )
         return CachedToolOutputWindow(
             text="\n\n".join(fragments),
             start_offset=start,
             end_offset=end,
             source_spans=included_spans,
-            page_labels=list(chunk.page_labels),
-            section_paths=[" > ".join(path) for path in chunk.section_paths],
-            anchor_labels=list(chunk.anchor_labels),
+            page_labels=page_labels,
+            section_ids=section_ids,
+            anchor_labels=anchor_labels,
             truncated=truncated,
             metadata=dict(stored.metadata),
         )
@@ -131,24 +137,19 @@ class CachedToolOutputWindowBuilder:
         end: int,
         truncated: bool,
     ) -> CachedToolOutputWindow:
-        # 连续窗口按偏移反查覆盖到的 page/section/anchor，便于后续精确读取。
-        locators = [
-            locator
-            for locator in stored.locators
-            if locator.start_offset < end and locator.end_offset > start
-        ]
+        source_spans = [SourceSpan(start, end)] if start < end else []
+        page_labels, section_ids, anchor_labels = _structure_labels(
+            stored,
+            source_spans,
+        )
         return CachedToolOutputWindow(
             text=stored.text[start:end],
             start_offset=start,
             end_offset=end,
-            source_spans=[SourceSpan(start, end)] if start < end else [],
-            page_labels=_locator_labels(locators, "page:"),
-            section_paths=[
-                locator.name.removeprefix("section:")
-                for locator in locators
-                if locator.name.startswith("section:")
-            ],
-            anchor_labels=_locator_labels(locators, "anchor:"),
+            source_spans=source_spans,
+            page_labels=page_labels,
+            section_ids=section_ids,
+            anchor_labels=anchor_labels,
             truncated=truncated,
             metadata=dict(stored.metadata),
         )
@@ -162,15 +163,38 @@ def _normalize_offset(value: int | None, text_length: int, *, default: int) -> i
     return min(max(offset, 0), text_length)
 
 
-def _locator_labels(
-    locators: Sequence[TextLocator],
-    prefix: str,
-) -> list[str]:
-    # locator 可能有重叠，标签去重后保持首次出现顺序。
-    return list(
+def _structure_labels(
+    stored: StoredCachedToolOutput,
+    source_spans: list[SourceSpan],
+) -> tuple[list[str], list[str], list[str]]:
+    """只投影实际返回 span 覆盖到的具体结构身份。"""
+    page_labels = list(
         dict.fromkeys(
-            locator.name.removeprefix(prefix)
-            for locator in locators
-            if locator.name.startswith(prefix)
+            page.page_label
+            for page in stored.pages
+            if _overlaps_any(page.source_span, source_spans)
         )
+    )
+    section_ids = list(
+        dict.fromkeys(
+            section.section_id
+            for section in stored.sections
+            if _overlaps_any(section.own_span, source_spans)
+        )
+    )
+    anchor_labels = list(
+        dict.fromkeys(
+            anchor.label
+            for anchor in stored.anchors
+            if _overlaps_any(anchor.source_span, source_spans)
+        )
+    )
+    return page_labels, section_ids, anchor_labels
+
+
+def _overlaps_any(span: SourceSpan, others: list[SourceSpan]) -> bool:
+    return any(
+        span.start_offset < other.end_offset
+        and span.end_offset > other.start_offset
+        for other in others
     )

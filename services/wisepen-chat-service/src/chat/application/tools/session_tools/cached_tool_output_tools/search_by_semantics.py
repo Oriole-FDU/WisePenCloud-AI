@@ -4,6 +4,18 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from common.utils.ranking import RankCandidate, RankingPipeline, RankQuery, RankRequest
+from common.utils.ranking.fusion import WeightedRrfFusion
+from common.utils.ranking.rerankers import (
+    ZeroEntropyReranker,
+    ZeroEntropyRerankerConfig,
+)
+from common.utils.ranking.scorers import (
+    BM25Scorer,
+    FieldedBM25Scorer,
+    FieldedBM25ScorerConfig,
+)
+from common.utils.ranking.tokenizer import ThuLacRankingTokenizer
 from zeroentropy import AsyncZeroEntropy
 
 from chat.application.tools.core import (
@@ -18,18 +30,18 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent as StoredCachedToolOutput,
+)
+from chat.application.tools.core.output_cache.cache_store import (
     ToolContentChunk as CachedToolOutputChunk,
+)
+from chat.application.tools.core.output_cache.cache_store import (
     ToolContentStore as CachedToolOutputStore,
 )
+from chat.application.tools.session_tools.cached_tool_output_tools.window import (
+    CachedToolOutputWindow,
+    CachedToolOutputWindowBuilder,
+)
 from chat.core.config.app_settings import settings
-
-from chat.application.tools.session_tools.cached_tool_output_tools.window import CachedToolOutputWindow, CachedToolOutputWindowBuilder
-from common.utils.ranking import RankCandidate, RankQuery, RankRequest
-from common.utils.ranking import RankingPipeline
-from common.utils.ranking.fusion import WeightedRrfFusion
-from common.utils.ranking.rerankers import ZeroEntropyReranker, ZeroEntropyRerankerConfig
-from common.utils.ranking.scorers import BM25Scorer, FieldedBM25Scorer, FieldedBM25ScorerConfig
-from common.utils.ranking.tokenizer import ThuLacRankingTokenizer
 
 _TIMEOUT_SECONDS = 300.0
 _PARAMETERS_SCHEMA: dict[str, Any] = {
@@ -175,6 +187,9 @@ async def _search_by_semantics(
     candidates: list[RankCandidate] = []
     sources: dict[str, tuple[StoredCachedToolOutput, CachedToolOutputChunk]] = {}
     for stored in stored_items:
+        sections_by_id = {
+            section.section_id: section for section in stored.sections
+        }
         for chunk in stored.chunks:
             # 排序候选从 chunk 的原文 span 回读，避免只拿 locator 元数据参与语义检索。
             text = _chunk_text(stored, chunk)
@@ -189,8 +204,11 @@ async def _search_by_semantics(
                     candidate_id=candidate_id,
                     text=text,
                     fields={
+                        # section_path 只在缓存内部辅助排序，对外窗口仅暴露 ID。
                         "section": "\n".join(
-                            " > ".join(path) for path in chunk.section_paths
+                            " > ".join(sections_by_id[section_id].section_path)
+                            for section_id in chunk.section_ids
+                            if section_id in sections_by_id
                         ),
                         "anchor": "\n".join(chunk.anchor_labels),
                     },

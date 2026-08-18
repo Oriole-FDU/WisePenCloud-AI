@@ -1,0 +1,156 @@
+=== Review notes ===
+- Neo4j traversal 和 LLM 图谱抽取结果用项目预定义实体类型表示。
+- seed 校验、BM25/WeightedRRF 路径排序、GraphEvidenceVerifier、状态扩展和 ReadingBlock 回补使用生产实现。
+- LOCATE、关系证据和新节点 mention 分别来自不同 ReadingBlock，EXPAND 不复述检索命中字段。
+- flat text 在生产索引阶段跳过图谱抽取，因此没有伪造 expandGraph 结果。
+
+=== Simulated extracted graph fact ===
+quote: WisePen RAG 使用 GraphRAG 技术补充实体关系导航
+quote: GraphRAG 使用知识图谱表示实体之间的关系
+entity anchors: kn_demo_wisepen_rag(product), kn_demo_graphrag(technology), kn_demo_knowledge_graph(concept)
+relations:
+  WisePen RAG -[USES]-> GraphRAG
+  GraphRAG -[USES]-> 知识图谱
+
+=== SECTIONED expandGraph ===
+{
+  "state_id": "nav_demo_1",
+  "traversal_direction": "both",
+  "seed_nodes": [
+    {
+      "node_id": "kn_demo_wisepen_rag",
+      "label": "WisePen RAG",
+      "kind": "Entity",
+      "entity_type": "product",
+      "role": "seed"
+    }
+  ],
+  "discovered_nodes": [
+    {
+      "node_id": "kn_demo_graphrag",
+      "label": "GraphRAG",
+      "kind": "Entity",
+      "entity_type": "technology",
+      "role": "discovered",
+      "mention_evidence": [
+        {
+          "resource_id": "demo-wisepen-rag",
+          "reading_block_id": "rsb_210e06807453bbb5985e093b46efc524",
+          "quote": "GraphRAG 技术",
+          "reading_block_range": {
+            "start_offset": 15,
+            "end_offset": 26
+          }
+        }
+      ]
+    },
+    {
+      "node_id": "kn_demo_knowledge_graph",
+      "label": "知识图谱",
+      "kind": "Entity",
+      "entity_type": "concept",
+      "role": "discovered",
+      "mention_evidence": [
+        {
+          "resource_id": "demo-wisepen-rag",
+          "reading_block_id": "rsb_ebdeb9a47bce8107230e696742a65c67",
+          "quote": "知识图谱",
+          "reading_block_range": {
+            "start_offset": 11,
+            "end_offset": 15
+          }
+        }
+      ]
+    }
+  ],
+  "paths": [
+    {
+      "path": "WisePen RAG -[USES]-> GraphRAG -[USES]-> 知识图谱",
+      "relations": [
+        {
+          "source": {
+            "node_id": "kn_demo_wisepen_rag",
+            "label": "WisePen RAG"
+          },
+          "predicate": "USES",
+          "target": {
+            "node_id": "kn_demo_graphrag",
+            "label": "GraphRAG"
+          },
+          "relation_evidence": [
+            {
+              "resource_id": "demo-wisepen-rag",
+              "reading_block_id": "rsb_210e06807453bbb5985e093b46efc524",
+              "quote": "WisePen RAG 使用 GraphRAG 技术补充实体关系导航",
+              "reading_block_range": {
+                "start_offset": 0,
+                "end_offset": 34
+              }
+            }
+          ]
+        },
+        {
+          "source": {
+            "node_id": "kn_demo_graphrag",
+            "label": "GraphRAG"
+          },
+          "predicate": "USES",
+          "target": {
+            "node_id": "kn_demo_knowledge_graph",
+            "label": "知识图谱"
+          },
+          "relation_evidence": [
+            {
+              "resource_id": "demo-wisepen-rag",
+              "reading_block_id": "rsb_ebdeb9a47bce8107230e696742a65c67",
+              "quote": "GraphRAG 使用知识图谱表示实体之间的关系",
+              "reading_block_range": {
+                "start_offset": 0,
+                "end_offset": 24
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "evidence_sections": [
+    {
+      "resource_id": "demo-wisepen-rag",
+      "section_id": "rsec_b450cb00a7228a206a0164d9f691eca3",
+      "title": "二、图谱导航",
+      "section_path": "WisePen RAG 导航架构说明 > 二、图谱导航",
+      "reading_blocks": [
+        {
+          "reading_block_id": "rsb_210e06807453bbb5985e093b46efc524",
+          "text": "WisePen RAG 使用 GraphRAG 技术补充实体关系导航，使模型能够沿文档中的知识关系继续读取材料。\n",
+          "page_labels": [
+            "1"
+          ],
+          "anchor_labels": []
+        }
+      ]
+    },
+    {
+      "resource_id": "demo-wisepen-rag",
+      "section_id": "rsec_758a75a7a0c2daa3e726bd7a07ab8dc4",
+      "title": "二.1 关系抽取",
+      "section_path": "WisePen RAG 导航架构说明 > 二、图谱导航 > 二.1 关系抽取",
+      "reading_blocks": [
+        {
+          "reading_block_id": "rsb_ebdeb9a47bce8107230e696742a65c67",
+          "text": "GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应的原文证据。\n",
+          "page_labels": [
+            "1"
+          ],
+          "anchor_labels": []
+        }
+      ]
+    }
+  ]
+}
+
+=== FLAT_TEXT graph behavior ===
+structure_mode: flat_text
+graph extraction: skipped
+expandGraph: not applicable

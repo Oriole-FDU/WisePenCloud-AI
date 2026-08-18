@@ -1,0 +1,142 @@
+=== Review notes ===
+- 两种文档都经过生产 INDEX 构造器，再经过 DocumentOutlineReader。
+- outline 节点保留 title，父子关系由 children 表达；不暴露 level 与 section_path。
+- 无标题、无页标记的纯文本仍保留 synthetic Section，且不伪造 page_range。
+
+=== SECTIONED source text ===
+版本号 v2.3，发布日期 2026-08-01。本手册供内部巡检人员使用。
+
+# WisePen RAG 导航架构说明
+
+WisePen RAG 面向企业文档问答场景，使用向量检索和结构化文档导航共同组织模型可读上下文。
+
+<!-- page 1 -->
+
+## 一、主检索流程
+
+WisePen RAG 使用向量检索召回相关 ReadingBlock，并按照标题树补充结构上相邻的阅读材料。
+
+## 二、图谱导航
+
+WisePen RAG 使用 GraphRAG 技术补充实体关系导航，使模型能够沿文档中的知识关系继续读取材料。
+
+### 二.1 关系抽取
+
+GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应的原文证据。
+
+<!-- page 2 -->
+
+### 二.2 证据回源
+
+图谱关系只能作为导航线索，最终返回的证据仍然必须回到当前发布 revision 的 ReadingBlock。
+
+### 二.3 查询边界
+
+图谱遍历只使用显式知识关系，不把节点 mention 或检索来源边当作可遍历关系。
+
+## 三、响应编排
+
+导航响应区分 seed 节点、新发现节点、关系证据和节点 mention 证据，并将同一 ReadingBlock 去重后返回。
+
+=== SECTIONED index summary ===
+{
+  "structure_mode": "sectioned",
+  "section_count": 8,
+  "reading_block_count": 8,
+  "retrieval_chunk_count": 8
+}
+=== SECTIONED getDocumentOutline ===
+{
+  "resource_id": "demo-rain-garden",
+  "document_version": 1,
+  "content_revision": "rrev_65eb8962068ffdbb4e3dcc3053877dd1",
+  "total_length": 543,
+  "outline": [
+    {
+      "section_id": "rsec_3041da2c74b903455e6020b5df5ad616",
+      "title": "文档开头",
+      "anchor_labels": [],
+      "children": []
+    },
+    {
+      "section_id": "rsec_84e306660d60c35e268a7485f276ecba",
+      "title": "WisePen RAG 导航架构说明",
+      "page_range": "1 - 2",
+      "anchor_labels": [],
+      "children": [
+        {
+          "section_id": "rsec_009ea0472ec7bec0e872851fd25a2593",
+          "title": "一、主检索流程",
+          "page_range": "1",
+          "anchor_labels": [],
+          "children": []
+        },
+        {
+          "section_id": "rsec_a709255ca921b901a7ccf79604c89956",
+          "title": "二、图谱导航",
+          "page_range": "1 - 2",
+          "anchor_labels": [],
+          "children": [
+            {
+              "section_id": "rsec_eaaf9b7fa78e369e4621d690db039f27",
+              "title": "二.1 关系抽取",
+              "page_range": "1 - 2",
+              "anchor_labels": [],
+              "children": []
+            },
+            {
+              "section_id": "rsec_c9ad2b0ce84ac8c21af3b7a7cd9ae959",
+              "title": "二.2 证据回源",
+              "page_range": "2",
+              "anchor_labels": [],
+              "children": []
+            },
+            {
+              "section_id": "rsec_8a35e45cb0da02cfc06039f68708b1d1",
+              "title": "二.3 查询边界",
+              "page_range": "2",
+              "anchor_labels": [],
+              "children": []
+            }
+          ]
+        },
+        {
+          "section_id": "rsec_a4c8dee8e3e71bdad60f431c2985b6a2",
+          "title": "三、响应编排",
+          "page_range": "2",
+          "anchor_labels": [],
+          "children": []
+        }
+      ]
+    }
+  ]
+}
+
+=== FLAT_TEXT source text ===
+果园霜冻观测记录，四月十二日。傍晚十八时，坡底测点温度为六点八摄氏度，坡肩测点为八点一摄氏度，风速低于每秒一米。天空晴朗，地表长波辐射散失明显，值班人员因此将本夜判断为辐射降温风险较高。
+二十二时三十分，坡底温度降至三点二摄氏度，叶面仍未结霜。工作人员检查风机燃油、转向和警戒范围，并确认灌溉主管无渗漏。按照预案，风机不因单个测点短时下降立即启动，而要结合坡底与坡肩温差、露点和连续下降趋势判断。
+次日零时四十分，坡底与坡肩温差扩大到三点四摄氏度，近地层出现稳定逆温。风机于零时四十五分启动，每二十分钟复测一次。启动后坡底温度回升约零点七摄氏度，叶面未发现冰晶。
+日出前后最容易出现当夜最低温。值班人员在五时二十分停止风机前，先确认东方云量增加、坡底温度连续三次回升，并保留一组未干预地块作为对照。最终记录应注明仪器编号、校准日期和缺测时段，避免把设备漂移误判为防霜措施效果。
+
+=== FLAT_TEXT index summary ===
+{
+  "structure_mode": "flat_text",
+  "section_count": 1,
+  "reading_block_count": 1,
+  "retrieval_chunk_count": 1
+}
+=== FLAT_TEXT getDocumentOutline ===
+{
+  "resource_id": "demo-orchard-frost-log",
+  "document_version": 1,
+  "content_revision": "rrev_cf26ed362a8edf080cc471a175e81fd2",
+  "total_length": 389,
+  "outline": [
+    {
+      "section_id": "rsec_d3ae11012880fdb5a55670160e6f53a5",
+      "title": "全文片段 1",
+      "anchor_labels": [],
+      "children": []
+    }
+  ]
+}

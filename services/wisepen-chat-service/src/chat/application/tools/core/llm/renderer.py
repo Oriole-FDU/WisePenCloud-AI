@@ -53,7 +53,7 @@ def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: Tool
         else:
             content = tool_output.content
             truncated = False
-            if max_output_chars is not None and max_output_chars > 0 and len(content) > max_output_chars:
+            if max_output_chars is not None and 0 < max_output_chars < len(content):
                 content = content[:max_output_chars] + "\n...[truncated]"
                 truncated = True
             output = render_tool_output({

@@ -39,7 +39,7 @@ class ToolOutputCache:
             try:
                 result = await self._content_store.put(
                     session_id=session_id,
-                    text=cacheable_text.content, is_markdown=cacheable_text.is_markdown,
+                    text=cacheable_text.content,
                     metadata=dict(cacheable_text.metadata),
                 )
             except Exception as exc:

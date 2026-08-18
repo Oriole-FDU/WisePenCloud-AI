@@ -1,5 +1,6 @@
-from .relevance_gate import HighLowRelevanceGateConfig, HighLowRelevanceGate
+from .relevance_gate import HighLowRelevanceGate, HighLowRelevanceGateConfig
 
 __all__ = [
+    "HighLowRelevanceGate",
     "HighLowRelevanceGateConfig",
 ]

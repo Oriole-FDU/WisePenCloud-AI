@@ -19,7 +19,6 @@ class ToolExecutionError(Exception):
 @dataclass(frozen=True)
 class CacheableText:
     content: str
-    is_markdown: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -28,6 +27,7 @@ class ToolOutput:
     content: str
     images: list[VisionImage] = field(default_factory=list)
     cacheable_texts: tuple[CacheableText, ...] = ()
+
 
 @dataclass(frozen=True)
 class ToolExecutionResult:

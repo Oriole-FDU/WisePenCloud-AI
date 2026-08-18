@@ -4,6 +4,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from common.utils.document import Page
+
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -16,12 +18,15 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent as StoredCachedToolOutput,
+)
+from chat.application.tools.core.output_cache.cache_store import (
     ToolContentStore as CachedToolOutputStore,
 )
-from common.utils.chunkers import LocatorKind, TextLocator
+from chat.application.tools.session_tools.cached_tool_output_tools.window import (
+    CachedToolOutputWindow,
+    CachedToolOutputWindowBuilder,
+)
 from chat.core.config.app_settings import settings
-
-from chat.application.tools.session_tools.cached_tool_output_tools.window import CachedToolOutputWindow, CachedToolOutputWindowBuilder
 
 _TIMEOUT_SECONDS = 300.0
 _PARAMETERS_SCHEMA: dict[str, Any] = {
@@ -125,7 +130,7 @@ class CachedToolOutputReadByPageTool:
             return _read_by_page(
                 content_id=content_id,
                 page_labels=page_labels,
-                locators=stored.locators,
+                pages=stored.pages,
                 builder=CachedToolOutputWindowBuilder(
                     char_budget=settings.TOOL_CONTENT_READ_WINDOW_CHAR_BUDGET
                 ),
@@ -143,14 +148,14 @@ def _read_by_page(
     *,
     content_id: str,
     page_labels: Sequence[str],
-    locators: Sequence[TextLocator],
+    pages: Sequence[Page],
     builder: CachedToolOutputWindowBuilder,
     stored: StoredCachedToolOutput,
 ) -> CachedToolOutputReadByPageResult:
     # 同一页可能被模型重复请求，去重但不打乱首次出现顺序。
     unique_page_labels = list(dict.fromkeys(page_labels))
-    # locator 是结构阶段产出的页边界索引，读取正文时只按这些边界回原文。
-    pages_by_label = _page_locators_by_label(locators)
+    # Page 是结构阶段产出的确定页范围，读取正文时只按其 source_span 回原文。
+    pages_by_label = _pages_by_label(pages)
     items: list[CachedToolOutputReadByPageItem] = []
     remaining = settings.TOOL_CONTENT_READ_TOTAL_CHAR_BUDGET
     budget_exhausted = False
@@ -180,7 +185,7 @@ def _read_by_page(
 
         windows = []
         reason = None
-        for page_range in page_ranges:
+        for page in page_ranges:
             if remaining <= 0:
                 # 一个 page label 可能对应多个连续片段，片段之间共享同一轮总预算。
                 budget_exhausted = True
@@ -188,8 +193,8 @@ def _read_by_page(
                 break
             window = builder.build_range_window(
                 stored,
-                start=page_range.start_offset,
-                end=page_range.end_offset,
+                start=page.source_span.start_offset,
+                end=page.source_span.end_offset,
                 char_budget=remaining,
             )
             windows.append(window)
@@ -214,14 +219,11 @@ def _read_by_page(
     )
 
 
-def _page_locators_by_label(
-    locators: Sequence[TextLocator],
-) -> dict[str, list[TextLocator]]:
-    # page locator 的 name 带 page: 前缀，对外返回和请求时都使用去前缀后的 label。
-    indexed: dict[str, list[TextLocator]] = {}
-    for locator in locators:
-        if locator.kind is LocatorKind.PAGE:
-            indexed.setdefault(locator.name.removeprefix("page:"), []).append(locator)
+def _pages_by_label(pages: Sequence[Page]) -> dict[str, list[Page]]:
+    # 重复页标签保留为多个范围，按 parser 产生的原文顺序依次读取。
+    indexed: dict[str, list[Page]] = {}
+    for page in pages:
+        indexed.setdefault(page.page_label, []).append(page)
     return indexed
 
 

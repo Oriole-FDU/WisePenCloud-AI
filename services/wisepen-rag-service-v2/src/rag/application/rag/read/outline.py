@@ -1,0 +1,68 @@
+"""读取已发布 revision 中随资源更新写入的精简目录。"""
+
+from dataclasses import dataclass, field
+
+from common.utils.document import OutlineNode
+
+from rag.application.rag.acl import PermissionAuthorizer
+from rag.domain.models.acl import PermissionScope
+from rag.domain.repositories.mongo import PublishedResourceReader
+
+from .content import ContentAccessRevokedError, ContentNotFoundError
+
+
+@dataclass(slots=True)
+class DocumentOutlineResult:
+    """READ outline 面向 API 的结果。"""
+
+    resource_id: str
+    content_revision: str
+    document_version: int
+    total_length: int
+    outline: list[OutlineNode] = field(default_factory=list)
+
+
+class DocumentOutlineReader:
+    """执行权限校验，并读取 revision 已持久化的目录。"""
+
+    __slots__ = ("_authorizer", "_structure_reader")
+
+    def __init__(
+        self,
+        *,
+        structure_reader: PublishedResourceReader,
+        authorizer: PermissionAuthorizer,
+    ) -> None:
+        self._structure_reader = structure_reader
+        self._authorizer = authorizer
+
+    async def get_document_outline(
+        self,
+        *,
+        resource_id: str,
+        permission_scope: PermissionScope,
+    ) -> DocumentOutlineResult:
+        if not await self._authorizer.authorize_resource(
+            resource_id=resource_id,
+            scope=permission_scope,
+        ):
+            raise ContentNotFoundError(resource_id)
+
+        outline = await self._structure_reader.get_document_outline(resource_id)
+        if outline is None:
+            raise ContentNotFoundError(resource_id)
+
+        # 目录读取跨越权限检查和 Mongo 查询，返回前再次确认资源仍可读。
+        if not await self._authorizer.authorize_resource(
+            resource_id=resource_id,
+            scope=permission_scope,
+        ):
+            raise ContentAccessRevokedError(resource_id)
+
+        return DocumentOutlineResult(
+            resource_id=outline.resource_id,
+            content_revision=outline.content_revision,
+            document_version=outline.document_version,
+            total_length=outline.total_length,
+            outline=outline.outline,
+        )
