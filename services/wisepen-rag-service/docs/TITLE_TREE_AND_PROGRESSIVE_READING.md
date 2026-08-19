@@ -114,8 +114,8 @@ expanded_cost = 路由摘要成本 + 最大子分支读取成本 + 未归属正�
 
 ### P0：先做导航投影，不改权威事实
 
-1. `getDocumentOutline` 增加可选 `root_section_id`、`depth` 和 `char_budget`，默认保持现有整树行为。
-2. outline 支持 `root_section_id` 和 `depth`；达到深度上限时用可选 `children_truncated` 标记仍有子节点。
+1. `getDocumentOutline` 只接受 `resource_id` 和可选 `max_depth`，返回文档级完整 outline。
+2. outline 支持 `max_depth`；达到深度上限时用 `children_truncated` 标记仍有子节点。
 3. 增加模型提示：大文档先 outline，命中后按 section 读取；父 Section 只读直属正文，子 Section 单独读取。
 4. demo 增加一条多轮轨迹：LOCATE 命中 -> scoped outline -> 读取两个子 Section -> 再决定是否 graph expand。
 
@@ -125,7 +125,6 @@ expanded_cost = 路由摘要成本 + 最大子分支读取成本 + 未归属正�
 {
   "resource_id": "doc-1",
   "content_revision": "rrev-1",
-  "root_section_id": "sec-2",
   "total_length": 24000,
   "outline": [
     {
@@ -175,9 +174,13 @@ expanded_cost = 路由摘要成本 + 最大子分支读取成本 + 未归属正�
 
 ### `getDocumentOutline`
 
-输入：`resource_id`、可选 `root_section_id`、`depth`。
+输入：`resource_id`、可选 `max_depth`。API 语义始终是读取文档完整 outline。
 
-输出：带稳定 `section_id` 的有限深度树、节点长度/页范围、`content_revision`；权限和 revision 校验沿用当前 `DocumentOutlineReader`。
+输出：带稳定 `section_id` 的文档 outline、节点长度/页范围、`content_revision`；权限和 revision 校验沿用当前 `DocumentOutlineReader`。
+
+### `getSectionInfo`
+
+输入：`resource_id`、`section_ids`。每个 Section 只返回 `section_id`、`title`、`section_path`、`allowed_directions` 和 `child_count`，不加载正文；模型可据此决定下一步调用 `readSections` 或 `expandSection`。
 
 ### `readSections`
 

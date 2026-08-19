@@ -20,6 +20,7 @@ from .read import (
     ResourceRequest,
     SectionContentRequest,
     SectionContentResponse,
+    SectionInfoResponse,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "SectionContentView",
     "SectionExpandRequest",
     "SectionExpandResponse",
+    "SectionInfoResponse",
 ]

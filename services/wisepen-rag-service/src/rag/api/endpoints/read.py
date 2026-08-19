@@ -15,6 +15,7 @@ from rag.api.schemas import (
     ReadPagesResponse,
     ReadSectionsRequest,
     ReadSectionsResponse,
+    SectionInfoResponse,
 )
 from rag.application.rag.read import (
     ContentAccessRevokedError,
@@ -53,8 +54,7 @@ async def get_document_outline(
         result = await reader.get_document_outline(
             resource_id=request.resource_id,
             permission_scope=_permission_scope(user_id),
-            root_section_id=request.root_section_id,
-            depth=request.depth,
+            max_depth=request.max_depth,
         )
     except ContentNotFoundError as error:
         raise ServiceException(RagErrorCode.RESOURCE_CONTENT_NOT_FOUND) from error
@@ -71,6 +71,32 @@ async def get_document_outline(
             outline=result.outline,
         )
     )
+
+
+@router.post(
+    "/getSectionInfo",
+    response_model=R[SectionInfoResponse],
+    response_model_exclude_none=True,
+)
+@inject
+async def get_section_info(
+    request: ReadSectionsRequest,
+    user_id: AuthenticatedUser,
+    reader: ContentReader,
+) -> R[SectionInfoResponse]:
+    try:
+        result = await reader.get_section_info(
+            resource_id=request.resource_id,
+            section_ids=request.section_ids,
+            permission_scope=_permission_scope(user_id),
+        )
+    except ContentNotFoundError as error:
+        raise ServiceException(RagErrorCode.RESOURCE_CONTENT_NOT_FOUND) from error
+    except ContentAccessRevokedError as error:
+        raise ServiceException(RagErrorCode.RESOURCE_READ_FAILED) from error
+    except Exception as error:
+        raise ServiceException(RagErrorCode.RESOURCE_READ_FAILED) from error
+    return R.success(result)
 
 
 @router.post(

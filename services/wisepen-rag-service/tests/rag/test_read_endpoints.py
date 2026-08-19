@@ -13,6 +13,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from rag.api.endpoints.read import (
     get_document_outline,
+    get_section_info,
     read_pages,
 )
 from rag.api.router import api_router
@@ -75,11 +76,13 @@ class _ContentReader:
 class _OutlineReader:
     def __init__(self) -> None:
         self.scope = None
+        self.max_depth = None
 
     async def get_document_outline(
-        self, *, resource_id, permission_scope, root_section_id=None, depth=None
+        self, *, resource_id, permission_scope, max_depth=None
     ):
         self.scope = permission_scope
+        self.max_depth = max_depth
         return DocumentOutlineResult(
             resource_id=resource_id,
             content_revision="revision-1",
@@ -153,6 +156,7 @@ def test_read_request_schemas_and_routes() -> None:
     assert "/getDocumentOutline" in paths
     assert "/readPages" in paths
     assert "/readSections" in paths
+    assert "/getSectionInfo" in paths
     assert "/expandSection" in paths
     assert "/getPageContent" not in paths
     assert "/getSectionContent" not in paths
@@ -177,6 +181,35 @@ async def test_outline_keeps_title_and_removes_level() -> None:
     assert not hasattr(node, "level")
     assert not hasattr(node, "section_path")
     assert reader.scope.group_roles == {"group-1": GroupRoleType.ADMIN}
+
+
+@pytest.mark.asyncio
+async def test_outline_endpoint_forwards_max_depth_only() -> None:
+    reader = _OutlineReader()
+    await get_document_outline(
+        DocumentOutlineRequest(resource_id="resource-1", max_depth=2),
+        user_id="user-1",
+        reader=reader,
+    )
+    assert reader.max_depth == 2
+
+
+@pytest.mark.asyncio
+async def test_section_info_returns_metadata_without_text() -> None:
+    reader = DocumentContentReader(
+        reader=_PublishedResourceReader(),
+        authorizer=_AllowAuthorizer(),
+    )
+    response = await get_section_info(
+        ReadSectionsRequest(resource_id="resource-1", section_ids=["section-1"]),
+        user_id="user-1",
+        reader=reader,
+    )
+    info = response.data["section-1"]
+    assert info.title == "标题"
+    assert info.child_count == 1
+    assert info.allowed_directions == ["children"]
+    assert not hasattr(info, "text")
 
 
 @pytest.mark.asyncio
@@ -277,7 +310,7 @@ def test_outline_uses_human_page_range() -> None:
 
 
 @pytest.mark.asyncio
-async def test_outline_supports_root_and_depth_projection() -> None:
+async def test_outline_supports_max_depth_projection() -> None:
     parent = OutlineNode(
         section_id="parent",
         title="父标题",
@@ -302,8 +335,7 @@ async def test_outline_supports_root_and_depth_projection() -> None:
     result = await reader.get_document_outline(
         resource_id="resource-1",
         permission_scope=PermissionScope(user_id="user-1"),
-        root_section_id="parent",
-        depth=0,
+        max_depth=0,
     )
 
     assert [node.section_id for node in result.outline] == ["parent"]

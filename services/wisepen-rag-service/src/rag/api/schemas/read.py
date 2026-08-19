@@ -5,7 +5,7 @@ from typing import Annotated
 from common.utils.document import OutlineNode
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from rag.application.rag.read.content import SectionContentView
+from rag.application.rag.read.content import SectionContentView, SectionInfoView
 
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
@@ -26,6 +26,7 @@ class ReadSectionsRequest(ResourceRequest):
 
 ReadPagesResponse = dict[str, str]
 ReadSectionsResponse = dict[str, SectionContentView]
+SectionInfoResponse = dict[str, SectionInfoView]
 
 # 仅保留 Python 导入层别名，HTTP 路径和公开 schema 使用 read* 身份。
 PageContentRequest = ReadPagesRequest
@@ -35,8 +36,7 @@ SectionContentResponse = ReadSectionsResponse
 
 
 class DocumentOutlineRequest(ResourceRequest):
-    root_section_id: NonEmptyText | None = None
-    depth: int | None = Field(default=None, ge=0, le=20)
+    max_depth: int | None = Field(default=None, ge=0, le=20)
 
 
 class DocumentOutlineResponse(BaseModel):

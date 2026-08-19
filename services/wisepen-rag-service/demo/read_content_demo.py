@@ -125,18 +125,31 @@ async def main() -> None:
         ),
         scope=scope,
     )
+    section_info_output = await _section_info_output(
+        reader=reader,
+        document=sectioned,
+        selected=next(
+            section
+            for section in sectioned.sections
+            if section.title == "3 Model Architecture"
+        ),
+        scope=scope,
+    )
 
     output = "\n".join(
         [
             "=== Review notes ===",
             "- Page READ 返回整页正文和 section_id/title/section_path，不重复 preview。",
             "- readSections 返回直属正文和 allowed_directions；方向展开由 expandSection 负责。",
+            "- getSectionInfo 只返回元信息，先帮助模型判断要不要读取正文。",
             "- expandSection 返回目标 Section 的直属正文，并用 from_section_id 标记导航来源。",
             "- 所有模型可见页归属统一为 page_range；纯文本没有页标记时不伪造页范围。",
             "",
             *_read_output("TEST1", sectioned, sectioned_output),
             "",
             *navigation_output,
+            "",
+            *section_info_output,
             "",
             *_read_output("FLAT_TEXT", flat_text, flat_output),
         ]
@@ -252,6 +265,37 @@ async def _navigation_output(*, expander, document, selected, scope) -> list[str
             ]
         )
     return output
+
+
+async def _section_info_output(*, reader, document, selected, scope) -> list[str]:
+    """展示无正文的 Section 元信息，模拟 getSectionInfo API。"""
+    section_ids = [
+        selected.section_id,
+        *[
+            section.section_id
+            for section in document.sections
+            if section.parent_section_id == selected.section_id
+        ],
+    ]
+    result = await reader.get_section_info(
+        resource_id=document.resource_id,
+        section_ids=section_ids,
+        permission_scope=scope,
+    )
+    payload = {
+        section_id: {
+            "section_id": info.section_id,
+            "title": info.title,
+            "section_path": info.section_path,
+            "allowed_directions": info.allowed_directions,
+            "child_count": info.child_count,
+        }
+        for section_id, info in result.items()
+    }
+    return [
+        "=== TEST1 getSectionInfo ===",
+        json.dumps(payload, ensure_ascii=False, indent=2),
+    ]
 
 
 def _read_output(
