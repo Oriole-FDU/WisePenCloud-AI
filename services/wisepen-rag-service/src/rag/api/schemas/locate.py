@@ -27,5 +27,5 @@ class CandidateLocateResponse(BaseModel):
 
     state_id: str
     retrieval_status: RankDecision
-    nodes: list[KnowledgeNode]
+    nodes: list[KnowledgeNode] | None = None
     reading_blocks: list[RetrievalReadingBlockView]

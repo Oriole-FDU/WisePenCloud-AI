@@ -49,7 +49,7 @@ GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应�
 {
   "resource_id": "demo-rain-garden",
   "document_version": 1,
-  "content_revision": "rrev_854bc0430e339fb1",
+  "content_revision": "rrev_9bda1d5804a2ad82",
   "total_length": 543,
   "outline": [
     {
@@ -137,7 +137,7 @@ GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应�
 {
   "resource_id": "demo-orchard-frost-log",
   "document_version": 1,
-  "content_revision": "rrev_aca879f64bb28d34",
+  "content_revision": "rrev_e7f6b9d47a95f514",
   "total_length": 389,
   "outline": [
     {

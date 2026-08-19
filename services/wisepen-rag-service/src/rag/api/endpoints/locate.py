@@ -26,7 +26,11 @@ Locator = Annotated[
 ]
 
 
-@router.post("/locateCandidate", response_model=R[CandidateLocateResponse])
+@router.post(
+    "/locateCandidate",
+    response_model=R[CandidateLocateResponse],
+    response_model_exclude_none=True,
+)
 @inject
 async def locate_candidate(
         request: LocateHttpRequest,

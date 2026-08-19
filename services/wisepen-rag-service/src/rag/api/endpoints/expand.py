@@ -13,14 +13,19 @@ from rag.api.schemas import (
 )
 from rag.api.schemas import (
     GraphExpandResponse,
+    SectionChildrenExpandResponse,
+    SectionExpandRequest,
+    SectionExpandResponse,
 )
 from rag.application.rag.navigate import (
     EvidenceRevisionError,
     GraphAccessRevokedError,
     KnowledgeGraphExpander,
     NavigationStateNotFoundError,
+    SectionExpander,
     UnknownSeedNodeError,
 )
+from rag.application.rag.read import ContentAccessRevokedError, ContentNotFoundError
 from rag.domain.error_codes import RagErrorCode
 from rag.domain.models.acl import PermissionScope
 
@@ -31,14 +36,18 @@ GraphExpander = Annotated[
     KnowledgeGraphExpander,
     Depends(Provide["knowledge_graph_expander"]),
 ]
+SectionTreeExpander = Annotated[
+    SectionExpander,
+    Depends(Provide["section_expander"]),
+]
 
 
 @router.post("/expandGraph", response_model=R[GraphExpandResponse])
 @inject
 async def expand_graph(
-        request: ExpandHttpRequest,
-        user_id: AuthenticatedUser,
-        expander: GraphExpander,
+    request: ExpandHttpRequest,
+    user_id: AuthenticatedUser,
+    expander: GraphExpander,
 ) -> R[GraphExpandResponse]:
     try:
         result = await expander.expand(
@@ -73,8 +82,56 @@ async def expand_graph(
         )
     )
 
+
 def _permission_scope(user_id: str) -> PermissionScope:
     return PermissionScope.from_group_roles(
         user_id,
         SecurityContextHolder.get_group_role_map(),
     )
+
+
+@router.post(
+    "/expandSection",
+    response_model=R[SectionExpandResponse | SectionChildrenExpandResponse],
+)
+@inject
+async def expand_section(
+    request: SectionExpandRequest,
+    user_id: AuthenticatedUser,
+    expander: SectionTreeExpander,
+) -> R[SectionExpandResponse]:
+    try:
+        result = await expander.expand(
+            resource_id=request.resource_id,
+            section_id=request.section_id,
+            direction=request.direction,
+            permission_scope=_permission_scope(user_id),
+            char_budget=request.char_budget,
+            after_section_id=request.after_section_id,
+        )
+    except ContentNotFoundError as error:
+        raise ServiceException(RagErrorCode.RESOURCE_CONTENT_NOT_FOUND) from error
+    except ContentAccessRevokedError as error:
+        raise ServiceException(RagErrorCode.RESOURCE_READ_FAILED) from error
+    except ValueError as error:
+        raise ServiceException(RagErrorCode.NAVIGATION_INVALID) from error
+    except Exception as error:
+        raise ServiceException(RagErrorCode.NAVIGATION_FAILED) from error
+    if hasattr(result, "sections"):
+        payload = SectionChildrenExpandResponse(
+            from_section_id=result.from_section_id,
+            sections=result.sections,
+            has_more=result.has_more,
+            next_after_section_id=result.next_after_section_id,
+            budget_exhausted=result.budget_exhausted,
+        )
+    else:
+        payload = SectionExpandResponse(
+            from_section_id=result.from_section_id,
+            section_id=result.section.section_id,
+            title=result.section.title,
+            section_path=result.section.section_path,
+            text=result.section.text,
+            allowed_directions=result.section.allowed_directions,
+        )
+    return R.success(payload)

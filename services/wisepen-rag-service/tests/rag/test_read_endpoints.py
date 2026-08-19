@@ -13,17 +13,26 @@ from pydantic import TypeAdapter, ValidationError
 
 from rag.api.endpoints.read import (
     get_document_outline,
-    get_page_content,
+    read_pages,
 )
 from rag.api.router import api_router
-from rag.api.schemas import PageContentRequest, ResourceRequest, SectionContentRequest
+from rag.api.schemas import (
+    DocumentOutlineRequest,
+    ReadPagesRequest,
+    ReadSectionsRequest,
+    ResourceRequest,
+)
 from rag.application.rag.read.content import (
     DocumentContentReader,
     SectionContentView,
 )
-from rag.application.rag.read.outline import DocumentOutlineResult
+from rag.application.rag.read.outline import (
+    DocumentOutlineReader,
+    DocumentOutlineResult,
+)
 from rag.domain.models.acl import PermissionScope
 from rag.domain.repositories.mongo.published_resource_reader import (
+    PublishedDocumentOutline,
     PublishedSectionContent,
 )
 
@@ -48,15 +57,17 @@ class _PublishedResourceReader:
 
 
 class _ContentReader:
-    async def get_pages(self, **kwargs):
+    async def read_pages(self, **kwargs):
         return {"1": "正文"}
 
-    async def get_sections(self, **kwargs):
+    async def read_sections(self, **kwargs):
         return {
             "section-1": SectionContentView(
+                section_id="section-1",
                 title="标题",
                 section_path="标题",
                 text="正文",
+                allowed_directions=[],
             )
         }
 
@@ -65,7 +76,9 @@ class _OutlineReader:
     def __init__(self) -> None:
         self.scope = None
 
-    async def get_document_outline(self, *, resource_id, permission_scope):
+    async def get_document_outline(
+        self, *, resource_id, permission_scope, root_section_id=None, depth=None
+    ):
         self.scope = permission_scope
         return DocumentOutlineResult(
             resource_id=resource_id,
@@ -129,17 +142,20 @@ def test_read_request_schemas_and_routes() -> None:
     with pytest.raises(ValidationError):
         ResourceRequest(resource_id="resource-1", extra_field=True)
     with pytest.raises(ValidationError):
-        PageContentRequest(
+        ReadPagesRequest(
             resource_id="resource-1",
             page_labels=[str(index) for index in range(21)],
         )
     with pytest.raises(ValidationError):
-        SectionContentRequest(resource_id="resource-1", section_ids=[])
+        ReadSectionsRequest(resource_id="resource-1", section_ids=[])
 
     paths = {route.path for route in api_router.routes}
     assert "/getDocumentOutline" in paths
-    assert "/getPageContent" in paths
-    assert "/getSectionContent" in paths
+    assert "/readPages" in paths
+    assert "/readSections" in paths
+    assert "/expandSection" in paths
+    assert "/getPageContent" not in paths
+    assert "/getSectionContent" not in paths
     assert "/expandDiscoveredSections" not in paths
 
 
@@ -149,7 +165,7 @@ async def test_outline_keeps_title_and_removes_level() -> None:
     SecurityContextHolder.set_group_role_map('{"group-1": 1}')
 
     response = await get_document_outline(
-        ResourceRequest(resource_id="resource-1"),
+        DocumentOutlineRequest(resource_id="resource-1"),
         user_id="user-1",
         reader=reader,
     )
@@ -165,8 +181,8 @@ async def test_outline_keeps_title_and_removes_level() -> None:
 
 @pytest.mark.asyncio
 async def test_page_view_returns_text_only() -> None:
-    response = await get_page_content(
-        PageContentRequest(resource_id="resource-1", page_labels=["1"]),
+    response = await read_pages(
+        ReadPagesRequest(resource_id="resource-1", page_labels=["1"]),
         user_id="user-1",
         reader=_ContentReader(),
     )
@@ -181,7 +197,7 @@ async def test_section_read_returns_authoritative_text_without_blocks() -> None:
         reader=_PublishedResourceReader(),
         authorizer=_AllowAuthorizer(),
     )
-    sections = await reader.get_sections(
+    sections = await reader.read_sections(
         resource_id="resource-1",
         section_ids=["section-1"],
         permission_scope=PermissionScope(user_id="user-1"),
@@ -195,17 +211,16 @@ async def test_section_read_returns_authoritative_text_without_blocks() -> None:
     )
     assert view.title == "标题"
     assert view.text == "正文"
-    assert view.navigation.children[0].title == "子标题"
-    assert view.navigation.children[0].preview == "子正文"
+    assert view.allowed_directions == ["children"]
     # 页码与锚点信息已从 Section 视图移除（正文可见、目录可查）。
     assert not hasattr(view, "page_range")
     assert not hasattr(view, "anchor_labels")
     assert "page_range" not in payload
     assert "anchor_labels" not in payload
-    assert "section_id" not in payload
+    assert payload["section_id"] == "section-1"
     assert "section" not in payload
     assert "reading_blocks" not in payload
-    assert "level" not in payload["navigation"]["children"][0]
+    assert payload["allowed_directions"] == ["children"]
 
 
 @pytest.mark.asyncio
@@ -214,12 +229,12 @@ async def test_flat_text_read_keeps_synthetic_section_context() -> None:
         reader=_FlatPublishedResourceReader(),
         authorizer=_AllowAuthorizer(),
     )
-    pages = await reader.get_pages(
+    pages = await reader.read_pages(
         resource_id="flat-resource",
         page_labels=["1"],
         permission_scope=PermissionScope(user_id="user-1"),
     )
-    sections = await reader.get_sections(
+    sections = await reader.read_sections(
         resource_id="flat-resource",
         section_ids=["flat-section"],
         permission_scope=PermissionScope(user_id="user-1"),
@@ -231,10 +246,11 @@ async def test_flat_text_read_keeps_synthetic_section_context() -> None:
     )
     assert page_payload == "平铺正文"
     assert section_payload == {
+        "section_id": "flat-section",
         "title": "全文片段 1",
         "section_path": "全文片段 1",
         "text": "平铺正文",
-        "navigation": {"children": []},
+        "allowed_directions": [],
     }
 
 
@@ -258,6 +274,41 @@ def test_outline_uses_human_page_range() -> None:
     assert flat_outline[0].title == "全文片段 1"
     assert flat_outline[0].length == 4
     assert flat_outline[0].children == []
+
+
+@pytest.mark.asyncio
+async def test_outline_supports_root_and_depth_projection() -> None:
+    parent = OutlineNode(
+        section_id="parent",
+        title="父标题",
+        length=10,
+        children=[OutlineNode(section_id="child", title="子标题", length=4)],
+    )
+
+    class _StructureReader:
+        async def get_document_outline(self, resource_id):
+            return PublishedDocumentOutline(
+                resource_id=resource_id,
+                content_revision="revision-1",
+                document_version=1,
+                total_length=10,
+                outline=[parent],
+            )
+
+    reader = DocumentOutlineReader(
+        structure_reader=_StructureReader(),
+        authorizer=_AllowAuthorizer(),
+    )
+    result = await reader.get_document_outline(
+        resource_id="resource-1",
+        permission_scope=PermissionScope(user_id="user-1"),
+        root_section_id="parent",
+        depth=0,
+    )
+
+    assert [node.section_id for node in result.outline] == ["parent"]
+    assert result.outline[0].children == []
+    assert result.outline[0].children_truncated is True
 
 
 def test_outline_nodes_carry_anchor_labels() -> None:
@@ -381,16 +432,15 @@ def test_outline_skips_nameless_root_without_preamble() -> None:
 
 
 @pytest.mark.asyncio
-async def test_section_read_without_body_keeps_navigation() -> None:
+async def test_section_read_includes_body_and_exposes_allowed_directions() -> None:
     reader = DocumentContentReader(
         reader=_NavPublishedResourceReader(),
         authorizer=_AllowAuthorizer(),
     )
-    sections = await reader.get_sections(
+    sections = await reader.read_sections(
         resource_id="resource-1",
         section_ids=["section-1"],
         permission_scope=PermissionScope(user_id="user-1"),
-        include_body=False,
     )
 
     view = sections["section-1"]
@@ -399,51 +449,23 @@ async def test_section_read_without_body_keeps_navigation() -> None:
         mode="json",
         exclude_none=True,
     )
-    # 正文被彻底省略，导航结构完整保留（轻量级目录漫游契约）。
-    assert view.text is None
-    assert "text" not in payload
-    assert view.navigation.parent.title == "父标题"
-    assert view.navigation.previous.title == "上一节"
-    assert view.navigation.next.title == "下一节"
-    assert view.navigation.children[0].title == "子标题"
+    assert view.text == "正文"
+    assert view.allowed_directions == ["parent", "children", "previous", "next"]
+    assert payload["allowed_directions"] == ["parent", "children", "previous", "next"]
 
 
-@pytest.mark.asyncio
-async def test_section_read_excludes_directions_and_ignores_unknown() -> None:
-    reader = DocumentContentReader(
-        reader=_NavPublishedResourceReader(),
-        authorizer=_AllowAuthorizer(),
-    )
-    sections = await reader.get_sections(
-        resource_id="resource-1",
-        section_ids=["section-1"],
-        permission_scope=PermissionScope(user_id="user-1"),
-        exclude_directions=["previous", "children", "invalid-direction"],
-    )
-
-    navigation = sections["section-1"].navigation
-    # 黑名单方向被屏蔽，未知输入静默忽略，其余方向不受影响。
-    assert navigation.previous is None
-    assert navigation.children == []
-    assert navigation.parent.title == "父标题"
-    assert navigation.next.title == "下一节"
-    assert sections["section-1"].text == "正文"
-
-
-def test_section_content_request_accepts_loose_directions() -> None:
-    request = SectionContentRequest(
-        resource_id="resource-1",
-        section_ids=["section-1"],
-        include_body=False,
-        exclude_directions=["previous", "anything"],
-    )
-    assert request.include_body is False
-    assert request.exclude_directions == ["previous", "anything"]
+def test_section_read_request_rejects_navigation_controls() -> None:
     with pytest.raises(ValidationError):
-        SectionContentRequest(
+        ReadSectionsRequest(
             resource_id="resource-1",
             section_ids=["section-1"],
-            exclude_directions=["a", "b", "c", "d", "e"],
+            include_body=False,
+        )
+    with pytest.raises(ValidationError):
+        ReadSectionsRequest(
+            resource_id="resource-1",
+            section_ids=["section-1"],
+            exclude_directions=["previous"],
         )
 
 

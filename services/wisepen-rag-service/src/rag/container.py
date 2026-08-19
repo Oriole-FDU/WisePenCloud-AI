@@ -1,6 +1,23 @@
 """RAG v2 的对象装配容器。"""
 
 import redis.asyncio as redis
+from common.utils.ranking import RankingPipeline
+from common.utils.ranking.diversifiers import MmrDiversifier, MmrDiversifierConfig
+from common.utils.ranking.fusion import WeightedRrfFusion
+from common.utils.ranking.rank_gates import (
+    HighLowRelevanceGate,
+    HighLowRelevanceGateConfig,
+)
+from common.utils.ranking.rerankers import (
+    ZeroEntropyReranker,
+    ZeroEntropyRerankerConfig,
+)
+from common.utils.ranking.scorers import (
+    BM25Scorer,
+    FieldedBM25Scorer,
+    FieldedBM25ScorerConfig,
+)
+from common.utils.ranking.tokenizer import ThuLacRankingTokenizer
 from dependency_injector import containers, providers
 from neo4j import AsyncGraphDatabase
 from pymongo import AsyncMongoClient
@@ -25,6 +42,7 @@ from rag.application.rag.navigate import (
     GraphEvidenceVerifier,
     KnowledgeGraphExpander,
     ReadingCandidateLocator,
+    SectionExpander,
     SourceEvidenceVerifier,
 )
 from rag.application.rag.read import (
@@ -53,23 +71,6 @@ from rag.core.persistence.redis import (
     RedisNavigationStateStore,
 )
 from rag.utils.llm_clients import EmbeddingClient, QueryClient
-from common.utils.ranking import RankingPipeline
-from common.utils.ranking.diversifiers import MmrDiversifier, MmrDiversifierConfig
-from common.utils.ranking.fusion import WeightedRrfFusion
-from common.utils.ranking.rank_gates import (
-    HighLowRelevanceGate,
-    HighLowRelevanceGateConfig,
-)
-from common.utils.ranking.rerankers import (
-    ZeroEntropyReranker,
-    ZeroEntropyRerankerConfig,
-)
-from common.utils.ranking.scorers import (
-    BM25Scorer,
-    FieldedBM25Scorer,
-    FieldedBM25ScorerConfig,
-)
-from common.utils.ranking.tokenizer import ThuLacRankingTokenizer
 
 
 def _build_authoritative_resource_collection(
@@ -295,6 +296,11 @@ class Container(containers.DeclarativeContainer):
         reader=published_resource_reader,
         authorizer=permission_authorizer,
     )
+    section_expander = providers.Singleton(
+        SectionExpander,
+        reader=published_resource_reader,
+        authorizer=permission_authorizer,
+    )
     graph_acl_writer = providers.Singleton(
         Neo4jGraphAclWriter,
         driver=neo4j_driver,
@@ -364,6 +370,7 @@ class Container(containers.DeclarativeContainer):
         knowledge_graph=knowledge_graph_repository,
         published_resources=published_resource_reader,
         state_store=navigation_state_store,
+        graph_enabled=settings.RAG_KNOWLEDGE_GRAPH_ENABLED,
     )
     knowledge_graph_expander = providers.Singleton(
         KnowledgeGraphExpander,

@@ -56,7 +56,7 @@ def test_revision_identity_and_unicode_length_are_stable() -> None:
     assert not hasattr(revision, "total_length")
     assert structure.total_length == len(markdown)
     assert revision.content_hash
-    assert revision.index_schema_version == "rag-v2-content:v6"
+    assert revision.index_schema_version == "rag-v2-content:v7"
 
 
 @pytest.mark.parametrize(
@@ -154,13 +154,13 @@ async def test_read_actions_raise_directly_when_content_is_missing() -> None:
             permission_scope=scope,
         )
     with pytest.raises(ContentNotFoundError):
-        await DocumentContentReader(reader=reader, authorizer=authorizer).get_pages(
+        await DocumentContentReader(reader=reader, authorizer=authorizer).read_pages(
             resource_id="missing",
             page_labels=["1"],
             permission_scope=scope,
         )
     with pytest.raises(ContentNotFoundError):
-        await DocumentContentReader(reader=reader, authorizer=authorizer).get_sections(
+        await DocumentContentReader(reader=reader, authorizer=authorizer).read_sections(
             resource_id="missing",
             section_ids=["section"],
             permission_scope=scope,

@@ -2,6 +2,7 @@
 
 ReadingBlock 是供模型阅读的中等粒度父块：
 - SECTIONED 文档可合并文档顺序上连续、且属于同一父 Section 的正文片段。
+- 无正文且无子节点的兄弟 Section 可跳过；有子节点的空 Section 是不可跨越的结构边界。
 - 每个 ReadingBlock 持有有序 Section ID 和原文 span，可严格回源。
 - 5000 字符是期望阅读长度，6000 字符是任何父块都不得突破的硬上限。
 """
@@ -36,6 +37,8 @@ class _ReadingAtom:
     section_id: str
     parent_section_id: str | None
     source_span: SourceSpan
+    # 空容器 Section 的子树是结构边界，即使子树没有正文也不能跨过合并。
+    blocks_previous_group: bool = False
 
 
 def build_reading_blocks(
@@ -95,11 +98,18 @@ def _build_section_reading_blocks(
 
 
 def _build_reading_atoms(markdown: str, sections: list[Section]) -> list[_ReadingAtom]:
-    """把 Section 正文拆成不超过硬上限、仍保留所属关系的原文片段。"""
+    """把 Section 正文拆成留有装箱空间、仍保留所属关系的原文片段。"""
     chunker = DocumentChunker(
-        DocumentChunkerConfig(max_characters=_READING_BLOCK_MAX_CHARACTERS)
+        DocumentChunkerConfig(max_characters=_READING_BLOCK_TARGET_CHARACTERS)
     )
     atoms: list[_ReadingAtom] = []
+    section_children = {
+        section.section_id: any(
+            child.parent_section_id == section.section_id for child in sections
+        )
+        for section in sections
+    }
+    blocks_previous_group = False
 
     for section in sections:
         if section.own_span.start_offset == section.own_span.end_offset:
@@ -109,21 +119,28 @@ def _build_reading_atoms(markdown: str, sections: list[Section]) -> list[_Readin
         ]
         result = chunker.chunk(section_text)
         heading_end = _heading_end_offset(result.blocks, section)
+        section_atoms = [
+            _ReadingAtom(
+                section_id=section.section_id,
+                parent_section_id=section.parent_section_id,
+                source_span=SourceSpan(
+                    section.own_span.start_offset + span.start_offset,
+                    section.own_span.start_offset + span.end_offset,
+                ),
+            )
+            for chunk in result.chunks
+            for span in chunk.source_spans
+            if span.end_offset > heading_end
+        ]
 
         # chunker 可能在超长正文块内部继续拆分；逐 span 装箱才能在尾块过短时重平衡。
-        for chunk in result.chunks:
-            atoms.extend(
-                _ReadingAtom(
-                    section_id=section.section_id,
-                    parent_section_id=section.parent_section_id,
-                    source_span=SourceSpan(
-                        section.own_span.start_offset + span.start_offset,
-                        section.own_span.start_offset + span.end_offset,
-                    ),
-                )
-                for span in chunk.source_spans
-                if span.end_offset > heading_end
-            )
+        if section_atoms:
+            section_atoms[0].blocks_previous_group = blocks_previous_group
+            atoms.extend(section_atoms)
+            blocks_previous_group = False
+        elif section_children[section.section_id]:
+            # 空叶子没有语义内容，可以跳过；有子节点的空 Section 是容器边界，必须留下信号。
+            blocks_previous_group = True
     return atoms
 
 
@@ -131,7 +148,11 @@ def _group_adjacent_siblings(atoms: list[_ReadingAtom]) -> list[list[_ReadingAto
     """只允许文档顺序连续且 parent_section_id 相同的 Section 共享父块。"""
     groups: list[list[_ReadingAtom]] = []
     for atom in atoms:
-        if not groups or groups[-1][-1].parent_section_id != atom.parent_section_id:
+        if (
+            not groups
+            or atom.blocks_previous_group
+            or groups[-1][-1].parent_section_id != atom.parent_section_id
+        ):
             groups.append([atom])
         else:
             groups[-1].append(atom)
@@ -172,7 +193,7 @@ def _pack_atoms(atoms: list[_ReadingAtom]) -> list[list[_ReadingAtom]]:
 def _balanced_split(
     atoms: list[_ReadingAtom],
 ) -> tuple[list[_ReadingAtom], list[_ReadingAtom]]:
-    """在两个父块都不超硬上限的前提下，选择最接近软目标的切点。"""
+    """在两个父块都不超硬上限的前提下，优先消除短尾并保持均衡。"""
     candidates = [
         (atoms[:index], atoms[index:])
         for index in range(1, len(atoms))
@@ -181,10 +202,20 @@ def _balanced_split(
     ]
     if not candidates:
         return atoms[:-1], atoms[-1:]
-    return min(
-        candidates,
-        key=lambda pair: abs(_rendered_length(pair[0]) - _READING_BLOCK_TARGET_CHARACTERS)
-        + abs(_rendered_length(pair[1]) - _READING_BLOCK_TARGET_CHARACTERS),
+    return min(candidates, key=_split_score)
+
+
+def _split_score(
+    pair: tuple[list[_ReadingAtom], list[_ReadingAtom]],
+) -> tuple[int, int, int]:
+    """先最大化短侧长度；同分时再比较均衡度和软目标偏差。"""
+    left_length = _rendered_length(pair[0])
+    right_length = _rendered_length(pair[1])
+    return (
+        -min(left_length, right_length),
+        abs(left_length - right_length),
+        abs(left_length - _READING_BLOCK_TARGET_CHARACTERS)
+        + abs(right_length - _READING_BLOCK_TARGET_CHARACTERS),
     )
 
 

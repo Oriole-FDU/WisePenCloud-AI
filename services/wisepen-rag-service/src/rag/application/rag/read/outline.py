@@ -1,6 +1,6 @@
 """读取已发布 revision 中随资源更新写入的精简目录。"""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from common.utils.document import OutlineNode
 
@@ -41,6 +41,8 @@ class DocumentOutlineReader:
         *,
         resource_id: str,
         permission_scope: PermissionScope,
+        root_section_id: str | None = None,
+        depth: int | None = None,
     ) -> DocumentOutlineResult:
         if not await self._authorizer.authorize_resource(
             resource_id=resource_id,
@@ -59,10 +61,59 @@ class DocumentOutlineReader:
         ):
             raise ContentAccessRevokedError(resource_id)
 
+        projected = _project_outline(
+            outline.outline, root_section_id=root_section_id, depth=depth
+        )
         return DocumentOutlineResult(
             resource_id=outline.resource_id,
             content_revision=outline.content_revision,
             document_version=outline.document_version,
             total_length=outline.total_length,
-            outline=outline.outline,
+            outline=projected,
         )
+
+
+def _project_outline(
+    nodes: list[OutlineNode],
+    *,
+    root_section_id: str | None,
+    depth: int | None,
+) -> list[OutlineNode]:
+    if depth is not None and depth < 0:
+        raise ValueError("depth must be non-negative")
+    selected = nodes
+    if root_section_id is not None:
+        selected = [_find_node(nodes, root_section_id)]
+
+    def project(node: OutlineNode, remaining: int | None) -> OutlineNode:
+        if remaining is not None and remaining == 0:
+            return replace(
+                node,
+                children=[],
+                children_truncated=True if node.children else None,
+            )
+        next_remaining = None if remaining is None else remaining - 1
+        children = [project(child, next_remaining) for child in node.children]
+        return replace(node, children=children, children_truncated=None)
+
+    return [project(node, depth) for node in selected]
+
+
+def _find_node(nodes: list[OutlineNode], section_id: str) -> OutlineNode:
+    for node in nodes:
+        if node.section_id == section_id:
+            return node
+        found = _find_node_or_none(node.children, section_id)
+        if found is not None:
+            return found
+    raise ContentNotFoundError(section_id)
+
+
+def _find_node_or_none(nodes: list[OutlineNode], section_id: str) -> OutlineNode | None:
+    for node in nodes:
+        if node.section_id == section_id:
+            return node
+        found = _find_node_or_none(node.children, section_id)
+        if found is not None:
+            return found
+    return None

@@ -9,12 +9,12 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends
 
 from rag.api.schemas import (
+    DocumentOutlineRequest,
     DocumentOutlineResponse,
-    PageContentRequest,
-    PageContentResponse,
-    ResourceRequest,
-    SectionContentRequest,
-    SectionContentResponse,
+    ReadPagesRequest,
+    ReadPagesResponse,
+    ReadSectionsRequest,
+    ReadSectionsResponse,
 )
 from rag.application.rag.read import (
     ContentAccessRevokedError,
@@ -45,14 +45,16 @@ ContentReader = Annotated[
 )
 @inject
 async def get_document_outline(
-        request: ResourceRequest,
-        user_id: AuthenticatedUser,
-        reader: OutlineReader,
+    request: DocumentOutlineRequest,
+    user_id: AuthenticatedUser,
+    reader: OutlineReader,
 ) -> R[DocumentOutlineResponse]:
     try:
         result = await reader.get_document_outline(
             resource_id=request.resource_id,
             permission_scope=_permission_scope(user_id),
+            root_section_id=request.root_section_id,
+            depth=request.depth,
         )
     except ContentNotFoundError as error:
         raise ServiceException(RagErrorCode.RESOURCE_CONTENT_NOT_FOUND) from error
@@ -72,18 +74,18 @@ async def get_document_outline(
 
 
 @router.post(
-    "/getPageContent",
-    response_model=R[PageContentResponse],
+    "/readPages",
+    response_model=R[ReadPagesResponse],
     response_model_exclude_none=True,
 )
 @inject
-async def get_page_content(
-        request: PageContentRequest,
-        user_id: AuthenticatedUser,
-        reader: ContentReader,
-) -> R[PageContentResponse]:
+async def read_pages(
+    request: ReadPagesRequest,
+    user_id: AuthenticatedUser,
+    reader: ContentReader,
+) -> R[ReadPagesResponse]:
     try:
-        result = await reader.get_pages(
+        result = await reader.read_pages(
             resource_id=request.resource_id,
             page_labels=request.page_labels,
             permission_scope=_permission_scope(user_id),
@@ -98,23 +100,21 @@ async def get_page_content(
 
 
 @router.post(
-    "/getSectionContent",
-    response_model=R[SectionContentResponse],
+    "/readSections",
+    response_model=R[ReadSectionsResponse],
     response_model_exclude_none=True,
 )
 @inject
-async def get_section_content(
-        request: SectionContentRequest,
-        user_id: AuthenticatedUser,
-        reader: ContentReader,
-) -> R[SectionContentResponse]:
+async def read_sections(
+    request: ReadSectionsRequest,
+    user_id: AuthenticatedUser,
+    reader: ContentReader,
+) -> R[ReadSectionsResponse]:
     try:
-        result = await reader.get_sections(
+        result = await reader.read_sections(
             resource_id=request.resource_id,
             section_ids=request.section_ids,
             permission_scope=_permission_scope(user_id),
-            include_body=request.include_body,
-            exclude_directions=request.exclude_directions,
         )
     except ContentNotFoundError as error:
         raise ServiceException(RagErrorCode.RESOURCE_CONTENT_NOT_FOUND) from error

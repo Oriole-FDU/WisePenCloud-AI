@@ -35,7 +35,7 @@ relations:
       "mention_evidence": [
         {
           "resource_id": "demo-wisepen-rag",
-          "reading_block_id": "rsb_ea054449550827f7",
+          "reading_block_id": "rsb_3fc8a0ac3a6dd1f4",
           "quote": "GraphRAG 技术"
         }
       ]
@@ -49,7 +49,7 @@ relations:
       "mention_evidence": [
         {
           "resource_id": "demo-wisepen-rag",
-          "reading_block_id": "rsb_ff81599284db4c03",
+          "reading_block_id": "rsb_f73a0d4f93e03e43",
           "quote": "知识图谱"
         }
       ]
@@ -72,7 +72,7 @@ relations:
           "relation_evidence": [
             {
               "resource_id": "demo-wisepen-rag",
-              "reading_block_id": "rsb_ea054449550827f7",
+              "reading_block_id": "rsb_3fc8a0ac3a6dd1f4",
               "quote": "WisePen RAG 使用 GraphRAG 技术补充实体关系导航"
             }
           ]
@@ -90,7 +90,7 @@ relations:
           "relation_evidence": [
             {
               "resource_id": "demo-wisepen-rag",
-              "reading_block_id": "rsb_ff81599284db4c03",
+              "reading_block_id": "rsb_f73a0d4f93e03e43",
               "quote": "GraphRAG 使用知识图谱表示实体之间的关系"
             }
           ]
@@ -101,7 +101,7 @@ relations:
   "evidence_reading_blocks": [
     {
       "resource_id": "demo-wisepen-rag",
-      "reading_block_id": "rsb_ea054449550827f7",
+      "reading_block_id": "rsb_3fc8a0ac3a6dd1f4",
       "text": "## 一、主检索流程\n\nWisePen RAG 使用向量检索召回相关 ReadingBlock，并按照标题树补充结构上相邻的阅读材料。\n\n\n## 二、图谱导航\n\nWisePen RAG 使用 GraphRAG 技术补充实体关系导航，使模型能够沿文档中的知识关系继续读取材料。\n",
       "sections": [
         {
@@ -124,7 +124,7 @@ relations:
     },
     {
       "resource_id": "demo-wisepen-rag",
-      "reading_block_id": "rsb_ff81599284db4c03",
+      "reading_block_id": "rsb_f73a0d4f93e03e43",
       "text": "### 二.1 关系抽取\n\nGraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应的原文证据。\n\n\n### 二.2 证据回源\n\n图谱关系只能作为导航线索，最终返回的证据仍然必须回到当前发布 revision 的 ReadingBlock。\n\n\n### 二.3 查询边界\n\n图谱遍历只使用显式知识关系，不把节点 mention 或检索来源边当作可遍历关系。\n",
       "sections": [
         {

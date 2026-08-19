@@ -8,15 +8,17 @@ from _demo_documents import (
     DemoDocument,
     build_demo_document,
     flat_text_markdown,
-    sectioned_markdown,
 )
 from pydantic import TypeAdapter
 
+from rag.api.schemas import SectionChildrenExpandResponse, SectionExpandResponse
+from rag.application.rag.navigate import SectionExpander
 from rag.application.rag.read.content import (
     DocumentContentReader,
     SectionContentView,
 )
 from rag.domain.models.acl import PermissionScope
+from rag.domain.models.section_navigation import SectionDirection
 from rag.domain.repositories.mongo.published_resource_reader import (
     PublishedSectionContent,
 )
@@ -35,9 +37,7 @@ class _DemoPublishedResourceReader:
 
     async def get_pages(self, resource_id, page_labels):
         document = self._documents[resource_id]
-        pages_by_label = {
-            page.page_label: page for page in document.structure.pages
-        }
+        pages_by_label = {page.page_label: page for page in document.structure.pages}
         result = {}
         for label in dict.fromkeys(page_labels):
             page = pages_by_label.get(label)
@@ -79,16 +79,22 @@ class _DemoPublishedResourceReader:
 
 
 async def main() -> None:
+    test1_path = Path(__file__).with_name("test1.md")
     sectioned = build_demo_document(
-        resource_id="demo-rain-garden",
-        markdown=sectioned_markdown(),
+        resource_id="demo-transformer-paper",
+        markdown=test1_path.read_text(encoding="utf-8"),
     )
     flat_text = build_demo_document(
         resource_id="demo-orchard-frost-log",
         markdown=flat_text_markdown(),
     )
+    published_reader = _DemoPublishedResourceReader([sectioned, flat_text])
     reader = DocumentContentReader(
-        reader=_DemoPublishedResourceReader([sectioned, flat_text]),
+        reader=published_reader,
+        authorizer=_AllowAuthorizer(),
+    )
+    expander = SectionExpander(
+        reader=published_reader,
         authorizer=_AllowAuthorizer(),
     )
     scope = PermissionScope(user_id="demo-reviewer")
@@ -99,7 +105,7 @@ async def main() -> None:
         selected=next(
             section
             for section in sectioned.sections
-            if section.title == "二、图谱导航"
+            if section.title == "3.2 Attention"
         ),
         scope=scope,
     )
@@ -109,15 +115,28 @@ async def main() -> None:
         selected=flat_text.sections[0],
         scope=scope,
     )
+    navigation_output = await _navigation_output(
+        expander=expander,
+        document=sectioned,
+        selected=next(
+            section
+            for section in sectioned.sections
+            if section.title == "3.2 Attention"
+        ),
+        scope=scope,
+    )
 
     output = "\n".join(
         [
             "=== Review notes ===",
             "- Page READ 返回整页正文和 section_id/title/section_path，不重复 preview。",
-            "- Section READ 返回直属正文；flat text 通过 synthetic Section 保留 title/path/navigation。",
+            "- readSections 返回直属正文和 allowed_directions；方向展开由 expandSection 负责。",
+            "- expandSection 返回目标 Section 的直属正文，并用 from_section_id 标记导航来源。",
             "- 所有模型可见页归属统一为 page_range；纯文本没有页标记时不伪造页范围。",
             "",
-            *_read_output("SECTIONED", sectioned, sectioned_output),
+            *_read_output("TEST1", sectioned, sectioned_output),
+            "",
+            *navigation_output,
             "",
             *_read_output("FLAT_TEXT", flat_text, flat_output),
         ]
@@ -128,12 +147,12 @@ async def main() -> None:
 
 
 async def _read_document(*, reader, document, selected, scope) -> dict[str, object]:
-    pages = await reader.get_pages(
+    pages = await reader.read_pages(
         resource_id=document.resource_id,
         page_labels=[page.page_label for page in document.structure.pages],
         permission_scope=scope,
     )
-    sections = await reader.get_sections(
+    sections = await reader.read_sections(
         resource_id=document.resource_id,
         section_ids=[selected.section_id],
         permission_scope=scope,
@@ -151,6 +170,90 @@ async def _read_document(*, reader, document, selected, scope) -> dict[str, obje
     }
 
 
+async def _navigation_output(*, expander, document, selected, scope) -> list[str]:
+    """展示一次 readSections 后沿四个方向逐步扩展的模型可见结果。"""
+    output = [
+        "=== TEST1 expandSection trace ===",
+        f"selected: {selected.section_id} {selected.title}",
+    ]
+    for direction in (
+        SectionDirection.PARENT,
+        SectionDirection.CHILDREN,
+        SectionDirection.PREVIOUS,
+        SectionDirection.NEXT,
+    ):
+        result = await expander.expand(
+            resource_id=document.resource_id,
+            section_id=selected.section_id,
+            direction=direction,
+            permission_scope=scope,
+            char_budget=12000,
+        )
+        response_model = (
+            SectionChildrenExpandResponse
+            if hasattr(result, "sections")
+            else SectionExpandResponse
+        )
+        payload_model = (
+            response_model.model_validate(result, from_attributes=True)
+            if hasattr(result, "sections")
+            else response_model(
+                from_section_id=result.from_section_id,
+                section_id=result.section.section_id,
+                title=result.section.title,
+                section_path=result.section.section_path,
+                text=result.section.text,
+                allowed_directions=result.section.allowed_directions,
+            )
+        )
+        payload = TypeAdapter(response_model).dump_python(
+            payload_model,
+            mode="json",
+            exclude_none=True,
+        )
+        output.extend(
+            [
+                f"--- direction: {direction} ---",
+                json.dumps(payload, ensure_ascii=False, indent=2),
+            ]
+        )
+
+    first_page = await expander.expand(
+        resource_id=document.resource_id,
+        section_id=selected.section_id,
+        direction=SectionDirection.CHILDREN,
+        permission_scope=scope,
+        char_budget=12000,
+    )
+    if first_page.has_more and first_page.next_after_section_id:
+        second_page = await expander.expand(
+            resource_id=document.resource_id,
+            section_id=selected.section_id,
+            direction=SectionDirection.CHILDREN,
+            permission_scope=scope,
+            char_budget=12000,
+            after_section_id=first_page.next_after_section_id,
+        )
+        output.extend(
+            [
+                "--- children cursor continuation ---",
+                json.dumps(
+                    TypeAdapter(SectionChildrenExpandResponse).dump_python(
+                        SectionChildrenExpandResponse.model_validate(
+                            second_page,
+                            from_attributes=True,
+                        ),
+                        mode="json",
+                        exclude_none=True,
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            ]
+        )
+    return output
+
+
 def _read_output(
     label: str,
     document: DemoDocument,
@@ -159,9 +262,9 @@ def _read_output(
     return [
         f"=== {label} source text ===",
         document.markdown,
-        f"=== {label} getPageContent ===",
+        f"=== {label} readPages ===",
         json.dumps(result["page"], ensure_ascii=False, indent=2),
-        f"=== {label} getSectionContent ({result['section_id']}) ===",
+        f"=== {label} readSections ({result['section_id']}) ===",
         json.dumps(result["section"], ensure_ascii=False, indent=2),
     ]
 

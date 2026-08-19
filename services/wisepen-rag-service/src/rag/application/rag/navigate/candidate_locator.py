@@ -41,7 +41,7 @@ class LocateResult:
 
     state_id: str
     retrieval_status: RankDecision
-    nodes: list[KnowledgeNode] = field(default_factory=list)
+    nodes: list[KnowledgeNode] | None = None
     reading_blocks: list[RetrievalReadingBlockView] = field(default_factory=list)
 
 
@@ -68,6 +68,7 @@ class ReadingCandidateLocator:
         "_candidate_search",
         "_embedding_client",
         "_evidence_verifier",
+        "_graph_enabled",
         "_knowledge_graph",
         "_published_resources",
         "_ranking_pipeline",
@@ -85,6 +86,7 @@ class ReadingCandidateLocator:
         knowledge_graph: KnowledgeGraphRepository,
         published_resources: PublishedResourceReader,
         state_store: NavigationStateStore,
+        graph_enabled: bool = True,
     ) -> None:
         self._embedding_client = embedding_client
         self._candidate_search = candidate_search
@@ -94,6 +96,7 @@ class ReadingCandidateLocator:
         self._knowledge_graph = knowledge_graph
         self._published_resources = published_resources
         self._state_store = state_store
+        self._graph_enabled = graph_enabled
 
     async def locate(
         self,
@@ -204,6 +207,18 @@ class ReadingCandidateLocator:
             permission_scope,
         )
         reading_blocks = _build_retrieval_reading_block_views(readable_records)
+
+        if not self._graph_enabled:
+            state = await self._state_store.create(
+                user_id=permission_scope.user_id,
+                session_id=session_id,
+                known_node_ids=[],
+            )
+            return LocateResult(
+                state_id=state.state_id,
+                retrieval_status=ranking.decision,
+                reading_blocks=reading_blocks,
+            )
 
         # 将 readable_records 按 ReadingBlock 聚合，构建图谱导航的种子块集合
         seed_blocks: dict[tuple[str, str, str], GraphSeedBlock] = {}

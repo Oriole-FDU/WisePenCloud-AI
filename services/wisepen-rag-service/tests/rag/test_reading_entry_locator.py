@@ -212,6 +212,7 @@ def _locator(
     decision=RankDecision.RELEVANT,
     acl_reader=None,
     knowledge_graph=None,
+    graph_enabled=True,
 ):
     records = {candidate.source_ref_id: _record(candidate) for candidate in candidates}
     state_store = _StateStore()
@@ -225,8 +226,31 @@ def _locator(
         knowledge_graph=knowledge_graph or _KnowledgeGraph(),
         published_resources=_RevisionReader(),
         state_store=state_store,
+        graph_enabled=graph_enabled,
     )
     return locator, state_store, source_evidence_reader
+
+
+@pytest.mark.asyncio
+async def test_locate_omits_graph_nodes_when_graph_is_disabled() -> None:
+    candidate = _candidate("chunk-1", SourceSpan(1, 4))
+    graph = _KnowledgeGraph()
+    locator, state_store, _ = _locator(
+        [candidate],
+        ranked_ids=[_candidate_id(candidate)],
+        knowledge_graph=graph,
+        graph_enabled=False,
+    )
+
+    result = await locator.locate(
+        session_id="session-1",
+        semantic_query="问题",
+        permission_scope=PermissionScope(user_id="user-1"),
+    )
+
+    assert result.nodes is None
+    assert graph.request is None
+    assert state_store.created["known_node_ids"] == []
 
 
 @pytest.mark.asyncio

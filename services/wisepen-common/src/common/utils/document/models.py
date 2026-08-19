@@ -113,6 +113,8 @@ class OutlineNode:
     page_range: str | None = None
     anchor_labels: list[str] = field(default_factory=list)
     children: list[OutlineNode] = field(default_factory=list)
+    # 仅在按 depth 截断公开目录时标记仍有未展开的子节点。
+    children_truncated: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,11 +1,11 @@
 """从当前已发布权威源按页或 Section 确定性读取正文。"""
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from rag.application.rag.acl import PermissionAuthorizer
 from rag.domain.models.acl import PermissionScope
-from rag.domain.models.structure import Section
+from rag.domain.models.section_navigation import SectionDirection
 from rag.domain.repositories.mongo import PublishedResourceReader
 from rag.domain.repositories.mongo.published_resource_reader import (
     PublishedSectionContent,
@@ -21,34 +21,14 @@ class ContentAccessRevokedError(RuntimeError):
 
 
 @dataclass(slots=True)
-class SectionAnchorView:
-    """READ 中的轻量 Section 锚点；flat text 由 synthetic Section 提供入口。"""
+class SectionContentView:
+    """Section 直属正文；方向导航通过 SectionExpander 单独负责。"""
 
     section_id: str
     title: str
     section_path: str
-    preview: str | None = None
-
-
-@dataclass(slots=True)
-class SectionNavigationView:
-    """Section 的轻量导航入口。"""
-
-    parent: SectionAnchorView | None = None
-    previous: SectionAnchorView | None = None
-    next: SectionAnchorView | None = None
-    children: list[SectionAnchorView] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class SectionContentView:
-    """Section 直属正文及导航；flat text 使用 synthetic Section 保持可读。"""
-
-    title: str
-    section_path: str
-    # include_body=False 时为 None，配合端点 exclude_none 从响应中彻底省略。
-    text: str | None = None
-    navigation: SectionNavigationView = field(default_factory=SectionNavigationView)
+    text: str
+    allowed_directions: list[SectionDirection]
 
 
 class DocumentContentReader:
@@ -65,7 +45,7 @@ class DocumentContentReader:
         self._reader = reader
         self._authorizer = authorizer
 
-    async def get_pages(
+    async def read_pages(
         self,
         *,
         resource_id: str,
@@ -87,16 +67,14 @@ class DocumentContentReader:
             raise ContentAccessRevokedError(resource_id)
         return pages
 
-    async def get_sections(
+    async def read_sections(
         self,
         *,
         resource_id: str,
         section_ids: Sequence[str],
         permission_scope: PermissionScope,
-        include_body: bool = True,
-        exclude_directions: Sequence[str] = (),
     ) -> dict[str, SectionContentView]:
-        """读取 Section 视图；include_body=False 裁剪正文，exclude_directions 过滤导航方向。"""
+        """读取 Section 正文；方向导航由 SectionExpander 单独负责。"""
         if not await self._authorizer.authorize_resource(
             resource_id=resource_id,
             scope=permission_scope,
@@ -110,16 +88,8 @@ class DocumentContentReader:
             scope=permission_scope,
         ):
             raise ContentAccessRevokedError(resource_id)
-        # 宽松黑名单：只取有效方向名做过滤，未知输入静默忽略。
-        excluded = frozenset(exclude_directions) & frozenset(
-            ("parent", "previous", "next", "children")
-        )
         return {
-            section_id: _to_section_content_view(
-                content,
-                include_body=include_body,
-                excluded_directions=excluded,
-            )
+            section_id: to_section_content_view(content)
             for section_id, content in sections.items()
         }
 
@@ -134,41 +104,22 @@ def format_page_range(page_labels: Sequence[str]) -> str | None:
     return f"{labels[0]} - {labels[-1]}"
 
 
-def _to_section_content_view(
+def to_section_content_view(
     content: PublishedSectionContent,
-    *,
-    include_body: bool = True,
-    excluded_directions: frozenset[str] = frozenset(),
 ) -> SectionContentView:
+    allowed_directions: list[SectionDirection] = []
+    if content.parent is not None:
+        allowed_directions.append(SectionDirection.PARENT)
+    if content.children:
+        allowed_directions.append(SectionDirection.CHILDREN)
+    if content.previous is not None:
+        allowed_directions.append(SectionDirection.PREVIOUS)
+    if content.next is not None:
+        allowed_directions.append(SectionDirection.NEXT)
     return SectionContentView(
+        section_id=content.section.section_id,
         title=content.section.title,
         section_path=" > ".join(content.section.section_path),
-        text=content.text if include_body else None,
-        navigation=SectionNavigationView(
-            parent=None
-            if "parent" in excluded_directions
-            else _optional_section_anchor_view(content.parent),
-            previous=None
-            if "previous" in excluded_directions
-            else _optional_section_anchor_view(content.previous),
-            next=None
-            if "next" in excluded_directions
-            else _optional_section_anchor_view(content.next),
-            children=[]
-            if "children" in excluded_directions
-            else [_to_section_anchor_view(child) for child in content.children],
-        ),
+        text=content.text,
+        allowed_directions=allowed_directions,
     )
-
-
-def _to_section_anchor_view(section: Section) -> SectionAnchorView:
-    return SectionAnchorView(
-        section_id=section.section_id,
-        title=section.title,
-        section_path=" > ".join(section.section_path),
-        preview=section.preview if section.preview else None,
-    )
-
-
-def _optional_section_anchor_view(section: Section | None) -> SectionAnchorView | None:
-    return _to_section_anchor_view(section) if section is not None else None
