@@ -9,6 +9,7 @@ dependencies = [
     "wisepen-mcp-service",
     "wisepen-common",
     "wisepen-sandbox-service",
+    "wisepen-rag-service",
     "mcp>=1.27,<2",
 ]
 
@@ -22,3 +23,4 @@ wisepen-chat-service = { workspace = true }
 wisepen-mcp-service = { workspace = true }
 wisepen-common = { workspace = true }
 wisepen-sandbox-service = { workspace = true }
+wisepen-rag-service = { workspace = true }

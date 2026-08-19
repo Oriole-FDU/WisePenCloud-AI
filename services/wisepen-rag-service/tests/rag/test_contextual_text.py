@@ -70,7 +70,7 @@ def _inputs(mode: StructureMode = StructureMode.SECTIONED):
     )
     block = ReadingBlock(
         block_id="block-1",
-        section_id="section-1",
+        section_ids=["section-1"],
         ordinal=0,
         raw_text="Target passage.",
         source_spans=[SourceSpan(0, 15)],
@@ -114,7 +114,7 @@ async def test_contextual_text_generates_and_only_enhances_index_text() -> None:
         "context",
     )
     assert "Title" in client.prompt
-    assert "A short section preview." in client.prompt
+    assert "section_preview" not in client.prompt
     assert "Target passage." in client.prompt
 
 

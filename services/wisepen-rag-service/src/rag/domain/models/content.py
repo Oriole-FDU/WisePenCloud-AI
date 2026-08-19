@@ -20,10 +20,10 @@ class ContentRevision:
 
 @dataclass(slots=True)
 class ReadingBlock:
-    """一个 Section 内可独立读取且能精确回源的有序正文块。"""
+    """覆盖一个或多个相邻兄弟 Section、且能精确回源的有序阅读块。"""
 
     block_id: str
-    section_id: str
+    section_ids: list[str]
     ordinal: int
     raw_text: str
     source_spans: list[SourceSpan] = field(default_factory=list)

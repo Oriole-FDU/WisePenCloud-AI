@@ -18,11 +18,13 @@ def test_long_section_builds_multiple_ordered_reading_blocks() -> None:
         sections=structure.sections,
     )
     section = next(item for item in structure.sections if item.title == "长章节")
-    section_blocks = [block for block in blocks if block.section_id == section.section_id]
+    section_blocks = [
+        block for block in blocks if section.section_id in block.section_ids
+    ]
 
     assert len(section_blocks) > 1
     assert [block.ordinal for block in section_blocks] == list(range(len(section_blocks)))
-    assert all(len(block.raw_text) <= 4000 for block in section_blocks)
+    assert all(len(block.raw_text) <= 6000 for block in section_blocks)
 
 
 def test_flat_text_builds_non_overlapping_sections_and_parent_blocks() -> None:
@@ -38,7 +40,7 @@ def test_flat_text_builds_non_overlapping_sections_and_parent_blocks() -> None:
 
     assert structure.mode is StructureMode.FLAT_TEXT
     assert len(structure.sections) == len(blocks) > 1
-    assert all(len(block.raw_text) <= 4000 for block in blocks)
+    assert all(len(block.raw_text) <= 6000 for block in blocks)
     assert all("<!-- page" not in block.raw_text for block in blocks)
     assert all(
         left.source_spans[-1].end_offset <= right.source_spans[0].start_offset
@@ -61,7 +63,7 @@ def test_reading_block_keeps_cross_page_and_anchor_attribution() -> None:
         sections=structure.sections,
     )
     data_section = next(item for item in structure.sections if item.title == "数据")
-    block = next(item for item in blocks if item.section_id == data_section.section_id)
+    block = next(item for item in blocks if data_section.section_id in item.section_ids)
 
     assert block.page_labels == ["1", "2"]
     assert block.anchor_labels == ["Table 1"]
@@ -82,8 +84,46 @@ def test_heading_without_direct_body_has_no_reading_block() -> None:
     parent = next(item for item in structure.sections if item.title == "父标题")
     child = next(item for item in structure.sections if item.title == "子标题")
 
-    assert [block for block in blocks if block.section_id == parent.section_id] == []
-    assert len([block for block in blocks if block.section_id == child.section_id]) == 1
+    assert [block for block in blocks if parent.section_id in block.section_ids] == []
+    assert len([block for block in blocks if child.section_id in block.section_ids]) == 1
+
+
+def test_adjacent_short_sibling_sections_share_one_reading_block() -> None:
+    markdown = "# 文档\n\n## 摘要\n\n短摘要。\n\n## 结论\n\n短结论。"
+    structure = build_document_structure(markdown)
+    blocks = build_reading_blocks(
+        resource_id="resource-1",
+        content_revision="revision-1",
+        markdown=markdown,
+        structure=structure,
+        sections=structure.sections,
+    )
+    summary = next(item for item in structure.sections if item.title == "摘要")
+    conclusion = next(item for item in structure.sections if item.title == "结论")
+
+    shared = next(block for block in blocks if summary.section_id in block.section_ids)
+
+    assert shared.section_ids == [summary.section_id, conclusion.section_id]
+    assert "短摘要。" in shared.raw_text
+    assert "短结论。" in shared.raw_text
+
+
+def test_reading_blocks_never_cross_parent_section_boundary() -> None:
+    markdown = "# A\n\n## A1\n\nA 内容。\n\n# B\n\n## B1\n\nB 内容。"
+    structure = build_document_structure(markdown)
+    blocks = build_reading_blocks(
+        resource_id="resource-1",
+        content_revision="revision-1",
+        markdown=markdown,
+        structure=structure,
+        sections=structure.sections,
+    )
+    sections_by_id = {section.section_id: section for section in structure.sections}
+
+    assert all(
+        len({sections_by_id[item].parent_section_id for item in block.section_ids}) == 1
+        for block in blocks
+    )
 
 
 def test_empty_document_builds_no_reading_blocks() -> None:

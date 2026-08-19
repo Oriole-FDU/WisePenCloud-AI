@@ -209,14 +209,22 @@ class MongoPublishedResourceReader(PublishedResourceReader):
                 "block_id": {"$in": list({ref.reading_block_id for ref in refs})},
             }
         ).to_list()
+        blocks_by_id = {entity.block_id: _to_reading_block(entity) for entity in blocks}
         sections = await SectionEntity.find(
             {
                 "resource_id": resource_id,
                 "content_revision": content_revision,
-                "section_id": {"$in": list({ref.section_id for ref in refs})},
+                "section_id": {
+                    "$in": list(
+                        {
+                            section_id
+                            for block in blocks_by_id.values()
+                            for section_id in block.section_ids
+                        }
+                    )
+                },
             }
         ).to_list()
-        blocks_by_id = {entity.block_id: _to_reading_block(entity) for entity in blocks}
         sections_by_id = {entity.section_id: _to_section(entity) for entity in sections}
 
         evidence: dict[str, SourceEvidence] = {}
@@ -227,11 +235,17 @@ class MongoPublishedResourceReader(PublishedResourceReader):
                 raise PublishedResourceCorruptError(
                     f"source ref {source_ref.ref_id} has missing ownership records"
                 )
+            block_sections = _reading_block_sections(block, sections_by_id)
+            if source_ref.section_id not in block.section_ids:
+                raise PublishedResourceCorruptError(
+                    f"source ref {source_ref.ref_id} has an invalid block owner"
+                )
             evidence[source_ref.ref_id] = SourceEvidence(
                 source_ref=source_ref,
                 reading_block=block,
                 section=section,
                 source_text=assemble_source_text(parts, source_ref.source_spans),
+                reading_block_sections=block_sections,
             )
         return evidence
 
@@ -325,7 +339,11 @@ class MongoPublishedResourceReader(PublishedResourceReader):
                 "content_revision": content_revision,
                 "section_id": {
                     "$in": list(
-                        {block.section_id for block in blocks_by_id.values()}
+                        {
+                            section_id
+                            for block in blocks_by_id.values()
+                            for section_id in block.section_ids
+                        }
                     )
                 },
             }
@@ -340,11 +358,6 @@ class MongoPublishedResourceReader(PublishedResourceReader):
             if block is None:
                 raise PublishedResourceCorruptError(
                     f"graph evidence {item.evidence_id} has no ReadingBlock"
-                )
-            section = sections_by_id.get(block.section_id)
-            if section is None:
-                raise PublishedResourceCorruptError(
-                    f"ReadingBlock {block.block_id} has no Section"
                 )
             if (
                 item.source_span.start_offset < 0
@@ -365,11 +378,17 @@ class MongoPublishedResourceReader(PublishedResourceReader):
                 raise PublishedResourceCorruptError(
                     f"graph evidence {item.evidence_id} does not match ReadingBlock"
                 )
+            section = _section_for_span(block, item.source_span, sections_by_id)
+            if section is None:
+                raise PublishedResourceCorruptError(
+                    f"graph evidence {item.evidence_id} has no owning Section"
+                )
             resolved[item.evidence_id] = PublishedGraphEvidence(
                 evidence=item,
                 reading_block=block,
                 section=section,
                 block_range=block_range,
+                reading_block_sections=_reading_block_sections(block, sections_by_id),
             )
         return resolved
 
@@ -480,7 +499,7 @@ def _to_section(record: SectionEntity) -> Section:
 def _to_reading_block(record: ReadingBlockEntity) -> ReadingBlock:
     return ReadingBlock(
         block_id=record.block_id,
-        section_id=record.section_id,
+        section_ids=list(record.section_ids),
         ordinal=record.ordinal,
         raw_text=record.raw_text,
         source_spans=[
@@ -490,6 +509,40 @@ def _to_reading_block(record: ReadingBlockEntity) -> ReadingBlock:
         page_labels=list(record.page_labels),
         anchor_labels=list(record.anchor_labels),
     )
+
+
+def _section_for_span(
+    block: ReadingBlock,
+    source_span: SourceSpan,
+    sections_by_id: dict[str, Section],
+) -> Section | None:
+    """根据精确证据区间解析多 Section 父块中的实际归属 Section。"""
+    for section_id in block.section_ids:
+        section = sections_by_id.get(section_id)
+        if section is not None and any(
+            source_span.start_offset >= content_span.start_offset
+            and source_span.end_offset <= content_span.end_offset
+            for content_span in section.content_spans
+        ):
+            return section
+    return None
+
+
+def _reading_block_sections(
+    block: ReadingBlock,
+    sections_by_id: dict[str, Section],
+) -> list[Section]:
+    """按父块声明顺序返回其 Section；缺失记录意味着发布数据不完整。"""
+    sections = [
+        sections_by_id[section_id]
+        for section_id in block.section_ids
+        if section_id in sections_by_id
+    ]
+    if len(sections) != len(block.section_ids):
+        raise PublishedResourceCorruptError(
+            f"ReadingBlock {block.block_id} has missing Sections"
+        )
+    return sections
 
 
 def _to_source_ref(record: SourceRefEntity) -> SourceRef:

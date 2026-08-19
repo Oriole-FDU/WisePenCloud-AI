@@ -316,7 +316,7 @@ def _reading_block_document(
         "resource_id": revision.resource_id,
         "content_revision": revision.content_revision,
         "block_id": block.block_id,
-        "section_id": block.section_id,
+        "section_ids": list(block.section_ids),
         "ordinal": block.ordinal,
         "raw_text": block.raw_text,
         "source_spans": [_span_document(span) for span in block.source_spans],

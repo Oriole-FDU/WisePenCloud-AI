@@ -122,7 +122,7 @@ class SourceEvidenceVerifier:
             raise EvidenceCorruptError(
                 f"source ref {source_ref.ref_id} has invalid block record"
             )
-        if record.reading_block.section_id != source_ref.section_id:
+        if source_ref.section_id not in record.reading_block.section_ids:
             raise EvidenceCorruptError(
                 f"source ref {source_ref.ref_id} has invalid block owner"
             )

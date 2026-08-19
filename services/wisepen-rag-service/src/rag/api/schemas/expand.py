@@ -6,9 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from rag.application.rag.navigate import (
     DiscoveredKnowledgeNodeView,
-    GraphEvidenceSectionView,
     GraphNodeView,
     GraphPathView,
+    GraphReadingBlockView,
     TraversalDirection,
 )
 from rag.domain.models.graph import KnowledgeRelationType
@@ -43,4 +43,4 @@ class GraphExpandResponse(BaseModel):
     seed_nodes: list[GraphNodeView]
     discovered_nodes: list[DiscoveredKnowledgeNodeView]
     paths: list[GraphPathView]
-    evidence_sections: list[GraphEvidenceSectionView]
+    evidence_reading_blocks: list[GraphReadingBlockView]

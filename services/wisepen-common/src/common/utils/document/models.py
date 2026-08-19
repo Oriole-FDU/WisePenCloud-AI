@@ -108,6 +108,8 @@ class OutlineNode:
 
     section_id: str
     title: str
+    # 节点可见章节范围的 Python 字符长度；真实章节包含其子章节。
+    length: int
     page_range: str | None = None
     anchor_labels: list[str] = field(default_factory=list)
     children: list[OutlineNode] = field(default_factory=list)

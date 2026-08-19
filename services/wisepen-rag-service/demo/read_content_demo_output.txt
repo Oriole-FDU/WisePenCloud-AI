@@ -43,45 +43,45 @@ GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应�
   "1": "<!-- page 1 -->\n\n## 一、主检索流程\n\nWisePen RAG 使用向量检索召回相关 ReadingBlock，并按照标题树补充结构上相邻的阅读材料。\n\n## 二、图谱导航\n\nWisePen RAG 使用 GraphRAG 技术补充实体关系导航，使模型能够沿文档中的知识关系继续读取材料。\n\n### 二.1 关系抽取\n\nGraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应的原文证据。\n\n",
   "2": "<!-- page 2 -->\n\n### 二.2 证据回源\n\n图谱关系只能作为导航线索，最终返回的证据仍然必须回到当前发布 revision 的 ReadingBlock。\n\n### 二.3 查询边界\n\n图谱遍历只使用显式知识关系，不把节点 mention 或检索来源边当作可遍历关系。\n\n## 三、响应编排\n\n导航响应区分 seed 节点、新发现节点、关系证据和节点 mention 证据，并将同一 ReadingBlock 去重后返回。\n"
 }
-=== SECTIONED getSectionContent (rsec_a709255ca921b901a7ccf79604c89956) ===
+=== SECTIONED getSectionContent (sec_ad2eec8e8c48d140) ===
 {
   "title": "二、图谱导航",
   "section_path": "WisePen RAG 导航架构说明 > 二、图谱导航",
   "text": "WisePen RAG 使用 GraphRAG 技术补充实体关系导航，使模型能够沿文档中的知识关系继续读取材料。\n",
   "navigation": {
     "parent": {
-      "section_id": "rsec_84e306660d60c35e268a7485f276ecba",
+      "section_id": "sec_00dc3d106afd4e6a",
       "title": "WisePen RAG 导航架构说明",
       "section_path": "WisePen RAG 导航架构说明",
       "preview": "WisePen RAG 面向企业文档问答场景，使用向量检索和结构化文档导航共同组织模型可读上下文。"
     },
     "previous": {
-      "section_id": "rsec_009ea0472ec7bec0e872851fd25a2593",
+      "section_id": "sec_8426be2b8471edde",
       "title": "一、主检索流程",
       "section_path": "WisePen RAG 导航架构说明 > 一、主检索流程",
       "preview": "WisePen RAG 使用向量检索召回相关 ReadingBlock，并按照标题树补充结构上相邻的阅读材料。"
     },
     "next": {
-      "section_id": "rsec_a4c8dee8e3e71bdad60f431c2985b6a2",
+      "section_id": "sec_321f4c4e678a0078",
       "title": "三、响应编排",
       "section_path": "WisePen RAG 导航架构说明 > 三、响应编排",
       "preview": "导航响应区分 seed 节点、新发现节点、关系证据和节点 mention 证据，并将同一 ReadingBlock 去重后返回。"
     },
     "children": [
       {
-        "section_id": "rsec_eaaf9b7fa78e369e4621d690db039f27",
+        "section_id": "sec_cd52df950233fce6",
         "title": "二.1 关系抽取",
         "section_path": "WisePen RAG 导航架构说明 > 二、图谱导航 > 二.1 关系抽取",
         "preview": "GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应的原文证据。"
       },
       {
-        "section_id": "rsec_c9ad2b0ce84ac8c21af3b7a7cd9ae959",
+        "section_id": "sec_1c13719cd8d5c589",
         "title": "二.2 证据回源",
         "section_path": "WisePen RAG 导航架构说明 > 二、图谱导航 > 二.2 证据回源",
         "preview": "图谱关系只能作为导航线索，最终返回的证据仍然必须回到当前发布 revision 的 ReadingBlock。"
       },
       {
-        "section_id": "rsec_8a35e45cb0da02cfc06039f68708b1d1",
+        "section_id": "sec_4e38826d05ae58db",
         "title": "二.3 查询边界",
         "section_path": "WisePen RAG 导航架构说明 > 二、图谱导航 > 二.3 查询边界",
         "preview": "图谱遍历只使用显式知识关系，不把节点 mention 或检索来源边当作可遍历关系。"
@@ -98,7 +98,7 @@ GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应�
 
 === FLAT_TEXT getPageContent ===
 {}
-=== FLAT_TEXT getSectionContent (rsec_d3ae11012880fdb5a55670160e6f53a5) ===
+=== FLAT_TEXT getSectionContent (sec_85b209e41bdf4d21) ===
 {
   "title": "全文片段 1",
   "section_path": "全文片段 1",

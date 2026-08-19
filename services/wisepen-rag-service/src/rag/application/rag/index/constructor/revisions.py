@@ -4,7 +4,7 @@ from rag.domain.models.content import ContentRevision
 
 # 当前内容索引 schema 版本，参与 content_revision 计算；
 # 当索引规则（chunker、结构解析、字段集合）发生变化时递增，强制旧 revision 失效。
-INDEX_SCHEMA_VERSION = "rag-v2-content:v4"
+INDEX_SCHEMA_VERSION = "rag-v2-content:v6"
 
 
 def build_content_revision_id(
@@ -48,5 +48,3 @@ def create_content_revision(
         content_hash=content_hash,
         index_schema_version=index_schema_version,
     )
-
-

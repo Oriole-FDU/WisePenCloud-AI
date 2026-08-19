@@ -34,8 +34,8 @@ You create one short retrieval context for a target passage from a private docum
 The context is prepended to the target passage for dense and BM25 retrieval; it is
 not an answer, a rewrite of the passage, or a general document summary.
 
-Use the section path to name the document topic and the section preview and reading
-block to resolve local references. Describe only what is supported by the supplied
+Use the section path to name the document topic and the reading block to resolve
+local references. Describe only what is supported by the supplied
 target passage and reading block. Do not add outside knowledge, recommendations, or
 facts that are only implied by the section title. Keep the target passage's primary
 language and stay concise.
@@ -72,19 +72,13 @@ class ContextualTextIndexer:
         if not chunks or structure.mode in (StructureMode.FLAT_TEXT, StructureMode.EMPTY):
             return list(chunks)
 
-        sections_by_id = {section.section_id: section for section in structure.sections}
         blocks_by_id = {block.block_id: block for block in reading_blocks}
         chunk_contexts: dict[str, RetrievalChunk] = {}
-        section_previews: dict[str, str] = {}
         for chunk in chunks:
-            # chunk 的 section/reading_block 归属由 constructor 流水线保证，这里只构建
-            # artifact_key 与 section preview，供缓存键与 prompt 使用。
-            section = sections_by_id[chunk.section_id]
-            section_previews[chunk.section_id] = section.preview
+            # chunk 的 section/reading_block 归属由 constructor 流水线保证。
             chunk_contexts[
                 self._artifact_key(
                     chunk,
-                    section.preview,
                     blocks_by_id[chunk.reading_block_id],
                 )
             ] = chunk
@@ -108,7 +102,6 @@ class ContextualTextIndexer:
                 *(
                     self._generate(
                         chunk=chunk_contexts[key],
-                        section_preview=section_previews[chunk_contexts[key].section_id],
                         reading_block=blocks_by_id[chunk_contexts[key].reading_block_id],
                         semaphore=semaphore,
                     )
@@ -130,7 +123,6 @@ class ContextualTextIndexer:
         for chunk in chunks:
             key = self._artifact_key(
                 chunk,
-                section_previews[chunk.section_id],
                 blocks_by_id[chunk.reading_block_id],
             )
             contextualized_chunks.append(
@@ -142,14 +134,13 @@ class ContextualTextIndexer:
         self,
         *,
         chunk: RetrievalChunk,
-        section_preview: str,
         reading_block: ReadingBlock,
         semaphore: asyncio.Semaphore,
     ) -> str:
         """调用 LLM 生成上下文文本。"""
         async with semaphore:
             response = await self._client.aquery(
-                self._build_prompt(chunk, section_preview, reading_block),
+                self._build_prompt(chunk, reading_block),
                 system_prompt=_SYSTEM_PROMPT,
                 max_tokens=256,
                 response_format={"type": "json_object"},
@@ -166,13 +157,12 @@ class ContextualTextIndexer:
     def _artifact_key(
         self,
         chunk: RetrievalChunk,
-        section_preview: str,
         reading_block: ReadingBlock,
     ) -> str:
         """计算 chunk 的上下文缓存键。
 
         将所有可能影响生成结果的输入维度（prompt 版本、schema 版本、模型与 thinking
-        配置、章节路径、section preview、reading block、chunk 文本）拼接后哈希，
+        配置、章节路径、reading block、chunk 文本）拼接后哈希，
         任何一项变化都会让 key 改变，从而强制重新生成。
         """
         input_fingerprint = "\0".join(
@@ -182,7 +172,6 @@ class ContextualTextIndexer:
                 self._client.model,
                 self._client.thinking or "default",
                 "\n".join(chunk.section_path),
-                section_preview,
                 reading_block.raw_text,
                 chunk.raw_text,
                 chunk.index_text,
@@ -193,7 +182,6 @@ class ContextualTextIndexer:
     @staticmethod
     def _build_prompt(
         chunk: RetrievalChunk,
-        section_preview: str,
         reading_block: ReadingBlock,
     ) -> str:
         return "\n".join(
@@ -205,8 +193,7 @@ class ContextualTextIndexer:
                     "Do not answer a question.</task>"
                 ),
                 f"<section_path>{xml_cdata(' > '.join(chunk.section_path) or '(document root)')}</section_path>",
-                f"<section_preview>{xml_cdata(section_preview)}</section_preview>",
-                f"<section_reading_block>{xml_cdata(reading_block.raw_text)}</section_reading_block>",
+                f"<reading_block>{xml_cdata(reading_block.raw_text)}</reading_block>",
                 f"<target_retrieval_chunk>{xml_cdata(chunk.raw_text)}</target_retrieval_chunk>",
                 "</contextual_indexing_request>",
             )

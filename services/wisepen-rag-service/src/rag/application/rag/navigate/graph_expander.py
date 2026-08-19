@@ -4,7 +4,19 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from common.utils.ranking import (
+    RankCandidate,
+    RankingPipeline,
+    RankQuery,
+    RankRequest,
+)
+
 from rag.application.rag.acl import PermissionAuthorizer
+from rag.application.rag.navigate.evidence_verifiers import GraphEvidenceVerifier
+from rag.application.rag.navigate.reading_blocks import (
+    ReadingBlockSectionView,
+    present_reading_block,
+)
 from rag.domain.models.acl import PermissionScope
 from rag.domain.models.graph import (
     KnowledgeEntityType,
@@ -25,14 +37,6 @@ from rag.domain.repositories.redis.navigation_state_store import (
     NavigationStateMissingError,
     NavigationStateStore,
 )
-from common.utils.ranking import (
-    RankCandidate,
-    RankingPipeline,
-    RankQuery,
-    RankRequest,
-)
-
-from rag.application.rag.navigate.evidence_verifiers import GraphEvidenceVerifier
 
 
 class UnknownSeedNodeError(RuntimeError):
@@ -58,30 +62,12 @@ class GraphNodeRole(StrEnum):
 class GraphReadingBlockView:
     """EXPAND 证据对应的完整 ReadingBlock，不携带检索命中字段。"""
 
+    resource_id: str
     reading_block_id: str
     text: str
+    sections: list[ReadingBlockSectionView] = field(default_factory=list)
     page_labels: list[str] = field(default_factory=list)
     anchor_labels: list[str] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class GraphEvidenceSectionView:
-    """EXPAND 为新关系或新节点补充的结构化阅读材料。"""
-
-    resource_id: str
-    section_id: str
-    title: str
-    section_path: str
-    reading_blocks: list[GraphReadingBlockView] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class GraphEvidenceRangeView:
-    """证据在 ReadingBlock 文本中的 Python 字符半开区间。"""
-
-    start_offset: int
-    end_offset: int
-
 
 @dataclass(slots=True)
 class GraphEvidenceRefView:
@@ -90,7 +76,6 @@ class GraphEvidenceRefView:
     resource_id: str
     reading_block_id: str
     quote: str
-    reading_block_range: GraphEvidenceRangeView
 
 
 @dataclass(slots=True)
@@ -149,7 +134,7 @@ class GraphExpandResult:
     seed_nodes: list[GraphNodeView] = field(default_factory=list)
     discovered_nodes: list[DiscoveredKnowledgeNodeView] = field(default_factory=list)
     paths: list[GraphPathView] = field(default_factory=list)
-    evidence_sections: list[GraphEvidenceSectionView] = field(default_factory=list)
+    evidence_reading_blocks: list[GraphReadingBlockView] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -400,7 +385,7 @@ class KnowledgeGraphExpander:
         for node_id in added_node_ids:
             retained_evidence.extend(node_evidence[node_id])
 
-        evidence_sections = _build_graph_evidence_section_views(
+        evidence_reading_blocks = _build_graph_reading_block_views(
             _deduplicate_evidence(retained_evidence)
         )
   
@@ -416,7 +401,7 @@ class KnowledgeGraphExpander:
                 for node_id in added_node_ids
             ],
             paths=path_views,
-            evidence_sections=evidence_sections,
+            evidence_reading_blocks=evidence_reading_blocks,
         )
 
     async def _verify_path_evidence(
@@ -577,10 +562,6 @@ def _to_evidence_view(record: PublishedGraphEvidence) -> GraphEvidenceRefView:
         resource_id=record.evidence.resource_id,
         reading_block_id=record.evidence.reading_block_id,
         quote=record.evidence.quote,
-        reading_block_range=GraphEvidenceRangeView(
-            start_offset=record.block_range.start_offset,
-            end_offset=record.block_range.end_offset,
-        ),
     )
 
 
@@ -671,36 +652,28 @@ def _path_resource_ids(path: TraversedPath) -> set[str]:
     }
 
 
-def _build_graph_evidence_section_views(
+def _build_graph_reading_block_views(
     records: Sequence[PublishedGraphEvidence],
-) -> list[GraphEvidenceSectionView]:
-    """按首次证据顺序聚合完整 ReadingBlock，并彻底隔离检索 matches。"""
-    sections: dict[tuple[str, str], GraphEvidenceSectionView] = {}
-    seen_blocks: set[tuple[str, str]] = set()
+) -> list[GraphReadingBlockView]:
+    """按首次证据顺序去重完整 ReadingBlock，并彻底隔离检索 matches。"""
+    blocks: dict[tuple[str, str], GraphReadingBlockView] = {}
 
     for record in records:
         resource_id = record.evidence.resource_id
-        section_key = (resource_id, record.section.section_id)
-        section_view = sections.setdefault(
-            section_key,
-            GraphEvidenceSectionView(
-                resource_id=resource_id,
-                section_id=record.section.section_id,
-                title=record.section.title,
-                section_path=" > ".join(record.section.section_path),
-            ),
-        )
         block_key = (resource_id, record.reading_block.block_id)
-        if block_key in seen_blocks:
+        if block_key in blocks:
             continue
-        seen_blocks.add(block_key)
-        section_view.reading_blocks.append(
-            GraphReadingBlockView(
-                reading_block_id=record.reading_block.block_id,
-                text=record.reading_block.raw_text,
-                page_labels=record.reading_block.page_labels,
-                anchor_labels=record.reading_block.anchor_labels,
-            )
+        presentation = present_reading_block(
+            record.reading_block,
+            record.reading_block_sections,
+        )
+        blocks[block_key] = GraphReadingBlockView(
+            resource_id=resource_id,
+            reading_block_id=record.reading_block.block_id,
+            text=presentation.text,
+            sections=presentation.sections,
+            page_labels=record.reading_block.page_labels,
+            anchor_labels=record.reading_block.anchor_labels,
         )
 
-    return list(sections.values())
+    return list(blocks.values())

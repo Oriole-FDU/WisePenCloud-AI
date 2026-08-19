@@ -5,26 +5,24 @@ import pytest
 from common.core.domain import GroupRoleType
 from common.core.exceptions import ServiceException
 from common.security import SecurityContextHolder
+from common.utils.ranking import RankDecision
 
 from rag.api.endpoints.expand import expand_graph
 from rag.api.endpoints.locate import locate_candidate
 from rag.api.schemas import CandidateLocateRequest, GraphExpandRequest
 from rag.application.rag.navigate import (
     DiscoveredKnowledgeNodeView,
-    GraphEvidenceRangeView,
     GraphEvidenceRefView,
-    GraphEvidenceSectionView,
+    GraphExpandResult,
     GraphNodeRole,
     GraphNodeView,
-    GraphRelationEndpointView,
-    GraphRelationView,
-    GraphExpandResult,
     GraphPathView,
     GraphReadingBlockView,
+    GraphRelationEndpointView,
+    GraphRelationView,
     LocateError,
     LocateResult,
     RetrievalReadingBlockView,
-    RetrievedSectionView,
     UnknownSeedNodeError,
 )
 from rag.domain.error_codes import RagErrorCode
@@ -32,7 +30,6 @@ from rag.domain.models.graph import (
     KnowledgeNode,
     KnowledgeNodeKind,
 )
-from common.utils.ranking import RankDecision
 
 
 class _Locator:
@@ -61,35 +58,21 @@ class _Expander:
         return self.result
 
 
-def _source() -> RetrievedSectionView:
-    return RetrievedSectionView(
+def _source() -> RetrievalReadingBlockView:
+    return RetrievalReadingBlockView(
         resource_id="resource-1",
-        section_id="section-1",
-        title="标题",
-        section_path="父标题 > 标题",
-        reading_blocks=[
-            RetrievalReadingBlockView(
-                reading_block_id="block-1",
-                text="完整正文",
-                page_labels=["1", "2"],
-            )
-        ],
+        reading_block_id="block-1",
+        text="完整正文",
+        page_labels=["1", "2"],
     )
 
 
-def _graph_source() -> GraphEvidenceSectionView:
-    return GraphEvidenceSectionView(
+def _graph_source() -> GraphReadingBlockView:
+    return GraphReadingBlockView(
         resource_id="resource-1",
-        section_id="section-1",
-        title="标题",
-        section_path="父标题 > 标题",
-        reading_blocks=[
-            GraphReadingBlockView(
-                reading_block_id="block-1",
-                text="完整正文",
-                page_labels=["1", "2"],
-            )
-        ],
+        reading_block_id="block-1",
+        text="完整正文",
+        page_labels=["1", "2"],
     )
 
 
@@ -106,7 +89,7 @@ async def test_locate_endpoint_uses_authenticated_identity_and_compact_contract(
                     kind=KnowledgeNodeKind.ENTITY,
                 )
             ],
-            sections=[_source()],
+            reading_blocks=[_source()],
         )
     )
     SecurityContextHolder.set_group_role_map('{"group-1": 1}')
@@ -123,15 +106,15 @@ async def test_locate_endpoint_uses_authenticated_identity_and_compact_contract(
     }
     payload = response.data.model_dump(mode="json")
     assert payload["retrieval_status"] == "relevant"
-    assert payload["sections"][0]["title"] == "标题"
-    assert payload["sections"][0]["reading_blocks"][0]["text"] == "完整正文"
-    assert payload["sections"][0]["reading_blocks"][0]["page_labels"] == ["1", "2"]
+    assert payload["reading_blocks"][0]["resource_id"] == "resource-1"
+    assert payload["reading_blocks"][0]["text"] == "完整正文"
+    assert payload["reading_blocks"][0]["page_labels"] == ["1", "2"]
+    assert "sections" not in payload
     assert "decision" not in payload
-    assert "level" not in payload["sections"][0]
 
 
 @pytest.mark.asyncio
-async def test_graph_endpoint_returns_llm_readable_paths_and_evidence_sections() -> None:
+async def test_graph_endpoint_returns_llm_readable_paths_and_evidence_blocks() -> None:
     expander = _Expander(
         GraphExpandResult(
             state_id="state-1",
@@ -145,7 +128,6 @@ async def test_graph_endpoint_returns_llm_readable_paths_and_evidence_sections()
                             resource_id="resource-1",
                             reading_block_id="block-1",
                             quote="正文",
-                            reading_block_range=GraphEvidenceRangeView(2, 4),
                         )
                     ],
                 ),
@@ -171,14 +153,13 @@ async def test_graph_endpoint_returns_llm_readable_paths_and_evidence_sections()
                                     resource_id="resource-1",
                                     reading_block_id="block-1",
                                     quote="正文",
-                                    reading_block_range=GraphEvidenceRangeView(2, 4),
                                 )
                             ],
                         )
                     ],
                 )
             ],
-            evidence_sections=[_graph_source()],
+            evidence_reading_blocks=[_graph_source()],
         )
     )
 
@@ -197,19 +178,19 @@ async def test_graph_endpoint_returns_llm_readable_paths_and_evidence_sections()
     assert payload["paths"][0]["path"] == "Alpha -[DEPENDS_ON]-> Beta"
     assert payload["paths"][0]["relations"][0]["relation_evidence"] == [
         {
-            "resource_id": "resource-1",
-            "reading_block_id": "block-1",
-            "quote": "正文",
-            "reading_block_range": {"start_offset": 2, "end_offset": 4},
-        }
-    ]
+                "resource_id": "resource-1",
+                "reading_block_id": "block-1",
+                "quote": "正文",
+            }
+        ]
     assert payload["seed_nodes"][0]["role"] == "seed"
     assert payload["discovered_nodes"][0]["role"] == "discovered"
     assert payload["discovered_nodes"][0]["mention_evidence"][0]["reading_block_id"] == (
         "block-1"
     )
-    graph_block = payload["evidence_sections"][0]["reading_blocks"][0]
+    graph_block = payload["evidence_reading_blocks"][0]
     assert graph_block["page_labels"] == ["1", "2"]
+    assert "evidence_sections" not in payload
     serialized = json.dumps(payload)
     assert "chunk_id" not in serialized
     assert "source_ref" not in serialized

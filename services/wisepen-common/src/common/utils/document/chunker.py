@@ -21,7 +21,7 @@ from .recursive_splitter import split_plain_text
 class DocumentChunkerConfig:
     """文档 chunk 的硬上限和 oversized block overlap 配置。"""
 
-    max_characters: int = 6000
+    max_characters: int = 4000
     chunk_overlap: int = 0
 
     def __post_init__(self) -> None:
@@ -47,7 +47,7 @@ class DocumentChunker:
         blocks = self._parser.parse(text)
         pages = _build_pages(text_length=len(text), blocks=blocks)
         anchors = _build_anchors(blocks)
-        chunks = self._chunk_semantic_sections(blocks)
+        chunks = self._chunk_by_sections(blocks)
 
         if any(block.block_kind is BlockKind.HEADING for block in blocks):
             sections = _build_heading_sections(text=text, blocks=blocks)
@@ -77,7 +77,7 @@ class DocumentChunker:
             anchors=anchors,
         )
 
-    def _chunk_semantic_sections(
+    def _chunk_by_sections(
         self,
         blocks: tuple[DocumentBlock, ...],
     ) -> tuple[DocumentChunk, ...]:

@@ -5513,6 +5513,7 @@ dependencies = [
     { name = "wisepen-chat-service" },
     { name = "wisepen-common" },
     { name = "wisepen-mcp-service" },
+    { name = "wisepen-rag-service" },
     { name = "wisepen-sandbox-service" },
 ]
 
@@ -5523,6 +5524,7 @@ requires-dist = [
     { name = "wisepen-chat-service", editable = "services/wisepen-chat-service" },
     { name = "wisepen-common", editable = "services/wisepen-common" },
     { name = "wisepen-mcp-service", editable = "services/wisepen-mcp-service" },
+    { name = "wisepen-rag-service", editable = "services/wisepen-rag-service" },
     { name = "wisepen-sandbox-service", editable = "services/wisepen-sandbox-service" },
 ]
 

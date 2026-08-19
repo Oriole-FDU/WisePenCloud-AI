@@ -170,13 +170,33 @@ class _PublishedResourceReader:
             result[item.evidence_id] = PublishedGraphEvidence(
                 evidence=item,
                 reading_block=block,
-                section=sections_by_id[block.section_id],
+                section=_section_for_evidence(
+                    block.section_ids,
+                    sections_by_id,
+                    item.source_span,
+                ),
                 block_range=SourceSpan(
                     local_start,
                     local_start + len(item.quote),
                 ),
+                reading_block_sections=[
+                    sections_by_id[section_id] for section_id in block.section_ids
+                ],
             )
         return result
+
+
+def _section_for_evidence(section_ids, sections_by_id, source_span):
+    """解析多 Section ReadingBlock 中证据 span 的实际 Section 归属。"""
+    for section_id in section_ids:
+        section = sections_by_id[section_id]
+        if any(
+            source_span.start_offset >= content_span.start_offset
+            and source_span.end_offset <= content_span.end_offset
+            for content_span in section.content_spans
+        ):
+            return section
+    raise ValueError("graph evidence does not belong to its ReadingBlock sections")
 
 
 class _MentionGraph:
@@ -375,12 +395,16 @@ def _evidence_records(documents: list[DemoDocument]) -> list[SourceEvidence]:
         sections_by_id = {section.section_id: section for section in document.sections}
         for source_ref in document.source_refs:
             chunk = chunks_by_id[source_ref.chunk_id]
+            block = blocks_by_id[source_ref.reading_block_id]
             records.append(
                 SourceEvidence(
                     source_ref=source_ref,
-                    reading_block=blocks_by_id[source_ref.reading_block_id],
+                    reading_block=block,
                     section=sections_by_id[source_ref.section_id],
                     source_text=chunk.raw_text,
+                    reading_block_sections=[
+                        sections_by_id[section_id] for section_id in block.section_ids
+                    ],
                 )
             )
     return records

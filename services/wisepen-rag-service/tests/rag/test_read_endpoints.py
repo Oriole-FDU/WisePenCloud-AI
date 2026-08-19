@@ -76,6 +76,7 @@ class _OutlineReader:
                 OutlineNode(
                     section_id="section-1",
                     title="标题",
+                    length=12,
                     page_range="1",
                 )
             ],
@@ -155,6 +156,7 @@ async def test_outline_keeps_title_and_removes_level() -> None:
 
     node = response.data.outline[0]
     assert node.title == "标题"
+    assert node.length == 12
     assert node.page_range == "1"
     assert not hasattr(node, "level")
     assert not hasattr(node, "section_path")
@@ -247,11 +249,14 @@ def test_outline_uses_human_page_range() -> None:
     )
 
     assert outline[0].page_range == "1 - 3"
+    assert outline[0].length == 12
     assert outline[0].children[0].page_range == "3"
+    assert outline[0].children[0].length == 6
 
     flat_outline = _to_outline([_flat_section()], [], [])
     assert flat_outline[0].page_range is None
     assert flat_outline[0].title == "全文片段 1"
+    assert flat_outline[0].length == 4
     assert flat_outline[0].children == []
 
 
@@ -334,9 +339,11 @@ def test_outline_exposes_titled_root_as_preamble_entry() -> None:
 
     assert outline[0].title == "文档开头"
     assert outline[0].page_range == "1"
+    assert outline[0].length == 4
     assert outline[0].children == []
     assert outline[1].title == "标题"
     assert outline[1].page_range == "1 - 3"
+    assert outline[1].length == 8
     assert outline[1].children == []
 
 

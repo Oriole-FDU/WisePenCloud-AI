@@ -95,6 +95,45 @@ def test_source_refs_preserve_reading_block_ownership() -> None:
     assert refs[0].anchor_labels == ["Table 1"]
 
 
+def test_shared_reading_block_keeps_retrieval_chunks_in_one_section() -> None:
+    markdown = "# 文档\n\n## 摘要\n\n摘要内容。\n\n## 结论\n\n结论内容。"
+    structure = build_document_structure(markdown)
+    blocks = build_reading_blocks(
+        resource_id="resource-1",
+        content_revision="revision-1",
+        markdown=markdown,
+        structure=structure,
+        sections=structure.sections,
+    )
+    chunks = build_retrieval_chunks(
+        markdown=markdown,
+        structure=structure,
+        sections=structure.sections,
+        reading_blocks=blocks,
+    )
+    summary = next(item for item in structure.sections if item.title == "摘要")
+    conclusion = next(item for item in structure.sections if item.title == "结论")
+    shared = next(block for block in blocks if summary.section_id in block.section_ids)
+    shared_chunks = [
+        chunk for chunk in chunks if chunk.reading_block_id == shared.block_id
+    ]
+
+    assert {chunk.section_id for chunk in shared_chunks} == {
+        summary.section_id,
+        conclusion.section_id,
+    }
+    for chunk in shared_chunks:
+        section = summary if chunk.section_id == summary.section_id else conclusion
+        assert all(
+            any(
+                span.start_offset >= content_span.start_offset
+                and span.end_offset <= content_span.end_offset
+                for content_span in section.content_spans
+            )
+            for span in chunk.source_spans
+        )
+
+
 def test_empty_document_builds_no_retrieval_facts() -> None:
     structure = build_document_structure("")
 

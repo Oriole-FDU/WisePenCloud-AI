@@ -1,3 +1,12 @@
+from rag.application.rag.navigate.evidence_verifiers.graph_evidence import (
+    GraphEvidenceVerifier,
+)
+from rag.application.rag.navigate.evidence_verifiers.source_evidence import (
+    EvidenceCorruptError,
+    EvidenceNotFoundError,
+    EvidenceRevisionError,
+    SourceEvidenceVerifier,
+)
 from rag.domain.models.graph import (
     TraversalDirection,
 )
@@ -7,32 +16,23 @@ from .candidate_locator import (
     LocateResult,
     ReadingCandidateLocator,
     RetrievalReadingBlockView,
-    RetrievedSectionView,
 )
-from rag.application.rag.navigate.evidence_verifiers.graph_evidence import GraphEvidenceVerifier
 from .graph_expander import (
     DiscoveredKnowledgeNodeView,
     GraphAccessRevokedError,
+    GraphEvidenceRefView,
+    GraphExpandResult,
     GraphNodeRole,
     GraphNodeView,
-    GraphEvidenceRangeView,
-    GraphEvidenceRefView,
-    GraphEvidenceSectionView,
-    GraphExpandResult,
+    GraphPathView,
     GraphReadingBlockView,
     GraphRelationEndpointView,
     GraphRelationView,
-    GraphPathView,
     KnowledgeGraphExpander,
     NavigationStateNotFoundError,
     UnknownSeedNodeError,
 )
-from rag.application.rag.navigate.evidence_verifiers.source_evidence import (
-    EvidenceCorruptError,
-    EvidenceNotFoundError,
-    EvidenceRevisionError,
-    SourceEvidenceVerifier,
-)
+from .reading_blocks import ReadingBlockSectionView
 
 __all__ = [
     "DiscoveredKnowledgeNodeView",
@@ -40,24 +40,22 @@ __all__ = [
     "EvidenceNotFoundError",
     "EvidenceRevisionError",
     "GraphAccessRevokedError",
-    "GraphNodeRole",
-    "GraphNodeView",
-    "GraphEvidenceRangeView",
     "GraphEvidenceRefView",
-    "GraphEvidenceSectionView",
     "GraphEvidenceVerifier",
     "GraphExpandResult",
-    "GraphRelationEndpointView",
-    "GraphRelationView",
+    "GraphNodeRole",
+    "GraphNodeView",
     "GraphPathView",
     "GraphReadingBlockView",
+    "GraphRelationEndpointView",
+    "GraphRelationView",
     "KnowledgeGraphExpander",
     "LocateError",
     "LocateResult",
     "NavigationStateNotFoundError",
+    "ReadingBlockSectionView",
     "ReadingCandidateLocator",
     "RetrievalReadingBlockView",
-    "RetrievedSectionView",
     "SourceEvidenceVerifier",
     "TraversalDirection",
     "UnknownSeedNodeError",

@@ -81,7 +81,7 @@ def _to_outline_node(
     anchors: Sequence[Anchor],
     expand_children: bool = True,
 ) -> OutlineNode:
-    # 有真实标题的 Section 用 subtree_span 计算页范围；level=0 root 只使用 own_span。
+    # 节点长度与页范围共用可见范围：真实章节覆盖子树，前言 root 只覆盖直属正文。
     span = section.subtree_span if section.level > 0 else section.own_span
     page_labels = [
         page.page_label
@@ -97,6 +97,7 @@ def _to_outline_node(
     return OutlineNode(
         section_id=section.section_id,
         title=section.title,
+        length=span.end_offset - span.start_offset,
         page_range=_format_page_range(page_labels),
         anchor_labels=anchor_labels,
         children=[

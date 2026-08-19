@@ -1,10 +1,16 @@
 import pytest
+from common.utils.document import SourceSpan
+from common.utils.ranking import RankCandidate, RankedCandidate, RankResult
 
 from rag.application.rag.navigate import (
     KnowledgeGraphExpander,
     UnknownSeedNodeError,
 )
-from rag.application.rag.navigate.graph_expander import _render_path, _to_path_view
+from rag.application.rag.navigate.graph_expander import (
+    _build_graph_reading_block_views,
+    _render_path,
+    _to_path_view,
+)
 from rag.domain.models.acl import PermissionScope
 from rag.domain.models.content import ReadingBlock
 from rag.domain.models.graph import (
@@ -24,8 +30,6 @@ from rag.domain.repositories.neo4j import (
     TraversedPath,
 )
 from rag.domain.repositories.redis import NavigationState
-from common.utils.document import SourceSpan
-from common.utils.ranking import RankCandidate, RankedCandidate, RankResult
 
 
 class _StateStore:
@@ -135,20 +139,88 @@ async def test_expand_returns_relation_and_discovered_node_reading_blocks() -> N
         == "block-relation"
     )
     assert (
-        result.paths[0].relations[0].relation_evidence[0]
-        .reading_block_range.start_offset
-        == 0
+        result.paths[0].relations[0].relation_evidence[0].quote
+        == "Alpha depends on Beta."
     )
-    blocks = [
-        block
-        for section in result.evidence_sections
-        for block in section.reading_blocks
-    ]
+    blocks = result.evidence_reading_blocks
     assert {block.reading_block_id for block in blocks} == {
         "block-relation",
         "block-node",
     }
     assert all(not hasattr(block, "matches") for block in blocks)
+
+
+def test_graph_evidence_blocks_show_all_sections_with_title_boundaries() -> None:
+    first = Section(
+        section_id="section-1",
+        title="第一节",
+        level=2,
+        parent_section_id="parent",
+        ordinal=0,
+        section_path=["文档", "第一节"],
+        own_span=SourceSpan(0, 2),
+        subtree_span=SourceSpan(0, 2),
+        content_spans=[SourceSpan(0, 2)],
+    )
+    second = Section(
+        section_id="section-2",
+        title="第二节",
+        level=2,
+        parent_section_id="parent",
+        ordinal=1,
+        section_path=["文档", "第二节"],
+        own_span=SourceSpan(2, 4),
+        subtree_span=SourceSpan(2, 4),
+        content_spans=[SourceSpan(2, 4)],
+    )
+    block = ReadingBlock(
+        block_id="block-1",
+        section_ids=[first.section_id, second.section_id],
+        ordinal=0,
+        raw_text="甲文\n\n乙文",
+        source_spans=[SourceSpan(0, 2), SourceSpan(2, 4)],
+    )
+    evidence = GraphEvidence(
+        evidence_id="evidence-1",
+        resource_id="resource-1",
+        content_revision="revision-1",
+        reading_block_id=block.block_id,
+        source_span=SourceSpan(0, 2),
+        quote="甲文",
+    )
+    record = PublishedGraphEvidence(
+        evidence=evidence,
+        reading_block=block,
+        section=first,
+        block_range=SourceSpan(0, 2),
+        reading_block_sections=[first, second],
+    )
+    duplicate = PublishedGraphEvidence(
+        evidence=GraphEvidence(
+            evidence_id="evidence-2",
+            resource_id="resource-1",
+            content_revision="revision-1",
+            reading_block_id=block.block_id,
+            source_span=SourceSpan(2, 4),
+            quote="乙文",
+        ),
+        reading_block=block,
+        section=second,
+        block_range=SourceSpan(4, 6),
+        reading_block_sections=[first, second],
+    )
+
+    blocks = _build_graph_reading_block_views([record, duplicate])
+
+    assert len(blocks) == 1
+    block_view = blocks[0]
+    assert block_view.resource_id == "resource-1"
+    assert block_view.text == "## 第一节\n\n甲文\n\n## 第二节\n\n乙文"
+    assert [section.section_id for section in block_view.sections] == [
+        "section-1",
+        "section-2",
+    ]
+    assert all(section.block_is_enough for section in block_view.sections)
 
 
 @pytest.mark.asyncio
@@ -201,7 +273,7 @@ async def test_expand_returns_nothing_when_concurrent_call_added_nodes_first() -
 
     assert result.paths == []
     assert result.discovered_nodes == []
-    assert result.evidence_sections == []
+    assert result.evidence_reading_blocks == []
 
 
 @pytest.mark.asyncio
@@ -412,7 +484,7 @@ def _record(evidence: GraphEvidence) -> PublishedGraphEvidence:
         evidence=evidence,
         reading_block=ReadingBlock(
             block_id=evidence.reading_block_id,
-            section_id=section_id,
+            section_ids=[section_id],
             ordinal=0,
             raw_text=evidence.quote,
             source_spans=[span],
@@ -420,4 +492,5 @@ def _record(evidence: GraphEvidence) -> PublishedGraphEvidence:
         ),
         section=section,
         block_range=span,
+        reading_block_sections=[section],
     )

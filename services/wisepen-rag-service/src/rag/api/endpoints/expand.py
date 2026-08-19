@@ -69,7 +69,7 @@ async def expand_graph(
             seed_nodes=result.seed_nodes,
             discovered_nodes=result.discovered_nodes,
             paths=result.paths,
-            evidence_sections=result.evidence_sections,
+            evidence_reading_blocks=result.evidence_reading_blocks,
         )
     )
 

@@ -1,11 +1,11 @@
 """LOCATE endpoint 的请求与响应 schema。"""
 from typing import Annotated
 
+from common.utils.ranking import RankDecision
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from rag.application.rag.navigate import RetrievedSectionView
+from rag.application.rag.navigate import RetrievalReadingBlockView
 from rag.domain.models.graph import KnowledgeNode
-from common.utils.ranking import RankDecision
 
 NonEmptyText = Annotated[
     str,
@@ -28,4 +28,4 @@ class CandidateLocateResponse(BaseModel):
     state_id: str
     retrieval_status: RankDecision
     nodes: list[KnowledgeNode]
-    sections: list[RetrievedSectionView]
+    reading_blocks: list[RetrievalReadingBlockView]

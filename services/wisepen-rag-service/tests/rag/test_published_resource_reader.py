@@ -100,7 +100,7 @@ def _install_published_resource(
     )
     block = SimpleNamespace(
         block_id="block-1",
-        section_id="section-1",
+        section_ids=["section-1"],
         ordinal=0,
         raw_text="Body",
         start_offset=5,
@@ -110,7 +110,7 @@ def _install_published_resource(
     )
     following_block = SimpleNamespace(
         block_id="block-2",
-        section_id="section-2",
+        section_ids=["section-2"],
         ordinal=0,
         raw_text="Tail",
         start_offset=9,

@@ -1,13 +1,17 @@
 from dataclasses import dataclass, replace
 
 import pytest
+from common.utils.document import SourceSpan
+from common.utils.ranking import RankDecision, RankedCandidate, RankResult
 
 from rag.application.rag.acl import PermissionAuthorizer
 from rag.application.rag.navigate import (
     ReadingCandidateLocator,
     SourceEvidenceVerifier,
 )
-from rag.application.rag.navigate.candidate_locator import _build_retrieved_section_views
+from rag.application.rag.navigate.candidate_locator import (
+    _build_retrieval_reading_block_views,
+)
 from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.domain.models.content import ReadingBlock
 from rag.domain.models.graph import KnowledgeNode, KnowledgeNodeKind
@@ -15,8 +19,6 @@ from rag.domain.models.provenance import SourceEvidence, SourceRef
 from rag.domain.models.retrieval import RetrievalCandidate
 from rag.domain.models.structure import Section
 from rag.domain.repositories.redis import NavigationState
-from common.utils.document import SourceSpan
-from common.utils.ranking import RankDecision, RankedCandidate, RankResult
 
 
 @dataclass
@@ -169,6 +171,7 @@ def _candidate(chunk_id, span, *, block_id="block-1") -> RetrievalCandidate:
 
 
 def _record(candidate) -> SourceEvidence:
+    section = _section()
     return SourceEvidence(
         source_ref=SourceRef(
             ref_id=candidate.source_ref_id,
@@ -184,14 +187,15 @@ def _record(candidate) -> SourceEvidence:
         ),
         reading_block=ReadingBlock(
             block_id=candidate.reading_block_id,
-            section_id=candidate.section_id,
+            section_ids=[candidate.section_id],
             ordinal=0,
             raw_text="abcdefghij",
             source_spans=[SourceSpan(0, 10)],
             page_labels=["1"],
         ),
-        section=_section(),
+        section=section,
         source_text=candidate.raw_text,
+        reading_block_sections=[section],
     )
 
 
@@ -242,12 +246,12 @@ async def test_locate_promotes_chunks_to_one_block_with_minimal_match_anchors() 
     )
 
     assert result.retrieval_status is RankDecision.RELEVANT
-    assert result.sections[0].title == "当前标题"
-    assert result.sections[0].section_path == "很长的父标题 > 当前标题"
-    block = result.sections[0].reading_blocks[0]
+    block = result.reading_blocks[0]
+    assert block.resource_id == "resource-1"
     assert block.text == "abcdefghij"
     assert block.page_labels == ["1"]
-    assert not hasattr(result.sections[0], "level")
+    assert block.sections[0].title == "当前标题"
+    assert block.sections[0].section_path == "很长的父标题 > 当前标题"
     assert result.nodes[0].resource_id is None
     assert state_store.created["known_node_ids"] == ["node-1"]
     assert "known_sections" not in state_store.created
@@ -291,55 +295,121 @@ def test_flat_text_retrieval_view_keeps_synthetic_section_context() -> None:
             section_path=("全文片段 1",),
         ),
     )
+    record = replace(record, reading_block_sections=[record.section])
 
-    section = _build_retrieved_section_views([record])[0]
+    block = _build_retrieval_reading_block_views([record])[0]
 
-    assert section.title == "全文片段 1"
-    assert section.section_path == "全文片段 1"
-    assert section.reading_blocks[0].page_labels == ["1"]
-    # 合成节单 block 即全集，命中即完整。
-    assert section.is_complete is True
+    assert block.sections[0].title == "全文片段 1"
+    assert block.sections[0].section_path == "全文片段 1"
+    assert block.page_labels == ["1"]
+    assert block.sections[0].block_is_enough is True
 
 
-def test_section_completeness_follows_span_coverage() -> None:
+def test_reading_block_section_completeness_follows_own_span_coverage() -> None:
     # 部分覆盖：block 只覆盖直属正文前半段。
     partial = _record(_candidate("chunk-1", SourceSpan(0, 4)))
     partial = replace(
         partial,
         section=replace(partial.section, content_spans=(SourceSpan(0, 10),)),
     )
+    partial = replace(partial, reading_block_sections=[partial.section])
     partial.reading_block.source_spans = [SourceSpan(0, 5)]
 
-    section = _build_retrieved_section_views([partial])[0]
+    block = _build_retrieval_reading_block_views([partial])[0]
 
-    assert section.is_complete is False
+    assert block.sections[0].block_is_enough is False
 
-    # 多 block 区间合并后完整覆盖。
+    # 完整性属于单个 ReadingBlock，不跨多个返回 block 聚合。
     first = _record(_candidate("chunk-1", SourceSpan(0, 4)))
     first = replace(
         first,
         section=replace(first.section, content_spans=(SourceSpan(0, 10),)),
     )
+    first = replace(first, reading_block_sections=[first.section])
     first.reading_block.source_spans = [SourceSpan(0, 5)]
     second = _record(_candidate("chunk-2", SourceSpan(6, 9), block_id="block-2"))
-    second = replace(second, section=first.section)
+    second = replace(
+        second,
+        section=first.section,
+        reading_block_sections=[first.section],
+    )
     second.reading_block.source_spans = [SourceSpan(5, 10)]
 
-    merged_section = _build_retrieved_section_views([first, second])[0]
+    blocks = _build_retrieval_reading_block_views([first, second])
 
-    assert merged_section.is_complete is True
+    assert all(block.sections[0].block_is_enough is False for block in blocks)
 
-    # 纯标题节（无直属正文）视为已完整。
-    heading_only = _record(_candidate("chunk-1", SourceSpan(0, 4)))
-    heading_only = replace(
-        heading_only,
-        section=replace(heading_only.section, content_spans=()),
+
+
+def test_multisection_block_shows_title_boundaries_and_all_sections() -> None:
+    first = Section(
+        section_id="section-1",
+        title="第一节",
+        level=2,
+        parent_section_id="parent",
+        ordinal=0,
+        section_path=["文档", "第一节"],
+        own_span=SourceSpan(0, 2),
+        subtree_span=SourceSpan(0, 2),
+        content_spans=[SourceSpan(0, 2)],
     )
-    heading_only.reading_block.source_spans = [SourceSpan(0, 5)]
+    second = Section(
+        section_id="section-2",
+        title="第二节",
+        level=2,
+        parent_section_id="parent",
+        ordinal=1,
+        section_path=["文档", "第二节"],
+        own_span=SourceSpan(2, 4),
+        subtree_span=SourceSpan(2, 4),
+        content_spans=[SourceSpan(2, 4)],
+    )
+    block = ReadingBlock(
+        block_id="block-1",
+        section_ids=[first.section_id, second.section_id],
+        ordinal=0,
+        raw_text="甲文\n\n乙文",
+        source_spans=[SourceSpan(0, 2), SourceSpan(2, 4)],
+    )
+    record = SourceEvidence(
+        source_ref=SourceRef(
+            ref_id="ref-1",
+            resource_id="resource-1",
+            content_revision="revision-1",
+            chunk_id="chunk-1",
+            reading_block_id=block.block_id,
+            section_id=first.section_id,
+            section_path=list(first.section_path),
+        ),
+        reading_block=block,
+        section=first,
+        source_text="甲文",
+        reading_block_sections=[first, second],
+    )
+    duplicate = replace(
+        record,
+        source_ref=replace(
+            record.source_ref,
+            ref_id="ref-2",
+            chunk_id="chunk-2",
+            section_id=second.section_id,
+            section_path=list(second.section_path),
+        ),
+        section=second,
+        source_text="乙文",
+    )
 
-    heading_section = _build_retrieved_section_views([heading_only])[0]
+    blocks = _build_retrieval_reading_block_views([record, duplicate])
 
-    assert heading_section.is_complete is True
+    assert len(blocks) == 1
+    block_view = blocks[0]
+    assert block_view.resource_id == "resource-1"
+    assert block_view.text == "## 第一节\n\n甲文\n\n## 第二节\n\n乙文"
+    assert [section.section_id for section in block_view.sections] == [
+        "section-1",
+        "section-2",
+    ]
+    assert all(section.block_is_enough for section in block_view.sections)
 
 
 @pytest.mark.asyncio
@@ -363,9 +433,7 @@ async def test_locate_max_results_counts_blocks_not_chunks() -> None:
         max_results=1,
     )
 
-    assert [block.reading_block_id for block in result.sections[0].reading_blocks] == [
-        "block-1"
-    ]
+    assert [block.reading_block_id for block in result.reading_blocks] == ["block-1"]
     assert source_evidence_reader.calls == [["ref-chunk-1", "ref-chunk-2"]]
 
 
@@ -385,7 +453,7 @@ async def test_locate_irrelevant_result_still_creates_graph_state() -> None:
     )
 
     assert result.retrieval_status is RankDecision.IRRELEVANT
-    assert result.sections == []
+    assert result.reading_blocks == []
     assert source_evidence_reader.calls == []
     assert state_store.created["known_node_ids"] == []
 
@@ -436,6 +504,6 @@ async def test_locate_drops_evidence_revoked_after_authoritative_read() -> None:
         permission_scope=PermissionScope(user_id="user-1"),
     )
 
-    assert result.sections == []
+    assert result.reading_blocks == []
     assert result.nodes == []
     assert state_store.created["known_node_ids"] == []

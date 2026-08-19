@@ -30,7 +30,7 @@ def _source(text: str, *, split: int | None = None) -> GraphBuildSource:
     )
     block = ReadingBlock(
         block_id="block-1",
-        section_id="section-1",
+        section_ids=["section-1"],
         ordinal=0,
         raw_text=(text if split is None else f"{text[:split]}\n\n{text[split:]}"),
         source_spans=spans,

@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from common.utils.document import SourceSpan
 from common.utils.ranking import (
     RankCandidate,
     RankDecision,
@@ -19,6 +18,10 @@ from common.utils.ranking import (
 
 from rag.application.rag.acl import PermissionAuthorizer
 from rag.application.rag.navigate.evidence_verifiers import SourceEvidenceVerifier
+from rag.application.rag.navigate.reading_blocks import (
+    ReadingBlockSectionView,
+    present_reading_block,
+)
 from rag.domain.models.acl import PermissionScope
 from rag.domain.models.graph import KnowledgeNode, KnowledgeNodeKind
 from rag.domain.models.provenance import SourceEvidence
@@ -39,7 +42,7 @@ class LocateResult:
     state_id: str
     retrieval_status: RankDecision
     nodes: list[KnowledgeNode] = field(default_factory=list)
-    sections: list[RetrievedSectionView] = field(default_factory=list)
+    reading_blocks: list[RetrievalReadingBlockView] = field(default_factory=list)
 
 
 class LocateError(RuntimeError):
@@ -50,25 +53,12 @@ class LocateError(RuntimeError):
 class RetrievalReadingBlockView:
     """检索命中后提升出的完整 ReadingBlock 正文及紧凑页范围。"""
 
+    resource_id: str
     reading_block_id: str
     text: str
+    sections: list[ReadingBlockSectionView] = field(default_factory=list)
     page_labels: list[str] = field(default_factory=list)
     anchor_labels: list[str] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class RetrievedSectionView:
-    """承载命中 ReadingBlock；flat text 使用 synthetic Section 作为读取锚点。"""
-
-    resource_id: str
-    section_id: str
-    title: str
-    section_path: str
-    reading_blocks: list[RetrievalReadingBlockView] = field(default_factory=list)
-    # 已提升 block 的原文区间是否完整覆盖 Section 直属正文；
-    # False 时模型才需要调用 getSectionContent 补读，避免盲目重载。
-    is_complete: bool = True
-
 
 class ReadingCandidateLocator:
     """编排召回、精排、回源核验与 Section 阅读入口的创建。"""
@@ -213,8 +203,7 @@ class ReadingCandidateLocator:
             records,
             permission_scope,
         )
-        # 构建最终展示的section视图
-        sections = _build_retrieved_section_views(readable_records)
+        reading_blocks = _build_retrieval_reading_block_views(readable_records)
 
         # 将 readable_records 按 ReadingBlock 聚合，构建图谱导航的种子块集合
         seed_blocks: dict[tuple[str, str, str], GraphSeedBlock] = {}
@@ -258,7 +247,7 @@ class ReadingCandidateLocator:
             state_id=state.state_id,
             retrieval_status=ranking.decision,
             nodes=nodes,
-            sections=sections,
+            reading_blocks=reading_blocks,
         )
 
     async def _filter_readable_candidates(
@@ -387,73 +376,26 @@ def _candidate_key(candidate: RetrievalCandidate) -> str:
     )
 
 
-def _build_retrieved_section_views(
+def _build_retrieval_reading_block_views(
     records: list[SourceEvidence],
-) -> list[RetrievedSectionView]:
-    """按首次命中顺序把核验证据提升并归组为完整 ReadingBlock。"""
-    sections: dict[tuple[str, str], RetrievedSectionView] = {}
+) -> list[RetrievalReadingBlockView]:
+    """按首次命中顺序把核验证据提升并去重为完整 ReadingBlock。"""
     blocks: dict[tuple[str, str], RetrievalReadingBlockView] = {}
-    # 按 section 聚合已提升 block 的原文区间与直属正文区间，供完整性判定。
-    block_spans_by_section: dict[tuple[str, str], list[SourceSpan]] = {}
-    content_spans_by_section: dict[tuple[str, str], list[SourceSpan]] = {}
-
     for record in records:
-        section_key = (record.source_ref.resource_id, record.section.section_id)
-        section_view = sections.setdefault(
-            section_key,
-            RetrievedSectionView(
-                resource_id=record.source_ref.resource_id,
-                section_id=record.section.section_id,
-                title=record.section.title,
-                section_path=" > ".join(record.section.section_path),
-            ),
-        )
         block_key = (record.source_ref.resource_id, record.reading_block.block_id)
-        block_view = blocks.get(block_key)
-        if block_view is None:
-            block_view = RetrievalReadingBlockView(
-                reading_block_id=record.reading_block.block_id,
-                text=record.reading_block.raw_text,
-                page_labels=record.reading_block.page_labels,
-                anchor_labels=record.reading_block.anchor_labels,
-            )
-            blocks[block_key] = block_view
-            section_view.reading_blocks.append(block_view)
-            block_spans_by_section.setdefault(section_key, []).extend(
-                record.reading_block.source_spans
-            )
-        content_spans_by_section.setdefault(
-            section_key, list(record.section.content_spans)
+        if block_key in blocks:
+            continue
+        presentation = present_reading_block(
+            record.reading_block,
+            record.reading_block_sections,
         )
-
-    # 完整性判定：提升 block 的原文区间联合覆盖 Section 全部直属正文区间。
-    for section_key, section_view in sections.items():
-        section_view.is_complete = _spans_cover(
-            block_spans_by_section.get(section_key, []),
-            content_spans_by_section.get(section_key, []),
+        block_view = RetrievalReadingBlockView(
+            resource_id=record.source_ref.resource_id,
+            reading_block_id=record.reading_block.block_id,
+            text=presentation.text,
+            sections=presentation.sections,
+            page_labels=record.reading_block.page_labels,
+            anchor_labels=record.reading_block.anchor_labels,
         )
-    return list(sections.values())
-
-
-def _spans_cover(covered: list[SourceSpan], target: list[SourceSpan]) -> bool:
-    """判断 target 的每个区间是否都被 covered 的合并区间完整包含。
-
-    纯标题节（target 为空）无正文可读，视为已完整。
-    """
-    if not target:
-        return True
-    # 合并 covered 为有序不相交区间，再做包含判定。
-    merged: list[list[int]] = []
-    for span in sorted(covered, key=lambda item: item.start_offset):
-        if merged and span.start_offset <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], span.end_offset)
-        else:
-            merged.append([span.start_offset, span.end_offset])
-    for span in target:
-        covered_any = any(
-            start <= span.start_offset and span.end_offset <= end
-            for start, end in merged
-        )
-        if not covered_any:
-            return False
-    return True
+        blocks[block_key] = block_view
+    return list(blocks.values())

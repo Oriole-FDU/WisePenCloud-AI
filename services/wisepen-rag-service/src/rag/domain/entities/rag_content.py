@@ -144,7 +144,7 @@ class ReadingBlockEntity(Document):
     resource_id: str
     content_revision: str
     block_id: str
-    section_id: str
+    section_ids: list[str] = Field(default_factory=list)
     ordinal: int
     raw_text: str
     source_spans: list[StoredSpan] = Field(default_factory=list)
@@ -164,10 +164,10 @@ class ReadingBlockEntity(Document):
             IndexModel(
                 [
                     ("content_revision", ASCENDING),
-                    ("section_id", ASCENDING),
+                    ("section_ids", ASCENDING),
                     ("ordinal", ASCENDING),
                 ],
-                name="idx_rag_v2_reading_block_section_order",
+                name="idx_rag_v2_reading_block_sections_order",
             ),
             IndexModel(
                 [

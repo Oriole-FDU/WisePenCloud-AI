@@ -42,58 +42,65 @@ GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应�
 {
   "structure_mode": "sectioned",
   "section_count": 8,
-  "reading_block_count": 8,
+  "reading_block_count": 5,
   "retrieval_chunk_count": 8
 }
 === SECTIONED getDocumentOutline ===
 {
   "resource_id": "demo-rain-garden",
   "document_version": 1,
-  "content_revision": "rrev_65eb8962068ffdbb4e3dcc3053877dd1",
+  "content_revision": "rrev_854bc0430e339fb1",
   "total_length": 543,
   "outline": [
     {
-      "section_id": "rsec_3041da2c74b903455e6020b5df5ad616",
+      "section_id": "sec_72fac05c6a7734da",
       "title": "文档开头",
+      "length": 40,
       "anchor_labels": [],
       "children": []
     },
     {
-      "section_id": "rsec_84e306660d60c35e268a7485f276ecba",
+      "section_id": "sec_00dc3d106afd4e6a",
       "title": "WisePen RAG 导航架构说明",
+      "length": 503,
       "page_range": "1 - 2",
       "anchor_labels": [],
       "children": [
         {
-          "section_id": "rsec_009ea0472ec7bec0e872851fd25a2593",
+          "section_id": "sec_8426be2b8471edde",
           "title": "一、主检索流程",
+          "length": 69,
           "page_range": "1",
           "anchor_labels": [],
           "children": []
         },
         {
-          "section_id": "rsec_a709255ca921b901a7ccf79604c89956",
+          "section_id": "sec_ad2eec8e8c48d140",
           "title": "二、图谱导航",
+          "length": 268,
           "page_range": "1 - 2",
           "anchor_labels": [],
           "children": [
             {
-              "section_id": "rsec_eaaf9b7fa78e369e4621d690db039f27",
+              "section_id": "sec_cd52df950233fce6",
               "title": "二.1 关系抽取",
+              "length": 71,
               "page_range": "1 - 2",
               "anchor_labels": [],
               "children": []
             },
             {
-              "section_id": "rsec_c9ad2b0ce84ac8c21af3b7a7cd9ae959",
+              "section_id": "sec_1c13719cd8d5c589",
               "title": "二.2 证据回源",
+              "length": 71,
               "page_range": "2",
               "anchor_labels": [],
               "children": []
             },
             {
-              "section_id": "rsec_8a35e45cb0da02cfc06039f68708b1d1",
+              "section_id": "sec_4e38826d05ae58db",
               "title": "二.3 查询边界",
+              "length": 57,
               "page_range": "2",
               "anchor_labels": [],
               "children": []
@@ -101,8 +108,9 @@ GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应�
           ]
         },
         {
-          "section_id": "rsec_a4c8dee8e3e71bdad60f431c2985b6a2",
+          "section_id": "sec_321f4c4e678a0078",
           "title": "三、响应编排",
+          "length": 76,
           "page_range": "2",
           "anchor_labels": [],
           "children": []
@@ -129,12 +137,13 @@ GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应�
 {
   "resource_id": "demo-orchard-frost-log",
   "document_version": 1,
-  "content_revision": "rrev_cf26ed362a8edf080cc471a175e81fd2",
+  "content_revision": "rrev_aca879f64bb28d34",
   "total_length": 389,
   "outline": [
     {
-      "section_id": "rsec_d3ae11012880fdb5a55670160e6f53a5",
+      "section_id": "sec_85b209e41bdf4d21",
       "title": "全文片段 1",
+      "length": 389,
       "anchor_labels": [],
       "children": []
     }

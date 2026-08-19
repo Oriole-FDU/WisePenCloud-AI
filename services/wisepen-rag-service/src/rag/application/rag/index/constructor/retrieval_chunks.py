@@ -48,41 +48,53 @@ def build_retrieval_chunks(
     chunks: list[RetrievalChunk] = []
 
     for reading_block in reading_blocks:
-        section = sections_by_id[reading_block.section_id]
-        result = chunker.chunk(reading_block.raw_text)
-        for chunk in result.chunks:
-            # chunk.source_spans 是 ReadingBlock 渲染文本上的偏移（rendered 坐标），
-            # 需要映射回原文坐标，使其可以独立回源。
-            source_spans = _map_rendered_spans_to_source(
-                rendered_spans=list(chunk.source_spans),
-                source_spans=reading_block.source_spans,
-            )
-            # raw_text 必须直接从原文渲染，确保与权威源完全一致，不可使用 chunker 给的文本。
-            raw_text = _render_source_text(markdown, source_spans)
-            chunks.append(
-                RetrievalChunk(
-                    chunk_id=_build_retrieval_chunk_id(
-                        reading_block_id=reading_block.block_id,
-                        source_spans=source_spans,
-                    ),
-                    reading_block_id=reading_block.block_id,
-                    section_id=section.section_id,
-                    section_path=list(section.section_path),
-                    raw_text=raw_text,
-                    index_text=raw_text,
-                    source_spans=source_spans,
-                    page_labels=[
-                        page.page_label
-                        for page in structure.pages
-                        if _overlaps(page.source_span, source_spans)
-                    ],
-                    anchor_labels=[
-                        anchor.label
-                        for anchor in structure.anchors
-                        if _overlaps(anchor.source_span, source_spans)
-                    ],
+        # 父块可以覆盖多个兄弟 Section，但检索块和证据引用仍保持单 Section 归属。
+        for section_id in reading_block.section_ids:
+            section = sections_by_id[section_id]
+            section_spans = [
+                span
+                for span in reading_block.source_spans
+                if _overlaps(span, section.content_spans)
+            ]
+            if not section_spans:
+                raise ValueError(
+                    f"reading block {reading_block.block_id} has no content for "
+                    f"section {section_id}"
                 )
-            )
+            result = chunker.chunk(_render_source_text(markdown, section_spans))
+            for chunk in result.chunks:
+                # chunk.source_spans 是当前 Section 渲染文本上的偏移，
+                # 需要映射回原文坐标，使其可以独立回源。
+                source_spans = _map_rendered_spans_to_source(
+                    rendered_spans=list(chunk.source_spans),
+                    source_spans=section_spans,
+                )
+                # raw_text 必须直接从原文渲染，确保与权威源完全一致。
+                raw_text = _render_source_text(markdown, source_spans)
+                chunks.append(
+                    RetrievalChunk(
+                        chunk_id=_build_retrieval_chunk_id(
+                            reading_block_id=reading_block.block_id,
+                            source_spans=source_spans,
+                        ),
+                        reading_block_id=reading_block.block_id,
+                        section_id=section.section_id,
+                        section_path=list(section.section_path),
+                        raw_text=raw_text,
+                        index_text=raw_text,
+                        source_spans=source_spans,
+                        page_labels=[
+                            page.page_label
+                            for page in structure.pages
+                            if _overlaps(page.source_span, source_spans)
+                        ],
+                        anchor_labels=[
+                            anchor.label
+                            for anchor in structure.anchors
+                            if _overlaps(anchor.source_span, source_spans)
+                        ],
+                    )
+                )
 
     return chunks
 

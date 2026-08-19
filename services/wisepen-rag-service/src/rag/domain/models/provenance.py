@@ -2,9 +2,10 @@
 
 from dataclasses import dataclass, field
 
+from common.utils.document import SourceSpan
+
 from rag.domain.models.content import ReadingBlock
 from rag.domain.models.structure import Section
-from common.utils.document import SourceSpan
 
 
 @dataclass(slots=True)
@@ -31,3 +32,5 @@ class SourceEvidence:
     reading_block: ReadingBlock
     section: Section
     source_text: str
+    # 与 reading_block.section_ids 同序，用于把多 Section 父块投影为可读文本。
+    reading_block_sections: list[Section] = field(default_factory=list)

@@ -9,8 +9,10 @@
 
 from dataclasses import dataclass, field
 
+from common.utils.document import Section, SourceSpan
+
+from rag.domain.models.content import ReadingBlock
 from rag.domain.repositories.mongo.published_resource_reader import GraphBuildSource
-from common.utils.document import SourceSpan
 from rag.utils.xml_markup import xml_attr, xml_cdata
 
 # 邻接 ReadingBlock 提供给模型作为上下文的字符数（仅用于消歧，不可作为证据来源）。
@@ -48,7 +50,7 @@ class KnowledgeExtractionWindow:
     resource_id: str
     content_revision: str
     reading_block_id: str
-    section_path: list[str]
+    section_paths: list[list[str]]
     window_id: str
     ordinal: int
     text: str
@@ -68,7 +70,7 @@ def build_extraction_windows(
        则整块作为一个窗口，window_id 直接复用 block_id 以保持稳定身份。
     3. 仅在窗口起点（start == 0）注入 previous_context，仅在窗口终点
        （end == len(raw_text)）注入 next_context，避免上下文重复。
-    4. 同一 Section 内的邻接 block 才会被选作上下文，跨 Section 不连上下文。
+    4. 只有仍处在同一父级阅读范围的邻接 block 才会被选作上下文。
     """
     sections_by_id = {
         section.section_id: section for section in source.structure.sections
@@ -78,9 +80,12 @@ def build_extraction_windows(
     for block_index, block in enumerate(source.reading_blocks):
         if not block.raw_text.strip() or not block.source_spans:
             continue
-        section = sections_by_id.get(block.section_id)
-        if section is None:
-            raise ValueError(f"reading block {block.block_id} has no section")
+        block_sections = [
+            sections_by_id[section_id] for section_id in block.section_ids
+            if section_id in sections_by_id
+        ]
+        if len(block_sections) != len(block.section_ids):
+            raise ValueError(f"reading block {block.block_id} has missing sections")
 
         # 计算 ReadingBlock 全量文本的局部→原文映射，供后续窗口裁剪复用。
         mappings = _source_mappings(source.markdown, block.raw_text, block.source_spans)
@@ -102,7 +107,7 @@ def build_extraction_windows(
                     resource_id=source.resource_id,
                     content_revision=source.content_revision,
                     reading_block_id=block.block_id,
-                    section_path=list(section.section_path),
+                    section_paths=[list(section.section_path) for section in block_sections],
                     window_id=(
                         block.block_id
                         if whole_block
@@ -116,7 +121,7 @@ def build_extraction_windows(
                     previous_context=(
                         previous.raw_text[-_ADJACENT_CONTEXT_CHARACTERS:]
                         if previous is not None
-                        and previous.section_id == block.section_id
+                        and _shares_parent_scope(previous, block, sections_by_id)
                         and start == 0
                         else ""
                     ),
@@ -124,7 +129,7 @@ def build_extraction_windows(
                     next_context=(
                         next_block.raw_text[:_ADJACENT_CONTEXT_CHARACTERS]
                         if next_block is not None
-                        and next_block.section_id == block.section_id
+                        and _shares_parent_scope(next_block, block, sections_by_id)
                         and end == len(block.raw_text)
                         else ""
                     ),
@@ -142,7 +147,9 @@ def render_extraction_window(window: KnowledgeExtractionWindow) -> str:
       <current_reading_block> 的连续子串；previous/next 仅供消歧。
     - 资源 ID 必须原样复制，避免模型臆造。
     """
-    section_path = " > ".join(window.section_path) or "(document root)"
+    section_paths = "\n".join(
+        " > ".join(path) or "(document root)" for path in window.section_paths
+    )
     return f"""EXTRACTION_RULES:
 - Extract only facts supported by <current_reading_block>.
 - evidence_quote must be one exact continuous substring of <current_reading_block>.
@@ -151,12 +158,27 @@ def render_extraction_window(window: KnowledgeExtractionWindow) -> str:
 - RELATED_TO requires a specific predicate.
 
 <extraction_window resource_id="{xml_attr(window.resource_id)}">
-  <section_path>{xml_cdata(section_path)}</section_path>
+  <section_paths>{xml_cdata(section_paths)}</section_paths>
   <previous_context>{xml_cdata(window.previous_context)}</previous_context>
   <current_reading_block>{xml_cdata(window.text)}</current_reading_block>
   <next_context>{xml_cdata(window.next_context)}</next_context>
 </extraction_window>
 """
+
+
+def _shares_parent_scope(
+    left: ReadingBlock,
+    right: ReadingBlock,
+    sections_by_id: dict[str, Section],
+) -> bool:
+    """邻块只在至少一对边界 Section 属于同一父级时提供消歧上下文。"""
+    left_parent_ids = {
+        sections_by_id[section_id].parent_section_id for section_id in left.section_ids
+    }
+    right_parent_ids = {
+        sections_by_id[section_id].parent_section_id for section_id in right.section_ids
+    }
+    return not left_parent_ids.isdisjoint(right_parent_ids)
 
 
 def _source_mappings(

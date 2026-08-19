@@ -1,15 +1,16 @@
 from dataclasses import replace
 
 import pytest
+from common.utils.document import SourceSpan
 
 from rag.application.rag.acl import PermissionAuthorizer
 from rag.application.rag.index.constructor import (
     build_content_revision_id,
+    build_document_structure,
     build_reading_blocks,
     build_retrieval_chunks,
     build_source_refs,
     create_content_revision,
-    build_document_structure,
 )
 from rag.application.rag.navigate import (
     EvidenceCorruptError,
@@ -37,7 +38,6 @@ from rag.domain.repositories import PublishedResourceRevisionError, StageAction
 from rag.domain.repositories.mongo.published_resource_reader import (
     PublishedGraphEvidence,
 )
-from common.utils.document import SourceSpan
 
 
 def _revision(markdown: str = "# 标题\n\n正文🙂。"):
@@ -56,7 +56,7 @@ def test_revision_identity_and_unicode_length_are_stable() -> None:
     assert not hasattr(revision, "total_length")
     assert structure.total_length == len(markdown)
     assert revision.content_hash
-    assert revision.index_schema_version == "rag-v2-content:v4"
+    assert revision.index_schema_version == "rag-v2-content:v6"
 
 
 @pytest.mark.parametrize(
@@ -337,7 +337,7 @@ async def test_graph_verifier_preserves_graph_evidence_identity_and_order() -> N
     span = SourceSpan(0, 4)
     block = ReadingBlock(
         block_id="block-1",
-        section_id="section-1",
+        section_ids=["section-1"],
         ordinal=0,
         raw_text="正文内容",
         source_spans=[span],

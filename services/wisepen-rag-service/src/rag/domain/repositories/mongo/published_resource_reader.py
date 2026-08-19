@@ -55,6 +55,8 @@ class PublishedGraphEvidence:
     section: Section
     # Python 字符半开区间，坐标系属于 reading_block.raw_text。
     block_range: SourceSpan
+    # 与 reading_block.section_ids 同序，供公开 ReadingBlock 文本保留 Section 边界。
+    reading_block_sections: list[Section] = field(default_factory=list)
 
 
 class PublishedResourceRevisionError(RuntimeError):
