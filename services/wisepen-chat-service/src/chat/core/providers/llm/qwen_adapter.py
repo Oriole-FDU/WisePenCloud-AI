@@ -53,9 +53,11 @@ class QwenAdapter(LLMProvider):
         model_request: ModelRequestInfo,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[LLMStreamEvent, None]:
-        # 有图片时使用 DashScope 原生多模态格式，纯文本保持现有 Generation 格式
-        has_images = any(message.imgs for message in messages)
-        qwen_messages = self._qwen_messages_formatter(messages, multimodal=has_images) # 消息
+        # DashScope 的调用接口由模型能力决定；视觉模型即使本轮没有图片，也必须使用多模态协议。
+        qwen_messages = self._qwen_messages_formatter(
+            messages,
+            multimodal=model_request.model.support_vision,
+        )
 
         # 设置请求参数
         request_kwargs:dict[str, Any] = {
@@ -68,6 +70,9 @@ class QwenAdapter(LLMProvider):
             "tools": tools, # Qwen function calling 使用 OpenAI-compatible tools schema，无需转换
             **model_request.runtime_options
         }
+        if model_request.base_url:
+            # DashScope SDK 通过 base_address 覆盖默认 endpoint；未配置时保留 SDK 默认地址。
+            request_kwargs["base_address"] = model_request.base_url
 
         assistant_text = ""
         reasoning_text = ""
@@ -75,14 +80,26 @@ class QwenAdapter(LLMProvider):
         tool_call_payloads = []
         token_usage = 0
         try:
-            call = dashscope.MultiModalConversation.call if has_images else dashscope.Generation.call
+            # 上游已用 support_vision 拦截不支持视觉的图片请求，这里沿用同一能力边界选接口。
+            call = (
+                dashscope.MultiModalConversation.call
+                if model_request.model.support_vision
+                else dashscope.Generation.call
+            )
             responses = call(**without_none(request_kwargs))
             # 流式调用
             for response in responses:
                 status_code = read_provider_value(response, "status_code")
                 if status_code and int(status_code) >= 400:
+                    code = read_provider_value(response, "code", "")
                     message = read_provider_value(response, "message", "DashScope request failed")
-                    raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Qwen Provider Error: {message}")
+                    raise ServiceException(
+                        ChatErrorCode.LLM_GENERATION_FAILED,
+                        custom_msg=(
+                            f"Qwen Provider Error: status={status_code}, "
+                            f"code={code}, message={message}"
+                        ),
+                    )
 
                 output = read_provider_value(response, "output", {}) or {}
 
