@@ -11,9 +11,7 @@ from rag.application.rag.navigate import (
     GraphReadingBlockView,
     TraversalDirection,
 )
-from rag.application.rag.read.content import SectionContentView
 from rag.domain.models.graph import KnowledgeRelationType
-from rag.domain.models.section_navigation import SectionDirection
 
 NonEmptyText = Annotated[
     str,
@@ -48,28 +46,3 @@ class GraphExpandResponse(BaseModel):
     evidence_reading_blocks: list[GraphReadingBlockView]
 
 
-class SectionExpandRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    resource_id: NonEmptyText
-    section_id: NonEmptyText
-    direction: SectionDirection
-    char_budget: int = Field(default=12000, ge=1, le=50000)
-    after_section_id: NonEmptyText | None = None
-
-
-class SectionExpandResponse(BaseModel):
-    from_section_id: str
-    section_id: str
-    title: str
-    section_path: str
-    text: str
-    allowed_directions: list[SectionDirection]
-
-
-class SectionChildrenExpandResponse(BaseModel):
-    from_section_id: str
-    sections: list[SectionContentView] = Field(default_factory=list)
-    has_more: bool = False
-    next_after_section_id: str | None = None
-    budget_exhausted: bool = False

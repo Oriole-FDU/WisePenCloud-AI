@@ -2,15 +2,20 @@ from .content import (
     ContentAccessRevokedError,
     ContentNotFoundError,
     DocumentContentReader,
-    SectionInfoView,
+    SectionContentView,
 )
-from .outline import DocumentOutlineReader, DocumentOutlineResult
+from .neighborhood import (
+    SectionMetadataView,
+    SectionNeighborhoodReader,
+    SectionNeighborhoodView,
+)
 
 __all__ = [
     "ContentAccessRevokedError",
     "ContentNotFoundError",
     "DocumentContentReader",
-    "DocumentOutlineReader",
-    "DocumentOutlineResult",
-    "SectionInfoView",
+    "SectionContentView",
+    "SectionMetadataView",
+    "SectionNeighborhoodReader",
+    "SectionNeighborhoodView",
 ]

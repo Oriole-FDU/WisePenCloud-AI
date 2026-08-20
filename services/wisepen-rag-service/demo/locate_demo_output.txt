@@ -61,13 +61,13 @@ GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应�
           "section_id": "sec_8426be2b8471edde",
           "title": "一、主检索流程",
           "section_path": "WisePen RAG 导航架构说明 > 一、主检索流程",
-          "block_is_enough": true
+          "is_complete": true
         },
         {
           "section_id": "sec_ad2eec8e8c48d140",
           "title": "二、图谱导航",
           "section_path": "WisePen RAG 导航架构说明 > 二、图谱导航",
-          "block_is_enough": true
+          "is_complete": true
         }
       ],
       "page_labels": [
@@ -99,7 +99,7 @@ GraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应�
           "section_id": "sec_85b209e41bdf4d21",
           "title": "全文片段 1",
           "section_path": "全文片段 1",
-          "block_is_enough": true
+          "is_complete": true
         }
       ],
       "page_labels": [],

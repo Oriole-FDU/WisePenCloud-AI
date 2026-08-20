@@ -17,6 +17,7 @@ from rag.application.rag.navigate.reading_blocks import (
     ReadingBlockSectionView,
     present_reading_block,
 )
+from rag.application.rag.read.content import format_page_range
 from rag.domain.models.acl import PermissionScope
 from rag.domain.models.graph import (
     KnowledgeEntityType,
@@ -66,7 +67,7 @@ class GraphReadingBlockView:
     reading_block_id: str
     text: str
     sections: list[ReadingBlockSectionView] = field(default_factory=list)
-    page_labels: list[str] = field(default_factory=list)
+    page_range: str | None = None
     anchor_labels: list[str] = field(default_factory=list)
 
 @dataclass(slots=True)
@@ -672,7 +673,7 @@ def _build_graph_reading_block_views(
             reading_block_id=record.reading_block.block_id,
             text=presentation.text,
             sections=presentation.sections,
-            page_labels=record.reading_block.page_labels,
+            page_range=format_page_range(record.reading_block.page_labels),
             anchor_labels=record.reading_block.anchor_labels,
         )
 

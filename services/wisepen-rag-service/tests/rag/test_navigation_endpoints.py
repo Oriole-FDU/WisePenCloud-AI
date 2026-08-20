@@ -7,12 +7,11 @@ from common.core.exceptions import ServiceException
 from common.security import SecurityContextHolder
 from common.utils.ranking import RankDecision
 
-from rag.api.endpoints.expand import expand_graph, expand_section
+from rag.api.endpoints.expand import expand_graph
 from rag.api.endpoints.locate import locate_candidate
 from rag.api.schemas import (
     CandidateLocateRequest,
     GraphExpandRequest,
-    SectionExpandRequest,
 )
 from rag.application.rag.navigate import (
     DiscoveredKnowledgeNodeView,
@@ -27,16 +26,13 @@ from rag.application.rag.navigate import (
     LocateError,
     LocateResult,
     RetrievalReadingBlockView,
-    SectionChildrenExpandResult,
     UnknownSeedNodeError,
 )
-from rag.application.rag.read.content import SectionContentView
 from rag.domain.error_codes import RagErrorCode
 from rag.domain.models.graph import (
     KnowledgeNode,
     KnowledgeNodeKind,
 )
-from rag.domain.models.section_navigation import SectionDirection
 
 
 class _Locator:
@@ -79,7 +75,7 @@ def _graph_source() -> GraphReadingBlockView:
         resource_id="resource-1",
         reading_block_id="block-1",
         text="完整正文",
-        page_labels=["1", "2"],
+        page_range="1 - 2",
     )
 
 
@@ -198,7 +194,7 @@ async def test_graph_endpoint_returns_llm_readable_paths_and_evidence_blocks() -
         "reading_block_id"
     ] == ("block-1")
     graph_block = payload["evidence_reading_blocks"][0]
-    assert graph_block["page_labels"] == ["1", "2"]
+    assert graph_block["page_range"] == "1 - 2"
     assert "evidence_sections" not in payload
     serialized = json.dumps(payload)
     assert "chunk_id" not in serialized
@@ -211,46 +207,6 @@ async def test_graph_endpoint_returns_llm_readable_paths_and_evidence_blocks() -
     assert "text" not in payload["paths"][0]
     assert "steps" not in payload["paths"][0]
     assert "node_ids" not in payload["paths"][0]
-
-
-@pytest.mark.asyncio
-async def test_section_endpoint_returns_directional_expansion_with_budget_state() -> (
-    None
-):
-    expander = _Expander(
-        SectionChildrenExpandResult(
-            from_section_id="section-1",
-            sections=[
-                SectionContentView(
-                    section_id="section-2",
-                    title="子标题",
-                    section_path="标题 > 子标题",
-                    text="子标题正文",
-                    allowed_directions=[SectionDirection.PARENT],
-                )
-            ],
-            has_more=True,
-            next_after_section_id="section-2",
-            budget_exhausted=True,
-        )
-    )
-
-    response = await expand_section(
-        SectionExpandRequest(
-            resource_id="resource-1",
-            section_id="section-1",
-            direction=SectionDirection.CHILDREN,
-            char_budget=100,
-        ),
-        user_id="user-1",
-        expander=expander,
-    )
-
-    assert expander.request.direction is SectionDirection.CHILDREN
-    assert response.data.sections[0].section_id == "section-2"
-    assert response.data.has_more is True
-    assert response.data.next_after_section_id == "section-2"
-    assert response.data.budget_exhausted is True
 
 
 @pytest.mark.asyncio

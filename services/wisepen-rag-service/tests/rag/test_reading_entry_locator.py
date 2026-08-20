@@ -326,7 +326,7 @@ def test_flat_text_retrieval_view_keeps_synthetic_section_context() -> None:
     assert block.sections[0].title == "全文片段 1"
     assert block.sections[0].section_path == "全文片段 1"
     assert block.page_labels == ["1"]
-    assert block.sections[0].block_is_enough is True
+    assert block.sections[0].is_complete is True
 
 
 def test_reading_block_section_completeness_follows_own_span_coverage() -> None:
@@ -341,7 +341,7 @@ def test_reading_block_section_completeness_follows_own_span_coverage() -> None:
 
     block = _build_retrieval_reading_block_views([partial])[0]
 
-    assert block.sections[0].block_is_enough is False
+    assert block.sections[0].is_complete is False
 
     # 完整性属于单个 ReadingBlock，不跨多个返回 block 聚合。
     first = _record(_candidate("chunk-1", SourceSpan(0, 4)))
@@ -361,7 +361,7 @@ def test_reading_block_section_completeness_follows_own_span_coverage() -> None:
 
     blocks = _build_retrieval_reading_block_views([first, second])
 
-    assert all(block.sections[0].block_is_enough is False for block in blocks)
+    assert all(block.sections[0].is_complete is False for block in blocks)
 
 
 
@@ -433,7 +433,7 @@ def test_multisection_block_shows_title_boundaries_and_all_sections() -> None:
         "section-1",
         "section-2",
     ]
-    assert all(section.block_is_enough for section in block_view.sections)
+    assert all(section.is_complete for section in block_view.sections)
 
 
 @pytest.mark.asyncio

@@ -33,11 +33,6 @@ from .graph_expander import (
     UnknownSeedNodeError,
 )
 from .reading_blocks import ReadingBlockSectionView
-from .section_expander import (
-    SectionChildrenExpandResult,
-    SectionExpander,
-    SectionExpandResult,
-)
 
 __all__ = [
     "DiscoveredKnowledgeNodeView",
@@ -61,9 +56,6 @@ __all__ = [
     "ReadingBlockSectionView",
     "ReadingCandidateLocator",
     "RetrievalReadingBlockView",
-    "SectionChildrenExpandResult",
-    "SectionExpandResult",
-    "SectionExpander",
     "SourceEvidenceVerifier",
     "TraversalDirection",
     "UnknownSeedNodeError",

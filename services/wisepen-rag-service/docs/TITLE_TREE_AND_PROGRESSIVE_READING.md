@@ -18,7 +18,7 @@ LOCATE -> READ -> EXPAND -> VERIFY
 
 - Common parser 根据标题、页标和锚点构建 `Section` 树；`parent_section_id`、`section_path`、`own_span`、`subtree_span` 和 `content_spans` 保留在事实层。
 - `OutlineAssembler` 将事实层投影为模型可见 outline，节点包含 `section_id`、`title`、`length`、`page_range`、`anchor_labels` 和 `children`。
-- `DocumentContentReader` 通过 `readPages/readSections` 支持确定性读取；Section READ 返回直属正文和 `allowed_directions`，具体方向由 `SectionExpander` 展开。
+- `DocumentContentReader` 通过 `readPages/readSections` 支持确定性读取；RAG 命中后由 `getSurroundingOutline` 返回局部标题树元信息，再由 `readSections` 精确读取正文。
 - LOCATE 先召回并精排 `RetrievalChunk`，再提升为完整 `ReadingBlock`，并经过 ACL、发布 revision 和 source evidence 校验。
 - EXPAND 目前是知识图谱关系扩展，不是标题树的子节点展开；图谱结果最终仍回源到当前发布 revision 的 `ReadingBlock`。
 - `flat_text` 文档使用 synthetic Section 保持可读入口，但不伪造页标记，也不抽取图谱关系。
@@ -114,8 +114,8 @@ expanded_cost = 路由摘要成本 + 最大子分支读取成本 + 未归属正�
 
 ### P0：先做导航投影，不改权威事实
 
-1. `getDocumentOutline` 只接受 `resource_id` 和可选 `max_depth`，返回文档级完整 outline。
-2. outline 支持 `max_depth`；达到深度上限时用 `children_truncated` 标记仍有子节点。
+1. RAG 不再从资源级完整 outline 开始，而是从 LOCATE 返回的命中 `section_id` 开始局部探索。
+2. 邻域元信息只返回直属 parent、有限 siblings 窗口和直属 children；正文统一由 `readSections` 读取。
 3. 增加模型提示：大文档先 outline，命中后按 section 读取；父 Section 只读直属正文，子 Section 单独读取。
 4. demo 增加一条多轮轨迹：LOCATE 命中 -> scoped outline -> 读取两个子 Section -> 再决定是否 graph expand。
 
@@ -172,25 +172,15 @@ expanded_cost = 路由摘要成本 + 最大子分支读取成本 + 未归属正�
 
 输出：现有 `state_id`、检索状态、已核验 `reading_blocks`、图谱 seed nodes。建议额外返回每个 block 的 `total_length`/`section_ids` 规划信息，但不要把窗口长度冒充源文本总长度。
 
-### `getDocumentOutline`
+### `getSurroundingOutline`
 
-输入：`resource_id`、可选 `max_depth`。API 语义始终是读取文档完整 outline。
+输入：`resource_id`、命中的 `section_id`、可选 `window_size`（`0..5`，默认 `2`）。
 
-输出：带稳定 `section_id` 的文档 outline、节点长度/页范围、`content_revision`；权限和 revision 校验沿用当前 `DocumentOutlineReader`。
-
-### `getSectionInfo`
-
-输入：`resource_id`、`section_ids`。每个 Section 只返回 `section_id`、`title`、`section_path`、`allowed_directions` 和 `child_count`，不加载正文；模型可据此决定下一步调用 `readSections` 或 `expandSection`。
+输出：直属 `parent`、包含当前节点的前后兄弟窗口 `siblings`、直属孩子 `children`。每个节点包含 `section_id`、`title`、`section_path`、`has_children`、`page_range` 和 `anchor_labels`；当前节点额外标记 `is_current=true`，不包含正文。
 
 ### `readSections`
 
-输入：`resource_id`、`section_ids`。正文读取不再携带导航黑名单；需要导航时调用 `expandSection`。
-
-### `expandSection`
-
-输入：`resource_id`、`section_id`、`direction`（`parent/children/previous/next`）。`children` 方向额外接受 `char_budget`（默认 12000）和 `after_section_id`，返回 `has_more`、`next_after_section_id` 与 `budget_exhausted`。
-
-输出：指定方向的 Section 视图，包含与 `readSections` 一致的直属正文和 `allowed_directions`，并以 `from_section_id` 标记导航来源；children 方向额外返回分页游标和预算状态。
+输入：`resource_id`、`section_ids`。返回选定 Section 的完整直属正文和身份信息，不返回导航字段。
 
 ### `expandGraph`
 

@@ -1,8 +1,7 @@
 === Review notes ===
 - Page READ 返回整页正文和 section_id/title/section_path，不重复 preview。
-- readSections 返回直属正文和 allowed_directions；方向展开由 expandSection 负责。
-- getSectionInfo 只返回元信息，先帮助模型判断要不要读取正文。
-- expandSection 返回目标 Section 的直属正文，并用 from_section_id 标记导航来源。
+- getSurroundingOutline 只返回命中 Section 的 parent、siblings、children 元信息。
+- readSections 只返回选定 Section 的完整直属正文。
 - 所有模型可见页归属统一为 page_range；纯文本没有页标记时不伪造页范围。
 
 === TEST1 source text ===
@@ -531,165 +530,75 @@ Figure 5: Many of the attention heads exhibit behaviour that seems related to th
   "section_id": "sec_3fb92b0d6635d74e",
   "title": "3.2 Attention",
   "section_path": "Attention Is All You Need > 3 Model Architecture > 3.2 Attention",
-  "text": "An attention function can be described as mapping a query and a set of key-value pairs to an output, where the query, keys, values, and output are all vectors. The output is computed as a weighted sum of the values, where the weight assigned to each value is computed by a compatibility function of the query with the corresponding key. \n\n\n![](images/c396b8f3713e23ef2f1e60b3801f825c96756a45f51bbc7eb4898f4230bab9db.jpg)\n\n\n\nFigure 2: (left) Scaled Dot-Product Attention. (right) Multi-Head Attention consists of several attention layers running in parallel.\n",
-  "allowed_directions": [
-    "parent",
-    "children",
-    "previous",
-    "next"
-  ]
+  "text": "An attention function can be described as mapping a query and a set of key-value pairs to an output, where the query, keys, values, and output are all vectors. The output is computed as a weighted sum of the values, where the weight assigned to each value is computed by a compatibility function of the query with the corresponding key. \n\n\n![](images/c396b8f3713e23ef2f1e60b3801f825c96756a45f51bbc7eb4898f4230bab9db.jpg)\n\n\n\nFigure 2: (left) Scaled Dot-Product Attention. (right) Multi-Head Attention consists of several attention layers running in parallel.\n"
 }
 
-=== TEST1 expandSection trace ===
-selected: sec_3fb92b0d6635d74e 3.2 Attention
---- direction: parent ---
+=== TEST1 getSurroundingOutline ===
 {
-  "from_section_id": "sec_3fb92b0d6635d74e",
-  "section_id": "sec_ff11c530ed0f64c9",
-  "title": "3 Model Architecture",
-  "section_path": "Attention Is All You Need > 3 Model Architecture",
-  "text": "Most competitive neural sequence transduction models have an encoder-decoder structure [5, 2, 35]. Here, the encoder maps an input sequence of symbol representations $( x _ { 1 } , . . . , x _ { n } )$ to a sequence of continuous representations $\\textbf { z } = ~ ( z _ { 1 } , . . . , z _ { n } )$ . Given z, the decoder then generates an output sequence $\\left( y _ { 1 } , . . . , y _ { m } \\right)$ of symbols one element at a time. At each step the model is auto-regressive [10], consuming the previously generated symbols as additional input when generating the next. \n\n\n![](images/f05ba6a0a2e484dbd8bf2a4a4fa2597a69a3a076f5b03cf4e818b176b4049244.jpg)\n\n\n\nFigure 1: The Transformer - model architecture.\n\n\nThe Transformer follows this overall architecture using stacked self-attention and point-wise, fully connected layers for both the encoder and decoder, shown in the left and right halves of Figure 1, respectively. \n",
-  "allowed_directions": [
-    "parent",
-    "children",
-    "previous",
-    "next"
-  ]
-}
---- direction: children ---
-{
-  "from_section_id": "sec_3fb92b0d6635d74e",
-  "sections": [
+  "parent": {
+    "section_id": "sec_ff11c530ed0f64c9",
+    "title": "3 Model Architecture",
+    "section_path": "Attention Is All You Need > 3 Model Architecture",
+    "has_children": true,
+    "anchor_labels": [
+      "Figure 1"
+    ]
+  },
+  "siblings": [
+    {
+      "section_id": "sec_fe642cb839fe5acc",
+      "title": "3.1 Encoder and Decoder Stacks",
+      "section_path": "Attention Is All You Need > 3 Model Architecture > 3.1 Encoder and Decoder Stacks",
+      "has_children": false
+    },
+    {
+      "section_id": "sec_3fb92b0d6635d74e",
+      "title": "3.2 Attention",
+      "section_path": "Attention Is All You Need > 3 Model Architecture > 3.2 Attention",
+      "has_children": true,
+      "anchor_labels": [
+        "Figure 2"
+      ],
+      "is_current": true
+    },
+    {
+      "section_id": "sec_ed1ebfd06efad2cd",
+      "title": "3.3 Position-wise Feed-Forward Networks",
+      "section_path": "Attention Is All You Need > 3 Model Architecture > 3.3 Position-wise Feed-Forward Networks",
+      "has_children": false
+    },
+    {
+      "section_id": "sec_e0e8a95cd78eb5f7",
+      "title": "3.4 Embeddings and Softmax",
+      "section_path": "Attention Is All You Need > 3 Model Architecture > 3.4 Embeddings and Softmax",
+      "has_children": false,
+      "anchor_labels": [
+        "Table 1"
+      ]
+    }
+  ],
+  "children": [
     {
       "section_id": "sec_ad653a9afb859254",
       "title": "3.2.1 Scaled Dot-Product Attention",
       "section_path": "Attention Is All You Need > 3 Model Architecture > 3.2 Attention > 3.2.1 Scaled Dot-Product Attention",
-      "text": "We call our particular attention \"Scaled Dot-Product Attention\" (Figure 2). The input consists of queries and keys of dimension $d _ { k }$ , and values of dimension $d _ { v }$ . We compute the dot products of the query with all keys, divide each by $\\sqrt { d _ { k } }$ , and apply a softmax function to obtain the weights on the values. \n\n\nIn practice, we compute the attention function on a set of queries simultaneously, packed together into a matrix $Q .$ The keys and values are also packed together into matrices K and V. We compute the matrix of outputs as: \n\n\n$$\n\\operatorname{Attention} (Q, K, V) = \\operatorname{softmax} (\\frac {Q K ^ {T}}{\\sqrt {d _ {k}}}) V\\tag{1}\n$$\n\n\nThe two most commonly used attention functions are additive attention [2], and dot-product (multiplicative) attention. Dot-product attention is identical to our algorithm, except for the scaling factor of $\\frac { 1 } { \\sqrt { d _ { k } } }$ . Additive attention computes the compatibility function using a feed-forward network with a single hidden layer. While the two are similar in theoretical complexity, dot-product attention is much faster and more space-efficient in practice, since it can be implemented using highly optimized matrix multiplication code. \n\n\nWhile for small values of $d _ { k }$ the two mechanisms perform similarly, additive attention outperforms dot product attention without scaling for larger values of $d _ { k }$ [3]. We suspect that for large values of $d _ { k } ,$ , the dot products grow large in magnitude, pushing the softmax function into regions where it has extremely small gradients <sup>4</sup>. To counteract this effect, we scale the dot products by $\\frac { 1 } { \\sqrt { d _ { k } } }$ \n",
-      "allowed_directions": [
-        "parent",
-        "next"
-      ]
+      "has_children": false
     },
     {
       "section_id": "sec_f9e2f748c0ba7adb",
       "title": "3.2.2 Multi-Head Attention",
       "section_path": "Attention Is All You Need > 3 Model Architecture > 3.2 Attention > 3.2.2 Multi-Head Attention",
-      "text": "Instead of performing a single attention function with $d _ { \\mathrm { m o d e l } }$ -dimensional keys, values and queries, we found it beneficial to linearly project the queries, keys and values h times with different, learned linear projections to $d _ { k } , d _ { k }$ and $d _ { v }$ dimensions, respectively. On each of these projected versions of queries, keys and values we then perform the attention function in parallel, yielding $d _ { v }$ -dimensional output values. These are concatenated and once again projected, resulting in the final values, as depicted in Figure 2. \n\n\nMulti-head attention allows the model to jointly attend to information from different representation subspaces at different positions. With a single attention head, averaging inhibits this. \n\n\n$$\n\\begin{array}{c} \\text {MultiHead} (Q, K, V) = \\text {Concat} (\\text {head} _ {1},..., \\text {head} _ {\\mathrm{h}}) W ^ {O} \\\\ \\text {where} \\text {head} _ {\\mathrm{i}} = \\text {Attention} (Q W _ {i} ^ {Q}, K W _ {i} ^ {K}, V W _ {i} ^ {V}) \\end{array}\n$$\n\n\nWhere the projections are parameter matrices $\\begin{array} { r } { W _ { i } ^ { Q } \\in \\mathbb { R } ^ { d _ { \\operatorname* { m o d e l } } \\times d _ { k } } , W _ { i } ^ { K } \\in \\mathbb { R } ^ { d _ { \\operatorname* { m o d e l } } \\times d _ { k } } , W _ { i } ^ { V } \\in \\mathbb { R } ^ { d _ { \\operatorname* { m o d e l } } \\times d _ { \\imath } } } \\end{array}$ and $W ^ { O } \\in \\mathbb R ^ { \\bar { h } d _ { v } \\times d _ { \\mathrm { m o d e l } } }$ \n\n\nIn this work we employ $h \\ : = \\ : 8$ parallel attention layers, or heads. For each of these we use $d _ { k } = d _ { v } = d _ { \\mathrm { m o d e l } } / h \\stackrel {  } { = } \\dot { 6 } 4$ . Due to the reduced dimension of each head, the total computational cost is similar to that of single-head attention with full dimensionality. \n",
-      "allowed_directions": [
-        "parent",
-        "previous",
-        "next"
-      ]
+      "has_children": false
     },
     {
       "section_id": "sec_b33fbf7906fb7b58",
       "title": "3.2.3 Applications of Attention in our Model",
       "section_path": "Attention Is All You Need > 3 Model Architecture > 3.2 Attention > 3.2.3 Applications of Attention in our Model",
-      "text": "The Transformer uses multi-head attention in three different ways: \n\n\n• In \"encoder-decoder attention\" layers, the queries come from the previous decoder layer, and the memory keys and values come from the output of the encoder. This allows every position in the decoder to attend over all positions in the input sequence. This mimics the typical encoder-decoder attention mechanisms in sequence-to-sequence models such as [38, 2, 9]. \n\n\n• The encoder contains self-attention layers. In a self-attention layer all of the keys, values and queries come from the same place, in this case, the output of the previous layer in the encoder. Each position in the encoder can attend to all positions in the previous layer of the encoder. \n\n\n• Similarly, self-attention layers in the decoder allow each position in the decoder to attend to all positions in the decoder up to and including that position. We need to prevent leftward information flow in the decoder to preserve the auto-regressive property. We implement this inside of scaled dot-product attention by masking out (setting to −∞) all values in the input of the softmax which correspond to illegal connections. See Figure 2. \n",
-      "allowed_directions": [
-        "parent",
-        "previous"
-      ]
+      "has_children": false
     }
-  ],
-  "has_more": false,
-  "budget_exhausted": false
-}
---- direction: previous ---
-{
-  "from_section_id": "sec_3fb92b0d6635d74e",
-  "section_id": "sec_fe642cb839fe5acc",
-  "title": "3.1 Encoder and Decoder Stacks",
-  "section_path": "Attention Is All You Need > 3 Model Architecture > 3.1 Encoder and Decoder Stacks",
-  "text": "Encoder: The encoder is composed of a stack of $N = 6$ identical layers. Each layer has two sub-layers. The first is a multi-head self-attention mechanism, and the second is a simple, positionwise fully connected feed-forward network. We employ a residual connection [11] around each of the two sub-layers, followed by layer normalization [1]. That is, the output of each sub-layer is LayerNorm(x + Sublayer(x)), where Sublayer(x) is the function implemented by the sub-layer itself. To facilitate these residual connections, all sub-layers in the model, as well as the embedding layers, produce outputs of dimension $d _ { \\mathrm { m o d e l } } = 5 1 2$ \n\n\nDecoder: The decoder is also composed of a stack of $N = 6$ identical layers. In addition to the two sub-layers in each encoder layer, the decoder inserts a third sub-layer, which performs multi-head attention over the output of the encoder stack. Similar to the encoder, we employ residual connections around each of the sub-layers, followed by layer normalization. We also modify the self-attention sub-layer in the decoder stack to prevent positions from attending to subsequent positions. This masking, combined with fact that the output embeddings are offset by one position, ensures that the predictions for position i can depend only on the known outputs at positions less than i. \n",
-  "allowed_directions": [
-    "parent",
-    "next"
-  ]
-}
---- direction: next ---
-{
-  "from_section_id": "sec_3fb92b0d6635d74e",
-  "section_id": "sec_ed1ebfd06efad2cd",
-  "title": "3.3 Position-wise Feed-Forward Networks",
-  "section_path": "Attention Is All You Need > 3 Model Architecture > 3.3 Position-wise Feed-Forward Networks",
-  "text": "In addition to attention sub-layers, each of the layers in our encoder and decoder contains a fully connected feed-forward network, which is applied to each position separately and identically. This consists of two linear transformations with a ReLU activation in between. \n\n\n$$\n\\operatorname{FFN} (x) = \\max (0, x W _ {1} + b _ {1}) W _ {2} + b _ {2}\\tag{2}\n$$\n\n\nWhile the linear transformations are the same across different positions, they use different parameters from layer to layer. Another way of describing this is as two convolutions with kernel size 1. The dimensionality of input and output is $d _ { \\mathrm { m o d e l } } = 5 1 2$ , and the inner-layer has dimensionality $d _ { f f } = 2 0 4 8$ \n",
-  "allowed_directions": [
-    "parent",
-    "previous",
-    "next"
   ]
 }
 
-=== TEST1 getSectionInfo ===
-{
-  "sec_ff11c530ed0f64c9": {
-    "section_id": "sec_ff11c530ed0f64c9",
-    "title": "3 Model Architecture",
-    "section_path": "Attention Is All You Need > 3 Model Architecture",
-    "allowed_directions": [
-      "parent",
-      "children",
-      "previous",
-      "next"
-    ],
-    "child_count": 5
-  },
-  "sec_fe642cb839fe5acc": {
-    "section_id": "sec_fe642cb839fe5acc",
-    "title": "3.1 Encoder and Decoder Stacks",
-    "section_path": "Attention Is All You Need > 3 Model Architecture > 3.1 Encoder and Decoder Stacks",
-    "allowed_directions": [
-      "parent",
-      "next"
-    ],
-    "child_count": 0
-  },
-  "sec_3fb92b0d6635d74e": {
-    "section_id": "sec_3fb92b0d6635d74e",
-    "title": "3.2 Attention",
-    "section_path": "Attention Is All You Need > 3 Model Architecture > 3.2 Attention",
-    "allowed_directions": [
-      "parent",
-      "children",
-      "previous",
-      "next"
-    ],
-    "child_count": 3
-  },
-  "sec_ed1ebfd06efad2cd": {
-    "section_id": "sec_ed1ebfd06efad2cd",
-    "title": "3.3 Position-wise Feed-Forward Networks",
-    "section_path": "Attention Is All You Need > 3 Model Architecture > 3.3 Position-wise Feed-Forward Networks",
-    "allowed_directions": [
-      "parent",
-      "previous",
-      "next"
-    ],
-    "child_count": 0
-  },
-  "sec_e0e8a95cd78eb5f7": {
-    "section_id": "sec_e0e8a95cd78eb5f7",
-    "title": "3.4 Embeddings and Softmax",
-    "section_path": "Attention Is All You Need > 3 Model Architecture > 3.4 Embeddings and Softmax",
-    "allowed_directions": [
-      "parent",
-      "previous",
-      "next"
-    ],
-    "child_count": 0
-  },
-  "sec_ce9069475c47c847": {
-    "section_id": "sec_ce9069475c47c847",
-    "title": "3.5 Positional Encoding",
-    "section_path": "Attention Is All You Need > 3 Model Architecture > 3.5 Positional Encoding",
-    "allowed_directions": [
-      "parent",
-      "previous"
-    ],
-    "child_count": 0
-  }
-}
 
 === FLAT_TEXT source text ===
 果园霜冻观测记录，四月十二日。傍晚十八时，坡底测点温度为六点八摄氏度，坡肩测点为八点一摄氏度，风速低于每秒一米。天空晴朗，地表长波辐射散失明显，值班人员因此将本夜判断为辐射降温风险较高。
@@ -704,6 +613,5 @@ selected: sec_3fb92b0d6635d74e 3.2 Attention
   "section_id": "sec_85b209e41bdf4d21",
   "title": "全文片段 1",
   "section_path": "全文片段 1",
-  "text": "果园霜冻观测记录，四月十二日。傍晚十八时，坡底测点温度为六点八摄氏度，坡肩测点为八点一摄氏度，风速低于每秒一米。天空晴朗，地表长波辐射散失明显，值班人员因此将本夜判断为辐射降温风险较高。\n二十二时三十分，坡底温度降至三点二摄氏度，叶面仍未结霜。工作人员检查风机燃油、转向和警戒范围，并确认灌溉主管无渗漏。按照预案，风机不因单个测点短时下降立即启动，而要结合坡底与坡肩温差、露点和连续下降趋势判断。\n次日零时四十分，坡底与坡肩温差扩大到三点四摄氏度，近地层出现稳定逆温。风机于零时四十五分启动，每二十分钟复测一次。启动后坡底温度回升约零点七摄氏度，叶面未发现冰晶。\n日出前后最容易出现当夜最低温。值班人员在五时二十分停止风机前，先确认东方云量增加、坡底温度连续三次回升，并保留一组未干预地块作为对照。最终记录应注明仪器编号、校准日期和缺测时段，避免把设备漂移误判为防霜措施效果。\n",
-  "allowed_directions": []
+  "text": "果园霜冻观测记录，四月十二日。傍晚十八时，坡底测点温度为六点八摄氏度，坡肩测点为八点一摄氏度，风速低于每秒一米。天空晴朗，地表长波辐射散失明显，值班人员因此将本夜判断为辐射降温风险较高。\n二十二时三十分，坡底温度降至三点二摄氏度，叶面仍未结霜。工作人员检查风机燃油、转向和警戒范围，并确认灌溉主管无渗漏。按照预案，风机不因单个测点短时下降立即启动，而要结合坡底与坡肩温差、露点和连续下降趋势判断。\n次日零时四十分，坡底与坡肩温差扩大到三点四摄氏度，近地层出现稳定逆温。风机于零时四十五分启动，每二十分钟复测一次。启动后坡底温度回升约零点七摄氏度，叶面未发现冰晶。\n日出前后最容易出现当夜最低温。值班人员在五时二十分停止风机前，先确认东方云量增加、坡底温度连续三次回升，并保留一组未干预地块作为对照。最终记录应注明仪器编号、校准日期和缺测时段，避免把设备漂移误判为防霜措施效果。\n"
 }

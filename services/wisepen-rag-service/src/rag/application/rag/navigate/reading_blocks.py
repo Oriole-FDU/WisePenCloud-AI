@@ -15,7 +15,7 @@ class ReadingBlockSectionView:
     title: str
     section_path: str
     # 仅表示当前 ReadingBlock 是否覆盖该 Section 的全部直属正文。
-    block_is_enough: bool
+    is_complete: bool
 
 
 @dataclass(slots=True)
@@ -51,7 +51,7 @@ def present_reading_block(
             section_id=section.section_id,
             title=section.title,
             section_path=" > ".join(section.section_path),
-            block_is_enough=_spans_cover(
+            is_complete=_spans_cover(
                 spans_by_section[section.section_id],
                 section.content_spans,
             ),

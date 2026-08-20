@@ -9,19 +9,18 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends
 
 from rag.api.schemas import (
-    DocumentOutlineRequest,
-    DocumentOutlineResponse,
     ReadPagesRequest,
     ReadPagesResponse,
     ReadSectionsRequest,
     ReadSectionsResponse,
-    SectionInfoResponse,
+    SurroundingOutlineRequest,
+    SurroundingOutlineResponse,
 )
 from rag.application.rag.read import (
     ContentAccessRevokedError,
     ContentNotFoundError,
     DocumentContentReader,
-    DocumentOutlineReader,
+    SectionNeighborhoodReader,
 )
 from rag.domain.error_codes import RagErrorCode
 from rag.domain.models.acl import PermissionScope
@@ -29,32 +28,34 @@ from rag.domain.models.acl import PermissionScope
 router = APIRouter()
 
 AuthenticatedUser = Annotated[str, Depends(require_login)]
-OutlineReader = Annotated[
-    DocumentOutlineReader,
-    Depends(Provide["document_outline_reader"]),
-]
 ContentReader = Annotated[
     DocumentContentReader,
     Depends(Provide["document_content_reader"]),
 ]
+NeighborhoodReader = Annotated[
+    SectionNeighborhoodReader,
+    Depends(Provide["section_neighborhood_reader"]),
+]
 
 
 @router.post(
-    "/getDocumentOutline",
-    response_model=R[DocumentOutlineResponse],
+    "/getSurroundingOutline",
+    response_model=R[SurroundingOutlineResponse],
     response_model_exclude_none=True,
+    response_model_exclude_defaults=True,
 )
 @inject
-async def get_document_outline(
-    request: DocumentOutlineRequest,
+async def get_surrounding_outline(
+    request: SurroundingOutlineRequest,
     user_id: AuthenticatedUser,
-    reader: OutlineReader,
-) -> R[DocumentOutlineResponse]:
+    reader: NeighborhoodReader,
+) -> R[SurroundingOutlineResponse]:
     try:
-        result = await reader.get_document_outline(
+        result = await reader.get_surrounding_outline(
             resource_id=request.resource_id,
+            section_id=request.section_id,
+            window_size=request.window_size,
             permission_scope=_permission_scope(user_id),
-            max_depth=request.max_depth,
         )
     except ContentNotFoundError as error:
         raise ServiceException(RagErrorCode.RESOURCE_CONTENT_NOT_FOUND) from error
@@ -63,40 +64,8 @@ async def get_document_outline(
     except Exception as error:
         raise ServiceException(RagErrorCode.RESOURCE_READ_FAILED) from error
     return R.success(
-        DocumentOutlineResponse(
-            resource_id=result.resource_id,
-            document_version=result.document_version,
-            content_revision=result.content_revision,
-            total_length=result.total_length,
-            outline=result.outline,
-        )
+        SurroundingOutlineResponse.model_validate(result, from_attributes=True)
     )
-
-
-@router.post(
-    "/getSectionInfo",
-    response_model=R[SectionInfoResponse],
-    response_model_exclude_none=True,
-)
-@inject
-async def get_section_info(
-    request: ReadSectionsRequest,
-    user_id: AuthenticatedUser,
-    reader: ContentReader,
-) -> R[SectionInfoResponse]:
-    try:
-        result = await reader.get_section_info(
-            resource_id=request.resource_id,
-            section_ids=request.section_ids,
-            permission_scope=_permission_scope(user_id),
-        )
-    except ContentNotFoundError as error:
-        raise ServiceException(RagErrorCode.RESOURCE_CONTENT_NOT_FOUND) from error
-    except ContentAccessRevokedError as error:
-        raise ServiceException(RagErrorCode.RESOURCE_READ_FAILED) from error
-    except Exception as error:
-        raise ServiceException(RagErrorCode.RESOURCE_READ_FAILED) from error
-    return R.success(result)
 
 
 @router.post(

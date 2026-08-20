@@ -22,7 +22,6 @@ from rag.application.rag.navigate import (
 from rag.application.rag.read import (
     ContentNotFoundError,
     DocumentContentReader,
-    DocumentOutlineReader,
 )
 from rag.core.persistence.mongo.resource_index_writer import (
     _decide_stage,
@@ -104,9 +103,6 @@ def test_source_span_contract_uses_half_open_offsets() -> None:
 
 
 class _MissingReader:
-    async def get_document_outline(self, resource_id):
-        return None
-
     async def get_pages(self, resource_id, page_labels):
         return None
 
@@ -147,13 +143,6 @@ async def test_read_actions_raise_directly_when_content_is_missing() -> None:
     authorizer = PermissionAuthorizer(local_store=_ReadableAclReader())
     scope = PermissionScope(user_id="user-1")
     with pytest.raises(ContentNotFoundError):
-        await DocumentOutlineReader(
-            structure_reader=reader, authorizer=authorizer
-        ).get_document_outline(
-            resource_id="missing",
-            permission_scope=scope,
-        )
-    with pytest.raises(ContentNotFoundError):
         await DocumentContentReader(reader=reader, authorizer=authorizer).read_pages(
             resource_id="missing",
             page_labels=["1"],
@@ -169,18 +158,7 @@ async def test_read_actions_raise_directly_when_content_is_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_read_actions_do_not_distinguish_denied_resource_from_missing() -> None:
-    reader = _MissingReader()
-    authorizer = PermissionAuthorizer(local_store=_DeniedAclReader())
-    scope = PermissionScope(user_id="user-1")
-
-    with pytest.raises(ContentNotFoundError):
-        await DocumentOutlineReader(
-            structure_reader=reader, authorizer=authorizer
-        ).get_document_outline(
-            resource_id="private-resource",
-            permission_scope=scope,
-        )
-
+    pytest.skip("resource-level outline action was removed")
 
 def _evidence_facts() -> tuple[
     str, object, list[ReadingBlock], list[RetrievalChunk], list[SourceRef], object

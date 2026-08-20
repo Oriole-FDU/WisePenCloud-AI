@@ -11,14 +11,13 @@ from _demo_documents import (
 )
 from pydantic import TypeAdapter
 
-from rag.api.schemas import SectionChildrenExpandResponse, SectionExpandResponse
-from rag.application.rag.navigate import SectionExpander
+from rag.api.schemas import SurroundingOutlineResponse
 from rag.application.rag.read.content import (
     DocumentContentReader,
     SectionContentView,
 )
+from rag.application.rag.read.neighborhood import SectionNeighborhoodReader
 from rag.domain.models.acl import PermissionScope
-from rag.domain.models.section_navigation import SectionDirection
 from rag.domain.repositories.mongo.published_resource_reader import (
     PublishedSectionContent,
 )
@@ -74,8 +73,22 @@ class _DemoPublishedResourceReader:
                 previous=siblings[index - 1] if index else None,
                 next=(siblings[index + 1] if index + 1 < len(siblings) else None),
                 children=siblings_by_parent.get(section_id, []),
+                page_labels=[
+                    page.page_label
+                    for page in document.structure.pages
+                    if _spans_overlap(page.source_span, section.subtree_span)
+                ],
+                anchor_labels=[
+                    anchor.label
+                    for anchor in document.structure.anchors
+                    if _spans_overlap(anchor.source_span, section.own_span)
+                ],
             )
         return result
+
+
+def _spans_overlap(left, right) -> bool:
+    return left.start_offset < right.end_offset and right.start_offset < left.end_offset
 
 
 async def main() -> None:
@@ -93,7 +106,7 @@ async def main() -> None:
         reader=published_reader,
         authorizer=_AllowAuthorizer(),
     )
-    expander = SectionExpander(
+    neighborhood_reader = SectionNeighborhoodReader(
         reader=published_reader,
         authorizer=_AllowAuthorizer(),
     )
@@ -115,8 +128,8 @@ async def main() -> None:
         selected=flat_text.sections[0],
         scope=scope,
     )
-    navigation_output = await _navigation_output(
-        expander=expander,
+    navigation_output = await _neighborhood_output(
+        reader=neighborhood_reader,
         document=sectioned,
         selected=next(
             section
@@ -125,31 +138,19 @@ async def main() -> None:
         ),
         scope=scope,
     )
-    section_info_output = await _section_info_output(
-        reader=reader,
-        document=sectioned,
-        selected=next(
-            section
-            for section in sectioned.sections
-            if section.title == "3 Model Architecture"
-        ),
-        scope=scope,
-    )
 
     output = "\n".join(
         [
             "=== Review notes ===",
             "- Page READ 返回整页正文和 section_id/title/section_path，不重复 preview。",
-            "- readSections 返回直属正文和 allowed_directions；方向展开由 expandSection 负责。",
-            "- getSectionInfo 只返回元信息，先帮助模型判断要不要读取正文。",
-            "- expandSection 返回目标 Section 的直属正文，并用 from_section_id 标记导航来源。",
+            "- getSurroundingOutline 只返回命中 Section 的 parent、siblings、children 元信息。",
+            "- readSections 只返回选定 Section 的完整直属正文。",
             "- 所有模型可见页归属统一为 page_range；纯文本没有页标记时不伪造页范围。",
             "",
             *_read_output("TEST1", sectioned, sectioned_output),
             "",
             *navigation_output,
             "",
-            *section_info_output,
             "",
             *_read_output("FLAT_TEXT", flat_text, flat_output),
         ]
@@ -183,118 +184,29 @@ async def _read_document(*, reader, document, selected, scope) -> dict[str, obje
     }
 
 
-async def _navigation_output(*, expander, document, selected, scope) -> list[str]:
-    """展示一次 readSections 后沿四个方向逐步扩展的模型可见结果。"""
-    output = [
-        "=== TEST1 expandSection trace ===",
-        f"selected: {selected.section_id} {selected.title}",
-    ]
-    for direction in (
-        SectionDirection.PARENT,
-        SectionDirection.CHILDREN,
-        SectionDirection.PREVIOUS,
-        SectionDirection.NEXT,
-    ):
-        result = await expander.expand(
-            resource_id=document.resource_id,
-            section_id=selected.section_id,
-            direction=direction,
-            permission_scope=scope,
-            char_budget=12000,
-        )
-        response_model = (
-            SectionChildrenExpandResponse
-            if hasattr(result, "sections")
-            else SectionExpandResponse
-        )
-        payload_model = (
-            response_model.model_validate(result, from_attributes=True)
-            if hasattr(result, "sections")
-            else response_model(
-                from_section_id=result.from_section_id,
-                section_id=result.section.section_id,
-                title=result.section.title,
-                section_path=result.section.section_path,
-                text=result.section.text,
-                allowed_directions=result.section.allowed_directions,
-            )
-        )
-        payload = TypeAdapter(response_model).dump_python(
-            payload_model,
-            mode="json",
-            exclude_none=True,
-        )
-        output.extend(
-            [
-                f"--- direction: {direction} ---",
-                json.dumps(payload, ensure_ascii=False, indent=2),
-            ]
-        )
-
-    first_page = await expander.expand(
+async def _neighborhood_output(*, reader, document, selected, scope) -> list[str]:
+    """展示命中 Section 周围的无正文局部标题树。"""
+    result = await reader.get_surrounding_outline(
         resource_id=document.resource_id,
         section_id=selected.section_id,
-        direction=SectionDirection.CHILDREN,
-        permission_scope=scope,
-        char_budget=12000,
-    )
-    if first_page.has_more and first_page.next_after_section_id:
-        second_page = await expander.expand(
-            resource_id=document.resource_id,
-            section_id=selected.section_id,
-            direction=SectionDirection.CHILDREN,
-            permission_scope=scope,
-            char_budget=12000,
-            after_section_id=first_page.next_after_section_id,
-        )
-        output.extend(
-            [
-                "--- children cursor continuation ---",
-                json.dumps(
-                    TypeAdapter(SectionChildrenExpandResponse).dump_python(
-                        SectionChildrenExpandResponse.model_validate(
-                            second_page,
-                            from_attributes=True,
-                        ),
-                        mode="json",
-                        exclude_none=True,
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-            ]
-        )
-    return output
-
-
-async def _section_info_output(*, reader, document, selected, scope) -> list[str]:
-    """展示无正文的 Section 元信息，模拟 getSectionInfo API。"""
-    section_ids = [
-        selected.section_id,
-        *[
-            section.section_id
-            for section in document.sections
-            if section.parent_section_id == selected.section_id
-        ],
-    ]
-    result = await reader.get_section_info(
-        resource_id=document.resource_id,
-        section_ids=section_ids,
+        window_size=2,
         permission_scope=scope,
     )
-    payload = {
-        section_id: {
-            "section_id": info.section_id,
-            "title": info.title,
-            "section_path": info.section_path,
-            "allowed_directions": info.allowed_directions,
-            "child_count": info.child_count,
-        }
-        for section_id, info in result.items()
-    }
+    payload = SurroundingOutlineResponse.model_validate(
+        result,
+        from_attributes=True,
+    ).model_dump(
+        exclude_defaults=True,
+        exclude_none=True,
+        by_alias=True,
+    )
     return [
-        "=== TEST1 getSectionInfo ===",
-        json.dumps(payload, ensure_ascii=False, indent=2),
+        "=== TEST1 getSurroundingOutline ===",
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            indent=2,
+        ),
     ]
 
 

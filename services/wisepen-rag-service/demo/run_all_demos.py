@@ -9,7 +9,6 @@ ROOT = DEMO_DIR.parent.parent
 PYTHON = sys.executable
 
 DEMOS = [
-    "structure_tree_demo.py",
     "read_content_demo.py",
     "navigation_output_demo.py",
 ]

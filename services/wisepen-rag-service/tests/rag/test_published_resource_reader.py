@@ -196,7 +196,6 @@ async def test_reader_returns_none_without_published_revision(monkeypatch) -> No
     reader = MongoPublishedResourceReader()
 
     assert await reader.get_content_revision("resource-1") is None
-    assert await reader.get_document_outline("resource-1") is None
     assert await reader.get_pages("resource-1", ["1"]) is None
     assert await reader.get_sections("resource-1", ["section-1"]) is None
     assert (
@@ -221,7 +220,6 @@ async def test_reader_projects_structure_content_evidence_and_graph_source(
     _install_published_resource(monkeypatch)
     reader = MongoPublishedResourceReader()
 
-    outline = await reader.get_document_outline("resource-1")
     pages = await reader.get_pages("resource-1", ["1"])
     sections = await reader.get_sections("resource-1", ["section-1"])
     evidence = await reader.get_source_evidence(
@@ -239,9 +237,6 @@ async def test_reader_projects_structure_content_evidence_and_graph_source(
         [_graph_evidence()],
     )
 
-    assert outline is not None
-    assert outline.content_revision == "revision-1"
-    assert outline.outline == []
     assert pages is not None and pages["1"] == "TitleBodyTail"
     assert sections is not None and sections["section-1"].text == "Body"
     assert sections["section-1"].next is not None

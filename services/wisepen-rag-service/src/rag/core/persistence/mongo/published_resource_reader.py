@@ -22,7 +22,6 @@ from rag.domain.models.provenance import SourceEvidence, SourceRef
 from rag.domain.models.structure import DocumentStructure, StructureMode
 from rag.domain.repositories.mongo.published_resource_reader import (
     GraphBuildSource,
-    PublishedDocumentOutline,
     PublishedGraphEvidence,
     PublishedResourceCorruptError,
     PublishedResourceReader,
@@ -72,22 +71,6 @@ class MongoPublishedResourceReader(PublishedResourceReader):
                 f"resource {resource_id} published revision is missing"
             )
         return _to_published_revision(entity)
-
-    async def get_document_outline(
-        self,
-        resource_id: str,
-    ) -> PublishedDocumentOutline | None:
-        revision = await self._get_published_revision(resource_id)
-        if revision is None:
-            return None
-
-        return PublishedDocumentOutline(
-            resource_id=revision.resource_id,
-            content_revision=revision.content_revision,
-            document_version=revision.document_version,
-            total_length=revision.total_length,
-            outline=revision.outline,
-        )
 
     async def get_pages(
         self,
@@ -168,6 +151,16 @@ class MongoPublishedResourceReader(PublishedResourceReader):
                 previous=siblings[index - 1] if index else None,
                 next=siblings[index + 1] if index + 1 < len(siblings) else None,
                 children=siblings_by_parent.get(section.section_id, []),
+                page_labels=[
+                    page.page_label
+                    for page in revision.pages
+                    if _spans_overlap(page.source_span, section.subtree_span)
+                ],
+                anchor_labels=[
+                    anchor.label
+                    for anchor in revision.anchors
+                    if _spans_overlap(anchor.source_span, section.own_span)
+                ],
             )
         return result
 
@@ -476,6 +469,10 @@ def _to_source_part(record: SourcePartEntity) -> SourcePart:
         source_span=SourceSpan(record.start_offset, record.end_offset),
         text=record.text,
     )
+
+
+def _spans_overlap(left: SourceSpan, right: SourceSpan) -> bool:
+    return left.start_offset < right.end_offset and right.start_offset < left.end_offset
 
 
 def _to_section(record: SectionEntity) -> Section:

@@ -42,12 +42,11 @@ from rag.application.rag.navigate import (
     GraphEvidenceVerifier,
     KnowledgeGraphExpander,
     ReadingCandidateLocator,
-    SectionExpander,
     SourceEvidenceVerifier,
 )
 from rag.application.rag.read import (
     DocumentContentReader,
-    DocumentOutlineReader,
+    SectionNeighborhoodReader,
 )
 from rag.core.config import settings
 from rag.core.persistence.mongo import (
@@ -286,18 +285,13 @@ class Container(containers.DeclarativeContainer):
         PermissionAuthorizer,
         local_store=resource_acl_store,
     )
-    document_outline_reader = providers.Singleton(
-        DocumentOutlineReader,
-        structure_reader=published_resource_reader,
-        authorizer=permission_authorizer,
-    )
     document_content_reader = providers.Singleton(
         DocumentContentReader,
         reader=published_resource_reader,
         authorizer=permission_authorizer,
     )
-    section_expander = providers.Singleton(
-        SectionExpander,
+    section_neighborhood_reader = providers.Singleton(
+        SectionNeighborhoodReader,
         reader=published_resource_reader,
         authorizer=permission_authorizer,
     )

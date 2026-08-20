@@ -1,6 +1,4 @@
 import pytest
-from common.core.domain import GroupRoleType
-from common.security import SecurityContextHolder
 from common.utils.document import (
     Anchor,
     OutlineAssembler,
@@ -11,29 +9,21 @@ from common.utils.document import (
 )
 from pydantic import TypeAdapter, ValidationError
 
-from rag.api.endpoints.read import (
-    get_document_outline,
-    get_section_info,
-    read_pages,
-)
+from rag.api.endpoints.read import get_surrounding_outline, read_pages
 from rag.api.router import api_router
 from rag.api.schemas import (
-    DocumentOutlineRequest,
     ReadPagesRequest,
     ReadSectionsRequest,
     ResourceRequest,
+    SurroundingOutlineRequest,
 )
 from rag.application.rag.read.content import (
     DocumentContentReader,
     SectionContentView,
 )
-from rag.application.rag.read.outline import (
-    DocumentOutlineReader,
-    DocumentOutlineResult,
-)
+from rag.application.rag.read.neighborhood import SectionNeighborhoodReader
 from rag.domain.models.acl import PermissionScope
 from rag.domain.repositories.mongo.published_resource_reader import (
-    PublishedDocumentOutline,
     PublishedSectionContent,
 )
 
@@ -48,13 +38,18 @@ class _PublishedResourceReader:
         return {"1": "<!-- page 1 -->\n正文"}
 
     async def get_sections(self, resource_id, section_ids):
-        return {
+        values = {
             "section-1": PublishedSectionContent(
                 section=_section(),
                 text="正文",
                 children=[_child_section()],
-            )
+            ),
+            "section-2": PublishedSectionContent(
+                section=_child_section(),
+                text="子正文",
+            ),
         }
+        return {section_id: values[section_id] for section_id in section_ids if section_id in values}
 
 
 class _ContentReader:
@@ -68,35 +63,8 @@ class _ContentReader:
                 title="标题",
                 section_path="标题",
                 text="正文",
-                allowed_directions=[],
             )
         }
-
-
-class _OutlineReader:
-    def __init__(self) -> None:
-        self.scope = None
-        self.max_depth = None
-
-    async def get_document_outline(
-        self, *, resource_id, permission_scope, max_depth=None
-    ):
-        self.scope = permission_scope
-        self.max_depth = max_depth
-        return DocumentOutlineResult(
-            resource_id=resource_id,
-            content_revision="revision-1",
-            document_version=3,
-            total_length=12,
-            outline=[
-                OutlineNode(
-                    section_id="section-1",
-                    title="标题",
-                    length=12,
-                    page_range="1",
-                )
-            ],
-        )
 
 
 def _section() -> Section:
@@ -153,63 +121,41 @@ def test_read_request_schemas_and_routes() -> None:
         ReadSectionsRequest(resource_id="resource-1", section_ids=[])
 
     paths = {route.path for route in api_router.routes}
-    assert "/getDocumentOutline" in paths
+    assert "/getSurroundingOutline" in paths
     assert "/readPages" in paths
     assert "/readSections" in paths
-    assert "/getSectionInfo" in paths
-    assert "/expandSection" in paths
+    assert "/getSectionInfo" not in paths
+    assert "/expandSection" not in paths
     assert "/getPageContent" not in paths
     assert "/getSectionContent" not in paths
     assert "/expandDiscoveredSections" not in paths
 
 
 @pytest.mark.asyncio
-async def test_outline_keeps_title_and_removes_level() -> None:
-    reader = _OutlineReader()
-    SecurityContextHolder.set_group_role_map('{"group-1": 1}')
-
-    response = await get_document_outline(
-        DocumentOutlineRequest(resource_id="resource-1"),
-        user_id="user-1",
-        reader=reader,
-    )
-
-    node = response.data.outline[0]
-    assert node.title == "标题"
-    assert node.length == 12
-    assert node.page_range == "1"
-    assert not hasattr(node, "level")
-    assert not hasattr(node, "section_path")
-    assert reader.scope.group_roles == {"group-1": GroupRoleType.ADMIN}
-
-
-@pytest.mark.asyncio
-async def test_outline_endpoint_forwards_max_depth_only() -> None:
-    reader = _OutlineReader()
-    await get_document_outline(
-        DocumentOutlineRequest(resource_id="resource-1", max_depth=2),
-        user_id="user-1",
-        reader=reader,
-    )
-    assert reader.max_depth == 2
-
-
-@pytest.mark.asyncio
-async def test_section_info_returns_metadata_without_text() -> None:
-    reader = DocumentContentReader(
+async def test_surrounding_outline_returns_metadata_only() -> None:
+    reader = SectionNeighborhoodReader(
         reader=_PublishedResourceReader(),
         authorizer=_AllowAuthorizer(),
     )
-    response = await get_section_info(
-        ReadSectionsRequest(resource_id="resource-1", section_ids=["section-1"]),
+    response = await get_surrounding_outline(
+        SurroundingOutlineRequest(
+            resource_id="resource-1", section_id="section-1", window_size=2
+        ),
         user_id="user-1",
         reader=reader,
     )
-    info = response.data["section-1"]
-    assert info.title == "标题"
-    assert info.child_count == 1
-    assert info.allowed_directions == ["children"]
-    assert not hasattr(info, "text")
+    assert response.data.parent is None
+    assert [item.section_id for item in response.data.siblings] == [
+        "section-1"
+    ]
+    assert response.data.siblings[0].is_current is True
+    assert response.data.siblings[0].page_range is None
+    assert response.data.siblings[0].anchor_labels == []
+    assert response.data.parent is None
+    assert response.data.children[0].is_current is None
+    assert response.data.children[0].title == "子标题"
+    assert response.data.children[0].has_children is False
+    assert not hasattr(response.data.children[0], "text")
 
 
 @pytest.mark.asyncio
@@ -244,8 +190,7 @@ async def test_section_read_returns_authoritative_text_without_blocks() -> None:
     )
     assert view.title == "标题"
     assert view.text == "正文"
-    assert view.allowed_directions == ["children"]
-    # 页码与锚点信息已从 Section 视图移除（正文可见、目录可查）。
+    # 导航元信息已由 getSurroundingOutline 单独提供。
     assert not hasattr(view, "page_range")
     assert not hasattr(view, "anchor_labels")
     assert "page_range" not in payload
@@ -253,7 +198,7 @@ async def test_section_read_returns_authoritative_text_without_blocks() -> None:
     assert payload["section_id"] == "section-1"
     assert "section" not in payload
     assert "reading_blocks" not in payload
-    assert payload["allowed_directions"] == ["children"]
+    assert set(payload) == {"section_id", "title", "section_path", "text"}
 
 
 @pytest.mark.asyncio
@@ -283,7 +228,6 @@ async def test_flat_text_read_keeps_synthetic_section_context() -> None:
         "title": "全文片段 1",
         "section_path": "全文片段 1",
         "text": "平铺正文",
-        "allowed_directions": [],
     }
 
 
@@ -307,40 +251,6 @@ def test_outline_uses_human_page_range() -> None:
     assert flat_outline[0].title == "全文片段 1"
     assert flat_outline[0].length == 4
     assert flat_outline[0].children == []
-
-
-@pytest.mark.asyncio
-async def test_outline_supports_max_depth_projection() -> None:
-    parent = OutlineNode(
-        section_id="parent",
-        title="父标题",
-        length=10,
-        children=[OutlineNode(section_id="child", title="子标题", length=4)],
-    )
-
-    class _StructureReader:
-        async def get_document_outline(self, resource_id):
-            return PublishedDocumentOutline(
-                resource_id=resource_id,
-                content_revision="revision-1",
-                document_version=1,
-                total_length=10,
-                outline=[parent],
-            )
-
-    reader = DocumentOutlineReader(
-        structure_reader=_StructureReader(),
-        authorizer=_AllowAuthorizer(),
-    )
-    result = await reader.get_document_outline(
-        resource_id="resource-1",
-        permission_scope=PermissionScope(user_id="user-1"),
-        max_depth=0,
-    )
-
-    assert [node.section_id for node in result.outline] == ["parent"]
-    assert result.outline[0].children == []
-    assert result.outline[0].children_truncated is True
 
 
 def test_outline_nodes_carry_anchor_labels() -> None:
@@ -464,7 +374,7 @@ def test_outline_skips_nameless_root_without_preamble() -> None:
 
 
 @pytest.mark.asyncio
-async def test_section_read_includes_body_and_exposes_allowed_directions() -> None:
+async def test_section_read_includes_body_without_navigation_fields() -> None:
     reader = DocumentContentReader(
         reader=_NavPublishedResourceReader(),
         authorizer=_AllowAuthorizer(),
@@ -482,8 +392,7 @@ async def test_section_read_includes_body_and_exposes_allowed_directions() -> No
         exclude_none=True,
     )
     assert view.text == "正文"
-    assert view.allowed_directions == ["parent", "children", "previous", "next"]
-    assert payload["allowed_directions"] == ["parent", "children", "previous", "next"]
+    assert set(payload) == {"section_id", "title", "section_path", "text"}
 
 
 def test_section_read_request_rejects_navigation_controls() -> None:

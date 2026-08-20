@@ -4,23 +4,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from common.utils.document import OutlineNode, Section, SourceSpan
+from common.utils.document import Section, SourceSpan
 
 from rag.domain.models.content import ReadingBlock
 from rag.domain.models.graph import GraphEvidence
 from rag.domain.models.provenance import SourceEvidence
 from rag.domain.models.structure import DocumentStructure
-
-
-@dataclass(slots=True)
-class PublishedDocumentOutline:
-    """从已发布 revision 直接读取的精简目录。"""
-
-    resource_id: str
-    content_revision: str
-    document_version: int
-    total_length: int
-    outline: list[OutlineNode] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -33,6 +22,8 @@ class PublishedSectionContent:
     previous: Section | None = None
     next: Section | None = None
     children: list[Section] = field(default_factory=list)
+    page_labels: list[str] = field(default_factory=list)
+    anchor_labels: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -71,11 +62,6 @@ class PublishedResourceReader(Protocol):
     """从同一发布资源聚合读取 revision、结构、正文和来源证据。"""
 
     async def get_content_revision(self, resource_id: str) -> str | None: ...
-
-    async def get_document_outline(
-        self,
-        resource_id: str,
-    ) -> PublishedDocumentOutline | None: ...
 
     async def get_pages(
         self,

@@ -220,7 +220,7 @@ def test_graph_evidence_blocks_show_all_sections_with_title_boundaries() -> None
         "section-1",
         "section-2",
     ]
-    assert all(section.block_is_enough for section in block_view.sections)
+    assert all(section.is_complete for section in block_view.sections)
 
 
 @pytest.mark.asyncio
