@@ -61,6 +61,8 @@ class QwenAdapter(LLMProvider):
 
         # 设置请求参数
         request_kwargs:dict[str, Any] = {
+            # DashScope SDK 通过 base_address 覆盖默认 endpoint；未配置时保留 SDK 默认地址。
+            "base_address": model_request.base_url,
             "api_key": model_request.api_key, # 鉴权密钥
             "model": model_request.model_name, # 模型名
             "messages": qwen_messages, # 消息
@@ -70,9 +72,6 @@ class QwenAdapter(LLMProvider):
             "tools": tools, # Qwen function calling 使用 OpenAI-compatible tools schema，无需转换
             **model_request.runtime_options
         }
-        if model_request.base_url:
-            # DashScope SDK 通过 base_address 覆盖默认 endpoint；未配置时保留 SDK 默认地址。
-            request_kwargs["base_address"] = model_request.base_url
 
         assistant_text = ""
         reasoning_text = ""
