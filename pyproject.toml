@@ -9,7 +9,6 @@ dependencies = [
     "wisepen-mcp-service",
     "wisepen-common",
     "wisepen-sandbox-service",
-    "wisepen-rag-service",
     "mcp>=1.27,<2",
 ]
 
