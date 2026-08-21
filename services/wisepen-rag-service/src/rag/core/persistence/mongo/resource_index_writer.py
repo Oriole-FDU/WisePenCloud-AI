@@ -13,6 +13,7 @@ from rag.domain.entities import (
     SectionEntity,
     SourcePartEntity,
     SourceRefEntity,
+    StoredOutlineNode,
 )
 from rag.domain.models.content import (
     ContentRevision,
@@ -255,7 +256,9 @@ def _revision_document(
         "index_schema_version": revision.index_schema_version,
         "structure_mode": structure.mode.value,
         "total_length": structure.total_length,
-        "outline": outline,
+        # Beanie 只会自动编码 Pydantic 模型和基础容器；OutlineNode 是 common
+        # 层的领域 dataclass，必须在 Mongo 边界转换为持久化模型。
+        "outline": [_stored_outline_node(node) for node in outline],
         "pages": [
             {
                 "page_index": page.page_index,
@@ -347,6 +350,19 @@ def _source_ref_document(
 
 def _span_document(span: SourceSpan) -> dict[str, int]:
     return {"start_offset": span.start_offset, "end_offset": span.end_offset}
+
+
+def _stored_outline_node(node: OutlineNode) -> StoredOutlineNode:
+    """递归把公开目录领域节点投影为可由 Beanie 编码的 Mongo 模型。"""
+    return StoredOutlineNode(
+        section_id=node.section_id,
+        title=node.title,
+        length=node.length,
+        page_range=node.page_range,
+        anchor_labels=list(node.anchor_labels),
+        children=[_stored_outline_node(child) for child in node.children],
+        children_truncated=node.children_truncated,
+    )
 
 
 def _stage_state_filter(revision: ContentRevision) -> dict[str, object]:

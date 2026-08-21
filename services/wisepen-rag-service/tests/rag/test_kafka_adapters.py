@@ -129,7 +129,27 @@ class _Consumer:
         return self.messages.pop(0)
 
 
-def _event_consumer(fake, handler):
+class _Producer:
+    def __init__(self, *, send_failures=0, **kwargs) -> None:
+        self.started = False
+        self.stopped = False
+        self.messages = []
+        self.send_failures = send_failures
+
+    async def start(self):
+        self.started = True
+
+    async def stop(self):
+        self.stopped = True
+
+    async def send_and_wait(self, topic, *, value):
+        if self.send_failures:
+            self.send_failures -= 1
+            raise RuntimeError("dead-letter broker unavailable")
+        self.messages.append((topic, value))
+
+
+def _event_consumer(fake, handler, **kwargs):
     return KafkaEventConsumer(
         bootstrap_servers="kafka:9092",
         topic="topic",
@@ -137,6 +157,7 @@ def _event_consumer(fake, handler):
         handler=handler,
         retry_delay_seconds=0,
         consumer_factory=lambda *args, **kwargs: fake,
+        **kwargs,
     )
 
 
@@ -179,6 +200,93 @@ async def test_invalid_message_commits_once_without_calling_handler() -> None:
 
 
 @pytest.mark.asyncio
+async def test_permanent_handler_failure_is_moved_to_dead_letter_after_limit() -> None:
+    fake = _Consumer([_Message({"resourceId": "resource-1"})])
+    producer = _Producer()
+    attempts = 0
+
+    async def handler(payload):
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("index backend unavailable")
+
+    consumer = _event_consumer(
+        fake,
+        handler,
+        max_delivery_attempts=2,
+        dead_letter_topic="failed-events",
+        producer_factory=lambda *args, **kwargs: producer,
+    )
+    consumer._consumer = fake
+    consumer._dead_letter_producer = producer
+
+    await consumer._consume_loop()
+
+    assert attempts == 2
+    assert fake.commits == 1
+    assert producer.messages == [
+        (
+            "failed-events",
+            {
+                "source_topic": "topic",
+                "source_partition": 0,
+                "source_offset": 7,
+                "delivery_attempts": 2,
+                "error_type": "RuntimeError",
+                "error": "index backend unavailable",
+                "payload": {"resourceId": "resource-1"},
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_invalid_message_is_preserved_in_dead_letter() -> None:
+    fake = _Consumer([_Message(b"not-json")])
+    producer = _Producer()
+    consumer = _event_consumer(
+        fake,
+        lambda payload: None,
+        dead_letter_topic="failed-events",
+    )
+    consumer._consumer = fake
+    consumer._dead_letter_producer = producer
+
+    await consumer._consume_loop()
+
+    assert fake.commits == 1
+    assert producer.messages[0][1]["error_type"] == "KafkaPayloadError"
+    assert producer.messages[0][1]["payload"] == {
+        "encoding": "base64",
+        "data": "bm90LWpzb24=",
+    }
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_publish_retries_before_committing_source_offset() -> None:
+    fake = _Consumer([_Message({"resourceId": "resource-1"})])
+    producer = _Producer(send_failures=1)
+
+    async def handler(payload):
+        raise RuntimeError("permanent failure")
+
+    consumer = _event_consumer(
+        fake,
+        handler,
+        max_delivery_attempts=1,
+        dead_letter_topic="failed-events",
+        producer_factory=lambda *args, **kwargs: producer,
+    )
+    consumer._consumer = fake
+    consumer._dead_letter_producer = producer
+
+    await consumer._consume_loop()
+
+    assert fake.commits == 1
+    assert len(producer.messages) == 1
+
+
+@pytest.mark.asyncio
 async def test_consumer_start_failure_propagates_and_stop_closes_started_client() -> None:
     failure = _Consumer(start_error=RuntimeError("unavailable"))
     consumer = _event_consumer(failure, lambda payload: None)
@@ -193,3 +301,25 @@ async def test_consumer_start_failure_propagates_and_stop_closes_started_client(
 
     assert fake.started is True
     assert fake.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_consumer_lifecycle_starts_and_stops_dead_letter_producer() -> None:
+    fake = _Consumer()
+    producer = _Producer()
+
+    async def handler(payload):
+        return None
+
+    consumer = _event_consumer(
+        fake,
+        handler,
+        dead_letter_topic="failed-events",
+        producer_factory=lambda *args, **kwargs: producer,
+    )
+
+    await consumer.start()
+    await consumer.stop()
+
+    assert producer.started is True
+    assert producer.stopped is True

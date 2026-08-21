@@ -1,9 +1,10 @@
 """RAG 内容索引使用的 Beanie Mongo 文档实体。"""
 
+from __future__ import annotations
+
 from typing import ClassVar
 
 from beanie import Document
-from common.utils.document import OutlineNode
 from pydantic import BaseModel, Field
 from pymongo import ASCENDING, IndexModel
 
@@ -24,6 +25,18 @@ class StoredAnchor(BaseModel):
     label: str
     start_offset: int
     end_offset: int
+
+
+class StoredOutlineNode(BaseModel):
+    """Mongo 中保存的公开目录节点，不直接持久化 common 中的 dataclass。"""
+
+    section_id: str
+    title: str
+    length: int
+    page_range: str | None = None
+    anchor_labels: list[str] = Field(default_factory=list)
+    children: list[StoredOutlineNode] = Field(default_factory=list)
+    children_truncated: bool | None = None
 
 
 class ResourceIndexStateEntity(Document):
@@ -52,7 +65,7 @@ class ContentRevisionEntity(Document):
     index_schema_version: str
     structure_mode: str
     total_length: int
-    outline: list[OutlineNode]
+    outline: list[StoredOutlineNode]
     pages: list[StoredPage] = Field(default_factory=list)
     anchors: list[StoredAnchor] = Field(default_factory=list)
 

@@ -9,6 +9,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel, Field
 
 from common.core.exceptions import ServiceException
+from common.logger import warn
 from common.utils.ranking import (
     RankCandidate,
     RankQuery,
@@ -143,7 +144,17 @@ class BaseSearchTool(ABC):
             top_k=len(rank_candidates),
             candidate_limit=len(rank_candidates),
         )
-        ranked = await self._ranking_pipeline.arank(rank_request)
+        try:
+            ranked = await self._ranking_pipeline.arank(rank_request)
+            ranked_candidates = ranked.ranked
+        except Exception as exc:  # noqa: BLE001 - 排序增强失败不能丢弃搜索证据
+            # ZeroEntropy 或其它排序组件不可用时，搜索结果仍是有效的原始证据。
+            warn(
+                "web search ranking failed; returning provider order.",
+                tool=self.tool_name,
+                exc=exc,
+            )
+            ranked_candidates = tuple(rank_candidates)
 
         return WebSearchToolResult(
             query=search_query,
@@ -156,7 +167,7 @@ class BaseSearchTool(ABC):
                     snippet=candidates_by_id[item.candidate_id].snippet,
                     highlights=candidates_by_id[item.candidate_id].highlights,
                 )
-                for item in ranked.ranked
+                for item in ranked_candidates
             ],
             supplier_answer=response.answer,
         )

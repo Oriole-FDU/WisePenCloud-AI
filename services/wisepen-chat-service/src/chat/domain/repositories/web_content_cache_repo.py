@@ -1,8 +1,18 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime
 
-from chat.application.tools.web_tools.common import WebContentCacheValue
+
+@dataclass(frozen=True, slots=True)
+class WebContentCacheValue:
+    """URL 级缓存的完整正文；raw_html 仅供 crawl 继续发现链接。"""
+
+    canonical_url: str
+    text: str
+    expire_at: datetime
+    raw_html: str | None = None
 
 
 class WebContentCacheRepository(ABC):

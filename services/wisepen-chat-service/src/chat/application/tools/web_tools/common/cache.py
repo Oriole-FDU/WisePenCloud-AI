@@ -1,25 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 
+from common.logger import info, warn
 from werkzeug.datastructures import ResponseCacheControl
 from werkzeug.http import parse_cache_control_header
 
-from chat.domain.repositories.web_content_cache_repo import WebContentCacheRepository
-from common.logger import info, warn
-
-
-@dataclass(frozen=True, slots=True)
-class WebContentCacheValue:
-    """URL 级缓存的完整正文；raw_html 仅供 crawl 继续发现链接。"""
-
-    canonical_url: str
-    text: str
-    expire_at: datetime
-    raw_html: str | None = None
-
+from chat.domain.repositories.web_content_cache_repo import (
+    WebContentCacheRepository,
+    WebContentCacheValue,
+)
 
 _DEFAULT_TTL = timedelta(hours=2)
 _MAX_TTL = timedelta(days=1)
@@ -45,7 +37,7 @@ class WebContentCache:
             return None
         try:
             value = await self._repository.get_value(url=url)
-            if value is not None and not _is_expired(value, now=datetime.now(timezone.utc)):
+            if value is not None and not _is_expired(value, now=datetime.now(UTC)):
                 info("URL 内容缓存命中", url=url)
                 return value
         except Exception as exc:  # noqa: BLE001 - cache 故障必须降级为实时抓取
@@ -63,7 +55,7 @@ class WebContentCache:
         if self._repository is None or not text:
             return
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             policy = _compute_ttl(headers=headers, now=now)
             if policy.no_store:
                 info("URL 内容缓存被 no-store 指令跳过", url=url)
@@ -138,12 +130,12 @@ def _parse_http_datetime(value: str | None) -> datetime | None:
     except (TypeError, ValueError):
         return None
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _is_expired(value: WebContentCacheValue, *, now: datetime) -> bool:
     expire_at = value.expire_at
     if expire_at.tzinfo is None:
-        expire_at = expire_at.replace(tzinfo=timezone.utc)
+        expire_at = expire_at.replace(tzinfo=UTC)
     return now >= expire_at

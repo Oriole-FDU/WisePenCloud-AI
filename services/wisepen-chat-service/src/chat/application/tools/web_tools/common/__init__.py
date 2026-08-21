@@ -1,4 +1,4 @@
-from .cache import WebContentCache, WebContentCacheValue
+from .cache import WebContentCache
 from .security import (
     UrlSecurityError,
     validate_public_http_url_async,
@@ -7,6 +7,5 @@ from .security import (
 __all__ = [
     "UrlSecurityError",
     "WebContentCache",
-    "WebContentCacheValue",
     "validate_public_http_url_async",
 ]

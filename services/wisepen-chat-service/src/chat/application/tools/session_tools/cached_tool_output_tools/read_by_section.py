@@ -58,7 +58,10 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
 
 @dataclass(slots=True)
 class CachedToolOutputReadBySectionItem:
+    """按章节读取结果；section_path 是该 section_id 对应的可读标题路径。"""
+
     section_id: str
+    section_path: str | None = None
     windows: list[CachedToolOutputWindow] = field(default_factory=list)
     reason: str | None = None
 
@@ -84,6 +87,8 @@ class CachedToolOutputReadBySectionTool:
                     "Use exact section_id values returned by "
                     "inspect_cached_tool_output_structure. Each section returns "
                     "only its direct body; child sections remain separate entries. "
+                    "Each item also includes the readable section_path for the "
+                    "requested section_id. "
                     "budget_exhausted indicates omitted or truncated later windows."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
@@ -197,6 +202,7 @@ def _read_by_section(
         items.append(
             CachedToolOutputReadBySectionItem(
                 section_id=section_id,
+                section_path=" > ".join(section.section_path),
                 windows=windows,
                 reason=reason,
             )

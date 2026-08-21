@@ -53,7 +53,15 @@ def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: Tool
         else:
             content = tool_output.content
             truncated = False
-            if max_output_chars is not None and 0 < max_output_chars < len(content):
+            # ToolOutputCache 已经按正文预算裁剪 contents[].text，并把 content_id、
+            # total_length 等回执追加到同一个结构化 JSON 中；这里再按原始字符串截断
+            # 会把回执截掉，甚至生成无法解析的 JSON。contents 是工具输出的正文契约，
+            # 不是某个工具偶然使用的业务字段。
+            if (
+                not _has_cached_contents(content)
+                and max_output_chars is not None
+                and 0 < max_output_chars < len(content)
+            ):
                 content = content[:max_output_chars] + "\n...[truncated]"
                 truncated = True
             output = render_tool_output({
@@ -112,3 +120,12 @@ def normalize_json_value(value: Any) -> Any:
     raise TypeError(
         f"unsupported tool output type: {type(value).__qualname__}"
     )
+
+
+def _has_cached_contents(content: str) -> bool:
+    """识别缓存层已完成正文预算和回执投影的工具输出。"""
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(payload, dict) and isinstance(payload.get("contents"), list)

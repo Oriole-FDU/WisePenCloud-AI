@@ -92,6 +92,7 @@ def _build_qdrant_client(
         https=False,
         cloud_inference=True,
         check_compatibility=False,
+        trust_env=False,
     )
 
 
@@ -101,12 +102,18 @@ def _build_kafka_consumer(
     topic: str,
     group_id: str,
     handler,
+    dead_letter_topic: str,
+    max_delivery_attempts: int,
+    retry_delay_seconds: float,
 ) -> KafkaEventConsumer:
     return KafkaEventConsumer(
         bootstrap_servers=bootstrap_servers,
         topic=topic,
         group_id=group_id,
         handler=handler.handle,
+        dead_letter_topic=dead_letter_topic,
+        max_delivery_attempts=max_delivery_attempts,
+        retry_delay_seconds=retry_delay_seconds,
     )
 
 
@@ -393,6 +400,9 @@ class Container(containers.DeclarativeContainer):
         topic=settings.KAFKA_DOCUMENT_READY_TOPIC,
         group_id=settings.KAFKA_RAG_DOCUMENT_READY_GROUP_ID,
         handler=document_ready_handler,
+        dead_letter_topic=settings.KAFKA_RAG_DEAD_LETTER_TOPIC,
+        max_delivery_attempts=settings.KAFKA_RAG_MAX_DELIVERY_ATTEMPTS,
+        retry_delay_seconds=settings.KAFKA_RAG_RETRY_DELAY_SECONDS,
     )
     acl_recalculate_consumer = providers.Singleton(
         _build_kafka_consumer,
@@ -400,6 +410,9 @@ class Container(containers.DeclarativeContainer):
         topic=settings.KAFKA_RESOURCE_ACL_RECALC_TOPIC,
         group_id=settings.KAFKA_RAG_ACL_RECALC_GROUP_ID,
         handler=acl_recalculate_handler,
+        dead_letter_topic=settings.KAFKA_RAG_DEAD_LETTER_TOPIC,
+        max_delivery_attempts=settings.KAFKA_RAG_MAX_DELIVERY_ATTEMPTS,
+        retry_delay_seconds=settings.KAFKA_RAG_RETRY_DELAY_SECONDS,
     )
     resource_destroy_consumer = providers.Singleton(
         _build_kafka_consumer,
@@ -407,6 +420,9 @@ class Container(containers.DeclarativeContainer):
         topic=settings.KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC,
         group_id=settings.KAFKA_RAG_RESOURCE_DESTROY_GROUP_ID,
         handler=resource_destroy_handler,
+        dead_letter_topic=settings.KAFKA_RAG_DEAD_LETTER_TOPIC,
+        max_delivery_attempts=settings.KAFKA_RAG_MAX_DELIVERY_ATTEMPTS,
+        retry_delay_seconds=settings.KAFKA_RAG_RETRY_DELAY_SECONDS,
     )
 
 

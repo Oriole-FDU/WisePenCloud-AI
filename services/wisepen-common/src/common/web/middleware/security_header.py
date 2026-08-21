@@ -19,15 +19,12 @@ class SecurityHeaderMiddleware(BaseHTTPMiddleware):
         # 提取并设置安全上下文
         user_id = request.headers.get(SecurityConstants.HEADER_USER_ID)
         identity_type = request.headers.get(SecurityConstants.HEADER_IDENTITY_TYPE)
-        user_status = request.headers.get(SecurityConstants.HEADER_USER_STATUS)
         group_role_map = request.headers.get(SecurityConstants.HEADER_GROUP_ROLE_MAP)
 
         if user_id:
             SecurityContextHolder.set_user_id(user_id)
             if identity_type:
                 SecurityContextHolder.set_identity_type(int(identity_type))
-            if user_status:
-                SecurityContextHolder.set_user_status(int(user_status))
             if group_role_map:
                 SecurityContextHolder.set_group_role_map(group_role_map)
 

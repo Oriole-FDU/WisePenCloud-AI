@@ -13,6 +13,7 @@ from rag.domain.entities import (
     SectionEntity,
     SourcePartEntity,
     SourceRefEntity,
+    StoredOutlineNode,
 )
 from rag.domain.models.content import (
     ReadingBlock,
@@ -442,7 +443,7 @@ def _to_published_revision(record: ContentRevisionEntity) -> _PublishedRevision:
         content_hash=record.content_hash,
         structure_mode=StructureMode(record.structure_mode),
         total_length=record.total_length,
-        outline=record.outline,
+        outline=[_outline_node(node) for node in record.outline],
         pages=[
             Page(
                 page_index=page.page_index,
@@ -458,6 +459,19 @@ def _to_published_revision(record: ContentRevisionEntity) -> _PublishedRevision:
             )
             for anchor in record.anchors
         ],
+    )
+
+
+def _outline_node(node: StoredOutlineNode) -> OutlineNode:
+    """把 Mongo 的持久化目录模型还原为 common 层公开领域模型。"""
+    return OutlineNode(
+        section_id=node.section_id,
+        title=node.title,
+        length=node.length,
+        page_range=node.page_range,
+        anchor_labels=list(node.anchor_labels),
+        children=[_outline_node(child) for child in node.children],
+        children_truncated=node.children_truncated,
     )
 
 

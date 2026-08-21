@@ -60,10 +60,9 @@ async def lifespan(app: FastAPI):
     info("beanie initialized.", db=settings.MONGODB_DB_NAME)
 
     await container.retrieval_index_writer().ensure_collection()
-    await container.knowledge_graph_repository().initialize()
-    await container.graph_acl_writer().initialize()
-
     if settings.RAG_KNOWLEDGE_GRAPH_ENABLED:
+        await container.knowledge_graph_repository().initialize()
+        await container.graph_acl_writer().initialize()
         await container.neo4j_driver().verify_connectivity()
 
     consumers = (
@@ -117,10 +116,11 @@ async def lifespan(app: FastAPI):
             await container.qdrant_client().close()
         except Exception as e:
             error("qdrant client close failed.", exc=e)
-        try:
-            await container.neo4j_driver().close()
-        except Exception as e:
-            error("neo4j driver close failed.", exc=e)
+        if settings.RAG_KNOWLEDGE_GRAPH_ENABLED:
+            try:
+                await container.neo4j_driver().close()
+            except Exception as e:
+                error("neo4j driver close failed.", exc=e)
         try:
             await container.mongo_client().close()
         except Exception as e:

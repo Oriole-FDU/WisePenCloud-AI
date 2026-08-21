@@ -29,6 +29,9 @@ class AppSettings(BaseModel):
     KAFKA_RAG_ACL_RECALC_GROUP_ID: str = "wisepen-rag-v2-acl-recalc-group"
     KAFKA_DOCUMENT_READY_TOPIC: str = "wisepen-document-ready-topic"
     KAFKA_RAG_DOCUMENT_READY_GROUP_ID: str = "wisepen-rag-v2-document-ready-group"
+    KAFKA_RAG_DEAD_LETTER_TOPIC: str = "wisepen-rag-failed-events-topic"
+    KAFKA_RAG_MAX_DELIVERY_ATTEMPTS: int = 3
+    KAFKA_RAG_RETRY_DELAY_SECONDS: float = 1.0
     KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC: str = (
         "wisepen-resource-physical-destroy-topic"
     )

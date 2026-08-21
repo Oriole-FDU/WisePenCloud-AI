@@ -43,10 +43,15 @@ class ToolOutputCache:
                     metadata=dict(cacheable_text.metadata),
                 )
             except Exception as exc:
-                # 缓存属于附加能力，单段入库失败不应中断整个工具调用。
-                warn("tool output cache content store failed.", e=exc,
-                     tool_name=invocation.tool_name, tool_call_id=invocation.tool_call_id, cacheable_text_index=index,
-                     )
+                # 缓存是工具输出的附加能力；写入失败时保留 preview，避免缓存故障
+                # 扩散为整个工具调用失败，同时通过日志保留故障诊断信息。
+                warn(
+                    "tool output cache content store failed.",
+                    e=exc,
+                    tool_name=invocation.tool_name,
+                    tool_call_id=invocation.tool_call_id,
+                    cacheable_text_index=index,
+                )
                 continue
 
             if result is not None:
@@ -65,7 +70,8 @@ class ToolOutputCache:
                 "metadata": dict(cacheable_text.metadata),
             }
             receipt = receipts.get(index)
-            if receipt is not None: item.update(asdict(receipt))
+            if receipt is not None:
+                item.update(asdict(receipt))
 
             contents.append(item)
 

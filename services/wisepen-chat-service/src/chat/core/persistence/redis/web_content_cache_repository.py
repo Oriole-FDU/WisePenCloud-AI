@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from hashlib import sha256
 
-from chat.application.tools.web_tools.common import (
+from redis.asyncio import Redis
+
+from chat.core.config.app_settings import settings
+from chat.domain.repositories.web_content_cache_repo import (
+    WebContentCacheRepository,
     WebContentCacheValue,
 )
-from chat.domain.repositories.web_content_cache_repo import WebContentCacheRepository
-from chat.core.config.app_settings import settings
-from redis.asyncio import Redis
 
 from .base import RedisRepository
 
@@ -49,11 +50,11 @@ class RedisWebContentCacheRepository(RedisRepository, WebContentCacheRepository)
         payload["expire_at"] = value.expire_at.isoformat()
         expire_at = value.expire_at
         if expire_at.tzinfo is None:
-            expire_at = expire_at.replace(tzinfo=timezone.utc)
+            expire_at = expire_at.replace(tzinfo=UTC)
         await self._redis.set(
             self._value_key(value.canonical_url),
             json.dumps(payload, ensure_ascii=False),
-            ex=max(1, int((expire_at - datetime.now(timezone.utc)).total_seconds())),
+            ex=max(1, int((expire_at - datetime.now(UTC)).total_seconds())),
         )
 
     @staticmethod

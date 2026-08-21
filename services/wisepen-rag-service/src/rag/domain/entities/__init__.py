@@ -7,6 +7,7 @@ from .rag_content import (
     SectionEntity,
     SourcePartEntity,
     SourceRefEntity,
+    StoredOutlineNode,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "SectionEntity",
     "SourcePartEntity",
     "SourceRefEntity",
+    "StoredOutlineNode",
 ]
