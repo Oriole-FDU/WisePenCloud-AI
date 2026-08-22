@@ -2,22 +2,24 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import is_dataclass, asdict
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
-
-from pydantic import BaseModel
+from typing import Any
 
 from chat.application.tools.core.definition import ClientToolResult, ToolRiskLevel
-from chat.application.tools.core.execution.hooks.builtin import JsonSchemaCheck, RequiredContextCheck
+from chat.application.tools.core.execution.hooks.builtin import (
+    JsonSchemaCheck,
+    RequiredContextCheck,
+)
 from chat.application.tools.core.execution.result import (
-    ToolOutput,
     ToolExecutionError,
     ToolExecutionResult,
+    ToolOutput,
 )
-
 from chat.application.tools.core.llm.invocation import ToolInvocation
 from chat.application.tools.core.registry import ToolScope
+from pydantic import BaseModel
 
 
 class ToolExecutor:
@@ -184,13 +186,23 @@ class ToolExecutor:
         if isinstance(output, Mapping):
             value = dict(output)
             return ToolOutput(
-                content=json.dumps(value, ensure_ascii=False),
+                content=json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    default=_json_default,
+                ),
             )
 
         if isinstance(output, Sequence) and not isinstance(output, str | bytes | bytearray):
             value = list(output)
             return ToolOutput(
-                content=json.dumps(value, ensure_ascii=False),
+                # default 负责递归展开列表元素，
+                # 保持工具的 list 视图而不是强迫每个工具重复做 asdict 转换。
+                content=json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    default=_json_default,
+                ),
             )
 
         raise ToolExecutionError(
@@ -198,3 +210,13 @@ class ToolExecutor:
             detail_reason=f"Tool output is not supported: {type(output).__qualname__}",
             retryable=False,
         )
+
+
+def _json_default(value: object) -> object:
+    """将容器内的 dataclass 或 Pydantic 模型转换为 JSON 可编码值。"""
+
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")

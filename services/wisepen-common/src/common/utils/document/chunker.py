@@ -54,20 +54,13 @@ class DocumentChunker:
             chunks = tuple(
                 replace(
                     chunk,
-                    section_ids=tuple(
-                        section.section_id
-                        for section in sections
-                        if _overlaps_any(section.own_span, chunk.source_spans)
-                    ),
+                    section_id=_section_id_for_chunk(chunk, sections),
                 )
                 for chunk in chunks
             )
         else:
-            sections = _build_flat_sections(text=text, chunks=chunks)
-            chunks = tuple(
-                replace(chunk, section_ids=(sections[index].section_id,))
-                for index, chunk in enumerate(chunks)
-            )
+            # 没有真实标题时不伪造 Section；chunk 仍可用于语义检索，但没有 section_id。
+            sections = ()
 
         return DocumentChunkingResult(
             chunks=chunks,
@@ -84,25 +77,22 @@ class DocumentChunker:
         """标题只划分 Section；页标不会切断语义 chunk。"""
         chunks: list[DocumentChunk] = []
         section_blocks: list[DocumentBlock] = []
-        section_has_body = False
 
         def flush_section() -> None:
-            nonlocal section_has_body
             if not section_blocks:
                 return
-            # 标题只负责结束已有正文 Section；页标被跳过，不会强制切断语义 chunk。
+            # 页标被跳过，不会强制切断语义 chunk。
             chunks.extend(self._pack_blocks(tuple(section_blocks)))
             section_blocks.clear()
-            section_has_body = False
 
         for block in blocks:
             if block.block_kind is BlockKind.PAGE_MARKER:
                 continue
-            if block.block_kind is BlockKind.HEADING and section_has_body:
+            if block.block_kind is BlockKind.HEADING:
+                # 每个标题都开启独立 Section；否则空父 Section 与子 Section 的标题
+                # 会落入同一子块，导致一个检索子块无法确定唯一父块。
                 flush_section()
             section_blocks.append(block)
-            if block.block_kind is not BlockKind.HEADING:
-                section_has_body = True
 
         flush_section()
         return _assign_chunk_ids(tuple(chunks))
@@ -214,6 +204,22 @@ def _assign_chunk_ids(
     return tuple(finalized)
 
 
+def _section_id_for_chunk(
+    chunk: DocumentChunk,
+    sections: tuple[Section, ...],
+) -> str | None:
+    matching_section_ids = tuple(
+        section.section_id
+        for section in sections
+        if _overlaps_any(section.own_span, chunk.source_spans)
+    )
+    if len(matching_section_ids) > 1:
+        raise ValueError(
+            "a section-based chunk must belong to at most one section"
+        )
+    return matching_section_ids[0] if matching_section_ids else None
+
+
 def _build_pages(
     *,
     text_length: int,
@@ -266,21 +272,25 @@ def _build_heading_sections(
     # 第一个标题前的正文没有真实父标题，使用 level=0 的虚拟 root 承接；
     # 有内容时给它“文档开头”标题，空 root 则由 OutlineAssembler 隐藏。
     root_title = "文档开头" if root_content_spans else ""
-    root = Section(
-        section_id=_section_id("root", 0, first_heading_start),
-        title=root_title,
-        level=0,
-        parent_section_id=None,
-        ordinal=0,
-        section_path=(root_title,) if root_title else (),
-        own_span=SourceSpan(0, first_heading_start),
-        subtree_span=SourceSpan(0, len(text)),
-        content_spans=root_content_spans,
-        preview=_section_preview(text, root_content_spans),
+    root = (
+        Section(
+            section_id=_section_id("root", 0, first_heading_start),
+            title=root_title,
+            level=0,
+            parent_section_id=None,
+            ordinal=0,
+            section_path=(root_title,),
+            own_span=SourceSpan(0, first_heading_start),
+            subtree_span=SourceSpan(0, len(text)),
+            content_spans=root_content_spans,
+            preview=_section_preview(text, root_content_spans),
+        )
+        if root_content_spans
+        else None
     )
-    sections = [root]
+    sections = [root] if root is not None else []
     open_section_indexes: list[int] = []
-    child_counts: dict[str, int] = {}
+    child_counts: dict[str | None, int] = {}
 
     for heading_index, heading in enumerate(headings):
         level = int(heading.metadata["heading_level"])
@@ -305,8 +315,9 @@ def _build_heading_sections(
             if open_section_indexes
             else root
         )
-        ordinal = child_counts.get(parent.section_id, 0)
-        child_counts[parent.section_id] = ordinal + 1
+        parent_section_id = parent.section_id if parent is not None else None
+        ordinal = child_counts.get(parent_section_id, 0)
+        child_counts[parent_section_id] = ordinal + 1
         own_end = (
             headings[heading_index + 1].start_offset
             if heading_index + 1 < len(headings)
@@ -319,7 +330,7 @@ def _build_heading_sections(
             section_id=_section_id("heading", heading.start_offset, own_end),
             title=str(heading.metadata["title"]),
             level=level,
-            parent_section_id=parent.section_id,
+            parent_section_id=parent_section_id,
             ordinal=ordinal,
             section_path=heading.section_path,
             own_span=SourceSpan(heading.start_offset, own_end),
@@ -330,37 +341,6 @@ def _build_heading_sections(
         sections.append(section)
         open_section_indexes.append(len(sections) - 1)
 
-    return tuple(sections)
-
-
-def _build_flat_sections(
-    *,
-    text: str,
-    chunks: tuple[DocumentChunk, ...],
-) -> tuple[Section, ...]:
-    # 无标题输入退化为 chunk 对应的 synthetic Section，便于按 section_id 导航。
-    sections: list[Section] = []
-    for index, chunk in enumerate(chunks):
-        title = f"全文片段 {index + 1}"
-        own_span = SourceSpan(chunk.start_offset, chunk.end_offset)
-        sections.append(
-            Section(
-                section_id=_section_id(
-                    "flat_text",
-                    own_span.start_offset,
-                    own_span.end_offset,
-                ),
-                title=title,
-                level=1,
-                parent_section_id=None,
-                ordinal=index,
-                section_path=(title,),
-                own_span=own_span,
-                subtree_span=own_span,
-                content_spans=chunk.source_spans,
-                preview=_section_preview(text, chunk.source_spans),
-            )
-        )
     return tuple(sections)
 
 

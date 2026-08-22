@@ -13,12 +13,17 @@ from functools import lru_cache
 from common.utils.document import (
     Anchor,
     DocumentChunker,
+    DocumentChunkerConfig,
     Page,
     Section,
     SourceSpan,
 )
 
 _DEFAULT_MAX_CHARS = 20_000_000
+_CACHE_CHUNKER_CONFIG = DocumentChunkerConfig(
+    max_characters=800,
+    chunk_overlap=100,
+)
 
 
 @lru_cache(maxsize=1)
@@ -41,7 +46,8 @@ class ToolContentChunk:
     start_offset: int
     end_offset: int
     source_spans: tuple[SourceSpan, ...]
-    section_ids: tuple[str, ...] = ()
+    # 有真实 Section 时，一个 chunk 只对应一个 Section；flat 文本保持为空。
+    section_id: str | None = None
     page_labels: tuple[str, ...] = ()
     anchor_labels: tuple[str, ...] = ()
 
@@ -79,7 +85,8 @@ async def put_tool_content(
     if not text or text.isspace() or len(text) > max_chars:
         return None
 
-    result = DocumentChunker().chunk(text)
+    # 缓存索引使用小子块提升命中精度；oversized block 的 overlap 只在递归切分内部生效。
+    result = DocumentChunker(_CACHE_CHUNKER_CONFIG).chunk(text)
     stored = StoredToolContent(
         content_id=f"cnt_{uuid.uuid4().hex[:16]}",
         session_id=session_id,
@@ -91,7 +98,7 @@ async def put_tool_content(
                 start_offset=chunk.start_offset,
                 end_offset=chunk.end_offset,
                 source_spans=chunk.source_spans,
-                section_ids=chunk.section_ids,
+                section_id=chunk.section_id,
                 page_labels=chunk.page_labels,
                 anchor_labels=chunk.anchor_labels,
             )

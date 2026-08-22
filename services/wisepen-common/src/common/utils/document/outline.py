@@ -37,7 +37,7 @@ class OutlineAssembler:
             )
 
         if root_section is None:
-            # 兼容没有 level=0 root 的 flat/synthetic 输入，直接投影顶层 Section。
+            # 没有前置无标题正文时，真实顶层 Section 直接挂在文档根下。
             return [
                 _to_outline_node(
                     section=section,

@@ -74,7 +74,7 @@ class RankingPipeline:
         ranked = ranked[: request.candidate_limit]
         if self.reranker is not None:
             ranked = await self.reranker.rerank(query=request.query, ranked=ranked)
-            ranked = assign_ranks(ranked)[: request.candidate_limit]
+            ranked = assign_ranks(ranked)
 
         decision: RankDecision | None = None
         decision_score: float | None = None

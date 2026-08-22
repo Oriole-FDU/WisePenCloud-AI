@@ -62,7 +62,8 @@ class DocumentChunk:
     source_spans: tuple[SourceSpan, ...]
     start_block: int
     end_block: int
-    section_ids: tuple[str, ...] = ()
+    # 有真实 Section 时，一个 chunk 只归属一个 Section；flat 文本保持为空。
+    section_id: str | None = None
     page_labels: tuple[str, ...] = ()
     anchor_labels: tuple[str, ...] = ()
     content_hash: str = ""
