@@ -19,9 +19,7 @@ from chat.application.tools.core import (
 from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent as StoredCachedToolOutput,
 )
-from chat.application.tools.core.output_cache.cache_store import (
-    ToolContentStore as CachedToolOutputStore,
-)
+from chat.application.tools.core.output_cache.cache_store import get_tool_content
 from chat.application.tools.session_tools.cached_tool_output_tools.window import (
     CachedToolOutputWindow,
     CachedToolOutputWindowBuilder,
@@ -51,24 +49,24 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
 
 
 @dataclass(slots=True)
-class CachedToolOutputReadByPageItem:
+class PageContent:
+    """单个 page 的模型可见内容；结构标识与续读窗口分开表达。"""
+
     page_label: str
-    windows: list[CachedToolOutputWindow] = field(default_factory=list)
-    reason: str | None = None
+    window: CachedToolOutputWindow
 
 
 @dataclass(slots=True)
 class CachedToolOutputReadByPageResult:
+    """按 page 读取结果；只返回实际成功构造的 page 内容。"""
+
     content_id: str
-    items: list[CachedToolOutputReadByPageItem] = field(default_factory=list)
-    budget_exhausted: bool = False
+    page_contents: list[PageContent] = field(default_factory=list)
 
 
 class CachedToolOutputReadByPageTool:
-    __slots__ = ("_definition", "_store")
 
-    def __init__(self, *, store: CachedToolOutputStore) -> None:
-        self._store = store
+    def __init__(self) -> None:
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="read_cached_tool_output_by_page",
@@ -82,8 +80,8 @@ class CachedToolOutputReadByPageTool:
                     "  - You need sections; use read_cached_tool_output_by_section.\n"
                     "  - You only know a semantic question or exact phrase; search first.\n\n"
                     "OUTPUT RULES:\n"
-                    "  - items[].page_label echoes the requested page label.\n"
-                    "  - budget_exhausted indicates that later page windows were omitted."
+                    "  - page_contents contains one entry per page successfully read.\n"
+                    "  - Each entry has page_label and one window; continue a truncated window from its end_offset."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -106,27 +104,14 @@ class CachedToolOutputReadByPageTool:
     ) -> CachedToolOutputReadByPageResult:
         del config
         try:
-            content_id = str(kwargs["content_id"])
-            # 入参来自 JSON array，保持 list 语义；后续去重时仍保留用户给出的顺序。
-            page_labels = [str(value).strip() for value in kwargs["page_labels"]]
-            # page 读取同样走 session_id 隔离，不能只依赖 content_id 本身。
-            stored = await self._store.get(
+            content_id = kwargs["content_id"]
+            page_labels = kwargs["page_labels"]
+            stored = await get_tool_content(
                 content_id=content_id,
-                session_id=str(context["session_id"]),
+                session_id=context["session_id"],
             )
             if stored is None:
-                # content 不存在时仍逐个回显 page_label，调用方能知道哪些请求未被满足。
-                unique_labels = list(dict.fromkeys(page_labels))
-                return CachedToolOutputReadByPageResult(
-                    content_id=content_id,
-                    items=[
-                        CachedToolOutputReadByPageItem(
-                            page_label=page_label,
-                            reason="cached_tool_output_not_found",
-                        )
-                        for page_label in unique_labels
-                    ],
-                )
+                return CachedToolOutputReadByPageResult(content_id=content_id)
             return _read_by_page(
                 content_id=content_id,
                 page_labels=page_labels,
@@ -152,75 +137,41 @@ def _read_by_page(
     builder: CachedToolOutputWindowBuilder,
     stored: StoredCachedToolOutput,
 ) -> CachedToolOutputReadByPageResult:
-    # 同一页可能被模型重复请求，去重但不打乱首次出现顺序。
-    unique_page_labels = list(dict.fromkeys(page_labels))
-    # Page 是结构阶段产出的确定页范围，读取正文时只按其 source_span 回原文。
     pages_by_label = _pages_by_label(pages)
-    items: list[CachedToolOutputReadByPageItem] = []
+    page_contents: list[PageContent] = []
     remaining = settings.TOOL_CONTENT_READ_TOTAL_CHAR_BUDGET
-    budget_exhausted = False
 
-    for page_label in unique_page_labels:
+    # page label 去重但保留首次出现顺序；一个 label 的多个范围只构造一个窗口。
+    for page_label in dict.fromkeys(page_labels):
         if remaining <= 0:
-            # 总预算耗尽后继续返回占位 item，避免调用方误以为后续页不存在。
-            budget_exhausted = True
-            items.append(
-                CachedToolOutputReadByPageItem(
-                    page_label=page_label,
-                    reason="page_budget_exhausted",
-                )
-            )
-            continue
-
-        page_ranges = pages_by_label.get(page_label, [])
+            break
+        page_ranges = pages_by_label.get(page_label)
         if not page_ranges:
-            # page label 来自外部输入，索引中找不到时明确标记 page_not_found。
-            items.append(
-                CachedToolOutputReadByPageItem(
-                    page_label=page_label,
-                    reason="page_not_found",
-                )
-            )
             continue
 
-        windows = []
-        reason = None
-        for page in page_ranges:
-            if remaining <= 0:
-                # 一个 page label 可能对应多个连续片段，片段之间共享同一轮总预算。
-                budget_exhausted = True
-                reason = "page_budget_exhausted"
-                break
-            window = builder.build_range_window(
-                stored,
-                start=page.source_span.start_offset,
-                end=page.source_span.end_offset,
-                char_budget=remaining,
-            )
-            windows.append(window)
-            remaining -= len(window.text)
-            if window.truncated:
-                # 单个窗口被截断时，不再继续同页后续片段，提示调用方按 offset 续读。
-                budget_exhausted = True
-                reason = "page_budget_exhausted"
-                break
-        items.append(
-            CachedToolOutputReadByPageItem(
+        window = builder.build_spans_window(
+            stored,
+            source_spans=[page.source_span for page in page_ranges],
+            char_budget=remaining,
+        )
+        page_contents.append(
+            PageContent(
                 page_label=page_label,
-                windows=windows,
-                reason=reason,
+                window=window,
             )
         )
+        remaining -= len(window.text)
+        if window.truncated:
+            break
 
     return CachedToolOutputReadByPageResult(
         content_id=content_id,
-        items=items,
-        budget_exhausted=budget_exhausted,
+        page_contents=page_contents,
     )
 
 
 def _pages_by_label(pages: Sequence[Page]) -> dict[str, list[Page]]:
-    # 重复页标签保留为多个范围，按 parser 产生的原文顺序依次读取。
+    # 重复页标签保留为多个范围，按 parser 产生的原文顺序聚合读取。
     indexed: dict[str, list[Page]] = {}
     for page in pages:
         indexed.setdefault(page.page_label, []).append(page)

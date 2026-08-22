@@ -4,7 +4,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from .models import BlockKind, DocumentBlock
 
-_PLAIN_TEXT_SEPARATORS = (
+# 顺序从语义较强的段落/换行逐级降到字符
+_SEPARATORS = (
     "\n\n",
     "\n",
     "。",
@@ -16,7 +17,6 @@ _PLAIN_TEXT_SEPARATORS = (
     " ",
     "",
 )
-# 顺序从语义较强的段落/换行逐级降到字符；这里刻意不重新解析 Markdown 标题。
 
 
 def split_plain_text(
@@ -36,14 +36,14 @@ def split_plain_text(
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
-        separators=list(_PLAIN_TEXT_SEPARATORS),
+        separators=list(_SEPARATORS),
     )
     raw_chunks = splitter.split_text(text)
     blocks: list[DocumentBlock] = []
     cursor = 0
     for index, chunk_text in enumerate(raw_chunks):
-        # splitter 返回的是文本而不是源坐标；从已消费位置附近回找，
-        # 能在重复内容存在时仍保持单调、局部的源 span 映射。
+        # splitter 返回的是文本而不是源坐标
+        # 从上一个重叠位置开始精确匹配，获取 chunk 在原文中的 Python 字符偏移范围
         search_from = max(0, cursor - chunk_overlap)
         start = text.find(chunk_text, search_from)
         if start < 0:

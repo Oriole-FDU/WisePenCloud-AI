@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
@@ -10,14 +9,13 @@ from typing import Any
 from common.logger import warn
 
 from chat.application.tools.core import (
-    CacheableText,
     ToolDefinition,
     ToolLLMSpec,
-    ToolOutput,
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
 )
+from chat.application.tools.core.output_cache.decorator import cacheable_tool_output
 from chat.core.config.app_settings import settings
 
 from .common import UrlSecurityError, WebContentCache, validate_public_http_url_async
@@ -72,14 +70,6 @@ class _FetchJob:
 class WebFetchTool:
     """直接拥有 URL 校验、缓存、两阶段抓取和结果投影。"""
 
-    __slots__ = (
-        "_cache",
-        "_concurrency",
-        "_definition",
-        "_min_text_length",
-        "_static_fetcher",
-        "_stealthy_fetcher",
-    )
 
     def __init__(
         self,
@@ -112,7 +102,8 @@ class WebFetchTool:
                 persist_output=True,
                 risk_level=ToolRiskLevel.MEDIUM,
                 timeout_seconds=300.0,
-                max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+                # 正文已经由 claim-check 装饰器转存，模型只接收 preview/receipt。
+                max_output_chars=None,
             ),
         )
 
@@ -120,12 +111,13 @@ class WebFetchTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
+    @cacheable_tool_output(paths=("items.*.text",))
     async def execute(
         self,
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> ToolOutput:
+    ) -> dict[str, Any]:
         del context, config
 
         # 构建任务队列
@@ -298,20 +290,13 @@ class WebFetchTool:
         pages: tuple[_FetchPage, ...],
         *,
         warning: str | None = None,
-    ) -> ToolOutput:
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "items": [{"source_url": page.source_url} for page in pages],
+            "items": [
+                {"source_url": page.source_url, "text": page.text}
+                for page in pages
+            ],
         }
         if warning:
             payload["warning"] = warning
-        return ToolOutput(
-            content=json.dumps(payload, ensure_ascii=False),
-            cacheable_texts=tuple(
-                CacheableText(
-                    content=page.text,
-                    metadata={"source_url": page.source_url},
-                )
-                for page in pages
-                if page.text.strip()
-            ),
-        )
+        return payload

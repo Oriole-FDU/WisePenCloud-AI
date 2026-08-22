@@ -19,9 +19,7 @@ from chat.application.tools.core import (
 from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent as StoredCachedToolOutput,
 )
-from chat.application.tools.core.output_cache.cache_store import (
-    ToolContentStore as CachedToolOutputStore,
-)
+from chat.application.tools.core.output_cache.cache_store import get_tool_content
 from chat.application.tools.session_tools.cached_tool_output_tools.window import (
     CachedToolOutputWindow,
     CachedToolOutputWindowBuilder,
@@ -57,27 +55,26 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
 
 
 @dataclass(slots=True)
-class CachedToolOutputReadBySectionItem:
-    """按章节读取结果；section_path 是该 section_id 对应的可读标题路径。"""
+class SectionContent:
+    """单个 section 的模型可见内容；结构字段与续读窗口分开表达。"""
 
     section_id: str
-    section_path: str | None = None
-    windows: list[CachedToolOutputWindow] = field(default_factory=list)
-    reason: str | None = None
+    title: str
+    section_path: str
+    window: CachedToolOutputWindow
 
 
 @dataclass(slots=True)
 class CachedToolOutputReadBySectionResult:
+    """按 section 读取结果；只返回实际成功定位到的 section。"""
+
     content_id: str
-    items: list[CachedToolOutputReadBySectionItem] = field(default_factory=list)
-    budget_exhausted: bool = False
+    section_contents: list[SectionContent] = field(default_factory=list)
 
 
 class CachedToolOutputReadBySectionTool:
-    __slots__ = ("_definition", "_store")
 
-    def __init__(self, *, store: CachedToolOutputStore) -> None:
-        self._store = store
+    def __init__(self) -> None:
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="read_cached_tool_output_by_section",
@@ -87,9 +84,9 @@ class CachedToolOutputReadBySectionTool:
                     "Use exact section_id values returned by "
                     "inspect_cached_tool_output_structure. Each section returns "
                     "only its direct body; child sections remain separate entries. "
-                    "Each item also includes the readable section_path for the "
-                    "requested section_id. "
-                    "budget_exhausted indicates omitted or truncated later windows."
+                    "Each entry in section_contents includes section_id, title, "
+                    "section_path, and one window. Continue a truncated window "
+                    "from its end_offset."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -112,23 +109,14 @@ class CachedToolOutputReadBySectionTool:
     ) -> CachedToolOutputReadBySectionResult:
         del config
         try:
-            content_id = str(kwargs["content_id"])
-            section_ids = [str(value).strip() for value in kwargs["section_ids"]]
-            stored = await self._store.get(
+            content_id = kwargs["content_id"]
+            section_ids = kwargs["section_ids"]
+            stored = await get_tool_content(
                 content_id=content_id,
-                session_id=str(context["session_id"]),
+                session_id=context["session_id"],
             )
             if stored is None:
-                return CachedToolOutputReadBySectionResult(
-                    content_id=content_id,
-                    items=[
-                        CachedToolOutputReadBySectionItem(
-                            section_id=section_id,
-                            reason="cached_tool_output_not_found",
-                        )
-                        for section_id in dict.fromkeys(section_ids)
-                    ],
-                )
+                return CachedToolOutputReadBySectionResult(content_id=content_id)
             return _read_by_section(
                 content_id=content_id,
                 section_ids=section_ids,
@@ -155,63 +143,36 @@ def _read_by_section(
     stored: StoredCachedToolOutput,
 ) -> CachedToolOutputReadBySectionResult:
     sections_by_id = {section.section_id: section for section in sections}
-    items: list[CachedToolOutputReadBySectionItem] = []
+    section_contents: list[SectionContent] = []
     remaining = settings.TOOL_CONTENT_READ_TOTAL_CHAR_BUDGET
-    budget_exhausted = False
 
     for section_id in dict.fromkeys(section_ids):
         if remaining <= 0:
-            budget_exhausted = True
-            items.append(
-                CachedToolOutputReadBySectionItem(
-                    section_id=section_id,
-                    reason="section_budget_exhausted",
-                )
-            )
-            continue
-
+            break
         section = sections_by_id.get(section_id)
         if section is None:
-            items.append(
-                CachedToolOutputReadBySectionItem(
-                    section_id=section_id,
-                    reason="section_not_found",
-                )
-            )
             continue
 
-        windows: list[CachedToolOutputWindow] = []
-        reason = None
-        for span in section.content_spans:
-            if remaining <= 0:
-                budget_exhausted = True
-                reason = "section_budget_exhausted"
-                break
-            window = builder.build_range_window(
-                stored,
-                start=span.start_offset,
-                end=span.end_offset,
-                char_budget=remaining,
-            )
-            windows.append(window)
-            remaining -= len(window.text)
-            if window.truncated:
-                budget_exhausted = True
-                reason = "section_budget_exhausted"
-                break
-        items.append(
-            CachedToolOutputReadBySectionItem(
-                section_id=section_id,
+        window = builder.build_spans_window(
+            stored,
+            source_spans=section.content_spans,
+            char_budget=remaining,
+        )
+        section_contents.append(
+            SectionContent(
+                section_id=section.section_id,
+                title=section.title,
                 section_path=" > ".join(section.section_path),
-                windows=windows,
-                reason=reason,
+                window=window,
             )
         )
+        remaining -= len(window.text)
+        if window.truncated:
+            break
 
     return CachedToolOutputReadBySectionResult(
         content_id=content_id,
-        items=items,
-        budget_exhausted=budget_exhausted,
+        section_contents=section_contents,
     )
 
 

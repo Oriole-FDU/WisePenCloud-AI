@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from common.utils.document import OutlineAssembler, OutlineNode
+from pydantic import TypeAdapter
 
 from chat.application.tools.core import (
     ToolDefinition,
@@ -15,9 +16,7 @@ from chat.application.tools.core import (
     ToolSelectionMode,
     ToolUISpec,
 )
-from chat.application.tools.core.output_cache.cache_store import (
-    ToolContentStore as CachedToolOutputStore,
-)
+from chat.application.tools.core.output_cache.cache_store import get_tool_content
 
 _TIMEOUT_SECONDS = 300.0
 _PARAMETERS_SCHEMA: dict[str, Any] = {
@@ -44,14 +43,14 @@ class CachedToolOutputStructureResult:
     content_id: str
     total_length: int | None = None
     outline: list[OutlineNode] = field(default_factory=list)
-    reason: str | None = None
+
+
+_RESULT_ADAPTER = TypeAdapter(CachedToolOutputStructureResult)
 
 
 class CachedToolOutputInspectStructureTool:
-    __slots__ = ("_definition", "_store")
-
-    def __init__(self, *, store: CachedToolOutputStore) -> None:
-        self._store = store
+    
+    def __init__(self) -> None:
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="inspect_cached_tool_output_structure",
@@ -87,20 +86,21 @@ class CachedToolOutputInspectStructureTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> CachedToolOutputStructureResult:
+    ) -> dict[str, Any]:
         del config
         try:
-            content_id = str(kwargs["content_id"])
-            stored = await self._store.get(
+            content_id = kwargs["content_id"]
+            stored = await get_tool_content(
                 content_id=content_id,
-                session_id=str(context["session_id"]),
+                session_id=context["session_id"],
             )
             if stored is None:
-                return CachedToolOutputStructureResult(
-                    content_id=content_id,
+                raise ToolExecutionError(
                     reason="cached_tool_output_not_found",
+                    retryable=False,
                 )
-            return CachedToolOutputStructureResult(
+
+            result = CachedToolOutputStructureResult(
                 content_id=content_id,
                 total_length=len(stored.text),
                 outline=OutlineAssembler.assemble(
@@ -108,6 +108,12 @@ class CachedToolOutputInspectStructureTool:
                     pages=stored.pages,
                     anchors=stored.anchors,
                 ),
+            )
+
+            return _RESULT_ADAPTER.dump_python(
+                result,
+                exclude_none=True,
+                exclude_defaults=True,
             )
         except Exception as exc:
             raise ToolExecutionError(

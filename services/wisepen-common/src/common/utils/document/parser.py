@@ -33,18 +33,18 @@ _TOKEN_KINDS: dict[str, BlockKind] = {
     "math_block": BlockKind.FORMULA,
     "math_block_label": BlockKind.FORMULA,
     "page_marker": BlockKind.PAGE_MARKER,
+    "paragraph_open": BlockKind.PARAGRAPH
 }
 
 
 class DocumentParser:
     """把 Markdown-compatible 文本解析为带原文位置的块级结构。"""
 
-    __slots__ = ("_parser",)
-
     def __init__(self) -> None:
         # 先让 markdown-it-py 负责语法边界，再把扩展 token 投影为 Common 的统一 block。
         self._parser = (
             MarkdownIt("commonmark")
+            .disable("lheading")    # 禁用 Setext 标题，避免与标题栈冲突
             .enable("table")
             .use(page_marker_plugin)
             .use(standalone_figure_plugin)
@@ -55,7 +55,7 @@ class DocumentParser:
         if not text:
             return ()
 
-        lines = text.splitlines(keepends=True)
+        lines = text.splitlines(keepends=True)  # 保留换行符，避免累加漂移
         # token.map 使用行号；这里转换为 Python 字符偏移，供所有下游结构复用。
         line_offsets = [0]
         for line in lines:
@@ -83,97 +83,90 @@ class DocumentParser:
         )
 
     def _parse_tokens(
-        self,
-        tokens: list[Token],
-        lines: list[str],
-        line_offsets: list[int],
-    ) -> list[DocumentBlock]:
-        """只消费顶层 token，并维护标题栈形成完整 section_path。"""
-        blocks: list[DocumentBlock] = []
-        headings: list[tuple[int, str]] = []
+            self,
+            tokens: list[Token],
+            lines: list[str],
+            line_offsets: list[int],
+        ) -> list[DocumentBlock]:
+            """只消费顶层 token，并维护标题栈形成完整 section_path。"""
+            blocks: list[DocumentBlock] = []
+            headings: list[tuple[int, str]] = []  # 栈：[(level, title), ...]
 
-        for index, token in enumerate(tokens):
-            # 只消费顶层 token。列表、引用和表格的内部 token 仍由外层 block 表示，
-            # 否则同一段原文会被重复产出，后续 span 和 chunk 边界就无法回源。
-            if token.level != 0 or token.map is None:
-                continue
+            for index, token in enumerate(tokens):
+                if token.level != 0 or token.map is None:
+                    continue
 
-            kind = _token_kind(token)
-            if kind is None:
-                continue
+                kind = _token_kind(token)
+                if kind is None:
+                    continue
 
-            start_line, end_line = token.map
-            block_text = "".join(lines[start_line:end_line])
-            if kind is BlockKind.PAGE_MARKER:
-                block_text = block_text.strip()
-            if not block_text.strip():
-                continue
+                start_line, end_line = token.map
+                block_text = "".join(lines[start_line:end_line])
+                if kind is BlockKind.PAGE_MARKER:
+                    block_text = block_text.strip()
+                if not block_text.strip():
+                    continue
 
-            metadata: dict[str, object] = {}
-            section_path = (
-                ()
-                if kind is BlockKind.PAGE_MARKER
-                else tuple(title for _, title in headings)
-            )
-            if kind is BlockKind.PAGE_MARKER:
-                # 页标不属于任何标题 Section；它只参与 Page 定位和 block 元数据。
-                metadata["page_label"] = token.meta["page_label"]
-            elif kind is BlockKind.FORMULA:
-                formula_match = FORMULA_LABEL_RE.search(block_text)
-                if formula_match is not None:
-                    metadata["anchor_label"] = (
-                        f"Equation {formula_match.group('number')}"
+                metadata: dict[str, object] = {}
+
+                if kind is BlockKind.HEADING:
+                    inline = (
+                        tokens[index + 1]
+                        if index + 1 < len(tokens) and tokens[index + 1].type == "inline"
+                        else None
                     )
-            elif kind is BlockKind.HEADING:
-                inline = (
-                    tokens[index + 1]
-                    if index + 1 < len(tokens)
-                    and tokens[index + 1].type == "inline"
-                    else None
-                )
-                title = inline.content.strip() if inline else block_text.strip()
-                level = int(token.tag[1])
-                # 标题栈只保留比当前标题更高的层级，再压入当前标题；
-                # 因此新标题天然挂到最近的未闭合父标题下面。
-                headings = [
-                    (depth, value)
-                    for depth, value in headings
-                    if depth < level
-                ]
-                headings.append((level, title))
-                section_path = tuple(value for _, value in headings)
-                metadata["title"] = title
-                metadata["heading_level"] = level
+                    title = inline.content.strip() if inline else block_text.strip()
+                    level = int(token.tag[1])
 
-            blocks.append(
-                DocumentBlock(
-                    block_id=f"block-{len(blocks)}",
-                    text=block_text,
-                    block_kind=kind,
-                    block_index=len(blocks),
-                    start_offset=line_offsets[start_line],
-                    end_offset=line_offsets[end_line],
-                    section_path=section_path,
-                    metadata=metadata,
-                )
-            )
+                    # 弹出所有 >= 当前层级的同级或子标题
+                    while headings and headings[-1][0] >= level:
+                        headings.pop()
+                    headings.append((level, title))
 
-        return blocks
+                    metadata["title"] = title
+                    metadata["heading_level"] = level
+
+                elif kind is BlockKind.PAGE_MARKER:
+                    # 页标不属于任何 Section，只存页码元数据
+                    metadata["page_label"] = token.meta["page_label"]
+
+                elif kind is BlockKind.FORMULA:
+                    formula_match = FORMULA_LABEL_RE.search(block_text)
+                    if formula_match is not None:
+                        metadata["anchor_label"] = f"Equation {formula_match.group('number')}"
+
+                # 统一冻结 section_path 并构造 DocumentBlock
+                section_path = () if kind is BlockKind.PAGE_MARKER else tuple(t for _, t in headings)
+
+                blocks.append(
+                    DocumentBlock(
+                        block_id=f"block-{len(blocks)}",
+                        text=block_text,
+                        block_kind=kind,
+                        block_index=len(blocks),
+                        start_offset=line_offsets[start_line],
+                        end_offset=line_offsets[end_line],
+                        section_path=section_path,
+                        metadata=metadata,
+                    )
+                )
+
+            return blocks
 
 
 def _token_kind(token: Token) -> BlockKind | None:
+    # 仅兼容 html 表格，其他html块丢弃
     if token.type == "html_block":
         return (
             BlockKind.TABLE
             if token.content.lstrip().lower().startswith("<table")
             else None
         )
-    if token.type == "paragraph_open":
-        return BlockKind.PARAGRAPH
     return _TOKEN_KINDS.get(token.type)
 
 
 def _numbered_anchor(text: str) -> tuple[BlockKind, str] | None:
+    # 识别标准题注文字，常见于学术论文
     match = NUMBERED_LABEL_RE.fullmatch(text.strip())
     if match is None:
         return None
@@ -194,6 +187,7 @@ def _associate_numbered_labels(
         first = blocks[index]
         if index + 1 < len(blocks):
             second = blocks[index + 1]
+            # 兼容题注在上和在下两种情况
             caption, target = (
                 (first, second)
                 if first.block_kind is BlockKind.PARAGRAPH
@@ -233,12 +227,13 @@ def _attach_page_labels(blocks: list[DocumentBlock]) -> list[DocumentBlock]:
     labeled: list[DocumentBlock] = []
     for block in blocks:
         if block.block_kind is BlockKind.PAGE_MARKER:
+            # 遇到页标，更新当前页码
             active_page_label = str(block.metadata["page_label"])
             labeled.append(block)
             continue
 
-        metadata = dict(block.metadata)
+        metadata = block.metadata
         if active_page_label is not None:
             metadata["page_label"] = active_page_label
-        labeled.append(replace(block, metadata=metadata))
+        labeled.append(replace(block, metadata=metadata))   # 打上页码标记
     return labeled

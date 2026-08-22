@@ -5,7 +5,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from hashlib import sha256
 
-from redis.asyncio import Redis
+import redis.asyncio as redis
 
 from chat.core.config.app_settings import settings
 from chat.domain.repositories.web_content_cache_repo import (
@@ -13,25 +13,17 @@ from chat.domain.repositories.web_content_cache_repo import (
     WebContentCacheValue,
 )
 
-from .base import RedisRepository
-
 _VALUE_KEY_PREFIX = "wisepen:web_content_cache:value:"
 
 
-class RedisWebContentCacheRepository(RedisRepository, WebContentCacheRepository):
+class RedisWebContentCacheRepository(WebContentCacheRepository):
     """按 URL 保存共享 web 正文，持久化字段与当前 cache 契约保持一致。"""
 
-    def __init__(self, *, redis_client: Redis | None = None) -> None:
-        super().__init__(
-            redis_client=(
-                redis_client
-                if redis_client is not None
-                else Redis.from_url(settings.REDIS_URL, decode_responses=True)
-            )
-        )
+    def __init__(self) -> None:
+        self.redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
     async def get_value(self, *, url: str) -> WebContentCacheValue | None:
-        raw = await self._redis.get(self._value_key(url))
+        raw = await self.redis.get(self._value_key(url))
         if raw is None:
             return None
         try:
@@ -51,7 +43,7 @@ class RedisWebContentCacheRepository(RedisRepository, WebContentCacheRepository)
         expire_at = value.expire_at
         if expire_at.tzinfo is None:
             expire_at = expire_at.replace(tzinfo=UTC)
-        await self._redis.set(
+        await self.redis.set(
             self._value_key(value.canonical_url),
             json.dumps(payload, ensure_ascii=False),
             ex=max(1, int((expire_at - datetime.now(UTC)).total_seconds())),

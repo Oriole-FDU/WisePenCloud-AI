@@ -35,8 +35,6 @@ class UrlFetchUnsupportedUrlError(UrlFetchError):
 class StaticPageFetcher:
     """调用共享 Scrapling 静态 session；URL 安全校验由工具入口负责。"""
 
-    __slots__ = ("_max_response_bytes", "_session")
-
     def __init__(self, *, session: Any, max_response_bytes: int = 52_428_800) -> None:
         self._session = session
         self._max_response_bytes = max_response_bytes

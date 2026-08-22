@@ -17,14 +17,12 @@ from chat.application.tools.core.execution.result import (
 )
 
 from chat.application.tools.core.llm.invocation import ToolInvocation
-from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
 from chat.application.tools.core.registry import ToolScope
 
 
 class ToolExecutor:
-    def __init__(self, tool_scope: ToolScope, *, output_cache: ToolOutputCache) -> None:
+    def __init__(self, tool_scope: ToolScope) -> None:
         self._tool_scope = tool_scope
-        self._output_cache = output_cache
 
     async def execute_client_one(self, invocation: ToolInvocation, client_tool_result: ClientToolResult) -> ToolExecutionResult:
         started_at = datetime.now(timezone.utc)
@@ -50,11 +48,7 @@ class ToolExecutor:
                     retryable=False,
                 )
 
-            output = await self._output_cache.process(
-                tool_output=self._coerce_tool_output(client_tool_result.output),
-                invocation=invocation,
-                session_id=self._tool_scope.context["session_id"], # 会话 ID
-            )
+            output = self._coerce_tool_output(client_tool_result.output)
 
             return ToolExecutionResult(tool_invocation=invocation, tool_output=output,
                                        started_at=started_at, finished_at=datetime.now(timezone.utc),
@@ -130,11 +124,7 @@ class ToolExecutor:
                 tool_name=invocation.tool_name,
             )
 
-            output = await self._output_cache.process(
-                tool_output=self._coerce_tool_output(output),
-                invocation=invocation,
-                session_id=self._tool_scope.context["session_id"], # 会话 ID
-            )
+            output = self._coerce_tool_output(output)
 
             return ToolExecutionResult(tool_invocation=invocation, tool_output=output,
                                        started_at=started_at, finished_at=datetime.now(timezone.utc),
@@ -192,10 +182,16 @@ class ToolExecutor:
             return ToolOutput(content=json.dumps(asdict(output), ensure_ascii=False))
 
         if isinstance(output, Mapping):
-            return ToolOutput(content=json.dumps(dict(output), ensure_ascii=False))
+            value = dict(output)
+            return ToolOutput(
+                content=json.dumps(value, ensure_ascii=False),
+            )
 
         if isinstance(output, Sequence) and not isinstance(output, str | bytes | bytearray):
-            return ToolOutput(content=json.dumps(list(output), ensure_ascii=False))
+            value = list(output)
+            return ToolOutput(
+                content=json.dumps(value, ensure_ascii=False),
+            )
 
         raise ToolExecutionError(
             reason="Tool Output Invalid",

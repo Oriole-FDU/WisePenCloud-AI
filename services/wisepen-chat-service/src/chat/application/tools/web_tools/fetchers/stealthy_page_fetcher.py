@@ -15,8 +15,6 @@ from .static_page_fetcher import (
 class StealthyPageFetcher:
     """调用共享 Scrapling 浏览器 session；URL 已在工具边界完成校验。"""
 
-    __slots__ = ("_max_response_bytes", "_session")
-
     def __init__(self, *, session: Any, max_response_bytes: int = 52_428_800) -> None:
         self._session = session
         self._max_response_bytes = max_response_bytes

@@ -19,15 +19,23 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent as StoredCachedToolOutput,
-    ToolContentStore as CachedToolOutputStore,
 )
-from chat.core.config.app_settings import settings
-
-from chat.application.tools.session_tools.cached_tool_output_tools.window import CachedToolOutputWindow, CachedToolOutputWindowBuilder
+from chat.application.tools.core.output_cache.cache_store import (
+    get_tool_content,
+)
+from chat.application.tools.session_tools.cached_tool_output_tools.window import (
+    CachedToolOutputWindow,
+)
 
 _MAX_REGEX_CHARS = 500
+_DEFAULT_MAX_MATCHES = 100
+_MAX_MATCHES = 100
+_DEFAULT_EXPAND_COUNT = 10
+_MAX_EXPAND_COUNT = 10
+_REGEX_CONTEXT_CHARS = 800
 _SEARCH_TIMEOUT_SECONDS = 5
 _TIMEOUT_SECONDS = 300.0
+
 _PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -46,16 +54,28 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         },
         "max_matches": {
             "type": "integer",
-            "default": 10,
-            "minimum": 0,
-            "description": "Maximum matches returned across all cached tool outputs.",
+            "default": _DEFAULT_MAX_MATCHES,
+            "minimum": 1,
+            "maximum": _MAX_MATCHES,
+            "description": (
+                "Maximum regex matches scanned across all cached tool outputs; this is independent "
+                "from how many match windows are expanded."
+            ),
         },
-        "context_chars": {
+        "match_offset": {
             "type": "integer",
             "minimum": 0,
+            "default": 0,
+            "description": "Zero-based global match index from which window expansion starts.",
+        },
+        "expand_count": {
+            "type": "integer",
+            "default": _DEFAULT_EXPAND_COUNT,
+            "minimum": 1,
+            "maximum": _MAX_EXPAND_COUNT,
             "description": (
-                "Optional raw source characters included before and after each match. "
-                "When omitted, the reader chooses token-budgeted context automatically."
+                "Number of matched occurrences to expand in this call; at most 10. "
+                "This is independent from max_matches."
             ),
         },
     },
@@ -72,17 +92,9 @@ class CachedToolOutputSearchByRegexMatch:
     window: CachedToolOutputWindow
 
 
-@dataclass(slots=True)
-class CachedToolOutputSearchByRegexResult:
-    matches: list[CachedToolOutputSearchByRegexMatch] = field(default_factory=list)
-    budget_exhausted: bool = False
-
-
 class CachedToolOutputSearchByRegexTool:
-    __slots__ = ("_definition", "_store")
 
-    def __init__(self, *, store: CachedToolOutputStore) -> None:
-        self._store = store
+    def __init__(self) -> None:
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="search_cached_tool_output_by_regex",
@@ -91,6 +103,9 @@ class CachedToolOutputSearchByRegexTool:
                     "Use this for exact names, identifiers, citations, headings, URLs, or other "
                     "literal patterns, including matches that cross retrieval chunk boundaries. "
                     "Results include absolute match offsets and bounded source context. "
+                    "Each expanded match includes 800 source characters before and after it when available. "
+                    "Use match_offset and expand_count to page through matches; expand_count is capped at 10 "
+                    "and is independent from max_matches. "
                     "Use search_cached_tool_output_by_semantics for meaning-based retrieval. Use read tools "
                     "after you know the desired range, pages, or sections."
                 ),
@@ -112,15 +127,10 @@ class CachedToolOutputSearchByRegexTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> CachedToolOutputSearchByRegexResult:
+    ) -> list[CachedToolOutputSearchByRegexMatch]:
         del config
-        # pattern 为空直接视为调用错误；不要把空正则扩展成全文匹配。
-        pattern = str(kwargs.get("pattern") or "")
-        if not pattern:
-            raise ToolExecutionError(
-                reason="missing_pattern",
-                detail_reason="pattern is required.",
-            )
+        # schema 已保证 pattern 非空；这里只负责执行正则语法检查。
+        pattern = kwargs["pattern"]
         if len(pattern) > _MAX_REGEX_CHARS:
             # 限制正则长度，避免模型生成过长表达式导致匹配成本失控。
             raise ToolExecutionError(
@@ -139,9 +149,9 @@ class CachedToolOutputSearchByRegexTool:
         try:
             # 搜索工具直接按 content_id 逐个读取缓存；不存在的 content 不参与搜索。
             stored_items = []
-            session_id = str(context["session_id"])
-            for content_id in [str(value) for value in kwargs["content_ids"]]:
-                stored = await self._store.get(
+            session_id = context["session_id"]
+            for content_id in kwargs["content_ids"]:
+                stored = await get_tool_content(
                     content_id=content_id,
                     session_id=session_id,
                 )
@@ -150,12 +160,9 @@ class CachedToolOutputSearchByRegexTool:
             return await _search_by_regex(
                 stored_items=stored_items,
                 pattern=pattern,
-                max_matches=max(int(kwargs.get("max_matches", 10)), 0),
-                context_chars=(
-                    max(int(kwargs["context_chars"]), 0)
-                    if "context_chars" in kwargs
-                    else None
-                ),
+                max_matches=kwargs["max_matches"],
+                match_offset=kwargs["match_offset"],
+                expand_count=kwargs["expand_count"],
             )
         except Exception as exc:
             raise ToolExecutionError(
@@ -170,22 +177,13 @@ async def _search_by_regex(
     stored_items: Sequence[StoredCachedToolOutput],
     pattern: str,
     max_matches: int,
-    context_chars: int | None,
-) -> CachedToolOutputSearchByRegexResult:
-    if max_matches <= 0:
-        # max_matches=0 是合法输入，用于主动禁止返回命中。
-        return CachedToolOutputSearchByRegexResult()
-
-    # regex 的窗口预算使用独立配置，不复用 read_cached_tool_output_by_range 的单窗口预算。
-    builder = CachedToolOutputWindowBuilder(
-        char_budget=settings.TOOL_CONTENT_REGEX_TOTAL_CHAR_BUDGET
-    )
-
-    def scan_loaded() -> tuple[list[CachedToolOutputSearchByRegexMatch], bool]:
+    match_offset: int,
+    expand_count: int,
+) -> list[CachedToolOutputSearchByRegexMatch]:
+    def scan_loaded() -> list[CachedToolOutputSearchByRegexMatch]:
         # regex 搜索放到工作线程里执行，避免复杂表达式阻塞事件循环。
         compiled = regex.compile(pattern)
-        matches: list[CachedToolOutputSearchByRegexMatch] = []
-        remaining = settings.TOOL_CONTENT_REGEX_TOTAL_CHAR_BUDGET
+        matched_ranges: list[tuple[StoredCachedToolOutput, int, int]] = []
         for stored in stored_items:
             try:
                 # timeout 由 regex 库在单次扫描中控制，复杂表达式会转成工具错误返回。
@@ -193,48 +191,41 @@ async def _search_by_regex(
                     stored.text,
                     timeout=_SEARCH_TIMEOUT_SECONDS,
                 ):
-                    if remaining <= 0:
-                        return matches, True
-                    window_start, window_end = _regex_window_range(
-                        stored.text,
-                        match_start=matched.start(),
-                        match_end=matched.end(),
-                        context_chars=context_chars,
-                        context_side_char_budget=(
-                            settings.TOOL_CONTENT_REGEX_CONTEXT_SIDE_CHAR_BUDGET
-                        ),
-                        total_char_budget=remaining,
-                    )
-                    # 命中上下文最终仍通过 WindowBuilder 回填 page/section/anchor 元数据。
-                    window = builder.build_range_window(
-                        stored,
-                        start=window_start,
-                        end=window_end,
-                        char_budget=remaining,
-                    )
-                    matches.append(
-                        CachedToolOutputSearchByRegexMatch(
-                            content_id=stored.content_id,
-                            match_start=matched.start(),
-                            match_end=matched.end(),
-                            window=window,
-                        )
-                    )
-                    remaining -= len(window.text)
-                    if len(matches) >= max_matches:
-                        # 达到命中数量上限不是预算耗尽，不需要标记 budget_exhausted。
-                        return matches, False
+                    matched_ranges.append((stored, matched.start(), matched.end()))
+                    if len(matched_ranges) >= max_matches:
+                        break
+                if len(matched_ranges) >= max_matches:
+                    break
             except TimeoutError as exc:
                 raise TimeoutError(
                     f"regex search exceeded {_SEARCH_TIMEOUT_SECONDS}s"
                 ) from exc
-        return matches, False
+        selected_ranges = matched_ranges[match_offset : match_offset + expand_count]
+        matches: list[CachedToolOutputSearchByRegexMatch] = []
+        for stored, match_start, match_end in selected_ranges:
+            window_start, window_end = _regex_window_range(
+                stored.text,
+                match_start=match_start,
+                match_end=match_end,
+            )
+            # 固定上下文直接构造窗口；搜索结果本身不再引入额外字符预算。
+            window = CachedToolOutputWindow(
+                text=stored.text[window_start:window_end],
+                start_offset=window_start,
+                end_offset=window_end,
+                truncated=False,
+            )
+            matches.append(
+                CachedToolOutputSearchByRegexMatch(
+                    content_id=stored.content_id,
+                    match_start=match_start,
+                    match_end=match_end,
+                    window=window,
+                )
+            )
+        return matches
 
-    matches, budget_exhausted = await asyncio.to_thread(scan_loaded)
-    return CachedToolOutputSearchByRegexResult(
-        matches=matches,
-        budget_exhausted=budget_exhausted,
-    )
+    return await asyncio.to_thread(scan_loaded)
 
 
 def _regex_window_range(
@@ -242,35 +233,12 @@ def _regex_window_range(
     *,
     match_start: int,
     match_end: int,
-    context_chars: int | None,
-    context_side_char_budget: int,
-    total_char_budget: int,
 ) -> tuple[int, int]:
-    # 未指定 context_chars 时使用系统默认的左右上下文预算。
-    if context_chars is None:
-        candidate_start = max(match_start - context_side_char_budget, 0)
-        candidate_end = min(match_end + context_side_char_budget, len(text))
-    else:
-        # 调用方显式给出 context_chars 时，按该值覆盖默认上下文长度。
-        context_chars = max(context_chars, 0)
-        candidate_start = max(match_start - context_chars, 0)
-        candidate_end = min(match_end + context_chars, len(text))
-
-    if len(text[candidate_start:candidate_end]) <= total_char_budget:
-        # 候选窗口未超过剩余预算时直接返回完整上下文。
-        return candidate_start, candidate_end
-
-    match_chars = len(text[match_start:match_end])
-    if match_chars >= total_char_budget:
-        # 极端情况下命中文本本身已超过预算，至少返回完整命中范围。
-        return match_start, match_end
-
-    # 上下文超过预算时，优先保留命中本体，再把剩余预算尽量平均分给前后文。
-    context_budget = total_char_budget - match_chars
-    before_budget = context_budget // 2
-    start = max(match_start - before_budget, candidate_start)
-    after_budget = context_budget - len(text[start:match_start])
-    return start, min(match_end + after_budget, candidate_end)
+    # 每个命中窗口固定取前后各 800 字符，正文边界不足时自然收缩。
+    return (
+        max(match_start - _REGEX_CONTEXT_CHARS, 0),
+        min(match_end + _REGEX_CONTEXT_CHARS, len(text)),
+    )
 
 
 def _policy() -> ToolPolicy:

@@ -26,8 +26,6 @@ from chat.application.tools.core.mcp import (
     McpToolCatalog,
     SystemMcpToolCatalog,
 )
-from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
-from chat.application.tools.core.output_cache.cache_store import ToolContentStore
 from chat.application.tools.session_tools.cached_tool_output_tools import (
     CachedToolOutputInspectStructureTool,
     CachedToolOutputReadByPageTool,
@@ -64,7 +62,6 @@ from chat.core.persistence import (
     RedisChatTurnStream,
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
-    RedisToolContentRepository,
     RedisWebContentCacheRepository,
 )
 from chat.core.providers import (
@@ -178,27 +175,13 @@ class Container(containers.DeclarativeContainer):
     hot_context_repo = providers.Singleton(RedisHotContext)
     mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache)
     chat_turn_stream_repo = providers.Singleton(RedisChatTurnStream)
-    tool_content_repo = providers.Singleton(
-        RedisToolContentRepository,
-        ttl_seconds=settings.TOOL_CONTENT_DEFAULT_TTL_SECONDS,
-    )
-    tool_content_store = providers.Singleton(
-        ToolContentStore,
-        tool_content_repository=tool_content_repo,
-        max_chars=settings.TOOL_CONTENT_MAX_CHARS,
-    )
     web_content_cache_repository = providers.Singleton(RedisWebContentCacheRepository)
     web_content_cache = providers.Singleton(
         WebContentCache,
         repository=web_content_cache_repository,
     )
-    tool_output_cache = providers.Singleton(
-        ToolOutputCache,
-        tool_content_store=tool_content_store,
-    )
     tool_dispatcher = providers.Singleton(
         ToolDispatcher,
-        output_cache=tool_output_cache,
     )
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
@@ -311,27 +294,21 @@ class Container(containers.DeclarativeContainer):
     )
     inspect_cached_tool_output_structure_tool = providers.Singleton(
         CachedToolOutputInspectStructureTool,
-        store=tool_content_store,
     )
     read_cached_tool_output_by_page_tool = providers.Singleton(
         CachedToolOutputReadByPageTool,
-        store=tool_content_store,
     )
     read_cached_tool_output_by_range_tool = providers.Singleton(
         CachedToolOutputReadByRangeTool,
-        store=tool_content_store,
     )
     read_cached_tool_output_by_section_tool = providers.Singleton(
         CachedToolOutputReadBySectionTool,
-        store=tool_content_store,
     )
     search_cached_tool_output_by_regex_tool = providers.Singleton(
         CachedToolOutputSearchByRegexTool,
-        store=tool_content_store,
     )
     search_cached_tool_output_by_semantics_tool = providers.Singleton(
         CachedToolOutputSearchBySemanticsTool,
-        store=tool_content_store,
     )
     web_fetch_static_session = providers.Resource(_provide_web_fetch_static_session)
     web_fetch_browser_session = providers.Resource(_provide_web_fetch_browser_session)

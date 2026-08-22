@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections import deque
 from contextlib import suppress
 from dataclasses import dataclass
@@ -12,15 +11,14 @@ from common.logger import warn
 from lxml import html as lxml_html
 
 from chat.application.tools.core import (
-    CacheableText,
     ToolDefinition,
     ToolExecutionError,
     ToolLLMSpec,
-    ToolOutput,
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
 )
+from chat.application.tools.core.output_cache.decorator import cacheable_tool_output
 from chat.core.config.app_settings import settings
 
 from .common import (
@@ -36,7 +34,6 @@ from .fetchers import (
     WebFetcher,
 )
 from .page_content import clean_html, should_fallback
-from ..core.execution.result import ToolOutput
 
 DEFAULT_MAX_PAGES = 20
 DEFAULT_MAX_DEPTH = 2
@@ -89,16 +86,7 @@ class _CrawlPage:
 
 class WebCrawlTool:
     """直接拥有 BFS、链接发现、两阶段抓取和 URL cache 读取。"""
-
-    __slots__ = (
-        "_cache",
-        "_concurrency",
-        "_definition",
-        "_min_text_length",
-        "_static_fetcher",
-        "_stealthy_fetcher",
-    )
-
+    
     def __init__(
         self,
         *,
@@ -128,7 +116,8 @@ class WebCrawlTool:
                 persist_output=True,
                 risk_level=ToolRiskLevel.MEDIUM,
                 timeout_seconds=300.0,
-                max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+                # 正文已经由 claim-check 装饰器转存，模型只接收 preview/receipt。
+                max_output_chars=None,
             ),
         )
 
@@ -136,12 +125,13 @@ class WebCrawlTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
+    @cacheable_tool_output(paths=("pages.*.text",))
     async def execute(
         self,
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> ToolOutput:
+    ) -> dict[str, Any]:
         del context, config
         seed_url = kwargs["seed_url"].strip()
         try:
@@ -318,23 +308,16 @@ class WebCrawlTool:
 
 
     @staticmethod
-    async def _build_output(pages: list[_CrawlPage], seed_url: str) -> ToolOutput:
+    async def _build_output(pages: list[_CrawlPage], seed_url: str) -> dict[str, Any]:
         payload = {
             "seed_url": seed_url,
             "pages_crawled": len(pages),
-            "pages": [{"url": page.source_url} for page in pages],
-        }
-        return ToolOutput(
-            content=json.dumps(payload, ensure_ascii=False),
-            cacheable_texts=tuple(
-                CacheableText(
-                    content=page.text,
-                    metadata={"source_url": page.source_url},
-                )
+            "pages": [
+                {"url": page.source_url, "text": page.text}
                 for page in pages
-                if page.text.strip()
-            ),
-        )
+            ],
+        }
+        return payload
 
 
 def _extract_links(

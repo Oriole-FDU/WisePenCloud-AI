@@ -1,32 +1,28 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from common.utils.document import SourceSpan
 
 from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent as StoredCachedToolOutput,
 )
-from chat.application.tools.core.output_cache.cache_store import (
-    ToolContentChunk as CachedToolOutputChunk,
-)
 
 
 @dataclass(slots=True)
 class CachedToolOutputWindow:
+    """模型可见的正文窗口；只负责正文和按字符 offset 续读。"""
+
     text: str
+    # offset 使用原文 Python 字符半开区间，供 range 工具从 end_offset 续读。
     start_offset: int
     end_offset: int
-    source_spans: list[SourceSpan] = field(default_factory=list)
-    page_labels: list[str] = field(default_factory=list)
-    section_ids: list[str] = field(default_factory=list)
-    anchor_labels: list[str] = field(default_factory=list)
     truncated: bool = False
-    metadata: dict[str, object] = field(default_factory=dict)
 
 
 class CachedToolOutputWindowBuilder:
-    __slots__ = ("_char_budget",)
+    """按统一字符预算从缓存正文构造可续读窗口。"""
 
     def __init__(self, *, char_budget: int) -> None:
         if char_budget < 1:
@@ -46,7 +42,7 @@ class CachedToolOutputWindowBuilder:
         normalized_start = _normalize_offset(start, text_length, default=0)
         requested_end = _normalize_offset(end, text_length, default=text_length)
         if requested_end <= normalized_start:
-            # 空区间不是错误，返回空窗口即可，方便调用方用偏移继续探测。
+            # 空区间返回空窗口。
             normalized_end = normalized_start
             truncated = False
         else:
@@ -56,71 +52,71 @@ class CachedToolOutputWindowBuilder:
             included_chars = min(requested_length, budget)
             truncated = requested_length > budget
             normalized_end = normalized_start + included_chars
-        return self._continuous_window(
-            stored,
-            start=normalized_start,
-            end=normalized_end,
+        return CachedToolOutputWindow(
+            text=stored.text[normalized_start:normalized_end],
+            start_offset=normalized_start,
+            end_offset=normalized_end,
             truncated=truncated,
         )
 
-    def build_source_window(
+    def build_spans_window(
         self,
         stored: StoredCachedToolOutput,
         *,
-        chunk: CachedToolOutputChunk,
+        source_spans: Sequence[SourceSpan],
         char_budget: int | None = None,
     ) -> CachedToolOutputWindow:
-        # semantic search 使用 chunk 的 source_spans 回读原文，避免把索引时的摘要文本当作来源。
+        """把一个对象的多个原文片段聚合成单个窗口。"""
+
         budget = self._resolve_budget(char_budget)
         fragments: list[str] = []
-        included_spans: list[SourceSpan] = []
+        included_ranges: list[tuple[int, int]] = []
         truncated = False
-        for span_index, span in enumerate(chunk.source_spans):
-            # 多个 span 之间用空行拼接；拼接符也要计入本次窗口预算。
-            prefix = "\n\n".join(fragments)
-            if prefix:
-                prefix += "\n\n"
-            available = budget - len(prefix)
+        output_length = 0
+
+        for span_index, span in enumerate(source_spans):
+            fragment = stored.text[span.start_offset : span.end_offset]
+            if not fragment:
+                continue
+
+            separator = "\n\n" if fragments else ""
+            available = budget - output_length - len(separator)
             if available <= 0:
                 truncated = True
                 break
 
-            fragment = stored.text[span.start_offset : span.end_offset]
             included_chars = min(len(fragment), available)
-            fragment_truncated = len(fragment) > available
-            fragment = fragment[:included_chars]
-            if not fragment and span.start_offset < span.end_offset:
-                # 当前 span 有内容但预算已经无法容纳任何字符，标记截断后结束。
+            fragment_truncated = included_chars < len(fragment)
+            fragments.append(separator + fragment[:included_chars])
+            output_length += len(separator) + included_chars
+            if included_chars:
+                included_ranges.append(
+                    (span.start_offset, span.start_offset + included_chars)
+                )
+
+            if fragment_truncated:
                 truncated = True
                 break
 
-            fragments.append(fragment)
-            included_spans.append(
-                SourceSpan(span.start_offset, span.start_offset + included_chars)
-            )
-            if fragment_truncated or (
-                span_index < len(chunk.source_spans) - 1
-                and len("\n\n".join(fragments)) >= budget
+            if span_index < len(source_spans) - 1 and (
+                output_length >= budget
             ):
                 truncated = True
                 break
 
-        start = min((span.start_offset for span in included_spans), default=0)
-        end = max((span.end_offset for span in included_spans), default=0)
-        page_labels, section_ids, anchor_labels = _structure_labels(
-            stored,
-            included_spans,
+        start_offset = min(
+            (start for start, _ in included_ranges),
+            default=0,
+        )
+        end_offset = max(
+            (end for _, end in included_ranges),
+            default=start_offset,
         )
         return CachedToolOutputWindow(
-            text="\n\n".join(fragments),
-            start_offset=start,
-            end_offset=end,
-            source_spans=included_spans,
-            page_labels=page_labels,
-            section_ids=section_ids,
-            anchor_labels=anchor_labels,
+            text="".join(fragments),
+            start_offset=start_offset,
+            end_offset=end_offset,
             truncated=truncated,
-            metadata=dict(stored.metadata),
         )
 
     def _resolve_budget(self, char_budget: int | None) -> int:
@@ -129,31 +125,6 @@ class CachedToolOutputWindowBuilder:
             return self._char_budget
         return max(1, min(char_budget, self._char_budget))
 
-    def _continuous_window(
-        self,
-        stored: StoredCachedToolOutput,
-        *,
-        start: int,
-        end: int,
-        truncated: bool,
-    ) -> CachedToolOutputWindow:
-        source_spans = [SourceSpan(start, end)] if start < end else []
-        page_labels, section_ids, anchor_labels = _structure_labels(
-            stored,
-            source_spans,
-        )
-        return CachedToolOutputWindow(
-            text=stored.text[start:end],
-            start_offset=start,
-            end_offset=end,
-            source_spans=source_spans,
-            page_labels=page_labels,
-            section_ids=section_ids,
-            anchor_labels=anchor_labels,
-            truncated=truncated,
-            metadata=dict(stored.metadata),
-        )
-
 
 def _normalize_offset(value: int | None, text_length: int, *, default: int) -> int:
     # 负偏移对齐 Python slice 习惯，最终仍夹在合法原文长度范围内。
@@ -161,40 +132,3 @@ def _normalize_offset(value: int | None, text_length: int, *, default: int) -> i
     if offset < 0:
         offset += text_length
     return min(max(offset, 0), text_length)
-
-
-def _structure_labels(
-    stored: StoredCachedToolOutput,
-    source_spans: list[SourceSpan],
-) -> tuple[list[str], list[str], list[str]]:
-    """只投影实际返回 span 覆盖到的具体结构身份。"""
-    page_labels = list(
-        dict.fromkeys(
-            page.page_label
-            for page in stored.pages
-            if _overlaps_any(page.source_span, source_spans)
-        )
-    )
-    section_ids = list(
-        dict.fromkeys(
-            section.section_id
-            for section in stored.sections
-            if _overlaps_any(section.own_span, source_spans)
-        )
-    )
-    anchor_labels = list(
-        dict.fromkeys(
-            anchor.label
-            for anchor in stored.anchors
-            if _overlaps_any(anchor.source_span, source_spans)
-        )
-    )
-    return page_labels, section_ids, anchor_labels
-
-
-def _overlaps_any(span: SourceSpan, others: list[SourceSpan]) -> bool:
-    return any(
-        span.start_offset < other.end_offset
-        and span.end_offset > other.start_offset
-        for other in others
-    )
