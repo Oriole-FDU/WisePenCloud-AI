@@ -15,8 +15,7 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
-from chat.application.tools.core.output_cache.decorator import cacheable_tool_output
-from chat.core.config.app_settings import settings
+from chat.application.tools.core.output_cache import cacheable_tool_output
 
 from .common import UrlSecurityError, WebContentCache, validate_public_http_url_async
 from .fetchers import (
@@ -69,7 +68,6 @@ class _FetchJob:
 
 class WebFetchTool:
     """直接拥有 URL 校验、缓存、两阶段抓取和结果投影。"""
-
 
     def __init__(
         self,

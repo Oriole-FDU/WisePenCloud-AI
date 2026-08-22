@@ -51,37 +51,15 @@ def cacheable_tool_output(
             # 执行工具execute函数
             raw = await target(*args, **kwargs)
 
-            from chat.core.config.app_settings import settings
-
-            # 将返回对象统一为 Json 纯树
-
-            # ToolOutput对象取原值
             tool_output = raw if isinstance(raw, ToolOutput) else None
-            # tool_output的json字符串会被重新解析为json对象，普通字符串不变
-            pure = _dump_json_tree(raw.content if tool_output else raw)
-            # 将字符串包装成单元素列表，后续可统一替换操作
-            target_root = [pure] if isinstance(pure, str) else pure
-
-            # 定位寄存的长文本
-            targets = _collect_targets(target_root, paths)
-            if targets:
-                budgets = _preview_budgets(
-                    [target.text for target in targets],
-                    per_budget=settings.TOOL_CONTENT_PREVIEW_PER_CHAR_BUDGET,
-                    total_budget=settings.TOOL_CONTENT_PREVIEW_TOTAL_CHAR_BUDGET,
-                )
-                await _claim_targets(
-                    targets,
-                    budgets,
-                    session_id=session_id,
-                )
-
-            # 提取最终的数据对象，如果是被包装的字符串，从列表中取回
-            result = target_root[0] if isinstance(pure, str) else target_root
+            result = await process_cacheable_output(
+                raw.content if tool_output else raw,
+                paths=paths,
+                session_id=session_id,
+            )
 
             # 如果结果依然是纯文本，说明未被寄存，或缓存存储失败降级了，按原字符串返回
             if isinstance(result, str):
-                # 如果是tool_output，需要回填images
                 return result if tool_output is None else ToolOutput(
                     content=result,
                     images=raw.images,
@@ -101,6 +79,31 @@ def cacheable_tool_output(
     if func is None:
         return decorate
     return decorate(func)
+
+
+async def process_cacheable_output(
+    value: Any,
+    *,
+    paths: tuple[str, ...],
+    session_id: str,
+) -> Any:
+    """在 Host 侧执行路径声明对应的 Claim Check 变异。"""
+
+    from chat.core.config.app_settings import settings
+
+    # MCP 信封和本地工具都先收敛成同一种 JSON 纯树，后续路径语义保持一致。
+    pure = _dump_json_tree(value)
+    target_root = [pure] if isinstance(pure, str) else pure
+    targets = _collect_targets(target_root, paths)
+    if targets:
+        budgets = _preview_budgets(
+            [target.text for target in targets],
+            per_budget=settings.TOOL_CONTENT_PREVIEW_PER_CHAR_BUDGET,
+            total_budget=settings.TOOL_CONTENT_PREVIEW_TOTAL_CHAR_BUDGET,
+        )
+        await _claim_targets(targets, budgets, session_id=session_id)
+
+    return target_root[0] if isinstance(pure, str) else target_root
 
 
 class _Target:

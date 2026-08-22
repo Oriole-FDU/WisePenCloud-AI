@@ -18,8 +18,7 @@ from chat.application.tools.core import (
     ToolPolicy,
     ToolRiskLevel,
 )
-from chat.application.tools.core.output_cache.decorator import cacheable_tool_output
-from chat.core.config.app_settings import settings
+from chat.application.tools.core.output_cache import cacheable_tool_output
 
 from .common import (
     UrlSecurityError,
@@ -86,7 +85,7 @@ class _CrawlPage:
 
 class WebCrawlTool:
     """直接拥有 BFS、链接发现、两阶段抓取和 URL cache 读取。"""
-    
+
     def __init__(
         self,
         *,
