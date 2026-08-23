@@ -4,7 +4,6 @@ from typing import Any
 
 import httpx
 from common.core.exceptions import ServiceException
-from common.utils.ranking import RankingPipeline
 
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.domain.error_codes import McpErrorCode
@@ -20,8 +19,7 @@ class FirecrawlSearchTool(BaseSearchTool):
     tool_name = "firecrawl_search"
     provider_name = "firecrawl"
 
-    def __init__(self, *, http_client: httpx.AsyncClient, ranking_pipeline: RankingPipeline) -> None:
-        super().__init__(ranking_pipeline=ranking_pipeline)
+    def __init__(self, *, http_client: httpx.AsyncClient) -> None:
         self._http_client = http_client
 
     async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:

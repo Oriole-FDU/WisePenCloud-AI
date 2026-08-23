@@ -61,16 +61,23 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "description": "One or more cached tool output content_id values returned in previous tool results.",
         },
 
-        "query": {
+        "semantic_query": {
             "type": "string",
             "minLength": 1,
             "description": (
-                "A natural language description or complete question detailing the information needed "
-                "(e.g., 'Why is self-attention more efficient than recurrent layers?'). "
-                "Matches by semantic meaning, not literal keywords. "
-                "Best practices: (1) Use formal phrasing and domain-specific terminology; "
-                "(2) Query in the same language as the target document; "
-                "(3) Avoid colloquialisms, slang, and emojis to prevent low similarity scores (< 0.2)."
+                "Information need used by the semantic reranker. Prefer a complete natural-language "
+                "question, such as 'Why is self-attention more efficient than recurrent layers?', but "
+                "ordinary semantic statements are also supported. Use formal phrasing and domain-specific "
+                "terminology; avoid colloquialisms, slang, and emojis."
+            ),
+        },
+        "lexical_query": {
+            "type": "string",
+            "minLength": 1,
+            "description": (
+                "Sparse keywords used by BM25 lexical retrieval. Prefer concise keywords rather than a "
+                "full sentence, and try useful synonyms, terminology variants, and cross-language terms "
+                "when they may improve matching."
             ),
         },
         "top_k": {
@@ -81,7 +88,7 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "description": "Maximum ranked parent sections returned; at most 10.",
         },
     },
-    "required": ["content_ids", "query"],
+    "required": ["content_ids", "semantic_query", "lexical_query"],
     "additionalProperties": False,
 }
 
@@ -144,6 +151,9 @@ class CachedToolOutputSearchBySemanticsTool:
                     "physical page boundaries. Small child chunks identify relevant parent sections; "
                     "each result includes content_id, section_id, section_path, rank, score, and "
                     "a parent window bounded to 4000 characters.\n\n"
+                    "Provide semantic_query and lexical_query separately: semantic_query is for the reranker "
+                    "and may be a question or ordinary semantic statement, while lexical_query is for BM25 "
+                    "and should contain sparse keywords with useful synonym or cross-language variants.\n\n"
                     "Use search_cached_tool_output_by_regex for exact patterns. Use read tools only after "
                     "you know the desired range, pages, or sections."
                 ),
@@ -167,12 +177,12 @@ class CachedToolOutputSearchBySemanticsTool:
         **kwargs: Any,
     ) -> list[CachedToolOutputSearchBySemanticsItem]:
         del config
-        # semantic search 必须有自然语言查询，空查询无法构建排序请求。
-        query = kwargs["query"].strip()
-        if not query:
+        semantic_query = kwargs["semantic_query"].strip()
+        lexical_query = kwargs["lexical_query"].strip()
+        if not semantic_query or not lexical_query:
             raise ToolExecutionError(
-                reason="missing_query",
-                detail_reason="query must be non-empty.",
+                reason="missing_search_queries",
+                detail_reason="semantic_query and lexical_query must be non-empty.",
             )
         try:
             # 允许多个 content 混排；不存在的 content 不参与候选构建。
@@ -187,7 +197,8 @@ class CachedToolOutputSearchBySemanticsTool:
                     stored_items.append(stored)
             return await _search_by_semantics(
                 stored_items=stored_items,
-                query=query,
+                semantic_query=semantic_query,
+                lexical_query=lexical_query,
                 top_k=kwargs["top_k"],
                 ranking_pipeline=self._ranking_pipeline,
             )
@@ -202,7 +213,8 @@ class CachedToolOutputSearchBySemanticsTool:
 async def _search_by_semantics(
     *,
     stored_items: Sequence[StoredCachedToolOutput],
-    query: str,
+    semantic_query: str,
+    lexical_query: str,
     top_k: int,
     ranking_pipeline: RankingPipeline,
 ) -> list[CachedToolOutputSearchBySemanticsItem]:
@@ -255,7 +267,10 @@ async def _search_by_semantics(
     # 的多个小子块占满最终结果。
     result = await ranking_pipeline.arank(
         RankRequest(
-            query=RankQuery(text=query),
+            query=RankQuery(
+                semantic_query=semantic_query,
+                lexical_query=lexical_query,
+            ),
             candidates=tuple(candidates),
             top_k=min(len(candidates), _CANDIDATE_LIMIT),
             candidate_limit=_CANDIDATE_LIMIT,

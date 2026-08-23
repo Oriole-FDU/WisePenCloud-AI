@@ -5,7 +5,6 @@ import asyncio
 import httpx
 from common.core.exceptions import ServiceException
 from common.logger import warn
-from common.utils.ranking import RankingPipeline
 from ddgs import DDGS
 
 from wisepen_mcp.core.config.app_settings import settings
@@ -29,10 +28,8 @@ class PlatformSearchTool(BaseSearchTool):
         self,
         *,
         http_client: httpx.AsyncClient,
-        ranking_pipeline: RankingPipeline,
         ddg_proxy: str | None = None,
     ) -> None:
-        super().__init__(ranking_pipeline=ranking_pipeline)
         self._http_client = http_client
         self._ddg_proxy = ddg_proxy
 

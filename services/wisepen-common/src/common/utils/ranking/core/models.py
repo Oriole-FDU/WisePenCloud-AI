@@ -28,12 +28,22 @@ class RankDecision(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class RankQuery:
-    """排序查询对象。"""
+    """同时承载语义重排和稀疏检索各自使用的查询文本。"""
 
-    text: str  # 查询文本
+    semantic_query: str | None = None  # reranker 使用的语义意图，可为问句或普通语义陈述。
+    lexical_query: str | None = None  # BM25 使用的稀疏关键词，可包含同义改写和跨语言词形。
     metadata: Metadata = field(
         default_factory=dict
     )  # 调用方附加元数据，pipeline 不解释其含义
+
+    def __post_init__(self) -> None:
+        if not any(
+            query is not None and query.strip()
+            for query in (self.semantic_query, self.lexical_query)
+        ):
+            raise ValueError(
+                "RankQuery requires at least one non-empty semantic_query or lexical_query."
+            )
 
 
 @dataclass(frozen=True, slots=True)
