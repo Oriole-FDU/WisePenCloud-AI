@@ -42,8 +42,8 @@ class RankingPipeline:
                 ranked=(),
                 total_candidates=len(request.candidates),
             )
-
-        ranked = ranked[: request.candidate_limit]
+        candidate_count = len(request.candidates)
+        ranked = ranked[: min(request.candidate_limit, candidate_count)]
         decision: RankDecision | None = None
         decision_score: float | None = None
         if self.gate is not None:
@@ -57,7 +57,7 @@ class RankingPipeline:
 
         return RankResult(
             ranked=assign_ranks(ranked[: request.top_k]),
-            total_candidates=len(request.candidates),
+            total_candidates=candidate_count,
             decision=decision,
             decision_score=decision_score,
         )
@@ -70,8 +70,8 @@ class RankingPipeline:
                 ranked=(),
                 total_candidates=len(request.candidates),
             )
-
-        ranked = ranked[: request.candidate_limit]
+        candidate_count = len(request.candidates)
+        ranked = ranked[: min(request.candidate_limit, candidate_count)]
         if self.reranker is not None:
             ranked = await self.reranker.rerank(query=request.query, ranked=ranked)
             ranked = assign_ranks(ranked)
@@ -91,8 +91,8 @@ class RankingPipeline:
             )
 
         return RankResult(
-            ranked=assign_ranks(ranked[: request.top_k]),
-            total_candidates=len(request.candidates),
+            ranked=assign_ranks(ranked[: min(request.top_k, candidate_count)]),
+            total_candidates=candidate_count,
             decision=decision,
             decision_score=decision_score,
         )

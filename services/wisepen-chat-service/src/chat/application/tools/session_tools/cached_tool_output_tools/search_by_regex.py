@@ -92,6 +92,16 @@ class CachedToolOutputSearchByRegexMatch:
     window: CachedToolOutputWindow
 
 
+@dataclass(slots=True)
+class CachedToolOutputSearchByRegexResult:
+    """正则搜索结果及其匹配分页信息。"""
+
+    matched_count: int  # 本次搜索实际扫描到的命中数，受 max_matches 限制。
+    expanded_count: int  # 本轮实际展开并返回上下文窗口的命中数。
+    next_match_offset: int  # 下一轮传入 match_offset 的建议值。
+    matches: list[CachedToolOutputSearchByRegexMatch]
+
+
 class CachedToolOutputSearchByRegexTool:
 
     def __init__(self) -> None:
@@ -103,6 +113,7 @@ class CachedToolOutputSearchByRegexTool:
                     "Use this for exact names, identifiers, citations, headings, URLs, or other "
                     "literal patterns, including matches that cross retrieval chunk boundaries. "
                     "Results include absolute match offsets and bounded source context. "
+                    "The result includes matched_count, expanded_count, and next_match_offset. "
                     "Each expanded match includes 800 source characters before and after it when available. "
                     "Use match_offset and expand_count to page through matches; expand_count is capped at 10 "
                     "and is independent from max_matches. "
@@ -127,7 +138,7 @@ class CachedToolOutputSearchByRegexTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> list[CachedToolOutputSearchByRegexMatch]:
+    ) -> CachedToolOutputSearchByRegexResult:
         del config
         # schema 已保证 pattern 非空；这里只负责执行正则语法检查。
         pattern = kwargs["pattern"]
@@ -179,8 +190,8 @@ async def _search_by_regex(
     max_matches: int,
     match_offset: int,
     expand_count: int,
-) -> list[CachedToolOutputSearchByRegexMatch]:
-    def scan_loaded() -> list[CachedToolOutputSearchByRegexMatch]:
+) -> CachedToolOutputSearchByRegexResult:
+    def scan_loaded() -> CachedToolOutputSearchByRegexResult:
         # regex 搜索放到工作线程里执行，避免复杂表达式阻塞事件循环。
         compiled = regex.compile(pattern)
         matched_ranges: list[tuple[StoredCachedToolOutput, int, int]] = []
@@ -223,7 +234,12 @@ async def _search_by_regex(
                     window=window,
                 )
             )
-        return matches
+        return CachedToolOutputSearchByRegexResult(
+            matched_count=len(matched_ranges),
+            expanded_count=len(matches),
+            next_match_offset=match_offset + len(matches),
+            matches=matches,
+        )
 
     return await asyncio.to_thread(scan_loaded)
 

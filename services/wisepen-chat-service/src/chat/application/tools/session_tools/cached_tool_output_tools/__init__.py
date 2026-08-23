@@ -12,6 +12,7 @@ from chat.application.tools.session_tools.cached_tool_output_tools.read_by_secti
 )
 from chat.application.tools.session_tools.cached_tool_output_tools.search_by_regex import (
     CachedToolOutputSearchByRegexTool,
+    CachedToolOutputSearchByRegexResult,
 )
 from chat.application.tools.session_tools.cached_tool_output_tools.search_by_semantics import (
     CachedToolOutputSearchBySemanticsTool,
@@ -23,5 +24,6 @@ __all__ = [
     "CachedToolOutputReadByRangeTool",
     "CachedToolOutputReadBySectionTool",
     "CachedToolOutputSearchByRegexTool",
+    "CachedToolOutputSearchByRegexResult",
     "CachedToolOutputSearchBySemanticsTool",
 ]

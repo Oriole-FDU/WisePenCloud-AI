@@ -46,7 +46,7 @@ from chat.application.tools.session_tools.cached_tool_output_tools.window import
 from chat.core.config.app_settings import settings
 
 _TIMEOUT_SECONDS = 300.0
-_CANDIDATE_LIMIT = 50   # 保留前50个粗召回
+_CANDIDATE_LIMIT = 80   # 保留前80个粗召回
 _DEFAULT_TOP_K = 5
 _MAX_TOP_K = 10
 _PARENT_WINDOW_MAX_CHARS = 4_000
@@ -273,7 +273,7 @@ async def _search_by_semantics(
             ),
             candidates=tuple(candidates),
             top_k=min(len(candidates), _CANDIDATE_LIMIT),
-            candidate_limit=_CANDIDATE_LIMIT,
+            candidate_limit=min(len(candidates), _CANDIDATE_LIMIT),
         )
     )
 

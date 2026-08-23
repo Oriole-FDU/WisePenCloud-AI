@@ -132,3 +132,5 @@ def _normalize_offset(value: int | None, text_length: int, *, default: int) -> i
     if offset < 0:
         offset += text_length
     return min(max(offset, 0), text_length)
+
+
