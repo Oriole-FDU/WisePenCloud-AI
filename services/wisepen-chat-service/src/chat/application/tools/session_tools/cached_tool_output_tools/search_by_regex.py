@@ -43,7 +43,7 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string", "minLength": 1},
             "minItems": 1,
-            "maxItems": 64,
+            "maxItems": 16,
             "description": "One or more cached tool output content_id values returned in previous tool results.",
         },
         "pattern": {

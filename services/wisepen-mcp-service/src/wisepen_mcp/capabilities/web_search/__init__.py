@@ -1,12 +1,13 @@
 import httpx
+from common.utils.ranking import RankingPipeline
+from common.utils.ranking.rerankers import (
+    ZeroEntropyReranker,
+    ZeroEntropyRerankerConfig,
+)
 from mcp.server.fastmcp import FastMCP
 from zeroentropy import AsyncZeroEntropy
 
-from common.utils.ranking import RankingPipeline
-from common.utils.ranking.fusion import WeightedRrfFusion
-from common.utils.ranking.rerankers import ZeroEntropyReranker, ZeroEntropyRerankerConfig
-from common.utils.ranking.scorers import FieldedBM25Scorer, FieldedBM25ScorerConfig
-from common.utils.ranking.tokenizer import ThuLacRankingTokenizer
+from ...core.config.app_settings import settings
 from .providers import (
     AnySearchTool,
     BaiduQianfanSearchTool,
@@ -16,41 +17,18 @@ from .providers import (
     TavilySearchTool,
     TinyFishSearchTool,
 )
-from .search_tools import (
-    BaseSearchTool,
-    SearchMode,
-    WebSearchToolResult,
-)
-from ...core.config.app_settings import settings
 
 
 def register_web_search_tools(
     mcp: FastMCP,
 ) -> None:
 
-
-    web_search_fielded_bm25_scorer = FieldedBM25Scorer(
-        tokenizer=ThuLacRankingTokenizer(),
-        config=FieldedBM25ScorerConfig(
-            field_weights={
-                "title": 3.0,
-                "snippet": 1.5,
-                "highlights": 1.0,
-            },
-            min_score=-1.0,
-        ),
-    )
-
-    web_search_zero_entropy_reranker = ZeroEntropyReranker(
+    web_search_reranker = ZeroEntropyReranker(
         client=AsyncZeroEntropy(api_key=settings.ZERO_ENTROPY_API_KEY),
         config=ZeroEntropyRerankerConfig(model=settings.RERANKER_MODEL),
     ) if settings.ZERO_ENTROPY_API_KEY else None
-
-    web_search_ranking_pipeline = RankingPipeline(
-        scorers=(web_search_fielded_bm25_scorer,),
-        fusion=WeightedRrfFusion(),
-        reranker=web_search_zero_entropy_reranker,
-    )
+    # Web 搜索不做粗筛选，pipeline 只负责对 provider 召回结果执行模型重排。
+    web_search_ranking_pipeline = RankingPipeline(reranker=web_search_reranker)
 
     web_search_http_client = httpx.AsyncClient(
         timeout=httpx.Timeout(settings.WEB_SEARCH_HTTP_TIMEOUT_SECONDS),

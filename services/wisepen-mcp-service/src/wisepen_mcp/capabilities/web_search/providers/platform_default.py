@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 
 import httpx
-from ddgs import DDGS
-
 from common.core.exceptions import ServiceException
 from common.logger import warn
 from common.utils.ranking import RankingPipeline
+from ddgs import DDGS
+
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
@@ -16,6 +16,7 @@ from ..search_tools import (
     SearchResponse,
     SearchResult,
 )
+
 
 class PlatformSearchTool(BaseSearchTool):
     """平台默认搜索工具，优先 4get，失败或无结果时降级至 DDGS"""

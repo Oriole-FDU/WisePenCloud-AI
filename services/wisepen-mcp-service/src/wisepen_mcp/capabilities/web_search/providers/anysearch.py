@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-
 from common.core.exceptions import ServiceException
 from common.utils.ranking import RankingPipeline
+
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.domain.error_codes import McpErrorCode
 

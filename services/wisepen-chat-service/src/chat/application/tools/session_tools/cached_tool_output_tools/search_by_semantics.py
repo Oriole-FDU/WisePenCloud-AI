@@ -46,7 +46,7 @@ from chat.application.tools.session_tools.cached_tool_output_tools.window import
 from chat.core.config.app_settings import settings
 
 _TIMEOUT_SECONDS = 300.0
-_CANDIDATE_LIMIT = 50
+_CANDIDATE_LIMIT = 50   # 保留前50个粗召回
 _DEFAULT_TOP_K = 5
 _MAX_TOP_K = 10
 _PARENT_WINDOW_MAX_CHARS = 4_000
@@ -57,9 +57,10 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string", "minLength": 1},
             "minItems": 1,
-            "maxItems": 64,
+            "maxItems": 16,
             "description": "One or more cached tool output content_id values returned in previous tool results.",
         },
+
         "query": {
             "type": "string",
             "minLength": 1,
@@ -232,7 +233,11 @@ async def _search_by_semantics(
             candidates.append(
                 RankCandidate(
                     candidate_id=candidate_id,
-                    text=text,
+                    text=(
+                        f"{section_path}\n{text}"
+                        if section_path
+                        else text
+                    ),
                     fields={
                         "section": section_path or "",
                         "anchor": "\n".join(chunk.anchor_labels),
