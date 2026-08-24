@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from .models import BlockKind, DocumentBlock
+from ..models import BlockKind, DocumentBlock
 
 # 顺序从语义较强的段落/换行逐级降到字符
 _SEPARATORS = (

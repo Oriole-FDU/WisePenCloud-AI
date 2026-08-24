@@ -9,6 +9,11 @@ from mdit_py_plugins.dollarmath import dollarmath_plugin
 
 from .models import BlockKind, DocumentBlock
 from .plugins import page_marker_plugin, standalone_figure_plugin
+from .utils._cleaning import (
+    clean_section_path,
+    clean_section_title,
+    is_repeated_sibling_title,
+)
 
 NUMBERED_LABEL_RE = re.compile(
     r"^(?:[·•]\s*|[-*+]\s+)?[*_`~\s]*"
@@ -62,6 +67,7 @@ class DocumentParser:
             line_offsets.append(line_offsets[-1] + len(line))
 
         blocks = self._parse_tokens(self._parser.parse(text), lines, line_offsets)
+        blocks = _remove_empty_heading_blocks(blocks)
         # 题注合并会改变主体范围，页码必须在最终 block 上投影。
         blocks = _associate_numbered_labels(blocks, text)
         blocks = _attach_page_labels(blocks)
@@ -91,6 +97,7 @@ class DocumentParser:
             """只消费顶层 token，并维护标题栈形成完整 section_path。"""
             blocks: list[DocumentBlock] = []
             headings: list[tuple[int, str]] = []  # 栈：[(level, title), ...]
+            previous_heading: tuple[int, tuple[str, ...], str] | None = None
 
             for index, token in enumerate(tokens):
                 if token.level != 0 or token.map is None:
@@ -115,13 +122,43 @@ class DocumentParser:
                         if index + 1 < len(tokens) and tokens[index + 1].type == "inline"
                         else None
                     )
-                    title = inline.content.strip() if inline else block_text.strip()
+                    raw_title = inline.content.strip() if inline else block_text.strip()
+                    title = clean_section_title(raw_title)
+                    if title is None:
+                        # 标题噪声不进入标题栈，后续正文继续归属最近有效节点。
+                        continue
                     level = int(token.tag[1])
 
-                    # 弹出所有 >= 当前层级的同级或子标题
-                    while headings and headings[-1][0] >= level:
-                        headings.pop()
+                    parent_index = next(
+                        (
+                            index
+                            for index, (heading_level, _) in enumerate(headings)
+                            if heading_level >= level
+                        ),
+                        len(headings),
+                    )
+                    parent_path = tuple(
+                        heading_title
+                        for _, heading_title in headings[:parent_index]
+                    )
+                    if clean_section_path((*parent_path, title)) is None:
+                        continue
+                    if (
+                        previous_heading is not None
+                        and previous_heading[0] == level
+                        and previous_heading[1] == parent_path
+                        and is_repeated_sibling_title(
+                            current_title=title,
+                            previous_title=previous_heading[2],
+                        )
+                    ):
+                        # 连续重复标题不再切分 Section，正文并入前一个有效节点。
+                        continue
+
+                    # 弹出所有 >= 当前层级的同级或子标题。
+                    headings = headings[:parent_index]
                     headings.append((level, title))
+                    previous_heading = (level, parent_path, title)
 
                     metadata["title"] = title
                     metadata["heading_level"] = level
@@ -152,6 +189,58 @@ class DocumentParser:
                 )
 
             return blocks
+
+
+def _remove_empty_heading_blocks(
+    blocks: list[DocumentBlock],
+) -> list[DocumentBlock]:
+    """移除没有正文、子节点或 anchor 的占位标题并重建标题路径。
+
+    仅删除真正没有可读内容的结构节点；有直属正文、子标题、图表或公式的短标题
+    仍然保留，避免用长度阈值误伤合法论文章节。
+    """
+
+    headings_to_remove: set[int] = set()
+    for index, block in enumerate(blocks):
+        if block.block_kind is not BlockKind.HEADING:
+            continue
+        level = int(block.metadata["heading_level"])
+        has_content = False
+        has_child = False
+        for following in blocks[index + 1 :]:
+            if following.block_kind is BlockKind.HEADING:
+                following_level = int(following.metadata["heading_level"])
+                if following_level > level:
+                    has_child = True
+                break
+            if following.block_kind is not BlockKind.PAGE_MARKER:
+                has_content = True
+                break
+        if not has_content and not has_child:
+            headings_to_remove.add(index)
+
+    if not headings_to_remove:
+        return blocks
+
+    normalized: list[DocumentBlock] = []
+    headings: list[tuple[int, str]] = []
+    for index, block in enumerate(blocks):
+        if index in headings_to_remove:
+            continue
+        if block.block_kind is BlockKind.HEADING:
+            level = int(block.metadata["heading_level"])
+            while headings and headings[-1][0] >= level:
+                headings.pop()
+            headings.append((level, str(block.metadata["title"])))
+            section_path = tuple(title for _, title in headings)
+        else:
+            section_path = (
+                ()
+                if block.block_kind is BlockKind.PAGE_MARKER
+                else tuple(title for _, title in headings)
+            )
+        normalized.append(replace(block, section_path=section_path))
+    return normalized
 
 
 def _token_kind(token: Token) -> BlockKind | None:

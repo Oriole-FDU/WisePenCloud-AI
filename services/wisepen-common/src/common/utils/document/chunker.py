@@ -14,7 +14,7 @@ from .models import (
     SourceSpan,
 )
 from .parser import DocumentParser
-from .recursive_splitter import split_plain_text
+from .utils._splitter import split_plain_text
 
 
 @dataclass(frozen=True, slots=True)

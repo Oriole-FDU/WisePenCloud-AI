@@ -1,3 +1,25 @@
+"""基于会话缓存的轻量级嵌入式 RAG（小型检索增强生成）系统。
+
+本模块为大模型提供在单个或多个缓存工具输出（Cached Tool Output）之上的端到端语义检索与上下文组装能力，
+遵循“细粒度索引召回，粗粒度拓扑组装，分级决策呈现”的设计哲学：
+
+1. 混合检索与重排流水线 (Hybrid Retrieval & Reranking):
+   - 采用双通道查询输入：自然语言问题 (semantic_query) 与稀疏关键词 (lexical_query)。
+   - 融合 BM25 与考虑文档结构权重的 Fielded BM25 (加权 Section 路径与 Anchor 标签)。
+   - 使用 Cross-Encoder (ZeroEntropy) 深度语义重排，并通过 HighLowRelevanceGate 动态过滤低相关噪声。
+
+2. 文档拓扑驱动的父块聚合 (Parent Document Aggregation):
+   - 以原子 Chunk 为召回单位保证检索灵敏度，召回后按 (content_id, section_id) 聚合。
+   - 弃用脆弱的字符几何切分，基于预存的 chunk_index 离散拓扑向同 Section 邻近 Chunk 扩展上下文，
+     在保证段落边界完整的同时，天然阻断跨章节的语义渗漏。
+
+3. 智能三路分流呈现策略 (Tri-branch Presentation Strategy):
+   根据章节长度、连通块覆盖密度与模型阅读预算，统一在全局 Top-K 下分流输出：
+   - 短章节 (≤ 4k chars): 直接返回整章完整视窗。
+   - 高密度章节 (≤ 8k chars 且覆盖率 ≥ 80%): 降级为 Section 读取建议，引导模型按章精准精读。
+   - 局部连通块: ≤ 6k chars 返回局部连续视窗；超大连通块生成 Range 读取建议，支持按偏移量连续续读。
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -7,6 +29,7 @@ from typing import Any
 
 from common.utils.document import Section, SourceSpan
 from common.utils.ranking import RankCandidate, RankingPipeline, RankQuery, RankRequest
+from common.utils.ranking.diversifiers import MmrDiversifier
 from common.utils.ranking.fusion import WeightedRrfFusion
 from common.utils.ranking.rank_gates import (
     HighLowRelevanceGate,
@@ -48,12 +71,14 @@ from chat.application.tools.session_tools.cached_tool_output_tools.window import
 from chat.core.config.app_settings import settings
 
 _TIMEOUT_SECONDS = 300.0
-_CANDIDATE_LIMIT = 80   # 保留前80个粗召回
-_DEFAULT_TOP_K = 5
+_CANDIDATE_LIMIT = 80  # 保留前80个粗召回
+_DEFAULT_TOP_K = 5  # 返回topk个父块
 _MAX_TOP_K = 10
-_PARENT_WINDOW_MAX_CHARS = 4_000
-_CHUNK_CONTEXT_CHARS = 800
-_HIGH_COVERAGE_RATIO = 0.5
+_SHORT_SECTION_MAX_CHARS = 4_000  # 只控制短 Section 是否直接返回全文。
+_LOCAL_PARENT_HARD_MAX_CHARS = 6_000  # 只控制局部父块的文本输出上限。
+_SECTION_RECOMMENDATION_MAX_CHARS = 8_000  # 控制是否允许建议整章读取。
+_SECTION_RECOMMENDATION_COVERAGE = 0.8  # 高相关性section覆盖率阈值
+
 _PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -120,7 +145,7 @@ class CachedToolOutputSectionReadRecommendation:
     section_path: str
     rank: int
     score: float
-    coverage_ratio: float  # 通过 gate 的 chunk 在该 Section 直属正文中的去重覆盖率。
+    coverage_ratio: float  # 扩展后单个连通命中块在 Section 中的去重覆盖率。
 
 
 @dataclass(slots=True)
@@ -152,7 +177,7 @@ class CachedToolOutputSearchBySemanticsResult:
         default_factory=list
     )
 
-
+# 由于含有大量空白可选分支，此处进行紧凑序列化处理
 _RESULT_ADAPTER = TypeAdapter(CachedToolOutputSearchBySemanticsResult)
 
 
@@ -191,6 +216,7 @@ def build_cached_tool_output_search_by_semantics_pipeline() -> RankingPipeline:
             BM25Scorer(tokenizer=tokenizer),
             FieldedBM25Scorer(
                 tokenizer=tokenizer,
+                # 额外奖励章节命中和明确的锚点命中
                 config=FieldedBM25ScorerConfig(
                     field_weights={
                         "section": 2.0,
@@ -209,7 +235,10 @@ def build_cached_tool_output_search_by_semantics_pipeline() -> RankingPipeline:
             ),
         ),
         gate=HighLowRelevanceGate(
-            HighLowRelevanceGateConfig(),
+            HighLowRelevanceGateConfig(),   # rank门控可确保大量命中均具有强相关性
+        ),
+        diversifiers=(
+            MmrDiversifier(tokenizer=tokenizer),
         ),
     )
 
@@ -223,20 +252,17 @@ class CachedToolOutputSearchBySemanticsTool:
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="search_cached_tool_output_by_semantics",
-                description=(
-                    "Search semantic chunks from one or more cached tool outputs and return the most "
-                    "relevant source windows. Chunks follow Markdown section semantics rather than "
-                    "physical page boundaries. top_k counts final parent contexts and read recommendations, "
-                    "not child chunks. Short sections are returned in full. When matching chunks cover at "
-                    "least half of a long section, section_recommendations lists its exact id for "
-                    "read_cached_tool_output_by_section. Local overlapping chunk contexts are merged into "
-                    "continuous parent windows bounded to 4000 characters; oversized merged ranges appear "
-                    "in range_recommendations for read_cached_tool_output_by_range.\n\n"
-                    "Provide semantic_query and lexical_query separately: semantic_query is for the reranker "
-                    "and may be a question or ordinary semantic statement, while lexical_query is for BM25 "
-                    "and should contain sparse keywords with useful synonym or cross-language variants.\n\n"
-                    "Use search_cached_tool_output_by_regex for exact patterns. Use read tools only after "
-                    "you know the desired range, pages, or sections."
+                description = (
+                    "Perform hybrid semantic search across cached tool outputs to retrieve relevant context windows "
+                    "and read recommendations. Merges nearby matches to preserve complete context without fragmenting sections.\n\n"
+                    "Parameters:\n"
+                    "- semantic_query: Natural language question or descriptive statement for the semantic reranker.\n"
+                    "- lexical_query: Concise keywords, synonyms, and terminology variants for BM25 matching.\n\n"
+                    "Returns a unified ranking of:\n"
+                    "1. results: Ready-to-read local text windows.\n"
+                    "2. section_recommendations: High-coverage sections; follow up with read_cached_tool_output_by_section.\n"
+                    "3. range_recommendations: Broad continuous matches; follow up with read_cached_tool_output_by_range.\n\n"
+                    "For exact literal patterns or identifiers, use search_cached_tool_output_by_regex instead."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -260,11 +286,7 @@ class CachedToolOutputSearchBySemanticsTool:
         del config
         semantic_query = kwargs["semantic_query"].strip()
         lexical_query = kwargs["lexical_query"].strip()
-        if not semantic_query or not lexical_query:
-            raise ToolExecutionError(
-                reason="missing_search_queries",
-                detail_reason="semantic_query and lexical_query must be non-empty.",
-            )
+
         try:
             # 允许多个 content 混排；不存在的 content 不参与候选构建。
             stored_items = []
@@ -312,38 +334,42 @@ async def _search_by_semantics(
         tuple[
             StoredCachedToolOutput,
             CachedToolOutputChunk,
-            str | None,
+            Section | None,
             str | None,
         ],
-    ] = {}
+    ] = {}  # 按照(stored, chunk, section, section_path)缓存，便于下游快速读取
     for stored in stored_items:
         sections_by_id = {section.section_id: section for section in stored.sections}
         for chunk in stored.chunks:
-            # 排序候选使用缓存时保存的 chunk 正文；locator 只负责后续回源和父块组装，
-            # 不把结构元数据误当成语义正文。
+            # 排序候选使用缓存时保存的 chunk 正文
             text = chunk.text
             if not text:
                 continue
             content_id = stored.content_id
             candidate_id = f"{content_id}:chunk:{chunk.chunk_index}"
             section = sections_by_id.get(chunk.section_id)
-            section_id = section.section_id if section else None
-            section_path = " > ".join(section.section_path) if section else None
+            section_path = (
+                " > ".join(section.section_path)
+                if section and section.section_path
+                else None
+            )
             # 先保存候选到原文 chunk 的映射。排序完成后只处理通过 gate 的候选，
             # 这样低相关 chunk 不会消耗父块预算或 top_k 名额。
-            sources[candidate_id] = (stored, chunk, section_id, section_path)
+            sources[candidate_id] = (stored, chunk, section, section_path)
             candidates.append(
-                RankCandidate(
-                    candidate_id=candidate_id,
-                    text=(
-                        f"{section_path}\n{text}"
-                        if section_path
-                        else text
-                    ),
+                    RankCandidate(
+                        candidate_id=candidate_id,
+                        # section_path已经是过滤后的结果，此处直接信任并插入开头，有利于提高重排的准确性
+                        text=(
+                            f"{section_path}\n{text}"
+                            if section_path
+                            else text
+                        ),
                     fields={
                         "section": section_path or "",
                         "anchor": "\n".join(chunk.anchor_labels),
                     },
+                    # MMR 只按 content_id 惩罚，在不同文档间做多样性平衡，Section 内的高相关命中仍可共同保留。
                     group_key=content_id,
                 )
             )
@@ -352,8 +378,7 @@ async def _search_by_semantics(
         # 没有候选时，返回空检索结果。
         return CachedToolOutputSearchBySemanticsResult()
 
-    # RankingPipeline 的请求模型要求 candidates 为 tuple。先保留通过 gate 的全部子块，
-    # 再由本工具按父块组装并应用 top_k，避免一个 Section 的多个小子块挤占最终结果。
+    # 先保留通过 gate 的全部子块， 再由本工具按父块组装并应用 top_k，避免一个 Section 的多个小子块挤占最终结果。
     result = await ranking_pipeline.arank(
         RankRequest(
             query=RankQuery(
@@ -366,8 +391,7 @@ async def _search_by_semantics(
         )
     )
 
-    # 排序阶段以 chunk 为单位，组装阶段才恢复父块语义；同一 Section 的多个命中
-    # 必须先聚合，否则每个小 chunk 都会错误占用一个最终 top_k。
+    # 收集一个section内所有命中的子块
     matched_chunks_by_parent: dict[
         tuple[str, str | None],
         list[_RankedMatchedChunk],
@@ -376,16 +400,11 @@ async def _search_by_semantics(
         source = sources.get(item.candidate_id)
         if source is None:
             continue
-        stored, chunk, section_id, section_path = source
-        section = next(
-            (
-                section
-                for section in stored.sections
-                if section.section_id == section_id
-            ),
-            None,
+        stored, chunk, section, section_path = source
+        parent_key = (
+            stored.content_id,
+            section.section_id if section else None,
         )
-        parent_key = (stored.content_id, section_id)
         matched_chunks_by_parent.setdefault(parent_key, []).append(
             _RankedMatchedChunk(
                 stored=stored,
@@ -396,7 +415,7 @@ async def _search_by_semantics(
                 score=item.score,
             )
         )
-
+    # 构造父块候选
     parent_candidates = [
         parent_candidate
         for matched_chunks in matched_chunks_by_parent.values()
@@ -410,8 +429,8 @@ def _build_parent_candidates(
 ) -> list[_ParentCandidate]:
     """按 Section 的长度和命中密度，将通过 gate 的 chunk 组装为父块候选。
 
-    长度判断必须先于覆盖率判断：短 Section 可以完整返回，不需要把一次可读内容
-    拆成局部窗口；只有长 Section 才需要在“读整章”和“局部父块”之间分流。
+    先构造不受局部输出预算限制的完整扩展连通块，再决定是否推荐读取整个 Section。
+    只有整章推荐失败后，局部父块才应用 6000 字符硬上限。
     """
 
     first_match = min(matched_chunks, key=lambda item: item.rank)
@@ -421,7 +440,7 @@ def _build_parent_candidates(
 
     if section is not None:
         scope = section.own_span
-        if _span_length(scope) <= _PARENT_WINDOW_MAX_CHARS:
+        if _span_length(scope) <= _SHORT_SECTION_MAX_CHARS:
             # 短 Section 直接完整返回，避免为本可一次理解的内容引入窗口组装。
             return [
                 _ParentCandidate(
@@ -438,14 +457,27 @@ def _build_parent_candidates(
                     matched_chunk_count=len(matched_chunks),
                 )
             ]
+    else:
+        # 无标题文本没有 Section 身份，但仍有完整正文范围；复用同一组装逻辑，
+        # 避免把一个检索 chunk 机械地当成它自己的父块。
+        scope = SourceSpan(0, len(stored.text))
 
-        # 以原文区间并集计算覆盖率，避免 chunk overlap 或同一 chunk 的多个 source span
-        # 重复放大“整章高度相关”的判断。
+    expanded_groups = _build_expanded_chunk_groups(
+        scope=scope,
+        matched_chunks=matched_chunks,
+    )
+    # 如果section长度低于最大建议章节阈值，连通窗口唯一且连续，覆盖率超过80%，则落入建议章节分区
+    if (
+        section is not None
+        and _span_length(scope) <= _SECTION_RECOMMENDATION_MAX_CHARS
+        and len(expanded_groups) == 1
+    ):
+        expanded_spans = [span for span, _ in expanded_groups]
         coverage_ratio = _covered_length(
-            spans=[item.chunk.source_spans for item in matched_chunks],
+            spans=expanded_spans,
             scope=scope,
         ) / _span_length(scope)
-        if coverage_ratio >= _HIGH_COVERAGE_RATIO:
+        if coverage_ratio >= _SECTION_RECOMMENDATION_COVERAGE:
             return [
                 _ParentCandidate(
                     content_id=stored.content_id,
@@ -457,17 +489,13 @@ def _build_parent_candidates(
                     matched_chunk_count=len(matched_chunks),
                 )
             ]
-    else:
-        # 无标题文本没有 Section 身份，但仍有完整正文范围；复用同一组装逻辑，
-        # 避免把一个检索 chunk 机械地当成它自己的父块。
-        scope = SourceSpan(0, len(stored.text))
 
     return _build_local_parent_candidates(
         stored=stored,
         section=section,
         section_path=section_path,
         scope=scope,
-        matched_chunks=matched_chunks,
+        expanded_groups=expanded_groups,
     )
 
 
@@ -477,68 +505,138 @@ def _build_local_parent_candidates(
     section: Section | None,
     section_path: str | None,
     scope: SourceSpan,
-    matched_chunks: Sequence[_RankedMatchedChunk],
+    expanded_groups: Sequence[
+        tuple[SourceSpan, list[_RankedMatchedChunk]]
+    ],
 ) -> list[_ParentCandidate]:
     """将重叠的 chunk 上下文贪婪合并为局部父块或大范围读取建议。
 
-    扩展窗口按原文位置排序；相交窗口形成同一个父块，且合并后的父块继续参与后续
-    窗口判断，因此 A 与 B、B 与 C 相交时，三者会形成一个连续候选。
+    扩展范围已经在 Section 推荐判断前完成合并；本函数只负责按 6000 字符硬上限
+    将每个完整连通块投影为文本窗口或单个连续 range。
     """
-
-    expanded_chunks = sorted(
-        (
-            (
-                SourceSpan(
-                    # 扩展范围同时受 Section/全文边界约束，不能把邻接标题或其他内容
-                    # 带入当前父块。
-                    max(item.chunk.start_offset - _CHUNK_CONTEXT_CHARS, scope.start_offset),
-                    min(item.chunk.end_offset + _CHUNK_CONTEXT_CHARS, scope.end_offset),
-                ),
-                item,
-            )
-            for item in matched_chunks
-        ),
-        key=lambda value: (value[0].start_offset, value[0].end_offset),
-    )
-    parent_candidates: list[_ParentCandidate] = []
-    current_span, first_item = expanded_chunks[0]
-    current_items = [first_item]
-
-    for expanded_span, item in expanded_chunks[1:]:
-        if expanded_span.start_offset <= current_span.end_offset:
-            # 使用区间相交而非 rank 相邻判断；rank 顺序只决定候选优先级，不能决定正文连续性。
-            current_span = SourceSpan(
-                current_span.start_offset,
-                max(current_span.end_offset, expanded_span.end_offset),
-            )
-            current_items.append(item)
-            continue
-
-        # 新窗口与当前父块断开，先封存当前父块，再从新窗口开始下一组。
-        parent_candidates.append(
-            _local_parent_candidate(
-                stored=stored,
-                section=section,
-                section_path=section_path,
-                scope=scope,
-                span=current_span,
-                matched_chunks=current_items,
-            )
-        )
-        current_span = expanded_span
-        current_items = [item]
-
-    parent_candidates.append(
+    return [
         _local_parent_candidate(
             stored=stored,
             section=section,
             section_path=section_path,
             scope=scope,
-            span=current_span,
-            matched_chunks=current_items,
+            span=expanded_span,
+            matched_chunks=group_items,
         )
+        for expanded_span, group_items in expanded_groups
+    ]
+
+
+def _build_expanded_chunk_groups(
+    *,
+    scope: SourceSpan,
+    matched_chunks: Sequence[_RankedMatchedChunk],
+) -> list[tuple[SourceSpan, list[_RankedMatchedChunk]]]:
+    """按缓存 chunk 顺序合并命中组，并向两侧各扩展一个同 Section chunk。
+
+    ToolContentChunk 的 ``chunk_index 是缓存时确定的顺序索引，因此不需要重新
+    扫描正文或按字符猜测邻居。扩展只接受同一 section_id 的邻居，避免父块跨过
+    标题边界；组内最多允许隔着一个同 Section 未命中 chunk，保持原有连续上下文语义。
+    """
+
+    sorted_chunks = sorted(
+        matched_chunks,
+        key=lambda item: (item.chunk.start_offset, item.chunk.end_offset),
     )
-    return parent_candidates
+    current_items = [sorted_chunks[0]]
+    expanded_groups: list[
+        tuple[SourceSpan, list[_RankedMatchedChunk]]
+    ] = []
+
+    def append_current_group() -> None:
+        first_item = current_items[0]
+        last_item = current_items[-1]
+        section_id = (
+            first_item.section.section_id
+            if first_item.section is not None
+            else None
+        )
+        previous_chunk = _neighbor_chunk(
+            stored=first_item.stored,
+            chunk=first_item.chunk,
+            section_id=section_id,
+            offset=-1,
+        )
+        next_chunk = _neighbor_chunk(
+            stored=last_item.stored,
+            chunk=last_item.chunk,
+            section_id=section_id,
+            offset=1,
+        )
+        expanded_groups.append(
+            (
+                SourceSpan(
+                    max(
+                        (
+                            previous_chunk.start_offset
+                            if previous_chunk is not None
+                            else first_item.chunk.start_offset
+                        ),
+                        scope.start_offset,
+                    ),
+                    min(
+                        (
+                            next_chunk.end_offset
+                            if next_chunk is not None
+                            else last_item.chunk.end_offset
+                        ),
+                        scope.end_offset,
+                    ),
+                ),
+                current_items.copy(),
+            )
+        )
+
+    for item in sorted_chunks[1:]:
+        previous_item = current_items[-1]
+        if _can_join_chunk_group(previous_item, item):
+            current_items.append(item)
+            continue
+
+        append_current_group()
+        current_items = [item]
+
+    append_current_group()
+    return expanded_groups
+
+
+def _can_join_chunk_group(
+    previous_item: _RankedMatchedChunk,
+    current_item: _RankedMatchedChunk,
+) -> bool:
+    """判断两个命中 chunk 是否仍属于同一连续上下文组。"""
+
+    if previous_item.section is not None and current_item.section is not None:
+        if previous_item.section.section_id != current_item.section.section_id:
+            return False
+    elif previous_item.section is not current_item.section:
+        return False
+
+    chunk_gap = current_item.chunk.chunk_index - previous_item.chunk.chunk_index
+    return 1 <= chunk_gap <= 2
+
+
+def _neighbor_chunk(
+    *,
+    stored: StoredCachedToolOutput,
+    chunk: CachedToolOutputChunk,
+    section_id: str | None,
+    offset: int,
+) -> CachedToolOutputChunk | None:
+    """按 chunk_index 获取同 Section 的相邻缓存 chunk。"""
+
+    neighbor_index = chunk.chunk_index + offset
+    if not 0 <= neighbor_index < len(stored.chunks):
+        return None
+    neighbor = stored.chunks[neighbor_index]
+    if neighbor.chunk_index != neighbor_index or neighbor.section_id != section_id:
+        return None
+    return neighbor
 
 
 def _local_parent_candidate(
@@ -552,7 +650,7 @@ def _local_parent_candidate(
 ) -> _ParentCandidate:
     sort_rank = min(item.rank for item in matched_chunks)
     score = max(item.score for item in matched_chunks)
-    if _span_length(span) > _PARENT_WINDOW_MAX_CHARS:
+    if _span_length(span) > _LOCAL_PARENT_HARD_MAX_CHARS:
         # 重叠命中覆盖的连续原文超过父块预算时，不能截断任何命中；将连续范围交给
         # range 工具续读，保留完整命中范围而不是返回一个语义不完整的父块。
         return _ParentCandidate(
@@ -564,6 +662,7 @@ def _local_parent_candidate(
             source_range=span,
             matched_chunk_count=len(matched_chunks),
         )
+    # 小窗口直接返回整个窗口
     return _ParentCandidate(
         content_id=stored.content_id,
         section=section,
@@ -580,16 +679,16 @@ def _build_search_result(
     *,
     top_k: int,
 ) -> CachedToolOutputSearchBySemanticsResult:
-    """按最早命中 rank 选出最终父块；每个建议或窗口各占一个 top_k。
+    """按父块代表分数选出最终候选；每个建议或窗口各占一个 top_k。
 
     一个内部候选最终只会落入三种公开视图之一：Section 读取建议、range 读取建议或
     普通父块。统一在这里分配 rank，确保不同视图共享同一套 top_k 计数。
     """
 
-    # 候选的 sort_rank 是其内部命中 chunk 的最早 rank；先命中的信息岛优先进入最终结果。
+    # 代表分数取父块内最高命中分数；最早 rank 只用于相同分数时稳定排序。
     selected_candidates = sorted(
         parent_candidates,
-        key=lambda item: item.sort_rank,
+        key=lambda item: (-item.score, item.sort_rank),
     )[:top_k]
     result = CachedToolOutputSearchBySemanticsResult()
     for rank, candidate in enumerate(selected_candidates, start=1):
@@ -650,10 +749,10 @@ def _build_search_result(
 
 def _covered_length(
     *,
-    spans: Sequence[Sequence[SourceSpan]],
+    spans: Sequence[SourceSpan],
     scope: SourceSpan,
 ) -> int:
-    """计算多个可能重叠的 chunk 在指定父范围内的去重覆盖字符数。
+    """计算多个可能重叠的范围在指定父范围内的去重覆盖字符数。
 
     这里使用 Python 字符半开区间；先裁剪到父范围，再排序合并，得到可解释且不重复
     的覆盖长度。
@@ -665,8 +764,7 @@ def _covered_length(
                 max(span.start_offset, scope.start_offset),
                 min(span.end_offset, scope.end_offset),
             )
-            for chunk_spans in spans
-            for span in chunk_spans
+            for span in spans
             if span.start_offset < scope.end_offset
             and span.end_offset > scope.start_offset
         ),
