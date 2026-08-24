@@ -55,4 +55,8 @@ class SessionWorkspaceDocument(Document):
                 name="idx_user_session_updated",
             ),
             IndexModel([("sandbox_id", ASCENDING), ("state", ASCENDING)], name="idx_sandbox_state"),
+            IndexModel(
+                [("state", ASCENDING), ("last_accessed_at", ASCENDING)],
+                name="idx_workspace_idle_scan",
+            ),
         ]

@@ -48,6 +48,9 @@ class SandboxRepository(Protocol):
         self,
         sandbox_id: str,
         state: SandboxState,
+        expected_state: SandboxState | None = None,
+        *,
+        clear_user_binding: bool = False,
     ) -> SandboxDocument | None:
-        """更新 sandbox 生命周期状态，并返回更新后的记录"""
+        """原子更新 sandbox 状态，可选地要求旧状态并清除用户绑定。"""
         ...

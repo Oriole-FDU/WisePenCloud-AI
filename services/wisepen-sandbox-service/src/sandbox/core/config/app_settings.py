@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 from common.logger import error, info
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from sandbox.core.config.nacos import nacos_client_manager
 from sandbox.domain.interfaces import SandboxProviderType
@@ -51,6 +51,13 @@ class AppSettings(BaseModel):
     SANDBOX_WORKSPACE_CACHE_HIGH_WATERMARK_RATIO: float = 0.8
     SANDBOX_WORKSPACE_CACHE_TARGET_WATERMARK_RATIO: float = 0.7
     SANDBOX_WORKSPACE_EVICTION_INTERVAL_SECONDS: float = 3600.0
+
+    # 空闲工作区自动回收配置。
+    SANDBOX_WORKSPACE_IDLE_TIMEOUT_SECONDS: int = Field(default=900, gt=0)
+    SANDBOX_WORKSPACE_RECLAIM_INTERVAL_SECONDS: float = Field(default=60.0, gt=0)
+    SANDBOX_WORKSPACE_CACHE_RETRY_COUNT: int = Field(default=3, ge=1, le=3)
+    SANDBOX_WORKSPACE_CACHE_RETRY_BACKOFF_SECONDS: float = Field(default=1.0, ge=0)
+    SANDBOX_WORKSPACE_RECLAIM_BATCH_SIZE: int = Field(default=100, ge=1)
 
 
 def _run_async(coro):

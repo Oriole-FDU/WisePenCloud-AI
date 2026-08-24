@@ -84,15 +84,24 @@ class MongoSandboxRepository(SandboxRepository):
         self,
         sandbox_id: str,
         state: SandboxState,
+        expected_state: SandboxState | None = None,
+        *,
+        clear_user_binding: bool = False,
     ) -> SandboxDocument | None:
-        return SandboxDocument.find_one(
-            SandboxDocument.sandbox_id == sandbox_id,
+        filters: dict[str, object] = {"sandbox_id": sandbox_id}
+        if expected_state is not None:
+            filters["state"] = expected_state
+        updates: dict[str, object] = {
+            "state": state,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if clear_user_binding:
+            updates["bind_user_id"] = None
+        return await SandboxDocument.find_one(
+            filters,
         ).update(
             {
-                "$set": {
-                    "state": state,
-                    "updated_at": datetime.now(timezone.utc),
-                }
+                "$set": updates,
             },
             response_type=UpdateResponse.NEW_DOCUMENT,
         )
