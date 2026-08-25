@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Iterable, Protocol
 
 from sandbox.domain.entities import (
@@ -40,9 +41,22 @@ class SandboxRepository(Protocol):
     async def assign_to_user(
         self,
         user_id: str,
+        session_id: str | None = None,
     ) -> SandboxDocument:
         """为用户原子分配一个 READY 沙箱，或在容量/空池时抛出领域异常"""
         ...
+
+    async def start_session(self, sandbox_id: str, session_id: str) -> SandboxDocument | None: ...
+
+    async def finish_session(self, sandbox_id: str, session_id: str) -> SandboxDocument | None: ...
+
+    async def list_idle_user_sandboxes(self, cutoff: datetime) -> list[SandboxDocument]: ...
+
+    async def claim_idle_sandbox(
+        self,
+        sandbox_id: str,
+        idle_since: datetime,
+    ) -> SandboxDocument | None: ...
 
     async def change_state(
         self,

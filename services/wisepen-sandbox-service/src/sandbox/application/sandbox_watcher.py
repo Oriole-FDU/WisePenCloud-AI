@@ -5,11 +5,12 @@ from datetime import timedelta, datetime, timezone
 
 from common.logger import error
 from sandbox.application.container_manager import ContainerManager, ContainerStatus
+from sandbox.application.sandbox_unloader import SandboxUnloader
 from sandbox.core.config.app_settings import settings
 from sandbox.core.providers import SandboxProviderManager
 from sandbox.domain.interfaces import SandboxProviderInfo
 from sandbox.domain.entities import SandboxDocument, SandboxState
-from sandbox.domain.repositories import SandboxRepository
+from sandbox.domain.repositories import SandboxRepository, WorkspaceRepository
 
 
 class Watcher:
@@ -20,11 +21,15 @@ class Watcher:
         self,
         sandbox_repository: SandboxRepository,
         sandbox_provider_manager: SandboxProviderManager,
-        container_manager: ContainerManager
+        container_manager: ContainerManager,
+        workspace_repository: WorkspaceRepository | None = None,
+        sandbox_unloader: SandboxUnloader | None = None,
     ) -> None:
         self._sandbox_repository = sandbox_repository
         self._sandbox_provider_manager = sandbox_provider_manager
         self._container_manager = container_manager
+        self._workspace_repository = workspace_repository
+        self._sandbox_unloader = sandbox_unloader
         self._stop = asyncio.Event()
         self._lock = asyncio.Lock()
 
@@ -64,9 +69,14 @@ class Watcher:
                     # 检查正在销毁的容器的实际状态
                     container_status = await self._container_manager.check_container_status(sandbox.container_id)
                     if container_status == ContainerStatus.NOT_FOUND:
-                        await self._sandbox_repository.change_state(sandbox.sandbox_id, SandboxState.DESTROYED)
+                        await self._sandbox_repository.change_state(
+                            sandbox.sandbox_id,
+                            SandboxState.DESTROYED,
+                            expected_state=SandboxState.DESTROYING,
+                            clear_user_binding=True,
+                        )
                     elif datetime.now(timezone.utc) > sandbox.updated_at + timedelta(seconds=settings.SANDBOX_DESTROY_TIMEOUT_SECONDS):
-                            force_destroy_sandbox_list.append(sandbox)  # 强制销毁正在销毁的容器（不等待容器自然销毁）
+                        force_destroy_sandbox_list.append(sandbox)  # 强制销毁正在销毁的容器（不等待容器自然销毁）
                     # 没有超时的容器下次再检查
 
             if force_destroy_sandbox_list:
@@ -91,7 +101,8 @@ class Watcher:
             container_id: str | None = None
             try:
                 container_id = await self._container_manager.create(sandbox_provider_info.image)
-                if container_id is None: raise
+                if container_id is None:
+                    raise RuntimeError("container creation returned no id")
                 base_url = await self._container_manager.get_container_base_url(container_id)
                 sandbox = SandboxDocument(
                     container_id=container_id,
@@ -119,7 +130,12 @@ class Watcher:
         for sandbox in sandboxes:
             try:
                 await self._container_manager.destroy(sandbox.container_id)
-                await self._sandbox_repository.change_state(sandbox.sandbox_id, SandboxState.DESTROYED)
+                await self._sandbox_repository.change_state(
+                    sandbox.sandbox_id,
+                    SandboxState.DESTROYED,
+                    expected_state=sandbox.state,
+                    clear_user_binding=True,
+                )
             except Exception as exc:
                 error("sandbox force destroy failed", exc=exc, sandbox_id=sandbox.sandbox_id)
 
@@ -131,6 +147,10 @@ class Watcher:
             except Exception as exc:
                 error("sandbox watcher iteration failed", exc=exc)
             try:
+                await self.unload_idle_sandboxes()
+            except Exception as exc:
+                error("sandbox unload iteration failed", exc=exc)
+            try:
                 await asyncio.wait_for(
                     self._stop.wait(),
                     timeout=settings.SANDBOX_WATCHER_INTERVAL_SECONDS,
@@ -141,3 +161,23 @@ class Watcher:
     def stop(self) -> None:
         # 请求 watcher 循环停止
         self._stop.set()
+
+    async def unload_idle_sandboxes(self) -> None:
+        if self._workspace_repository is None or self._sandbox_unloader is None:
+            return
+        retiring = await self._sandbox_repository.get_by_states([SandboxState.RETIRING])
+        for sandbox in retiring:
+            await self._sandbox_unloader.unload(sandbox)
+
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            seconds=settings.SANDBOX_WORKSPACE_IDLE_TIMEOUT_SECONDS,
+        )
+        for candidate in await self._sandbox_repository.list_idle_user_sandboxes(cutoff):
+            if candidate.idle_since is None:
+                continue
+            claimed = await self._sandbox_repository.claim_idle_sandbox(
+                candidate.sandbox_id,
+                candidate.idle_since,
+            )
+            if claimed is not None:
+                await self._sandbox_unloader.unload(claimed)

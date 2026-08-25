@@ -49,6 +49,11 @@ class WorkspaceRepository(Protocol):
         """写入运行时沙箱关联和容器内工作区路径。"""
         ...
 
+    async def list_attached_by_sandbox(
+        self,
+        sandbox_id: str,
+    ) -> list[SessionWorkspaceDocument]: ...
+
     async def list_idle_attached(
         self,
         cutoff: datetime,

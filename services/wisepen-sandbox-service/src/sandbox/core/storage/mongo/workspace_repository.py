@@ -76,6 +76,14 @@ class MongoWorkspaceRepository(WorkspaceRepository):
             response_type=UpdateResponse.NEW_DOCUMENT,
         )
 
+    async def list_attached_by_sandbox(
+        self,
+        sandbox_id: str,
+    ) -> list[SessionWorkspaceDocument]:
+        return await SessionWorkspaceDocument.find(
+            {"sandbox_id": sandbox_id, "state": WorkspaceState.ATTACHED},
+        ).to_list()
+
     async def list_idle_attached(
         self,
         cutoff: datetime,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dependency_injector import containers, providers
 
-from sandbox.application import ContainerManager, Watcher, WorkspaceAllocator
+from sandbox.application import ContainerManager, SandboxUnloader, Watcher, WorkspaceAllocator
 from sandbox.core.config.app_settings import settings
 from sandbox.core.providers import AIOAdapter, SandboxProviderManager
 from sandbox.core.storage.mongo import (
@@ -40,11 +40,19 @@ class Container(containers.DeclarativeContainer):
         workspace_repository=workspace_repository,
         container_manager=container_manager,
     )
+    sandbox_unloader = providers.Singleton(
+        SandboxUnloader,
+        sandbox_repository=sandbox_repository,
+        workspace_repository=workspace_repository,
+        container_manager=container_manager,
+    )
     watcher = providers.Singleton(
         Watcher,
         sandbox_repository=sandbox_repository,
         sandbox_provider_manager=sandbox_provider_manager,
-        container_manager=container_manager
+        container_manager=container_manager,
+        workspace_repository=workspace_repository,
+        sandbox_unloader=sandbox_unloader,
     )
 
 

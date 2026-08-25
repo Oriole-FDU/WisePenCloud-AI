@@ -99,9 +99,10 @@ class ContainerManager:
         self,
         container_id: str,
         workspace_id: str,
+        snapshot_path: str | None = None,
     ) -> str:
         """将宿主机缓存的 workspace 恢复至容器内同名目录。"""
-        cache_path = Path(settings.SANDBOX_WORKSPACE_CACHE_ROOT) / workspace_id
+        cache_path = Path(snapshot_path) if snapshot_path else Path(settings.SANDBOX_WORKSPACE_CACHE_ROOT) / workspace_id
         if not cache_path.is_dir():
             raise ServiceException(
                 SandboxErrorCode.DOCKER_RUNTIME_FAILED,
@@ -128,6 +129,20 @@ class ContainerManager:
         if cleanup_returncode != 0:
             message = f"{message}; docker workspace cleanup failed: {cleanup_stderr}"
         raise ServiceException(SandboxErrorCode.DOCKER_RUNTIME_FAILED, message)
+
+    async def export_sandbox_workspaces(self, container_id: str, destination: Path) -> None:
+        """将容器内 workspace 根目录复制到宿主机 staging 目录。"""
+        destination.mkdir(parents=True, exist_ok=True)
+        returncode, _, stderr = await self._docker(
+            "cp",
+            f"{container_id}:{settings.SANDBOX_CONTAINER_WORKSPACE_ROOT}/.",
+            str(destination),
+        )
+        if returncode != 0:
+            raise ServiceException(
+                SandboxErrorCode.DOCKER_RUNTIME_FAILED,
+                f"docker workspace snapshot failed: {stderr}",
+            )
 
     async def _docker(self, *args: str) -> tuple[int, str, str]:
         try:
