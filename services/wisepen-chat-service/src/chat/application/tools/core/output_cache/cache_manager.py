@@ -1,7 +1,8 @@
 """工具返回值的原地 Claim Check 装饰器。
 
 装饰器拥有模型输出前的最后一个缓存边界：它接收异构业务对象，先收敛为
-JSON 纯树，再把被正文 Store 接管的长字符串替换成同级 preview 和 receipt 字段。
+JSON 纯树，再把超出预算、需要正文 Store 接管的长字符串替换成同级 preview 和
+receipt 字段；未超过预算的正文保持原输出，不暴露缓存字段。
 Redis、分块和文档结构仍由 ``cache_store`` 与 Redis repository 独立负责。
 """
 
@@ -219,7 +220,7 @@ async def _claim_targets(
     *,
     session_id: str,
 ) -> None:
-    "将目标入库，并原地变异为preview, content_id, total_length, chunk_count四个字段"
+    """将目标入库，并按是否截断选择模型可见的输出形状。"""
     for target, budget in zip(targets, budgets, strict=True):
         prefix = (
             f"{target.prefix}_"
@@ -236,6 +237,7 @@ async def _claim_targets(
             key in target.parent for key in claim_keys
         ):
             continue
+
         try:
             # 存入缓存
             receipt = await put_tool_content(session_id=session_id, text=target.text)
@@ -244,7 +246,10 @@ async def _claim_targets(
             continue
         if receipt is None:
             continue
-        preview, _ = _build_preview(target.text, budget)
+        preview, truncated = _build_preview(target.text, budget)
+        if not truncated:
+            # 原文已能完整展示时不改写输出，也不向模型暴露仅供续读的 receipt。
+            continue
         replacement = {
             f"{prefix}preview": preview,
             f"{prefix}content_id": receipt.content_id,

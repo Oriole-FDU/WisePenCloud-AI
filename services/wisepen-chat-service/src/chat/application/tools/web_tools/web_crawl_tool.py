@@ -115,7 +115,7 @@ class WebCrawlTool:
                 persist_output=True,
                 risk_level=ToolRiskLevel.MEDIUM,
                 timeout_seconds=300.0,
-                # 正文已经由 claim-check 装饰器转存，模型只接收 preview/receipt。
+                # 超预算正文由 claim-check 装饰器转存并展示 preview/receipt，短正文保持原输出。
                 max_output_chars=None,
             ),
         )
