@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 
 from sandbox.domain.entities import (
@@ -48,25 +49,40 @@ class WorkspaceRepository(Protocol):
         """写入运行时沙箱关联和容器内工作区路径。"""
         ...
 
-    async def clear_runtime_binding(
+    async def list_attached_by_sandbox(
         self,
-        workspace_id: str,
-    ) -> SessionWorkspaceDocument | None:
-        """清空当前沙箱关联和容器内工作区路径。"""
+        sandbox_id: str,
+    ) -> list[SessionWorkspaceDocument]: ...
+
+    async def list_idle_attached(
+        self,
+        cutoff: datetime,
+        limit: int,
+    ) -> list[SessionWorkspaceDocument]:
+        """查询最近访问时间早于截止时间且仍在容器中的工作区。"""
         ...
 
-    async def set_export_bundle(
+    async def touch_if_attached(
         self,
         workspace_id: str,
-        export_bundle: WorkspaceExportBundleRef | None,
     ) -> SessionWorkspaceDocument | None:
-        """更新 export_bundle，并返回更新后的记录"""
+        """仅在工作区仍处于 ATTACHED 时更新最近访问时间。"""
+        ...
+
+    async def count_runtime_workspaces(
+        self,
+        sandbox_id: str,
+    ) -> int:
+        """统计仍占用沙箱运行时的工作区数量。"""
         ...
 
     async def change_state(
         self,
         workspace_id: str,
         state: WorkspaceState,
+        *,
+        export_bundle: WorkspaceExportBundleRef | None = None,
+        clear_runtime_binding: bool = False,
     ) -> SessionWorkspaceDocument | None:
-        """更新 workspace 生命周期状态，并返回更新后的记录"""
+        """更新 workspace 状态，可选地写入缓存引用或清理运行时绑定。"""
         ...

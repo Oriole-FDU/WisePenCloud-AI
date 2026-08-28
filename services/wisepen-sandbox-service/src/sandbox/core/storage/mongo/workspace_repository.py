@@ -76,53 +76,90 @@ class MongoWorkspaceRepository(WorkspaceRepository):
             response_type=UpdateResponse.NEW_DOCUMENT,
         )
 
-    async def clear_runtime_binding(
+    async def list_attached_by_sandbox(
+        self,
+        sandbox_id: str,
+    ) -> list[SessionWorkspaceDocument]:
+        return await SessionWorkspaceDocument.find(
+            {"sandbox_id": sandbox_id, "state": WorkspaceState.ATTACHED},
+        ).to_list()
+
+    async def list_idle_attached(
+        self,
+        cutoff: datetime,
+        limit: int,
+    ) -> list[SessionWorkspaceDocument]:
+        if limit <= 0:
+            return []
+        return await SessionWorkspaceDocument.find(
+            {
+                "state": WorkspaceState.ATTACHED,
+                "last_accessed_at": {"$lte": cutoff},
+            },
+            sort=[("last_accessed_at", 1)],
+        ).limit(limit).to_list()
+
+    async def touch_if_attached(
         self,
         workspace_id: str,
     ) -> SessionWorkspaceDocument | None:
+        now = datetime.now(timezone.utc)
         return await SessionWorkspaceDocument.find_one(
-            SessionWorkspaceDocument.id == workspace_id,
+            {
+                "id": workspace_id,
+                "state": WorkspaceState.ATTACHED,
+                "sandbox_id": {"$ne": None},
+                "workspace_path": {"$ne": None},
+            },
         ).update(
             {
                 "$set": {
-                    "sandbox_id": None,
-                    "workspace_path": None,
-                    "updated_at": datetime.now(timezone.utc),
+                    "last_accessed_at": now,
+                    "updated_at": now,
                 }
             },
             response_type=UpdateResponse.NEW_DOCUMENT,
         )
 
-    async def set_export_bundle(
+    async def count_runtime_workspaces(
         self,
-        workspace_id: str,
-        export_bundle: WorkspaceExportBundleRef | None,
-    ) -> SessionWorkspaceDocument | None:
-        return await SessionWorkspaceDocument.find_one(
-            SessionWorkspaceDocument.id == workspace_id,
-        ).update(
+        sandbox_id: str,
+    ) -> int:
+        return await SessionWorkspaceDocument.find(
             {
-                "$set": {
-                    "export_bundle": export_bundle,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
-            response_type=UpdateResponse.NEW_DOCUMENT,
-        )
+                "sandbox_id": sandbox_id,
+                "state": {
+                    "$in": [
+                        WorkspaceState.ATTACHED,
+                        WorkspaceState.EXPORTING,
+                        WorkspaceState.IMPORTING,
+                    ]
+                },
+            }
+        ).count()
 
     async def change_state(
         self,
         workspace_id: str,
         state: WorkspaceState,
+        *,
+        export_bundle: WorkspaceExportBundleRef | None = None,
+        clear_runtime_binding: bool = False,
     ) -> SessionWorkspaceDocument | None:
+        filters: dict[str, object] = {"id": workspace_id}
+        updates: dict[str, object] = {
+            "state": state,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if export_bundle is not None:
+            updates["export_bundle"] = export_bundle.model_dump()
+        if clear_runtime_binding:
+            updates.update({"sandbox_id": None, "workspace_path": None})
         return await SessionWorkspaceDocument.find_one(
-            SessionWorkspaceDocument.id == workspace_id,
+            filters,
         ).update(
             {
-                "$set": {
-                    "state": state,
-                    "updated_at": datetime.now(timezone.utc),
-                }
+                "$set": updates,
             },
             response_type=UpdateResponse.NEW_DOCUMENT,
         )
