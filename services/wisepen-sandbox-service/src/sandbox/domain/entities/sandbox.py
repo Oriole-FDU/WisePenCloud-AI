@@ -48,6 +48,15 @@ class SandboxDocument(Document):
                 [("bind_user_id", ASCENDING), ("state", ASCENDING), ("updated_at", DESCENDING)],
                 name="idx_bind_state_updated",
             ),
+            IndexModel(
+                [("bind_user_id", ASCENDING)],
+                unique=True,
+                partialFilterExpression={
+                    "state": SandboxState.USER_ACTIVE,
+                    "bind_user_id": {"$type": "string"},
+                },
+                name="uniq_active_user_binding",
+            ),
             IndexModel([("state", ASCENDING), ("idle_since", ASCENDING)], name="idx_user_sandbox_idle"),
         ]
 

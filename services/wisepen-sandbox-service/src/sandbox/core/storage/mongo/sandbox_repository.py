@@ -51,6 +51,7 @@ class MongoSandboxRepository(SandboxRepository):
     ) -> SandboxDocument | None:
         return await SandboxDocument.find_one(
             SandboxDocument.bind_user_id == user_id,
+            SandboxDocument.state == SandboxState.USER_ACTIVE,
         )
 
     async def assign_to_user(
@@ -146,13 +147,10 @@ class MongoSandboxRepository(SandboxRepository):
         self,
         sandbox_id: str,
         state: SandboxState,
-        expected_state: SandboxState | None = None,
         *,
         clear_user_binding: bool = False,
     ) -> SandboxDocument | None:
         filters: dict[str, object] = {"sandbox_id": sandbox_id}
-        if expected_state is not None:
-            filters["state"] = expected_state
         updates: dict[str, object] = {
             "state": state,
             "updated_at": datetime.now(timezone.utc),

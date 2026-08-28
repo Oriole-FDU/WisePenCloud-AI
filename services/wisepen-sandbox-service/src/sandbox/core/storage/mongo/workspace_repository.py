@@ -142,14 +142,11 @@ class MongoWorkspaceRepository(WorkspaceRepository):
         self,
         workspace_id: str,
         state: WorkspaceState,
-        expected_state: WorkspaceState | None = None,
         *,
         export_bundle: WorkspaceExportBundleRef | None = None,
         clear_runtime_binding: bool = False,
     ) -> SessionWorkspaceDocument | None:
         filters: dict[str, object] = {"id": workspace_id}
-        if expected_state is not None:
-            filters["state"] = expected_state
         updates: dict[str, object] = {
             "state": state,
             "updated_at": datetime.now(timezone.utc),

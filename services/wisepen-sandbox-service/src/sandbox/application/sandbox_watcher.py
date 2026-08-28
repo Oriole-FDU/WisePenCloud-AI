@@ -72,7 +72,6 @@ class Watcher:
                         await self._sandbox_repository.change_state(
                             sandbox.sandbox_id,
                             SandboxState.DESTROYED,
-                            expected_state=SandboxState.DESTROYING,
                             clear_user_binding=True,
                         )
                     elif datetime.now(timezone.utc) > sandbox.updated_at + timedelta(seconds=settings.SANDBOX_DESTROY_TIMEOUT_SECONDS):
@@ -101,8 +100,6 @@ class Watcher:
             container_id: str | None = None
             try:
                 container_id = await self._container_manager.create(sandbox_provider_info.image)
-                if container_id is None:
-                    raise RuntimeError("container creation returned no id")
                 base_url = await self._container_manager.get_container_base_url(container_id)
                 sandbox = SandboxDocument(
                     container_id=container_id,
@@ -130,12 +127,7 @@ class Watcher:
         for sandbox in sandboxes:
             try:
                 await self._container_manager.destroy(sandbox.container_id)
-                await self._sandbox_repository.change_state(
-                    sandbox.sandbox_id,
-                    SandboxState.DESTROYED,
-                    expected_state=sandbox.state,
-                    clear_user_binding=True,
-                )
+                await self._sandbox_repository.change_state(sandbox.sandbox_id, SandboxState.DESTROYED, clear_user_binding=True)
             except Exception as exc:
                 error("sandbox force destroy failed", exc=exc, sandbox_id=sandbox.sandbox_id)
 
@@ -163,21 +155,13 @@ class Watcher:
         self._stop.set()
 
     async def unload_idle_sandboxes(self) -> None:
-        if self._workspace_repository is None or self._sandbox_unloader is None:
-            return
+        # 先处理进入 RETIRING 的历史遗留项
         retiring = await self._sandbox_repository.get_by_states([SandboxState.RETIRING])
         for sandbox in retiring:
             await self._sandbox_unloader.unload(sandbox)
-
-        cutoff = datetime.now(timezone.utc) - timedelta(
-            seconds=settings.SANDBOX_WORKSPACE_IDLE_TIMEOUT_SECONDS,
-        )
+        # 再根据超时处理新的情况
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.SANDBOX_WORKSPACE_IDLE_TIMEOUT_SECONDS)
         for candidate in await self._sandbox_repository.list_idle_user_sandboxes(cutoff):
-            if candidate.idle_since is None:
-                continue
-            claimed = await self._sandbox_repository.claim_idle_sandbox(
-                candidate.sandbox_id,
-                candidate.idle_since,
-            )
+            claimed = await self._sandbox_repository.claim_idle_sandbox(candidate.sandbox_id, candidate.idle_since)
             if claimed is not None:
                 await self._sandbox_unloader.unload(claimed)

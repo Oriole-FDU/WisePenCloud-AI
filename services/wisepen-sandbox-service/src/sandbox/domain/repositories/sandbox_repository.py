@@ -35,7 +35,7 @@ class SandboxRepository(Protocol):
         self,
         user_id: str,
     ) -> SandboxDocument | None:
-        """读取指定用户当前绑定的沙箱记录"""
+        """读取指定用户当前有效的 USER_ACTIVE 沙箱记录"""
         ...
 
     async def assign_to_user(
@@ -52,19 +52,14 @@ class SandboxRepository(Protocol):
 
     async def list_idle_user_sandboxes(self, cutoff: datetime) -> list[SandboxDocument]: ...
 
-    async def claim_idle_sandbox(
-        self,
-        sandbox_id: str,
-        idle_since: datetime,
-    ) -> SandboxDocument | None: ...
+    async def claim_idle_sandbox(self, sandbox_id: str, idle_since: datetime) -> SandboxDocument | None: ...
 
     async def change_state(
         self,
         sandbox_id: str,
         state: SandboxState,
-        expected_state: SandboxState | None = None,
         *,
         clear_user_binding: bool = False,
     ) -> SandboxDocument | None:
-        """原子更新 sandbox 状态，可选地要求旧状态并清除用户绑定。"""
+        """更新 sandbox 状态，可选地清除用户绑定。"""
         ...
