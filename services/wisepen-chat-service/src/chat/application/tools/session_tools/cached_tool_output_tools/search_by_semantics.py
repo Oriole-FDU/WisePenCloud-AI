@@ -29,7 +29,6 @@ from typing import Any
 
 from common.utils.document import Section, SourceSpan
 from common.utils.ranking import RankCandidate, RankingPipeline, RankQuery, RankRequest
-from common.utils.ranking.diversifiers import MmrDiversifier
 from common.utils.ranking.fusion import WeightedRrfFusion
 from common.utils.ranking.rank_gates import (
     HighLowRelevanceGate,
@@ -236,9 +235,6 @@ def build_cached_tool_output_search_by_semantics_pipeline() -> RankingPipeline:
         ),
         gate=HighLowRelevanceGate(
             HighLowRelevanceGateConfig(),   # rank门控可确保大量命中均具有强相关性
-        ),
-        diversifiers=(
-            MmrDiversifier(tokenizer=tokenizer),
         ),
     )
 

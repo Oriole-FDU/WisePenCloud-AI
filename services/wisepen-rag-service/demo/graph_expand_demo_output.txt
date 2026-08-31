@@ -1,0 +1,156 @@
+=== Review notes ===
+- Neo4j traversal 和 LLM 图谱抽取结果用项目预定义实体类型表示。
+- seed 校验、BM25/WeightedRRF 路径排序、GraphEvidenceVerifier、状态扩展和 ReadingBlock 回补使用生产实现。
+- LOCATE、关系证据和新节点 mention 分别来自不同 ReadingBlock，EXPAND 不复述检索命中字段。
+- flat text 在生产索引阶段跳过图谱抽取，因此没有伪造 expandGraph 结果。
+
+=== Simulated extracted graph fact ===
+quote: WisePen RAG 使用 GraphRAG 技术补充实体关系导航
+quote: GraphRAG 使用知识图谱表示实体之间的关系
+entity anchors: kn_demo_wisepen_rag(product), kn_demo_graphrag(technology), kn_demo_knowledge_graph(concept)
+relations:
+  WisePen RAG -[USES]-> GraphRAG
+  GraphRAG -[USES]-> 知识图谱
+
+=== SECTIONED expandGraph ===
+{
+  "state_id": "nav_demo_1",
+  "traversal_direction": "both",
+  "seed_nodes": [
+    {
+      "node_id": "kn_demo_wisepen_rag",
+      "label": "WisePen RAG",
+      "kind": "Entity",
+      "entity_type": "product",
+      "role": "seed"
+    }
+  ],
+  "discovered_nodes": [
+    {
+      "node_id": "kn_demo_graphrag",
+      "label": "GraphRAG",
+      "kind": "Entity",
+      "entity_type": "technology",
+      "role": "discovered",
+      "mention_evidence": [
+        {
+          "resource_id": "demo-wisepen-rag",
+          "reading_block_id": "rsb_3fc8a0ac3a6dd1f4",
+          "quote": "GraphRAG 技术"
+        }
+      ]
+    },
+    {
+      "node_id": "kn_demo_knowledge_graph",
+      "label": "知识图谱",
+      "kind": "Entity",
+      "entity_type": "concept",
+      "role": "discovered",
+      "mention_evidence": [
+        {
+          "resource_id": "demo-wisepen-rag",
+          "reading_block_id": "rsb_f73a0d4f93e03e43",
+          "quote": "知识图谱"
+        }
+      ]
+    }
+  ],
+  "paths": [
+    {
+      "path": "WisePen RAG -[USES]-> GraphRAG -[USES]-> 知识图谱",
+      "relations": [
+        {
+          "source": {
+            "node_id": "kn_demo_wisepen_rag",
+            "label": "WisePen RAG"
+          },
+          "predicate": "USES",
+          "target": {
+            "node_id": "kn_demo_graphrag",
+            "label": "GraphRAG"
+          },
+          "relation_evidence": [
+            {
+              "resource_id": "demo-wisepen-rag",
+              "reading_block_id": "rsb_3fc8a0ac3a6dd1f4",
+              "quote": "WisePen RAG 使用 GraphRAG 技术补充实体关系导航"
+            }
+          ]
+        },
+        {
+          "source": {
+            "node_id": "kn_demo_graphrag",
+            "label": "GraphRAG"
+          },
+          "predicate": "USES",
+          "target": {
+            "node_id": "kn_demo_knowledge_graph",
+            "label": "知识图谱"
+          },
+          "relation_evidence": [
+            {
+              "resource_id": "demo-wisepen-rag",
+              "reading_block_id": "rsb_f73a0d4f93e03e43",
+              "quote": "GraphRAG 使用知识图谱表示实体之间的关系"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "evidence_reading_blocks": [
+    {
+      "resource_id": "demo-wisepen-rag",
+      "reading_block_id": "rsb_3fc8a0ac3a6dd1f4",
+      "text": "## 一、主检索流程\n\nWisePen RAG 使用向量检索召回相关 ReadingBlock，并按照标题树补充结构上相邻的阅读材料。\n\n\n## 二、图谱导航\n\nWisePen RAG 使用 GraphRAG 技术补充实体关系导航，使模型能够沿文档中的知识关系继续读取材料。\n",
+      "sections": [
+        {
+          "section_id": "sec_8426be2b8471edde",
+          "title": "一、主检索流程",
+          "section_path": "WisePen RAG 导航架构说明 > 一、主检索流程",
+          "is_complete": true
+        },
+        {
+          "section_id": "sec_ad2eec8e8c48d140",
+          "title": "二、图谱导航",
+          "section_path": "WisePen RAG 导航架构说明 > 二、图谱导航",
+          "is_complete": true
+        }
+      ],
+      "page_range": "1",
+      "anchor_labels": []
+    },
+    {
+      "resource_id": "demo-wisepen-rag",
+      "reading_block_id": "rsb_f73a0d4f93e03e43",
+      "text": "### 二.1 关系抽取\n\nGraphRAG 使用知识图谱表示实体之间的关系，并保留关系对应的原文证据。\n\n\n### 二.2 证据回源\n\n图谱关系只能作为导航线索，最终返回的证据仍然必须回到当前发布 revision 的 ReadingBlock。\n\n\n### 二.3 查询边界\n\n图谱遍历只使用显式知识关系，不把节点 mention 或检索来源边当作可遍历关系。\n",
+      "sections": [
+        {
+          "section_id": "sec_cd52df950233fce6",
+          "title": "二.1 关系抽取",
+          "section_path": "WisePen RAG 导航架构说明 > 二、图谱导航 > 二.1 关系抽取",
+          "is_complete": true
+        },
+        {
+          "section_id": "sec_1c13719cd8d5c589",
+          "title": "二.2 证据回源",
+          "section_path": "WisePen RAG 导航架构说明 > 二、图谱导航 > 二.2 证据回源",
+          "is_complete": true
+        },
+        {
+          "section_id": "sec_4e38826d05ae58db",
+          "title": "二.3 查询边界",
+          "section_path": "WisePen RAG 导航架构说明 > 二、图谱导航 > 二.3 查询边界",
+          "is_complete": true
+        }
+      ],
+      "page_range": "1 - 2",
+      "anchor_labels": []
+    }
+  ]
+}
+
+=== FLAT_TEXT graph behavior ===
+structure_mode: flat_text
+graph extraction: skipped
+expandGraph: not applicable
