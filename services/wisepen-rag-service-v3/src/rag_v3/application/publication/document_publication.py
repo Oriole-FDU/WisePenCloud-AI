@@ -1,6 +1,6 @@
-"""P0 文档 revision 的事实写入和 active 发布编排。"""
+"""文档 revision 的事实写入和 active 发布编排。"""
 
-from rag_v3.domain.models import ContentRevision, Document
+from rag_v3.application.document.models import ContentRevision, Document
 from rag_v3.domain.repositories.doc_chunks import DocChunkRepository
 from rag_v3.domain.repositories.document_vectors import DocumentVectorRepository
 from rag_v3.domain.repositories.documents import DocumentRepository

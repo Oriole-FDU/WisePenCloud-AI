@@ -2,21 +2,13 @@
 
 from collections.abc import Sequence
 
-from common.utils.document import Anchor, Page, Section, SourceSpan
-
-from rag_v3.domain.entities.documents import (
-    DocumentRevisionEntity,
-    StoredAnchor,
-    StoredPage,
-    StoredSection,
-    StoredSpan,
-)
-from rag_v3.domain.models import (
+from rag_v3.application.document.models import (
     ContentRevision,
     Document,
+    DocumentMetadataRegistry,
     DocumentStructure,
 )
-from rag_v3.domain.plugins import DocumentMetadataRegistry
+from rag_v3.domain.entities.documents import DocumentRevisionEntity
 from rag_v3.domain.repositories.documents import DocumentRepository
 
 
@@ -34,7 +26,7 @@ class MongoDocumentRepository(DocumentRepository):
                 "content_revision": document.revision.content_revision,
             }
         )
-        # content_revision 是完整文档版本；不能借重试路径覆写为另一份 metadata。
+        # 相同 revision 严禁篡改 metadata
         if existing is not None and existing.metadata != metadata:
             raise ValueError("document metadata differs for the same content revision")
         await DocumentRevisionEntity.get_pymongo_collection().update_one(
@@ -77,6 +69,7 @@ class MongoDocumentRepository(DocumentRepository):
         self,
         section_ids: Sequence[str],
     ) -> list[Document]:
+        """子章节反查完整文档"""
         unique_section_ids = list(dict.fromkeys(section_ids))
         if not unique_section_ids:
             return []
@@ -94,38 +87,11 @@ def _to_document(document: Document, metadata: dict[str, object]) -> dict[str, o
         "content_sha256": document.revision.content_sha256,
         "raw_content": document.raw_content,
         "total_length": document.structure.total_length,
-        "sections": [_stored_section(section) for section in document.structure.sections],
-        "pages": [_stored_page(page) for page in document.structure.pages],
-        "anchors": [_stored_anchor(anchor) for anchor in document.structure.anchors],
+        "sections": document.structure.sections,
+        "pages": document.structure.pages,
+        "anchors": document.structure.anchors,
         "metadata": metadata,
     }
-
-
-def _stored_span(span: SourceSpan) -> StoredSpan:
-    return StoredSpan(start_offset=span.start_offset, end_offset=span.end_offset)
-
-
-def _stored_section(section: Section) -> StoredSection:
-    return StoredSection(
-        section_id=section.section_id,
-        title=section.title,
-        level=section.level,
-        parent_section_id=section.parent_section_id,
-        ordinal=section.ordinal,
-        section_path=list(section.section_path),
-        own_span=_stored_span(section.own_span),
-        subtree_span=_stored_span(section.subtree_span),
-        content_spans=[_stored_span(span) for span in section.content_spans],
-        preview=section.preview,
-    )
-
-
-def _stored_page(page: Page) -> StoredPage:
-    return StoredPage(page_index=page.page_index, page_label=page.page_label, source_span=_stored_span(page.source_span))
-
-
-def _stored_anchor(anchor: Anchor) -> StoredAnchor:
-    return StoredAnchor(label=anchor.label, source_span=_stored_span(anchor.source_span))
 
 
 def _to_domain(entity: DocumentRevisionEntity, metadata_registry: DocumentMetadataRegistry) -> Document:
@@ -139,40 +105,9 @@ def _to_domain(entity: DocumentRevisionEntity, metadata_registry: DocumentMetada
         raw_content=entity.raw_content,
         structure=DocumentStructure(
             total_length=entity.total_length,
-            sections=tuple(_section(section) for section in entity.sections),
-            pages=tuple(_page(page) for page in entity.pages),
-            anchors=tuple(_anchor(anchor) for anchor in entity.anchors),
+            sections=entity.sections,
+            pages=entity.pages,
+            anchors=entity.anchors,
         ),
         metadata=metadata_registry.decode(entity.metadata),
     )
-
-
-def _span(span: StoredSpan) -> SourceSpan:
-    return SourceSpan(span.start_offset, span.end_offset)
-
-
-def _section(section: StoredSection) -> Section:
-    return Section(
-        section_id=section.section_id,
-        title=section.title,
-        level=section.level,
-        parent_section_id=section.parent_section_id,
-        ordinal=section.ordinal,
-        section_path=tuple(section.section_path),
-        own_span=_span(section.own_span),
-        subtree_span=_span(section.subtree_span),
-        content_spans=[_span(span) for span in section.content_spans],
-        preview=section.preview,
-    )
-
-
-def _page(page: StoredPage) -> Page:
-    return Page(
-        page_index=page.page_index,
-        page_label=page.page_label,
-        source_span=_span(page.source_span),
-    )
-
-
-def _anchor(anchor: StoredAnchor) -> Anchor:
-    return Anchor(label=anchor.label, source_span=_span(anchor.source_span))

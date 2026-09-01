@@ -16,10 +16,22 @@ from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient
 from zeroentropy import AsyncZeroEntropy
 
-from rag_v3.application.document import DocumentIndexBuilder, DocumentPreparer
-from rag_v3.application.graph import GraphFactBuilder, GraphProjectionBuilder
+from rag_v3.application.document.indexing import DocumentIndexBuilder
+from rag_v3.application.document.models import (
+    DocChunkMetadataRegistry,
+    DocumentMetadataRegistry,
+)
+from rag_v3.application.document.preparation import DocumentPreparer
+from rag_v3.application.events import (
+    AclRecalculateHandler,
+    DocumentReadyHandler,
+    ResourceDestroyHandler,
+)
+from rag_v3.application.graph.graph_fact_builder import GraphFactBuilder
+from rag_v3.application.graph.graph_indexing import GraphIndexBuilder
 from rag_v3.application.publication import AclSynchronizer, DocumentPublication
-from rag_v3.application.retrieval import GraphRetriever, HybridRetriever
+from rag_v3.application.retrieval.graph_retriever import GraphRetriever
+from rag_v3.application.retrieval.hybrid_retriever import HybridRetriever
 from rag_v3.application.snapshot import ActiveDocumentSnapshotLoader
 from rag_v3.core.config.app_settings import settings
 from rag_v3.core.persistence.mongo import (
@@ -36,7 +48,6 @@ from rag_v3.core.persistence.qdrant import (
     QdrantGraphEdgeVectorRepository,
     QdrantGraphNodeVectorRepository,
 )
-from rag_v3.domain.plugins import DocumentMetadataRegistry
 
 
 def _resource_items_collection(client: AsyncMongoClient):
@@ -75,13 +86,17 @@ class Container(containers.DeclarativeContainer):
     graph_plugins = providers.List()
     metadata_registry = providers.Singleton(
         DocumentMetadataRegistry,
-        plugins=graph_plugins,
+        metadata_types=[plugin.metadata_type for plugin in graph_plugins],
     )
     documents = providers.Singleton(
         MongoDocumentRepository,
         metadata_registry=metadata_registry,
     )
-    doc_chunks = providers.Singleton(MongoDocChunkRepository)
+    chunk_metadata_registry = providers.Singleton(DocChunkMetadataRegistry)
+    doc_chunks = providers.Singleton(
+        MongoDocChunkRepository,
+        metadata_registry=chunk_metadata_registry,
+    )
     index_states = providers.Singleton(MongoResourceIndexStateRepository)
     resource_acls = providers.Singleton(MongoResourceAclRepository)
     authoritative_acls = providers.Singleton(
@@ -169,11 +184,30 @@ class Container(containers.DeclarativeContainer):
         embedding_model=settings.EMBEDDING_MODEL,
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
         max_concurrency=settings.DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY,
+        enhancement_enabled=settings.DOCUMENT_ENHANCEMENT_ENABLED,
+    )
+    document_ready_handler = providers.Factory(
+        DocumentReadyHandler,
+        preparer=document_preparer,
+        index_builder=document_index_builder,
     )
     acl_synchronizer = providers.Factory(
         AclSynchronizer,
         authoritative_reader=authoritative_acls,
         local_repository=resource_acls,
+    )
+    acl_recalculate_handler = providers.Factory(
+        AclRecalculateHandler,
+        synchronizer=acl_synchronizer,
+    )
+    resource_destroy_handler = providers.Factory(
+        ResourceDestroyHandler,
+        publication=document_publication,
+        document_vectors=document_vectors,
+        node_vectors=graph_node_vectors,
+        edge_vectors=graph_edge_vectors,
+        topology=graph_topology,
+        graph_enabled=settings.GRAPH_ENABLED,
     )
     active_document_snapshots = providers.Factory(
         ActiveDocumentSnapshotLoader,
@@ -194,8 +228,8 @@ class Container(containers.DeclarativeContainer):
         query_model=settings.QUERY_MODEL,
         max_concurrency=settings.DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY,
     )
-    graph_projection_builder = providers.Factory(
-        GraphProjectionBuilder,
+    graph_index_builder = providers.Factory(
+        GraphIndexBuilder,
         enabled=settings.GRAPH_ENABLED,
         documents=documents,
         doc_chunks=doc_chunks,

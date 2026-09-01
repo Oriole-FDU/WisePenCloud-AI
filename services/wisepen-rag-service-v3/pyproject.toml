@@ -5,6 +5,7 @@ description = "WisePen RAG service v3"
 requires-python = ">=3.11"
 dependencies = [
     "beanie>=2,<3",
+    "aiokafka>=0.12,<1",
     "dependency-injector>=4.49,<5",
     "fastapi>=0.136,<1",
     "instructor>=1,<2",

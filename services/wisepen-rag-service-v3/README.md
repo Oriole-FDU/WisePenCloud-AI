@@ -8,7 +8,7 @@
 
 RAG V3 是一次全量重写。Common 只提供无业务含义的文档结构事实，RAG 在此基础上定义自己的 `Document`、`DocChunk`、图谱事实和检索结果契约。Common 的 `Section`、`Page`、`Anchor`、`SourceSpan` 可以有限复用，但不作为 RAG 的整体服务契约。Common 的局部 Section ID 会被重写为包含资源和 content revision 的 RAG 全局 ID。
 
-首版明确不做：静态父块、任意 Range 读取、PPR/贡献聚合、Redis 内容缓存、Kafka offset 状态、逻辑删除回滚状态机，以及用 MCP 反向定义 RAG 内部能力。
+首版明确不做：静态父块、任意 Range 读取、PPR/贡献聚合、Redis 内容缓存、Kafka offset 状态、逻辑删除回滚状态机，以及用 MCP 反向定义 RAG 内部能力。Kafka transport 本身已接入，但不把 offset 写入 RAG 状态。
 
 ## 2. 一条完整数据链路
 
@@ -47,7 +47,7 @@ Mongo 保存一个 revision 的正文、结构和 metadata，以及独立的 `do
 - `staged_document_version`：构建版本的单调判断依据；
 - `applied_content_revision`：线上唯一可见版本。
 
-ACL 的来源权威是上游 `wispen_resource_items`；RAG 本地 `resource_acls` 按 `acl_revision` 同步，用于在线终检；Qdrant/Neo4j 的 ACL 仅用于预过滤。
+ACL 的来源权威是上游 `wispen_resource_items`；RAG 本地 `resource_acls` 按 `acl_revision` 异步同步，用于查询候选资源确定后建立一次在线权限快照；Qdrant/Neo4j 的 ACL 仅用于预过滤。ACL 缺失拒绝返回，允许短暂传播延迟。
 
 正常读取不拆 source part，不逐条跨库 IO。Chunk 和 LLM 文本 Evidence 按资源、版本批量回查；确定性图元直接按 active revision 和 ACL 过滤。Redis 首版不引入，除非监控证明 Mongo 组装已经是显著瓶颈。
 
@@ -59,7 +59,7 @@ ACL 的来源权威是上游 `wispen_resource_items`；RAG 本地 `resource_acls
 Qdrant Dense Top-N ─┐
                     ├─ chunk_id 并集去重
 Qdrant BM25 Top-N ──┘
-  -> Mongo 批量回查当前 DocChunk + Document ACL
+  -> Mongo 批量回查当前 DocChunk + Document，并建立 ACL 快照
   -> reranker + Common 相关性门控
   -> ChunkHit
   -> 动态构建不截断的父块
@@ -103,17 +103,16 @@ Ontology 是垂类图谱的核心：插件声明合法实体、关系端点、me
 - Section `DIRECT` 按一批全局 `section_id` 返回轻量 Section 列表，允许跨资源调用；
 - Section `RECURSIVE` 同样只依赖全局 `section_id`，返回请求根的资源、完整路径和按真实 Markdown 标题层级拼接的阅读文本，`max_depth` 控制展开深度。
 
-读取不返回 span/offset，不提供 Range 接口。所有正文来自当前 active `Document.raw_content`，ACL 在读取前后核验。
+读取不返回 span/offset，不提供 Range 接口。所有正文来自当前 active `Document.raw_content`，读取候选确定后批量建立一次 ACL 快照。
 
 ## 9. 查询时的统一原则
 
 无论是混合检索、图谱检索、标题树还是读取，都遵循同一顺序：
 
 ```text
-active revision
-  -> 候选或 Section 定位
-  -> Mongo 当前事实批量回查
-  -> ACL 终检
+候选或 Section 定位
+  -> Mongo 批量建立 active/ACL 快照
+  -> 当前事实批量回查
   -> 业务排序/拼装
   -> 返回
 ```
@@ -129,7 +128,7 @@ Qdrant payload、Neo4j 属性、标题树视图和动态父块都不是权威来
 5. 实现统一标题树渲染、三种入口和读取 Page/Section。
 6. 最后接入上层工具编排；工具层不反向扩张 RAG 契约。
 
-每一步都以当前 active revision、ACL 终检、批量跨库 IO 和可重建索引为验收底线。
+每一步都以当前 active revision、请求级 ACL 快照、批量跨库 IO 和可重建索引为验收底线。
 
 ## 11. 旧代码复用清单
 

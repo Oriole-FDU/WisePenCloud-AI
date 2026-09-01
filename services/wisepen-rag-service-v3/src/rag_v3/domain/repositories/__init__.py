@@ -4,7 +4,10 @@ from .acl import AuthoritativeAclReader, ResourceAclRepository
 from .doc_chunks import DocChunkRepository
 from .document_vectors import DocumentVectorRepository
 from .documents import DocumentRepository
-from .graph import GraphFactRepository
+from .graph_edge_vectors import GraphEdgeVectorRepository
+from .graph_fact import GraphFactRepository
+from .graph_node_vectors import GraphNodeVectorRepository
+from .graph_topology import GraphTopologyRepository
 from .index_state import ResourceIndexStateRepository, StageAction
 
 __all__ = [
@@ -12,19 +15,11 @@ __all__ = [
     "DocChunkRepository",
     "DocumentRepository",
     "DocumentVectorRepository",
+    "GraphEdgeVectorRepository",
     "GraphFactRepository",
+    "GraphNodeVectorRepository",
+    "GraphTopologyRepository",
     "ResourceAclRepository",
     "ResourceIndexStateRepository",
     "StageAction",
-]
-from .graph_projections import (
-    GraphEdgeVectorRepository,
-    GraphNodeVectorRepository,
-    GraphTopologyRepository,
-)
-
-__all__ = [
-    "GraphEdgeVectorRepository",
-    "GraphNodeVectorRepository",
-    "GraphTopologyRepository",
 ]

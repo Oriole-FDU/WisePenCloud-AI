@@ -4,18 +4,18 @@ from dataclasses import replace
 
 from common.utils.document import Section, SourceSpan
 
+from rag_v3.application.document.models import (
+    DocChunk,
+    Document,
+    DocumentStructure,
+)
 from rag_v3.application.retrieval.hybrid_retriever import (
     _build_dynamic_parents,
     _RankedChunk,
     _union_candidates,
 )
-from rag_v3.domain.models import (
-    DocChunk,
-    Document,
-    DocumentStructure,
-    HybridQuery,
-    VectorCandidate,
-)
+from rag_v3.application.retrieval.models import HybridQuery
+from rag_v3.domain.repositories.document_vectors import VectorCandidate
 
 from .conftest import chunk_for_document, document
 
@@ -37,8 +37,8 @@ def test_union_keeps_two_route_ranks_without_fusing_scores() -> None:
     assert candidates[1].lexical_rank == 1
 
 
-def test_hybrid_query_uses_semantic_query_unless_lexical_query_overrides_it() -> None:
-    assert HybridQuery(semantic_query="语义问题", top_k=3).lexical_query == "语义问题"
+def test_hybrid_query_only_declares_caller_input() -> None:
+    assert HybridQuery(semantic_query="语义问题", top_k=3).lexical_query == ""
     assert HybridQuery(
         semantic_query="语义问题",
         lexical_query="BM25 关键词",
@@ -63,8 +63,8 @@ def test_short_section_returns_its_complete_parent() -> None:
     )
 
     assert parents[0].text == item.raw_content
-    assert parents[0].source_spans == (SourceSpan(0, len(item.raw_content)),)
-    assert parents[0].matched_chunk_ids == (chunk.chunk_id,)
+    assert parents[0].source_spans == [SourceSpan(0, len(item.raw_content))]
+    assert parents[0].matched_chunk_ids == [chunk.chunk_id]
 
 
 def test_high_coverage_section_returns_complete_section() -> None:
@@ -82,7 +82,7 @@ def test_high_coverage_section_returns_complete_section() -> None:
 
     assert len(parents) == 1
     assert parents[0].text == item.raw_content
-    assert parents[0].source_spans == (SourceSpan(0, 5_000),)
+    assert parents[0].source_spans == [SourceSpan(0, 5_000)]
 
 
 def test_long_section_returns_complete_expanded_group_without_budget_cutoff() -> None:
@@ -94,7 +94,7 @@ def test_long_section_returns_complete_expanded_group_without_budget_cutoff() ->
     )
 
     assert len(parents) == 1
-    assert parents[0].source_spans == (SourceSpan(3_000, 6_000),)
+    assert parents[0].source_spans == [SourceSpan(3_000, 6_000)]
     assert parents[0].text == item.raw_content[3_000:6_000]
 
 

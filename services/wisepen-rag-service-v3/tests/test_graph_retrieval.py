@@ -1,25 +1,24 @@
 """P2-C 图谱检索的召回分流、权限终检和局部精排测试。"""
 
-
 import pytest
 from common.utils.document import SourceSpan
 from common.utils.ranking import RankDecision, RankedCandidate, RankResult
 from pydantic import BaseModel
 
-from rag_v3.application.retrieval import GraphRetriever
-from rag_v3.domain.acl import PermissionScope, ResourceAcl
-from rag_v3.domain.graph import (
-    GraphFilterCondition,
-    GraphFilterOperator,
-    GraphNode,
+from rag_v3.application.document.models import DocumentMetadata
+from rag_v3.application.graph.models import GraphNode, GraphPlugin, TextGraphEvidence
+from rag_v3.application.retrieval.graph_retriever import GraphRetriever
+from rag_v3.application.retrieval.models import (
     GraphSearchLevel,
     GraphSearchRequest,
-    GraphSourceProjection,
-    GraphVectorCandidate,
-    TextGraphEvidence,
 )
-from rag_v3.domain.models import DocumentMetadata
-from rag_v3.domain.plugins import GraphPlugin
+from rag_v3.domain.acl import PermissionScope, ResourceAcl
+from rag_v3.domain.repositories.graph_node_vectors import (
+    GraphFilterCondition,
+    GraphFilterOperator,
+    GraphVectorCandidate,
+)
+from rag_v3.domain.repositories.graph_topology import GraphSourceProjection
 
 from .conftest import (
     MemoryAcls,
@@ -76,7 +75,9 @@ class _Ranking:
         return RankResult(
             ranked=tuple(
                 RankedCandidate(candidate=item, rank=index, score=1.0 / index)
-                for index, item in enumerate(request.candidates[: request.top_k], start=1)
+                for index, item in enumerate(
+                    request.candidates[: request.top_k], start=1
+                )
             ),
             total_candidates=len(request.candidates),
             decision=self.decision,
@@ -85,7 +86,9 @@ class _Ranking:
 
 class _Embeddings:
     async def create(self, **kwargs):
-        return type("Response", (), {"data": [type("Item", (), {"embedding": [0.1, 0.2]})]})()
+        return type(
+            "Response", (), {"data": [type("Item", (), {"embedding": [0.1, 0.2]})]}
+        )()
 
 
 class _OpenAI:
@@ -114,7 +117,7 @@ class _PaperMetadata(DocumentMetadata):
 
 
 def _plugin() -> GraphPlugin:
-    from rag_v3.domain.graph import Ontology
+    from rag_v3.application.graph.models import Ontology
 
     return GraphPlugin(
         plugin_id="paper",
@@ -125,7 +128,12 @@ def _plugin() -> GraphPlugin:
 
 
 async def _active_source():
-    item = document(resource_id="resource", version=1, section_id="section", raw_content="Alpha is proven.")
+    item = document(
+        resource_id="resource",
+        version=1,
+        section_id="section",
+        raw_content="Alpha is proven.",
+    )
     chunk = chunk_for_document(item)
     documents = MemoryDocuments()
     chunks = MemoryDocChunks()
@@ -134,10 +142,29 @@ async def _active_source():
     await chunks.save_revision([chunk])
     await states.stage_revision(item.revision, expected_applied_content_revision=None)
     await states.apply_revision(item.revision)
-    return item, chunk, documents, chunks, states, MemoryAcls({"resource": ResourceAcl("resource", 1, "owner")})
+    return (
+        item,
+        chunk,
+        documents,
+        chunks,
+        states,
+        MemoryAcls({"resource": ResourceAcl("resource", 1, "owner")}),
+    )
 
 
-def _retriever(*, topology, node_vectors, edge_vectors, facts, documents, chunks, states, acls, ranking, enabled=True):
+def _retriever(
+    *,
+    topology,
+    node_vectors,
+    edge_vectors,
+    facts,
+    documents,
+    chunks,
+    states,
+    acls,
+    ranking,
+    enabled=True,
+):
     return GraphRetriever(
         enabled=enabled,
         topology=topology,
@@ -174,14 +201,18 @@ async def test_disabled_graph_search_touches_no_backend() -> None:
         enabled=False,
     )
 
-    result = await retriever.search(GraphSearchRequest(query="alpha"), PermissionScope("owner"))
+    result = await retriever.search(
+        GraphSearchRequest(query="alpha"), PermissionScope("owner")
+    )
 
-    assert result.hits == ()
+    assert result.hits == []
     assert topology.calls == vectors.dense_calls == ranking.requests == []
 
 
 @pytest.mark.asyncio
-async def test_hybrid_retrieval_keeps_vector_branches_separate_and_returns_fact() -> None:
+async def test_hybrid_retrieval_keeps_vector_branches_separate_and_returns_fact() -> (
+    None
+):
     item, _, documents, chunks, states, acls = await _active_source()
     node = GraphNode(node_id="node", name="Alpha", category="method")
     source = GraphSourceProjection(
@@ -196,10 +227,30 @@ async def test_hybrid_retrieval_keeps_vector_branches_separate_and_returns_fact(
         graph_rank=1,
     )
     node_vectors = _Vectors(
-        [GraphVectorCandidate("node-source", "node", "node", item.resource_id, item.revision.content_revision, 1, "node_dense")]
+        [
+            GraphVectorCandidate(
+                "node-source",
+                "node",
+                "node",
+                item.resource_id,
+                item.revision.content_revision,
+                1,
+                "node_dense",
+            )
+        ]
     )
     edge_vectors = _Vectors(
-        [GraphVectorCandidate("edge-source", "edge", "edge", item.resource_id, item.revision.content_revision, 1, "edge_dense")]
+        [
+            GraphVectorCandidate(
+                "edge-source",
+                "edge",
+                "edge",
+                item.resource_id,
+                item.revision.content_revision,
+                1,
+                "edge_dense",
+            )
+        ]
     )
     topology = _Topology([source])
     ranking = _Ranking()
@@ -230,10 +281,16 @@ async def test_hybrid_retrieval_keeps_vector_branches_separate_and_returns_fact(
     assert topology.calls[0]["metadata_filters"][0].field == "reference_year"
     assert result.hits[0].producer_id == "paper-v1"
     assert ranking.requests[0].candidates[0].text == "Alpha"
+    # 图谱候选确定后只读取一次本地 active/ACL；异步 ACL 投影的传播延迟
+    # 不能通过同一请求内的重复 Mongo 查询消除。
+    assert states.get_states_calls == 1
+    assert acls.get_acls_calls == 1
 
 
 @pytest.mark.asyncio
-async def test_seed_skips_vector_recall_and_llm_evidence_returns_chunk_only_after_quote_check() -> None:
+async def test_seed_skips_vector_recall_and_llm_evidence_returns_chunk_only_after_quote_check() -> (
+    None
+):
     item, chunk, documents, chunks, states, acls = await _active_source()
     evidence = TextGraphEvidence(
         evidence_id="evidence",
@@ -277,7 +334,7 @@ async def test_seed_skips_vector_recall_and_llm_evidence_returns_chunk_only_afte
 
     assert vectors.dense_calls == vectors.bm25_calls == []
     assert result.hits[0].chunk_id == chunk.chunk_id
-    assert result.hits[0].graph_ids == ("node",)
+    assert result.hits[0].graph_ids == ["node"]
     assert "Alpha is proven." in ranking.requests[0].candidates[0].text
 
 
@@ -321,14 +378,17 @@ async def test_llm_source_with_invalid_quote_is_not_sent_to_reranker() -> None:
         PermissionScope("owner"),
     )
 
-    assert result.hits == ()
+    assert result.hits == []
     assert ranking.requests == []
 
 
 def test_plugin_filter_requires_registered_matching_type() -> None:
-    request = GraphSearchRequest(query="x", plugin_id="paper", metadata_filter=_PaperFilter(year_from=2020))
-    assert _plugin().compile_filter(request.metadata_filter)[0].operator is GraphFilterOperator.GTE
-    with pytest.raises(ValueError, match="requires plugin_id"):
-        GraphSearchRequest(query="x", metadata_filter=_PaperFilter(year_from=2020))
+    request = GraphSearchRequest(
+        query="x", plugin_id="paper", metadata_filter=_PaperFilter(year_from=2020)
+    )
+    assert (
+        _plugin().compile_filter(request.metadata_filter)[0].operator
+        is GraphFilterOperator.GTE
+    )
     with pytest.raises(ValueError, match="does not match plugin"):
         _plugin().compile_filter({"year_from": 2020})

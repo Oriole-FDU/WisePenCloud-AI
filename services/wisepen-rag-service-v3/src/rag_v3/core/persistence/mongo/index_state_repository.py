@@ -4,8 +4,8 @@ from collections.abc import Mapping, Sequence
 
 from pymongo.errors import DuplicateKeyError
 
+from rag_v3.application.document.models import ContentRevision, ResourceIndexState
 from rag_v3.domain.entities.documents import ResourceIndexStateEntity
-from rag_v3.domain.models import ContentRevision, ResourceIndexState
 from rag_v3.domain.repositories.index_state import (
     ResourceIndexStateRepository,
     StageAction,
@@ -123,17 +123,20 @@ def _stage_filter(
     revision: ContentRevision,
     expected_applied_content_revision: str | None,
 ) -> dict[str, object]:
+    """条件更新 filter，保证并发 stage/apply 不会覆盖较新 revision。"""
     return {
         "resource_id": revision.resource_id,
         "$and": [
             {
                 "$or": [
-                    {"staged_document_version": {"$exists": False}},
-                    {"staged_document_version": None},
+                    {"staged_document_version": {"$exists": False}},  # 从未暂存
+                    {"staged_document_version": None},  # 暂存字段为 null，如被清空
+                    # 当前暂存版本 <= 新版本，避免旧数据覆盖新版本
                     {"staged_document_version": {"$lte": revision.document_version}},
                 ]
             },
             {
+                # 乐观锁校验：当前任务基于预期的 active revision 进行 stage；若 active revision 已被新 revision 覆盖，则拒绝。
                 "$or": (
                     [
                         {"applied_content_revision": {"$exists": False}},
@@ -152,20 +155,25 @@ def _stage_action(
     current: ResourceIndexState | None,
     expected_applied_content_revision: str | None,
 ) -> StageAction:
+    """状态判定函数"""
+    # 唯一索引并发竞争后记录已被删除时，调用方应重试，而不是猜测发布状态。
     if current is None:
-        # 唯一索引并发竞争后记录已被删除时，调用方应重试，而不是猜测发布状态。
         raise RuntimeError(f"resource {revision.resource_id} stage changed concurrently")
+    # 乐观锁冲突，线上版本已被修改
     if current.applied_content_revision != expected_applied_content_revision:
         raise RevisionStateChangedError(
             f"resource {revision.resource_id} active revision changed concurrently"
         )
+    # 幂等命中，线上版本与暂存版本一致
     if current.applied_content_revision == revision.content_revision:
         return StageAction.ALREADY_APPLIED
+    # 暂存版本已被新版本覆盖，当前 revision 已过期
     if (
         current.staged_document_version is not None
         and current.staged_document_version > revision.document_version
     ):
         return StageAction.STALE
+    # 排除了上述所有冲突异常后，状态校验通过，可以继续按正常暂存成功处理
     return StageAction.STAGED
 
 

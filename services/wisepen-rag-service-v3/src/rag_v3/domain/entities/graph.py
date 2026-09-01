@@ -3,11 +3,11 @@
 from typing import ClassVar, Literal
 
 from beanie import Document
+from common.utils.document import SourceSpan
 from pydantic import Field
 from pymongo import ASCENDING, IndexModel
 
-from rag_v3.domain.entities.documents import StoredSpan
-from rag_v3.domain.graph import GraphEdge, GraphNode
+from rag_v3.application.graph.models import GraphEdge, GraphNode
 
 
 class GraphNodeProjectionEntity(Document):
@@ -62,7 +62,7 @@ class TextGraphEvidenceEntity(Document):
     content_revision: str
     section_id: str | None = None
     chunk_id: str
-    source_spans: list[StoredSpan]
+    source_spans: list[SourceSpan]
     quote_text: str
 
     class Settings:

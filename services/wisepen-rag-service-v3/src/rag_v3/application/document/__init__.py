@@ -1,6 +1,1 @@
-"""文档解析、Chunk 生成和确定性增强用例。"""
-
-from .indexing import DocumentIndexBuilder
-from .preparation import DocumentPreparer
-
-__all__ = ["DocumentIndexBuilder", "DocumentPreparer"]
+"""文档事实、准备和索引 application 用例。"""

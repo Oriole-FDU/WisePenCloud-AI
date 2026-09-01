@@ -7,25 +7,29 @@ import pytest
 from common.utils.document import SourceSpan
 from pydantic import ConfigDict
 
-from rag_v3.application.document import DocumentPreparer
+from rag_v3.application.document.models import (
+    DocumentMetadata,
+    DocumentMetadataRegistry,
+    ResourceIndexState,
+)
+from rag_v3.application.document.preparation import DocumentPreparer
 from rag_v3.application.graph.graph_fact_builder import (
     GraphFactBuilder,
     _collect_llm_facts,
     _ExtractedNode,
     _GraphExtraction,
 )
-from rag_v3.application.publication import DocumentPublication
-from rag_v3.domain.graph import (
+from rag_v3.application.graph.models import (
     EntitySpec,
     GraphEdge,
     GraphNode,
+    GraphPlugin,
     Ontology,
     RelationSpec,
     graph_edge_id,
     graph_node_id,
 )
-from rag_v3.domain.models import DocumentMetadata, ResourceIndexState
-from rag_v3.domain.plugins import DocumentMetadataRegistry, GraphPlugin
+from rag_v3.application.publication import DocumentPublication
 
 from .conftest import (
     MemoryDocChunks,
@@ -105,7 +109,7 @@ def _plugin(*, enable_llm_extraction: bool = False) -> GraphPlugin:
 
 
 def test_metadata_registry_only_decodes_registered_types() -> None:
-    registry = DocumentMetadataRegistry([_plugin()])
+    registry = DocumentMetadataRegistry([_plugin().metadata_type])
     metadata = PaperMetadata(title="Source", reference_title="Target")
 
     assert registry.decode(registry.encode(metadata)) == metadata
@@ -114,7 +118,9 @@ def test_metadata_registry_only_decodes_registered_types() -> None:
 
 
 @pytest.mark.asyncio
-async def test_preparer_preserves_typed_metadata_and_same_revision_cannot_change_it() -> None:
+async def test_preparer_preserves_typed_metadata_and_same_revision_cannot_change_it() -> (
+    None
+):
     documents = MemoryDocuments()
     chunks = MemoryDocChunks()
     states = MemoryIndexStates()
@@ -176,7 +182,7 @@ async def test_deterministic_plugin_writes_facts_without_text_evidence() -> None
     assert result is not None
     assert (result.node_count, result.edge_count, result.evidence_count) == (2, 1, 0)
     assert len(facts.calls) == 1
-    assert facts.calls[0]["evidences"] == ()
+    assert facts.calls[0]["evidences"] == []
     assert facts.calls[0]["nodes"][0].producer_id == "paper-citation-v1"
 
 
@@ -222,7 +228,7 @@ def test_llm_quote_must_be_unique_inside_target_chunk() -> None:
 
     assert len(nodes) == 1
     assert evidences[0].quote_text == "Alpha"
-    assert evidences[0].source_spans == (SourceSpan(0, 5),)
+    assert evidences[0].source_spans == [SourceSpan(0, 5)]
 
     duplicate = _GraphExtraction(
         nodes=(

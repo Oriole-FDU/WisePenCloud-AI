@@ -2,10 +2,10 @@
 
 import pytest
 
+from rag_v3.application.document.models import rag_section_id
 from rag_v3.application.publication import DocumentPublication
 from rag_v3.application.snapshot import ActiveDocumentSnapshotLoader
 from rag_v3.domain.acl import PermissionScope, ResourceAcl
-from rag_v3.domain.models import rag_section_id
 from rag_v3.domain.repositories.index_state import StageAction
 
 from .conftest import (

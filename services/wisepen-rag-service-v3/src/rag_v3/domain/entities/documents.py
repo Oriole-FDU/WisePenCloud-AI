@@ -5,37 +5,9 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from beanie import Document
-from pydantic import BaseModel, Field
+from common.utils.document import Anchor, Page, Section
+from pydantic import Field
 from pymongo import ASCENDING, IndexModel
-
-
-class StoredSpan(BaseModel):
-    start_offset: int
-    end_offset: int
-
-
-class StoredPage(BaseModel):
-    page_index: int
-    page_label: str
-    source_span: StoredSpan
-
-
-class StoredAnchor(BaseModel):
-    label: str
-    source_span: StoredSpan
-
-
-class StoredSection(BaseModel):
-    section_id: str
-    title: str
-    level: int
-    parent_section_id: str | None = None
-    ordinal: int
-    section_path: list[str] = Field(default_factory=list)
-    own_span: StoredSpan
-    subtree_span: StoredSpan
-    content_spans: list[StoredSpan] = Field(default_factory=list)
-    preview: str = ""
 
 
 class ResourceIndexStateEntity(Document):
@@ -66,9 +38,9 @@ class DocumentRevisionEntity(Document):
     content_sha256: str
     raw_content: str
     total_length: int
-    sections: list[StoredSection] = Field(default_factory=list)
-    pages: list[StoredPage] = Field(default_factory=list)
-    anchors: list[StoredAnchor] = Field(default_factory=list)
+    sections: list[Section] = Field(default_factory=list)
+    pages: list[Page] = Field(default_factory=list)
+    anchors: list[Anchor] = Field(default_factory=list)
     # metadata 由已注册的 Pydantic 类型解码，Mongo 只保存其原始结构。
     metadata: dict[str, Any] = Field(default_factory=dict)
 

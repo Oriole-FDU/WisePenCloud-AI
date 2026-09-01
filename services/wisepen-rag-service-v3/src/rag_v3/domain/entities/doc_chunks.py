@@ -1,16 +1,11 @@
 """DocChunk 的 Mongo 持久化实体。"""
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from beanie import Document
-from pydantic import BaseModel, Field
+from common.utils.document import SourceSpan
+from pydantic import Field
 from pymongo import ASCENDING, IndexModel
-
-from .documents import StoredSpan
-
-
-class StoredChunkMetadata(BaseModel):
-    chunk_type: str = "general"
 
 
 class DocChunkEntity(Document):
@@ -23,13 +18,14 @@ class DocChunkEntity(Document):
     section_id: str | None = None
     section_path: list[str] = Field(default_factory=list)
     raw_text: str
-    source_spans: list[StoredSpan]
+    source_spans: list[SourceSpan]
     page_labels: list[str] = Field(default_factory=list)
     anchor_labels: list[str] = Field(default_factory=list)
     contextual_prefix: str = ""
     key_terms: list[str] = Field(default_factory=list)
     extracted_node_ids: list[str] = Field(default_factory=list)
-    metadata: StoredChunkMetadata = Field(default_factory=StoredChunkMetadata)
+    # Mongo 先保留完整对象，仓储再按注册表恢复具体 metadata 子类。
+    metadata: dict[str, Any] = Field(default_factory=lambda: {"chunk_type": "general"})
 
     class Settings:
         name = "doc_chunks"

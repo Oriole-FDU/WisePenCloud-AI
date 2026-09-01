@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 from common.utils.document import Section
 
+from rag_v3.application.document.models import Document
 from rag_v3.domain.acl import PermissionScope
-from rag_v3.domain.models import Document
 from rag_v3.domain.repositories.acl import ResourceAclRepository
 from rag_v3.domain.repositories.documents import DocumentRepository
 from rag_v3.domain.repositories.index_state import ResourceIndexStateRepository
@@ -21,7 +21,7 @@ class ResolvedSection:
 
 
 class ActiveDocumentSnapshotLoader:
-    """为读取、标题树和后续检索提供统一的 active+ACL 前置。"""
+    """为读取、标题树提供统一的 active+ACL 前置。"""
 
     def __init__(
         self,

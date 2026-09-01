@@ -4,16 +4,9 @@ from dataclasses import replace
 
 import pytest
 
-from rag_v3.application.graph import GraphProjectionBuilder
-from rag_v3.core.persistence.neo4j.graph_topology_repository import _node_item
-from rag_v3.core.persistence.qdrant.graph_vector_repository import (
-    QdrantGraphEdgeVectorRepository,
-    QdrantGraphNodeVectorRepository,
-    _edge_projection_id,
-    _node_projection_id,
-)
-from rag_v3.domain.acl import ResourceAcl
-from rag_v3.domain.graph import (
+from rag_v3.application.document.models import DocumentMetadata, ResourceIndexState
+from rag_v3.application.graph.graph_indexing import GraphIndexBuilder
+from rag_v3.application.graph.models import (
     GraphEdge,
     GraphEdgeProjection,
     GraphNode,
@@ -22,7 +15,14 @@ from rag_v3.domain.graph import (
     graph_edge_id,
     graph_node_id,
 )
-from rag_v3.domain.models import DocumentMetadata, ResourceIndexState
+from rag_v3.core.persistence.neo4j.graph_topology_repository import _node_item
+from rag_v3.core.persistence.qdrant.graph_vector_repository import (
+    QdrantGraphEdgeVectorRepository,
+    QdrantGraphNodeVectorRepository,
+    _edge_projection_id,
+    _node_projection_id,
+)
+from rag_v3.domain.acl import ResourceAcl
 
 from .conftest import (
     MemoryAcls,
@@ -55,7 +55,9 @@ class _Topology:
     async def replace_revision(self, **kwargs) -> None:
         self.calls.append(kwargs)
 
-    async def delete_resources(self, resource_ids) -> None:  # pragma: no cover - protocol completeness
+    async def delete_resources(
+        self, resource_ids
+    ) -> None:  # pragma: no cover - protocol completeness
         pass
 
 
@@ -66,10 +68,14 @@ class _NodeVectors:
     async def replace_revision(self, **kwargs) -> None:
         self.calls.append(kwargs)
 
-    async def is_complete(self, **kwargs) -> bool:  # pragma: no cover - protocol completeness
+    async def is_complete(
+        self, **kwargs
+    ) -> bool:  # pragma: no cover - protocol completeness
         return True
 
-    async def delete_resources(self, resource_ids) -> None:  # pragma: no cover - protocol completeness
+    async def delete_resources(
+        self, resource_ids
+    ) -> None:  # pragma: no cover - protocol completeness
         pass
 
 
@@ -85,7 +91,15 @@ class _Embeddings:
     async def create(self, **kwargs):
         if self.on_create is not None:
             self.on_create()
-        return type("Response", (), {"data": [type("Item", (), {"embedding": vector}) for vector in self.vectors]})()
+        return type(
+            "Response",
+            (),
+            {
+                "data": [
+                    type("Item", (), {"embedding": vector}) for vector in self.vectors
+                ]
+            },
+        )()
 
 
 class _OpenAI:
@@ -117,7 +131,7 @@ def _facts(item) -> GraphRevisionFacts:
     )
     values = {"reference_year": 2025}
     return GraphRevisionFacts(
-        nodes=(
+        nodes=[
             GraphNodeProjection(
                 node=source,
                 resource_id=item.resource_id,
@@ -132,8 +146,8 @@ def _facts(item) -> GraphRevisionFacts:
                 producer_id="paper-v1",
                 filter_values=values,
             ),
-        ),
-        edges=(
+        ],
+        edges=[
             GraphEdgeProjection(
                 edge=edge,
                 resource_id=item.resource_id,
@@ -141,7 +155,7 @@ def _facts(item) -> GraphRevisionFacts:
                 producer_id="paper-v1",
                 filter_values=values,
             ),
-        ),
+        ],
     )
 
 
@@ -164,7 +178,7 @@ async def _active_inputs(*, typed: bool = True):
 async def test_disabled_projection_skips_before_loading_graph_facts() -> None:
     item, documents, chunks, states, acls = await _active_inputs()
     facts = _GraphFacts(_facts(item))
-    builder = GraphProjectionBuilder(
+    builder = GraphIndexBuilder(
         enabled=False,
         documents=documents,
         doc_chunks=chunks,
@@ -179,7 +193,7 @@ async def test_disabled_projection_skips_before_loading_graph_facts() -> None:
         embedding_dimensions=2,
     )
 
-    result = await builder.rebuild(resource_id="paper")
+    result = await builder.index(resource_id="paper")
 
     assert result.skipped is True
     assert facts.calls == 0
@@ -192,7 +206,7 @@ async def test_general_document_skips_before_touching_projection_backends() -> N
     topology = _Topology()
     nodes = _NodeVectors()
     edges = _EdgeVectors()
-    builder = GraphProjectionBuilder(
+    builder = GraphIndexBuilder(
         enabled=True,
         documents=documents,
         doc_chunks=chunks,
@@ -207,7 +221,7 @@ async def test_general_document_skips_before_touching_projection_backends() -> N
         embedding_dimensions=2,
     )
 
-    result = await builder.rebuild(resource_id="paper")
+    result = await builder.index(resource_id="paper")
 
     assert result.skipped is True
     assert facts.calls == 0
@@ -215,13 +229,15 @@ async def test_general_document_skips_before_touching_projection_backends() -> N
 
 
 @pytest.mark.asyncio
-async def test_projection_writes_three_independent_targets_with_acl_and_filter_values() -> None:
+async def test_projection_writes_three_independent_targets_with_acl_and_filter_values() -> (
+    None
+):
     item, documents, chunks, states, acls = await _active_inputs()
     facts = _GraphFacts(_facts(item))
     topology = _Topology()
     nodes = _NodeVectors()
     edges = _EdgeVectors()
-    builder = GraphProjectionBuilder(
+    builder = GraphIndexBuilder(
         enabled=True,
         documents=documents,
         doc_chunks=chunks,
@@ -236,23 +252,27 @@ async def test_projection_writes_three_independent_targets_with_acl_and_filter_v
         embedding_dimensions=2,
     )
 
-    result = await builder.rebuild(resource_id="paper")
+    result = await builder.index(resource_id="paper")
 
     assert (result.node_count, result.edge_count) == (2, 1)
     assert len(topology.calls) == len(nodes.calls) == len(edges.calls) == 1
     assert topology.calls[0]["resource_acl"].acl_revision == 3
     assert nodes.calls[0]["nodes"][0].filter_values == {"reference_year": 2025}
-    assert set(edges.calls[0]["lexical_texts"].values()) == {"Source -> CITES -> Target\ncitation"}
+    assert set(edges.calls[0]["lexical_texts"].values()) == {
+        "Source -> CITES -> Target\ncitation"
+    }
 
 
 @pytest.mark.asyncio
-async def test_projection_rejects_missing_acl_and_active_switch_before_writing() -> None:
+async def test_projection_rejects_missing_acl_and_active_switch_before_writing() -> (
+    None
+):
     item, documents, chunks, states, _ = await _active_inputs()
     facts = _GraphFacts(_facts(item))
     topology = _Topology()
     nodes = _NodeVectors()
     edges = _EdgeVectors()
-    missing_acl = GraphProjectionBuilder(
+    missing_acl = GraphIndexBuilder(
         enabled=True,
         documents=documents,
         doc_chunks=chunks,
@@ -267,7 +287,7 @@ async def test_projection_rejects_missing_acl_and_active_switch_before_writing()
         embedding_dimensions=2,
     )
     with pytest.raises(PermissionError, match="ACL"):
-        await missing_acl.rebuild(resource_id="paper")
+        await missing_acl.index(resource_id="paper")
 
     def switch_active() -> None:
         states.states["paper"] = ResourceIndexState(
@@ -275,7 +295,7 @@ async def test_projection_rejects_missing_acl_and_active_switch_before_writing()
             applied_content_revision="newer",
         )
 
-    changing = GraphProjectionBuilder(
+    changing = GraphIndexBuilder(
         enabled=True,
         documents=documents,
         doc_chunks=chunks,
@@ -285,12 +305,14 @@ async def test_projection_rejects_missing_acl_and_active_switch_before_writing()
         topology=topology,
         node_vectors=nodes,
         edge_vectors=edges,
-        openai_client=_OpenAI(_Embeddings([[0.1, 0.2], [0.2, 0.3], [0.3, 0.4]], switch_active)),
+        openai_client=_OpenAI(
+            _Embeddings([[0.1, 0.2], [0.2, 0.3], [0.3, 0.4]], switch_active)
+        ),
         embedding_model="embedding",
         embedding_dimensions=2,
     )
     with pytest.raises(ValueError, match="not active"):
-        await changing.rebuild(resource_id="paper")
+        await changing.index(resource_id="paper")
     assert topology.calls == nodes.calls == edges.calls == []
 
 
@@ -376,4 +398,7 @@ async def test_qdrant_node_and_edge_vectors_keep_two_index_shapes() -> None:
         resource_acl=acl,
     )
     assert "sparse_vectors_config" in edge_client.created[0]
-    assert edge_client.upserts[0]["points"][0].vector["sparse"].text == "Source -> CITES -> Target"
+    assert (
+        edge_client.upserts[0]["points"][0].vector["sparse"].text
+        == "Source -> CITES -> Target"
+    )

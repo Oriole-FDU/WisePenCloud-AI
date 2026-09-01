@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import field
 from enum import StrEnum
 from hashlib import sha256
-from typing import Literal
+from typing import Literal, Protocol
 
 from common.utils.document import SourceSpan
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from rag_v3.application.document.models import Document, DocumentMetadata
+
+# --- 枚举与核心图元模型 ---
 
 class GraphNodeKind(StrEnum):
     """节点在图中的资源语义。"""
@@ -18,30 +21,6 @@ class GraphNodeKind(StrEnum):
     ENTITY = "entity"
     RESOURCE = "resource"
     EXTERNAL_RESOURCE = "external_resource"
-
-
-class GraphSearchLevel(StrEnum):
-    """图谱入口选择的召回路径。"""
-
-    LOW = "low"
-    HIGH = "high"
-    HYBRID = "hybrid"
-
-
-class TraversalDirection(StrEnum):
-    """从 seed 节点扩展关系的方向。"""
-
-    IN = "in"
-    OUT = "out"
-    BOTH = "both"
-
-
-class GraphFilterOperator(StrEnum):
-    """插件可编译到图谱来源投影的最小过滤运算集合。"""
-
-    EQ = "eq"
-    GTE = "gte"
-    LTE = "lte"
 
 
 class GraphNode(BaseModel):
@@ -54,7 +33,7 @@ class GraphNode(BaseModel):
     node_type: GraphNodeKind = GraphNodeKind.ENTITY
     category: str
     description: str = ""
-    aliases: tuple[str, ...] = ()
+    aliases: list[str] = field(default_factory=list)
     extra_meta: dict[str, object] = Field(default_factory=dict)
 
 
@@ -68,7 +47,7 @@ class GraphEdge(BaseModel):
     target_node_id: str
     relation_type: str
     description: str = ""
-    keywords: tuple[str, ...] = ()
+    keywords: list[str] = field(default_factory=list)
     extra_meta: dict[str, object] = Field(default_factory=dict)
 
 
@@ -84,7 +63,7 @@ class TextGraphEvidence(BaseModel):
     content_revision: str
     section_id: str | None = None
     chunk_id: str
-    source_spans: tuple[SourceSpan, ...]
+    source_spans: list[SourceSpan]
     quote_text: str
 
     @model_validator(mode="after")
@@ -96,6 +75,8 @@ class TextGraphEvidence(BaseModel):
         return self
 
 
+# --- 投影模型 ---
+
 class GraphNodeProjection(BaseModel):
     """一个逻辑节点在某个 revision 的 LLM 或确定性来源投影。"""
 
@@ -104,7 +85,7 @@ class GraphNodeProjection(BaseModel):
     node: GraphNode
     resource_id: str
     content_revision: str
-    evidence_ids: tuple[str, ...] = ()
+    evidence_ids: list[str] = field(default_factory=list)
     producer_id: str | None = None
     # 只保存插件明确声明、且图谱查询实际需要下推的 metadata 标量值。
     filter_values: dict[str, str | int | float | bool] = Field(default_factory=dict)
@@ -124,7 +105,7 @@ class GraphEdgeProjection(BaseModel):
     edge: GraphEdge
     resource_id: str
     content_revision: str
-    evidence_ids: tuple[str, ...] = ()
+    evidence_ids: list[str] = field(default_factory=list)
     producer_id: str | None = None
     filter_values: dict[str, str | int | float | bool] = Field(default_factory=dict)
 
@@ -135,6 +116,8 @@ class GraphEdgeProjection(BaseModel):
         return self
 
 
+# --- Ontology 约束 ---
+
 class EntitySpec(BaseModel):
     """一个插件允许的实体类别。"""
 
@@ -142,7 +125,7 @@ class EntitySpec(BaseModel):
 
     category: str
     description: str
-    default_node_type: GraphNodeKind = GraphNodeKind.ENTITY
+    node_type: GraphNodeKind = GraphNodeKind.ENTITY
 
 
 class RelationSpec(BaseModel):
@@ -152,8 +135,8 @@ class RelationSpec(BaseModel):
 
     relation_type: str
     description: str
-    allowed_sources: tuple[str, ...] = ()
-    allowed_targets: tuple[str, ...] = ()
+    allowed_sources: list[str] = field(default_factory=list)
+    allowed_targets: list[str] = field(default_factory=list)
 
 
 class Ontology(BaseModel):
@@ -184,134 +167,75 @@ class Ontology(BaseModel):
             raise ValueError("relation target category is not allowed")
 
 
+# --- 插件协议与实现 ---
+
+class DeterministicGraphProducer(Protocol):
+    """从已校验 metadata 直接生成图元，不生成文本 Evidence。"""
+
+    def produce(self, document: Document) -> tuple[tuple[GraphNode, ...], tuple[GraphEdge, ...]]: ...
+
+
+class GraphFilterCompiler(Protocol):
+    """将垂类强类型查询过滤编译为图谱来源投影条件。"""
+
+    filter_type: type[BaseModel]
+
+    def compile(self, value: BaseModel) -> tuple[object, ...]: ...
+
+
+class GraphPlugin:
+    """一个垂类的 metadata 类型、Ontology 与可选图谱生产能力。"""
+
+    def __init__(
+        self,
+        *,
+        plugin_id: str,
+        metadata_type: type[DocumentMetadata],
+        ontology: Ontology,
+        deterministic_producer: DeterministicGraphProducer | None = None,
+        enable_llm_extraction: bool = True,
+        metadata_filter_values: Callable[[Document], Mapping[str, str | int | float | bool]] | None = None,
+        filter_compiler: GraphFilterCompiler | None = None,
+    ) -> None:
+        if not plugin_id.strip():
+            raise ValueError("plugin_id must not be empty")
+        self.plugin_id = plugin_id
+        self.metadata_type = metadata_type
+        self.ontology = ontology
+        self.deterministic_producer = deterministic_producer    # 确定性规则事实抽取
+        self.enable_llm_extraction = enable_llm_extraction
+        self._metadata_filter_values = metadata_filter_values   # 业务自定义元信息过滤
+        self._filter_compiler = filter_compiler
+
+    def matches(self, metadata: DocumentMetadata) -> bool:
+        return type(metadata) is self.metadata_type
+
+    def filter_values(self, document: Document) -> dict[str, str | int | float | bool]:
+        if self._metadata_filter_values is None:
+            return {}
+        return dict(self._metadata_filter_values(document))
+
+    def compile_filter(self, value: BaseModel | None) -> tuple[object, ...]:
+        if value is None:
+            return ()
+        if self._filter_compiler is None or not isinstance(value, self._filter_compiler.filter_type):
+            raise ValueError("graph metadata filter does not match plugin")
+        return self._filter_compiler.compile(value)
+
+
+# --- 聚合模型 ---
+
 class GraphRevisionFacts(BaseModel):
     """Mongo 中同一资源 revision 的完整图谱事实，用于重建外部投影。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    nodes: tuple[GraphNodeProjection, ...] = ()
-    edges: tuple[GraphEdgeProjection, ...] = ()
-    evidences: tuple[TextGraphEvidence, ...] = ()
+    nodes: list[GraphNodeProjection] = field(default_factory=list)
+    edges: list[GraphEdgeProjection] = field(default_factory=list)
+    evidences: list[TextGraphEvidence] = field(default_factory=list)
 
 
-class GraphFilterCondition(BaseModel):
-    """已由垂类插件校验的来源投影 metadata 过滤条件。"""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    field: str
-    operator: GraphFilterOperator
-    value: str | int | float | bool
-
-    @model_validator(mode="after")
-    def _require_property_safe_field(self) -> GraphFilterCondition:
-        """过滤字段会同时编译为 Qdrant 路径和 Neo4j 属性名。"""
-        if not self.field.isidentifier() or self.field.startswith("_"):
-            raise ValueError("graph filter field must be a public identifier")
-        return self
-
-
-@dataclass(frozen=True, slots=True)
-class GraphVectorCandidate:
-    """Qdrant 图谱初检候选；不携带缓存正文或原始相似度分数。"""
-
-    projection_id: str
-    target_type: Literal["node", "edge"]
-    target_id: str
-    resource_id: str
-    content_revision: str
-    rank: int
-    branch: str
-
-
-@dataclass(frozen=True, slots=True)
-class GraphSourceProjection:
-    """Neo4j 返回的一个可归属资源 revision 的图元来源。"""
-
-    projection_id: str
-    target_type: Literal["node", "edge"]
-    target_id: str
-    resource_id: str
-    content_revision: str
-    evidence_ids: tuple[str, ...]
-    producer_id: str | None
-    node: GraphNode | None = None
-    edge: GraphEdge | None = None
-    source_node_name: str = ""
-    target_node_name: str = ""
-    graph_rank: int = 0
-    hop_count: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class GraphSearchRequest:
-    """图谱检索输入；metadata_filter 只能是已注册插件的强类型模型。"""
-
-    query: str
-    level: GraphSearchLevel = GraphSearchLevel.HYBRID
-    seed_node_ids: tuple[str, ...] = ()
-    resource_ids: tuple[str, ...] | None = None
-    node_categories: tuple[str, ...] = ()
-    relation_types: tuple[str, ...] = ()
-    direction: TraversalDirection = TraversalDirection.BOTH
-    max_depth: int = 1
-    vector_top_n: int = 20
-    rerank_candidate_n: int = 50
-    top_k: int = 5
-    plugin_id: str | None = None
-    metadata_filter: BaseModel | None = None
-
-    def __post_init__(self) -> None:
-        if not self.query.strip():
-            raise ValueError("query must not be empty")
-        if not 0 <= self.max_depth <= 2:
-            raise ValueError("max_depth must be between 0 and 2")
-        if not 1 <= self.vector_top_n <= 100:
-            raise ValueError("vector_top_n must be between 1 and 100")
-        if not self.top_k <= self.rerank_candidate_n <= 200:
-            raise ValueError("rerank_candidate_n must be between top_k and 200")
-        if not 1 <= self.top_k <= 20:
-            raise ValueError("top_k must be between 1 and 20")
-        if self.metadata_filter is not None and not self.plugin_id:
-            raise ValueError("metadata_filter requires plugin_id")
-        object.__setattr__(self, "query", self.query.strip())
-
-
-@dataclass(frozen=True, slots=True)
-class ChunkGraphHit:
-    """由 LLM 图元 Evidence 回查出的权威正文 Chunk。"""
-
-    chunk_id: str
-    resource_id: str
-    content_revision: str
-    section_id: str | None
-    section_path: tuple[str, ...]
-    graph_ids: tuple[str, ...]
-    rerank_score: float
-
-
-@dataclass(frozen=True, slots=True)
-class DeterministicGraphFactHit:
-    """确定性 producer 生成、无需正文 Evidence 的可读图事实。"""
-
-    target_type: Literal["node", "edge"]
-    target_id: str
-    resource_id: str
-    content_revision: str
-    producer_id: str
-    rerank_score: float
-
-
-GraphSearchHit = ChunkGraphHit | DeterministicGraphFactHit
-
-
-@dataclass(frozen=True, slots=True)
-class GraphSearchResult:
-    """局部精排后的图谱检索结果；不暴露内部图遍历和向量 payload。"""
-
-    hits: tuple[GraphSearchHit, ...]
-    relevance_decision: str | None = None
-
+# --- ID 生成工具函数 ---
 
 def graph_node_id(*, category: str, name: str) -> str:
     """按类别和规范化名称生成可跨 revision 合并的稳定节点 ID。"""
@@ -353,11 +277,11 @@ def graph_source_projection_id(
     target_id: str,
     resource_id: str,
     content_revision: str,
-    evidence_ids: tuple[str, ...] = (),
+    evidence_ids: list[str] | None = None,
     producer_id: str | None = None,
 ) -> str:
     """为一个图元来源生成跨 Neo4j 与 Qdrant 共用的稳定身份。"""
-    source = producer_id or "\0".join(sorted(evidence_ids))
+    source = producer_id or "\0".join(sorted(evidence_ids or []))
     return "gsp_" + _stable_hash(
         target_type,
         target_id,

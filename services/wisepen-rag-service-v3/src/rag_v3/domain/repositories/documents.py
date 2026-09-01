@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from typing import Protocol
 
-from rag_v3.domain.models import Document
+from rag_v3.application.document.models import Document
 
 
 class DocumentRepository(Protocol):

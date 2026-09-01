@@ -4,8 +4,7 @@ from collections.abc import Mapping, Sequence
 
 from common.utils.document import Section, SourceSpan
 
-from rag_v3.domain.acl import ResourceAcl
-from rag_v3.domain.models import (
+from rag_v3.application.document.models import (
     ContentRevision,
     DocChunk,
     Document,
@@ -13,6 +12,7 @@ from rag_v3.domain.models import (
     ResourceIndexState,
     rag_chunk_id,
 )
+from rag_v3.domain.acl import ResourceAcl
 from rag_v3.domain.repositories.index_state import StageAction
 
 

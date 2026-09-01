@@ -3,11 +3,16 @@
 import pytest
 from common.utils.document import DocumentChunker, DocumentChunkerConfig, SourceSpan
 
-from rag_v3.application.document import DocumentPreparer
+from rag_v3.application.document.models import (
+    ContentRevision,
+    DocChunk,
+    rag_chunk_id,
+    rag_section_id,
+)
+from rag_v3.application.document.preparation import DocumentPreparer
 from rag_v3.application.publication import DocumentPublication
 from rag_v3.application.snapshot import ActiveDocumentSnapshotLoader
 from rag_v3.domain.acl import PermissionScope, ResourceAcl
-from rag_v3.domain.models import ContentRevision, DocChunk, rag_chunk_id, rag_section_id
 from rag_v3.domain.repositories.index_state import StageAction
 
 from .conftest import (
@@ -28,7 +33,9 @@ def _readable_acl(resource_id: str) -> ResourceAcl:
     )
 
 
-def _preparer() -> tuple[DocumentPreparer, MemoryDocuments, MemoryIndexStates, MemoryDocChunks]:
+def _preparer() -> tuple[
+    DocumentPreparer, MemoryDocuments, MemoryIndexStates, MemoryDocChunks
+]:
     documents = MemoryDocuments()
     states = MemoryIndexStates()
     chunks = MemoryDocChunks()
@@ -50,16 +57,21 @@ def _preparer() -> tuple[DocumentPreparer, MemoryDocuments, MemoryIndexStates, M
 
 
 @pytest.mark.asyncio
-async def test_prepare_projects_common_result_with_global_ids_and_stays_staged() -> None:
+async def test_prepare_projects_common_result_with_global_ids_and_stays_staged() -> (
+    None
+):
     markdown = """前言正文。\n\n<!-- page 1 -->\n\n# 数据\n\n正文。\n\nTable 1: 样例\n\n| 值 |\n| --- |\n| 甲 |\n"""
     common_result = DocumentChunker(
         DocumentChunkerConfig(max_characters=800, chunk_overlap=100)
     ).chunk(markdown)
     preparer, documents, states, chunks = _preparer()
 
-    assert await preparer.prepare(
-        resource_id="resource", document_version=1, markdown=markdown
-    ) is StageAction.STAGED
+    assert (
+        await preparer.prepare(
+            resource_id="resource", document_version=1, markdown=markdown
+        )
+        is StageAction.STAGED
+    )
 
     revision = ContentRevision.create(
         resource_id="resource", document_version=1, raw_content=markdown
@@ -109,9 +121,10 @@ async def test_prepare_projects_common_result_with_global_ids_and_stays_staged()
         index_states=states,
         resource_acls=MemoryAcls({"resource": _readable_acl("resource")}),
     )
-    assert await snapshots.load_documents(
-        ["resource"], scope=PermissionScope("reader")
-    ) == {}
+    assert (
+        await snapshots.load_documents(["resource"], scope=PermissionScope("reader"))
+        == {}
+    )
 
 
 @pytest.mark.asyncio
@@ -119,16 +132,22 @@ async def test_prepare_is_idempotent_and_revision_scoped() -> None:
     preparer, _, states, chunks = _preparer()
     markdown = "# 标题\n\n正文。\n"
 
-    assert await preparer.prepare(
-        resource_id="resource", document_version=1, markdown=markdown
-    ) is StageAction.STAGED
+    assert (
+        await preparer.prepare(
+            resource_id="resource", document_version=1, markdown=markdown
+        )
+        is StageAction.STAGED
+    )
     first_revision = states.states["resource"].staged_content_revision
     first_chunks = await chunks.get_revision_chunks(
         resource_id="resource", content_revision=first_revision
     )
-    assert await preparer.prepare(
-        resource_id="resource", document_version=1, markdown=markdown
-    ) is StageAction.STAGED
+    assert (
+        await preparer.prepare(
+            resource_id="resource", document_version=1, markdown=markdown
+        )
+        is StageAction.STAGED
+    )
     assert [chunk.chunk_id for chunk in first_chunks] == [
         chunk.chunk_id
         for chunk in await chunks.get_revision_chunks(
@@ -136,9 +155,12 @@ async def test_prepare_is_idempotent_and_revision_scoped() -> None:
         )
     ]
 
-    assert await preparer.prepare(
-        resource_id="resource", document_version=2, markdown=markdown
-    ) is StageAction.STAGED
+    assert (
+        await preparer.prepare(
+            resource_id="resource", document_version=2, markdown=markdown
+        )
+        is StageAction.STAGED
+    )
     second_revision = states.states["resource"].staged_content_revision
     second_chunks = await chunks.get_revision_chunks(
         resource_id="resource", content_revision=second_revision
@@ -150,12 +172,17 @@ async def test_prepare_is_idempotent_and_revision_scoped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_old_version_does_not_write_chunks_after_newer_revision_is_active() -> None:
+async def test_old_version_does_not_write_chunks_after_newer_revision_is_active() -> (
+    None
+):
     preparer, documents, states, chunks = _preparer()
     markdown = "# 标题\n\n正文。\n"
-    assert await preparer.prepare(
-        resource_id="resource", document_version=2, markdown=markdown
-    ) is StageAction.STAGED
+    assert (
+        await preparer.prepare(
+            resource_id="resource", document_version=2, markdown=markdown
+        )
+        is StageAction.STAGED
+    )
     revision = ContentRevision.create(
         resource_id="resource", document_version=2, raw_content=markdown
     )
@@ -172,14 +199,15 @@ async def test_old_version_does_not_write_chunks_after_newer_revision_is_active(
         doc_chunks=chunks,
         document_vectors=vectors,
         index_states=states,
-    ).apply_revision(
-        revision
-    )
+    ).apply_revision(revision)
     save_calls = chunks.save_calls
 
-    assert await preparer.prepare(
-        resource_id="resource", document_version=1, markdown=markdown
-    ) is StageAction.STALE
+    assert (
+        await preparer.prepare(
+            resource_id="resource", document_version=1, markdown=markdown
+        )
+        is StageAction.STALE
+    )
     assert chunks.save_calls == save_calls
 
 
@@ -193,11 +221,14 @@ async def test_flat_and_oversized_markdown_keep_common_chunk_text_and_spans() ->
 
     await preparer.prepare(resource_id="flat", document_version=1, markdown=markdown)
     saved_chunks = await chunks.get_revision_chunks(
-        resource_id="flat", content_revision=states.states["flat"].staged_content_revision
+        resource_id="flat",
+        content_revision=states.states["flat"].staged_content_revision,
     )
 
     assert len(saved_chunks) > 1
-    assert all(chunk.section_id is None and chunk.section_path == () for chunk in saved_chunks)
+    assert all(
+        chunk.section_id is None and chunk.section_path == [] for chunk in saved_chunks
+    )
     assert [(chunk.raw_text, chunk.source_spans) for chunk in saved_chunks] == [
         (chunk.text, chunk.source_spans) for chunk in common_result.chunks
     ]

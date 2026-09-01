@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from typing import Protocol
 
-from rag_v3.domain.models import ContentRevision, ResourceIndexState
+from rag_v3.application.document.models import ContentRevision, ResourceIndexState
 
 
 class StageAction(StrEnum):

@@ -38,7 +38,7 @@ class MongoResourceAclRepository(ResourceAclRepository):
                 upsert=True,
             )
         except DuplicateKeyError:
-            # 与旧实现一致：并发首次写入后，同 revision 重试仍视为成功。
+            # 并发首次写入后，同 revision 重试仍视为成功。
             result = await collection.update_one(
                 _newer_or_same_revision_filter(resource_acl),
                 {"$set": fields},

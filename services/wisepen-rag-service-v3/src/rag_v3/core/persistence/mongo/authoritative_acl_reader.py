@@ -28,12 +28,14 @@ class MongoAuthoritativeAclReader(AuthoritativeAclReader):
         unique_resource_ids = list(dict.fromkeys(resource_ids))
         if not unique_resource_ids:
             return {}
+
         if any(not ObjectId.is_valid(resource_id) for resource_id in unique_resource_ids):
             raise AuthoritativeAclError("resource_id must be a valid ObjectId")
 
         records = await self._collection.find(
             {"_id": {"$in": [ObjectId(resource_id) for resource_id in unique_resource_ids]}}
         ).to_list(length=None)
+
         return {
             resource_id: _project(record, resource_id)
             for record in records

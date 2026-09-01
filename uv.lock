@@ -5508,6 +5508,7 @@ name = "wisepen-rag-service-v3"
 version = "0.1.0"
 source = { editable = "services/wisepen-rag-service-v3" }
 dependencies = [
+    { name = "aiokafka" },
     { name = "beanie" },
     { name = "dependency-injector" },
     { name = "fastapi" },
@@ -5533,6 +5534,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiokafka", specifier = ">=0.12,<1" },
     { name = "beanie", specifier = ">=2,<3" },
     { name = "dependency-injector", specifier = ">=4.49,<5" },
     { name = "fastapi", specifier = ">=0.136,<1" },

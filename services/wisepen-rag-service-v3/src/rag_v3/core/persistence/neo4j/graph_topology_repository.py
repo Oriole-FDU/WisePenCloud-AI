@@ -6,20 +6,26 @@ from typing import Any
 
 from neo4j import AsyncDriver
 
-from rag_v3.domain.acl import PermissionScope, ResourceAcl
-from rag_v3.domain.graph import (
+from rag_v3.application.graph.models import (
     GraphEdge,
     GraphEdgeProjection,
-    GraphFilterCondition,
-    GraphFilterOperator,
     GraphNode,
     GraphNodeProjection,
-    GraphSourceProjection,
-    GraphVectorCandidate,
-    TraversalDirection,
     graph_source_projection_id,
 )
-from rag_v3.domain.repositories.graph_projections import GraphTopologyRepository
+from rag_v3.application.retrieval.models import TraversalDirection
+from rag_v3.domain.acl import PermissionScope, ResourceAcl
+from rag_v3.domain.repositories.graph_node_vectors import (
+    GraphFilterCondition,
+    GraphFilterOperator,
+    GraphVectorCandidate,
+)
+from rag_v3.domain.repositories.graph_topology import (
+    GraphSourceProjection,
+    GraphTopologyRepository,
+)
+
+# --- 常量与 Cypher 查询 ---
 
 _NODE_LABEL = "RagV3GraphNode"
 _EDGE_LABEL = "RagV3GraphEdge"
@@ -32,11 +38,13 @@ _SCHEMA = (
     f"CREATE INDEX rag_v3_graph_source_revision IF NOT EXISTS FOR (source:{_SOURCE_LABEL}) ON (source.resource_id, source.content_revision)",
 )
 
+# 删除一个 revision 的所有来源投影
 _DELETE_REVISION = f"""
 MATCH (source:{_SOURCE_LABEL} {{resource_id: $resource_id, content_revision: $content_revision}})
 DETACH DELETE source
 """
 
+# 清理无来源投影关联的逻辑节点和边（孤儿）
 _DELETE_ORPHANS = f"""
 MATCH (edge:{_EDGE_LABEL})
 WHERE NOT (edge)<-[:RAG_V3_PROJECTS_EDGE]-()
@@ -49,6 +57,7 @@ WHERE NOT (node)<-[:RAG_V3_PROJECTS_NODE]-()
 DELETE node
 """
 
+# 创建节点及来源投影，并关联
 _UPSERT_NODES = f"""
 UNWIND $items AS item
 MERGE (node:{_NODE_LABEL} {{node_id: item.node_id}})
@@ -77,6 +86,7 @@ SET source += item.filter_properties
 MERGE (source)-[:RAG_V3_PROJECTS_NODE]->(node)
 """
 
+# 创建边及来源投影，并关联两端节点
 _UPSERT_EDGES = f"""
 UNWIND $items AS item
 MATCH (source_node:{_NODE_LABEL} {{node_id: item.source_node_id}})
@@ -107,12 +117,15 @@ SET source += item.filter_properties
 MERGE (source)-[:RAG_V3_PROJECTS_EDGE]->(edge)
 """
 
+# 删除多个资源的所有来源投影
 _DELETE_RESOURCES = f"""
 MATCH (source:{_SOURCE_LABEL})
 WHERE source.resource_id IN $resource_ids
 DETACH DELETE source
 """
 
+
+# --- 仓储类 ---
 
 class Neo4jGraphTopologyRepository(GraphTopologyRepository):
     """按来源投影保存图谱拓扑，逻辑图元不会被单一资源 revision 覆盖。"""
@@ -131,29 +144,28 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
         edges: Sequence[GraphEdgeProjection],
         resource_acl: ResourceAcl,
     ) -> None:
-        if any(item.resource_id != resource_id for item in (*nodes, *edges)):
-            raise ValueError("graph projections must belong to resource_id")
-        if any(item.content_revision != content_revision for item in (*nodes, *edges)):
-            raise ValueError("graph projections must belong to content_revision")
-        if resource_acl.resource_id != resource_id:
-            raise ValueError("resource ACL must belong to projected graph facts")
-
+        """原子替换一个 revision 的来源投影，清理孤儿逻辑图元。"""
         await self._ensure_schema()
         async with self._driver.session() as session:
+            # 1. 删除该 revision 的所有来源投影
             await session.run(
                 _DELETE_REVISION,
                 resource_id=resource_id,
                 content_revision=content_revision,
             )
+            # 2. 写入节点来源
             node_items = [_node_item(item, resource_acl) for item in nodes]
             if node_items:
                 await session.run(_UPSERT_NODES, items=node_items)
+            # 3. 写入边来源
             edge_items = [_edge_item(item, resource_acl) for item in edges]
             if edge_items:
                 await session.run(_UPSERT_EDGES, items=edge_items)
+            # 4. 清理无来源的孤立逻辑节点/边
             await session.run(_DELETE_ORPHANS)
 
     async def delete_resources(self, resource_ids: Sequence[str]) -> None:
+        """删除多个资源的所有来源投影。"""
         ids = list(dict.fromkeys(resource_ids))
         if not ids:
             return
@@ -175,19 +187,23 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
         metadata_filters: Sequence[GraphFilterCondition],
         limit: int,
     ) -> list[GraphSourceProjection]:
-        """从有限 vector/seed 起点扩展至多两跳，不扫描全图。"""
+        """从向量候选和种子节点出发，按方向和关系类型扩展至多 max_depth 跳。"""
         if limit <= 0:
             return []
         await self._ensure_schema()
+
+        # 构建 ACL 和过滤条件
         predicate, parameters = _source_predicate(
             scope=scope,
             resource_ids=resource_ids,
             metadata_filters=metadata_filters,
         )
-        ranks = {item.projection_id: item.rank for item in candidates}
-        projection_ids = list(ranks)
+        orders = {item.projection_id: index for index, item in enumerate(candidates)}
+        projection_ids = list(orders)
         source_node_ids = list(dict.fromkeys(seed_node_ids))
+
         async with self._driver.session() as session:
+            # 第一跳：直接从来源投影命中节点/边
             direct = await session.run(
                 f"""
                 MATCH (source:{_SOURCE_LABEL})-[projection:RAG_V3_PROJECTS_NODE|RAG_V3_PROJECTS_EDGE]->(target)
@@ -200,6 +216,12 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
                        target_node.node_id AS target_node_id,
                        source_node.name AS source_node_name,
                        target_node.name AS target_node_name
+                ORDER BY CASE
+                           WHEN source.target_type = 'node'
+                                AND source.target_id IN $seed_node_ids THEN -1
+                           ELSE indexOf($projection_ids, source.projection_id)
+                         END,
+                         source.projection_id
                 LIMIT $limit
                 """,
                 projection_ids=projection_ids,
@@ -207,15 +229,15 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
                 limit=limit,
                 **parameters,
             )
-            result = [_source_from_record(record, ranks, 0) async for record in direct]
+            result = [
+                _source_from_record(record, orders, 0) async for record in direct
+            ]
+            result.sort(key=lambda item: item.graph_rank)
             if max_depth == 0:
                 return _deduplicate_sources(result)
 
-            frontier = {
-                item.target_id
-                for item in result
-                if item.target_type == "node"
-            } | set(source_node_ids)
+            # 迭代扩展
+            frontier = {item.target_id for item in result if item.target_type == "node"} | set(source_node_ids)
             for hop in range(1, max_depth + 1):
                 if not frontier or len(result) >= limit:
                     break
@@ -239,8 +261,11 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
                     limit=limit - len(result),
                     **parameters,
                 )
-                edges = [_source_from_record(record, ranks, hop) async for record in expanded]
+                edges = [
+                    _source_from_record(record, orders, hop) async for record in expanded
+                ]
                 result.extend(edges)
+                # 更新前沿：新发现的节点 ID
                 frontier = {
                     node_id
                     for record in edges
@@ -250,6 +275,7 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
             return _deduplicate_sources(result)
 
     async def _ensure_schema(self) -> None:
+        """确保 Neo4j 约束和索引存在（线程安全）。"""
         if self._schema_ready:
             return
         async with self._schema_lock:
@@ -261,7 +287,10 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
             self._schema_ready = True
 
 
+# --- 辅助函数：构造节点/边导入项 ---
+
 def _node_item(item: GraphNodeProjection, acl: ResourceAcl) -> dict[str, Any]:
+    """将节点投影转换为 Cypher 导入项。"""
     return {
         "projection_id": graph_source_projection_id(
             target_type="node",
@@ -276,13 +305,14 @@ def _node_item(item: GraphNodeProjection, acl: ResourceAcl) -> dict[str, Any]:
         "node_type": item.node.node_type.value,
         "category": item.node.category,
         "description": item.node.description,
-        "aliases": list(item.node.aliases),
+        "aliases": item.node.aliases,
         "extra_meta": item.node.extra_meta,
         **_source_properties(item, acl),
     }
 
 
 def _edge_item(item: GraphEdgeProjection, acl: ResourceAcl) -> dict[str, Any]:
+    """将边投影转换为 Cypher 导入项。"""
     return {
         "projection_id": graph_source_projection_id(
             target_type="edge",
@@ -297,7 +327,7 @@ def _edge_item(item: GraphEdgeProjection, acl: ResourceAcl) -> dict[str, Any]:
         "target_node_id": item.edge.target_node_id,
         "relation_type": item.edge.relation_type,
         "description": item.edge.description,
-        "keywords": list(item.edge.keywords),
+        "keywords": item.edge.keywords,
         "extra_meta": item.edge.extra_meta,
         **_source_properties(item, acl),
     }
@@ -307,13 +337,13 @@ def _source_properties(
     item: GraphNodeProjection | GraphEdgeProjection,
     acl: ResourceAcl,
 ) -> dict[str, Any]:
+    """提取来源投影的公共属性（包括 ACL 平铺和过滤字段前缀）。"""
     return {
         "resource_id": item.resource_id,
         "content_revision": item.content_revision,
         "producer_id": item.producer_id,
-        "evidence_ids": list(item.evidence_ids),
-        # Neo4j property values cannot be maps. 过滤字段在来源节点上按前缀展开，
-        # 这样插件编译出的条件才能与 Qdrant 一样下推。
+        "evidence_ids": item.evidence_ids,
+        # 过滤字段加上前缀，以便 Cypher 中可以用 source['filter_xxx'] 匹配
         "filter_properties": {
             f"filter_{key}": value for key, value in item.filter_values.items()
         },
@@ -339,8 +369,11 @@ def _source_properties(
 
 
 def _group_subject(group_id: str, user_id: str) -> str:
+    """组合 group_id 和 user_id 为唯一主题字符串。"""
     return f"{group_id}\x1f{user_id}"
 
+
+# --- 辅助函数：Cypher 条件构造 ---
 
 def _source_predicate(
     *,
@@ -348,7 +381,7 @@ def _source_predicate(
     resource_ids: Sequence[str] | None,
     metadata_filters: Sequence[GraphFilterCondition],
 ) -> tuple[str, dict[str, Any]]:
-    """Neo4j 只做与 Qdrant 同语义的预过滤，授权结论仍由 Mongo 给出。"""
+    """构造来源节点的 ACL 和资源/元数据过滤条件。"""
     predicate = """
     (source.owner_id = $user_id
      OR $user_id IN source.readable_users
@@ -370,6 +403,7 @@ def _source_predicate(
     if resource_ids:
         predicate += " AND source.resource_id IN $resource_ids"
         parameters["resource_ids"] = list(dict.fromkeys(resource_ids))
+    # 处理元数据过滤条件
     for index, condition in enumerate(metadata_filters):
         parameter = f"metadata_filter_{index}"
         operator = {
@@ -384,6 +418,7 @@ def _source_predicate(
 
 
 def _direction_predicate(direction: TraversalDirection) -> str:
+    """根据方向返回边扩展条件。"""
     if direction is TraversalDirection.OUT:
         return "source_node.node_id IN $frontier_node_ids"
     if direction is TraversalDirection.IN:
@@ -391,11 +426,14 @@ def _direction_predicate(direction: TraversalDirection) -> str:
     return "source_node.node_id IN $frontier_node_ids OR target_node.node_id IN $frontier_node_ids"
 
 
+# --- 辅助函数：记录转换与去重 ---
+
 def _source_from_record(
     record: Any,
-    ranks: dict[str, int],
+    orders: dict[str, int],
     hop_count: int,
 ) -> GraphSourceProjection:
+    """将 Neo4j 记录转为 GraphSourceProjection。"""
     source = dict(record["source"])
     target = dict(record["target"])
     target_type = source["target_type"]
@@ -427,13 +465,13 @@ def _source_from_record(
         target_id=source["target_id"],
         resource_id=source["resource_id"],
         content_revision=source["content_revision"],
-        evidence_ids=tuple(source.get("evidence_ids", ())),
+        evidence_ids=source.get("evidence_ids", []),
         producer_id=source.get("producer_id"),
         node=node,
         edge=edge,
         source_node_name=record.get("source_node_name") or "",
         target_node_name=record.get("target_node_name") or "",
-        graph_rank=ranks.get(source["projection_id"], 10_000),
+        graph_rank=orders.get(source["projection_id"], 10_000),
         hop_count=hop_count,
     )
 
@@ -441,15 +479,10 @@ def _source_from_record(
 def _deduplicate_sources(
     sources: Sequence[GraphSourceProjection],
 ) -> list[GraphSourceProjection]:
+    """按 projection_id 去重，保留最小 graph_rank。"""
     by_projection: dict[str, GraphSourceProjection] = {}
     for source in sources:
         current = by_projection.get(source.projection_id)
-        if current is None or (source.graph_rank, source.hop_count) < (
-            current.graph_rank,
-            current.hop_count,
-        ):
+        if current is None or source.graph_rank < current.graph_rank:
             by_projection[source.projection_id] = source
-    return sorted(
-        by_projection.values(),
-        key=lambda item: (item.graph_rank, item.hop_count, item.target_id),
-    )
+    return list(by_projection.values())

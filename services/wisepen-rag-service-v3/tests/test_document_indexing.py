@@ -6,11 +6,15 @@ from types import SimpleNamespace
 import pytest
 from common.utils.document import SourceSpan
 
-from rag_v3.application.document import DocumentIndexBuilder, DocumentPreparer
-from rag_v3.application.document.indexing import _shared_window
+from rag_v3.application.document.indexing import (
+    DocumentIndexBuilder,
+    _embed_chunks,
+    _shared_window,
+)
+from rag_v3.application.document.models import ContentRevision, DocChunk, rag_chunk_id
+from rag_v3.application.document.preparation import DocumentPreparer
 from rag_v3.application.publication import DocumentPublication
 from rag_v3.domain.acl import ResourceAcl
-from rag_v3.domain.models import ContentRevision, DocChunk, rag_chunk_id
 from rag_v3.domain.repositories.index_state import StageAction
 
 from .conftest import (
@@ -46,7 +50,10 @@ class _FakeOpenAI:
         inputs = list(kwargs["input"])
         self.embedding_inputs.append(inputs)
         return SimpleNamespace(
-            data=[SimpleNamespace(embedding=[float(index), 1.0]) for index in range(len(inputs))]
+            data=[
+                SimpleNamespace(embedding=[float(index), 1.0])
+                for index in range(len(inputs))
+            ]
         )
 
 
@@ -54,7 +61,7 @@ def _acl(resource_id: str) -> ResourceAcl:
     return ResourceAcl(resource_id=resource_id, acl_revision=1, owner_id="owner")
 
 
-async def _prepared_builder():
+async def _prepared_builder(*, enhancement_enabled: bool = True):
     documents = MemoryDocuments()
     chunks = MemoryDocChunks()
     states = MemoryIndexStates()
@@ -67,11 +74,14 @@ async def _prepared_builder():
     )
     preparer = DocumentPreparer(publication=publication, doc_chunks=chunks)
     markdown = "# 标题\n\n" + ("正文内容。" * 200)
-    assert await preparer.prepare(
-        resource_id="resource",
-        document_version=1,
-        markdown=markdown,
-    ) is StageAction.STAGED
+    assert (
+        await preparer.prepare(
+            resource_id="resource",
+            document_version=1,
+            markdown=markdown,
+        )
+        is StageAction.STAGED
+    )
     revision = ContentRevision.create(
         resource_id="resource",
         document_version=1,
@@ -90,6 +100,7 @@ async def _prepared_builder():
         embedding_model="embedding-model",
         embedding_dimensions=2,
         max_concurrency=5,
+        enhancement_enabled=enhancement_enabled,
     )
     return builder, client, documents, chunks, states, vectors, revision
 
@@ -104,9 +115,11 @@ async def test_index_builder_enhances_indexes_and_only_then_publishes() -> None:
         resource_id="resource",
         content_revision=revision.content_revision,
     )
-    assert states.states["resource"].applied_content_revision == revision.content_revision
+    assert (
+        states.states["resource"].applied_content_revision == revision.content_revision
+    )
     assert all(chunk.contextual_prefix == "检索上下文" for chunk in saved)
-    assert all(chunk.key_terms == ("术语", "检索") for chunk in saved)
+    assert all(chunk.key_terms == ["术语", "检索"] for chunk in saved)
     assert vectors.write_calls == 1
     assert client.embedding_inputs == [[chunk.get_semantic_text() for chunk in saved]]
     assert len(client.chat_calls) == len(saved)
@@ -124,7 +137,15 @@ async def test_index_builder_enhances_indexes_and_only_then_publishes() -> None:
 
 @pytest.mark.asyncio
 async def test_index_builder_rejects_missing_acl_before_model_calls() -> None:
-    builder, client, documents, chunks, states, vectors, revision = await _prepared_builder()
+    (
+        builder,
+        client,
+        documents,
+        chunks,
+        states,
+        vectors,
+        revision,
+    ) = await _prepared_builder()
     builder = DocumentIndexBuilder(
         documents=documents,
         doc_chunks=chunks,
@@ -152,7 +173,50 @@ async def test_index_builder_rejects_missing_acl_before_model_calls() -> None:
     assert states.states["resource"].applied_content_revision is None
 
 
-def test_shared_window_prefers_short_section_and_keeps_neighbor_chunks_complete() -> None:
+@pytest.mark.asyncio
+async def test_index_builder_can_disable_expensive_enhancement_calls() -> None:
+    builder, client, _, chunks, states, vectors, revision = await _prepared_builder(
+        enhancement_enabled=False
+    )
+
+    await builder.build_and_publish(revision)
+
+    saved = await chunks.get_revision_chunks(
+        resource_id="resource", content_revision=revision.content_revision
+    )
+    assert (
+        states.states["resource"].applied_content_revision == revision.content_revision
+    )
+    assert all(not chunk.contextual_prefix and not chunk.key_terms for chunk in saved)
+    assert client.chat_calls == []
+    assert len(client.embedding_inputs) == 1
+    assert vectors.write_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_embed_chunks_sends_large_revision_in_ordered_batches() -> None:
+    client = _FakeOpenAI()
+    chunks = [
+        _chunk(section_id=None, index=index, text=f"chunk {index}")
+        for index in range(257)
+    ]
+
+    vectors = await _embed_chunks(
+        client,
+        model="embedding-model",
+        dimensions=2,
+        chunks=chunks,
+    )
+
+    assert [len(batch) for batch in client.embedding_inputs] == [32] * 8 + [1]
+    assert client.embedding_inputs[0][0] == chunks[0].get_semantic_text()
+    assert client.embedding_inputs[-1] == [chunks[-1].get_semantic_text()]
+    assert list(vectors) == [chunk.chunk_id for chunk in chunks]
+
+
+def test_shared_window_prefers_short_section_and_keeps_neighbor_chunks_complete() -> (
+    None
+):
     short_document = document(
         resource_id="resource",
         version=1,

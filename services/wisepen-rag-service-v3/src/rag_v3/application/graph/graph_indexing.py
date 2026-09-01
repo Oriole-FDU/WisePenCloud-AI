@@ -1,4 +1,4 @@
-"""将 Mongo 图谱事实独立投影到 Neo4j 与两个 Qdrant collection。"""
+"""将 Mongo 图谱事实独立写入 Neo4j 与两个 Qdrant collection。"""
 
 from __future__ import annotations
 
@@ -6,29 +6,26 @@ from dataclasses import dataclass
 
 from openai import AsyncOpenAI
 
-from rag_v3.domain.graph import (
+from rag_v3.application.document.models import GeneralDocumentMetadata
+from rag_v3.application.graph.models import (
     GraphEdgeProjection,
     GraphNode,
     GraphNodeProjection,
-    GraphRevisionFacts,
     graph_source_projection_id,
 )
-from rag_v3.domain.models import GeneralDocumentMetadata
 from rag_v3.domain.repositories.acl import ResourceAclRepository
 from rag_v3.domain.repositories.doc_chunks import DocChunkRepository
 from rag_v3.domain.repositories.documents import DocumentRepository
-from rag_v3.domain.repositories.graph import GraphFactRepository
-from rag_v3.domain.repositories.graph_projections import (
-    GraphEdgeVectorRepository,
-    GraphNodeVectorRepository,
-    GraphTopologyRepository,
-)
+from rag_v3.domain.repositories.graph_edge_vectors import GraphEdgeVectorRepository
+from rag_v3.domain.repositories.graph_fact import GraphFactRepository
+from rag_v3.domain.repositories.graph_node_vectors import GraphNodeVectorRepository
+from rag_v3.domain.repositories.graph_topology import GraphTopologyRepository
 from rag_v3.domain.repositories.index_state import ResourceIndexStateRepository
 
 
 @dataclass(frozen=True, slots=True)
-class GraphProjectionResult:
-    """一次图谱投影的实际产出；关闭全局开关时明确返回 skipped。"""
+class GraphIndexResult:
+    """一次图谱三路入库的实际产出；关闭全局开关时明确返回 skipped。"""
 
     resource_id: str
     content_revision: str | None
@@ -37,8 +34,8 @@ class GraphProjectionResult:
     skipped: bool = False
 
 
-class GraphProjectionBuilder:
-    """重建 active revision 的三个图谱投影，不参与文档发布。"""
+class GraphIndexBuilder:
+    """将 active revision 的图事实写入 Neo4j、节点向量和关系向量，不参与文档发布。"""
 
     def __init__(
         self,
@@ -71,15 +68,15 @@ class GraphProjectionBuilder:
         self._embedding_model = embedding_model
         self._embedding_dimensions = embedding_dimensions
 
-    async def rebuild(
+    async def index(
         self,
         *,
         resource_id: str,
         content_revision: str | None = None,
-    ) -> GraphProjectionResult:
-        """只重建当前 active revision；旧 revision 绝不写入外部可查询投影。"""
+    ) -> GraphIndexResult:
+        """只处理当前 active revision；旧 revision 绝不写入外部索引。"""
         if not self._enabled:
-            return GraphProjectionResult(resource_id, None, 0, 0, skipped=True)
+            return GraphIndexResult(resource_id, None, 0, 0, skipped=True)
         if self._topology is None:
             raise RuntimeError("graph topology repository is not configured")
 
@@ -87,32 +84,29 @@ class GraphProjectionBuilder:
             resource_id=resource_id,
             content_revision=content_revision,
         )
-        documents = await self._documents.get_revisions([(resource_id, target_revision)])
+        documents = await self._documents.get_revisions(
+            [(resource_id, target_revision)]
+        )
         document = documents.get((resource_id, target_revision))
         if document is None:
             raise ValueError("active document is missing")
         # 通用文档没有默认 Ontology；误调用投影也不能创建空的外部图索引。
         if isinstance(document.metadata, GeneralDocumentMetadata):
-            return GraphProjectionResult(resource_id, target_revision, 0, 0, skipped=True)
-        resource_acl = (
-            await self._resource_acls.get_resource_acls([resource_id])
-        ).get(resource_id)
+            return GraphIndexResult(resource_id, target_revision, 0, 0, skipped=True)
+        resource_acl = (await self._resource_acls.get_resource_acls([resource_id])).get(
+            resource_id
+        )
         if resource_acl is None:
             raise PermissionError("resource ACL is missing")
         facts = await self._graph_facts.get_revision_facts(
             resource_id=resource_id,
             content_revision=target_revision,
         )
-        chunks = await self._doc_chunks.get_revision_chunks(
-            resource_id=resource_id,
-            content_revision=target_revision,
-        )
-        _validate_evidence_chunks(facts, {chunk.chunk_id for chunk in chunks})
         nodes_by_id = {item.node.node_id: item.node for item in facts.nodes}
-        _validate_edge_endpoints(facts.edges, nodes_by_id)
 
         node_texts = {
-            _node_projection_id(item): _node_index_text(item.node) for item in facts.nodes
+            _node_projection_id(item): _node_index_text(item.node)
+            for item in facts.nodes
         }
         edge_texts = {
             _edge_projection_id(item): _edge_index_text(item, nodes_by_id)
@@ -163,7 +157,7 @@ class GraphProjectionBuilder:
             lexical_texts=edge_texts,
             resource_acl=resource_acl,
         )
-        return GraphProjectionResult(
+        return GraphIndexResult(
             resource_id=resource_id,
             content_revision=target_revision,
             node_count=len(facts.nodes),
@@ -179,7 +173,10 @@ class GraphProjectionBuilder:
         state = (await self._index_states.get_states([resource_id])).get(resource_id)
         if state is None or state.applied_content_revision is None:
             raise ValueError("resource has no active revision")
-        if content_revision is not None and content_revision != state.applied_content_revision:
+        if (
+            content_revision is not None
+            and content_revision != state.applied_content_revision
+        ):
             raise ValueError("requested graph projection revision is not active")
         return state.applied_content_revision
 
@@ -197,27 +194,6 @@ class GraphProjectionBuilder:
         ):
             raise ValueError("embedding response dimensions do not match settings")
         return vectors
-
-
-def _validate_evidence_chunks(facts: GraphRevisionFacts, chunk_ids: set[str]) -> None:
-    """P2-A 已校验证据；此处只批量确认其 Chunk 仍是同一 revision 的事实。"""
-    missing = {evidence.chunk_id for evidence in facts.evidences} - chunk_ids
-    if missing:
-        raise ValueError("graph evidence chunk is missing from active revision")
-
-
-def _validate_edge_endpoints(
-    edges: tuple[GraphEdgeProjection, ...],
-    nodes_by_id: dict[str, GraphNode],
-) -> None:
-    missing = {
-        node_id
-        for item in edges
-        for node_id in (item.edge.source_node_id, item.edge.target_node_id)
-        if node_id not in nodes_by_id
-    }
-    if missing:
-        raise ValueError("graph edge endpoint is missing from revision facts")
 
 
 def _node_projection_id(item: GraphNodeProjection) -> str:
@@ -243,10 +219,14 @@ def _edge_projection_id(item: GraphEdgeProjection) -> str:
 
 
 def _node_index_text(node: GraphNode) -> str:
-    return "\n".join(part for part in (node.name, *node.aliases, node.description) if part)
+    return "\n".join(
+        part for part in (node.name, *node.aliases, node.description) if part
+    )
 
 
-def _edge_index_text(item: GraphEdgeProjection, nodes_by_id: dict[str, GraphNode]) -> str:
+def _edge_index_text(
+    item: GraphEdgeProjection, nodes_by_id: dict[str, GraphNode]
+) -> str:
     edge = item.edge
     parts = [
         f"{nodes_by_id[edge.source_node_id].name} -> {edge.relation_type} -> {nodes_by_id[edge.target_node_id].name}",
