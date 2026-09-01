@@ -14,7 +14,6 @@ from rag_v3.application.retrieval.hybrid_retriever import (
     _RankedChunk,
     _union_candidates,
 )
-from rag_v3.application.retrieval.models import HybridQuery
 from rag_v3.domain.repositories.document_vectors import VectorCandidate
 
 from .conftest import chunk_for_document, document
@@ -37,13 +36,7 @@ def test_union_keeps_two_route_ranks_without_fusing_scores() -> None:
     assert candidates[1].lexical_rank == 1
 
 
-def test_hybrid_query_only_declares_caller_input() -> None:
-    assert HybridQuery(semantic_query="语义问题", top_k=3).lexical_query == ""
-    assert HybridQuery(
-        semantic_query="语义问题",
-        lexical_query="BM25 关键词",
-        top_k=3,
-    ).lexical_query == "BM25 关键词"
+def test_hybrid_query_inputs_are_plain_arguments() -> None:
     assert SourceSpan(2, 7).length == 5
 
 

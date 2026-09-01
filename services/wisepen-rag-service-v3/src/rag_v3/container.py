@@ -29,7 +29,9 @@ from rag_v3.application.events import (
 )
 from rag_v3.application.graph.graph_fact_builder import GraphFactBuilder
 from rag_v3.application.graph.graph_indexing import GraphIndexBuilder
+from rag_v3.application.outline import OutlineBuilder
 from rag_v3.application.publication import AclSynchronizer, DocumentPublication
+from rag_v3.application.reading import DocumentReader
 from rag_v3.application.retrieval.graph_retriever import GraphRetriever
 from rag_v3.application.retrieval.hybrid_retriever import HybridRetriever
 from rag_v3.application.snapshot import ActiveDocumentSnapshotLoader
@@ -214,6 +216,14 @@ class Container(containers.DeclarativeContainer):
         documents=documents,
         index_states=index_states,
         resource_acls=resource_acls,
+    )
+    document_reader = providers.Factory(
+        DocumentReader,
+        snapshots=active_document_snapshots,
+    )
+    outline_builder = providers.Factory(
+        OutlineBuilder,
+        snapshots=active_document_snapshots,
     )
     graph_facts = providers.Singleton(MongoGraphFactRepository)
     graph_fact_builder = providers.Factory(

@@ -1,0 +1,86 @@
+# 审阅视图：DocumentReader.read_pages（换行已实际渲染）
+
+[]
+
+# 模型真实可见视图：DocumentReader.read_pages（\n 保持转义）
+
+[]
+
+# 审阅视图：DocumentReader.read_sections (DIRECT)
+
+[1]
+resource_id: demo-p3
+section_id: rsec-demo-1
+section_path: Attention Is All You Need > Abstract
+content:
+The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English to-German translation task, improving over the existing best results, including ensembles, by over 2 BLEU. On the WMT 2014 English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, a small fraction of the training costs of the best models from the literature. We show that the Transformer generalizes well to other tasks by applying it successfully to English constituency parsing both with large and limited training data.
+
+# 模型真实可见视图：DocumentReader.read_sections (DIRECT)
+
+[ReadSectionItem(resource_id='demo-p3', section_id='rsec-demo-1', section_path='Attention Is All You Need > Abstract', content='The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English to-German translation task, improving over the existing best results, including ensembles, by over 2 BLEU. On the WMT 2014 English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, a small fraction of the training costs of the best models from the literature. We show that the Transformer generalizes well to other tasks by applying it successfully to English constituency parsing both with large and limited training data.')]
+
+# 审阅视图：DocumentReader.read_sections (RECURSIVE)
+
+[1]
+resource_id: demo-p3
+section_id: rsec-demo-1
+section_path: Attention Is All You Need > Abstract
+content:
+## Abstract
+
+The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English to-German translation task, improving over the existing best results, including ensembles, by over 2 BLEU. On the WMT 2014 English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, a small fraction of the training costs of the best models from the literature. We show that the Transformer generalizes well to other tasks by applying it successfully to English constituency parsing both with large and limited training data.
+
+# 模型真实可见视图：DocumentReader.read_sections (RECURSIVE)
+
+[ReadSectionItem(resource_id='demo-p3', section_id='rsec-demo-1', section_path='Attention Is All You Need > Abstract', content='## Abstract\n\nThe dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English to-German translation task, improving over the existing best results, including ensembles, by over 2 BLEU. On the WMT 2014 English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, a small fraction of the training costs of the best models from the literature. We show that the Transformer generalizes well to other tasks by applying it successfully to English constituency parsing both with large and limited training data.')]
+
+# 审阅视图：OutlineBuilder.neighborhood
+
+[1]
+resource_id: demo-p3
+section_id: rsec-demo-1
+title: Abstract
+section_path: Attention Is All You Need > Abstract
+char_count: 1140
+page_range: None
+anchor_labels: []
+outline:
+- Attention Is All You Need {#rsec-demo-0} [+9] (502 chars)
+  - Abstract [C] (1140 chars)
+  - 1 Introduction {#rsec-demo-2} (1925 chars)
+
+# 模型真实可见视图：OutlineBuilder.neighborhood
+
+[NeighborhoodItem(resource_id='demo-p3', section_id='rsec-demo-1', title='Abstract', section_path='Attention Is All You Need > Abstract', char_count=1140, page_range=None, anchor_labels=[], outline='- Attention Is All You Need {#rsec-demo-0} [+9] (502 chars)\n  - Abstract [C] (1140 chars)\n  - 1 Introduction {#rsec-demo-2} (1925 chars)')]
+
+# 审阅视图：OutlineBuilder.global_outline (max_level=0，全部层级)
+
+- Attention Is All You Need {#rsec-demo-0} [+9] (502 chars)
+  - Abstract {#rsec-demo-1} (1140 chars)
+  - 1 Introduction {#rsec-demo-2} (1925 chars)
+  - 2 Background {#rsec-demo-3} (1812 chars)
+  - 3 Model Architecture {#rsec-demo-4} [+5] (921 chars)
+    - 3.1 Encoder and Decoder Stacks {#rsec-demo-5} (1345 chars)
+    - 3.2 Attention {#rsec-demo-6} [+3] (555 chars)
+      - 3.2.1 Scaled Dot-Product Attention {#rsec-demo-7} (1707 chars)
+      - 3.2.2 Multi-Head Attention {#rsec-demo-8} (1850 chars)
+      - 3.2.3 Applications of Attention in our Model {#rsec-demo-9} (1170 chars)
+    - 3.3 Position-wise Feed-Forward Networks {#rsec-demo-10} (705 chars)
+    - 3.4 Embeddings and Softmax {#rsec-demo-11} (1387 chars)
+    - 3.5 Positional Encoding {#rsec-demo-12} (1580 chars)
+  - 4 Why Self-Attention {#rsec-demo-13} (3364 chars)
+  - 5 Training {#rsec-demo-14} [+4] (59 chars)
+    - 5.1 Training Data and Batching {#rsec-demo-15} (590 chars)
+    - 5.2 Hardware and Schedule {#rsec-demo-16} (399 chars)
+    - 5.3 Optimizer {#rsec-demo-17} (593 chars)
+    - 5.4 Regularization {#rsec-demo-18} (2136 chars)
+  - 6 Results {#rsec-demo-19} [+3] (0 chars)
+    - 6.1 Machine Translation {#rsec-demo-20} (1719 chars)
+    - 6.2 Model Variations {#rsec-demo-21} (4548 chars)
+    - 6.3 English Constituency Parsing {#rsec-demo-22} (2870 chars)
+  - 7 Conclusion {#rsec-demo-23} (1217 chars)
+  - References {#rsec-demo-24} (8174 chars)
+
+# 模型真实可见视图：OutlineBuilder.global_outline
+
+'- Attention Is All You Need {#rsec-demo-0} [+9] (502 chars)\n  - Abstract {#rsec-demo-1} (1140 chars)\n  - 1 Introduction {#rsec-demo-2} (1925 chars)\n  - 2 Background {#rsec-demo-3} (1812 chars)\n  - 3 Model Architecture {#rsec-demo-4} [+5] (921 chars)\n    - 3.1 Encoder and Decoder Stacks {#rsec-demo-5} (1345 chars)\n    - 3.2 Attention {#rsec-demo-6} [+3] (555 chars)\n      - 3.2.1 Scaled Dot-Product Attention {#rsec-demo-7} (1707 chars)\n      - 3.2.2 Multi-Head Attention {#rsec-demo-8} (1850 chars)\n      - 3.2.3 Applications of Attention in our Model {#rsec-demo-9} (1170 chars)\n    - 3.3 Position-wise Feed-Forward Networks {#rsec-demo-10} (705 chars)\n    - 3.4 Embeddings and Softmax {#rsec-demo-11} (1387 chars)\n    - 3.5 Positional Encoding {#rsec-demo-12} (1580 chars)\n  - 4 Why Self-Attention {#rsec-demo-13} (3364 chars)\n  - 5 Training {#rsec-demo-14} [+4] (59 chars)\n    - 5.1 Training Data and Batching {#rsec-demo-15} (590 chars)\n    - 5.2 Hardware and Schedule {#rsec-demo-16} (399 chars)\n    - 5.3 Optimizer {#rsec-demo-17} (593 chars)\n    - 5.4 Regularization {#rsec-demo-18} (2136 chars)\n  - 6 Results {#rsec-demo-19} [+3] (0 chars)\n    - 6.1 Machine Translation {#rsec-demo-20} (1719 chars)\n    - 6.2 Model Variations {#rsec-demo-21} (4548 chars)\n    - 6.3 English Constituency Parsing {#rsec-demo-22} (2870 chars)\n  - 7 Conclusion {#rsec-demo-23} (1217 chars)\n  - References {#rsec-demo-24} (8174 chars)'

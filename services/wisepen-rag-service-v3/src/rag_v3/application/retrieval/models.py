@@ -78,14 +78,6 @@ class GraphSearchResult:
 
 
 # --- 混合检索相关结构 ---
-@dataclass(frozen=True, slots=True)
-class HybridQuery:
-    """混合检索能力的输入，不承载 API 参数策略或默认解析。"""
-
-    semantic_query: str
-    top_k: int
-    lexical_query: str = ""
-
 
 @dataclass(frozen=True, slots=True)
 class ChunkHit:

@@ -20,7 +20,6 @@ from rag_v3.application.document.models import DocChunk, Document
 from rag_v3.application.retrieval.models import (
     ChunkHit,
     DynamicParent,
-    HybridQuery,
     HybridRetrievalResult,
 )
 from rag_v3.domain.acl import PermissionScope
@@ -80,18 +79,20 @@ class HybridRetriever:
 
     async def retrieve(
         self,
-        query: HybridQuery,
+        semantic_query: str,
+        top_k: int,
         *,
+        lexical_query: str = "",
         scope: PermissionScope,
     ) -> HybridRetrievalResult:
         """独立召回两路 Top 30，在 Mongo 当前事实和 ACL 快照校验后才产生 Hit。"""
         # 输入校验
-        semantic_query = query.semantic_query.strip()
+        semantic_query = semantic_query.strip()
         if not semantic_query:
             raise ValueError("semantic_query must not be empty")
-        if query.top_k <= 0:
+        if top_k <= 0:
             raise ValueError("top_k must be positive")
-        lexical_query = query.lexical_query.strip() or semantic_query
+        lexical_query = lexical_query.strip() or semantic_query
 
         # 1. 生成查询向量并并行检索稠密和BM25
         query_vector = await _embed_query(
@@ -148,7 +149,7 @@ class HybridRetriever:
                     lexical_query=lexical_query,
                 ),
                 candidates=ranking_candidates,
-                top_k=query.top_k,
+            top_k=top_k,
                 candidate_limit=len(ranking_candidates),
             )
         )

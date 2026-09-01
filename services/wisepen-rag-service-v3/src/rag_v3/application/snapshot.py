@@ -1,4 +1,4 @@
-"""只读取 active revision 且通过 ACL 的文档和全局 Section。"""
+"""查询前批量定位 active Document，并建立一次 ACL 快照。"""
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -14,14 +14,15 @@ from rag_v3.domain.repositories.index_state import ResourceIndexStateRepository
 
 @dataclass(frozen=True, slots=True)
 class ResolvedSection:
-    """一个已确认 active 且当前用户可读的全局 Section 定位结果。"""
-
+    """定位到的文档与所属 section 组合。"""
     document: Document
     section: Section
 
 
+# --- Active 文档与 ACL 快照加载器 ---
+
 class ActiveDocumentSnapshotLoader:
-    """为读取、标题树提供统一的 active+ACL 前置。"""
+    """为读取、标题树和其他查询用例提供最小 active+ACL 前置。"""
 
     def __init__(
         self,
@@ -40,28 +41,35 @@ class ActiveDocumentSnapshotLoader:
         *,
         scope: PermissionScope,
     ) -> Mapping[str, Document]:
-        """按输入资源批量读取当前可见版本；ACL 缺失时拒绝。"""
+        """根据资源 ID 批量加载当前 active 且用户可读的文档。"""
         unique_resource_ids = list(dict.fromkeys(resource_ids))
         if not unique_resource_ids:
             return {}
+
+        # 获取各资源的发布状态
         states = await self._index_states.get_states(unique_resource_ids)
+
+        # 收集已发布的有效 revision
         active_revisions = [
             (resource_id, state.applied_content_revision)
             for resource_id, state in states.items()
             if state.applied_content_revision is not None
         ]
+
+        # 并行获取文档内容和 ACL
         documents = await self._documents.get_revisions(active_revisions)
         resource_acls = await self._resource_acls.get_resource_acls(
             [resource_id for resource_id, _ in active_revisions]
         )
 
+        # 逐个校验 ACL 权限和文档存在性
         result: dict[str, Document] = {}
         for resource_id in unique_resource_ids:
             state = states.get(resource_id)
             if state is None or state.applied_content_revision is None:
                 continue
-            resource_acl = resource_acls.get(resource_id)
-            if resource_acl is None or not resource_acl.can_read(scope):
+            acl = resource_acls.get(resource_id)
+            if acl is None or not acl.can_read(scope):
                 continue
             document = documents.get((resource_id, state.applied_content_revision))
             if document is not None:
@@ -74,38 +82,37 @@ class ActiveDocumentSnapshotLoader:
         *,
         scope: PermissionScope,
     ) -> Mapping[str, ResolvedSection]:
-        """定位一批全局 Section ID；不存在和无权条目都不返回。"""
+        """根据 section ID 定位到对应的文档和 section 对象，并校验 active + 权限。"""
         unique_section_ids = list(dict.fromkeys(section_ids))
         if not unique_section_ids:
             return {}
 
-        # 查询可能命中未清理旧 revision，必须在下方以 active 指针重新过滤。
+        # 先通过 section ID 反查可能所属的文档
         candidates = await self._documents.find_by_section_ids(unique_section_ids)
-        candidate_resource_ids = list(
-            dict.fromkeys(document.resource_id for document in candidates)
-        )
-        states = await self._index_states.get_states(candidate_resource_ids)
-        resource_acls = await self._resource_acls.get_resource_acls(
-            candidate_resource_ids
-        )
+        resource_ids = list(dict.fromkeys(doc.resource_id for doc in candidates))
 
-        active_documents: dict[str, Document] = {}
-        for document in candidates:
-            state = states.get(document.resource_id)
-            resource_acl = resource_acls.get(document.resource_id)
-            if state is None or state.applied_content_revision != document.revision.content_revision:
-                continue
-            if resource_acl is None or not resource_acl.can_read(scope):
-                continue
-            active_documents[document.resource_id] = document
+        # 获取发布状态和 ACL
+        states = await self._index_states.get_states(resource_ids)
+        acls = await self._resource_acls.get_resource_acls(resource_ids)
 
         locations: dict[str, ResolvedSection] = {}
         requested = set(unique_section_ids)
-        for document in active_documents.values():
+
+        for document in candidates:
+            state = states.get(document.resource_id)
+            acl = acls.get(document.resource_id)
+            # 检查文档是否已发布、revision 一致、且用户可读
+            if (
+                state is None
+                or state.applied_content_revision != document.revision.content_revision
+                or acl is None
+                or not acl.can_read(scope)
+            ):
+                continue
+
+            # 遍历文档的 section，匹配请求的 section_id
             for section in document.structure.sections:
                 if section.section_id in requested:
-                    locations[section.section_id] = ResolvedSection(
-                        document=document,
-                        section=section,
-                    )
+                    locations[section.section_id] = ResolvedSection(document, section)
+
         return locations
