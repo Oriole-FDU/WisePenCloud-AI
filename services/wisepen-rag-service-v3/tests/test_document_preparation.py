@@ -10,7 +10,13 @@ from rag_v3.domain.acl import PermissionScope, ResourceAcl
 from rag_v3.domain.models import ContentRevision, DocChunk, rag_chunk_id, rag_section_id
 from rag_v3.domain.repositories.index_state import StageAction
 
-from .conftest import MemoryAcls, MemoryDocChunks, MemoryDocuments, MemoryIndexStates
+from .conftest import (
+    MemoryAcls,
+    MemoryDocChunks,
+    MemoryDocuments,
+    MemoryDocumentVectors,
+    MemoryIndexStates,
+)
 
 
 def _readable_acl(resource_id: str) -> ResourceAcl:
@@ -26,9 +32,15 @@ def _preparer() -> tuple[DocumentPreparer, MemoryDocuments, MemoryIndexStates, M
     documents = MemoryDocuments()
     states = MemoryIndexStates()
     chunks = MemoryDocChunks()
+    vectors = MemoryDocumentVectors()
     return (
         DocumentPreparer(
-            publication=DocumentPublication(documents=documents, index_states=states),
+            publication=DocumentPublication(
+                documents=documents,
+                doc_chunks=chunks,
+                document_vectors=vectors,
+                index_states=states,
+            ),
             doc_chunks=chunks,
         ),
         documents,
@@ -147,7 +159,20 @@ async def test_old_version_does_not_write_chunks_after_newer_revision_is_active(
     revision = ContentRevision.create(
         resource_id="resource", document_version=2, raw_content=markdown
     )
-    await DocumentPublication(documents=documents, index_states=states).apply_revision(
+    vectors = MemoryDocumentVectors()
+    vectors.revision_chunk_ids[("resource", revision.content_revision)] = {
+        chunk.chunk_id
+        for chunk in await chunks.get_revision_chunks(
+            resource_id="resource",
+            content_revision=revision.content_revision,
+        )
+    }
+    await DocumentPublication(
+        documents=documents,
+        doc_chunks=chunks,
+        document_vectors=vectors,
+        index_states=states,
+    ).apply_revision(
         revision
     )
     save_calls = chunks.save_calls

@@ -10,6 +10,8 @@ dependencies = [
     "pydantic>=2,<3",
     "pydantic-settings>=2,<3",
     "pymongo>=4.17,<5",
+    "openai>=2,<3",
+    "qdrant-client>=1.18,<2",
     "pyyaml",
     "uvicorn",
     "wisepen-common",

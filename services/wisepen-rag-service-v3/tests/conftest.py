@@ -11,6 +11,7 @@ from rag_v3.domain.models import (
     Document,
     DocumentStructure,
     ResourceIndexState,
+    rag_chunk_id,
 )
 from rag_v3.domain.repositories.index_state import StageAction
 
@@ -92,6 +93,31 @@ class MemoryDocChunks:
             )
             if chunk.section_id in wanted
         ]
+
+
+class MemoryDocumentVectors:
+    """P1-B 测试使用的文档向量投影替身。"""
+
+    def __init__(self) -> None:
+        self.revision_chunk_ids: dict[tuple[str, str], set[str]] = {}
+        self.write_calls = 0
+
+    async def write_revision(self, *, chunks, dense_vectors, resource_acl) -> None:
+        self.write_calls += 1
+        if chunks:
+            key = (chunks[0].resource_id, chunks[0].content_revision)
+            self.revision_chunk_ids[key] = {chunk.chunk_id for chunk in chunks}
+
+    async def is_complete(
+        self,
+        *,
+        resource_id: str,
+        content_revision: str,
+        chunk_ids,
+    ) -> bool:
+        return self.revision_chunk_ids.get(
+            (resource_id, content_revision), set()
+        ) == set(chunk_ids)
 
 
 class MemoryIndexStates:
@@ -210,4 +236,30 @@ def document(
         revision=revision,
         raw_content=raw_content,
         structure=DocumentStructure(total_length=len(raw_content), sections=(section,)),
+    )
+
+
+def chunk_for_document(document: Document) -> DocChunk:
+    """为 P0 发布测试补齐 P1 后必需的最小 Chunk 投影。"""
+    return DocChunk(
+        chunk_id=rag_chunk_id(
+            resource_id=document.resource_id,
+            content_revision=document.revision.content_revision,
+            common_chunk_id="test-chunk",
+        ),
+        resource_id=document.resource_id,
+        content_revision=document.revision.content_revision,
+        chunk_index=0,
+        section_id=(
+            document.structure.sections[0].section_id
+            if document.structure.sections
+            else None
+        ),
+        section_path=(
+            document.structure.sections[0].section_path
+            if document.structure.sections
+            else ()
+        ),
+        raw_text=document.raw_content,
+        source_spans=(SourceSpan(0, len(document.raw_content)),),
     )

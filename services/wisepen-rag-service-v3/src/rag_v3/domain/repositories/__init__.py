@@ -2,6 +2,7 @@
 
 from .acl import AuthoritativeAclReader, ResourceAclRepository
 from .doc_chunks import DocChunkRepository
+from .document_vectors import DocumentVectorRepository
 from .documents import DocumentRepository
 from .index_state import ResourceIndexStateRepository, StageAction
 
@@ -9,6 +10,7 @@ __all__ = [
     "AuthoritativeAclReader",
     "DocChunkRepository",
     "DocumentRepository",
+    "DocumentVectorRepository",
     "ResourceAclRepository",
     "ResourceIndexStateRepository",
     "StageAction",

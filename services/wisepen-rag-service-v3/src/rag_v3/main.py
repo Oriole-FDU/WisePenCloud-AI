@@ -66,6 +66,14 @@ async def lifespan(_: FastAPI):
     except Exception as exc:  # noqa: BLE001  # pragma: no cover - 退出时尽力关闭客户端
         error("mongo client close failed.", exc=exc)
     try:
+        await container.openai_client().close()
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - 退出时尽力关闭客户端
+        error("openai client close failed.", exc=exc)
+    try:
+        await container.qdrant_client().close()
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - 退出时尽力关闭客户端
+        error("qdrant client close failed.", exc=exc)
+    try:
         await nacos_client_manager.deregister_instance()
     except Exception as exc:  # noqa: BLE001  # pragma: no cover - 注销失败不阻断退出
         error("nacos instance deregister failed.", exc=exc)

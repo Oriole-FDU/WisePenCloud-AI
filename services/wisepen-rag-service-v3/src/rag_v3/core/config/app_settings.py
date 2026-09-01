@@ -11,7 +11,7 @@ from .nacos import nacos_client_manager
 
 
 class AppSettings(BaseModel):
-    """P0 仅声明 Mongo、资源来源和网关安全真正消费的配置。"""
+    """当前已落地的 Mongo、LLM 与 Qdrant 运行配置。"""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -19,6 +19,18 @@ class AppSettings(BaseModel):
     MONGODB_DB_NAME: str
     RESOURCE_MONGODB_DB_NAME: str | None = None
     FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
+    LLM_BASE_URL: str
+    LLM_API_KEY: str
+    QUERY_MODEL: str
+    EMBEDDING_MODEL: str
+    EMBEDDING_DIMENSIONS: int
+    DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY: int = 5
+    QDRANT_HOST: str
+    QDRANT_PORT: int = 6333
+    QDRANT_PASSWORD: str = ""
+    QDRANT_DOCUMENT_CHUNK_COLLECTION_NAME: str = "document_chunk_vectors"
+    QDRANT_DOCUMENT_DENSE_VECTOR_NAME: str = "dense"
+    QDRANT_DOCUMENT_SPARSE_VECTOR_NAME: str = "sparse"
 
     @property
     def resource_mongodb_db_name(self) -> str:

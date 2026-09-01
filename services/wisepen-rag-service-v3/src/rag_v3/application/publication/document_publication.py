@@ -1,6 +1,8 @@
 """P0 文档 revision 的事实写入和 active 发布编排。"""
 
 from rag_v3.domain.models import ContentRevision, Document
+from rag_v3.domain.repositories.doc_chunks import DocChunkRepository
+from rag_v3.domain.repositories.document_vectors import DocumentVectorRepository
 from rag_v3.domain.repositories.documents import DocumentRepository
 from rag_v3.domain.repositories.index_state import (
     ResourceIndexStateRepository,
@@ -15,9 +17,13 @@ class DocumentPublication:
         self,
         *,
         documents: DocumentRepository,
+        doc_chunks: DocChunkRepository,
+        document_vectors: DocumentVectorRepository,
         index_states: ResourceIndexStateRepository,
     ) -> None:
         self._documents = documents
+        self._doc_chunks = doc_chunks
+        self._document_vectors = document_vectors
         self._index_states = index_states
 
     async def stage_document(self, document: Document) -> StageAction:
@@ -52,13 +58,30 @@ class DocumentPublication:
         return action
 
     async def apply_revision(self, revision: ContentRevision) -> None:
-        """仅当同一 revision 已有权威 Document 事实时才允许对外可见。"""
-        if not await self._documents.exists(
-            resource_id=revision.resource_id,
-            content_revision=revision.content_revision,
-        ):
+        """仅在 Mongo 事实和文档向量投影完整时允许对外可见。"""
+        documents = await self._documents.get_revisions(
+            [(revision.resource_id, revision.content_revision)]
+        )
+        document = documents.get((revision.resource_id, revision.content_revision))
+        if document is None:
             raise ValueError(
                 f"document revision {revision.content_revision} is not persisted"
+            )
+        chunks = await self._doc_chunks.get_revision_chunks(
+            resource_id=revision.resource_id,
+            content_revision=revision.content_revision,
+        )
+        if document.raw_content.strip() and not chunks:
+            raise ValueError(
+                f"document chunks for {revision.content_revision} are not persisted"
+            )
+        if not await self._document_vectors.is_complete(
+            resource_id=revision.resource_id,
+            content_revision=revision.content_revision,
+            chunk_ids=[chunk.chunk_id for chunk in chunks],
+        ):
+            raise ValueError(
+                f"document vector revision {revision.content_revision} is incomplete"
             )
         await self._index_states.apply_revision(revision)
 
