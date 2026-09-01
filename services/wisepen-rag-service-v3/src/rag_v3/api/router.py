@@ -1,7 +1,8 @@
-"""P0 仅暴露服务健康检查，不提前定义业务接口。"""
+"""RAG V3 HTTP 路由聚合。"""
 
 from fastapi import APIRouter
 
+from rag_v3.api.endpoints import reading, retrieval
 from rag_v3.core.config.bootstrap_settings import bootstrap_settings
 
 api_router = APIRouter()
@@ -10,3 +11,7 @@ api_router = APIRouter()
 @api_router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": bootstrap_settings.SERVICE_NAME}
+
+
+api_router.include_router(retrieval.router, prefix="/retrieval", tags=["retrieval"])
+api_router.include_router(reading.router, prefix="/reading", tags=["reading"])

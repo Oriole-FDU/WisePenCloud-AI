@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from common.utils.document import Page, Section, SourceSpan
 
+from rag_v3.application.reading import DocumentReadError
 from rag_v3.application.snapshot import ActiveDocumentSnapshotLoader
 from rag_v3.domain.acl import PermissionScope
 
@@ -43,7 +44,8 @@ class OutlineBuilder:
         for section_id in section_ids:
             location = locations.get(section_id)
             if location is None:
-                continue
+                # 不存在、旧 revision 和无权 Section 对外必须不可区分。
+                raise DocumentReadError("section is not visible")
 
             structure = location.document.structure
 
@@ -137,7 +139,7 @@ class OutlineBuilder:
         documents = await self._snapshots.load_documents([resource_id], scope=scope)
         document = documents.get(resource_id)
         if document is None:
-            return ""
+            raise DocumentReadError("document is not visible")
 
         children_by_parent = _children_by_parent(document.structure.sections)
         lines: list[str] = []

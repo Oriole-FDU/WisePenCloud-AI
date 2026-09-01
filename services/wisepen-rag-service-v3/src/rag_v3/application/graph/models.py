@@ -223,18 +223,6 @@ class GraphPlugin:
         return self._filter_compiler.compile(value)
 
 
-# --- 聚合模型 ---
-
-class GraphRevisionFacts(BaseModel):
-    """Mongo 中同一资源 revision 的完整图谱事实，用于重建外部投影。"""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    nodes: list[GraphNodeProjection] = field(default_factory=list)
-    edges: list[GraphEdgeProjection] = field(default_factory=list)
-    evidences: list[TextGraphEvidence] = field(default_factory=list)
-
-
 # --- ID 生成工具函数 ---
 
 def graph_node_id(*, category: str, name: str) -> str:

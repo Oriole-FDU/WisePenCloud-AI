@@ -11,7 +11,6 @@ from rag_v3.application.graph.models import (
     GraphEdgeProjection,
     GraphNode,
     GraphNodeProjection,
-    GraphRevisionFacts,
     graph_edge_id,
     graph_node_id,
 )
@@ -23,6 +22,7 @@ from rag_v3.core.persistence.qdrant.graph_vector_repository import (
     _node_projection_id,
 )
 from rag_v3.domain.acl import ResourceAcl
+from rag_v3.domain.repositories.graph_fact import GraphRevisionFacts
 
 from .conftest import (
     MemoryAcls,

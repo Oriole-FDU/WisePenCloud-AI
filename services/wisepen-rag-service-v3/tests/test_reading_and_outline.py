@@ -102,6 +102,16 @@ async def test_outline_neighborhood_and_global_outline() -> None:
     assert "B.1" in await service.global_outline("r1", max_level=0, scope=scope)
 
 
+async def test_outline_hides_unknown_sections_and_documents() -> None:
+    service = OutlineBuilder(snapshots=Snapshot(_document()))
+    scope = PermissionScope(user_id="u")
+
+    with pytest.raises(DocumentReadError):
+        await service.neighborhood(["missing"], scope=scope)
+    with pytest.raises(DocumentReadError):
+        await service.global_outline("missing", scope=scope)
+
+
 def test_section_concatenation_strips_body_and_title_whitespace() -> None:
     section = Section(
         "s",

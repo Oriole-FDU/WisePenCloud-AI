@@ -75,6 +75,13 @@ def _build_ranking_pipeline(
     )
 
 
+def _build_metadata_registry(plugins):
+    """在容器解析插件列表后收集 metadata 类型，避免声明期读取 provider。"""
+    return DocumentMetadataRegistry(
+        metadata_types=[plugin.metadata_type for plugin in plugins]
+    )
+
+
 class Container(containers.DeclarativeContainer):
     """集中管理当前已落地的 Mongo 生命周期和 application 用例。"""
 
@@ -87,8 +94,8 @@ class Container(containers.DeclarativeContainer):
     # 默认没有通用 Ontology；部署垂类时由 composition 显式覆盖此列表。
     graph_plugins = providers.List()
     metadata_registry = providers.Singleton(
-        DocumentMetadataRegistry,
-        metadata_types=[plugin.metadata_type for plugin in graph_plugins],
+        _build_metadata_registry,
+        plugins=graph_plugins,
     )
     documents = providers.Singleton(
         MongoDocumentRepository,

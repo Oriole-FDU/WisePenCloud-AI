@@ -7,7 +7,6 @@ from pymongo import ReplaceOne
 from rag_v3.application.graph.models import (
     GraphEdgeProjection,
     GraphNodeProjection,
-    GraphRevisionFacts,
     TextGraphEvidence,
 )
 from rag_v3.domain.entities.graph import (
@@ -15,7 +14,10 @@ from rag_v3.domain.entities.graph import (
     GraphNodeProjectionEntity,
     TextGraphEvidenceEntity,
 )
-from rag_v3.domain.repositories.graph_fact import GraphFactRepository
+from rag_v3.domain.repositories.graph_fact import (
+    GraphFactRepository,
+    GraphRevisionFacts,
+)
 
 
 class MongoGraphFactRepository(GraphFactRepository):

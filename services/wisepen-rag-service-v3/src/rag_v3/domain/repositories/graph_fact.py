@@ -1,14 +1,23 @@
-"""图谱 Mongo 事实的仓储端口。"""
+"""图谱 Mongo 事实的仓储端口和 revision 读取结果。"""
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from rag_v3.application.graph.models import (
     GraphEdgeProjection,
     GraphNodeProjection,
-    GraphRevisionFacts,
     TextGraphEvidence,
 )
+
+
+@dataclass
+class GraphRevisionFacts:
+    """一次 Mongo revision 读取的完整事实，供外部投影重建使用。"""
+
+    nodes: list[GraphNodeProjection] = field(default_factory=list)
+    edges: list[GraphEdgeProjection] = field(default_factory=list)
+    evidences: list[TextGraphEvidence] = field(default_factory=list)
 
 
 class GraphFactRepository(Protocol):
