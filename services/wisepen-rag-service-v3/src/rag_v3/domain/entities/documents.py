@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from beanie import Document
 from pydantic import BaseModel, Field
@@ -38,10 +38,6 @@ class StoredSection(BaseModel):
     preview: str = ""
 
 
-class StoredDocumentMetadata(BaseModel):
-    document_type: str = "general"
-
-
 class ResourceIndexStateEntity(Document):
     """在线可见性只由该实体中的 applied 指针决定。"""
 
@@ -73,7 +69,8 @@ class DocumentRevisionEntity(Document):
     sections: list[StoredSection] = Field(default_factory=list)
     pages: list[StoredPage] = Field(default_factory=list)
     anchors: list[StoredAnchor] = Field(default_factory=list)
-    metadata: StoredDocumentMetadata = Field(default_factory=StoredDocumentMetadata)
+    # metadata 由已注册的 Pydantic 类型解码，Mongo 只保存其原始结构。
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     class Settings:
         name = "document_revisions"

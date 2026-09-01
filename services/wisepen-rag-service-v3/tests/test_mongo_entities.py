@@ -3,8 +3,11 @@
 from rag_v3.domain.entities import (
     DocChunkEntity,
     DocumentRevisionEntity,
+    GraphEdgeProjectionEntity,
+    GraphNodeProjectionEntity,
     ResourceAclEntity,
     ResourceIndexStateEntity,
+    TextGraphEvidenceEntity,
 )
 
 
@@ -17,6 +20,9 @@ def test_mongo_indexes_cover_visibility_acl_document_and_chunk_location() -> Non
     acl_indexes = _index_keys(ResourceAclEntity)
     document_indexes = _index_keys(DocumentRevisionEntity)
     chunk_indexes = _index_keys(DocChunkEntity)
+    graph_node_indexes = _index_keys(GraphNodeProjectionEntity)
+    graph_edge_indexes = _index_keys(GraphEdgeProjectionEntity)
+    graph_evidence_indexes = _index_keys(TextGraphEvidenceEntity)
 
     assert [("resource_id", 1)] in state_indexes
     assert [("resource_id", 1)] in acl_indexes
@@ -28,6 +34,19 @@ def test_mongo_indexes_cover_visibility_acl_document_and_chunk_location() -> Non
         ("content_revision", 1),
         ("chunk_index", 1),
     ] in chunk_indexes
+    assert [
+        ("resource_id", 1),
+        ("content_revision", 1),
+        ("node.node_id", 1),
+        ("producer_id", 1),
+    ] in graph_node_indexes
+    assert [
+        ("resource_id", 1),
+        ("content_revision", 1),
+        ("edge.edge_id", 1),
+        ("producer_id", 1),
+    ] in graph_edge_indexes
+    assert [("evidence_id", 1)] in graph_evidence_indexes
     assert [
         ("resource_id", 1),
         ("content_revision", 1),

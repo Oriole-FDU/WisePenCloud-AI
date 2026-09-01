@@ -7,7 +7,6 @@ from common.utils.document import Anchor, Page, Section, SourceSpan
 from rag_v3.domain.entities.documents import (
     DocumentRevisionEntity,
     StoredAnchor,
-    StoredDocumentMetadata,
     StoredPage,
     StoredSection,
     StoredSpan,
@@ -16,22 +15,34 @@ from rag_v3.domain.models import (
     ContentRevision,
     Document,
     DocumentStructure,
-    GeneralDocumentMetadata,
 )
+from rag_v3.domain.plugins import DocumentMetadataRegistry
 from rag_v3.domain.repositories.documents import DocumentRepository
 
 
 class MongoDocumentRepository(DocumentRepository):
     """把 RAG Document 投影为一条 Mongo revision 文档。"""
 
+    def __init__(self, *, metadata_registry: DocumentMetadataRegistry) -> None:
+        self._metadata_registry = metadata_registry
+
     async def save_revision(self, document: Document) -> None:
-        # 相同 content_revision 必须对应同一正文哈希；replace 是幂等重试，非迁移逻辑。
+        metadata = self._metadata_registry.encode(document.metadata)
+        existing = await DocumentRevisionEntity.find_one(
+            {
+                "resource_id": document.resource_id,
+                "content_revision": document.revision.content_revision,
+            }
+        )
+        # content_revision 是完整文档版本；不能借重试路径覆写为另一份 metadata。
+        if existing is not None and existing.metadata != metadata:
+            raise ValueError("document metadata differs for the same content revision")
         await DocumentRevisionEntity.get_pymongo_collection().update_one(
             {
                 "resource_id": document.resource_id,
                 "content_revision": document.revision.content_revision,
             },
-            {"$set": _to_document(document)},
+            {"$set": _to_document(document, metadata)},
             upsert=True,
         )
 
@@ -58,7 +69,7 @@ class MongoDocumentRepository(DocumentRepository):
         ]
         entities = await DocumentRevisionEntity.find({"$or": clauses}).to_list()
         return {
-            (entity.resource_id, entity.content_revision): _to_domain(entity)
+            (entity.resource_id, entity.content_revision): _to_domain(entity, self._metadata_registry)
             for entity in entities
         }
 
@@ -72,10 +83,10 @@ class MongoDocumentRepository(DocumentRepository):
         entities = await DocumentRevisionEntity.find(
             {"sections.section_id": {"$in": unique_section_ids}}
         ).to_list()
-        return [_to_domain(entity) for entity in entities]
+        return [_to_domain(entity, self._metadata_registry) for entity in entities]
 
 
-def _to_document(document: Document) -> dict[str, object]:
+def _to_document(document: Document, metadata: dict[str, object]) -> dict[str, object]:
     return {
         "resource_id": document.resource_id,
         "content_revision": document.revision.content_revision,
@@ -86,9 +97,7 @@ def _to_document(document: Document) -> dict[str, object]:
         "sections": [_stored_section(section) for section in document.structure.sections],
         "pages": [_stored_page(page) for page in document.structure.pages],
         "anchors": [_stored_anchor(anchor) for anchor in document.structure.anchors],
-        "metadata": StoredDocumentMetadata(
-            document_type=document.metadata.document_type,
-        ),
+        "metadata": metadata,
     }
 
 
@@ -119,7 +128,7 @@ def _stored_anchor(anchor: Anchor) -> StoredAnchor:
     return StoredAnchor(label=anchor.label, source_span=_stored_span(anchor.source_span))
 
 
-def _to_domain(entity: DocumentRevisionEntity) -> Document:
+def _to_domain(entity: DocumentRevisionEntity, metadata_registry: DocumentMetadataRegistry) -> Document:
     return Document(
         resource_id=entity.resource_id,
         revision=ContentRevision(
@@ -134,9 +143,7 @@ def _to_domain(entity: DocumentRevisionEntity) -> Document:
             pages=tuple(_page(page) for page in entity.pages),
             anchors=tuple(_anchor(anchor) for anchor in entity.anchors),
         ),
-        metadata=GeneralDocumentMetadata(
-            document_type=entity.metadata.document_type,
-        ),
+        metadata=metadata_registry.decode(entity.metadata),
     )
 
 

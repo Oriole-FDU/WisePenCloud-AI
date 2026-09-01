@@ -23,6 +23,11 @@ class MemoryDocuments:
         self.section_lookup_calls = 0
 
     async def save_revision(self, document: Document) -> None:
+        existing = self.documents.get(
+            (document.resource_id, document.revision.content_revision)
+        )
+        if existing is not None and existing.metadata != document.metadata:
+            raise ValueError("document metadata differs for the same content revision")
         self.documents[(document.resource_id, document.revision.content_revision)] = document
 
     async def exists(self, *, resource_id: str, content_revision: str) -> bool:

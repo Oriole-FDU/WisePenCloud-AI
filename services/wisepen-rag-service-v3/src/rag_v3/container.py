@@ -16,6 +16,7 @@ from qdrant_client import AsyncQdrantClient
 from zeroentropy import AsyncZeroEntropy
 
 from rag_v3.application.document import DocumentIndexBuilder, DocumentPreparer
+from rag_v3.application.graph import GraphFactBuilder
 from rag_v3.application.publication import AclSynchronizer, DocumentPublication
 from rag_v3.application.retrieval import HybridRetriever
 from rag_v3.application.snapshot import ActiveDocumentSnapshotLoader
@@ -24,10 +25,12 @@ from rag_v3.core.persistence.mongo import (
     MongoAuthoritativeAclReader,
     MongoDocChunkRepository,
     MongoDocumentRepository,
+    MongoGraphFactRepository,
     MongoResourceAclRepository,
     MongoResourceIndexStateRepository,
 )
 from rag_v3.core.persistence.qdrant import QdrantDocumentVectorRepository
+from rag_v3.domain.plugins import DocumentMetadataRegistry
 
 
 def _resource_items_collection(client: AsyncMongoClient):
@@ -62,7 +65,16 @@ class Container(containers.DeclarativeContainer):
         client=mongo_client,
     )
 
-    documents = providers.Singleton(MongoDocumentRepository)
+    # 默认没有通用 Ontology；部署垂类时由 composition 显式覆盖此列表。
+    graph_plugins = providers.List()
+    metadata_registry = providers.Singleton(
+        DocumentMetadataRegistry,
+        plugins=graph_plugins,
+    )
+    documents = providers.Singleton(
+        MongoDocumentRepository,
+        metadata_registry=metadata_registry,
+    )
     doc_chunks = providers.Singleton(MongoDocChunkRepository)
     index_states = providers.Singleton(MongoResourceIndexStateRepository)
     resource_acls = providers.Singleton(MongoResourceAclRepository)
@@ -134,6 +146,18 @@ class Container(containers.DeclarativeContainer):
         documents=documents,
         index_states=index_states,
         resource_acls=resource_acls,
+    )
+    graph_facts = providers.Singleton(MongoGraphFactRepository)
+    graph_fact_builder = providers.Factory(
+        GraphFactBuilder,
+        documents=documents,
+        doc_chunks=doc_chunks,
+        graph_facts=graph_facts,
+        index_states=index_states,
+        plugins=graph_plugins,
+        openai_client=openai_client,
+        query_model=settings.QUERY_MODEL,
+        max_concurrency=settings.DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY,
     )
     hybrid_retriever = providers.Factory(
         HybridRetriever,

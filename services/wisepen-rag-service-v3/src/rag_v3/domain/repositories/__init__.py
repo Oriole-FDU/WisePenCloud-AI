@@ -4,6 +4,7 @@ from .acl import AuthoritativeAclReader, ResourceAclRepository
 from .doc_chunks import DocChunkRepository
 from .document_vectors import DocumentVectorRepository
 from .documents import DocumentRepository
+from .graph import GraphFactRepository
 from .index_state import ResourceIndexStateRepository, StageAction
 
 __all__ = [
@@ -11,6 +12,7 @@ __all__ = [
     "DocChunkRepository",
     "DocumentRepository",
     "DocumentVectorRepository",
+    "GraphFactRepository",
     "ResourceAclRepository",
     "ResourceIndexStateRepository",
     "StageAction",

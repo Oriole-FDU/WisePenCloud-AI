@@ -30,8 +30,11 @@ from rag_v3.core.config.nacos import nacos_client_manager
 from rag_v3.domain.entities import (
     DocChunkEntity,
     DocumentRevisionEntity,
+    GraphEdgeProjectionEntity,
+    GraphNodeProjectionEntity,
     ResourceAclEntity,
     ResourceIndexStateEntity,
+    TextGraphEvidenceEntity,
 )
 
 no_proxy = ",".join(
@@ -52,6 +55,9 @@ async def lifespan(_: FastAPI):
             ResourceAclEntity,
             DocumentRevisionEntity,
             DocChunkEntity,
+            GraphNodeProjectionEntity,
+            GraphEdgeProjectionEntity,
+            TextGraphEvidenceEntity,
         ],
     )
     try:

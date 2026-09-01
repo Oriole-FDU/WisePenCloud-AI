@@ -14,7 +14,9 @@ from rag_v3.domain.models import (
     ContentRevision,
     DocChunk,
     Document,
+    DocumentMetadata,
     DocumentStructure,
+    GeneralDocumentMetadata,
     rag_chunk_id,
     rag_section_id,
 )
@@ -40,6 +42,7 @@ class DocumentPreparer:
         resource_id: str,
         document_version: int,
         markdown: str,
+        metadata: DocumentMetadata | None = None,
     ) -> StageAction:
         """构造并暂存一版文档事实，绝不在此阶段发布 active 指针。"""
         revision = ContentRevision.create(
@@ -82,6 +85,7 @@ class DocumentPreparer:
                 pages=chunking.pages,
                 anchors=chunking.anchors,
             ),
+            metadata=metadata or GeneralDocumentMetadata(),
         )
         chunks = tuple(
             _to_doc_chunk(

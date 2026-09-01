@@ -7,6 +7,7 @@ from hashlib import sha256
 
 from common.utils.document import Anchor, Page, Section, SourceSpan
 from common.utils.ranking import RankDecision
+from pydantic import BaseModel, ConfigDict
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,9 +106,16 @@ class DocumentStructure:
             raise ValueError("structure span is outside raw_content")
 
 
-@dataclass(frozen=True, slots=True)
-class GeneralDocumentMetadata:
-    """P0 唯一支持的通用文档 metadata，垂类联合类型留到插件阶段。"""
+class DocumentMetadata(BaseModel):
+    """Document 持久化的强类型 metadata 基类；具体类型由插件注册。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    document_type: str
+
+
+class GeneralDocumentMetadata(DocumentMetadata):
+    """没有图谱插件的通用文档 metadata。"""
 
     document_type: str = "general"
 
@@ -242,7 +250,7 @@ class Document:
     revision: ContentRevision
     raw_content: str
     structure: DocumentStructure
-    metadata: GeneralDocumentMetadata = field(default_factory=GeneralDocumentMetadata)
+    metadata: DocumentMetadata = field(default_factory=GeneralDocumentMetadata)
 
     def __post_init__(self) -> None:
         if self.revision.resource_id != self.resource_id:
