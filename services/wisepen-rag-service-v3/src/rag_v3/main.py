@@ -28,6 +28,7 @@ from rag_v3.container import container
 from rag_v3.core.config.app_settings import settings
 from rag_v3.core.config.nacos import nacos_client_manager
 from rag_v3.domain.entities import (
+    DocChunkEntity,
     DocumentRevisionEntity,
     ResourceAclEntity,
     ResourceIndexStateEntity,
@@ -50,6 +51,7 @@ async def lifespan(_: FastAPI):
             ResourceIndexStateEntity,
             ResourceAclEntity,
             DocumentRevisionEntity,
+            DocChunkEntity,
         ],
     )
     try:

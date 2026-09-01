@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from hashlib import sha256
 
-from common.utils.document import Anchor, Page, Section
+from common.utils.document import Anchor, Page, Section, SourceSpan
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +57,17 @@ def rag_section_id(
     return f"rsec_{sha256(identity.encode('utf-8')).hexdigest()[:24]}"
 
 
+def rag_chunk_id(
+    *,
+    resource_id: str,
+    content_revision: str,
+    common_chunk_id: str,
+) -> str:
+    """为 Common 局部 Chunk ID 增加资源和内容版本命名空间。"""
+    identity = f"{resource_id}\0{content_revision}\0{common_chunk_id}"
+    return f"rchk_{sha256(identity.encode('utf-8')).hexdigest()[:24]}"
+
+
 @dataclass(frozen=True, slots=True)
 class DocumentStructure:
     """RAG 保留的文档结构事实；Section ID 已是全局、版本化 ID。"""
@@ -98,6 +109,62 @@ class GeneralDocumentMetadata:
     """P0 唯一支持的通用文档 metadata，垂类联合类型留到插件阶段。"""
 
     document_type: str = "general"
+
+
+@dataclass(frozen=True, slots=True)
+class GeneralChunkMetadata:
+    """P1 唯一支持的通用 Chunk metadata。"""
+
+    chunk_type: str = "general"
+
+
+@dataclass(frozen=True, slots=True)
+class DocChunk:
+    """RAG 的检索原子；正文与坐标来自 Common 的一次分块结果。"""
+
+    chunk_id: str
+    resource_id: str
+    content_revision: str
+    chunk_index: int
+    section_id: str | None
+    section_path: tuple[str, ...]
+    raw_text: str
+    # 原文 Python 字符半开区间，允许一个 Chunk 覆盖多个完整 block。
+    source_spans: tuple[SourceSpan, ...]
+    page_labels: tuple[str, ...] = ()
+    anchor_labels: tuple[str, ...] = ()
+    contextual_prefix: str = ""
+    key_terms: tuple[str, ...] = ()
+    extracted_node_ids: tuple[str, ...] = ()
+    metadata: GeneralChunkMetadata = field(default_factory=GeneralChunkMetadata)
+
+    def __post_init__(self) -> None:
+        if not self.chunk_id:
+            raise ValueError("chunk_id must not be empty")
+        if self.chunk_index < 0:
+            raise ValueError("chunk_index must not be negative")
+        if not self.source_spans:
+            raise ValueError("source_spans must not be empty")
+
+    def get_semantic_text(self) -> str:
+        """构建 Dense 输入；不将该拼接结果作为持久化字段。"""
+        parts: list[str] = []
+        if self.section_path:
+            parts.append(" > ".join(self.section_path))
+        if self.contextual_prefix.strip():
+            parts.append(self.contextual_prefix.strip())
+        parts.append(self.raw_text)
+        return "\n\n".join(parts)
+
+    def get_lexical_text(self) -> str:
+        """构建 BM25 输入；不将该拼接结果作为持久化字段。"""
+        parts: list[str] = []
+        if self.section_path:
+            parts.append(" ".join(self.section_path))
+        if self.key_terms:
+            parts.append(" ".join(self.key_terms))
+        parts.append(self.raw_text)
+        return " ".join(parts)
 
 
 @dataclass(frozen=True, slots=True)

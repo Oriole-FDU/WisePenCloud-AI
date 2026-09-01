@@ -7,6 +7,7 @@ from common.utils.document import Section, SourceSpan
 from rag_v3.domain.acl import ResourceAcl
 from rag_v3.domain.models import (
     ContentRevision,
+    DocChunk,
     Document,
     DocumentStructure,
     ResourceIndexState,
@@ -44,6 +45,52 @@ class MemoryDocuments:
             document
             for document in self.documents.values()
             if any(section.section_id in wanted for section in document.structure.sections)
+        ]
+
+
+class MemoryDocChunks:
+    """DocumentPreparer 测试使用的 revision 级幂等 Chunk 仓储。"""
+
+    def __init__(self) -> None:
+        self.chunks: dict[str, DocChunk] = {}
+        self.save_calls = 0
+
+    async def save_revision(self, chunks: Sequence[DocChunk]) -> None:
+        self.save_calls += 1
+        for chunk in chunks:
+            self.chunks[chunk.chunk_id] = chunk
+
+    async def get_revision_chunks(
+        self,
+        *,
+        resource_id: str,
+        content_revision: str,
+    ) -> list[DocChunk]:
+        return sorted(
+            (
+                chunk
+                for chunk in self.chunks.values()
+                if chunk.resource_id == resource_id
+                and chunk.content_revision == content_revision
+            ),
+            key=lambda chunk: chunk.chunk_index,
+        )
+
+    async def get_section_chunks(
+        self,
+        *,
+        resource_id: str,
+        content_revision: str,
+        section_ids: Sequence[str],
+    ) -> list[DocChunk]:
+        wanted = set(section_ids)
+        return [
+            chunk
+            for chunk in await self.get_revision_chunks(
+                resource_id=resource_id,
+                content_revision=content_revision,
+            )
+            if chunk.section_id in wanted
         ]
 
 
