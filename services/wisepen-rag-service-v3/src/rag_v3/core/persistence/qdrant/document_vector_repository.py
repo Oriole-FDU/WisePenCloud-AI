@@ -8,8 +8,8 @@ from uuid import NAMESPACE_URL, uuid5
 from qdrant_client import AsyncQdrantClient
 from qdrant_client import models as qdrant_models
 
-from rag_v3.domain.acl import ResourceAcl
-from rag_v3.domain.models import DocChunk
+from rag_v3.domain.acl import PermissionScope, ResourceAcl
+from rag_v3.domain.models import DocChunk, VectorCandidate
 from rag_v3.domain.repositories.document_vectors import DocumentVectorRepository
 
 
@@ -95,6 +95,62 @@ class QdrantDocumentVectorRepository(DocumentVectorRepository):
         )
         return result.count == len(set(chunk_ids))
 
+    async def search_dense(
+        self,
+        *,
+        query_vector: Sequence[float],
+        scope: PermissionScope,
+        limit: int,
+    ) -> list[VectorCandidate]:
+        """只执行 Dense 初检；与 BM25 独立取 Top-N，禁止在 Qdrant 内融合。"""
+        if limit <= 0 or not query_vector:
+            return []
+        if len(query_vector) != self._dense_vector_size:
+            raise ValueError("query vector size does not match collection schema")
+        if not await self._client.collection_exists(self._collection_name):
+            return []
+        response = await self._client.query_points(
+            collection_name=self._collection_name,
+            query=list(query_vector),
+            using=self._dense_vector_name,
+            query_filter=_permission_filter(scope),
+            limit=limit,
+            with_payload=["chunk_id", "resource_id", "content_revision"],
+        )
+        return [
+            _candidate_from_payload(point.payload, dense_rank=index)
+            for index, point in enumerate(response.points, start=1)
+        ]
+
+    async def search_bm25(
+        self,
+        *,
+        query: str,
+        scope: PermissionScope,
+        limit: int,
+    ) -> list[VectorCandidate]:
+        """只执行 BM25 初检；候选之后再与 Dense 并集并交给 reranker。"""
+        if limit <= 0 or not query.strip():
+            return []
+        if not await self._client.collection_exists(self._collection_name):
+            return []
+        response = await self._client.query_points(
+            collection_name=self._collection_name,
+            query=qdrant_models.Document(
+                text=query,
+                model="qdrant/bm25",
+                options={"tokenizer": "multilingual"},
+            ),
+            using=self._sparse_vector_name,
+            query_filter=_permission_filter(scope),
+            limit=limit,
+            with_payload=["chunk_id", "resource_id", "content_revision"],
+        )
+        return [
+            _candidate_from_payload(point.payload, lexical_rank=index)
+            for index, point in enumerate(response.points, start=1)
+        ]
+
     async def _ensure_collection(self) -> None:
         if self._collection_ready:
             return
@@ -161,6 +217,27 @@ def _payload(chunk: DocChunk, resource_acl: ResourceAcl) -> dict[str, Any]:
     }
 
 
+def _candidate_from_payload(
+    payload: Mapping[str, object] | None,
+    *,
+    dense_rank: int | None = None,
+    lexical_rank: int | None = None,
+) -> VectorCandidate:
+    if payload is None:
+        raise ValueError("Qdrant candidate payload is missing")
+    values = [payload.get(key) for key in ("chunk_id", "resource_id", "content_revision")]
+    if not all(isinstance(value, str) and value for value in values):
+        raise ValueError("Qdrant candidate payload is incomplete")
+    chunk_id, resource_id, content_revision = values
+    return VectorCandidate(
+        chunk_id=chunk_id,
+        resource_id=resource_id,
+        content_revision=content_revision,
+        dense_rank=dense_rank,
+        lexical_rank=lexical_rank,
+    )
+
+
 def _revision_filter(
     resource_id: str,
     content_revision: str,
@@ -198,4 +275,79 @@ def _match(key: str, value: str) -> qdrant_models.FieldCondition:
     return qdrant_models.FieldCondition(
         key=key,
         match=qdrant_models.MatchValue(value=value),
+    )
+
+
+def _permission_filter(scope: PermissionScope) -> qdrant_models.Filter:
+    """生成与 ResourceAcl.can_read 相同优先级的 Qdrant ACL 预过滤。"""
+    user_id = scope.user_id
+    should: list[qdrant_models.Condition] = [
+        _match("owner_id", user_id),
+        _match("readable_users", user_id),
+    ]
+    group_filters: list[qdrant_models.Condition] = []
+    if scope.managed_group_ids:
+        group_filters.append(
+            _nested_group_filter(
+                qdrant_models.Filter(
+                    must=[
+                        qdrant_models.FieldCondition(
+                            key="group_id",
+                            match=qdrant_models.MatchAny(
+                                any=list(scope.managed_group_ids)
+                            ),
+                        )
+                    ]
+                )
+            )
+        )
+    if scope.joined_group_ids:
+        joined_group_ids = list(scope.joined_group_ids)
+        group_filters.extend(
+            (
+                _nested_group_filter(
+                    qdrant_models.Filter(
+                        must=[
+                            qdrant_models.FieldCondition(
+                                key="group_id",
+                                match=qdrant_models.MatchAny(any=joined_group_ids),
+                            ),
+                            qdrant_models.FieldCondition(
+                                key="default_readable",
+                                match=qdrant_models.MatchValue(value=True),
+                            ),
+                        ],
+                        must_not=[_match("excluded_read_users", user_id)],
+                    )
+                ),
+                _nested_group_filter(
+                    qdrant_models.Filter(
+                        must=[
+                            qdrant_models.FieldCondition(
+                                key="group_id",
+                                match=qdrant_models.MatchAny(any=joined_group_ids),
+                            ),
+                            qdrant_models.FieldCondition(
+                                key="default_readable",
+                                match=qdrant_models.MatchValue(value=False),
+                            ),
+                            _match("readable_users", user_id),
+                        ]
+                    )
+                ),
+            )
+        )
+    if group_filters:
+        should.append(
+            qdrant_models.Filter(
+                must_not=[_match("excluded_read_users", user_id)],
+                should=group_filters,
+            )
+        )
+    return qdrant_models.Filter(should=should)
+
+
+def _nested_group_filter(group_filter: qdrant_models.Filter) -> qdrant_models.NestedCondition:
+    return qdrant_models.NestedCondition(
+        nested=qdrant_models.Nested(key="group_acls", filter=group_filter)
     )

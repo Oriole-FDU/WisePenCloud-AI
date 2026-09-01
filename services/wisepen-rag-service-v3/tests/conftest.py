@@ -94,6 +94,24 @@ class MemoryDocChunks:
             if chunk.section_id in wanted
         ]
 
+    async def get_chunks_by_ids(self, chunk_ids: Sequence[str]) -> list[DocChunk]:
+        wanted = set(chunk_ids)
+        return [chunk for chunk in self.chunks.values() if chunk.chunk_id in wanted]
+
+    async def get_revisions_chunks(
+        self,
+        revisions: Sequence[tuple[str, str]],
+    ) -> list[DocChunk]:
+        wanted = set(revisions)
+        return sorted(
+            (
+                chunk
+                for chunk in self.chunks.values()
+                if (chunk.resource_id, chunk.content_revision) in wanted
+            ),
+            key=lambda chunk: (chunk.resource_id, chunk.content_revision, chunk.chunk_index),
+        )
+
 
 class MemoryDocumentVectors:
     """P1-B 测试使用的文档向量投影替身。"""

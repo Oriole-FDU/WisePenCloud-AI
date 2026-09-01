@@ -3,8 +3,8 @@
 from collections.abc import Mapping, Sequence
 from typing import Protocol
 
-from rag_v3.domain.acl import ResourceAcl
-from rag_v3.domain.models import DocChunk
+from rag_v3.domain.acl import PermissionScope, ResourceAcl
+from rag_v3.domain.models import DocChunk, VectorCandidate
 
 
 class DocumentVectorRepository(Protocol):
@@ -25,3 +25,19 @@ class DocumentVectorRepository(Protocol):
         content_revision: str,
         chunk_ids: Sequence[str],
     ) -> bool: ...
+
+    async def search_dense(
+        self,
+        *,
+        query_vector: Sequence[float],
+        scope: PermissionScope,
+        limit: int,
+    ) -> list[VectorCandidate]: ...
+
+    async def search_bm25(
+        self,
+        *,
+        query: str,
+        scope: PermissionScope,
+        limit: int,
+    ) -> list[VectorCandidate]: ...

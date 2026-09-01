@@ -48,6 +48,34 @@ class MongoDocChunkRepository(DocChunkRepository):
         )
         return [_to_domain(entity) for entity in entities]
 
+    async def get_chunks_by_ids(self, chunk_ids: Sequence[str]) -> list[DocChunk]:
+        """一次按初检并集回查，避免检索阶段按 Chunk 逐条访问 Mongo。"""
+        unique_chunk_ids = list(dict.fromkeys(chunk_ids))
+        if not unique_chunk_ids:
+            return []
+        entities = await DocChunkEntity.find(
+            {"chunk_id": {"$in": unique_chunk_ids}}
+        ).to_list()
+        return [_to_domain(entity) for entity in entities]
+
+    async def get_revisions_chunks(
+        self,
+        revisions: Sequence[tuple[str, str]],
+    ) -> list[DocChunk]:
+        """批量装载父块装箱所需的 revision 全量 Chunk，避免按资源循环。"""
+        unique_revisions = list(dict.fromkeys(revisions))
+        if not unique_revisions:
+            return []
+        entities = await DocChunkEntity.find(
+            {
+                "$or": [
+                    {"resource_id": resource_id, "content_revision": content_revision}
+                    for resource_id, content_revision in unique_revisions
+                ]
+            }
+        ).sort("+chunk_index").to_list()
+        return [_to_domain(entity) for entity in entities]
+
     async def get_section_chunks(
         self,
         *,

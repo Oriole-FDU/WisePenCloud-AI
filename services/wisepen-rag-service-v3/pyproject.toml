@@ -12,6 +12,7 @@ dependencies = [
     "pymongo>=4.17,<5",
     "openai>=2,<3",
     "qdrant-client>=1.18,<2",
+    "zeroentropy",
     "pyyaml",
     "uvicorn",
     "wisepen-common",

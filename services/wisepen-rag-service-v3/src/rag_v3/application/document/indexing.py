@@ -18,7 +18,6 @@ from rag_v3.domain.repositories.documents import DocumentRepository
 from rag_v3.domain.repositories.index_state import ResourceIndexStateRepository
 
 _SECTION_CONTEXT_LIMIT = 6_000
-_WINDOW_CONTEXT_LIMIT = 4_000
 _WINDOW_CHUNK_STEPS = 2
 _MAX_KEY_TERMS = 8
 _SYSTEM_PROMPT = """You enrich one private-document retrieval chunk.
@@ -244,19 +243,9 @@ def _shared_window(
     after = chunks[
         chunk_index + 1 : chunk_index + 1 + _WINDOW_CHUNK_STEPS
     ]
-    header = _window_header(chunk)
-    neighbor_budget = max(
-        0,
-        _WINDOW_CONTEXT_LIMIT - len(header) - len(chunk.raw_text) - 4,
-    )
-    before_text = "\n\n".join(item.raw_text for item in before)[
-        -(neighbor_budget // 2) :
-    ]
-    after_text = "\n\n".join(item.raw_text for item in after)[
-        : neighbor_budget - len(before_text)
-    ]
-    parts = [part for part in (before_text, chunk.raw_text, after_text) if part]
-    return header + "\n\n" + "\n\n".join(parts)
+    # 800 字符 Chunk 的自然窗口约为五个 Chunk；这里不是模型预算，不能裁掉邻居。
+    parts = [item.raw_text for item in (*before, chunk, *after) if item.raw_text]
+    return _window_header(chunk) + "\n\n" + "\n\n".join(parts)
 
 
 def _section_text(document: Document, section: Section) -> str:

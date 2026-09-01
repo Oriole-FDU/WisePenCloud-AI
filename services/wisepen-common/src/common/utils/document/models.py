@@ -33,6 +33,11 @@ class SourceSpan:
                 "source span must satisfy 0 <= start_offset <= end_offset"
             )
 
+    @property
+    def length(self) -> int:
+        """返回半开区间覆盖的 Python 字符数。"""
+        return self.end_offset - self.start_offset
+
 
 @dataclass(frozen=True, slots=True)
 class DocumentBlock:

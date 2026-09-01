@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 
 from common.utils.document import Anchor, Page, Section, SourceSpan
+from common.utils.ranking import RankDecision
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +166,72 @@ class DocChunk:
             parts.append(" ".join(self.key_terms))
         parts.append(self.raw_text)
         return " ".join(parts)
+
+
+@dataclass(frozen=True, slots=True)
+class VectorCandidate:
+    """Qdrant 初检候选；只携带 Mongo 回查和两路审计所需的引用。"""
+
+    chunk_id: str
+    resource_id: str
+    content_revision: str
+    dense_rank: int | None = None
+    lexical_rank: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HybridQuery:
+    """混合检索的调用输入；最终命中数必须由调用方明确决定。"""
+
+    semantic_query: str
+    top_k: int
+    lexical_query: str = ""
+
+    def __post_init__(self) -> None:
+        semantic_query = self.semantic_query.strip()
+        if not semantic_query:
+            raise ValueError("semantic_query must not be empty")
+        if self.top_k <= 0:
+            raise ValueError("top_k must be positive")
+        # 未提供关键词时沿用语义查询；调用方给出的非空关键词始终优先。
+        object.__setattr__(self, "semantic_query", semantic_query)
+        object.__setattr__(self, "lexical_query", self.lexical_query.strip() or semantic_query)
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkHit:
+    """通过版本、ACL 与相关性门控后的检索原子。"""
+
+    chunk_id: str
+    resource_id: str
+    content_revision: str
+    section_id: str | None
+    section_path: tuple[str, ...]
+    rerank_score: float
+    node_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DynamicParent:
+    """查询时由权威 Markdown 重建的完整连续阅读区间。"""
+
+    parent_id: str
+    resource_id: str
+    content_revision: str
+    section_ids: tuple[str, ...]
+    text: str
+    source_spans: tuple[SourceSpan, ...]  # Python 字符半开区间。
+    matched_chunk_ids: tuple[str, ...]
+    score: float
+
+
+@dataclass(frozen=True, slots=True)
+class HybridRetrievalResult:
+    """混合检索结果；实体节点始终随具体命中 Chunk 返回。"""
+
+    hits: tuple[ChunkHit, ...]
+    parents: tuple[DynamicParent, ...]
+    relevance_decision: RankDecision
 
 
 @dataclass(frozen=True, slots=True)

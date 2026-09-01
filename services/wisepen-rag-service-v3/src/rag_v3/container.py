@@ -1,12 +1,23 @@
 """P0/P1 外部依赖装配：Mongo 客户端、仓储和 application 用例。"""
 
+from common.utils.ranking import RankingPipeline
+from common.utils.ranking.rank_gates import (
+    HighLowRelevanceGate,
+    HighLowRelevanceGateConfig,
+)
+from common.utils.ranking.rerankers import (
+    ZeroEntropyReranker,
+    ZeroEntropyRerankerConfig,
+)
 from dependency_injector import containers, providers
 from openai import AsyncOpenAI
 from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient
+from zeroentropy import AsyncZeroEntropy
 
 from rag_v3.application.document import DocumentIndexBuilder, DocumentPreparer
 from rag_v3.application.publication import AclSynchronizer, DocumentPublication
+from rag_v3.application.retrieval import HybridRetriever
 from rag_v3.application.snapshot import ActiveDocumentSnapshotLoader
 from rag_v3.core.config.app_settings import settings
 from rag_v3.core.persistence.mongo import (
@@ -21,6 +32,25 @@ from rag_v3.core.persistence.qdrant import QdrantDocumentVectorRepository
 
 def _resource_items_collection(client: AsyncMongoClient):
     return client[settings.resource_mongodb_db_name]["wispen_resource_items"]
+
+
+def _build_ranking_pipeline(
+    zero_entropy_client: AsyncZeroEntropy,
+) -> RankingPipeline:
+    """V3 只保留精排和相关性门控；两路 Qdrant 结果不在此处融合。"""
+    return RankingPipeline(
+        reranker=ZeroEntropyReranker(
+            client=zero_entropy_client,
+            config=ZeroEntropyRerankerConfig(model=settings.RERANKER_MODEL),
+        ),
+        gate=HighLowRelevanceGate(
+            HighLowRelevanceGateConfig(
+                low_watermark=settings.RAG_RERANK_RELEVANCE_LOW_WATERMARK,
+                high_watermark=settings.RAG_RERANK_RELEVANCE_HIGH_WATERMARK,
+                uncertain_limit=settings.RAG_RERANK_UNCERTAIN_LIMIT,
+            )
+        ),
+    )
 
 
 class Container(containers.DeclarativeContainer):
@@ -44,6 +74,14 @@ class Container(containers.DeclarativeContainer):
         AsyncOpenAI,
         base_url=settings.LLM_BASE_URL,
         api_key=settings.LLM_API_KEY,
+    )
+    zero_entropy_client = providers.Singleton(
+        AsyncZeroEntropy,
+        api_key=settings.ZERO_ENTROPY_API_KEY,
+    )
+    hybrid_ranking_pipeline = providers.Singleton(
+        _build_ranking_pipeline,
+        zero_entropy_client=zero_entropy_client,
     )
     qdrant_client = providers.Singleton(
         AsyncQdrantClient,
@@ -96,6 +134,18 @@ class Container(containers.DeclarativeContainer):
         documents=documents,
         index_states=index_states,
         resource_acls=resource_acls,
+    )
+    hybrid_retriever = providers.Factory(
+        HybridRetriever,
+        documents=documents,
+        doc_chunks=doc_chunks,
+        document_vectors=document_vectors,
+        index_states=index_states,
+        resource_acls=resource_acls,
+        ranking_pipeline=hybrid_ranking_pipeline,
+        openai_client=openai_client,
+        embedding_model=settings.EMBEDDING_MODEL,
+        embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
     )
 
 

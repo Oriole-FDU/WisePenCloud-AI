@@ -152,7 +152,7 @@ async def test_index_builder_rejects_missing_acl_before_model_calls() -> None:
     assert states.states["resource"].applied_content_revision is None
 
 
-def test_shared_window_prefers_short_section_and_bounds_long_or_flat_context() -> None:
+def test_shared_window_prefers_short_section_and_keeps_neighbor_chunks_complete() -> None:
     short_document = document(
         resource_id="resource",
         version=1,
@@ -175,8 +175,7 @@ def test_shared_window_prefers_short_section_and_bounds_long_or_flat_context() -
         for index in range(5)
     ]
     window = _shared_window(long_document, long_chunks, long_chunks[2])
-    assert "222" in window
-    assert len(window) <= 4_010
+    assert all(str(index) * 800 in window for index in range(5))
 
     flat_chunk = _chunk(section_id=None, index=0, text="flat target")
     assert _shared_window(short_document, [flat_chunk], flat_chunk).endswith(

@@ -18,6 +18,13 @@ class DocChunkRepository(Protocol):
         content_revision: str,
     ) -> list[DocChunk]: ...
 
+    async def get_chunks_by_ids(self, chunk_ids: Sequence[str]) -> list[DocChunk]: ...
+
+    async def get_revisions_chunks(
+        self,
+        revisions: Sequence[tuple[str, str]],
+    ) -> list[DocChunk]: ...
+
     async def get_section_chunks(
         self,
         *,
