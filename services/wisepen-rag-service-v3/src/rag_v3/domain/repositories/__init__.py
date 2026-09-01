@@ -17,3 +17,14 @@ __all__ = [
     "ResourceIndexStateRepository",
     "StageAction",
 ]
+from .graph_projections import (
+    GraphEdgeVectorRepository,
+    GraphNodeVectorRepository,
+    GraphTopologyRepository,
+)
+
+__all__ = [
+    "GraphEdgeVectorRepository",
+    "GraphNodeVectorRepository",
+    "GraphTopologyRepository",
+]

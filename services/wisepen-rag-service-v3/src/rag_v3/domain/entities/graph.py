@@ -18,6 +18,7 @@ class GraphNodeProjectionEntity(Document):
     content_revision: str
     evidence_ids: list[str] = Field(default_factory=list)
     producer_id: str | None = None
+    filter_values: dict[str, str | int | float | bool] = Field(default_factory=dict)
 
     class Settings:
         name = "graph_node_projections"
@@ -38,6 +39,7 @@ class GraphEdgeProjectionEntity(Document):
     content_revision: str
     evidence_ids: list[str] = Field(default_factory=list)
     producer_id: str | None = None
+    filter_values: dict[str, str | int | float | bool] = Field(default_factory=dict)
 
     class Settings:
         name = "graph_edge_projections"

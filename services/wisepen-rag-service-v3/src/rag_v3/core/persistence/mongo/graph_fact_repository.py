@@ -1,5 +1,6 @@
 """Beanie adapter：按 revision 保存图谱事实，不实现图查询。"""
 
+from common.utils.document import SourceSpan
 from pymongo import ReplaceOne
 
 from rag_v3.domain.entities.documents import StoredSpan
@@ -11,6 +12,7 @@ from rag_v3.domain.entities.graph import (
 from rag_v3.domain.graph import (
     GraphEdgeProjection,
     GraphNodeProjection,
+    GraphRevisionFacts,
     TextGraphEvidence,
 )
 from rag_v3.domain.repositories.graph import GraphFactRepository
@@ -40,6 +42,62 @@ class MongoGraphFactRepository(GraphFactRepository):
         await _replace_edges(edges)
         await _replace_evidences(evidences)
 
+    async def get_revision_facts(
+        self,
+        *,
+        resource_id: str,
+        content_revision: str,
+    ) -> GraphRevisionFacts:
+        """按 revision 批量读取全部事实；投影层不逐图元回查 Mongo。"""
+        revision_filter = {
+            "resource_id": resource_id,
+            "content_revision": content_revision,
+        }
+        nodes = await GraphNodeProjectionEntity.find(revision_filter).to_list()
+        edges = await GraphEdgeProjectionEntity.find(revision_filter).to_list()
+        evidences = await TextGraphEvidenceEntity.find(revision_filter).to_list()
+        return GraphRevisionFacts(
+            nodes=tuple(
+                GraphNodeProjection(
+                    node=item.node,
+                    resource_id=item.resource_id,
+                    content_revision=item.content_revision,
+                    evidence_ids=tuple(item.evidence_ids),
+                    producer_id=item.producer_id,
+                    filter_values=item.filter_values,
+                )
+                for item in nodes
+            ),
+            edges=tuple(
+                GraphEdgeProjection(
+                    edge=item.edge,
+                    resource_id=item.resource_id,
+                    content_revision=item.content_revision,
+                    evidence_ids=tuple(item.evidence_ids),
+                    producer_id=item.producer_id,
+                    filter_values=item.filter_values,
+                )
+                for item in edges
+            ),
+            evidences=tuple(
+                TextGraphEvidence(
+                    evidence_id=item.evidence_id,
+                    target_type=item.target_type,
+                    target_id=item.target_id,
+                    resource_id=item.resource_id,
+                    content_revision=item.content_revision,
+                    section_id=item.section_id,
+                    chunk_id=item.chunk_id,
+                    source_spans=tuple(
+                        SourceSpan(span.start_offset, span.end_offset)
+                        for span in item.source_spans
+                    ),
+                    quote_text=item.quote_text,
+                )
+                for item in evidences
+            ),
+        )
+
 
 async def _replace_nodes(nodes: tuple[GraphNodeProjection, ...]) -> None:
     if not nodes:
@@ -59,6 +117,7 @@ async def _replace_nodes(nodes: tuple[GraphNodeProjection, ...]) -> None:
                     "content_revision": node.content_revision,
                     "evidence_ids": list(node.evidence_ids),
                     "producer_id": node.producer_id,
+                    "filter_values": node.filter_values,
                 },
                 upsert=True,
             )
@@ -85,6 +144,7 @@ async def _replace_edges(edges: tuple[GraphEdgeProjection, ...]) -> None:
                     "content_revision": edge.content_revision,
                     "evidence_ids": list(edge.evidence_ids),
                     "producer_id": edge.producer_id,
+                    "filter_values": edge.filter_values,
                 },
                 upsert=True,
             )

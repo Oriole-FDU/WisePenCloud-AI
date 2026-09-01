@@ -5,6 +5,7 @@ from typing import Protocol
 from rag_v3.domain.graph import (
     GraphEdgeProjection,
     GraphNodeProjection,
+    GraphRevisionFacts,
     TextGraphEvidence,
 )
 
@@ -21,3 +22,10 @@ class GraphFactRepository(Protocol):
         edges: tuple[GraphEdgeProjection, ...],
         evidences: tuple[TextGraphEvidence, ...],
     ) -> None: ...
+
+    async def get_revision_facts(
+        self,
+        *,
+        resource_id: str,
+        content_revision: str,
+    ) -> GraphRevisionFacts: ...

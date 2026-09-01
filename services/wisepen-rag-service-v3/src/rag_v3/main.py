@@ -79,6 +79,12 @@ async def lifespan(_: FastAPI):
         await container.qdrant_client().close()
     except Exception as exc:  # noqa: BLE001  # pragma: no cover - 退出时尽力关闭客户端
         error("qdrant client close failed.", exc=exc)
+    neo4j_driver = container.neo4j_driver()
+    if neo4j_driver is not None:
+        try:
+            await neo4j_driver.close()
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - 退出时尽力关闭客户端
+            error("neo4j driver close failed.", exc=exc)
     try:
         await nacos_client_manager.deregister_instance()
     except Exception as exc:  # noqa: BLE001  # pragma: no cover - 注销失败不阻断退出

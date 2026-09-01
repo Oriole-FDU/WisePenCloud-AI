@@ -87,6 +87,7 @@ class GraphFactBuilder:
     def __init__(
         self,
         *,
+        enabled: bool = True,
         documents: DocumentRepository,
         doc_chunks: DocChunkRepository,
         graph_facts: GraphFactRepository,
@@ -98,6 +99,7 @@ class GraphFactBuilder:
     ) -> None:
         if max_concurrency <= 0:
             raise ValueError("max_concurrency must be positive")
+        self._enabled = enabled
         self._documents = documents
         self._doc_chunks = doc_chunks
         self._graph_facts = graph_facts
@@ -109,6 +111,8 @@ class GraphFactBuilder:
 
     async def build(self, *, resource_id: str) -> GraphBuildResult | None:
         """只补建当前 active revision；没有匹配插件时不调用模型也不写图。"""
+        if not self._enabled:
+            return None
         state = (await self._index_states.get_states([resource_id])).get(resource_id)
         if state is None or state.applied_content_revision is None:
             return None
@@ -175,6 +179,7 @@ class GraphFactBuilder:
         dict[str, list[str]],
     ]:
         deterministic_nodes, deterministic_edges = _deterministic_facts(document, plugin)
+        filter_values = plugin.filter_values(document)
         llm_nodes: dict[str, GraphNode] = {}
         llm_edges: dict[str, GraphEdge] = {}
         evidence_ids_by_target: dict[tuple[str, str], list[str]] = defaultdict(list)
@@ -215,6 +220,7 @@ class GraphFactBuilder:
                 resource_id=document.resource_id,
                 content_revision=document.revision.content_revision,
                 producer_id=plugin.plugin_id,
+                filter_values=filter_values,
             )
             for node in deterministic_nodes.values()
         ]
@@ -224,6 +230,7 @@ class GraphFactBuilder:
                 resource_id=document.resource_id,
                 content_revision=document.revision.content_revision,
                 producer_id=plugin.plugin_id,
+                filter_values=filter_values,
             )
             for edge in deterministic_edges.values()
         ]
@@ -233,6 +240,7 @@ class GraphFactBuilder:
                 resource_id=document.resource_id,
                 content_revision=document.revision.content_revision,
                 evidence_ids=tuple(dict.fromkeys(evidence_ids_by_target[("node", node_id)])),
+                filter_values=filter_values,
             )
             for node_id, node in llm_nodes.items()
         )
@@ -242,6 +250,7 @@ class GraphFactBuilder:
                 resource_id=document.resource_id,
                 content_revision=document.revision.content_revision,
                 evidence_ids=tuple(dict.fromkeys(evidence_ids_by_target[("edge", edge_id)])),
+                filter_values=filter_values,
             )
             for edge_id, edge in llm_edges.items()
         )

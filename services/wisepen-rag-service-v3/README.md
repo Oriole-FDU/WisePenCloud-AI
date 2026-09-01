@@ -20,11 +20,12 @@ RAG V3 是一次全量重写。Common 只提供无业务含义的文档结构事
   -> contextual_prefix / key_terms 增强
   -> Dense + BM25 文本索引
   -> LLM 图谱抽取或垂类确定性 producer
-  -> GraphNode / GraphEdge；LLM 抽取额外产生 TextGraphEvidence
+  -> Mongo GraphNode / GraphEdge / TextGraphEvidence
+  -> 独立补建 Neo4j 拓扑 + 图谱 Node/Edge 向量投影
   -> active revision 发布
 ```
 
-写入不是边写边可见。一个新 `content_revision` 先进入 staged 状态，完成 Mongo 事实、Qdrant 索引和 Neo4j 投影后，才通过条件更新成为 applied。查询只接受 active 指针指向的版本。
+文档写入不是边写边可见：新 `content_revision` 先进入 staged，完成 Document、DocChunk 和文档检索投影后才通过条件更新成为 applied。图谱是附加能力，Mongo 图谱事实、Neo4j 拓扑和图谱向量均在发布后独立补建；它们失败不会改变 active 指针，也不会影响混合检索。
 
 ## 3. 核心领域模型
 
@@ -124,7 +125,7 @@ Qdrant payload、Neo4j 属性、标题树视图和动态父块都不是权威来
 1. 先实现领域模型、Mongo revision/ACL 仓储和 staged/applied 发布状态。
 2. 再实现 DocChunk 生成、增强产物和 Qdrant Dense/BM25 入库。
 3. 实现混合检索、回查、相关性门控和动态父块。
-4. 接入图谱 Node/Edge、LLM TextGraphEvidence、两个图谱 Qdrant collection 和 Ontology/确定性 producer 插件接口。
+4. 接入图谱 Node/Edge、LLM TextGraphEvidence、Ontology/确定性 producer 插件，以及发布后独立的 Neo4j/Qdrant 图谱投影。
 5. 实现统一标题树渲染、三种入口和读取 Page/Section。
 6. 最后接入上层工具编排；工具层不反向扩张 RAG 契约。
 

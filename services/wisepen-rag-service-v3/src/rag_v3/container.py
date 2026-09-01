@@ -10,13 +10,14 @@ from common.utils.ranking.rerankers import (
     ZeroEntropyRerankerConfig,
 )
 from dependency_injector import containers, providers
+from neo4j import AsyncGraphDatabase
 from openai import AsyncOpenAI
 from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient
 from zeroentropy import AsyncZeroEntropy
 
 from rag_v3.application.document import DocumentIndexBuilder, DocumentPreparer
-from rag_v3.application.graph import GraphFactBuilder
+from rag_v3.application.graph import GraphFactBuilder, GraphProjectionBuilder
 from rag_v3.application.publication import AclSynchronizer, DocumentPublication
 from rag_v3.application.retrieval import HybridRetriever
 from rag_v3.application.snapshot import ActiveDocumentSnapshotLoader
@@ -29,7 +30,12 @@ from rag_v3.core.persistence.mongo import (
     MongoResourceAclRepository,
     MongoResourceIndexStateRepository,
 )
-from rag_v3.core.persistence.qdrant import QdrantDocumentVectorRepository
+from rag_v3.core.persistence.neo4j import Neo4jGraphTopologyRepository
+from rag_v3.core.persistence.qdrant import (
+    QdrantDocumentVectorRepository,
+    QdrantGraphEdgeVectorRepository,
+    QdrantGraphNodeVectorRepository,
+)
 from rag_v3.domain.plugins import DocumentMetadataRegistry
 
 
@@ -109,6 +115,34 @@ class Container(containers.DeclarativeContainer):
         dense_vector_name=settings.QDRANT_DOCUMENT_DENSE_VECTOR_NAME,
         sparse_vector_name=settings.QDRANT_DOCUMENT_SPARSE_VECTOR_NAME,
     )
+    graph_node_vectors = providers.Singleton(
+        QdrantGraphNodeVectorRepository,
+        client=qdrant_client,
+        collection_name=settings.QDRANT_GRAPH_NODE_COLLECTION_NAME,
+        dense_vector_size=settings.EMBEDDING_DIMENSIONS,
+        dense_vector_name=settings.QDRANT_GRAPH_NODE_DENSE_VECTOR_NAME,
+    )
+    graph_edge_vectors = providers.Singleton(
+        QdrantGraphEdgeVectorRepository,
+        client=qdrant_client,
+        collection_name=settings.QDRANT_GRAPH_EDGE_COLLECTION_NAME,
+        dense_vector_size=settings.EMBEDDING_DIMENSIONS,
+        dense_vector_name=settings.QDRANT_GRAPH_EDGE_DENSE_VECTOR_NAME,
+        sparse_vector_name=settings.QDRANT_GRAPH_EDGE_SPARSE_VECTOR_NAME,
+    )
+    if settings.GRAPH_ENABLED:
+        neo4j_driver = providers.Singleton(
+            AsyncGraphDatabase.driver,
+            settings.NEO4J_URI,
+            auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
+        )
+        graph_topology = providers.Singleton(
+            Neo4jGraphTopologyRepository,
+            driver=neo4j_driver,
+        )
+    else:
+        neo4j_driver = providers.Object(None)
+        graph_topology = providers.Object(None)
 
     document_publication = providers.Factory(
         DocumentPublication,
@@ -150,6 +184,7 @@ class Container(containers.DeclarativeContainer):
     graph_facts = providers.Singleton(MongoGraphFactRepository)
     graph_fact_builder = providers.Factory(
         GraphFactBuilder,
+        enabled=settings.GRAPH_ENABLED,
         documents=documents,
         doc_chunks=doc_chunks,
         graph_facts=graph_facts,
@@ -158,6 +193,21 @@ class Container(containers.DeclarativeContainer):
         openai_client=openai_client,
         query_model=settings.QUERY_MODEL,
         max_concurrency=settings.DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY,
+    )
+    graph_projection_builder = providers.Factory(
+        GraphProjectionBuilder,
+        enabled=settings.GRAPH_ENABLED,
+        documents=documents,
+        doc_chunks=doc_chunks,
+        graph_facts=graph_facts,
+        resource_acls=resource_acls,
+        index_states=index_states,
+        topology=graph_topology,
+        node_vectors=graph_node_vectors,
+        edge_vectors=graph_edge_vectors,
+        openai_client=openai_client,
+        embedding_model=settings.EMBEDDING_MODEL,
+        embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
     )
     hybrid_retriever = providers.Factory(
         HybridRetriever,

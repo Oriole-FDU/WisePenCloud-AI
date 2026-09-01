@@ -30,12 +30,21 @@ class AppSettings(BaseModel):
     RAG_RERANK_RELEVANCE_HIGH_WATERMARK: float = 0.6
     RAG_RERANK_UNCERTAIN_LIMIT: int = 3
     DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY: int = 5
+    GRAPH_ENABLED: bool = False
+    NEO4J_URI: str = ""
+    NEO4J_USERNAME: str = ""
+    NEO4J_PASSWORD: str = ""
     QDRANT_HOST: str
     QDRANT_PORT: int = 6333
     QDRANT_PASSWORD: str = ""
     QDRANT_DOCUMENT_CHUNK_COLLECTION_NAME: str = "document_chunk_vectors"
     QDRANT_DOCUMENT_DENSE_VECTOR_NAME: str = "dense"
     QDRANT_DOCUMENT_SPARSE_VECTOR_NAME: str = "sparse"
+    QDRANT_GRAPH_NODE_COLLECTION_NAME: str = "graph_node_vectors"
+    QDRANT_GRAPH_EDGE_COLLECTION_NAME: str = "graph_edge_vectors"
+    QDRANT_GRAPH_NODE_DENSE_VECTOR_NAME: str = "dense"
+    QDRANT_GRAPH_EDGE_DENSE_VECTOR_NAME: str = "dense"
+    QDRANT_GRAPH_EDGE_SPARSE_VECTOR_NAME: str = "sparse"
 
     @property
     def resource_mongodb_db_name(self) -> str:

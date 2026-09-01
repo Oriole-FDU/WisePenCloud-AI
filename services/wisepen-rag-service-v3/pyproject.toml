@@ -8,6 +8,7 @@ dependencies = [
     "dependency-injector>=4.49,<5",
     "fastapi>=0.136,<1",
     "instructor>=1,<2",
+    "neo4j>=6,<7",
     "pydantic>=2,<3",
     "pydantic-settings>=2,<3",
     "pymongo>=4.17,<5",

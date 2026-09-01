@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
 from rag_v3.domain.graph import GraphEdge, GraphNode, Ontology
@@ -26,6 +26,10 @@ class GraphPlugin:
         ontology: Ontology,
         deterministic_producer: DeterministicGraphProducer | None = None,
         enable_llm_extraction: bool = True,
+        metadata_filter_values: Callable[
+            [Document], Mapping[str, str | int | float | bool]
+        ]
+        | None = None,
     ) -> None:
         if not plugin_id.strip():
             raise ValueError("plugin_id must not be empty")
@@ -34,9 +38,16 @@ class GraphPlugin:
         self.ontology = ontology
         self.deterministic_producer = deterministic_producer
         self.enable_llm_extraction = enable_llm_extraction
+        self._metadata_filter_values = metadata_filter_values
 
     def matches(self, metadata: DocumentMetadata) -> bool:
         return type(metadata) is self.metadata_type
+
+    def filter_values(self, document: Document) -> dict[str, str | int | float | bool]:
+        """只由插件决定哪些强类型 metadata 可以成为查询过滤字段。"""
+        if self._metadata_filter_values is None:
+            return {}
+        return dict(self._metadata_filter_values(document))
 
 
 class DocumentMetadataRegistry:

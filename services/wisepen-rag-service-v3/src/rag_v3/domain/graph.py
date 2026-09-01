@@ -81,6 +81,8 @@ class GraphNodeProjection(BaseModel):
     content_revision: str
     evidence_ids: tuple[str, ...] = ()
     producer_id: str | None = None
+    # 只保存插件明确声明、且图谱查询实际需要下推的 metadata 标量值。
+    filter_values: dict[str, str | int | float | bool] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_source(self) -> GraphNodeProjection:
@@ -99,6 +101,7 @@ class GraphEdgeProjection(BaseModel):
     content_revision: str
     evidence_ids: tuple[str, ...] = ()
     producer_id: str | None = None
+    filter_values: dict[str, str | int | float | bool] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_source(self) -> GraphEdgeProjection:
@@ -156,6 +159,16 @@ class Ontology(BaseModel):
             raise ValueError("relation target category is not allowed")
 
 
+class GraphRevisionFacts(BaseModel):
+    """Mongo 中同一资源 revision 的完整图谱事实，用于重建外部投影。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    nodes: tuple[GraphNodeProjection, ...] = ()
+    edges: tuple[GraphEdgeProjection, ...] = ()
+    evidences: tuple[TextGraphEvidence, ...] = ()
+
+
 def graph_node_id(*, category: str, name: str) -> str:
     """按类别和规范化名称生成可跨 revision 合并的稳定节点 ID。"""
     return "gn_" + _stable_hash(category, name)
@@ -187,6 +200,26 @@ def graph_evidence_id(
         str(span.start_offset),
         str(span.end_offset),
         quote_text,
+    )
+
+
+def graph_source_projection_id(
+    *,
+    target_type: Literal["node", "edge"],
+    target_id: str,
+    resource_id: str,
+    content_revision: str,
+    evidence_ids: tuple[str, ...] = (),
+    producer_id: str | None = None,
+) -> str:
+    """为一个图元来源生成跨 Neo4j 与 Qdrant 共用的稳定身份。"""
+    source = producer_id or "\0".join(sorted(evidence_ids))
+    return "gsp_" + _stable_hash(
+        target_type,
+        target_id,
+        resource_id,
+        content_revision,
+        source,
     )
 
 
