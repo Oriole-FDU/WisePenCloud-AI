@@ -1,5 +1,7 @@
 """Beanie adapter：按 revision 保存图谱事实，不实现图查询。"""
 
+from collections.abc import Sequence
+
 from common.utils.document import SourceSpan
 from pymongo import ReplaceOne
 
@@ -97,6 +99,32 @@ class MongoGraphFactRepository(GraphFactRepository):
                 for item in evidences
             ),
         )
+
+    async def get_evidences(self, evidence_ids: Sequence[str]) -> list[TextGraphEvidence]:
+        """按 ID 批量回查 LLM 证据；图检索不逐图元访问 Mongo。"""
+        ids = list(dict.fromkeys(evidence_ids))
+        if not ids:
+            return []
+        entities = await TextGraphEvidenceEntity.find(
+            {"evidence_id": {"$in": ids}}
+        ).to_list()
+        return [
+            TextGraphEvidence(
+                evidence_id=item.evidence_id,
+                target_type=item.target_type,
+                target_id=item.target_id,
+                resource_id=item.resource_id,
+                content_revision=item.content_revision,
+                section_id=item.section_id,
+                chunk_id=item.chunk_id,
+                source_spans=tuple(
+                    SourceSpan(span.start_offset, span.end_offset)
+                    for span in item.source_spans
+                ),
+                quote_text=item.quote_text,
+            )
+            for item in entities
+        ]
 
 
 async def _replace_nodes(nodes: tuple[GraphNodeProjection, ...]) -> None:

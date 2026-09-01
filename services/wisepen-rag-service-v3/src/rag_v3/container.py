@@ -19,7 +19,7 @@ from zeroentropy import AsyncZeroEntropy
 from rag_v3.application.document import DocumentIndexBuilder, DocumentPreparer
 from rag_v3.application.graph import GraphFactBuilder, GraphProjectionBuilder
 from rag_v3.application.publication import AclSynchronizer, DocumentPublication
-from rag_v3.application.retrieval import HybridRetriever
+from rag_v3.application.retrieval import GraphRetriever, HybridRetriever
 from rag_v3.application.snapshot import ActiveDocumentSnapshotLoader
 from rag_v3.core.config.app_settings import settings
 from rag_v3.core.persistence.mongo import (
@@ -217,6 +217,23 @@ class Container(containers.DeclarativeContainer):
         index_states=index_states,
         resource_acls=resource_acls,
         ranking_pipeline=hybrid_ranking_pipeline,
+        openai_client=openai_client,
+        embedding_model=settings.EMBEDDING_MODEL,
+        embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
+    )
+    graph_retriever = providers.Factory(
+        GraphRetriever,
+        enabled=settings.GRAPH_ENABLED,
+        topology=graph_topology,
+        node_vectors=graph_node_vectors,
+        edge_vectors=graph_edge_vectors,
+        graph_facts=graph_facts,
+        doc_chunks=doc_chunks,
+        documents=documents,
+        index_states=index_states,
+        resource_acls=resource_acls,
+        ranking_pipeline=hybrid_ranking_pipeline,
+        plugins=graph_plugins,
         openai_client=openai_client,
         embedding_model=settings.EMBEDDING_MODEL,
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,

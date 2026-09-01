@@ -306,7 +306,7 @@ def test_source_projection_identity_keeps_resources_separate() -> None:
     item = _node_item(first_node, acl)
     assert item["producer_id"] == "paper-v1"
     assert item["evidence_ids"] == []
-    assert item["filter_values"] == {"reference_year": 2025}
+    assert item["filter_properties"] == {"filter_reference_year": 2025}
 
 
 class _Qdrant:

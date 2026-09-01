@@ -6,10 +6,17 @@ from typing import Any
 
 from neo4j import AsyncDriver
 
-from rag_v3.domain.acl import ResourceAcl
+from rag_v3.domain.acl import PermissionScope, ResourceAcl
 from rag_v3.domain.graph import (
+    GraphEdge,
     GraphEdgeProjection,
+    GraphFilterCondition,
+    GraphFilterOperator,
+    GraphNode,
     GraphNodeProjection,
+    GraphSourceProjection,
+    GraphVectorCandidate,
+    TraversalDirection,
     graph_source_projection_id,
 )
 from rag_v3.domain.repositories.graph_projections import GraphTopologyRepository
@@ -58,12 +65,15 @@ SET source.target_type = 'node',
     source.content_revision = item.content_revision,
     source.producer_id = item.producer_id,
     source.evidence_ids = item.evidence_ids,
-    source.filter_values = item.filter_values,
     source.acl_revision = item.acl_revision,
     source.owner_id = item.owner_id,
     source.readable_users = item.readable_users,
     source.excluded_read_users = item.excluded_read_users,
-    source.group_acls = item.group_acls
+    source.group_ids = item.group_ids,
+    source.default_readable_group_ids = item.default_readable_group_ids,
+    source.group_readable_subjects = item.group_readable_subjects,
+    source.group_excluded_subjects = item.group_excluded_subjects
+SET source += item.filter_properties
 MERGE (source)-[:RAG_V3_PROJECTS_NODE]->(node)
 """
 
@@ -85,12 +95,15 @@ SET source.target_type = 'edge',
     source.content_revision = item.content_revision,
     source.producer_id = item.producer_id,
     source.evidence_ids = item.evidence_ids,
-    source.filter_values = item.filter_values,
     source.acl_revision = item.acl_revision,
     source.owner_id = item.owner_id,
     source.readable_users = item.readable_users,
     source.excluded_read_users = item.excluded_read_users,
-    source.group_acls = item.group_acls
+    source.group_ids = item.group_ids,
+    source.default_readable_group_ids = item.default_readable_group_ids,
+    source.group_readable_subjects = item.group_readable_subjects,
+    source.group_excluded_subjects = item.group_excluded_subjects
+SET source += item.filter_properties
 MERGE (source)-[:RAG_V3_PROJECTS_EDGE]->(edge)
 """
 
@@ -148,6 +161,93 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
         async with self._driver.session() as session:
             await session.run(_DELETE_RESOURCES, resource_ids=ids)
             await session.run(_DELETE_ORPHANS)
+
+    async def traverse(
+        self,
+        *,
+        candidates: Sequence[GraphVectorCandidate],
+        seed_node_ids: Sequence[str],
+        scope: PermissionScope,
+        resource_ids: Sequence[str] | None,
+        relation_types: Sequence[str],
+        direction: TraversalDirection,
+        max_depth: int,
+        metadata_filters: Sequence[GraphFilterCondition],
+        limit: int,
+    ) -> list[GraphSourceProjection]:
+        """从有限 vector/seed 起点扩展至多两跳，不扫描全图。"""
+        if limit <= 0:
+            return []
+        await self._ensure_schema()
+        predicate, parameters = _source_predicate(
+            scope=scope,
+            resource_ids=resource_ids,
+            metadata_filters=metadata_filters,
+        )
+        ranks = {item.projection_id: item.rank for item in candidates}
+        projection_ids = list(ranks)
+        source_node_ids = list(dict.fromkeys(seed_node_ids))
+        async with self._driver.session() as session:
+            direct = await session.run(
+                f"""
+                MATCH (source:{_SOURCE_LABEL})-[projection:RAG_V3_PROJECTS_NODE|RAG_V3_PROJECTS_EDGE]->(target)
+                WHERE (source.projection_id IN $projection_ids
+                       OR (source.target_type = 'node' AND source.target_id IN $seed_node_ids))
+                  AND {predicate}
+                OPTIONAL MATCH (target)-[:RAG_V3_FROM]->(source_node:{_NODE_LABEL})
+                OPTIONAL MATCH (target)-[:RAG_V3_TO]->(target_node:{_NODE_LABEL})
+                RETURN source, target, source_node.node_id AS source_node_id,
+                       target_node.node_id AS target_node_id,
+                       source_node.name AS source_node_name,
+                       target_node.name AS target_node_name
+                LIMIT $limit
+                """,
+                projection_ids=projection_ids,
+                seed_node_ids=source_node_ids,
+                limit=limit,
+                **parameters,
+            )
+            result = [_source_from_record(record, ranks, 0) async for record in direct]
+            if max_depth == 0:
+                return _deduplicate_sources(result)
+
+            frontier = {
+                item.target_id
+                for item in result
+                if item.target_type == "node"
+            } | set(source_node_ids)
+            for hop in range(1, max_depth + 1):
+                if not frontier or len(result) >= limit:
+                    break
+                expanded = await session.run(
+                    f"""
+                    MATCH (edge:{_EDGE_LABEL})-[:RAG_V3_FROM]->(source_node:{_NODE_LABEL})
+                    MATCH (edge)-[:RAG_V3_TO]->(target_node:{_NODE_LABEL})
+                    WHERE (size($relation_types) = 0 OR edge.relation_type IN $relation_types)
+                      AND {_direction_predicate(direction)}
+                    MATCH (source:{_SOURCE_LABEL})-[:RAG_V3_PROJECTS_EDGE]->(edge)
+                    WHERE {predicate}
+                    RETURN source, edge AS target,
+                           source_node.node_id AS source_node_id,
+                           target_node.node_id AS target_node_id,
+                           source_node.name AS source_node_name,
+                           target_node.name AS target_node_name
+                    LIMIT $limit
+                    """,
+                    frontier_node_ids=list(frontier),
+                    relation_types=list(relation_types),
+                    limit=limit - len(result),
+                    **parameters,
+                )
+                edges = [_source_from_record(record, ranks, hop) async for record in expanded]
+                result.extend(edges)
+                frontier = {
+                    node_id
+                    for record in edges
+                    if record.edge is not None
+                    for node_id in (record.edge.source_node_id, record.edge.target_node_id)
+                } - frontier
+            return _deduplicate_sources(result)
 
     async def _ensure_schema(self) -> None:
         if self._schema_ready:
@@ -212,18 +312,144 @@ def _source_properties(
         "content_revision": item.content_revision,
         "producer_id": item.producer_id,
         "evidence_ids": list(item.evidence_ids),
-        "filter_values": item.filter_values,
+        # Neo4j property values cannot be maps. 过滤字段在来源节点上按前缀展开，
+        # 这样插件编译出的条件才能与 Qdrant 一样下推。
+        "filter_properties": {
+            f"filter_{key}": value for key, value in item.filter_values.items()
+        },
         "acl_revision": acl.acl_revision,
         "owner_id": acl.owner_id,
         "readable_users": list(acl.readable_users),
         "excluded_read_users": list(acl.excluded_read_users),
-        "group_acls": [
-            {
-                "group_id": group.group_id,
-                "default_readable": group.default_readable,
-                "readable_users": list(group.readable_users),
-                "excluded_read_users": list(group.excluded_read_users),
-            }
+        "group_ids": [group.group_id for group in acl.group_acls],
+        "default_readable_group_ids": [
+            group.group_id for group in acl.group_acls if group.default_readable
+        ],
+        "group_readable_subjects": [
+            _group_subject(group.group_id, user_id)
             for group in acl.group_acls
+            for user_id in group.readable_users
+        ],
+        "group_excluded_subjects": [
+            _group_subject(group.group_id, user_id)
+            for group in acl.group_acls
+            for user_id in group.excluded_read_users
         ],
     }
+
+
+def _group_subject(group_id: str, user_id: str) -> str:
+    return f"{group_id}\x1f{user_id}"
+
+
+def _source_predicate(
+    *,
+    scope: PermissionScope,
+    resource_ids: Sequence[str] | None,
+    metadata_filters: Sequence[GraphFilterCondition],
+) -> tuple[str, dict[str, Any]]:
+    """Neo4j 只做与 Qdrant 同语义的预过滤，授权结论仍由 Mongo 给出。"""
+    predicate = """
+    (source.owner_id = $user_id
+     OR $user_id IN source.readable_users
+     OR (NOT $user_id IN source.excluded_read_users AND
+         (any(group_id IN source.group_ids WHERE group_id IN $managed_group_ids)
+          OR any(group_id IN source.default_readable_group_ids WHERE
+                 group_id IN $joined_group_ids
+                 AND NOT group_id + $subject_separator + $user_id IN source.group_excluded_subjects)
+          OR any(group_id IN source.group_ids WHERE
+                 group_id IN $joined_group_ids
+                 AND group_id + $subject_separator + $user_id IN source.group_readable_subjects))))
+    """
+    parameters: dict[str, Any] = {
+        "user_id": scope.user_id,
+        "managed_group_ids": list(scope.managed_group_ids),
+        "joined_group_ids": list(scope.joined_group_ids),
+        "subject_separator": "\x1f",
+    }
+    if resource_ids:
+        predicate += " AND source.resource_id IN $resource_ids"
+        parameters["resource_ids"] = list(dict.fromkeys(resource_ids))
+    for index, condition in enumerate(metadata_filters):
+        parameter = f"metadata_filter_{index}"
+        operator = {
+            GraphFilterOperator.EQ: "=",
+            GraphFilterOperator.GTE: ">=",
+            GraphFilterOperator.LTE: "<=",
+        }[condition.operator]
+        predicate += f" AND source[$metadata_field_{index}] {operator} ${parameter}"
+        parameters[f"metadata_field_{index}"] = f"filter_{condition.field}"
+        parameters[parameter] = condition.value
+    return predicate, parameters
+
+
+def _direction_predicate(direction: TraversalDirection) -> str:
+    if direction is TraversalDirection.OUT:
+        return "source_node.node_id IN $frontier_node_ids"
+    if direction is TraversalDirection.IN:
+        return "target_node.node_id IN $frontier_node_ids"
+    return "source_node.node_id IN $frontier_node_ids OR target_node.node_id IN $frontier_node_ids"
+
+
+def _source_from_record(
+    record: Any,
+    ranks: dict[str, int],
+    hop_count: int,
+) -> GraphSourceProjection:
+    source = dict(record["source"])
+    target = dict(record["target"])
+    target_type = source["target_type"]
+    node = None
+    edge = None
+    if target_type == "node":
+        node = GraphNode(
+            node_id=target["node_id"],
+            name=target["name"],
+            node_type=target["node_type"],
+            category=target["category"],
+            description=target.get("description", ""),
+            aliases=tuple(target.get("aliases", ())),
+            extra_meta=target.get("extra_meta", {}),
+        )
+    else:
+        edge = GraphEdge(
+            edge_id=target["edge_id"],
+            source_node_id=record["source_node_id"],
+            target_node_id=record["target_node_id"],
+            relation_type=target["relation_type"],
+            description=target.get("description", ""),
+            keywords=tuple(target.get("keywords", ())),
+            extra_meta=target.get("extra_meta", {}),
+        )
+    return GraphSourceProjection(
+        projection_id=source["projection_id"],
+        target_type=target_type,
+        target_id=source["target_id"],
+        resource_id=source["resource_id"],
+        content_revision=source["content_revision"],
+        evidence_ids=tuple(source.get("evidence_ids", ())),
+        producer_id=source.get("producer_id"),
+        node=node,
+        edge=edge,
+        source_node_name=record.get("source_node_name") or "",
+        target_node_name=record.get("target_node_name") or "",
+        graph_rank=ranks.get(source["projection_id"], 10_000),
+        hop_count=hop_count,
+    )
+
+
+def _deduplicate_sources(
+    sources: Sequence[GraphSourceProjection],
+) -> list[GraphSourceProjection]:
+    by_projection: dict[str, GraphSourceProjection] = {}
+    for source in sources:
+        current = by_projection.get(source.projection_id)
+        if current is None or (source.graph_rank, source.hop_count) < (
+            current.graph_rank,
+            current.hop_count,
+        ):
+            by_projection[source.projection_id] = source
+    return sorted(
+        by_projection.values(),
+        key=lambda item: (item.graph_rank, item.hop_count, item.target_id),
+    )

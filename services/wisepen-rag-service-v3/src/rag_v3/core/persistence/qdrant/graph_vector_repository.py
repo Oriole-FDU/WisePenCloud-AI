@@ -8,10 +8,13 @@ from uuid import NAMESPACE_URL, uuid5
 from qdrant_client import AsyncQdrantClient
 from qdrant_client import models as qdrant_models
 
-from rag_v3.domain.acl import ResourceAcl
+from rag_v3.domain.acl import PermissionScope, ResourceAcl
 from rag_v3.domain.graph import (
     GraphEdgeProjection,
+    GraphFilterCondition,
+    GraphFilterOperator,
     GraphNodeProjection,
+    GraphVectorCandidate,
     graph_source_projection_id,
 )
 from rag_v3.domain.repositories.graph_projections import (
@@ -95,6 +98,32 @@ class QdrantGraphNodeVectorRepository(GraphNodeVectorRepository):
 
     async def delete_resources(self, resource_ids: Sequence[str]) -> None:
         await _delete_resources(self._client, self._collection_name, resource_ids)
+
+    async def search_dense(
+        self,
+        *,
+        query_vector: Sequence[float],
+        scope: PermissionScope,
+        resource_ids: Sequence[str] | None,
+        node_categories: Sequence[str],
+        metadata_filters: Sequence[GraphFilterCondition],
+        limit: int,
+    ) -> list[GraphVectorCandidate]:
+        return await _search_dense(
+            self._client,
+            collection_name=self._collection_name,
+            dense_vector_name=self._dense_vector_name,
+            dense_vector_size=self._dense_vector_size,
+            query_vector=query_vector,
+            scope=scope,
+            resource_ids=resource_ids,
+            target_type="node",
+            type_values=node_categories,
+            type_field="category",
+            metadata_filters=metadata_filters,
+            limit=limit,
+            branch="node_dense",
+        )
 
     async def _ensure_collection(self) -> None:
         if self._collection_ready:
@@ -211,6 +240,71 @@ class QdrantGraphEdgeVectorRepository(GraphEdgeVectorRepository):
 
     async def delete_resources(self, resource_ids: Sequence[str]) -> None:
         await _delete_resources(self._client, self._collection_name, resource_ids)
+
+    async def search_dense(
+        self,
+        *,
+        query_vector: Sequence[float],
+        scope: PermissionScope,
+        resource_ids: Sequence[str] | None,
+        relation_types: Sequence[str],
+        metadata_filters: Sequence[GraphFilterCondition],
+        limit: int,
+    ) -> list[GraphVectorCandidate]:
+        return await _search_dense(
+            self._client,
+            collection_name=self._collection_name,
+            dense_vector_name=self._dense_vector_name,
+            dense_vector_size=self._dense_vector_size,
+            query_vector=query_vector,
+            scope=scope,
+            resource_ids=resource_ids,
+            target_type="edge",
+            type_values=relation_types,
+            type_field="relation_type",
+            metadata_filters=metadata_filters,
+            limit=limit,
+            branch="edge_dense",
+        )
+
+    async def search_bm25(
+        self,
+        *,
+        query: str,
+        scope: PermissionScope,
+        resource_ids: Sequence[str] | None,
+        relation_types: Sequence[str],
+        metadata_filters: Sequence[GraphFilterCondition],
+        limit: int,
+    ) -> list[GraphVectorCandidate]:
+        if limit <= 0 or not query.strip():
+            return []
+        if not await self._client.collection_exists(self._collection_name):
+            return []
+        response = await self._client.query_points(
+            collection_name=self._collection_name,
+            query=qdrant_models.Document(
+                text=query,
+                model="qdrant/bm25",
+                options={"tokenizer": "multilingual"},
+            ),
+            using=self._sparse_vector_name,
+            query_filter=_search_filter(
+                scope=scope,
+                resource_ids=resource_ids,
+                type_values=relation_types,
+                type_field="relation_type",
+                metadata_filters=metadata_filters,
+            ),
+            limit=limit,
+            with_payload=[
+                "projection_id",
+                "edge_id",
+                "resource_id",
+                "content_revision",
+            ],
+        )
+        return _graph_candidates(response.points, target_type="edge", branch="edge_bm25")
 
     async def _ensure_collection(self) -> None:
         if self._collection_ready:
@@ -392,6 +486,215 @@ def _source_payload(
 
 def _point_id(kind: str, projection_id: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"wisepen-rag-v3:graph:{kind}:{projection_id}"))
+
+
+async def _search_dense(
+    client: AsyncQdrantClient,
+    *,
+    collection_name: str,
+    dense_vector_name: str,
+    dense_vector_size: int,
+    query_vector: Sequence[float],
+    scope: PermissionScope,
+    resource_ids: Sequence[str] | None,
+    target_type: str,
+    type_values: Sequence[str],
+    type_field: str,
+    metadata_filters: Sequence[GraphFilterCondition],
+    limit: int,
+    branch: str,
+) -> list[GraphVectorCandidate]:
+    if limit <= 0 or not query_vector:
+        return []
+    if len(query_vector) != dense_vector_size:
+        raise ValueError("query vector size does not match collection schema")
+    if not await client.collection_exists(collection_name):
+        return []
+    response = await client.query_points(
+        collection_name=collection_name,
+        query=list(query_vector),
+        using=dense_vector_name,
+        query_filter=_search_filter(
+            scope=scope,
+            resource_ids=resource_ids,
+            type_values=type_values,
+            type_field=type_field,
+            metadata_filters=metadata_filters,
+        ),
+        limit=limit,
+        with_payload=[
+            "projection_id",
+            f"{target_type}_id",
+            "resource_id",
+            "content_revision",
+        ],
+    )
+    return _graph_candidates(response.points, target_type=target_type, branch=branch)
+
+
+def _graph_candidates(
+    points: Sequence[qdrant_models.ScoredPoint],
+    *,
+    target_type: str,
+    branch: str,
+) -> list[GraphVectorCandidate]:
+    target_key = f"{target_type}_id"
+    candidates: list[GraphVectorCandidate] = []
+    for rank, point in enumerate(points, start=1):
+        payload = point.payload or {}
+        values = [
+            payload.get("projection_id"),
+            payload.get(target_key),
+            payload.get("resource_id"),
+            payload.get("content_revision"),
+        ]
+        if not all(isinstance(value, str) and value for value in values):
+            continue
+        projection_id, target_id, resource_id, content_revision = values
+        candidates.append(
+            GraphVectorCandidate(
+                projection_id=projection_id,
+                target_type=target_type,  # type: ignore[arg-type]  # 由固定调用点传入 node/edge。
+                target_id=target_id,
+                resource_id=resource_id,
+                content_revision=content_revision,
+                rank=rank,
+                branch=branch,
+            )
+        )
+    return candidates
+
+
+def _search_filter(
+    *,
+    scope: PermissionScope,
+    resource_ids: Sequence[str] | None,
+    type_values: Sequence[str],
+    type_field: str,
+    metadata_filters: Sequence[GraphFilterCondition],
+) -> qdrant_models.Filter:
+    must: list[qdrant_models.Condition] = [_permission_filter(scope)]
+    if resource_ids:
+        must.append(
+            qdrant_models.FieldCondition(
+                key="resource_id",
+                match=qdrant_models.MatchAny(any=list(dict.fromkeys(resource_ids))),
+            )
+        )
+    if type_values:
+        must.append(
+            qdrant_models.FieldCondition(
+                key=type_field,
+                match=qdrant_models.MatchAny(any=list(dict.fromkeys(type_values))),
+            )
+        )
+    must.extend(_metadata_conditions(metadata_filters))
+    return qdrant_models.Filter(must=must)
+
+
+def _metadata_conditions(
+    filters: Sequence[GraphFilterCondition],
+) -> list[qdrant_models.FieldCondition]:
+    conditions: list[qdrant_models.FieldCondition] = []
+    for item in filters:
+        key = f"filter_values.{item.field}"
+        if item.operator is GraphFilterOperator.EQ:
+            conditions.append(
+                qdrant_models.FieldCondition(
+                    key=key,
+                    match=qdrant_models.MatchValue(value=item.value),
+                )
+            )
+        elif item.operator is GraphFilterOperator.GTE:
+            conditions.append(
+                qdrant_models.FieldCondition(
+                    key=key,
+                    range=qdrant_models.Range(gte=item.value),
+                )
+            )
+        else:
+            conditions.append(
+                qdrant_models.FieldCondition(
+                    key=key,
+                    range=qdrant_models.Range(lte=item.value),
+                )
+            )
+    return conditions
+
+
+def _permission_filter(scope: PermissionScope) -> qdrant_models.Filter:
+    """与 ResourceAcl.can_read 同顺序的 Qdrant 预过滤；最终授权仍回到 Mongo。"""
+    user_id = scope.user_id
+    should: list[qdrant_models.Condition] = [
+        _match("owner_id", user_id),
+        _match("readable_users", user_id),
+    ]
+    group_filters: list[qdrant_models.Condition] = []
+    if scope.managed_group_ids:
+        group_filters.append(
+            _nested_group_filter(
+                qdrant_models.Filter(
+                    must=[
+                        qdrant_models.FieldCondition(
+                            key="group_id",
+                            match=qdrant_models.MatchAny(
+                                any=list(scope.managed_group_ids)
+                            ),
+                        )
+                    ]
+                )
+            )
+        )
+    if scope.joined_group_ids:
+        joined = list(scope.joined_group_ids)
+        group_filters.extend(
+            (
+                _nested_group_filter(
+                    qdrant_models.Filter(
+                        must=[
+                            qdrant_models.FieldCondition(
+                                key="group_id",
+                                match=qdrant_models.MatchAny(any=joined),
+                            ),
+                            qdrant_models.FieldCondition(
+                                key="default_readable",
+                                match=qdrant_models.MatchValue(value=True),
+                            ),
+                        ],
+                        must_not=[_match("excluded_read_users", user_id)],
+                    )
+                ),
+                _nested_group_filter(
+                    qdrant_models.Filter(
+                        must=[
+                            qdrant_models.FieldCondition(
+                                key="group_id",
+                                match=qdrant_models.MatchAny(any=joined),
+                            ),
+                            qdrant_models.FieldCondition(
+                                key="default_readable",
+                                match=qdrant_models.MatchValue(value=False),
+                            ),
+                            _match("readable_users", user_id),
+                        ]
+                    )
+                ),
+            )
+        )
+    if group_filters:
+        should.append(
+            qdrant_models.Filter(
+                must_not=[_match("excluded_read_users", user_id)],
+                should=group_filters,
+            )
+        )
+    return qdrant_models.Filter(should=should)
+
+
+def _nested_group_filter(group_filter: qdrant_models.Filter) -> qdrant_models.NestedCondition:
+    return qdrant_models.NestedCondition(
+        nested=qdrant_models.Nested(key="group_acls", filter=group_filter)
+    )
 
 
 def _revision_filter(resource_id: str, content_revision: str) -> qdrant_models.Filter:

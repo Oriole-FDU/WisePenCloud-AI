@@ -1,5 +1,6 @@
 """图谱 Mongo 事实的仓储端口。"""
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from rag_v3.domain.graph import (
@@ -29,3 +30,5 @@ class GraphFactRepository(Protocol):
         resource_id: str,
         content_revision: str,
     ) -> GraphRevisionFacts: ...
+
+    async def get_evidences(self, evidence_ids: Sequence[str]) -> list[TextGraphEvidence]: ...

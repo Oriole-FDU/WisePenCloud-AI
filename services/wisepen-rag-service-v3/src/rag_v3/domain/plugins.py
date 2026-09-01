@@ -5,7 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
-from rag_v3.domain.graph import GraphEdge, GraphNode, Ontology
+from pydantic import BaseModel
+
+from rag_v3.domain.graph import (
+    GraphEdge,
+    GraphFilterCondition,
+    GraphNode,
+    Ontology,
+)
 from rag_v3.domain.models import Document, DocumentMetadata, GeneralDocumentMetadata
 
 
@@ -13,6 +20,14 @@ class DeterministicGraphProducer(Protocol):
     """从已校验 metadata 直接生成图元，不生成文本 Evidence。"""
 
     def produce(self, document: Document) -> tuple[tuple[GraphNode, ...], tuple[GraphEdge, ...]]: ...
+
+
+class GraphFilterCompiler(Protocol):
+    """将垂类强类型查询过滤编译为图谱来源投影条件。"""
+
+    filter_type: type[BaseModel]
+
+    def compile(self, value: BaseModel) -> tuple[GraphFilterCondition, ...]: ...
 
 
 class GraphPlugin:
@@ -30,6 +45,7 @@ class GraphPlugin:
             [Document], Mapping[str, str | int | float | bool]
         ]
         | None = None,
+        filter_compiler: GraphFilterCompiler | None = None,
     ) -> None:
         if not plugin_id.strip():
             raise ValueError("plugin_id must not be empty")
@@ -39,6 +55,7 @@ class GraphPlugin:
         self.deterministic_producer = deterministic_producer
         self.enable_llm_extraction = enable_llm_extraction
         self._metadata_filter_values = metadata_filter_values
+        self._filter_compiler = filter_compiler
 
     def matches(self, metadata: DocumentMetadata) -> bool:
         return type(metadata) is self.metadata_type
@@ -48,6 +65,17 @@ class GraphPlugin:
         if self._metadata_filter_values is None:
             return {}
         return dict(self._metadata_filter_values(document))
+
+    def compile_filter(self, value: BaseModel | None) -> tuple[GraphFilterCondition, ...]:
+        """拒绝错误插件或自由字典，保证 metadata 过滤仍属于垂类契约。"""
+        if value is None:
+            return ()
+        if self._filter_compiler is None or not isinstance(
+            value,
+            self._filter_compiler.filter_type,
+        ):
+            raise ValueError("graph metadata filter does not match plugin")
+        return self._filter_compiler.compile(value)
 
 
 class DocumentMetadataRegistry:
