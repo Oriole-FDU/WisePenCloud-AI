@@ -1,3 +1,1 @@
-from .models.acl import GroupResourceAcl, PermissionScope, ResourceAcl
-
-__all__ = ["GroupResourceAcl", "PermissionScope", "ResourceAcl"]
+"""RAG 长期事实和外部能力端口。"""

@@ -1,162 +1,165 @@
+"""RAG 服务启动入口。"""
+
+import os
+import warnings
+from contextlib import asynccontextmanager
+
+warnings.filterwarnings(
+    "ignore", category=DeprecationWarning, module=r"websockets\.legacy"
+)
+
 from common.logger import error, info, setup_logging_intercept
-from common.observability import setup_observability
+from common.observability import instrument_fastapi_app, setup_observability
 
 from rag.core.config.bootstrap_settings import bootstrap_settings
 
-# 在读取 Nacos 业务配置之前完成日志桥接与 OTel SDK 初始化。
 setup_logging_intercept(bootstrap_settings.LOG_LEVEL)
 setup_observability(
     service_name=bootstrap_settings.SERVICE_NAME,
     environment=bootstrap_settings.PROFILE,
 )
 
-from contextlib import asynccontextmanager
-
 import uvicorn
 from beanie import init_beanie
-from common.observability import instrument_fastapi_app
 from common.web.exception_handlers import setup_global_exception_handlers
 from common.web.middleware import SecurityHeaderMiddleware
 from fastapi import FastAPI
 
-from rag.api.endpoints import expand as expand_endpoints
-from rag.api.endpoints import locate as locate_endpoints
-from rag.api.endpoints import read as read_endpoints
-from rag.api.exception_handlers import setup_rag_exception_handler
+from rag.api.endpoints import reading as reading_endpoints
+from rag.api.endpoints import retrieval as retrieval_endpoints
+from rag.api.kafka import (
+    AclRecalculatePayload,
+    DocumentReadyPayload,
+    KafkaEventConsumer,
+    ResourceDestroyPayload,
+    validated_handler,
+)
 from rag.api.router import api_router
 from rag.container import container
 from rag.core.config.app_settings import settings
 from rag.core.config.nacos import nacos_client_manager
 from rag.domain.entities import (
-    ContentRevisionEntity,
-    GenerationArtifactEntity,
-    ReadingBlockEntity,
+    DocChunkEntity,
+    DocumentRevisionEntity,
+    GraphEdgeProjectionEntity,
+    GraphNodeProjectionEntity,
     ResourceAclEntity,
     ResourceIndexStateEntity,
-    SectionEntity,
-    SourcePartEntity,
-    SourceRefEntity,
+    TextGraphEvidenceEntity,
 )
+
+no_proxy = ",".join(
+    filter(
+        None,
+        [
+            os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "",
+            "localhost, 127.0.0.1",
+        ],
+    )
+)
+os.environ["no_proxy"] = no_proxy
+os.environ["NO_PROXY"] = no_proxy
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_: FastAPI):
     info("service starting.", service=bootstrap_settings.SERVICE_NAME)
-
     mongo_client = container.mongo_client()
     await init_beanie(
         database=mongo_client[settings.MONGODB_DB_NAME],
         document_models=[
             ResourceIndexStateEntity,
-            ContentRevisionEntity,
-            SourcePartEntity,
-            SectionEntity,
-            ReadingBlockEntity,
-            SourceRefEntity,
             ResourceAclEntity,
-            GenerationArtifactEntity,
+            DocumentRevisionEntity,
+            DocChunkEntity,
+            GraphNodeProjectionEntity,
+            GraphEdgeProjectionEntity,
+            TextGraphEvidenceEntity,
         ],
     )
-    info("beanie initialized.", db=settings.MONGODB_DB_NAME)
-
-    await container.retrieval_index_writer().ensure_collection()
-    if settings.RAG_KNOWLEDGE_GRAPH_ENABLED:
-        await container.knowledge_graph_repository().initialize()
-        await container.graph_acl_writer().initialize()
-        await container.neo4j_driver().verify_connectivity()
-
-    consumers = (
-        container.document_ready_consumer(),
-        container.acl_recalculate_consumer(),
-        container.resource_destroy_consumer(),
-    )
-    started = []
+    kafka_consumers: list[KafkaEventConsumer] = []
+    if settings.KAFKA_ENABLED:
+        handlers = [
+            (
+                DocumentReadyPayload,
+                settings.KAFKA_DOCUMENT_READY_TOPIC,
+                settings.KAFKA_RAG_DOCUMENT_READY_GROUP_ID,
+                container.document_ready_handler().handle,
+            ),
+            (
+                AclRecalculatePayload,
+                settings.KAFKA_RESOURCE_ACL_RECALC_TOPIC,
+                settings.KAFKA_RAG_ACL_RECALC_GROUP_ID,
+                container.acl_recalculate_handler().handle,
+            ),
+            (
+                ResourceDestroyPayload,
+                settings.KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC,
+                settings.KAFKA_RAG_RESOURCE_DESTROY_GROUP_ID,
+                container.resource_destroy_handler().handle,
+            ),
+        ]
+        try:
+            for payload_model, topic, group_id, handler in handlers:
+                consumer = KafkaEventConsumer(
+                    bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
+                    topic=topic,
+                    group_id=group_id,
+                    handler=validated_handler(payload_model, handler),
+                    retry_delay_seconds=settings.KAFKA_RAG_RETRY_DELAY_SECONDS,
+                    max_delivery_attempts=settings.KAFKA_RAG_MAX_DELIVERY_ATTEMPTS,
+                    dead_letter_topic=settings.KAFKA_RAG_DEAD_LETTER_TOPIC,
+                )
+                await consumer.start()
+                kafka_consumers.append(consumer)
+        except Exception:
+            for consumer in reversed(kafka_consumers):
+                await consumer.stop()
+            raise
     try:
-        for consumer in consumers:
-            await consumer.start()
-            started.append(consumer)
+        await nacos_client_manager.register_instance()
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - 注册失败不阻断本地启动
+        error("nacos instance register failed.", exc=exc)
+    info("service ready.", service=bootstrap_settings.SERVICE_NAME)
+    yield
+    info("service stopping.", service=bootstrap_settings.SERVICE_NAME)
+    for consumer in reversed(kafka_consumers):
         try:
-            await nacos_client_manager.register_instance()
-        except Exception as e:
-            error("nacos instance register failed.", exc=e)
-
-        info(
-            "service ready.",
-            service=bootstrap_settings.SERVICE_NAME,
-            port=bootstrap_settings.SERVICE_PORT,
-        )
-        yield
-    finally:
-        info("service stopping.", service=bootstrap_settings.SERVICE_NAME)
-
-        for consumer in reversed(started):
             await consumer.stop()
-
+        except Exception as exc:  # noqa: BLE001
+            error("kafka consumer stop failed.", exc=exc)
+    try:
+        await mongo_client.close()
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - 退出时尽力关闭客户端
+        error("mongo client close failed.", exc=exc)
+    try:
+        await container.openai_client().close()
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - 退出时尽力关闭客户端
+        error("openai client close failed.", exc=exc)
+    try:
+        await container.qdrant_client().close()
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - 退出时尽力关闭客户端
+        error("qdrant client close failed.", exc=exc)
+    neo4j_driver = container.neo4j_driver()
+    if neo4j_driver is not None:
         try:
-            await container.contextual_text_client().close()
-        except Exception as e:
-            error("contextual text client close failed.", exc=e)
-        try:
-            await container.graph_query_client().close()
-        except Exception as e:
-            error("graph query client close failed.", exc=e)
-        try:
-            await container.embedding_client().close()
-        except Exception as e:
-            error("embedding client close failed.", exc=e)
-        try:
-            await container.zero_entropy_client().close()
-        except Exception as e:
-            error("zero entropy client close failed.", exc=e)
-        try:
-            await container.redis_client().aclose()
-        except Exception as e:
-            error("redis client close failed.", exc=e)
-        try:
-            await container.qdrant_client().close()
-        except Exception as e:
-            error("qdrant client close failed.", exc=e)
-        if settings.RAG_KNOWLEDGE_GRAPH_ENABLED:
-            try:
-                await container.neo4j_driver().close()
-            except Exception as e:
-                error("neo4j driver close failed.", exc=e)
-        try:
-            await container.mongo_client().close()
-        except Exception as e:
-            error("mongo client close failed.", exc=e)
-        try:
-            await nacos_client_manager.deregister_instance()
-        except Exception as e:
-            error("nacos instance deregister failed.", exc=e)
+            await neo4j_driver.close()
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - 退出时尽力关闭客户端
+            error("neo4j driver close failed.", exc=exc)
+    try:
+        await nacos_client_manager.deregister_instance()
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - 注销失败不阻断退出
+        error("nacos instance deregister failed.", exc=exc)
 
 
-container.wire(
-    modules=[
-        locate_endpoints,
-        read_endpoints,
-        expand_endpoints,
-    ]
-)
-
-app = FastAPI(
-    title=bootstrap_settings.APP_NAME,
-    docs_url="/docs",
-    lifespan=lifespan,
-)
+app = FastAPI(title=bootstrap_settings.APP_NAME, lifespan=lifespan, docs_url="/docs")
 instrument_fastapi_app(app)
 app.add_middleware(
-    SecurityHeaderMiddleware,
-    from_source_secret=settings.FROM_SOURCE_SECRET,
+    SecurityHeaderMiddleware, from_source_secret=settings.FROM_SOURCE_SECRET
 )
 setup_global_exception_handlers(app, is_dev=bootstrap_settings.IS_DEV)
-setup_rag_exception_handler(app)
-app.include_router(api_router, prefix="/internal/rag")
-
-
-@app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "service": bootstrap_settings.SERVICE_NAME}
+app.include_router(api_router, prefix="/rag")
+container.wire(modules=[reading_endpoints, retrieval_endpoints])
 
 
 if __name__ == "__main__":

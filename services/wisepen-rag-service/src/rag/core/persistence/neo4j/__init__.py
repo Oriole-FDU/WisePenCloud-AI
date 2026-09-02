@@ -1,7 +1,5 @@
-from .graph_acl_writer import Neo4jGraphAclWriter
-from .knowledge_graph_repository import Neo4jKnowledgeGraphRepository
+"""Neo4j 图谱拓扑投影 adapter。"""
 
-__all__ = [
-    "Neo4jGraphAclWriter",
-    "Neo4jKnowledgeGraphRepository",
-]
+from .graph_topology_repository import Neo4jGraphTopologyRepository
+
+__all__ = ["Neo4jGraphTopologyRepository"]

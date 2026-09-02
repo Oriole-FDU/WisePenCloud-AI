@@ -1,1 +1,1 @@
-"""RAG API endpoints package."""
+"""RAG V3 HTTP endpoint 模块。"""

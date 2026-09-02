@@ -1,9 +1,13 @@
-from .candidate_searcher import QdrantCandidateSearcher
-from .retrieval_acl_writer import QdrantRetrievalAclWriter
-from .retrieval_index_writer import QdrantRetrievalIndexWriter
+"""Qdrant 文档与图谱索引投影适配器。"""
+
+from .document_vector_repository import QdrantDocumentVectorRepository
+from .graph_vector_repository import (
+    QdrantGraphEdgeVectorRepository,
+    QdrantGraphNodeVectorRepository,
+)
 
 __all__ = [
-    "QdrantCandidateSearcher",
-    "QdrantRetrievalAclWriter",
-    "QdrantRetrievalIndexWriter",
+    "QdrantDocumentVectorRepository",
+    "QdrantGraphEdgeVectorRepository",
+    "QdrantGraphNodeVectorRepository",
 ]

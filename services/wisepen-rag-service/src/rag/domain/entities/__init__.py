@@ -1,24 +1,20 @@
-from .generation_artifact import GenerationArtifactEntity
-from .rag_acl import GroupResourceAcl, ResourceAclEntity
-from .rag_content import (
-    ContentRevisionEntity,
-    ReadingBlockEntity,
-    ResourceIndexStateEntity,
-    SectionEntity,
-    SourcePartEntity,
-    SourceRefEntity,
-    StoredOutlineNode,
+"""Beanie 持久化实体。"""
+
+from .doc_chunks import DocChunkEntity
+from .documents import DocumentRevisionEntity, ResourceIndexStateEntity
+from .graph import (
+    GraphEdgeProjectionEntity,
+    GraphNodeProjectionEntity,
+    TextGraphEvidenceEntity,
 )
+from .resource_acl import ResourceAclEntity
 
 __all__ = [
-    "ContentRevisionEntity",
-    "GenerationArtifactEntity",
-    "GroupResourceAcl",
-    "ReadingBlockEntity",
+    "DocChunkEntity",
+    "DocumentRevisionEntity",
+    "GraphEdgeProjectionEntity",
+    "GraphNodeProjectionEntity",
     "ResourceAclEntity",
     "ResourceIndexStateEntity",
-    "SectionEntity",
-    "SourcePartEntity",
-    "SourceRefEntity",
-    "StoredOutlineNode",
+    "TextGraphEvidenceEntity",
 ]
