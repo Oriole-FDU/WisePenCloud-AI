@@ -90,6 +90,7 @@ class _Retriever:
                     resource_id="resource-1",
                     content_revision="resource-1@1",
                     section_id="section-1",
+                    section_path=["Title", "Section"],
                     text="parent content",
                     source_spans=[SourceSpan(0, 14)],
                     matched_chunk_ids=["chunk-1"],
@@ -157,6 +158,7 @@ def test_query_routes_return_transport_shapes_and_context_scope(api_client) -> N
     assert parent == {
         "resource_id": "resource-1",
         "section_id": "section-1",
+        "section_path": "Title > Section",
         "text": "parent content",
         "score": 0.9,
     }

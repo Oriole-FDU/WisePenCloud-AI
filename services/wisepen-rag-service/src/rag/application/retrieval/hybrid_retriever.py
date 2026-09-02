@@ -341,7 +341,7 @@ def _build_dynamic_parents(
         # 情况1：section 短，直接返回整个 section
         if section is not None and scope.length <= _SHORT_SECTION_MAX_CHARS:
             parents.append(
-                _parent_from_span(document, scope, section_id, matched_chunk_ids, score)
+                _parent_from_span(document, scope, section_id, list(section.section_path) if section else [], matched_chunk_ids, score)
             )
             continue
 
@@ -360,7 +360,7 @@ def _build_dynamic_parents(
             >= _SECTION_RETURN_COVERAGE
         ):
             parents.append(
-                _parent_from_span(document, scope, section_id, matched_chunk_ids, score)
+                _parent_from_span(document, scope, section_id, list(section.section_path) if section else [], matched_chunk_ids, score)
             )
             continue
 
@@ -371,6 +371,7 @@ def _build_dynamic_parents(
                     document,
                     span,
                     section_id,
+                    list(section.section_path) if section else [],
                     [item.chunk.chunk_id for item in group],
                     max(item.score for item in group),
                 )
@@ -433,6 +434,7 @@ def _parent_from_span(
     document: Document,
     span: SourceSpan,
     section_id: str | None,
+    section_path: list[str],
     matched_chunk_ids: list[str],
     score: float,
 ) -> DynamicParent:
@@ -442,6 +444,7 @@ def _parent_from_span(
         resource_id=document.resource_id,
         content_revision=document.revision.content_revision,
         section_id=section_id,
+        section_path=section_path,
         text=document.raw_content[span.start_offset : span.end_offset],
         source_spans=[span],
         matched_chunk_ids=matched_chunk_ids,

@@ -16,10 +16,8 @@ from common.utils.ranking import (
 from openai import AsyncOpenAI
 
 from rag.application.document.models import DocChunk, Document
-from rag.application.graph.models import GraphPlugin
+from rag.application.plugins.core.registry import GraphPluginRegistry
 from rag.application.retrieval.models import (
-    ChunkGraphHit,
-    DeterministicGraphFactHit,
     GraphSearchHit,
     GraphSearchLevel,
     GraphSearchRequest,
@@ -51,7 +49,6 @@ class _Candidate:
     text: str
     source: GraphSourceProjection
     chunk: DocChunk | None
-    graph_ids: list[str]
 
 
 # --- 图谱检索器 ---
@@ -72,7 +69,7 @@ class GraphRetriever:
         index_states: ResourceIndexStateRepository,
         resource_acls: ResourceAclRepository,
         ranking_pipeline: RankingPipeline,
-        plugins: tuple[GraphPlugin, ...],
+        plugin_registry: GraphPluginRegistry,
         openai_client: AsyncOpenAI,
         embedding_model: str,
         embedding_dimensions: int,
@@ -87,7 +84,7 @@ class GraphRetriever:
         self._index_states = index_states
         self._resource_acls = resource_acls
         self._ranking_pipeline = ranking_pipeline
-        self._plugins = plugins
+        self._plugin_registry = plugin_registry
         self._openai_client = openai_client
         self._embedding_model = embedding_model
         self._embedding_dimensions = embedding_dimensions
@@ -114,7 +111,7 @@ class GraphRetriever:
             raise ValueError("graph search candidate counts must be positive")
 
         # 编译插件过滤器
-        metadata_filters = _compile_filters(request, self._plugins)
+        metadata_filters = _compile_filters(request, self._plugin_registry)
 
         # 向量召回（若没有 seed 则进行）
         vector_candidates = await self._retrieve_vectors(
@@ -188,25 +185,20 @@ class GraphRetriever:
                 if chunk is None:
                     continue
                 hits.append(
-                    ChunkGraphHit(
-                        chunk_id=chunk.chunk_id,
+                    GraphSearchHit(
                         resource_id=chunk.resource_id,
-                        content_revision=chunk.content_revision,
+                        text=candidate.text,
+                        score=item.score,
                         section_id=chunk.section_id,
-                        section_path=chunk.section_path,
-                        graph_ids=candidate.graph_ids,
-                        rerank_score=item.score,
+                        section_path=list(chunk.section_path),
                     )
                 )
             else:
                 hits.append(
-                    DeterministicGraphFactHit(
-                        target_type=candidate.source.target_type,
-                        target_id=candidate.source.target_id,
+                    GraphSearchHit(
                         resource_id=candidate.source.resource_id,
-                        content_revision=candidate.source.content_revision,
-                        producer_id=candidate.source.producer_id or "",
-                        rerank_score=item.score,
+                        text=candidate.text,
+                        score=item.score,
                     )
                 )
         return GraphSearchResult(hits, relevance_decision=decision.value)
@@ -306,8 +298,8 @@ class GraphRetriever:
             and chunk.is_valid_for(document)
         }
 
-        # 按拓扑返回顺序聚合候选（一个 chunk 可能对应多个图元）。首次
-        # 出现位置就是粗排位置，后续同 Chunk 命中只补充 graph_ids。
+        # 按拓扑返回顺序聚合候选。一个 Chunk 命中多个图元时只保留一次，
+        # 因为模型结果只消费可读正文和定位信息，不消费内部图元指针。
         by_chunk: dict[str, _Candidate] = {}
         ordered: list[_Candidate] = []
         for source in sources:
@@ -331,15 +323,12 @@ class GraphRetriever:
                             text=chunk.get_full_text(),
                             source=source,
                             chunk=chunk,
-                            graph_ids=[source.target_id],
                         )
                         by_chunk[chunk.chunk_id] = candidate
                         ordered.append(candidate)
-                    elif source.target_id not in current.graph_ids:
-                        current.graph_ids.append(source.target_id)
                 continue
             if source.producer_id:
-                text = _fact_rerank_text(source)
+                text = source.get_fact_text()
                 if text:
                     ordered.append(
                         _Candidate(
@@ -348,7 +337,6 @@ class GraphRetriever:
                             text=text,
                             source=source,
                             chunk=None,
-                            graph_ids=[source.target_id],
                         )
                     )
         return ordered
@@ -378,16 +366,14 @@ class GraphRetriever:
 
 def _compile_filters(
     request: GraphSearchRequest,
-    plugins: tuple[GraphPlugin, ...],
+    plugin_registry: GraphPluginRegistry,
 ) -> tuple[GraphFilterCondition, ...]:
     """根据请求中的 plugin_id 和 metadata_filter 编译过滤条件。"""
     if request.metadata_filter is not None and request.plugin_id is None:
         raise ValueError("metadata_filter requires plugin_id")
     if request.plugin_id is None:
         return ()
-    plugin = next(
-        (item for item in plugins if item.plugin_id == request.plugin_id), None
-    )
+    plugin = plugin_registry.get(request.plugin_id)
     if plugin is None:
         raise ValueError("graph plugin is not registered")
     return plugin.compile_filter(request.metadata_filter)
@@ -469,23 +455,3 @@ def _valid_evidence(
         for span in evidence.source_spans
     )
     return quote == evidence.quote_text
-
-
-def _fact_rerank_text(source: GraphSourceProjection) -> str:
-    """为确定性事实生成用于精排的文本。"""
-    if source.edge is not None:
-        return " ".join(
-            part
-            for part in (
-                source.source_node_name or source.edge.source_node_id,
-                source.edge.relation_type,
-                source.target_node_name or source.edge.target_node_id,
-                source.edge.description,
-            )
-            if part
-        )
-    if source.node is not None:
-        return " ".join(
-            part for part in (source.node.name, source.node.description) if part
-        )
-    return ""

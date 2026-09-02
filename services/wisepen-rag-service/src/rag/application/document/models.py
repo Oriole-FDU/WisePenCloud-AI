@@ -6,7 +6,13 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 
 from common.utils.document import Anchor, Page, Section, SourceSpan
-from pydantic import BaseModel, ConfigDict
+
+from rag.application.plugins.core.models import (
+    DocChunkMetadata,
+    DocumentMetadata,
+    GeneralChunkMetadata,
+    GeneralDocumentMetadata,
+)
 
 # --- 资源可见性 ---
 
@@ -72,84 +78,6 @@ class ContentRevision:
             f"{self.resource_id}@{self.document_version}"
             f"#{self.content_sha256[:16]}"
         )
-
-
-# --- 文档拓展性 ---
-
-class DocumentMetadata(BaseModel):
-    """Document 持久化的强类型 metadata 基类；具体类型由插件注册。"""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    document_type: str
-
-
-class GeneralDocumentMetadata(DocumentMetadata):
-    """没有图谱插件的通用文档 metadata。"""
-
-    document_type: str = "general"
-
-
-class DocumentMetadataRegistry:
-    """按 document_type 恢复已注册的文档 metadata 多态类型。"""
-
-    def __init__(self, metadata_types: list[type[DocumentMetadata]] | None = None) -> None:
-        types = [GeneralDocumentMetadata, *(metadata_types or [])]
-        self._types = {
-            metadata_type.model_fields["document_type"].default: metadata_type
-            for metadata_type in types
-        }
-        if len(self._types) != len(types):
-            raise ValueError("document metadata types must be unique")
-
-    def encode(self, metadata: DocumentMetadata) -> dict[str, object]:
-        metadata_type = self._types.get(metadata.document_type)
-        if metadata_type is not type(metadata):
-            raise ValueError(f"unregistered document metadata: {type(metadata).__name__}")
-        return metadata.model_dump(mode="json")
-
-    def decode(self, value: dict[str, object]) -> DocumentMetadata:
-        document_type = value.get("document_type")
-        if not isinstance(document_type, str) or document_type not in self._types:
-            raise ValueError("unregistered document metadata type")
-        return self._types[document_type].model_validate(value)
-
-
-class DocChunkMetadata(BaseModel):
-    """DocChunk 持久化的强类型 metadata 基类；具体类型由插件注册。"""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    chunk_type: str
-
-
-class GeneralChunkMetadata(DocChunkMetadata):
-    """通用 Chunk metadata。"""
-
-    chunk_type: str = "general"
-
-
-class DocChunkMetadataRegistry:
-    """按 chunk_type 恢复已注册的 Chunk metadata 多态类型。"""
-
-    def __init__(self, metadata_types: list[type[DocChunkMetadata]] | None = None) -> None:
-        types = [GeneralChunkMetadata, *(metadata_types or [])]
-        self._types = {
-            metadata_type.model_fields["chunk_type"].default: metadata_type
-            for metadata_type in types
-        }
-        if len(self._types) != len(types):
-            raise ValueError("chunk metadata types must be unique")
-
-    def encode(self, metadata: DocChunkMetadata) -> dict[str, object]:
-        metadata_type = self._types.get(metadata.chunk_type)
-        if metadata_type is not type(metadata):
-            raise ValueError(f"unregistered chunk metadata: {type(metadata).__name__}")
-        return metadata.model_dump(mode="json")
-
-    def decode(self, value: dict[str, object]) -> DocChunkMetadata:
-        chunk_type = value.get("chunk_type")
-        if not isinstance(chunk_type, str) or chunk_type not in self._types:
-            raise ValueError("unregistered chunk metadata type")
-        return self._types[chunk_type].model_validate(value)
 
 
 # --- 文档结构与分块 ---

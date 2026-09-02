@@ -60,6 +60,7 @@ async def search_hybrid(
                 DynamicParentResponse(
                     resource_id=item.resource_id,
                     section_id=item.section_id,
+                    section_path=" > ".join(item.section_path),
                     text=item.text,
                     score=item.score,
                 )

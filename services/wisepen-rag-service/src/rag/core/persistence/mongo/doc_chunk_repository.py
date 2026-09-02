@@ -6,8 +6,8 @@ from pymongo import ReplaceOne
 
 from rag.application.document.models import (
     DocChunk,
-    DocChunkMetadataRegistry,
 )
+from rag.application.plugins.core.codecs import DocChunkMetadataCodec
 from rag.domain.entities.doc_chunks import DocChunkEntity
 from rag.domain.repositories.doc_chunks import DocChunkRepository
 
@@ -15,8 +15,8 @@ from rag.domain.repositories.doc_chunks import DocChunkRepository
 class MongoDocChunkRepository(DocChunkRepository):
     """批量保存同一 revision 的 Chunk 事实，不保存索引文本或向量。"""
 
-    def __init__(self, *, metadata_registry: DocChunkMetadataRegistry) -> None:
-        self._metadata_registry = metadata_registry
+    def __init__(self, *, metadata_codec: DocChunkMetadataCodec) -> None:
+        self._metadata_codec = metadata_codec
 
     async def save_revision(self, chunks: Sequence[DocChunk]) -> None:
         if not chunks:
@@ -24,7 +24,7 @@ class MongoDocChunkRepository(DocChunkRepository):
         operations = [
             ReplaceOne(
                 {"chunk_id": chunk.chunk_id},
-                _to_document(chunk, self._metadata_registry),
+                _to_document(chunk, self._metadata_codec),
                 upsert=True,
             )
             for chunk in chunks
@@ -41,7 +41,7 @@ class MongoDocChunkRepository(DocChunkRepository):
         entities = await DocChunkEntity.find(
             {"chunk_id": {"$in": unique_chunk_ids}}
         ).to_list()
-        return [_to_domain(entity, self._metadata_registry) for entity in entities]
+        return [_to_domain(entity, self._metadata_codec) for entity in entities]
 
     async def get_revision_chunks(
         self,
@@ -59,7 +59,7 @@ class MongoDocChunkRepository(DocChunkRepository):
             .sort("+chunk_index")
             .to_list()
         )
-        return [_to_domain(entity, self._metadata_registry) for entity in entities]
+        return [_to_domain(entity, self._metadata_codec) for entity in entities]
 
     async def get_revisions_chunks(
         self,
@@ -77,7 +77,7 @@ class MongoDocChunkRepository(DocChunkRepository):
                 ]
             }
         ).sort("+chunk_index").to_list()
-        return [_to_domain(entity, self._metadata_registry) for entity in entities]
+        return [_to_domain(entity, self._metadata_codec) for entity in entities]
 
     async def get_section_chunks(
         self,
@@ -100,12 +100,12 @@ class MongoDocChunkRepository(DocChunkRepository):
             .sort("+chunk_index")
             .to_list()
         )
-        return [_to_domain(entity, self._metadata_registry) for entity in entities]
+        return [_to_domain(entity, self._metadata_codec) for entity in entities]
 
 
 def _to_document(
     chunk: DocChunk,
-    metadata_registry: DocChunkMetadataRegistry,
+    metadata_codec: DocChunkMetadataCodec,
 ) -> dict[str, object]:
     return {
         "chunk_id": chunk.chunk_id,
@@ -121,11 +121,11 @@ def _to_document(
         "contextual_prefix": chunk.contextual_prefix,
         "key_terms": chunk.key_terms,
         "extracted_node_ids": chunk.extracted_node_ids,
-        "metadata": metadata_registry.encode(chunk.metadata),
+        "metadata": metadata_codec.encode(chunk.metadata),
     }
 
 
-def _to_domain(entity: DocChunkEntity, metadata_registry: DocChunkMetadataRegistry) -> DocChunk:
+def _to_domain(entity: DocChunkEntity, metadata_codec: DocChunkMetadataCodec) -> DocChunk:
     return DocChunk(
         chunk_id=entity.chunk_id,
         resource_id=entity.resource_id,
@@ -140,5 +140,5 @@ def _to_domain(entity: DocChunkEntity, metadata_registry: DocChunkMetadataRegist
         contextual_prefix=entity.contextual_prefix,
         key_terms=entity.key_terms,
         extracted_node_ids=entity.extracted_node_ids,
-        metadata=metadata_registry.decode(entity.metadata),
+        metadata=metadata_codec.decode(entity.metadata),
     )

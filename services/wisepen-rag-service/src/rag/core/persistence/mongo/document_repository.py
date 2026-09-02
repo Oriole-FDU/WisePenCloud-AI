@@ -5,9 +5,9 @@ from collections.abc import Sequence
 from rag.application.document.models import (
     ContentRevision,
     Document,
-    DocumentMetadataRegistry,
     DocumentStructure,
 )
+from rag.application.plugins.core.codecs import DocumentMetadataCodec
 from rag.domain.entities.documents import DocumentRevisionEntity
 from rag.domain.repositories.documents import DocumentRepository
 
@@ -15,11 +15,11 @@ from rag.domain.repositories.documents import DocumentRepository
 class MongoDocumentRepository(DocumentRepository):
     """把 RAG Document 投影为一条 Mongo revision 文档。"""
 
-    def __init__(self, *, metadata_registry: DocumentMetadataRegistry) -> None:
-        self._metadata_registry = metadata_registry
+    def __init__(self, *, metadata_codec: DocumentMetadataCodec) -> None:
+        self._metadata_codec = metadata_codec
 
     async def save_revision(self, document: Document) -> None:
-        metadata = self._metadata_registry.encode(document.metadata)
+        metadata = self._metadata_codec.encode(document.metadata)
         existing = await DocumentRevisionEntity.find_one(
             {
                 "resource_id": document.resource_id,
@@ -61,7 +61,7 @@ class MongoDocumentRepository(DocumentRepository):
         ]
         entities = await DocumentRevisionEntity.find({"$or": clauses}).to_list()
         return {
-            (entity.resource_id, entity.content_revision): _to_domain(entity, self._metadata_registry)
+            (entity.resource_id, entity.content_revision): _to_domain(entity, self._metadata_codec)
             for entity in entities
         }
 
@@ -76,7 +76,7 @@ class MongoDocumentRepository(DocumentRepository):
         entities = await DocumentRevisionEntity.find(
             {"sections.section_id": {"$in": unique_section_ids}}
         ).to_list()
-        return [_to_domain(entity, self._metadata_registry) for entity in entities]
+        return [_to_domain(entity, self._metadata_codec) for entity in entities]
 
 
 def _to_document(document: Document, metadata: dict[str, object]) -> dict[str, object]:
@@ -94,7 +94,7 @@ def _to_document(document: Document, metadata: dict[str, object]) -> dict[str, o
     }
 
 
-def _to_domain(entity: DocumentRevisionEntity, metadata_registry: DocumentMetadataRegistry) -> Document:
+def _to_domain(entity: DocumentRevisionEntity, metadata_codec: DocumentMetadataCodec) -> Document:
     return Document(
         resource_id=entity.resource_id,
         revision=ContentRevision(
@@ -109,5 +109,5 @@ def _to_domain(entity: DocumentRevisionEntity, metadata_registry: DocumentMetada
             pages=entity.pages,
             anchors=entity.anchors,
         ),
-        metadata=metadata_registry.decode(entity.metadata),
+        metadata=metadata_codec.decode(entity.metadata),
     )

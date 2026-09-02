@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from rag.application.document.models import DocumentMetadata, ResourceIndexState
+from rag.application.document.models import ResourceIndexState
 from rag.application.graph.graph_indexing import GraphIndexBuilder
 from rag.application.graph.models import (
     GraphEdge,
@@ -14,6 +14,7 @@ from rag.application.graph.models import (
     graph_edge_id,
     graph_node_id,
 )
+from rag.application.plugins.core.models import DocumentMetadata
 from rag.core.persistence.neo4j.graph_topology_repository import _node_item
 from rag.core.persistence.qdrant.graph_vector_repository import (
     QdrantGraphEdgeVectorRepository,

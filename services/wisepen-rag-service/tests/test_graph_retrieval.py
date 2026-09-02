@@ -1,12 +1,22 @@
 """P2-C 图谱检索的召回分流、权限终检和局部精排测试。"""
 
+from dataclasses import replace
+from typing import Annotated
+
 import pytest
 from common.utils.document import SourceSpan
 from common.utils.ranking import RankDecision, RankedCandidate, RankResult
-from pydantic import BaseModel
+from pydantic import Field
 
-from rag.application.document.models import DocumentMetadata
-from rag.application.graph.models import GraphNode, GraphPlugin, TextGraphEvidence
+from rag.application.graph.models import GraphNode, TextGraphEvidence
+from rag.application.plugins.core import (
+    DeclarativeGraphFilter,
+    GraphPlugin,
+    Gte,
+    Ontology,
+)
+from rag.application.plugins.core.models import DocumentMetadata
+from rag.application.plugins.core.registry import GraphPluginRegistry
 from rag.application.retrieval.graph_retriever import GraphRetriever
 from rag.application.retrieval.models import (
     GraphSearchLevel,
@@ -14,7 +24,6 @@ from rag.application.retrieval.models import (
 )
 from rag.domain.acl import PermissionScope, ResourceAcl
 from rag.domain.repositories.graph_node_vectors import (
-    GraphFilterCondition,
     GraphFilterOperator,
     GraphVectorCandidate,
 )
@@ -95,35 +104,27 @@ class _OpenAI:
     embeddings = _Embeddings()
 
 
-class _PaperFilter(BaseModel):
-    year_from: int
-
-
-class _FilterCompiler:
-    filter_type = _PaperFilter
-
-    def compile(self, value):
-        return (
-            GraphFilterCondition(
-                field="reference_year",
-                operator=GraphFilterOperator.GTE,
-                value=value.year_from,
-            ),
-        )
+class _PaperFilter(DeclarativeGraphFilter):
+    year_from: Annotated[int | None, Gte("reference_year")] = Field(
+        default=None,
+        description="参考文献发表起始年份，包含该年份。",
+    )
 
 
 class _PaperMetadata(DocumentMetadata):
     document_type: str = "paper"
+    reference_year: int
 
 
 def _plugin() -> GraphPlugin:
-    from rag.application.graph.models import Ontology
-
     return GraphPlugin(
         plugin_id="paper",
         metadata_type=_PaperMetadata,
         ontology=Ontology(domain="paper"),
-        filter_compiler=_FilterCompiler(),
+        metadata_filter_values=lambda document: {
+            "reference_year": document.metadata.reference_year,
+        },
+        metadata_filter_type=_PaperFilter,
     )
 
 
@@ -176,7 +177,7 @@ def _retriever(
         index_states=states,
         resource_acls=acls,
         ranking_pipeline=ranking,
-        plugins=(_plugin(),),
+        plugin_registry=GraphPluginRegistry(plugins=[_plugin()]),
         openai_client=_OpenAI(),
         embedding_model="embedding",
         embedding_dimensions=2,
@@ -279,8 +280,11 @@ async def test_hybrid_retrieval_keeps_vector_branches_separate_and_returns_fact(
     assert len(node_vectors.dense_calls) == 1
     assert len(edge_vectors.dense_calls) == len(edge_vectors.bm25_calls) == 1
     assert topology.calls[0]["metadata_filters"][0].field == "reference_year"
-    assert result.hits[0].producer_id == "paper-v1"
-    assert ranking.requests[0].candidates[0].text == "Alpha"
+    assert result.hits[0].resource_id == item.resource_id
+    assert result.hits[0].text == "实体: Alpha\n类别: method"
+    assert result.hits[0].score == 1.0
+    assert result.hits[0].section_id is None
+    assert ranking.requests[0].candidates[0].text == "实体: Alpha\n类别: method"
     # 图谱候选确定后只读取一次本地 active/ACL；异步 ACL 投影的传播延迟
     # 不能通过同一请求内的重复 Mongo 查询消除。
     assert states.get_states_calls == 1
@@ -333,8 +337,10 @@ async def test_seed_skips_vector_recall_and_llm_evidence_returns_chunk_only_afte
     )
 
     assert vectors.dense_calls == vectors.bm25_calls == []
-    assert result.hits[0].chunk_id == chunk.chunk_id
-    assert result.hits[0].graph_ids == ["node"]
+    assert result.hits[0].resource_id == item.resource_id
+    assert result.hits[0].text == chunk.get_full_text()
+    assert result.hits[0].section_id == chunk.section_id
+    assert result.hits[0].section_path == list(chunk.section_path)
     assert "Alpha is proven." in ranking.requests[0].candidates[0].text
 
 
@@ -390,5 +396,26 @@ def test_plugin_filter_requires_registered_matching_type() -> None:
         _plugin().compile_filter(request.metadata_filter)[0].operator
         is GraphFilterOperator.GTE
     )
+    assert _plugin().compile_filter(
+        _PaperFilter(year_from=2020)
+    )[0].field == "reference_year"
     with pytest.raises(ValueError, match="does not match plugin"):
         _plugin().compile_filter({"year_from": 2020})
+
+
+def test_plugin_declarative_filter_only_targets_written_metadata() -> None:
+    item = replace(
+        document(resource_id="paper", version=1, section_id="section"),
+        metadata=_PaperMetadata(reference_year=2020),
+    )
+    conditions = _plugin().compile_filter(_PaperFilter(year_from=2020))
+
+    assert {condition.field for condition in conditions} <= _plugin().filter_values(item).keys()
+
+
+def test_declarative_filter_rejects_field_without_mapping() -> None:
+    class _InvalidFilter(DeclarativeGraphFilter):
+        year: int | None = None
+
+    with pytest.raises(ValueError, match="exactly one FilterOp"):
+        _InvalidFilter(year=2020).to_conditions()

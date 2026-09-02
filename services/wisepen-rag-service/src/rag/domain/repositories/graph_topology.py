@@ -36,6 +36,27 @@ class GraphSourceProjection:
     graph_rank: int = 0
     hop_count: int = 0
 
+    def get_fact_text(self) -> str:
+        """返回确定性图元用于精排和展示的事实文本。"""
+        if self.edge is not None:
+            lines = [
+                f"来源实体: {self.source_node_name or self.edge.source_node_id}",
+                f"关系: {self.edge.relation_type}",
+                f"目标实体: {self.target_node_name or self.edge.target_node_id}",
+            ]
+            if self.edge.description:
+                lines.append(f"事实说明: {self.edge.description}")
+            return "\n".join(lines)
+        if self.node is not None:
+            lines = [
+                f"实体: {self.node.name}",
+                f"类别: {self.node.category}",
+            ]
+            if self.node.description:
+                lines.append(f"说明: {self.node.description}")
+            return "\n".join(lines)
+        return ""
+
 
 class GraphTopologyRepository(Protocol):
     """管理 Neo4j 的逻辑拓扑和按资源 revision 区分的来源投影。"""

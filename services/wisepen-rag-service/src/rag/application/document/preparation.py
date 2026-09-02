@@ -13,12 +13,15 @@ from rag.application.document.models import (
     ContentRevision,
     DocChunk,
     Document,
-    DocumentMetadata,
     DocumentStructure,
-    GeneralDocumentMetadata,
     rag_chunk_id,
     rag_section_id,
 )
+from rag.application.plugins.core.models import (
+    DocumentMetadata,
+    GeneralDocumentMetadata,
+)
+from rag.application.plugins.core.registry import DocumentChunkMetadataBuilder
 from rag.application.publication import DocumentPublication
 from rag.domain.repositories.doc_chunks import DocChunkRepository
 from rag.domain.repositories.index_state import StageAction
@@ -33,12 +36,14 @@ class DocumentPreparer:
         publication: DocumentPublication,
         doc_chunks: DocChunkRepository,
         chunker_config: DocumentChunkerConfig | None = None,
+        chunk_metadata_builder: DocumentChunkMetadataBuilder | None = None,
     ) -> None:
         self._publication = publication
         self._doc_chunks = doc_chunks
         self._chunker_config = chunker_config or DocumentChunkerConfig(
             max_characters=800, chunk_overlap=100
         )
+        self._chunk_metadata_builder = chunk_metadata_builder
 
     async def prepare(
         self,
@@ -100,6 +105,18 @@ class DocumentPreparer:
             )
             for chunk in chunking.chunks
         ]
+        if self._chunk_metadata_builder is not None:
+            # 垂域 metadata 在准备阶段固化，后续图谱与检索只消费同一份 Chunk 事实。
+            chunks = [
+                replace(
+                    chunk,
+                    metadata=self._chunk_metadata_builder.build_metadata(
+                        document=document,
+                        chunk=chunk,
+                    ),
+                )
+                for chunk in chunks
+            ]
 
         action = await self._publication.stage_document(document)
         if action is StageAction.STALE:

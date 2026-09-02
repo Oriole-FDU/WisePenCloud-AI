@@ -1,17 +1,14 @@
-"""图谱逻辑事实、来源投影和 Ontology 约束。"""
+"""图谱逻辑事实、来源投影和稳定 ID。"""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 from dataclasses import field
 from enum import StrEnum
 from hashlib import sha256
-from typing import Literal, Protocol
+from typing import Literal
 
 from common.utils.document import SourceSpan
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from rag.application.document.models import Document, DocumentMetadata
 
 # --- 枚举与核心图元模型 ---
 
@@ -28,13 +25,13 @@ class GraphNode(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    node_id: str
-    name: str
-    node_type: GraphNodeKind = GraphNodeKind.ENTITY
-    category: str
-    description: str = ""
-    aliases: list[str] = field(default_factory=list)
-    extra_meta: dict[str, object] = Field(default_factory=dict)
+    node_id: str = Field(description="逻辑节点的稳定标识。")
+    name: str = Field(description="节点的可读名称。")
+    node_type: GraphNodeKind = Field(default=GraphNodeKind.ENTITY, description="节点的资源语义类型。")
+    category: str = Field(description="节点在垂类本体中的类别。")
+    description: str = Field(default="", description="节点的补充说明。")
+    aliases: list[str] = Field(default_factory=list, description="节点的其他可检索名称。")
+    extra_meta: dict[str, object] = Field(default_factory=dict, description="插件声明的附加属性。")
 
 
 class GraphEdge(BaseModel):
@@ -42,13 +39,13 @@ class GraphEdge(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    edge_id: str
-    source_node_id: str
-    target_node_id: str
-    relation_type: str
-    description: str = ""
-    keywords: list[str] = field(default_factory=list)
-    extra_meta: dict[str, object] = Field(default_factory=dict)
+    edge_id: str = Field(description="逻辑关系的稳定标识。")
+    source_node_id: str = Field(description="关系起点节点标识。")
+    target_node_id: str = Field(description="关系终点节点标识。")
+    relation_type: str = Field(description="关系在垂类本体中的谓词。")
+    description: str = Field(default="", description="关系的补充说明。")
+    keywords: list[str] = Field(default_factory=list, description="关系相关的检索关键词。")
+    extra_meta: dict[str, object] = Field(default_factory=dict, description="插件声明的附加属性。")
 
 
 class TextGraphEvidence(BaseModel):
@@ -114,113 +111,6 @@ class GraphEdgeProjection(BaseModel):
         if bool(self.evidence_ids) == bool(self.producer_id):
             raise ValueError("graph projection requires exactly one source path")
         return self
-
-
-# --- Ontology 约束 ---
-
-class EntitySpec(BaseModel):
-    """一个插件允许的实体类别。"""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    category: str
-    description: str
-    node_type: GraphNodeKind = GraphNodeKind.ENTITY
-
-
-class RelationSpec(BaseModel):
-    """一个插件允许的关系谓词与端点类别。"""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    relation_type: str
-    description: str
-    allowed_sources: list[str] = field(default_factory=list)
-    allowed_targets: list[str] = field(default_factory=list)
-
-
-class Ontology(BaseModel):
-    """垂类图谱的实体、关系及端点约束。"""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    domain: str
-    description: str = ""
-    entity_specs: dict[str, EntitySpec] = Field(default_factory=dict)
-    relation_specs: dict[str, RelationSpec] = Field(default_factory=dict)
-
-    def validate_node(self, node: GraphNode) -> None:
-        if node.category not in self.entity_specs:
-            raise ValueError(f"unknown entity category: {node.category}")
-
-    def validate_edge(self, edge: GraphEdge, nodes: Mapping[str, GraphNode]) -> None:
-        spec = self.relation_specs.get(edge.relation_type)
-        if spec is None:
-            raise ValueError(f"unknown relation type: {edge.relation_type}")
-        source = nodes.get(edge.source_node_id)
-        target = nodes.get(edge.target_node_id)
-        if source is None or target is None:
-            raise ValueError("relation endpoint is missing")
-        if spec.allowed_sources and source.category not in spec.allowed_sources:
-            raise ValueError("relation source category is not allowed")
-        if spec.allowed_targets and target.category not in spec.allowed_targets:
-            raise ValueError("relation target category is not allowed")
-
-
-# --- 插件协议与实现 ---
-
-class DeterministicGraphProducer(Protocol):
-    """从已校验 metadata 直接生成图元，不生成文本 Evidence。"""
-
-    def produce(self, document: Document) -> tuple[tuple[GraphNode, ...], tuple[GraphEdge, ...]]: ...
-
-
-class GraphFilterCompiler(Protocol):
-    """将垂类强类型查询过滤编译为图谱来源投影条件。"""
-
-    filter_type: type[BaseModel]
-
-    def compile(self, value: BaseModel) -> tuple[object, ...]: ...
-
-
-class GraphPlugin:
-    """一个垂类的 metadata 类型、Ontology 与可选图谱生产能力。"""
-
-    def __init__(
-        self,
-        *,
-        plugin_id: str,
-        metadata_type: type[DocumentMetadata],
-        ontology: Ontology,
-        deterministic_producer: DeterministicGraphProducer | None = None,
-        enable_llm_extraction: bool = True,
-        metadata_filter_values: Callable[[Document], Mapping[str, str | int | float | bool]] | None = None,
-        filter_compiler: GraphFilterCompiler | None = None,
-    ) -> None:
-        if not plugin_id.strip():
-            raise ValueError("plugin_id must not be empty")
-        self.plugin_id = plugin_id
-        self.metadata_type = metadata_type
-        self.ontology = ontology
-        self.deterministic_producer = deterministic_producer    # 确定性规则事实抽取
-        self.enable_llm_extraction = enable_llm_extraction
-        self._metadata_filter_values = metadata_filter_values   # 业务自定义元信息过滤
-        self._filter_compiler = filter_compiler
-
-    def matches(self, metadata: DocumentMetadata) -> bool:
-        return type(metadata) is self.metadata_type
-
-    def filter_values(self, document: Document) -> dict[str, str | int | float | bool]:
-        if self._metadata_filter_values is None:
-            return {}
-        return dict(self._metadata_filter_values(document))
-
-    def compile_filter(self, value: BaseModel | None) -> tuple[object, ...]:
-        if value is None:
-            return ()
-        if self._filter_compiler is None or not isinstance(value, self._filter_compiler.filter_type):
-            raise ValueError("graph metadata filter does not match plugin")
-        return self._filter_compiler.compile(value)
 
 
 # --- ID 生成工具函数 ---

@@ -1,4 +1,4 @@
-"""P0/P1 外部依赖装配：Mongo 客户端、仓储和 application 用例。"""
+"""依赖装配"""
 
 from common.utils.ranking import RankingPipeline
 from common.utils.ranking.rank_gates import (
@@ -17,10 +17,6 @@ from qdrant_client import AsyncQdrantClient
 from zeroentropy import AsyncZeroEntropy
 
 from rag.application.document.indexing import DocumentIndexBuilder
-from rag.application.document.models import (
-    DocChunkMetadataRegistry,
-    DocumentMetadataRegistry,
-)
 from rag.application.document.preparation import DocumentPreparer
 from rag.application.events import (
     AclRecalculateHandler,
@@ -30,6 +26,7 @@ from rag.application.events import (
 from rag.application.graph.graph_fact_builder import GraphFactBuilder
 from rag.application.graph.graph_indexing import GraphIndexBuilder
 from rag.application.outline import OutlineBuilder
+from rag.application.plugins.core import GraphPluginRegistry
 from rag.application.publication import AclSynchronizer, DocumentPublication
 from rag.application.reading import DocumentReader
 from rag.application.retrieval.graph_retriever import GraphRetriever
@@ -75,13 +72,6 @@ def _build_ranking_pipeline(
     )
 
 
-def _build_metadata_registry(plugins):
-    """在容器解析插件列表后收集 metadata 类型，避免声明期读取 provider。"""
-    return DocumentMetadataRegistry(
-        metadata_types=[plugin.metadata_type for plugin in plugins]
-    )
-
-
 class Container(containers.DeclarativeContainer):
     """集中管理当前已落地的 Mongo 生命周期和 application 用例。"""
 
@@ -91,20 +81,19 @@ class Container(containers.DeclarativeContainer):
         client=mongo_client,
     )
 
-    # 默认没有通用 Ontology；部署垂类时由 composition 显式覆盖此列表。
+    # 默认不注册垂类插件；部署时由 composition 显式提供完整插件。
     graph_plugins = providers.List()
-    metadata_registry = providers.Singleton(
-        _build_metadata_registry,
+    graph_plugin_registry = providers.Singleton(
+        GraphPluginRegistry,
         plugins=graph_plugins,
     )
     documents = providers.Singleton(
         MongoDocumentRepository,
-        metadata_registry=metadata_registry,
+        metadata_codec=graph_plugin_registry.provided.document_metadata_codec,
     )
-    chunk_metadata_registry = providers.Singleton(DocChunkMetadataRegistry)
     doc_chunks = providers.Singleton(
         MongoDocChunkRepository,
-        metadata_registry=chunk_metadata_registry,
+        metadata_codec=graph_plugin_registry.provided.doc_chunk_metadata_codec,
     )
     index_states = providers.Singleton(MongoResourceIndexStateRepository)
     resource_acls = providers.Singleton(MongoResourceAclRepository)
@@ -179,6 +168,7 @@ class Container(containers.DeclarativeContainer):
         DocumentPreparer,
         publication=document_publication,
         doc_chunks=doc_chunks,
+        chunk_metadata_builder=graph_plugin_registry.provided.chunk_metadata_builder,
     )
     document_index_builder = providers.Factory(
         DocumentIndexBuilder,
@@ -240,7 +230,7 @@ class Container(containers.DeclarativeContainer):
         doc_chunks=doc_chunks,
         graph_facts=graph_facts,
         index_states=index_states,
-        plugins=graph_plugins,
+        plugin_registry=graph_plugin_registry,
         openai_client=openai_client,
         query_model=settings.QUERY_MODEL,
         max_concurrency=settings.DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY,
@@ -284,7 +274,7 @@ class Container(containers.DeclarativeContainer):
         index_states=index_states,
         resource_acls=resource_acls,
         ranking_pipeline=hybrid_ranking_pipeline,
-        plugins=graph_plugins,
+        plugin_registry=graph_plugin_registry,
         openai_client=openai_client,
         embedding_model=settings.EMBEDDING_MODEL,
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,

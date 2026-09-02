@@ -19,12 +19,13 @@ from rag.application.graph.models import (
     GraphEdgeProjection,
     GraphNode,
     GraphNodeProjection,
-    GraphPlugin,
     TextGraphEvidence,
     graph_edge_id,
     graph_evidence_id,
     graph_node_id,
 )
+from rag.application.plugins.core import GraphPlugin
+from rag.application.plugins.core.registry import GraphPluginRegistry
 from rag.domain.repositories.doc_chunks import DocChunkRepository
 from rag.domain.repositories.documents import DocumentRepository
 from rag.domain.repositories.graph_fact import GraphFactRepository
@@ -130,7 +131,7 @@ class GraphFactBuilder:
         doc_chunks: DocChunkRepository,
         graph_facts: GraphFactRepository,
         index_states: ResourceIndexStateRepository,
-        plugins: tuple[GraphPlugin, ...],
+        plugin_registry: GraphPluginRegistry,
         openai_client: AsyncOpenAI,
         query_model: str,
         max_concurrency: int,
@@ -142,7 +143,7 @@ class GraphFactBuilder:
         self._doc_chunks = doc_chunks
         self._graph_facts = graph_facts
         self._index_states = index_states
-        self._plugins = plugins
+        self._plugin_registry = plugin_registry
         self._openai_client = openai_client
         self._instructor_client = (
             instructor.from_openai(openai_client) if openai_client is not None else None
@@ -168,7 +169,8 @@ class GraphFactBuilder:
         document = documents.get((resource_id, content_revision))
         if document is None:
             raise ValueError("active document is missing")
-        plugin = _matching_plugin(document, self._plugins)
+        # 插件类型分发
+        plugin = self._plugin_registry.match_document(document.metadata)
         if plugin is None:
             return GraphBuildResult(resource_id, content_revision, 0, 0, 0)
 
@@ -246,7 +248,8 @@ class GraphFactBuilder:
         chunk_node_ids: dict[str, list[str]] = defaultdict(list)
 
         # 3. LLM 抽取（仅在插件启用且有 chunk 时进行）
-        if plugin.enable_llm_extraction and chunks:
+        selected_chunks = plugin.select_chunks(chunks)
+        if plugin.enable_llm_extraction and selected_chunks:
             semaphore = asyncio.Semaphore(self._max_concurrency)
             chunk_indices = {
                 chunk.chunk_id: index for index, chunk in enumerate(chunks)
@@ -262,11 +265,11 @@ class GraphFactBuilder:
                         chunk=chunk,
                         semaphore=semaphore,
                     )
-                    for chunk in chunks
+                    for chunk in selected_chunks
                 )
             )
             # 收集各 chunk 的抽取结果，合并相同逻辑节点/边并生成证据
-            for chunk, extraction in zip(chunks, extracted, strict=True):
+            for chunk, extraction in zip(selected_chunks, extracted, strict=True):
                 _collect_llm_facts(
                     document=document,
                     chunk=chunk,
@@ -336,16 +339,6 @@ class GraphFactBuilder:
 
 
 # --- 辅助函数 ---
-
-def _matching_plugin(
-    document: Document, plugins: tuple[GraphPlugin, ...]
-) -> GraphPlugin | None:
-    """根据文档 metadata 匹配唯一插件；多个匹配则抛出错误。"""
-    matches = [plugin for plugin in plugins if plugin.matches(document.metadata)]
-    if len(matches) > 1:
-        raise ValueError("document metadata matches multiple graph plugins")
-    return matches[0] if matches else None
-
 
 def _deterministic_facts(
     document: Document,

@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Literal
 
 from common.utils.document import SourceSpan
 from common.utils.ranking import RankDecision
@@ -48,27 +47,15 @@ class GraphSearchRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class ChunkGraphHit:
-    chunk_id: str
+class GraphSearchHit:
+    """图谱检索的模型可读结果，不暴露来源投影或生命周期指针。"""
+
     resource_id: str
-    content_revision: str
-    section_id: str | None
-    section_path: list[str]
-    graph_ids: list[str]
-    rerank_score: float
-
-
-@dataclass(frozen=True, slots=True)
-class DeterministicGraphFactHit:
-    target_type: Literal["node", "edge"]
-    target_id: str
-    resource_id: str
-    content_revision: str
-    producer_id: str
-    rerank_score: float
-
-
-GraphSearchHit = ChunkGraphHit | DeterministicGraphFactHit
+    text: str
+    score: float
+    # LLM 来源可以定位到证据 Chunk；确定性事实没有 Chunk 定位时保持空值。
+    section_id: str | None = None
+    section_path: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +88,7 @@ class DynamicParent:
     content_revision: str
     # 父块按单个 section 分组；无标题文档的 chunk 才为 None。
     section_id: str | None
+    section_path: list[str]
     text: str
     source_spans: list[SourceSpan]  # Python 字符半开区间。
     matched_chunk_ids: list[str]
