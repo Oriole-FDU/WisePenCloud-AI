@@ -21,10 +21,10 @@ from rag.core.persistence.qdrant.common import (
 from rag.domain.acl import PermissionScope, ResourceAcl
 from rag.domain.repositories.graph_edge_vectors import GraphEdgeVectorRepository
 from rag.domain.repositories.graph_node_vectors import (
-    GraphFilterCondition,
     GraphNodeVectorRepository,
     GraphVectorCandidate,
 )
+from rag.domain.repositories.metadata_filters import MetadataFilterCondition
 
 # --- 常量：公共 Payload 索引配置 ---
 
@@ -96,7 +96,7 @@ class QdrantGraphNodeVectorRepository(
         scope: PermissionScope,
         resource_ids: Sequence[str] | None,
         node_categories: Sequence[str],
-        metadata_filters: Sequence[GraphFilterCondition],
+        metadata_filters: Sequence[MetadataFilterCondition],
         limit: int,
     ) -> list[GraphVectorCandidate]:
         if not await self._client.collection_exists(self._collection_name):
@@ -203,7 +203,7 @@ class QdrantGraphEdgeVectorRepository(
         scope: PermissionScope,
         resource_ids: Sequence[str] | None,
         relation_types: Sequence[str],
-        metadata_filters: Sequence[GraphFilterCondition],
+        metadata_filters: Sequence[MetadataFilterCondition],
         limit: int,
     ) -> list[GraphVectorCandidate]:
         if not await self._client.collection_exists(self._collection_name):
@@ -243,7 +243,7 @@ class QdrantGraphEdgeVectorRepository(
         scope: PermissionScope,
         resource_ids: Sequence[str] | None,
         relation_types: Sequence[str],
-        metadata_filters: Sequence[GraphFilterCondition],
+        metadata_filters: Sequence[MetadataFilterCondition],
         limit: int,
     ) -> list[GraphVectorCandidate]:
         if not await self._client.collection_exists(self._collection_name):
@@ -410,7 +410,7 @@ def _build_query_filter(
     resource_ids: Sequence[str] | None,
     type_field: str | None = None,
     type_values: Sequence[str] | None = None,
-    metadata_filters: Sequence[GraphFilterCondition] = (),
+    metadata_filters: Sequence[MetadataFilterCondition] = (),
 ) -> qdrant_models.Filter:
     """组装权限、资源、类型和自定义元数据过滤器。"""
     filters: list[qdrant_models.Condition] = [permission_filter(scope)]
@@ -425,7 +425,7 @@ def _build_query_filter(
 
 
 def _metadata_conditions(
-    metadata_filters: Sequence[GraphFilterCondition],
+    metadata_filters: Sequence[MetadataFilterCondition],
 ) -> list[qdrant_models.FieldCondition]:
     """将元数据过滤条件转为 Qdrant 字段条件。"""
     conditions: list[qdrant_models.FieldCondition] = []

@@ -12,7 +12,7 @@ from rag.application.graph.models import (
     GraphNodeProjection,
     graph_source_projection_id,
 )
-from rag.application.plugins.core.models import GeneralDocumentMetadata
+from rag.application.plugins.core.metadata import GeneralDocumentMetadata
 from rag.domain.repositories.acl import ResourceAclRepository
 from rag.domain.repositories.doc_chunks import DocChunkRepository
 from rag.domain.repositories.documents import DocumentRepository

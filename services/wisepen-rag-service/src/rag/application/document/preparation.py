@@ -17,7 +17,7 @@ from rag.application.document.models import (
     rag_chunk_id,
     rag_section_id,
 )
-from rag.application.plugins.core.models import (
+from rag.application.plugins.core.metadata import (
     DocumentMetadata,
     GeneralDocumentMetadata,
 )

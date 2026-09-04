@@ -6,6 +6,7 @@ from typing import Protocol
 
 from rag.application.document.models import DocChunk
 from rag.domain.acl import PermissionScope, ResourceAcl
+from rag.domain.repositories.metadata_filters import MetadataFilterCondition
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +47,7 @@ class DocumentVectorRepository(Protocol):
         query_vector: Sequence[float],
         scope: PermissionScope,
         limit: int,
+        metadata_filters: Sequence[MetadataFilterCondition] = (),
     ) -> list[VectorCandidate]: ...
 
     async def search_bm25(
@@ -54,4 +56,5 @@ class DocumentVectorRepository(Protocol):
         query: str,
         scope: PermissionScope,
         limit: int,
+        metadata_filters: Sequence[MetadataFilterCondition] = (),
     ) -> list[VectorCandidate]: ...

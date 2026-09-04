@@ -24,4 +24,4 @@ Page、Section 和 Neighborhood 每次最多请求 20 项；`sibling_steps` 限�
 
 ## 图谱边界
 
-本轮不暴露任何 Graph Search HTTP 接口。`general` 文档没有图谱检索能力，而 `metadata_filter` 是垂域插件的强类型输入，不能以通用 JSON 透传。未来只有在真实垂域插件需要外部图检索时，才单独定义插件所属的 HTTP schema、过滤语义和结果契约。
+本轮不暴露任何 Graph Search HTTP 接口，也不在 Hybrid Search HTTP 请求中加入 metadata 过滤字段。`metadata_filter` 是垂类插件的强类型内部输入，不能以通用 JSON 透传；当前能力仅接入 application/repository 链路，未来有真实垂类需求时再单独定义 HTTP schema、过滤语义和结果契约。

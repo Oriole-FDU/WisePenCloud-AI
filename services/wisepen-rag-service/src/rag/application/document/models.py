@@ -7,7 +7,7 @@ from hashlib import sha256
 
 from common.utils.document import Anchor, Page, Section, SourceSpan
 
-from rag.application.plugins.core.models import (
+from rag.application.plugins.core.metadata import (
     DocChunkMetadata,
     DocumentMetadata,
     GeneralChunkMetadata,

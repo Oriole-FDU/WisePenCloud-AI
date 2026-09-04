@@ -1,4 +1,4 @@
-"""垂类插件必须实现的 SPI 协议与 GraphPlugin 聚合根。"""
+"""垂类插件必须实现的 SPI 协议与 RagPlugin 聚合根。"""
 
 from collections.abc import Callable, Mapping
 from typing import Protocol
@@ -7,10 +7,10 @@ from pydantic import BaseModel
 
 from rag.application.document.models import DocChunk, Document
 from rag.application.graph.models import GraphEdge, GraphNode
-from rag.application.plugins.core.filters import DeclarativeGraphFilter
-from rag.application.plugins.core.models import DocChunkMetadata, DocumentMetadata
+from rag.application.plugins.core.filters import DeclarativeMetadataFilter
+from rag.application.plugins.core.metadata import DocChunkMetadata, DocumentMetadata
 from rag.application.plugins.core.ontology import Ontology
-from rag.domain.repositories.graph_node_vectors import GraphFilterCondition
+from rag.domain.repositories.metadata_filters import MetadataFilterCondition
 
 
 class ChunkMetadataBuilder(Protocol):
@@ -33,8 +33,8 @@ class DeterministicGraphProducer(Protocol):
     def produce(self, document: Document) -> tuple[tuple[GraphNode, ...], tuple[GraphEdge, ...]]: ...
 
 
-class GraphPlugin:
-    """一种垂类的 metadata、Ontology 与可选图谱生产能力。"""
+class RagPlugin:
+    """一种垂类的 metadata、检索过滤与可选图谱生产能力。"""
 
     def __init__(
         self,
@@ -47,7 +47,7 @@ class GraphPlugin:
         chunk_selector: Callable[[DocChunk], bool] | None = None,
         chunk_metadata_builder: ChunkMetadataBuilder | None = None,
         metadata_filter_values: Callable[[Document], Mapping[str, str | int | float | bool]] | None = None,
-        metadata_filter_type: type[DeclarativeGraphFilter] | None = None,
+        metadata_filter_type: type[DeclarativeMetadataFilter] | None = None,
     ) -> None:
         if not plugin_id.strip():
             raise ValueError("plugin_id must not be empty")
@@ -83,7 +83,7 @@ class GraphPlugin:
     def compile_filter(
         self,
         value: BaseModel | None,
-    ) -> tuple[GraphFilterCondition, ...]:
+    ) -> tuple[MetadataFilterCondition, ...]:
         if value is None:
             return ()
         if (

@@ -15,10 +15,10 @@ from rag.application.graph.models import (
 )
 from rag.application.retrieval.models import TraversalDirection
 from rag.domain.acl import PermissionScope, ResourceAcl
-from rag.domain.repositories.graph_node_vectors import (
-    GraphFilterCondition,
-    GraphFilterOperator,
-    GraphVectorCandidate,
+from rag.domain.repositories.graph_node_vectors import GraphVectorCandidate
+from rag.domain.repositories.metadata_filters import (
+    MetadataFilterCondition,
+    MetadataFilterOperator,
 )
 from rag.domain.repositories.graph_topology import (
     GraphSourceProjection,
@@ -184,7 +184,7 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
         relation_types: Sequence[str],
         direction: TraversalDirection,
         max_depth: int,
-        metadata_filters: Sequence[GraphFilterCondition],
+        metadata_filters: Sequence[MetadataFilterCondition],
         limit: int,
     ) -> list[GraphSourceProjection]:
         """从向量候选和种子节点出发，按方向和关系类型扩展至多 max_depth 跳。"""
@@ -379,7 +379,7 @@ def _source_predicate(
     *,
     scope: PermissionScope,
     resource_ids: Sequence[str] | None,
-    metadata_filters: Sequence[GraphFilterCondition],
+    metadata_filters: Sequence[MetadataFilterCondition],
 ) -> tuple[str, dict[str, Any]]:
     """构造来源节点的 ACL 和资源/元数据过滤条件。"""
     predicate = """
@@ -407,9 +407,9 @@ def _source_predicate(
     for index, condition in enumerate(metadata_filters):
         parameter = f"metadata_filter_{index}"
         operator = {
-            GraphFilterOperator.EQ: "=",
-            GraphFilterOperator.GTE: ">=",
-            GraphFilterOperator.LTE: "<=",
+            MetadataFilterOperator.EQ: "=",
+            MetadataFilterOperator.GTE: ">=",
+            MetadataFilterOperator.LTE: "<=",
         }[condition.operator]
         predicate += f" AND source[$metadata_field_{index}] {operator} ${parameter}"
         parameters[f"metadata_field_{index}"] = f"filter_{condition.field}"

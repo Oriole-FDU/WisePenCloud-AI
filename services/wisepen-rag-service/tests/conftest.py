@@ -125,7 +125,9 @@ class MemoryDocumentVectors:
         self.revision_chunk_ids: dict[tuple[str, str], set[str]] = {}
         self.write_calls = 0
 
-    async def write_revision(self, *, chunks, dense_vectors, resource_acl) -> None:
+    async def write_revision(
+        self, *, chunks, dense_vectors, resource_acl, filter_values=None
+    ) -> None:
         self.write_calls += 1
         if chunks:
             key = (chunks[0].resource_id, chunks[0].content_revision)

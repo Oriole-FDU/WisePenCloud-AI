@@ -24,8 +24,8 @@ from rag.application.graph.models import (
     graph_evidence_id,
     graph_node_id,
 )
-from rag.application.plugins.core import GraphPlugin
-from rag.application.plugins.core.registry import GraphPluginRegistry
+from rag.application.plugins.core import RagPlugin
+from rag.application.plugins.core.registry import RagPluginRegistry
 from rag.domain.repositories.doc_chunks import DocChunkRepository
 from rag.domain.repositories.documents import DocumentRepository
 from rag.domain.repositories.graph_fact import GraphFactRepository
@@ -131,7 +131,7 @@ class GraphFactBuilder:
         doc_chunks: DocChunkRepository,
         graph_facts: GraphFactRepository,
         index_states: ResourceIndexStateRepository,
-        plugin_registry: GraphPluginRegistry,
+        plugin_registry: RagPluginRegistry,
         openai_client: AsyncOpenAI,
         query_model: str,
         max_concurrency: int,
@@ -226,7 +226,7 @@ class GraphFactBuilder:
         *,
         document: Document,
         chunks: list[DocChunk],
-        plugin: GraphPlugin,
+        plugin: RagPlugin,
     ) -> tuple[
         list[GraphNodeProjection],
         list[GraphEdgeProjection],
@@ -342,7 +342,7 @@ class GraphFactBuilder:
 
 def _deterministic_facts(
     document: Document,
-    plugin: GraphPlugin,
+    plugin: RagPlugin,
 ) -> tuple[dict[str, GraphNode], dict[str, GraphEdge]]:
     """运行插件的确定性生成器，并做本体校验。"""
     if plugin.deterministic_producer is None:
@@ -394,7 +394,7 @@ def _collect_llm_facts(
     document: Document,
     chunk: DocChunk,
     extraction: _GraphExtraction,
-    plugin: GraphPlugin,
+    plugin: RagPlugin,
     nodes: dict[str, GraphNode],
     edges: dict[str, GraphEdge],
     evidences: list[TextGraphEvidence],

@@ -2,37 +2,16 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from rag.domain.repositories.metadata_filters import (
+    MetadataFilterCondition,
+)
 
 from rag.application.graph.models import (
     GraphNodeProjection,
 )
 from rag.domain.acl import PermissionScope, ResourceAcl
-
-
-class GraphFilterOperator(StrEnum):
-    EQ = "eq"
-    GTE = "gte"
-    LTE = "lte"
-
-
-class GraphFilterCondition(BaseModel):
-    """插件编译出的图谱索引过滤条件，仅在一次查询中传递。"""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    field: str
-    operator: GraphFilterOperator
-    value: str | int | float | bool
-
-    @model_validator(mode="after")
-    def _require_property_safe_field(self) -> "GraphFilterCondition":
-        if not self.field.isidentifier() or self.field.startswith("_"):
-            raise ValueError("graph filter field must be a public identifier")
-        return self
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +49,6 @@ class GraphNodeVectorRepository(Protocol):
         scope: PermissionScope,
         resource_ids: Sequence[str] | None,
         node_categories: Sequence[str],
-        metadata_filters: Sequence[GraphFilterCondition],
+    metadata_filters: Sequence[MetadataFilterCondition],
         limit: int,
     ) -> list[GraphVectorCandidate]: ...

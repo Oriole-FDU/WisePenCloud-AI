@@ -7,7 +7,7 @@ from pymongo import ReplaceOne
 from rag.application.document.models import (
     DocChunk,
 )
-from rag.application.plugins.core.codecs import DocChunkMetadataCodec
+from rag.application.plugins.core.metadata import DocChunkMetadataCodec
 from rag.domain.entities.doc_chunks import DocChunkEntity
 from rag.domain.repositories.doc_chunks import DocChunkRepository
 

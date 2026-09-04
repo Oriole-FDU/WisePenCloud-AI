@@ -17,6 +17,7 @@ from common.utils.ranking import (
 from openai import AsyncOpenAI
 
 from rag.application.document.models import DocChunk, Document
+from rag.application.plugins.core import RagPluginRegistry
 from rag.application.retrieval.models import (
     ChunkHit,
     DynamicParent,
@@ -30,6 +31,7 @@ from rag.domain.repositories.document_vectors import (
     VectorCandidate,
 )
 from rag.domain.repositories.documents import DocumentRepository
+from rag.domain.repositories.metadata_filters import MetadataFilterCondition
 from rag.domain.repositories.index_state import ResourceIndexStateRepository
 
 # --- 常量配置 ---
@@ -66,6 +68,7 @@ class HybridRetriever:
         openai_client: AsyncOpenAI,
         embedding_model: str,
         embedding_dimensions: int,
+        plugin_registry: RagPluginRegistry,
     ) -> None:
         self._documents = documents
         self._doc_chunks = doc_chunks
@@ -76,6 +79,7 @@ class HybridRetriever:
         self._openai_client = openai_client
         self._embedding_model = embedding_model
         self._embedding_dimensions = embedding_dimensions
+        self._plugin_registry = plugin_registry
 
     async def retrieve(
         self,
@@ -84,6 +88,8 @@ class HybridRetriever:
         *,
         lexical_query: str = "",
         scope: PermissionScope,
+        plugin_id: str | None = None,
+        metadata_filter=None,
     ) -> HybridRetrievalResult:
         """独立召回两路 Top 30，在 Mongo 当前事实和 ACL 快照校验后才产生 Hit。"""
         # 输入校验
@@ -93,6 +99,11 @@ class HybridRetriever:
         if top_k <= 0:
             raise ValueError("top_k must be positive")
         lexical_query = lexical_query.strip() or semantic_query
+        metadata_filters = _compile_metadata_filters(
+            plugin_registry=self._plugin_registry,
+            plugin_id=plugin_id,
+            metadata_filter=metadata_filter,
+        )
 
         # 1. 生成查询向量并并行检索稠密和BM25
         query_vector = await _embed_query(
@@ -105,11 +116,13 @@ class HybridRetriever:
             self._document_vectors.search_dense(
                 query_vector=query_vector,
                 scope=scope,
+                metadata_filters=metadata_filters,
                 limit=_CANDIDATE_LIMIT,
             ),
             self._document_vectors.search_bm25(
                 query=lexical_query,
                 scope=scope,
+                metadata_filters=metadata_filters,
                 limit=_CANDIDATE_LIMIT,
             ),
         )
@@ -245,6 +258,25 @@ async def _embed_query(
     if len(vector) != dimensions:
         raise ValueError("embedding response dimensions do not match settings")
     return vector
+
+
+# --- 辅助函数：metadata 过滤 ---
+
+def _compile_metadata_filters(
+    *,
+    plugin_registry: RagPluginRegistry,
+    plugin_id: str | None,
+    metadata_filter,
+) -> tuple[MetadataFilterCondition, ...]:
+    """将垂类声明式过滤编译为索引条件；API 尚未暴露该内部参数。"""
+    if metadata_filter is not None and plugin_id is None:
+        raise ValueError("metadata_filter requires plugin_id")
+    if plugin_id is None:
+        return ()
+    plugin = plugin_registry.get(plugin_id)
+    if plugin is None:
+        raise ValueError("RAG plugin is not registered")
+    return plugin.compile_filter(metadata_filter)
 
 
 # --- 辅助函数：候选合并 ---

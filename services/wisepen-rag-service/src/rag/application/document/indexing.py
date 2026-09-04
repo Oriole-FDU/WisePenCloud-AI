@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, field_validator
 
 from rag.application.document.models import ContentRevision, DocChunk, Document
+from rag.application.plugins.core.registry import RagPluginRegistry
 from rag.application.publication import DocumentPublication
 from rag.domain.repositories.acl import ResourceAclRepository
 from rag.domain.repositories.doc_chunks import DocChunkRepository
@@ -84,6 +85,7 @@ class DocumentIndexBuilder:
         embedding_model: str,
         embedding_dimensions: int,
         max_concurrency: int,
+        plugin_registry: RagPluginRegistry | None = None,
         enhancement_enabled: bool = True,
     ) -> None:
         if embedding_dimensions <= 0:
@@ -103,6 +105,7 @@ class DocumentIndexBuilder:
         self._embedding_dimensions = embedding_dimensions
         self._max_concurrency = max_concurrency
         self._enhancement_enabled = enhancement_enabled
+        self._plugin_registry = plugin_registry or RagPluginRegistry()
 
     async def build_and_publish(self, revision: ContentRevision) -> None:
         """只构建当前 staged revision；成功投影后才切换 active 指针。"""
@@ -148,6 +151,12 @@ class DocumentIndexBuilder:
             chunks=enhanced_chunks,
             dense_vectors=dense_vectors,
             resource_acl=resource_acl,
+            filter_values=(
+                plugin.filter_values(document)
+                if (plugin := self._plugin_registry.match_document(document.metadata))
+                is not None
+                else {}
+            ),
         )
 
         # 4. 最终发布，切换 active 指针

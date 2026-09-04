@@ -7,7 +7,7 @@ from rag.application.document.models import (
     Document,
     DocumentStructure,
 )
-from rag.application.plugins.core.codecs import DocumentMetadataCodec
+from rag.application.plugins.core.metadata import DocumentMetadataCodec
 from rag.domain.entities.documents import DocumentRevisionEntity
 from rag.domain.repositories.documents import DocumentRepository
 

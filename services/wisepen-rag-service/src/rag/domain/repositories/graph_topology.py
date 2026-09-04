@@ -12,10 +12,8 @@ from rag.application.graph.models import (
 )
 from rag.application.retrieval.models import TraversalDirection
 from rag.domain.acl import PermissionScope, ResourceAcl
-from rag.domain.repositories.graph_node_vectors import (
-    GraphFilterCondition,
-    GraphVectorCandidate,
-)
+from rag.domain.repositories.graph_node_vectors import GraphVectorCandidate
+from rag.domain.repositories.metadata_filters import MetadataFilterCondition
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +81,6 @@ class GraphTopologyRepository(Protocol):
         relation_types: Sequence[str],
         direction: TraversalDirection,
         max_depth: int,
-        metadata_filters: Sequence[GraphFilterCondition],
+        metadata_filters: Sequence[MetadataFilterCondition],
         limit: int,
     ) -> list[GraphSourceProjection]: ...

@@ -16,7 +16,7 @@ from common.utils.ranking import (
 from openai import AsyncOpenAI
 
 from rag.application.document.models import DocChunk, Document
-from rag.application.plugins.core.registry import GraphPluginRegistry
+from rag.application.plugins.core.registry import RagPluginRegistry
 from rag.application.retrieval.models import (
     GraphSearchHit,
     GraphSearchLevel,
@@ -30,10 +30,10 @@ from rag.domain.repositories.documents import DocumentRepository
 from rag.domain.repositories.graph_edge_vectors import GraphEdgeVectorRepository
 from rag.domain.repositories.graph_fact import GraphFactRepository
 from rag.domain.repositories.graph_node_vectors import (
-    GraphFilterCondition,
     GraphNodeVectorRepository,
     GraphVectorCandidate,
 )
+from rag.domain.repositories.metadata_filters import MetadataFilterCondition
 from rag.domain.repositories.graph_topology import (
     GraphSourceProjection,
     GraphTopologyRepository,
@@ -69,7 +69,7 @@ class GraphRetriever:
         index_states: ResourceIndexStateRepository,
         resource_acls: ResourceAclRepository,
         ranking_pipeline: RankingPipeline,
-        plugin_registry: GraphPluginRegistry,
+        plugin_registry: RagPluginRegistry,
         openai_client: AsyncOpenAI,
         embedding_model: str,
         embedding_dimensions: int,
@@ -209,7 +209,7 @@ class GraphRetriever:
         *,
         query: str,
         scope: PermissionScope,
-        metadata_filters: tuple[GraphFilterCondition, ...],
+        metadata_filters: tuple[MetadataFilterCondition, ...],
     ) -> list[GraphVectorCandidate]:
         """根据请求级别执行节点/边向量召回。"""
         if request.seed_node_ids:
@@ -366,8 +366,8 @@ class GraphRetriever:
 
 def _compile_filters(
     request: GraphSearchRequest,
-    plugin_registry: GraphPluginRegistry,
-) -> tuple[GraphFilterCondition, ...]:
+    plugin_registry: RagPluginRegistry,
+) -> tuple[MetadataFilterCondition, ...]:
     """根据请求中的 plugin_id 和 metadata_filter 编译过滤条件。"""
     if request.metadata_filter is not None and request.plugin_id is None:
         raise ValueError("metadata_filter requires plugin_id")
@@ -375,7 +375,7 @@ def _compile_filters(
         return ()
     plugin = plugin_registry.get(request.plugin_id)
     if plugin is None:
-        raise ValueError("graph plugin is not registered")
+        raise ValueError("RAG plugin is not registered")
     return plugin.compile_filter(request.metadata_filter)
 
 

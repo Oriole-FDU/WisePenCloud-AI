@@ -10,23 +10,21 @@ from pydantic import Field
 
 from rag.application.graph.models import GraphNode, TextGraphEvidence
 from rag.application.plugins.core import (
-    DeclarativeGraphFilter,
-    GraphPlugin,
+    DeclarativeMetadataFilter,
+    RagPlugin,
     Gte,
     Ontology,
 )
-from rag.application.plugins.core.models import DocumentMetadata
-from rag.application.plugins.core.registry import GraphPluginRegistry
+from rag.application.plugins.core.metadata import DocumentMetadata
+from rag.application.plugins.core.registry import RagPluginRegistry
 from rag.application.retrieval.graph_retriever import GraphRetriever
 from rag.application.retrieval.models import (
     GraphSearchLevel,
     GraphSearchRequest,
 )
 from rag.domain.acl import PermissionScope, ResourceAcl
-from rag.domain.repositories.graph_node_vectors import (
-    GraphFilterOperator,
-    GraphVectorCandidate,
-)
+from rag.domain.repositories.graph_node_vectors import GraphVectorCandidate
+from rag.domain.repositories.metadata_filters import MetadataFilterOperator
 from rag.domain.repositories.graph_topology import GraphSourceProjection
 
 from .conftest import (
@@ -104,7 +102,7 @@ class _OpenAI:
     embeddings = _Embeddings()
 
 
-class _PaperFilter(DeclarativeGraphFilter):
+class _PaperFilter(DeclarativeMetadataFilter):
     year_from: Annotated[int | None, Gte("reference_year")] = Field(
         default=None,
         description="参考文献发表起始年份，包含该年份。",
@@ -116,8 +114,8 @@ class _PaperMetadata(DocumentMetadata):
     reference_year: int
 
 
-def _plugin() -> GraphPlugin:
-    return GraphPlugin(
+def _plugin() -> RagPlugin:
+    return RagPlugin(
         plugin_id="paper",
         metadata_type=_PaperMetadata,
         ontology=Ontology(domain="paper"),
@@ -177,7 +175,7 @@ def _retriever(
         index_states=states,
         resource_acls=acls,
         ranking_pipeline=ranking,
-        plugin_registry=GraphPluginRegistry(plugins=[_plugin()]),
+        plugin_registry=RagPluginRegistry(plugins=[_plugin()]),
         openai_client=_OpenAI(),
         embedding_model="embedding",
         embedding_dimensions=2,
@@ -394,7 +392,7 @@ def test_plugin_filter_requires_registered_matching_type() -> None:
     )
     assert (
         _plugin().compile_filter(request.metadata_filter)[0].operator
-        is GraphFilterOperator.GTE
+        is MetadataFilterOperator.GTE
     )
     assert _plugin().compile_filter(
         _PaperFilter(year_from=2020)
@@ -414,7 +412,7 @@ def test_plugin_declarative_filter_only_targets_written_metadata() -> None:
 
 
 def test_declarative_filter_rejects_field_without_mapping() -> None:
-    class _InvalidFilter(DeclarativeGraphFilter):
+    class _InvalidFilter(DeclarativeMetadataFilter):
         year: int | None = None
 
     with pytest.raises(ValueError, match="exactly one FilterOp"):

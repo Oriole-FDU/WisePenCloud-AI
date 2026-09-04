@@ -18,6 +18,7 @@ from rag.domain.repositories.document_vectors import (
     DocumentVectorRepository,
     VectorCandidate,
 )
+from rag.domain.repositories.metadata_filters import MetadataFilterCondition
 
 _UPSERT_BATCH_SIZE = 256
 
@@ -31,6 +32,7 @@ _PAYLOAD_INDEXES = (
     ("owner_id", qdrant_models.PayloadSchemaType.KEYWORD),
     ("readable_users", qdrant_models.PayloadSchemaType.KEYWORD),
     ("excluded_read_users", qdrant_models.PayloadSchemaType.KEYWORD),
+    ("filter_values", qdrant_models.PayloadSchemaType.KEYWORD),
     ("group_acls[].group_id", qdrant_models.PayloadSchemaType.KEYWORD),
     ("group_acls[].default_readable", qdrant_models.PayloadSchemaType.BOOL),
     ("group_acls[].readable_users", qdrant_models.PayloadSchemaType.KEYWORD),
@@ -66,6 +68,7 @@ class QdrantDocumentVectorRepository(QdrantVectorRepository, DocumentVectorRepos
         chunks: Sequence[DocChunk],
         dense_vectors: Mapping[str, Sequence[float]],
         resource_acl: ResourceAcl,
+        filter_values: Mapping[str, str | int | float | bool] | None = None,
     ) -> None:
         if not chunks:
             return
@@ -85,6 +88,7 @@ class QdrantDocumentVectorRepository(QdrantVectorRepository, DocumentVectorRepos
                 resource_acl=resource_acl,
                 dense_vector_name=self._dense_vector_name,
                 sparse_vector_name=self._sparse_vector_name,
+                filter_values=filter_values or {},
             )
             for chunk in chunks
         ]
@@ -126,6 +130,7 @@ class QdrantDocumentVectorRepository(QdrantVectorRepository, DocumentVectorRepos
         query_vector: Sequence[float],
         scope: PermissionScope,
         limit: int,
+        metadata_filters: Sequence[MetadataFilterCondition] = (),
     ) -> list[VectorCandidate]:
         """只执行 Dense 初检；与 BM25 独立取 Top-N，禁止在 Qdrant 内融合。"""
         if not await self._client.collection_exists(self._collection_name):
@@ -135,7 +140,7 @@ class QdrantDocumentVectorRepository(QdrantVectorRepository, DocumentVectorRepos
             collection_name=self._collection_name,
             query=list(query_vector),
             using=self._dense_vector_name,
-            query_filter=permission_filter(scope),
+            query_filter=_build_query_filter(scope, metadata_filters),
             limit=limit,
             with_payload=["chunk_id", "resource_id", "content_revision"],
         )
@@ -150,6 +155,7 @@ class QdrantDocumentVectorRepository(QdrantVectorRepository, DocumentVectorRepos
         query: str,
         scope: PermissionScope,
         limit: int,
+        metadata_filters: Sequence[MetadataFilterCondition] = (),
     ) -> list[VectorCandidate]:
         """只执行 BM25 初检；候选之后再与 Dense 并集并交给 reranker。"""
         if not await self._client.collection_exists(self._collection_name):
@@ -163,7 +169,7 @@ class QdrantDocumentVectorRepository(QdrantVectorRepository, DocumentVectorRepos
                 options={"tokenizer": "multilingual"},
             ),
             using=self._sparse_vector_name,
-            query_filter=permission_filter(scope),
+            query_filter=_build_query_filter(scope, metadata_filters),
             limit=limit,
             with_payload=["chunk_id", "resource_id", "content_revision"],
         )
@@ -191,6 +197,7 @@ def _to_point(
     resource_acl: ResourceAcl,
     dense_vector_name: str,
     sparse_vector_name: str,
+    filter_values: Mapping[str, str | int | float | bool],
 ) -> qdrant_models.PointStruct:
     """构造 Qdrant 写入点位。"""
     return qdrant_models.PointStruct(
@@ -203,11 +210,15 @@ def _to_point(
                 options={"tokenizer": "multilingual"},
             ),
         },
-        payload=_payload(chunk, resource_acl),
+        payload=_payload(chunk, resource_acl, filter_values),
     )
 
 
-def _payload(chunk: DocChunk, resource_acl: ResourceAcl) -> dict[str, Any]:
+def _payload(
+    chunk: DocChunk,
+    resource_acl: ResourceAcl,
+    filter_values: Mapping[str, str | int | float | bool],
+) -> dict[str, Any]:
     """只序列化候选定位、ACL 预过滤与后续图谱 seed 所需字段。"""
     return {
         "chunk_id": chunk.chunk_id,
@@ -229,7 +240,33 @@ def _payload(chunk: DocChunk, resource_acl: ResourceAcl) -> dict[str, Any]:
             }
             for group_acl in resource_acl.group_acls
         ],
+        "filter_values": dict(filter_values),
     }
+
+
+def _build_query_filter(
+    scope: PermissionScope,
+    metadata_filters: Sequence[MetadataFilterCondition],
+) -> qdrant_models.Filter:
+    """将 ACL 与插件声明的文档 metadata 条件合并为 Qdrant 初检过滤器。"""
+    conditions: list[qdrant_models.Condition] = [permission_filter(scope)]
+    for item in metadata_filters:
+        key = f"filter_values.{item.field}"
+        if item.operator.value == "eq":
+            conditions.append(match_value(key, item.value))
+        elif item.operator.value == "gte":
+            conditions.append(
+                qdrant_models.FieldCondition(
+                    key=key, range=qdrant_models.Range(gte=item.value)
+                )
+            )
+        elif item.operator.value == "lte":
+            conditions.append(
+                qdrant_models.FieldCondition(
+                    key=key, range=qdrant_models.Range(lte=item.value)
+                )
+            )
+    return qdrant_models.Filter(must=conditions)
 
 
 def _parse_candidate(

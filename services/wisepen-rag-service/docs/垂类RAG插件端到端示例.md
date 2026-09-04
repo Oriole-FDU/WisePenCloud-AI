@@ -1,6 +1,6 @@
  
 
-# 图谱插件端到端示例
+# 垂类 RAG 插件端到端示例
 
 本文以论文为例，展示当前图谱插件的完整链路：文档级元数据生成确定性引用事实；Chunk 级元数据在准备期确定哪些段落值得 LLM 抽取；两条路径最终都返回模型可直接阅读的 `GraphSearchHit`。
 
@@ -80,13 +80,13 @@ class PaperChunkMetadataBuilder:
 `DocumentPreparer` 的调用面只接收 Registry 组装出的一个运行时 Builder。多个插件的路由是 Registry 的内部职责，不暴露为 prepare 的参数列表，也不由论文插件接触存储 codec：
 
 ```python
-from rag.application.plugins.core import GraphPluginRegistry
+from rag.application.plugins.core import RagPluginRegistry
 from rag.application.document.preparation import DocumentPreparer
 
 
 paper_chunk_metadata_builder = PaperChunkMetadataBuilder()
 # paper_plugin 在第 4 节定义；容器只接收包入口导出的完整插件实例。
-plugin_registry = GraphPluginRegistry(plugins=[paper_plugin])
+plugin_registry = RagPluginRegistry(plugins=[paper_plugin])
 document_preparer = DocumentPreparer(
     publication=publication,
     doc_chunks=doc_chunks,
@@ -133,7 +133,7 @@ PaperChunkMetadata(
 )
 ```
 
-Registry 从已注册的 `GraphPlugin.chunk_metadata_builder` 收集垂域规则，构造一个 `DocumentChunkMetadataBuilder` 并同步生成 Mongo 所需 codec。因此不需要额外维护一份容易漂移的 Chunk metadata 注册表。没有匹配 builder 的文档继续使用 `GeneralChunkMetadata`。
+Registry 从已注册的 `RagPlugin.chunk_metadata_builder` 收集垂域规则，构造一个 `DocumentChunkMetadataBuilder` 并同步生成 Mongo 所需 codec。因此不需要额外维护一份容易漂移的 Chunk metadata 注册表。没有匹配 builder 的文档继续使用 `GeneralChunkMetadata`。
 
 选择哪些标题只是论文插件的业务策略。这里选择摘要是为了控制抽取成本；实际产品可在同一 builder 中根据稳定的标题路径标记引言、方法或实验段落。选择为空时不会回退为全量抽取。
 
@@ -226,7 +226,7 @@ class PaperCitationProducer:
 
 ## 4. 注册插件与选择 LLM 抽取目标
 
-`GraphPlugin` 将一种文档 metadata、它的 Ontology、确定性 producer、Chunk metadata builder 和 LLM 抽取选择器组合起来。selector 只影响 LLM 调用目标；确定性 producer 始终接收完整 `Document`。
+`RagPlugin` 将一种文档 metadata、它的 Ontology、确定性 producer、Chunk metadata builder 和 LLM 抽取选择器组合起来。selector 只影响 LLM 调用目标；确定性 producer 始终接收完整 `Document`。
 
 ```python
 from typing import Annotated
@@ -234,15 +234,15 @@ from typing import Annotated
 from pydantic import Field
 
 from rag.application.plugins.core import (
-    DeclarativeGraphFilter,
+    DeclarativeMetadataFilter,
     Eq,
-    GraphPlugin,
+    RagPlugin,
     Gte,
     Lte,
 )
 
 
-class PaperFilter(DeclarativeGraphFilter):
+class PaperFilter(DeclarativeMetadataFilter):
     """面向模型调用的论文查询过滤；字段名不暴露存储字段。"""
 
     min_year: Annotated[int | None, Gte("publication_year")] = Field(
@@ -267,7 +267,7 @@ class PaperFilter(DeclarativeGraphFilter):
     )
 
 
-paper_plugin = GraphPlugin(
+paper_plugin = RagPlugin(
     plugin_id="academic-paper",
     metadata_type=PaperMetadata,
     ontology=PaperOntology,
@@ -290,7 +290,7 @@ paper_plugin = GraphPlugin(
 container.graph_plugins.override([paper_plugin])
 ```
 
-`Annotated` 中的 `Eq`、`Gte`、`Lte` 只由插件核心读取。调用方看到的是自然字段名 `min_year`、`author`；底座最终仍得到既有的 `GraphFilterCondition`，Qdrant 和 Neo4j 无需感知垂类类型。每个 Filter 字段必须恰好声明一个操作映射；未声明会在编译时失败，避免静默漏召回。
+`Annotated` 中的 `Eq`、`Gte`、`Lte` 只由插件核心读取。调用方看到的是自然字段名 `min_year`、`author`；底座最终仍得到既有的 `MetadataFilterCondition`，Qdrant 和 Neo4j 无需感知垂类类型。每个 Filter 字段必须恰好声明一个操作映射；未声明会在编译时失败，避免静默漏召回。
 
 完整构建链路如下：
 
@@ -340,9 +340,9 @@ result = await graph_retriever.search(request, permission_scope)
 
 ```python
 (
-    GraphFilterCondition(
+    MetadataFilterCondition(
         field="publication_year",
-        operator=GraphFilterOperator.GTE,
+        operator=MetadataFilterOperator.GTE,
         value=2020,
     ),
 )

@@ -14,7 +14,7 @@ from rag.application.graph.models import (
     graph_edge_id,
     graph_node_id,
 )
-from rag.application.plugins.core.models import DocumentMetadata
+from rag.application.plugins.core.metadata import DocumentMetadata
 from rag.core.persistence.neo4j.graph_topology_repository import _node_item
 from rag.core.persistence.qdrant.graph_vector_repository import (
     QdrantGraphEdgeVectorRepository,

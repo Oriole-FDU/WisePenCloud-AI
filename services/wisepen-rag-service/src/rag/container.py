@@ -26,7 +26,7 @@ from rag.application.events import (
 from rag.application.graph.graph_fact_builder import GraphFactBuilder
 from rag.application.graph.graph_indexing import GraphIndexBuilder
 from rag.application.outline import OutlineBuilder
-from rag.application.plugins.core import GraphPluginRegistry
+from rag.application.plugins.core import RagPluginRegistry
 from rag.application.publication import AclSynchronizer, DocumentPublication
 from rag.application.reading import DocumentReader
 from rag.application.retrieval.graph_retriever import GraphRetriever
@@ -84,7 +84,7 @@ class Container(containers.DeclarativeContainer):
     # 默认不注册垂类插件；部署时由 composition 显式提供完整插件。
     graph_plugins = providers.List()
     graph_plugin_registry = providers.Singleton(
-        GraphPluginRegistry,
+        RagPluginRegistry,
         plugins=graph_plugins,
     )
     documents = providers.Singleton(
@@ -184,6 +184,7 @@ class Container(containers.DeclarativeContainer):
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
         max_concurrency=settings.DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY,
         enhancement_enabled=settings.DOCUMENT_ENHANCEMENT_ENABLED,
+        plugin_registry=graph_plugin_registry,
     )
     document_ready_handler = providers.Factory(
         DocumentReadyHandler,

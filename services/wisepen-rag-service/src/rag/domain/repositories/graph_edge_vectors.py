@@ -7,10 +7,8 @@ from rag.application.graph.models import (
     GraphEdgeProjection,
 )
 from rag.domain.acl import PermissionScope, ResourceAcl
-from rag.domain.repositories.graph_node_vectors import (
-    GraphFilterCondition,
-    GraphVectorCandidate,
-)
+from rag.domain.repositories.graph_node_vectors import GraphVectorCandidate
+from rag.domain.repositories.metadata_filters import MetadataFilterCondition
 
 
 class GraphEdgeVectorRepository(Protocol):
@@ -36,7 +34,7 @@ class GraphEdgeVectorRepository(Protocol):
         scope: PermissionScope,
         resource_ids: Sequence[str] | None,
         relation_types: Sequence[str],
-        metadata_filters: Sequence[GraphFilterCondition],
+        metadata_filters: Sequence[MetadataFilterCondition],
         limit: int,
     ) -> list[GraphVectorCandidate]: ...
 
@@ -47,6 +45,6 @@ class GraphEdgeVectorRepository(Protocol):
         scope: PermissionScope,
         resource_ids: Sequence[str] | None,
         relation_types: Sequence[str],
-        metadata_filters: Sequence[GraphFilterCondition],
+        metadata_filters: Sequence[MetadataFilterCondition],
         limit: int,
     ) -> list[GraphVectorCandidate]: ...

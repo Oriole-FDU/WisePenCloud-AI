@@ -27,18 +27,18 @@ from rag.application.graph.models import (
 )
 from rag.application.plugins.core import (
     EntitySpec,
-    GraphPlugin,
+    RagPlugin,
     Ontology,
     RelationSpec,
 )
-from rag.application.plugins.core.models import (
+from rag.application.plugins.core.metadata import (
     DocChunkMetadata,
     DocumentMetadata,
     GeneralDocumentMetadata,
 )
 from rag.application.plugins.core.registry import (
     DocumentChunkMetadataBuilder,
-    GraphPluginRegistry,
+    RagPluginRegistry,
 )
 from rag.application.publication import DocumentPublication
 from rag.domain.repositories.graph_topology import GraphSourceProjection
@@ -129,8 +129,8 @@ def _plugin(
     enable_llm_extraction: bool = False,
     chunk_selector=None,
     chunk_metadata_builder=None,
-) -> GraphPlugin:
-    return GraphPlugin(
+) -> RagPlugin:
+    return RagPlugin(
         plugin_id="paper-citation-v1",
         metadata_type=PaperMetadata,
         ontology=Ontology(
@@ -153,7 +153,7 @@ def _plugin(
 
 
 def test_metadata_registry_only_decodes_registered_types() -> None:
-    registry = GraphPluginRegistry(plugins=[_plugin()])
+    registry = RagPluginRegistry(plugins=[_plugin()])
     metadata = PaperMetadata(title="Source", reference_title="Target")
 
     codec = registry.document_metadata_codec
@@ -164,7 +164,7 @@ def test_metadata_registry_only_decodes_registered_types() -> None:
 
 def test_plugin_chunk_metadata_builder_is_registered_for_persistence() -> None:
     plugin = _plugin(chunk_metadata_builder=_PaperChunkMetadataBuilder())
-    registry = GraphPluginRegistry(plugins=[plugin])
+    registry = RagPluginRegistry(plugins=[plugin])
     metadata = PaperChunkMetadata(
         section_role="abstract",
         is_graph_extraction_target=True,
@@ -176,7 +176,7 @@ def test_plugin_chunk_metadata_builder_is_registered_for_persistence() -> None:
 
 def test_plugin_registry_validates_unique_plugins_and_routes_metadata() -> None:
     plugin = _plugin(chunk_metadata_builder=_PaperChunkMetadataBuilder())
-    registry = GraphPluginRegistry(plugins=[plugin])
+    registry = RagPluginRegistry(plugins=[plugin])
 
     assert registry.get(plugin.plugin_id) is plugin
     assert registry.match_document(
@@ -184,20 +184,20 @@ def test_plugin_registry_validates_unique_plugins_and_routes_metadata() -> None:
     ) is plugin
     assert registry.match_document(GeneralDocumentMetadata()) is None
     with pytest.raises(ValueError, match="plugin ids"):
-        GraphPluginRegistry(plugins=[plugin, _plugin()])
+        RagPluginRegistry(plugins=[plugin, _plugin()])
 
 
 def test_plugin_registry_rejects_duplicate_metadata_and_chunk_types() -> None:
     class _OtherPaperMetadata(DocumentMetadata):
         document_type: str = "paper"
 
-    duplicate_metadata_plugin = GraphPlugin(
+    duplicate_metadata_plugin = RagPlugin(
         plugin_id="other-paper",
         metadata_type=_OtherPaperMetadata,
         ontology=Ontology(domain="other"),
     )
     with pytest.raises(ValueError, match="document metadata types"):
-        GraphPluginRegistry(plugins=[_plugin(), duplicate_metadata_plugin])
+        RagPluginRegistry(plugins=[_plugin(), duplicate_metadata_plugin])
 
     class _OtherMetadata(DocumentMetadata):
         document_type: str = "other"
@@ -212,14 +212,14 @@ def test_plugin_registry_rejects_duplicate_metadata_and_chunk_types() -> None:
         def build_metadata(self, *, document, chunk) -> _OtherChunkMetadata:
             return _OtherChunkMetadata()
 
-    duplicate_chunk_plugin = GraphPlugin(
+    duplicate_chunk_plugin = RagPlugin(
         plugin_id="other",
         metadata_type=_OtherMetadata,
         ontology=Ontology(domain="other"),
         chunk_metadata_builder=_OtherChunkMetadataBuilder(),
     )
     with pytest.raises(ValueError, match="chunk metadata types"):
-        GraphPluginRegistry(
+        RagPluginRegistry(
             plugins=[
                 _plugin(chunk_metadata_builder=_PaperChunkMetadataBuilder()),
                 duplicate_chunk_plugin,
@@ -367,7 +367,7 @@ async def test_deterministic_plugin_writes_facts_without_text_evidence() -> None
         doc_chunks=chunks,
         graph_facts=facts,
         index_states=states,
-        plugin_registry=GraphPluginRegistry(plugins=[_plugin()]),
+        plugin_registry=RagPluginRegistry(plugins=[_plugin()]),
         openai_client=None,
         query_model="model",
         max_concurrency=1,
@@ -425,7 +425,7 @@ async def test_chunk_selector_limits_llm_targets_but_keeps_full_shared_window(mo
         doc_chunks=chunks,
         graph_facts=_GraphFacts(),
         index_states=states,
-        plugin_registry=GraphPluginRegistry(
+        plugin_registry=RagPluginRegistry(
             plugins=[_plugin(
                 enable_llm_extraction=True,
                 chunk_selector=lambda chunk: chunk.chunk_id == "selected",
@@ -466,7 +466,7 @@ async def test_empty_chunk_selection_skips_llm_and_keeps_deterministic_facts(mon
         doc_chunks=chunks,
         graph_facts=facts,
         index_states=states,
-        plugin_registry=GraphPluginRegistry(
+        plugin_registry=RagPluginRegistry(
             plugins=[
                 _plugin(enable_llm_extraction=True, chunk_selector=lambda chunk: False)
             ],
@@ -571,7 +571,7 @@ async def test_general_document_skips_graph_build_without_model_call() -> None:
         doc_chunks=chunks,
         graph_facts=facts,
         index_states=states,
-        plugin_registry=GraphPluginRegistry(plugins=[_plugin()]),
+        plugin_registry=RagPluginRegistry(plugins=[_plugin()]),
         openai_client=None,
         query_model="model",
         max_concurrency=1,
@@ -616,7 +616,7 @@ async def test_active_switch_during_build_prevents_old_graph_write() -> None:
         doc_chunks=chunks,
         graph_facts=facts,
         index_states=states,
-        plugin_registry=GraphPluginRegistry(plugins=[_plugin()]),
+        plugin_registry=RagPluginRegistry(plugins=[_plugin()]),
         openai_client=None,
         query_model="model",
         max_concurrency=1,
