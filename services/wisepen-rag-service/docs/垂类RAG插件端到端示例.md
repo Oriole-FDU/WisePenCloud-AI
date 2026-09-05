@@ -1,0 +1,465 @@
+ 
+
+# 垂类 RAG 插件端到端示例
+
+本文以论文为例，展示当前图谱插件的完整链路：文档级元数据生成确定性引用事实；Chunk 级元数据在准备期确定哪些段落值得 LLM 抽取；两条路径最终都返回模型可直接阅读的 `GraphSearchHit`。
+
+这不是把论文变成 RAG 的通用资源模型。通用底座只维护 `Document`、`DocChunk`、版本、权限和图谱投影；论文的字段、术语、关系和段落选择规则全部由插件提供。
+
+当前仓库只实现 `rag.application.plugins.core`，不预建空的论文包。出现真实论文生产需求后，本示例中的类型应收敛到 `rag.application.plugins.paper`：`metadata.py` 放论文 metadata，`chunks.py` 放段落语义 builder，`graph.py` 放 Ontology、producer 和过滤器，包入口只导出完整的 `paper_plugin` 供容器注册。
+
+## 1. 定义论文 metadata
+
+论文解析器已经能确定论文标题、发表年份和参考文献。这些结构化事实不应再由 LLM 从 Markdown 猜测。
+
+```python
+from pydantic import BaseModel, ConfigDict
+
+from rag.application.plugins.core import DocumentMetadata
+
+
+class PaperReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    title: str
+    doi: str | None = None
+
+
+class PaperMetadata(DocumentMetadata):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    document_type: str = "paper"
+    title: str
+    publication_year: int
+    primary_author: str
+    authors: list[str]
+    institution: str
+    research_domain: str
+    references: list[PaperReference]
+```
+
+metadata 是 revision 的组成部分，字段变化必须使用新的 `document_version`，不能在同一 revision 中覆盖。
+
+## 2. 在准备期生成 Chunk metadata
+
+图谱抽取不应对整篇论文的全部 Chunk 默认调用 LLM。论文插件定义 `PaperChunkMetadataBuilder`，把标题路径解释为论文段落角色并写入每个 Chunk。这个结果和正文一起持久化，后续读取、图谱构建与重试看到的是同一份事实。
+
+```python
+from rag.application.document.models import (
+    DocChunk,
+    Document,
+)
+from rag.application.plugins.core import DocChunkMetadata
+
+
+class PaperChunkMetadata(DocChunkMetadata):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    chunk_type: str = "paper"
+    section_role: str = ""
+    is_graph_extraction_target: bool = False
+
+
+class PaperChunkMetadataBuilder:
+    doc_metadata_type = PaperMetadata
+    chunk_metadata_type = PaperChunkMetadata
+
+    def build_metadata(
+        self,
+        *,
+        document: Document,
+        chunk: DocChunk,
+    ) -> PaperChunkMetadata:
+        section_role = chunk.section_path[-1].casefold() if chunk.section_path else ""
+        return PaperChunkMetadata(
+            section_role=section_role,
+            is_graph_extraction_target=section_role in {"abstract", "摘要"},
+        )
+```
+
+`DocumentPreparer` 的调用面只接收 Registry 组装出的一个运行时 Builder。多个插件的路由是 Registry 的内部职责，不暴露为 prepare 的参数列表，也不由论文插件接触存储 codec：
+
+```python
+from rag.application.plugins.core import RagPluginRegistry
+from rag.application.document.preparation import DocumentPreparer
+
+
+paper_chunk_metadata_builder = PaperChunkMetadataBuilder()
+# paper_plugin 在第 4 节定义；容器只接收包入口导出的完整插件实例。
+plugin_registry = RagPluginRegistry(plugins=[paper_plugin])
+document_preparer = DocumentPreparer(
+    publication=publication,
+    doc_chunks=doc_chunks,
+    chunk_metadata_builder=plugin_registry.chunk_metadata_builder,
+)
+
+await document_preparer.prepare(
+    resource_id="paper-graph-rag",
+    document_version=1,
+    markdown=paper_markdown,
+    metadata=PaperMetadata(
+        title="Graph RAG for Paper Reading",
+        publication_year=2026,
+        primary_author="张三",
+        authors=["张三", "李四"],
+        institution="复旦大学",
+        research_domain="检索增强生成",
+        references=[PaperReference(title="LightRAG")],
+    ),
+)
+```
+
+例如下列 Markdown 的两个 Chunk 会得到不同 metadata：
+
+```markdown
+# Abstract
+
+本文提出一种论文图谱方法。
+
+# Method
+
+方法细节。
+```
+
+```python
+PaperChunkMetadata(
+    section_role="abstract",
+    is_graph_extraction_target=True,
+)
+
+PaperChunkMetadata(
+    section_role="method",
+    is_graph_extraction_target=False,
+)
+```
+
+Registry 从已注册的 `RagPlugin.chunk_metadata_builder` 收集垂域规则，构造一个 `DocumentChunkMetadataBuilder` 并同步生成 Mongo 所需 codec。因此不需要额外维护一份容易漂移的 Chunk metadata 注册表。没有匹配 builder 的文档继续使用 `GeneralChunkMetadata`。
+
+选择哪些标题只是论文插件的业务策略。这里选择摘要是为了控制抽取成本；实际产品可在同一 builder 中根据稳定的标题路径标记引言、方法或实验段落。选择为空时不会回退为全量抽取。
+
+## 3. 定义 Ontology 与确定性引用 producer
+
+Ontology 约束宏观的实体类别和关系端点，不约束 Chunk metadata。`node_type` 是实体规格的正确字段名。
+
+```python
+from rag.application.graph.models import (
+    GraphNodeKind,
+)
+from rag.application.plugins.core import EntitySpec, Ontology, RelationSpec
+
+
+PaperOntology = Ontology(
+    domain="academic_paper",
+    description="论文及其引用关系",
+    entity_specs={
+        "paper": EntitySpec(
+            category="paper",
+            description="库内或外部论文",
+            node_type=GraphNodeKind.RESOURCE,
+        ),
+    },
+    relation_specs={
+        "CITES": RelationSpec(
+            relation_type="CITES",
+            description="起点论文引用终点论文",
+            allowed_sources=["paper"],
+            allowed_targets=["paper"],
+        ),
+    },
+)
+```
+
+确定性 producer 消费 `PaperMetadata.references`，并为库内论文和外部参考文献建立稳定图元。它不创建 `TextGraphEvidence`，因为引用来自已校验的结构化输入。
+
+```python
+from rag.application.graph.models import (
+    GraphEdge,
+    GraphNode,
+    graph_edge_id,
+    graph_node_id,
+)
+
+
+class PaperCitationProducer:
+    producer_id = "paper-citation-v1"
+
+    def produce(self, document: Document):
+        metadata = document.metadata
+        if not isinstance(metadata, PaperMetadata):
+            return (), ()
+
+        source = GraphNode(
+            node_id=graph_node_id(category="paper", name=metadata.title),
+            name=metadata.title,
+            category="paper",
+            node_type=GraphNodeKind.RESOURCE,
+        )
+        nodes = {source.node_id: source}
+        edges: list[GraphEdge] = []
+
+        for reference in metadata.references:
+            target = GraphNode(
+                node_id=graph_node_id(category="paper", name=reference.title),
+                name=reference.title,
+                category="paper",
+                node_type=GraphNodeKind.EXTERNAL_RESOURCE,
+            )
+            nodes[target.node_id] = target
+            edge = GraphEdge(
+                edge_id=graph_edge_id(
+                    source_node_id=source.node_id,
+                    relation_type="CITES",
+                    target_node_id=target.node_id,
+                ),
+                source_node_id=source.node_id,
+                target_node_id=target.node_id,
+                relation_type="CITES",
+                description=f"{metadata.title} cites {reference.title}",
+            )
+            PaperOntology.validate_node(target)
+            PaperOntology.validate_edge(edge, nodes)
+            edges.append(edge)
+
+        PaperOntology.validate_node(source)
+        return tuple(nodes.values()), tuple(edges)
+```
+
+## 4. 注册插件与选择 LLM 抽取目标
+
+`RagPlugin` 将一种文档 metadata、它的 Ontology、确定性 producer、Chunk metadata builder 和 LLM 抽取选择器组合起来。selector 只影响 LLM 调用目标；确定性 producer 始终接收完整 `Document`。
+
+```python
+from typing import Annotated
+
+from pydantic import Field
+
+from rag.application.plugins.core import (
+    DeclarativeMetadataFilter,
+    Eq,
+    RagPlugin,
+    Gte,
+    Lte,
+)
+
+
+class PaperFilter(DeclarativeMetadataFilter):
+    """面向模型调用的论文查询过滤；字段名不暴露存储字段。"""
+
+    min_year: Annotated[int | None, Gte("publication_year")] = Field(
+        default=None,
+        description="发表起始年份，包含该年份。",
+    )
+    max_year: Annotated[int | None, Lte("publication_year")] = Field(
+        default=None,
+        description="发表截止年份，包含该年份。",
+    )
+    author: Annotated[str | None, Eq("author_name")] = Field(
+        default=None,
+        description="作者姓名。",
+    )
+    institution: Annotated[str | None, Eq("institution")] = Field(
+        default=None,
+        description="论文所属机构。",
+    )
+    domain: Annotated[str | None, Eq("research_domain")] = Field(
+        default=None,
+        description="研究领域。",
+    )
+
+
+paper_plugin = RagPlugin(
+    plugin_id="academic-paper",
+    metadata_type=PaperMetadata,
+    ontology=PaperOntology,
+    deterministic_producer=PaperCitationProducer(),
+    chunk_metadata_builder=paper_chunk_metadata_builder,
+    enable_llm_extraction=True,
+    chunk_selector=lambda chunk: (
+        isinstance(chunk.metadata, PaperChunkMetadata)
+        and chunk.metadata.is_graph_extraction_target
+    ),
+    metadata_filter_values=lambda document: {
+        "publication_year": document.metadata.publication_year,
+        "author_name": document.metadata.primary_author,
+        "institution": document.metadata.institution,
+        "research_domain": document.metadata.research_domain,
+    },
+    metadata_filter_type=PaperFilter,
+)
+
+container.graph_plugins.override([paper_plugin])
+```
+
+`Annotated` 中的 `Eq`、`Gte`、`Lte` 只由插件核心读取。调用方看到的是自然字段名 `min_year`、`author`；底座最终仍得到既有的 `MetadataFilterCondition`，Qdrant 和 Neo4j 无需感知垂类类型。每个 Filter 字段必须恰好声明一个操作映射；未声明会在编译时失败，避免静默漏召回。
+
+完整构建链路如下：
+
+```text
+Markdown + PaperMetadata
+  -> DocumentPreparer
+  -> PaperChunkMetadataBuilder 为每个 Chunk 写入 metadata
+  -> DocumentIndexBuilder 发布 active revision
+  -> PaperCitationProducer 生成 CITES 确定性事实
+  -> 仅 is_graph_extraction_target=True 的 Chunk 调用 LLM
+  -> LLM quote 生成 TextGraphEvidence
+  -> Mongo 图事实，再投影到 Neo4j 和 Qdrant
+```
+
+未选中的 `Method` Chunk 可以作为选中 `Abstract` Chunk 的共享上下文，但不能独自产生 LLM 图事实。没有任何 Chunk 被选中时，LLM 不调用；确定性引用关系仍正常写入。
+
+## 5. 构造一次完整的图谱查询
+
+插件注册完成、文档已建立 active revision 后，调用方只使用模型友好的 `PaperFilter` 字段构造请求。`GraphRetriever` 会根据 `plugin_id` 找到论文插件，再把声明式过滤编译成底层 metadata 条件，最后返回可直接阅读的事实文本。
+
+```python
+from rag.application.retrieval.models import (
+    GraphSearchLevel,
+    GraphSearchRequest,
+    TraversalDirection,
+)
+
+
+request = GraphSearchRequest(
+    query="哪些论文被 2020 年以后发表的论文引用？",
+    level=GraphSearchLevel.HIGH,
+    resource_ids=["paper-graph-rag"],
+    relation_types=["CITES"],
+    direction=TraversalDirection.OUT,
+    max_depth=1,
+    vector_top_n=20,
+    candidate_limit=50,
+    top_k=5,
+    plugin_id="academic-paper",
+    metadata_filter=PaperFilter(min_year=2020),
+)
+
+result = await graph_retriever.search(request, permission_scope)
+```
+
+这里的 `PaperFilter(min_year=2020)` 会编译为：
+
+```python
+(
+    MetadataFilterCondition(
+        field="publication_year",
+        operator=MetadataFilterOperator.GTE,
+        value=2020,
+    ),
+)
+```
+
+过滤字段可以单独使用，也可以组合使用。单独查询只生成一个底层条件：
+
+```python
+author_request = GraphSearchRequest(
+    query="张三参与的论文有哪些引用关系？",
+    level=GraphSearchLevel.HIGH,
+    plugin_id="academic-paper",
+    metadata_filter=PaperFilter(author="张三"),
+)
+```
+
+组合查询则按 AND 语义生成多个条件：
+
+```python
+combined_request = GraphSearchRequest(
+    query="复旦大学 2020 年以后在检索增强生成领域发表的论文引用了什么？",
+    level=GraphSearchLevel.HIGH,
+    relation_types=["CITES"],
+    plugin_id="academic-paper",
+    metadata_filter=PaperFilter(
+        min_year=2020,
+        institution="复旦大学",
+        domain="检索增强生成",
+    ),
+)
+```
+
+检索返回的是模型可直接消费的结果，而不是图元或存储指针：
+
+```python
+GraphSearchResult(
+    hits=[
+        GraphSearchHit(
+            resource_id="paper-graph-rag",
+            text=(
+                "来源实体: Graph RAG for Paper Reading\n"
+                "关系: CITES\n"
+                "目标实体: LightRAG\n"
+                "事实说明: Graph RAG for Paper Reading cites LightRAG"
+            ),
+            score=0.91,
+        ),
+    ],
+)
+```
+
+查询链路至此闭环：自然语言查询和声明式过滤进入 `GraphSearchRequest`，插件负责领域路由与过滤编译，底座负责向量召回、图遍历、权限复核和精排，最终输出包含事实文本的 `GraphSearchHit`。
+
+## 6. `get_fact_text()` 的实际输出
+
+确定性关系没有正文 Chunk。`GraphSourceProjection.get_fact_text()` 因此将端点、谓词和事实描述组合为同一份精排文本和对外展示文本：
+
+```python
+projection = GraphSourceProjection(
+    projection_id="gsp_example",
+    target_type="edge",
+    target_id="ge_example",
+    resource_id="paper-graph-rag",
+    content_revision="paper-graph-rag@1#abc123",
+    evidence_ids=[],
+    producer_id="paper-citation-v1",
+    edge=GraphEdge(
+        edge_id="ge_example",
+        source_node_id="gn_source",
+        target_node_id="gn_target",
+        relation_type="CITES",
+        description="Graph RAG for Paper Reading cites LightRAG",
+    ),
+    source_node_name="Graph RAG for Paper Reading",
+    target_node_name="LightRAG",
+)
+
+projection.get_fact_text()
+# (
+#     "来源实体: Graph RAG for Paper Reading\n"
+#     "关系: CITES\n"
+#     "目标实体: LightRAG\n"
+#     "事实说明: Graph RAG for Paper Reading cites LightRAG"
+# )
+```
+
+这个字符串会送入 reranker，并原样构造结果：
+
+```python
+GraphSearchHit(
+    resource_id="paper-graph-rag",
+    text=(
+        "来源实体: Graph RAG for Paper Reading\n"
+        "关系: CITES\n"
+        "目标实体: LightRAG\n"
+        "事实说明: Graph RAG for Paper Reading cites LightRAG"
+    ),
+    score=0.91,
+)
+```
+
+相比之下，LLM 路径返回的是已验证 Evidence 对应的完整 Chunk 正文，并携带最小定位：
+
+```python
+GraphSearchHit(
+    resource_id="paper-graph-rag",
+    text="Abstract\n\n本文提出一种论文图谱方法。",
+    score=0.87,
+    section_id="rsec_...",
+    section_path=["Abstract"],
+)
+```
+
+两种结果均不暴露 Chunk ID、图元 ID、Evidence ID、producer ID、内容 revision、offset 或来源投影。它们是生命周期和审计所需的内部事实，不是模型阅读所需内容。
+
+## 7. 查询与边界
+
+论文插件可把 `publication_year` 作为文档级标量过滤字段下推到图谱投影；它不允许客户端按任意 `PaperMetadata` 字段或 `PaperChunkMetadata.section_role` 过滤。后者会将抽取成本策略错误地扩张为查询召回策略，并带来未经验证的漏召回风险。
+
+图谱检索当前仍是内部能力，未开放 HTTP 路由。它按当前 active revision 与 ACL 复核候选；LLM 来源还复核 Evidence、Chunk 和原文 quote。更细的 Chunk 级查询、条款资源和纯表格资源不是此插件的扩展目标，相关边界与取舍见 [图谱能力决策](图谱能力决策.md)。

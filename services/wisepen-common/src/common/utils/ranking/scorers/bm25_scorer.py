@@ -44,6 +44,8 @@ class BM25Scorer:
     ) -> tuple[ScoreSignal, ...]:
         if not candidates:
             return ()
+        if not query.lexical_query or not query.lexical_query.strip():
+            return ()
 
         positions = candidate_positions(candidates)
 
@@ -53,7 +55,7 @@ class BM25Scorer:
         if not any(corpus_tokens):
             return ()
 
-        query_tokens = list(self.tokenizer.tokenize(query.text))
+        query_tokens = list(self.tokenizer.tokenize(query.lexical_query))
         if not query_tokens:
             return ()
 

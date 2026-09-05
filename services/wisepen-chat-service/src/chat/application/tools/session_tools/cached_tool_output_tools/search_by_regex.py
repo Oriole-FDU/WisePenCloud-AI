@@ -19,15 +19,23 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent as StoredCachedToolOutput,
-    ToolContentStore as CachedToolOutputStore,
 )
-from chat.core.config.app_settings import settings
+from chat.application.tools.core.output_cache.cache_store import (
+    get_tool_content,
+)
+from chat.application.tools.session_tools.cached_tool_output_tools.window import (
+    CachedToolOutputWindow,
+)
 
-from chat.application.tools.session_tools.cached_tool_output_tools.window import CachedToolOutputWindow, CachedToolOutputWindowBuilder
-
-_MAX_REGEX_CHARS = 500
-_SEARCH_TIMEOUT_SECONDS = 5
+_MAX_REGEX_CHARS = 500    # 正则表达式的最大字符限制
+_DEFAULT_MAX_MATCHES = 10    # 默认最大匹配数(正则匹配数，非窗口数)
+_MAX_MATCHES = 100    # 最大匹配数上限
+_REGEX_CONTEXT_CHARS = 200    # 单边拓展上下文上限
+_REGEX_CLUSTER_GAP_CHARS = _REGEX_CONTEXT_CHARS * 2    # 窗口融合的gap上限
+_REGEX_SENTENCE_BOUNDARIES = frozenset(".。!?！？;；\n")    # sentence分隔符集合
+_SEARCH_TIMEOUT_SECONDS = 5    # regex最大搜索时间，避免复杂正则搜索超时
 _TIMEOUT_SECONDS = 300.0
+
 _PARAMETERS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -35,7 +43,7 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string", "minLength": 1},
             "minItems": 1,
-            "maxItems": 64,
+            "maxItems": 16,
             "description": "One or more cached tool output content_id values returned in previous tool results.",
         },
         "pattern": {
@@ -46,17 +54,10 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         },
         "max_matches": {
             "type": "integer",
-            "default": 10,
-            "minimum": 0,
-            "description": "Maximum matches returned across all cached tool outputs.",
-        },
-        "context_chars": {
-            "type": "integer",
-            "minimum": 0,
-            "description": (
-                "Optional raw source characters included before and after each match. "
-                "When omitted, the reader chooses token-budgeted context automatically."
-            ),
+            "default": _DEFAULT_MAX_MATCHES,
+            "minimum": 1,
+            "maximum": _MAX_MATCHES,
+            "description": "Maximum exact regex matches collected across all cached tool outputs; at most 100.",
         },
     },
     "required": ["content_ids", "pattern"],
@@ -65,34 +66,46 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
 
 
 @dataclass(slots=True)
-class CachedToolOutputSearchByRegexMatch:
+class CachedToolOutputRegexHighlight:
+    """窗口内一个正则命中的可见高光。"""
+
+    text: str
+    # 相对所属 window.text 的 Python 字符半开区间，不是全局原文偏移。
+    start_offset: int
+    end_offset: int
+
+
+@dataclass(slots=True)
+class CachedToolOutputRegexWindow:
+    """一个命中簇的连续上下文窗口及其窗口内高光。"""
+
     content_id: str
-    match_start: int
-    match_end: int
     window: CachedToolOutputWindow
+    highlights: list[CachedToolOutputRegexHighlight]
 
 
 @dataclass(slots=True)
 class CachedToolOutputSearchByRegexResult:
-    matches: list[CachedToolOutputSearchByRegexMatch] = field(default_factory=list)
-    budget_exhausted: bool = False
+    """正则搜索结果；命中数和最终聚类窗口数使用不同计数。"""
 
+    matched_count: int  # 实际收集的精确匹配数，受 max_matches 限制。
+    window_count: int  # 按位置聚类并合并后的最终窗口数。
+    windows: list[CachedToolOutputRegexWindow] = field(default_factory=list)
 
 class CachedToolOutputSearchByRegexTool:
-    __slots__ = ("_definition", "_store")
 
-    def __init__(self, *, store: CachedToolOutputStore) -> None:
-        self._store = store
+    def __init__(self) -> None:
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="search_cached_tool_output_by_regex",
-                description=(
+                description = (
                     "Search complete cached source texts with a Python regular expression. "
-                    "Use this for exact names, identifiers, citations, headings, URLs, or other "
-                    "literal patterns, including matches that cross retrieval chunk boundaries. "
-                    "Results include absolute match offsets and bounded source context. "
-                    "Use search_cached_tool_output_by_semantics for meaning-based retrieval. Use read tools "
-                    "after you know the desired range, pages, or sections."
+                    "Best for exact literal names, codes, identifiers, citations, URLs, or patterns that may span chunk boundaries.\n\n"
+                    "Key Behaviors:\n"
+                    "- max_matches limits total exact regex hits, which are then clustered into compact context windows.\n"
+                    "- Windows provide absolute start_offset and end_offset for follow-up reads with read_cached_tool_output_by_range.\n"
+                    "- Highlight offsets are relative to each returned window's text.\n\n"
+                    "For meaning-based or conceptual queries, use search_cached_tool_output_by_semantics instead."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
@@ -114,13 +127,8 @@ class CachedToolOutputSearchByRegexTool:
         **kwargs: Any,
     ) -> CachedToolOutputSearchByRegexResult:
         del config
-        # pattern 为空直接视为调用错误；不要把空正则扩展成全文匹配。
-        pattern = str(kwargs.get("pattern") or "")
-        if not pattern:
-            raise ToolExecutionError(
-                reason="missing_pattern",
-                detail_reason="pattern is required.",
-            )
+        # schema 已保证 pattern 非空；这里只负责执行正则语法检查。
+        pattern = kwargs["pattern"]
         if len(pattern) > _MAX_REGEX_CHARS:
             # 限制正则长度，避免模型生成过长表达式导致匹配成本失控。
             raise ToolExecutionError(
@@ -139,24 +147,20 @@ class CachedToolOutputSearchByRegexTool:
         try:
             # 搜索工具直接按 content_id 逐个读取缓存；不存在的 content 不参与搜索。
             stored_items = []
-            session_id = str(context["session_id"])
-            for content_id in [str(value) for value in kwargs["content_ids"]]:
-                stored = await self._store.get(
+            session_id = context["session_id"]
+            for content_id in kwargs["content_ids"]:
+                stored = await get_tool_content(
                     content_id=content_id,
                     session_id=session_id,
                 )
                 if stored is not None:
                     stored_items.append(stored)
-            return await _search_by_regex(
+            result = await _search_by_regex(
                 stored_items=stored_items,
                 pattern=pattern,
-                max_matches=max(int(kwargs.get("max_matches", 10)), 0),
-                context_chars=(
-                    max(int(kwargs["context_chars"]), 0)
-                    if "context_chars" in kwargs
-                    else None
-                ),
+                max_matches=kwargs["max_matches"],
             )
+            return result
         except Exception as exc:
             raise ToolExecutionError(
                 reason="search_cached_tool_output_by_regex_failed",
@@ -170,22 +174,11 @@ async def _search_by_regex(
     stored_items: Sequence[StoredCachedToolOutput],
     pattern: str,
     max_matches: int,
-    context_chars: int | None,
 ) -> CachedToolOutputSearchByRegexResult:
-    if max_matches <= 0:
-        # max_matches=0 是合法输入，用于主动禁止返回命中。
-        return CachedToolOutputSearchByRegexResult()
-
-    # regex 的窗口预算使用独立配置，不复用 read_cached_tool_output_by_range 的单窗口预算。
-    builder = CachedToolOutputWindowBuilder(
-        char_budget=settings.TOOL_CONTENT_REGEX_TOTAL_CHAR_BUDGET
-    )
-
-    def scan_loaded() -> tuple[list[CachedToolOutputSearchByRegexMatch], bool]:
+    def scan_loaded() -> CachedToolOutputSearchByRegexResult:
         # regex 搜索放到工作线程里执行，避免复杂表达式阻塞事件循环。
         compiled = regex.compile(pattern)
-        matches: list[CachedToolOutputSearchByRegexMatch] = []
-        remaining = settings.TOOL_CONTENT_REGEX_TOTAL_CHAR_BUDGET
+        matched_ranges: list[tuple[StoredCachedToolOutput, int, int]] = []    # (stored, matched.start, matched.end)
         for stored in stored_items:
             try:
                 # timeout 由 regex 库在单次扫描中控制，复杂表达式会转成工具错误返回。
@@ -193,48 +186,113 @@ async def _search_by_regex(
                     stored.text,
                     timeout=_SEARCH_TIMEOUT_SECONDS,
                 ):
-                    if remaining <= 0:
-                        return matches, True
-                    window_start, window_end = _regex_window_range(
-                        stored.text,
-                        match_start=matched.start(),
-                        match_end=matched.end(),
-                        context_chars=context_chars,
-                        context_side_char_budget=(
-                            settings.TOOL_CONTENT_REGEX_CONTEXT_SIDE_CHAR_BUDGET
-                        ),
-                        total_char_budget=remaining,
-                    )
-                    # 命中上下文最终仍通过 WindowBuilder 回填 page/section/anchor 元数据。
-                    window = builder.build_range_window(
-                        stored,
-                        start=window_start,
-                        end=window_end,
-                        char_budget=remaining,
-                    )
-                    matches.append(
-                        CachedToolOutputSearchByRegexMatch(
-                            content_id=stored.content_id,
-                            match_start=matched.start(),
-                            match_end=matched.end(),
-                            window=window,
-                        )
-                    )
-                    remaining -= len(window.text)
-                    if len(matches) >= max_matches:
-                        # 达到命中数量上限不是预算耗尽，不需要标记 budget_exhausted。
-                        return matches, False
+                    matched_ranges.append((stored, matched.start(), matched.end()))
+                    if len(matched_ranges) >= max_matches:
+                        break
+                if len(matched_ranges) >= max_matches:
+                    break
             except TimeoutError as exc:
                 raise TimeoutError(
                     f"regex search exceeded {_SEARCH_TIMEOUT_SECONDS}s"
                 ) from exc
-        return matches, False
+        windows = _build_regex_windows(
+            matched_ranges=matched_ranges,
+        )
+        return CachedToolOutputSearchByRegexResult(
+            matched_count=len(matched_ranges),
+            window_count=len(windows),
+            windows=windows,
+        )
 
-    matches, budget_exhausted = await asyncio.to_thread(scan_loaded)
-    return CachedToolOutputSearchByRegexResult(
-        matches=matches,
-        budget_exhausted=budget_exhausted,
-    )
+    return await asyncio.to_thread(scan_loaded)
+
+
+def _build_regex_windows(
+    *,
+    matched_ranges: Sequence[tuple[StoredCachedToolOutput, int, int]],
+) -> list[CachedToolOutputRegexWindow]:
+    """按正文分别聚类命中，并把每个命中簇投影为一个短窗口。
+
+    正则匹配先以全局原文坐标保存；窗口生成完成后才将匹配坐标转换为窗口内坐标，
+    从而同时保留精确高光和 range 工具所需的全局窗口范围。
+    """
+
+    windows: list[CachedToolOutputRegexWindow] = []
+    # 正文对象去重
+    for stored in _ordered_stored_items(matched_ranges):
+        ranges = [
+            (match_start, match_end)
+            for item, match_start, match_end in matched_ranges
+            if item is stored
+        ]
+        for cluster in _cluster_match_ranges(ranges):
+            window_start, window_end = _regex_window_range(
+                stored.text,
+                match_start=cluster[0][0],
+                match_end=cluster[-1][1],
+            )
+            window = CachedToolOutputWindow(
+                text=stored.text[window_start:window_end],
+                start_offset=window_start,
+                end_offset=window_end,
+                # 本工具没有总窗口预算；未找到句界时按字符边界自然结束。
+                truncated=False,
+            )
+            windows.append(
+                CachedToolOutputRegexWindow(
+                    content_id=stored.content_id,
+                    window=window,
+                    highlights=[
+                        CachedToolOutputRegexHighlight(
+                            text=stored.text[match_start:match_end],
+                            start_offset=match_start - window_start,
+                            end_offset=match_end - window_start,
+                        )
+                        for match_start, match_end in cluster
+                    ],
+                )
+            )
+    return windows
+
+
+def _ordered_stored_items(
+    matched_ranges: Sequence[tuple[StoredCachedToolOutput, int, int]],
+) -> list[StoredCachedToolOutput]:
+    """同一个正文对象有可能被多次匹配，此处按照首次命中的顺序去重"""
+    seen_ids: set[int] = set()
+    stored_items: list[StoredCachedToolOutput] = []
+
+    for stored, _, _ in matched_ranges:
+        obj_id = id(stored)
+        if obj_id not in seen_ids:
+            seen_ids.add(obj_id)
+            stored_items.append(stored)
+
+    return stored_items
+
+
+def _cluster_match_ranges(
+    ranges: Sequence[tuple[int, int]],
+) -> list[list[tuple[int, int]]]:
+    """把相邻或重叠的正则命中合并为连续簇。"""
+
+    ordered_ranges = sorted(ranges)
+    if not ordered_ranges:
+        return []
+
+    clusters: list[list[tuple[int, int]]] = []
+    current = [ordered_ranges[0]]
+    current_end = ordered_ranges[0][1]
+    for match_start, match_end in ordered_ranges[1:]:
+        if match_start - current_end <= _REGEX_CLUSTER_GAP_CHARS:
+            current.append((match_start, match_end))
+            current_end = max(current_end, match_end)
+            continue
+        clusters.append(current)
+        current = [(match_start, match_end)]
+        current_end = match_end
+    clusters.append(current)
+    return clusters
 
 
 def _regex_window_range(
@@ -242,35 +300,30 @@ def _regex_window_range(
     *,
     match_start: int,
     match_end: int,
-    context_chars: int | None,
-    context_side_char_budget: int,
-    total_char_budget: int,
 ) -> tuple[int, int]:
-    # 未指定 context_chars 时使用系统默认的左右上下文预算。
-    if context_chars is None:
-        candidate_start = max(match_start - context_side_char_budget, 0)
-        candidate_end = min(match_end + context_side_char_budget, len(text))
-    else:
-        # 调用方显式给出 context_chars 时，按该值覆盖默认上下文长度。
-        context_chars = max(context_chars, 0)
-        candidate_start = max(match_start - context_chars, 0)
-        candidate_end = min(match_end + context_chars, len(text))
+    """在命中簇两侧各取最多 200 字符，并优先落在最近句界。"""
+    # 确认大候选边界边界
+    candidate_start = max(match_start - _REGEX_CONTEXT_CHARS, 0)
+    candidate_end = min(match_end + _REGEX_CONTEXT_CHARS, len(text))
 
-    if len(text[candidate_start:candidate_end]) <= total_char_budget:
-        # 候选窗口未超过剩余预算时直接返回完整上下文。
-        return candidate_start, candidate_end
-
-    match_chars = len(text[match_start:match_end])
-    if match_chars >= total_char_budget:
-        # 极端情况下命中文本本身已超过预算，至少返回完整命中范围。
-        return match_start, match_end
-
-    # 上下文超过预算时，优先保留命中本体，再把剩余预算尽量平均分给前后文。
-    context_budget = total_char_budget - match_chars
-    before_budget = context_budget // 2
-    start = max(match_start - before_budget, candidate_start)
-    after_budget = context_budget - len(text[start:match_start])
-    return start, min(match_end + after_budget, candidate_end)
+    # 回退边界，从最佳标点处截断，避免窗口内出现半截语句
+    left_boundary = max(
+        (
+            index + 1
+            for index in range(candidate_start, match_start)
+            if text[index] in _REGEX_SENTENCE_BOUNDARIES
+        ),
+        default=candidate_start,
+    )
+    right_boundary = next(
+        (
+            index + 1
+            for index in range(match_end, candidate_end)
+            if text[index] in _REGEX_SENTENCE_BOUNDARIES
+        ),
+        candidate_end,
+    )
+    return left_boundary, right_boundary
 
 
 def _policy() -> ToolPolicy:

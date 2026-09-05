@@ -13,10 +13,12 @@ from chat.application.tools.core import (
     ToolSelectionMode,
     ToolUISpec,
 )
-from chat.application.tools.core.output_cache.cache_store import ToolContentStore as CachedToolOutputStore
+from chat.application.tools.core.output_cache.cache_store import get_tool_content
+from chat.application.tools.session_tools.cached_tool_output_tools.window import (
+    CachedToolOutputWindow,
+    CachedToolOutputWindowBuilder,
+)
 from chat.core.config.app_settings import settings
-
-from chat.application.tools.session_tools.cached_tool_output_tools.window import CachedToolOutputWindow, CachedToolOutputWindowBuilder
 
 _TIMEOUT_SECONDS = 300.0
 _PARAMETERS_SCHEMA: dict[str, Any] = {
@@ -53,10 +55,8 @@ class CachedToolOutputReadByRangeResult:
 
 
 class CachedToolOutputReadByRangeTool:
-    __slots__ = ("_definition", "_store")
 
-    def __init__(self, *, store: CachedToolOutputStore) -> None:
-        self._store = store
+    def __init__(self) -> None:
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="read_cached_tool_output_by_range",
@@ -98,11 +98,11 @@ class CachedToolOutputReadByRangeTool:
     ) -> CachedToolOutputReadByRangeResult:
         del config
         try:
-            content_id = str(kwargs["content_id"])
+            content_id = kwargs["content_id"]
             # 只允许读取当前会话持有的 content，避免 LLM 猜测其他会话的 content_id。
-            stored = await self._store.get(
+            stored = await get_tool_content(
                 content_id=content_id,
-                session_id=str(context["session_id"]),
+                session_id=context["session_id"],
             )
             if stored is None:
                 # content 不存在时返回普通结果，让 LLM 可以改用 structure/search 重新定位。
@@ -118,8 +118,8 @@ class CachedToolOutputReadByRangeTool:
                 content_id=content_id,
                 window=builder.build_range_window(
                     stored,
-                    start=int(kwargs["start"]) if "start" in kwargs else None,
-                    end=int(kwargs["end"]) if "end" in kwargs else None,
+                    start=kwargs["start"] if "start" in kwargs else None,  # noqa: SIM401
+                    end=kwargs["end"] if "end" in kwargs else None,  # noqa: SIM401
                 ),
             )
         except Exception as exc:

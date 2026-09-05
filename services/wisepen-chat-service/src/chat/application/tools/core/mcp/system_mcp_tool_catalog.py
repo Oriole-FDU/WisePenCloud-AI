@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import time
-from typing import Any, List
+from typing import Any
+
+from common.logger import error
 
 from chat.application.tools.core import (
     ToolConfigSpec,
@@ -17,7 +19,6 @@ from chat.application.tools.core.mcp.remote_tool import McpRemoteTool
 from chat.core.config.app_settings import settings
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.service_client import McpServiceClient
-from common.logger import error
 
 _WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
     schema={
@@ -44,7 +45,7 @@ _WEB_SEARCH_POLICY = ToolPolicy(
     max_output_chars=None,
 )
 
-_SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
+_SYSTEM_TOOL_CONFIGS: list[dict[str, Any]] = [{
         "tool_name": "create_skill_info",
         "ui_spec": ToolUISpec(display_name="创建 Skill 信息", description="创建新的 Skill 草稿信息。"),
         "policy": ToolPolicy(
@@ -228,7 +229,7 @@ class SystemMcpToolCatalog:
             # 重新拉取缓存
             try:
                 descriptors = await self._mcp_service_client.list_tools()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - discovery failure leaves no usable system tools
                 error("load system mcp tools failed.", exc=e)
                 return {}
             self._mcp_tools_cache_update_time = now

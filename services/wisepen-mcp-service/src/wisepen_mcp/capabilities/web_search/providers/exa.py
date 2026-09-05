@@ -3,9 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-
 from common.core.exceptions import ServiceException
-from common.utils.ranking import RankingPipeline
+
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
@@ -20,8 +19,7 @@ class ExaSearchTool(BaseSearchTool):
     tool_name = "exa_search"
     provider_name = "exa"
 
-    def __init__(self, *, http_client: httpx.AsyncClient, ranking_pipeline: RankingPipeline) -> None:
-        super().__init__(ranking_pipeline=ranking_pipeline)
+    def __init__(self, *, http_client: httpx.AsyncClient) -> None:
         self._http_client = http_client
 
 
