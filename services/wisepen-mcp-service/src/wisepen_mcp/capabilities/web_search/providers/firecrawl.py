@@ -47,7 +47,7 @@ class FirecrawlSearchTool(BaseSearchTool):
             return SearchResponse(results=[SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["abstract"]] if item.get("abstract") else [], metadata={key: item[key] for key in ("paperId", "primaryId", "sourceIds", "score") if item.get(key) is not None}) for item in data["results"]])
         return SearchResponse(
             results=[
-                SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["description"]] if item.get("description") else [])
-                for item in data["data"]["web"]
+                SearchResult(title=item.title, url=item.url, evidences=[item.description] if item.description else [])
+                for item in data.web or []
             ]
         )
