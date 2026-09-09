@@ -20,4 +20,6 @@ dependencies = [
     "nacos-sdk-python",
     "wisepen-common",
     "exa-py>=2.20.0",
+    "tavily-python>=0.7.0",
+    "firecrawl-py>=2.0.0",
 ]

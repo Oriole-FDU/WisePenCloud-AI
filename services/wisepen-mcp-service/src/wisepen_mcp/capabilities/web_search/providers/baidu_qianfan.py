@@ -28,7 +28,7 @@ class BaiduQianfanSearchTool(BaseSearchTool):
 
         url = f"{settings.WEB_SEARCH_BAIDU_QIANFAN_BASE_URL.rstrip('/')}/v2/ai_search/web_search"
         payload = {
-            "messages": [{"role": "user", "content": query}],
+            "messages": [{"role": "user", "content": f"{query}\n{focus}" if focus else query}],
             "search_source": "baidu_search_v2",
             "resource_type_filter": [{"type": "web", "top_k": max_results}],
         }
@@ -62,7 +62,13 @@ class BaiduQianfanSearchTool(BaseSearchTool):
     def map_response(data: dict[str, Any]) -> SearchResponse:
         return SearchResponse(
             results=[
-                SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["snippet"]] if item.get("snippet") else [])
+                SearchResult(
+                    title=item.get("title"),
+                    url=item.get("url"),
+                    published_date=item.get("date"),
+                    evidences=[item[key] for key in ("markdown_content", "content", "snippet") if item.get(key)][:1],
+                    metadata={key: item[key] for key in ("authority_score", "rerank_score", "aladdin") if item.get(key) is not None},
+                )
                 for item in data["references"]
             ]
         )

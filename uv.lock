@@ -1204,6 +1204,24 @@ wheels = [
 ]
 
 [[package]]
+name = "firecrawl-py"
+version = "4.42.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "httpx" },
+    { name = "nest-asyncio" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/68/a1/b9c330494d6cb755ebc6f3360d8231e7579789898619799845000b0caff8/firecrawl_py-4.42.0.tar.gz", hash = "sha256:48f0210243ae2d8da57647b54d7a372f5fdd5c4c8bf15c67597c92a729788f78", size = 237434, upload-time = "2026-09-08T14:41:30.733Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/45/8e/1799ded3652b4245466250558b0b22759dc2fdc538bb84f07d03e8185b96/firecrawl_py-4.42.0-py3-none-any.whl", hash = "sha256:ccce7a0f33be9433790b23227afdec2b225e10efbaf1467d496476aff74dfacb", size = 291776, upload-time = "2026-09-08T14:41:29.393Z" },
+]
+
+[[package]]
 name = "flatbuffers"
 version = "25.12.19"
 source = { registry = "https://pypi.org/simple" }
@@ -2662,6 +2680,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/9d/57/f939c3b9b28e5851095eafb823b5a996eea3f21a14be513bcf9b355f97da/neo4j-6.3.0.tar.gz", hash = "sha256:d0d3986c37ad174a549a39dfec6d22a00a061ebcb0267f1a5caf856589838e73", size = 242487, upload-time = "2026-08-28T10:25:04.743Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/47/47/d29d93455fe2959e5b8383e52f68b3633d729f39e87fef94743f9f2240ae/neo4j-6.3.0-py3-none-any.whl", hash = "sha256:d243f9c8adf882ae7205a76eb2419b0a632d5f3c89383d4a0044d737a2223991", size = 331471, upload-time = "2026-08-28T10:25:03.263Z" },
+]
+
+[[package]]
+name = "nest-asyncio"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/83/f8/51569ac65d696c8ecbee95938f89d4abf00f47d58d48f6fbabfe8f0baefe/nest_asyncio-1.6.0.tar.gz", hash = "sha256:6f172d5449aca15afd6c646851f4e31e02c598d553a667e38cafa997cfec55fe", size = 7418, upload-time = "2024-01-21T14:25:19.227Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/c4/c2971a3ba4c6103a3d10c4b0f24f461ddc027f0f09763220cf35ca1401b3/nest_asyncio-1.6.0-py3-none-any.whl", hash = "sha256:87af6efd6b5e897c81050477ef65c62e2b2f35d51703cae01aff2905b1852e1c", size = 5195, upload-time = "2024-01-21T14:25:17.223Z" },
 ]
 
 [[package]]
@@ -4564,6 +4591,20 @@ wheels = [
 ]
 
 [[package]]
+name = "tavily-python"
+version = "0.8.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "requests" },
+    { name = "tiktoken" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0d/94/f49475ac7c33beb19a7067ffa9faad21a9b1a4afbcadac22476a9e143783/tavily_python-0.8.1.tar.gz", hash = "sha256:f00d1ecfe9a7ad82a7d6b84427faefe7448e9f16a8115ece3f5fbadc35752c4b", size = 31270, upload-time = "2026-09-03T13:20:33.15Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/34/33/30bf2dcbd36f0591aa0b0a9bcf6b1d45c5c2223730557abdecf282cef72d/tavily_python-0.8.1-py3-none-any.whl", hash = "sha256:21392e47f28e6024405d5616e1e3228eed1d15a3b3d9d9e523c150e628f13a5e", size = 22177, upload-time = "2026-09-03T13:20:32.21Z" },
+]
+
+[[package]]
 name = "tenacity"
 version = "9.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -5260,12 +5301,14 @@ dependencies = [
     { name = "dependency-injector" },
     { name = "exa-py" },
     { name = "fastapi" },
+    { name = "firecrawl-py" },
     { name = "httpx" },
     { name = "mcp" },
     { name = "nacos-sdk-python" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
+    { name = "tavily-python" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "wisepen-common" },
 ]
@@ -5276,12 +5319,14 @@ requires-dist = [
     { name = "dependency-injector" },
     { name = "exa-py", specifier = ">=2.20.0" },
     { name = "fastapi" },
+    { name = "firecrawl-py", specifier = ">=2.0.0" },
     { name = "httpx" },
     { name = "mcp", specifier = ">=1.27,<2" },
     { name = "nacos-sdk-python" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
+    { name = "tavily-python", specifier = ">=0.7.0" },
     { name = "uvicorn", extras = ["standard"] },
     { name = "wisepen-common", editable = "services/wisepen-common" },
 ]

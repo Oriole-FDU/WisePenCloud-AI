@@ -23,16 +23,16 @@ class TinyFishSearchTool(BaseSearchTool):
         self._http_client = http_client
 
     async def search_web(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
-        return await self._search(query=query, api_key=api_key, academic=False)
+        return await self._search(query=query, focus=focus, api_key=api_key, academic=False)
 
     async def search_academic(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
-        return await self._search(query=query, api_key=api_key, academic=True)
+        return await self._search(query=query, focus=focus, api_key=api_key, academic=True)
 
-    async def _search(self, *, query: str, api_key: str | None, academic: bool) -> SearchResponse:
+    async def _search(self, *, query: str, focus: str | None, api_key: str | None, academic: bool) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "TinyFish API key is required.")
 
-        params: dict[str, object] = {"query": query}
+        params: dict[str, object] = {"query": query, "purpose": focus} if focus else {"query": query}
         if academic:
             params["domain_type"] = "research_paper"
 
@@ -65,7 +65,7 @@ class TinyFishSearchTool(BaseSearchTool):
     def map_response(data: dict[str, Any]) -> SearchResponse:
         return SearchResponse(
             results=[
-                SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["snippet"]] if item.get("snippet") else [])
+                SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["snippet"]] if item.get("snippet") else [], metadata={"site_name": item["site_name"]} if item.get("site_name") else {})
                 for item in data["results"]
             ],
         )

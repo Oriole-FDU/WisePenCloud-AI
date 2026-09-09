@@ -100,15 +100,22 @@ class BaseSearchTool(ABC):
                 "query must not be blank.",
             )
 
+        request = ProviderSearchRequest(
+            query=query,
+            mode=mode,
+            focus=focus.strip() if focus and focus.strip() else None,
+            max_results=max_results,
+        )
+
         api_key = get_tool_config_value(ctx, "api_key")
         api_key = api_key.strip() if isinstance(api_key, str) and api_key.strip() else None
         if self.requires_api_key and not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CONFIG_MISSING,f"{self.tool_name} API key is not configured.",)
 
-        if mode is SearchMode.ACADEMIC:
-            response = await self.search_academic(query=query, focus=focus, max_results=max_results, api_key=api_key)
+        if request.mode is SearchMode.ACADEMIC:
+            response = await self.search_academic(query=request.query, focus=request.focus, max_results=request.max_results, api_key=api_key)
         else:
-            response = await self.search_web(query=query, focus=focus, max_results=max_results, api_key=api_key)
+            response = await self.search_web(query=request.query, focus=request.focus, max_results=request.max_results, api_key=api_key)
 
         seen_urls: set[str | None] = set()
         search_results: list[SearchResult] = []
@@ -116,7 +123,7 @@ class BaseSearchTool(ABC):
             if result.url in seen_urls: continue
             seen_urls.add(result.url)
             search_results.append(result)
-            if len(search_results) >= max_results:
+            if len(search_results) >= request.max_results:
                 break
 
         candidates_by_id = {f"[{index}]": result for index, result in enumerate(search_results, 1)}
@@ -127,8 +134,8 @@ class BaseSearchTool(ABC):
             )
 
         return WebSearchToolResult(
-            query=query,
-            mode=mode,
+            query=request.query,
+            mode=request.mode,
             candidates=[
                 WebSearchCandidate(
                     candidate_id=candidate_id,

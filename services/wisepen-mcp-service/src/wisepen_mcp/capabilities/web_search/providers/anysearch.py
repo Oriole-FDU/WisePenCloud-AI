@@ -27,7 +27,7 @@ class AnySearchTool(BaseSearchTool):
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "AnySearch API key is required.")
 
         url = f"{settings.WEB_SEARCH_ANYSEARCH_BASE_URL.rstrip('/')}/v1/search"
-        payload = {"query": query, "max_results": max_results, "content_types": ["webpage"]}
+        payload = {"query": f"{query}\n{focus}" if focus else query, "max_results": min(max_results, 10), "content_types": ["webpage"]}
 
         try:
             response = await self._http_client.post(url, headers={"Authorization": f"Bearer {api_key}"}, json=payload)
@@ -58,7 +58,7 @@ class AnySearchTool(BaseSearchTool):
     def map_response(data: dict[str, Any]) -> SearchResponse:
         return SearchResponse(
             results=[
-                SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["snippet"]] if item.get("snippet") else [])
+                SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["snippet"]] if item.get("snippet") else [], metadata={"source": item["source"]} if item.get("source") else {})
                 for item in data["data"]["results"]
             ]
         )

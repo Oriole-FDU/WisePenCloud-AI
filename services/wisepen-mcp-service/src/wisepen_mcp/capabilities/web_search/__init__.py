@@ -25,9 +25,7 @@ def register_web_search_tools(
         http_client=web_search_http_client,
     )
     exa_search_tool = ExaSearchTool()
-    tavily_search_tool = TavilySearchTool(
-        http_client=web_search_http_client,
-    )
+    tavily_search_tool = TavilySearchTool()
     anysearch_search_tool = AnySearchTool(
         http_client=web_search_http_client,
     )
@@ -37,9 +35,7 @@ def register_web_search_tools(
     tinyfish_search_tool = TinyFishSearchTool(
         http_client=web_search_http_client,
     )
-    firecrawl_search_tool = FirecrawlSearchTool(
-        http_client=web_search_http_client,
-    )
+    firecrawl_search_tool = FirecrawlSearchTool()
     web_search_tools = [
         platform_search_tool,
         exa_search_tool,
