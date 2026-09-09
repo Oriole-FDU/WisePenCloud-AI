@@ -33,18 +33,18 @@ class PlatformSearchTool(BaseSearchTool):
         self._http_client = http_client
         self._ddg_proxy = ddg_proxy
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
         try:
             response = await self._search_fourget(query=query, max_results=max_results)
             if response.results:
-                return SearchResponse(results=response.results, answer=response.answer)
+                return SearchResponse(results=response.results, summary=response.summary)
 
         except ServiceException as exc:
             warn("web search provider fallback.", from_provider="fourget", to_provider="ddgs", reason=exc.msg,)
 
         response = await self._search_ddg(query=query, max_results=max_results)
 
-        return SearchResponse(results=response.results, answer=response.answer)
+        return SearchResponse(results=response.results, summary=response.summary)
 
     async def _search_fourget(
         self,
@@ -80,10 +80,10 @@ class PlatformSearchTool(BaseSearchTool):
         try:
             return SearchResponse(
                 results=[
-                    SearchResult(title=item.get("title"), url=item.get("url"), snippet=item.get("description"))
+                    SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["description"]] if item.get("description") else [])
                     for item in data["web"]
                 ],
-                answer="\n".join(answer_lines)
+                summary="\n".join(answer_lines)
             )
         except (KeyError, TypeError, AttributeError) as exc:
             raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, "fourget response JSON shape is invalid.") from exc
@@ -104,7 +104,7 @@ class PlatformSearchTool(BaseSearchTool):
         try:
             return SearchResponse(
                 results=[
-                    SearchResult(title=item.get("title"), url=item.get("href"), snippet=item.get("body"))
+                    SearchResult(title=item.get("title"), url=item.get("href"), evidences=[item["body"]] if item.get("body") else [])
                     for item in items
                 ]
             )

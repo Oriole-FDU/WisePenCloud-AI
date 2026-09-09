@@ -22,10 +22,10 @@ class TinyFishSearchTool(BaseSearchTool):
     def __init__(self, *, http_client: httpx.AsyncClient) -> None:
         self._http_client = http_client
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
         return await self._search(query=query, api_key=api_key, academic=False)
 
-    async def search_academic(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_academic(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
         return await self._search(query=query, api_key=api_key, academic=True)
 
     async def _search(self, *, query: str, api_key: str | None, academic: bool) -> SearchResponse:
@@ -65,7 +65,7 @@ class TinyFishSearchTool(BaseSearchTool):
     def map_response(data: dict[str, Any]) -> SearchResponse:
         return SearchResponse(
             results=[
-                SearchResult(title=item.get("title"), url=item.get("url"), snippet=item.get("snippet"))
+                SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["snippet"]] if item.get("snippet") else [])
                 for item in data["results"]
             ],
         )

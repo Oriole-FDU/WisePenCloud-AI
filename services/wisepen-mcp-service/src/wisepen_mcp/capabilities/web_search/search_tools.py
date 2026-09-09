@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Annotated, ClassVar
+from typing import Annotated, Any, ClassVar
 
 from common.core.exceptions import ServiceException
 from mcp.server.fastmcp import Context, FastMCP
@@ -18,36 +18,49 @@ class SearchMode(StrEnum):
     ACADEMIC = "academic" # 学术内容
 
 
+DEFAULT_SEARCH_RESULTS = 10
+MAX_SEARCH_RESULTS = 20
+
+
 @dataclass(frozen=True, slots=True)
 class SearchResult:
     title: str | None = None
     url: str | None = None
-    snippet: str | None = None
-    highlights: list[str] | None = None
+    published_date: str | None = None
+    evidences: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class SearchResponse:
     results: list[SearchResult]
-    answer: str | None = None
+    summary: str | None = None
+
+
+class ProviderSearchRequest(BaseModel):
+    """Provider 无关的搜索意图；不暴露供应商成本或深度旋钮。"""
+
+    query: str = Field(min_length=1)
+    mode: SearchMode = SearchMode.WEB
+    focus: str | None = None
+    max_results: int = Field(default=10, ge=1, le=MAX_SEARCH_RESULTS)
 
 class WebSearchCandidate(BaseModel):
     candidate_id: str = Field(description="Result label to use when referring to this candidate.")
     title: str | None = Field(default=None, description="Page or document title reported by the search provider.")
     url: str | None = Field(default=None, description="Source URL for opening or citing the result.")
-    snippet: str | None = Field(default=None, description="Provider excerpt for judging whether the source is relevant.")
-    highlights: list[str] | None = Field(default=None, description="Additional excerpts that directly matched the search.")
+    published_date: str | None = None
+    evidences: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class WebSearchToolResult(BaseModel):
     query: str = Field(description="Normalized query that was sent to the search provider.")
     mode: SearchMode = Field(description="Search scope used for this request.")
     candidates: list[WebSearchCandidate] = Field(description="Search evidence in provider order; inspect each candidate's URL and excerpts before relying on it.")
-    supplier_answer: str | None = Field(default=None, description=("Optional provider-generated summary. Treat it as a lead and verify it against the returned candidates."))
+    summary: str | None = Field(default=None, description="Optional provider summary; treat it only as a lead.")
 
 
-DEFAULT_SEARCH_RESULTS = 10
-MAX_SEARCH_RESULTS = 20
 TOOL_DESCRIPTION = (
     "Description:\n"
     "Search external information. query controls what the provider retrieves. "
@@ -55,7 +68,7 @@ TOOL_DESCRIPTION = (
     "support fall back to web search.\n"
     "Output:\n"
     "Returns source candidates with URLs and excerpts in provider order. Use those "
-    "candidates as evidence. supplier_answer, when present, is only a provider summary "
+    "candidates as evidence. summary, when present, is only a provider lead "
     "and should be checked against the sources. In the final response, "
     "Every claim supported by a returned URL must be cited immediately after the relevant statement "
     "with an inline Markdown link in the form"
@@ -77,6 +90,7 @@ class BaseSearchTool(ABC):
         ctx: Context,
         query: Annotated[str, Field(min_length=1, description="Concise keywords sent to the search provider.")],
         mode: Annotated[SearchMode, Field(description="Use academic for literature search; unsupported providers fall back to web.")],
+        focus: Annotated[str | None, Field(description="Specific fact or passage to extract from matched pages.")] = None,
         max_results: Annotated[int, Field(ge=1, le=MAX_SEARCH_RESULTS, description="Maximum number of search candidates to return.")] = DEFAULT_SEARCH_RESULTS,
     ) -> WebSearchToolResult:
         query = query.strip()
@@ -92,9 +106,9 @@ class BaseSearchTool(ABC):
             raise ServiceException(McpErrorCode.WEB_SEARCH_CONFIG_MISSING,f"{self.tool_name} API key is not configured.",)
 
         if mode is SearchMode.ACADEMIC:
-            response = await self.search_academic(query=query, max_results=max_results, api_key=api_key)
+            response = await self.search_academic(query=query, focus=focus, max_results=max_results, api_key=api_key)
         else:
-            response = await self.search_web(query=query, max_results=max_results, api_key=api_key)
+            response = await self.search_web(query=query, focus=focus, max_results=max_results, api_key=api_key)
 
         seen_urls: set[str | None] = set()
         search_results: list[SearchResult] = []
@@ -120,18 +134,19 @@ class BaseSearchTool(ABC):
                     candidate_id=candidate_id,
                     title=result.title,
                     url=result.url,
-                    snippet=result.snippet,
-                    highlights=result.highlights,
+                    published_date=result.published_date,
+                    evidences=result.evidences,
+                    metadata=result.metadata,
                 )
                 for candidate_id in candidates_by_id
                 for result in (candidates_by_id[candidate_id],)
             ],
-            supplier_answer=response.answer,
+            summary=response.summary,
         )
 
     @abstractmethod
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
         pass
 
-    async def search_academic(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
-        return await self.search_web(query=query, max_results=max_results, api_key=api_key)
+    async def search_academic(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
+        return await self.search_web(query=query, focus=focus, max_results=max_results, api_key=api_key)

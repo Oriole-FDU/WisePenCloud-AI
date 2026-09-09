@@ -23,10 +23,10 @@ class ExaSearchTool(BaseSearchTool):
         self._http_client = http_client
 
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
         return await self._search(query=query, api_key=api_key, max_results=max_results, academic=False)
 
-    async def search_academic(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_academic(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
         return await self._search(query=query, api_key=api_key, max_results=max_results, academic=True)
 
     async def _search(self, *, query: str, max_results: int, api_key: str | None, academic: bool) -> SearchResponse:
@@ -74,8 +74,7 @@ class ExaSearchTool(BaseSearchTool):
                 SearchResult(
                     title=item.get("title"),
                     url=item.get("url"),
-                    snippet=item.get("summary"),
-                    highlights=highlights if (highlights := item.get("highlights")) is not None else None,
+                    evidences=highlights if (highlights := item.get("highlights")) is not None else [],
                 )
                 for item in data["results"]
             ]
