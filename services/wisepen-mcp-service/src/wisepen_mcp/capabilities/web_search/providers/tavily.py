@@ -25,7 +25,7 @@ class TavilySearchTool(BaseSearchTool):
         # 固定基础档与切片数，Search 不请求全文正文。
         try:
             data = await AsyncTavilyClient(api_key=api_key).search(
-                f"{query}\n{focus}" if focus else query,
+                query,
                 search_depth="basic",
                 max_results=max_results,
                 include_answer="basic",

@@ -19,13 +19,13 @@ class FirecrawlSearchTool(BaseSearchTool):
     provider_name = "firecrawl"
 
     async def search_web(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
-        return await self._search(query=query, focus=focus, api_key=api_key, max_results=max_results, academic=False)
+        return await self._search(query=query, api_key=api_key, max_results=max_results, academic=False)
 
     async def search_academic(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
-        return await self._search(query=query, focus=focus, api_key=api_key, max_results=max_results, academic=True)
+        return await self._search(query=query, api_key=api_key, max_results=max_results, academic=True)
 
 
-    async def _search(self, *, query: str, focus: str | None, max_results: int, api_key: str | None, academic: bool) -> SearchResponse:
+    async def _search(self, *, query: str, max_results: int, api_key: str | None, academic: bool) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "Firecrawl API key is required.")
 
@@ -35,7 +35,7 @@ class FirecrawlSearchTool(BaseSearchTool):
                 data = await client.search_papers(query, k=max_results)
             else:
                 # Firecrawl v2 默认把相关段落放入 description，不附加 scrapeOptions。
-                data = await client.v2.search(f"{query}\n{focus}" if focus else query, limit=max_results, sources=["web"])
+                data = await client.v2.search(query, limit=max_results, sources=["web"])
         except Exception as exc:
             raise ServiceException(McpErrorCode.WEB_SEARCH_UNAVAILABLE, f"firecrawl request failed: {exc}") from exc
 

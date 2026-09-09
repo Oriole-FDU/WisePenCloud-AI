@@ -28,7 +28,7 @@ class BaiduQianfanSearchTool(BaseSearchTool):
 
         url = f"{settings.WEB_SEARCH_BAIDU_QIANFAN_BASE_URL.rstrip('/')}/v2/ai_search/web_search"
         payload = {
-            "messages": [{"role": "user", "content": f"{query}\n{focus}" if focus else query}],
+            "messages": [{"role": "user", "content": query}],
             "search_source": "baidu_search_v2",
             "resource_type_filter": [{"type": "web", "top_k": max_results}],
         }
