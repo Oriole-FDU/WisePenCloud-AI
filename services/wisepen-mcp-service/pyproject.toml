@@ -19,4 +19,5 @@ dependencies = [
     "pyyaml",
     "nacos-sdk-python",
     "wisepen-common",
+    "exa-py>=2.20.0",
 ]

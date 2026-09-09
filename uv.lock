@@ -1030,6 +1030,24 @@ wheels = [
 ]
 
 [[package]]
+name = "exa-py"
+version = "2.20.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpcore" },
+    { name = "httpx" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d9/3d/112afb07944b357c3b6e37e63639a2d6d7178edaf486e87f7f0f70d92694/exa_py-2.20.0.tar.gz", hash = "sha256:e7c6d80c91fcb192a53e4615f032f15fd50352fec1825535222e5c9b4f1fda78", size = 80020, upload-time = "2026-09-01T01:03:42.198Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/e1/0de5407121dcef075567d2f352dd0f268c7c21eedd402a75bf2b747b19f6/exa_py-2.20.0-py3-none-any.whl", hash = "sha256:5a61decaa2d8d6124938c9f86b89ff53b6f4d8b11bf24ddf83fcca76c11c26b2", size = 109568, upload-time = "2026-09-01T01:03:40.955Z" },
+]
+
+[[package]]
 name = "fake-useragent"
 version = "2.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5240,6 +5258,7 @@ source = { editable = "services/wisepen-mcp-service" }
 dependencies = [
     { name = "ddgs" },
     { name = "dependency-injector" },
+    { name = "exa-py" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "mcp" },
@@ -5255,6 +5274,7 @@ dependencies = [
 requires-dist = [
     { name = "ddgs" },
     { name = "dependency-injector" },
+    { name = "exa-py", specifier = ">=2.20.0" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "mcp", specifier = ">=1.27,<2" },

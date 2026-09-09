@@ -24,9 +24,7 @@ def register_web_search_tools(
     platform_search_tool = PlatformSearchTool(
         http_client=web_search_http_client,
     )
-    exa_search_tool = ExaSearchTool(
-        http_client=web_search_http_client,
-    )
+    exa_search_tool = ExaSearchTool()
     tavily_search_tool = TavilySearchTool(
         http_client=web_search_http_client,
     )
