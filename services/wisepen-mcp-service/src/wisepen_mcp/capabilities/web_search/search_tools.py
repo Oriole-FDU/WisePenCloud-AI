@@ -46,7 +46,6 @@ class ProviderSearchRequest(BaseModel):
     max_results: int = Field(default=10, ge=1, le=MAX_SEARCH_RESULTS)
 
 class WebSearchCandidate(BaseModel):
-    candidate_id: str = Field(description="Result label to use when referring to this candidate.")
     title: str | None = Field(default=None, description="Page or document title reported by the search provider.")
     url: str | None = Field(default=None, description="Source URL for opening or citing the result.")
     published_date: str | None = None
@@ -62,17 +61,14 @@ class WebSearchToolResult(BaseModel):
 
 
 TOOL_DESCRIPTION = (
-    "Description:\n"
-    "Search external information. query controls what the provider retrieves. "
-    "Use academic mode for literature search; providers without native academic "
-    "support fall back to web search.\n"
-    "Output:\n"
-    "Returns source candidates with URLs and excerpts in provider order. Use those "
-    "candidates as evidence. summary, when present, is only a provider lead "
-    "and should be checked against the sources. In the final response, "
-    "Every claim supported by a returned URL must be cited immediately after the relevant statement "
-    "with an inline Markdown link in the form"
-    "[brief description, usually the official website name](exact URL)"
+    "### Purpose\n"
+    "Search external web or scholarly resources to retrieve authoritative evidence.\n\n"
+    "### Operating Rules\n"
+    "1. Query Formulation: Use concise, specific keywords. For literature or scientific "
+    "topics, specify mode='academic' (providers lacking academic engines gracefully fall "
+    "back to web search).\n"
+    "2. Evidence Verification: Use `candidates` as primary factual groundings. Any `summary` "
+    "provided is an unverified preview and MUST be corroborated by candidate excerpts.\n"
 )
 
 class BaseSearchTool(ABC):
@@ -117,17 +113,19 @@ class BaseSearchTool(ABC):
         else:
             response = await self.search_web(query=request.query, focus=request.focus, max_results=request.max_results, api_key=api_key)
 
-        seen_urls: set[str | None] = set()
+        seen_urls: set[str] = set()
         search_results: list[SearchResult] = []
         for result in response.results:
-            if result.url in seen_urls: continue
-            seen_urls.add(result.url)
+            # 无 URL 的论文结果不能以 None 互相去重，否则会无故丢失不同论文的标题与摘要证据。
+            if result.url and result.url in seen_urls:
+                continue
+            if result.url:
+                seen_urls.add(result.url)
             search_results.append(result)
             if len(search_results) >= request.max_results:
                 break
 
-        candidates_by_id = {f"[{index}]": result for index, result in enumerate(search_results, 1)}
-        if not candidates_by_id:
+        if not search_results:
             raise ServiceException(
                 McpErrorCode.WEB_SEARCH_EMPTY_RESULT,
                 "The search provider returned no results.",
@@ -138,15 +136,13 @@ class BaseSearchTool(ABC):
             mode=request.mode,
             candidates=[
                 WebSearchCandidate(
-                    candidate_id=candidate_id,
                     title=result.title,
                     url=result.url,
                     published_date=result.published_date,
                     evidences=result.evidences,
                     metadata=result.metadata,
                 )
-                for candidate_id in candidates_by_id
-                for result in (candidates_by_id[candidate_id],)
+                for result in search_results
             ],
             summary=response.summary,
         )

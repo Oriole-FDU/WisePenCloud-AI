@@ -44,7 +44,17 @@ class FirecrawlSearchTool(BaseSearchTool):
     @staticmethod
     def map_response(data: dict[str, Any], *, academic: bool) -> SearchResponse:
         if academic:
-            return SearchResponse(results=[SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["abstract"]] if item.get("abstract") else [], metadata={key: item[key] for key in ("paperId", "primaryId", "sourceIds", "score") if item.get(key) is not None}) for item in data["results"]])
+            return SearchResponse(
+                results=[
+                    SearchResult(
+                        title=item.get("title"),
+                        url=item.get("url"),
+                        evidences=[item["abstract"]] if item.get("abstract") else [],
+                        metadata={"score": item["score"]} if item.get("score") is not None else {},
+                    )
+                    for item in data["results"]
+                ]
+            )
         return SearchResponse(
             results=[
                 SearchResult(title=item.title, url=item.url, evidences=[item.description] if item.description else [])

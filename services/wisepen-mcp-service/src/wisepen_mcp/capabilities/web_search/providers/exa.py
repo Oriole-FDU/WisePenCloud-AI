@@ -54,7 +54,6 @@ class ExaSearchTool(BaseSearchTool):
                     metadata={
                         key: value
                         for key, value in {
-                            "id": item.id,
                             "author": item.author,
                             "highlight_scores": item.highlight_scores,
                             "entities": item.entities,
