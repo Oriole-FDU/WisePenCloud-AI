@@ -23,11 +23,20 @@ class AnySearchTool(BaseSearchTool):
         self._http_client = http_client
 
     async def search_web(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
+        return await self._search(query=query, focus=focus, max_results=max_results, api_key=api_key, tag=None)
+
+    async def search_academic(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
+        # 以免费 sub-domains 发现接口的当前枚举为准；academic.paper 已被服务端废弃。
+        return await self._search(query=query, focus=focus, max_results=max_results, api_key=api_key, tag="academic.search")
+
+    async def _search(self, *, query: str, focus: str | None, max_results: int, api_key: str | None, tag: str | None) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "AnySearch API key is required.")
 
         url = f"{settings.WEB_SEARCH_ANYSEARCH_BASE_URL.rstrip('/')}/v1/search"
         payload = {"query": f"{query}\n{focus}" if focus else query, "max_results": min(max_results, 10), "content_types": ["webpage"]}
+        if tag:
+            payload["tag"] = tag
 
         try:
             response = await self._http_client.post(url, headers={"Authorization": f"Bearer {api_key}"}, json=payload)
