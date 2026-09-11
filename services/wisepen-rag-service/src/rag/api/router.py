@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from rag.api.endpoints import reading, retrieval
+from rag.api.endpoints import graph, reading, retrieval
 from rag.core.config.bootstrap_settings import bootstrap_settings
 
 api_router = APIRouter()
@@ -14,4 +14,5 @@ async def health() -> dict[str, str]:
 
 
 api_router.include_router(retrieval.router, prefix="/retrieval", tags=["retrieval"])
+api_router.include_router(graph.router, prefix="/retrieval", tags=["retrieval"])
 api_router.include_router(reading.router, prefix="/reading", tags=["reading"])

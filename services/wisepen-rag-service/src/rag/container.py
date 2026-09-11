@@ -250,6 +250,7 @@ class Container(containers.DeclarativeContainer):
         openai_client=openai_client,
         embedding_model=settings.EMBEDDING_MODEL,
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
+        plugin_registry=graph_plugin_registry,
     )
     hybrid_retriever = providers.Factory(
         HybridRetriever,

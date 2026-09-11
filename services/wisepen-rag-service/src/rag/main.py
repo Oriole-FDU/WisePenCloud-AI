@@ -25,6 +25,7 @@ from common.web.exception_handlers import setup_global_exception_handlers
 from common.web.middleware import SecurityHeaderMiddleware
 from fastapi import FastAPI
 
+from rag.api.endpoints import graph as graph_endpoints
 from rag.api.endpoints import reading as reading_endpoints
 from rag.api.endpoints import retrieval as retrieval_endpoints
 from rag.api.kafka import (
@@ -159,7 +160,7 @@ app.add_middleware(
 )
 setup_global_exception_handlers(app, is_dev=bootstrap_settings.IS_DEV)
 app.include_router(api_router, prefix="/rag")
-container.wire(modules=[reading_endpoints, retrieval_endpoints])
+container.wire(modules=[reading_endpoints, retrieval_endpoints, graph_endpoints])
 
 
 if __name__ == "__main__":

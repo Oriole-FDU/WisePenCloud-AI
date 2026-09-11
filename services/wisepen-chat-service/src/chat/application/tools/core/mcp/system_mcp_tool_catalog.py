@@ -45,6 +45,15 @@ _WEB_SEARCH_POLICY = ToolPolicy(
     max_output_chars=None,
 )
 
+# RAG 返回的是检索与正文能力结果，本次直接交给 Chat 消费，不接入工具输出缓存体系。
+_RAG_POLICY = ToolPolicy(
+    expose_by_default=True,
+    risk_level=ToolRiskLevel.LOW,
+    timeout_seconds=30.0,
+    persist_output=True,
+    max_output_chars=None,
+)
+
 _SYSTEM_TOOL_CONFIGS: list[dict[str, Any]] = [{
         "tool_name": "create_skill_info",
         "ui_spec": ToolUISpec(display_name="创建 Skill 信息", description="创建新的 Skill 草稿信息。"),
@@ -166,6 +175,33 @@ _SYSTEM_TOOL_CONFIGS: list[dict[str, Any]] = [{
             max_output_chars=None,
         ),
         "failure_reason": "Document Resource Text Read Failed",
+    },
+    # General RAG Tools；图谱检索暂不注册到 Chat。
+    {
+        "tool_name": "rag_search_hybrid",
+        "ui_spec": ToolUISpec(display_name="混合检索", description="在当前用户可见文档中进行语义与关键词混合检索。"),
+        "policy": _RAG_POLICY,
+        "failure_reason": "RAG Hybrid Search Failed",
+    }, {
+        "tool_name": "rag_read_pages",
+        "ui_spec": ToolUISpec(display_name="读取文档页", description="读取当前用户可见资源的指定页面。"),
+        "policy": _RAG_POLICY,
+        "failure_reason": "RAG Page Read Failed",
+    }, {
+        "tool_name": "rag_read_sections",
+        "ui_spec": ToolUISpec(display_name="读取文档章节", description="读取当前用户可见资源的指定章节。"),
+        "policy": _RAG_POLICY,
+        "failure_reason": "RAG Section Read Failed",
+    }, {
+        "tool_name": "rag_get_neighborhood",
+        "ui_spec": ToolUISpec(display_name="读取章节邻域", description="读取当前用户可见章节附近的标题目录。"),
+        "policy": _RAG_POLICY,
+        "failure_reason": "RAG Neighborhood Read Failed",
+    }, {
+        "tool_name": "rag_get_global_outline",
+        "ui_spec": ToolUISpec(display_name="读取文档目录", description="读取当前用户可见资源的标题目录。"),
+        "policy": _RAG_POLICY,
+        "failure_reason": "RAG Global Outline Read Failed",
     },
     # Web Search Tools
     {

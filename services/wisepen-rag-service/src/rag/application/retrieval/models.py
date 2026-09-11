@@ -34,13 +34,13 @@ class GraphSearchRequest:
     query: str
     level: GraphSearchLevel = GraphSearchLevel.HYBRID
     seed_node_ids: list[str] = field(default_factory=list)
-    resource_ids: list[str] | None = None
+    resource_ids: list[str] | None = None   # 仅在资源 revision 范围内检索；None 表示不限制。
     node_categories: list[str] = field(default_factory=list)
     relation_types: list[str] = field(default_factory=list)
     direction: TraversalDirection = TraversalDirection.BOTH
     max_depth: int = 1
     vector_top_n: int = 20  # 每个节点/关系向量分支各取多少条
-    candidate_limit: int = 50  # 并集池和图遍历最多送入精排多少条
+    candidate_limit: int = 60  # 并集池和图遍历最多送入精排多少条
     top_k: int = 5  # 最终对外返回多少条
     plugin_id: str | None = None
     metadata_filter: BaseModel | None = None

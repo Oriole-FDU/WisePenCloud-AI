@@ -70,7 +70,7 @@ from chat.application.tools.session_tools.cached_tool_output_tools.window import
 from chat.core.config.app_settings import settings
 
 _TIMEOUT_SECONDS = 300.0
-_CANDIDATE_LIMIT = 80  # 保留前80个粗召回
+_CANDIDATE_LIMIT = 60  # 保留前60个粗召回
 _DEFAULT_TOP_K = 5  # 返回topk个父块
 _MAX_TOP_K = 10
 _SHORT_SECTION_MAX_CHARS = 4_000  # 只控制短 Section 是否直接返回全文。

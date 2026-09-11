@@ -7,6 +7,7 @@ HTTP 是 application 用例的薄传输适配，统一在 `/rag` 前缀下使用
 | 路径 | 用途 | 请求核心字段 |
 | --- | --- | --- |
 | `POST /rag/retrieval/searchHybrid` | 文档 Dense/BM25 混合检索 | `semantic_query`、`lexical_query`、`top_k` |
+| `POST /rag/retrieval/searchGraph` | 通用图谱混合检索 | `query`、可选种子节点/资源范围、`top_k` |
 | `POST /rag/reading/readPages` | 按真实 Page label 读取 | `resource_id`、`page_labels` |
 | `POST /rag/reading/readSections` | 按全局 Section ID 读取 | `section_ids`、`mode`、`max_depth` |
 | `POST /rag/reading/getNeighborhood` | 批量 Section 邻域目录 | `section_ids`、`sibling_steps` |
@@ -17,6 +18,8 @@ Page、Section 和 Neighborhood 每次最多请求 20 项；`sibling_steps` 限�
 ## 响应与可见性
 
 `searchHybrid` 返回相关性判定和动态父块。HTTP 响应只保留模型消费所需的 `resource_id`、单个 `section_id`、`text` 和 `score`；命中 Chunk 指针、父块 ID、`content_revision`、`matched_chunk_ids`、`source_spans` 和 Python 字符 offset 均属于服务内部事实，不对外暴露。
+
+`searchGraph` 只提供通用图谱检索能力；层级、节点类别、关系类型、遍历方向、深度、向量候选数和候选上限均受 HTTP schema 范围约束并提供服务端默认值，不接收垂类 `plugin_id` 或 `metadata_filter`。
 
 `getNeighborhood` 的每个 item 只返回 `resource_id`、`section_id`、`section_path` 和 `outline`。当前标题已包含在 `section_path` 最后一段及 outline 的 `[C]` 行中，不再重复返回 `title`；长度、页码和锚点只保留在 outline 文本中。
 
