@@ -40,16 +40,16 @@ _WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
 _WEB_SEARCH_POLICY = ToolPolicy(
     expose_by_default=True,
     risk_level=ToolRiskLevel.LOW,
-    timeout_seconds=100.0,
+    timeout_seconds=30.0,
     persist_output=True,
     max_output_chars=None,
 )
 
 # RAG 返回的是检索与正文能力结果，本次直接交给 Chat 消费，不接入工具输出缓存体系。
 _RAG_POLICY = ToolPolicy(
-    expose_by_default=True,
+    expose_by_default=False,
     risk_level=ToolRiskLevel.LOW,
-    timeout_seconds=30.0,
+    timeout_seconds=100.0,
     persist_output=True,
     max_output_chars=None,
 )
