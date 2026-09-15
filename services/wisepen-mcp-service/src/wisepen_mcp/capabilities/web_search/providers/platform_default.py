@@ -8,7 +8,7 @@ from common.core.exceptions import ServiceException
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
-from ..search_tools import BaseSearchTool, SearchResponse, SearchResult
+from ..search_tools import BaseSearchTool, SearchRecency, SearchResponse, SearchResult
 
 
 class PlatformSearchTool(BaseSearchTool):
@@ -21,7 +21,7 @@ class PlatformSearchTool(BaseSearchTool):
     def __init__(self, *, http_client: httpx.AsyncClient) -> None:
         self._http_client = http_client
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(self, *, query: str, max_results: int, api_key: str | None, recency: SearchRecency | None = None) -> SearchResponse:
         # 默认工具只使用平台托管凭证，请求侧 api_key 不得覆盖平台配置。
         api_key = settings.WEB_SEARCH_API_KEY.strip()
         if not api_key:
@@ -36,6 +36,13 @@ class PlatformSearchTool(BaseSearchTool):
             "count": max_results,
             "content_size": "medium",
         }
+        if recency is not None:
+            payload["search_recency_filter"] = {
+                SearchRecency.DAY: "oneDay",
+                SearchRecency.WEEK: "oneWeek",
+                SearchRecency.MONTH: "oneMonth",
+                SearchRecency.YEAR: "oneYear",
+            }[recency]
 
         try:
             response = await self._http_client.post(url, headers={"Authorization": f"Bearer {api_key}"}, json=payload)

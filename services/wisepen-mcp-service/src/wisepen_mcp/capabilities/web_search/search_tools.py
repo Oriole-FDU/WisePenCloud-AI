@@ -15,7 +15,6 @@ from pydantic import BaseModel, Field
 from wisepen_mcp.capabilities.core.tool_metadata import get_tool_config_value
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
-
 DEFAULT_SEARCH_RESULTS = 10
 MAX_SEARCH_RESULTS = 20
 
@@ -23,6 +22,13 @@ MAX_SEARCH_RESULTS = 20
 class SearchMode(StrEnum):
     WEB = "web"  # 普通网页
     ACADEMIC = "academic"  # 学术内容
+
+
+class SearchRecency(StrEnum):
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+    YEAR = "year"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +52,7 @@ class ProviderSearchRequest(BaseModel):
     query: str = Field(min_length=1)
     mode: SearchMode = SearchMode.WEB
     focus: str | None = None
+    recency: SearchRecency | None = None
     max_results: int = Field(
         default=DEFAULT_SEARCH_RESULTS,
         ge=1,
@@ -169,6 +176,20 @@ class BaseSearchTool(ABC):
         else:
             hidden_parameters.add("focus")
 
+        # 整个工具的实际搜索路径都接收四档 recency 才暴露，不生成按 mode 分支的 Schema。
+        if "recency" in _keyword_parameters(self.search_web) and (
+            not self._has_academic_search()
+            or "recency" in _keyword_parameters(self.search_academic)
+        ):
+            description += (
+                "\n### Recency\n"
+                "Use `recency` (day, week, month, year) as a soft freshness filter; "
+                "omit it for unrestricted search. Exact boundaries follow the provider. "
+                "Express precise date requirements in `query`.\n"
+            )
+        else:
+            hidden_parameters.add("recency")
+
         @wraps(self.execute)
         async def execute(**kwargs: Any) -> WebSearchToolResult:
             return await self.execute(**kwargs)
@@ -224,6 +245,10 @@ class BaseSearchTool(ABC):
                 ),
             ),
         ] = None,
+        recency: Annotated[
+            SearchRecency | None,
+            Field(description="Soft freshness preference: day, week, month, or year. Omit for no time restriction."),
+        ] = None,
         max_results: Annotated[
             int,
             Field(
@@ -245,6 +270,7 @@ class BaseSearchTool(ABC):
             # 未实现独立学术路径时，输出 scope 也应反映实际执行的网页搜索。
             mode=mode if self._has_academic_search() else SearchMode.WEB,
             focus=focus.strip() if focus and focus.strip() else None,
+            recency=recency,
             max_results=max_results,
         )
 
@@ -269,6 +295,7 @@ class BaseSearchTool(ABC):
             handler,
             query=request.query,
             focus=request.focus,
+            recency=request.recency,
             max_results=request.max_results,
             api_key=api_key,
         )
@@ -327,12 +354,14 @@ class BaseSearchTool(ABC):
         max_results: int,
         api_key: str | None,
         focus: str | None = None,
+        recency: SearchRecency | None = None,
     ) -> SearchResponse:
         # 保留内部 fallback，但只向目标网页实现传递其明确接收的参数。
         kwargs = _filter_search_kwargs(
             self.search_web,
             query=query,
             focus=focus,
+            recency=recency,
             max_results=max_results,
             api_key=api_key,
         )

@@ -9,6 +9,7 @@ from wisepen_mcp.domain.error_codes import McpErrorCode
 
 from ..search_tools import (
     BaseSearchTool,
+    SearchRecency,
     SearchResponse,
     SearchResult,
 )
@@ -18,9 +19,12 @@ class TavilySearchTool(BaseSearchTool):
     tool_name = "tavily_search"
     provider_name = "tavily"
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(self, *, query: str, max_results: int, api_key: str | None, recency: SearchRecency | None = None) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "Tavily API key is required.")
+
+        # Tavily 按发表或更新时间过滤；未指定时不改变原请求参数。
+        search_options = {"time_range": recency.value} if recency is not None else {}
 
         # 固定基础档与切片数，Search 不请求全文正文。
         try:
@@ -32,6 +36,7 @@ class TavilySearchTool(BaseSearchTool):
                 include_raw_content=False,
                 include_images=False,
                 chunks_per_source=3,
+                **search_options,
             )
         except Exception as exc:
             raise ServiceException(McpErrorCode.WEB_SEARCH_UNAVAILABLE, f"tavily request failed: {exc}") from exc
