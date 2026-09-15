@@ -53,6 +53,8 @@ class ChatTurnToolPolicyBuilder:
         tool_selection_default_enabled: Optional[bool],
         tool_selection_overrides: Optional[dict[str, bool]],
         user_defined_on_demand_skill_ids: Optional[Set[str]],
+        agent_id: str | None = None,
+        agent_version: int | None = None,
     ) -> ChatTurnToolPolicyResult:
         # 构建 Skill 视图：返回本轮可展示给 LLM 的 Skill metadata，由 LLM 判断是否加载
         available_skills: list[SkillMeta] = []
@@ -76,6 +78,9 @@ class ChatTurnToolPolicyBuilder:
             "user_id": user_id,
             "temporary_attachment_refs": temporary_attachment_refs,
         }
+        if agent_id:
+            tool_context["agent_id"] = agent_id
+            tool_context["agent_version"] = agent_version
 
         # allowed_skill_ids 表示本轮展示给 LLM 的 Skill 白名单
         allowed_skill_ids = {skill.skill_id for skill in available_skills}
@@ -83,6 +88,11 @@ class ChatTurnToolPolicyBuilder:
             allowed_skill_ids.add(_CURRENT_NOTE_EDITOR_SKILL_ID)
         if allowed_skill_ids:
             tool_context["allowed_skill_ids"] = sorted(allowed_skill_ids)
+            tool_context["skill_versions"] = {
+                skill.skill_id: skill.version
+                for skill in available_skills
+                if skill.version > 0
+            }
 
         # expose_tool_name_set 只解禁本轮需要出现的工具
         # 默认不暴露按需工具

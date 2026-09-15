@@ -206,6 +206,7 @@ class Container(containers.DeclarativeContainer):
     remote_agent_resolver = providers.Singleton(
         RemoteAgentResolver,
         ai_asset_client=ai_asset_client,
+        resource_client=resource_client,
     )
     agent_resolver = providers.Singleton(
         CompositeAgentResolver,
@@ -315,6 +316,7 @@ class Container(containers.DeclarativeContainer):
         tool_policy_builder=chat_turn_tool_policy_builder,
         suspended_chat_repo=suspended_chat_repo,
         agent_resolver=agent_resolver,
+        resource_client=resource_client,
         oss_file_loader=oss_file_loader,
     )
 
