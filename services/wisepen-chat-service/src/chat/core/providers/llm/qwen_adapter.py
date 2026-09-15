@@ -76,7 +76,7 @@ class QwenAdapter(LLMProvider):
         assistant_text = ""
         reasoning_text = ""
         tool_calls: list[ToolCallMessage] = []
-        tool_call_payloads = []
+        tool_call_payloads: dict[int, dict[str, Any]] = {}
         token_usage = 0
         try:
             # 上游已用 support_vision 拦截不支持视觉的图片请求，这里沿用同一能力边界选接口。
@@ -126,19 +126,11 @@ class QwenAdapter(LLMProvider):
                     assistant_text += content
                     yield LLMStreamEvent(type=LLMEventType.TEXT_DELTA, delta=content) # 传递 LLMStreamEvent TEXT_DELTA
 
-                # 当 message.tool_calls 出现时,function.arguments 已经是一个可解析的完整 JSON 字符串
-                # https://help.aliyun.com/zh/model-studio/qwen-api-via-dashscope
+                # 流式 Qwen tool_calls 是按 index 返回的增量片段，不能把每个 response
+                # 直接当成一个完整调用；否则首个空 arguments 片段会在下一轮回放时触发 400。
                 for call in read_provider_value(message, "tool_calls", []) or []:
                     payload = call if isinstance(call, dict) else {}
-
-                    # 保存完整 tool_call 原生块
-                    function = payload.get("function", {})
-                    tool_call_payloads.append(payload)
-                    tool_calls.append(ToolCallMessage(
-                        call_id=payload.get("id") or f"call_{uuid.uuid4().hex}",
-                        name=function.get("name", ""),
-                        arguments=json_object(function.get("arguments", "{}")),
-                    ))
+                    _merge_tool_call_fragment(tool_call_payloads, payload)
         except ServiceException:
             raise
         except Exception as e:
@@ -147,6 +139,15 @@ class QwenAdapter(LLMProvider):
         # 计费
         if token_usage: # 传递 LLMStreamEvent USAGE
             yield LLMStreamEvent(type=LLMEventType.USAGE, usage=LLMUsage(output_tokens=token_usage))
+
+        # 只有完整聚合后的原生调用才能进入业务事件和下一轮 assistant 回放。
+        for payload in tool_call_payloads.values():
+            function = payload.get("function", {})
+            tool_calls.append(ToolCallMessage(
+                call_id=payload.get("id") or f"call_{uuid.uuid4().hex}",
+                name=function.get("name", ""),
+                arguments=json_object(function.get("arguments", "{}")),
+            ))
 
         # 解析工具调用
         if tool_calls: # 传递 LLMStreamEvent TOOL_CALLS
@@ -159,7 +160,7 @@ class QwenAdapter(LLMProvider):
             "reasoning_content": reasoning_text or None,
         }
         if tool_call_payloads:
-            assistant_message["tool_calls"] = tool_call_payloads
+            assistant_message["tool_calls"] = list(tool_call_payloads.values())
         yield LLMStreamEvent(type=LLMEventType.STATE, provider_payload={"message": assistant_message})
 
     @staticmethod
@@ -198,3 +199,44 @@ class QwenAdapter(LLMProvider):
                 "content": content,
             })
         return result
+
+
+def _merge_tool_call_fragment(
+    tool_calls: dict[int, dict[str, Any]],
+    fragment: dict[str, Any],
+) -> None:
+    """按流式 index 合并 Qwen tool call，保留原生 assistant 回放形状。"""
+    index = fragment.get("index")
+    if not isinstance(index, int):
+        # 正常协议总会带 index；缺失时按已有 id 兜底，避免把同一调用拆成多个调用。
+        fragment_id = fragment.get("id")
+        index = next(
+            (
+                known_index
+                for known_index, payload in tool_calls.items()
+                if payload.get("id") == fragment_id
+            ),
+            len(tool_calls),
+        )
+
+    accumulated = tool_calls.setdefault(
+        index,
+        {
+            "index": index,
+            "id": "",
+            "type": fragment.get("type", "function"),
+            "function": {"name": "", "arguments": ""},
+        },
+    )
+    if fragment.get("id"):
+        accumulated["id"] = fragment["id"]
+    if fragment.get("type"):
+        accumulated["type"] = fragment["type"]
+
+    fragment_function = fragment.get("function") or {}
+    function = accumulated["function"]
+    if fragment_function.get("name"):
+        function["name"] = fragment_function["name"]
+    arguments = fragment_function.get("arguments")
+    if arguments is not None:
+        function["arguments"] += str(arguments)

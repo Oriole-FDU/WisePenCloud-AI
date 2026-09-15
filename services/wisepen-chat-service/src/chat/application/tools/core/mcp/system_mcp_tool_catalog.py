@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import time
-from typing import Any, List
+from typing import Any
+
+from common.logger import error
 
 from chat.application.tools.core import (
     ToolConfigSpec,
@@ -17,7 +19,6 @@ from chat.application.tools.core.mcp.remote_tool import McpRemoteTool
 from chat.core.config.app_settings import settings
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.service_client import McpServiceClient
-from common.logger import error
 
 _WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
     schema={
@@ -39,12 +40,21 @@ _WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
 _WEB_SEARCH_POLICY = ToolPolicy(
     expose_by_default=True,
     risk_level=ToolRiskLevel.LOW,
+    timeout_seconds=30.0,
+    persist_output=True,
+    max_output_chars=None,
+)
+
+# RAG 返回的是检索与正文能力结果，本次直接交给 Chat 消费，不接入工具输出缓存体系。
+_RAG_POLICY = ToolPolicy(
+    expose_by_default=False,
+    risk_level=ToolRiskLevel.LOW,
     timeout_seconds=100.0,
     persist_output=True,
     max_output_chars=None,
 )
 
-_SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
+_SYSTEM_TOOL_CONFIGS: list[dict[str, Any]] = [{
         "tool_name": "create_skill_info",
         "ui_spec": ToolUISpec(display_name="创建 Skill 信息", description="创建新的 Skill 草稿信息。"),
         "policy": ToolPolicy(
@@ -166,6 +176,33 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         ),
         "failure_reason": "Document Resource Text Read Failed",
     },
+    # General RAG Tools；图谱检索暂不注册到 Chat。
+    {
+        "tool_name": "rag_search_hybrid",
+        "ui_spec": ToolUISpec(display_name="混合检索", description="在当前用户可见文档中进行语义与关键词混合检索。"),
+        "policy": _RAG_POLICY,
+        "failure_reason": "RAG Hybrid Search Failed",
+    }, {
+        "tool_name": "rag_read_pages",
+        "ui_spec": ToolUISpec(display_name="读取文档页", description="读取当前用户可见资源的指定页面。"),
+        "policy": _RAG_POLICY,
+        "failure_reason": "RAG Page Read Failed",
+    }, {
+        "tool_name": "rag_read_sections",
+        "ui_spec": ToolUISpec(display_name="读取文档章节", description="读取当前用户可见资源的指定章节。"),
+        "policy": _RAG_POLICY,
+        "failure_reason": "RAG Section Read Failed",
+    }, {
+        "tool_name": "rag_get_neighborhood",
+        "ui_spec": ToolUISpec(display_name="读取章节邻域", description="读取当前用户可见章节附近的标题目录。"),
+        "policy": _RAG_POLICY,
+        "failure_reason": "RAG Neighborhood Read Failed",
+    }, {
+        "tool_name": "rag_get_global_outline",
+        "ui_spec": ToolUISpec(display_name="读取文档目录", description="读取当前用户可见资源的标题目录。"),
+        "policy": _RAG_POLICY,
+        "failure_reason": "RAG Global Outline Read Failed",
+    },
     # Web Search Tools
     {
         "tool_name": "default_web_search",
@@ -228,7 +265,7 @@ class SystemMcpToolCatalog:
             # 重新拉取缓存
             try:
                 descriptors = await self._mcp_service_client.list_tools()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - discovery failure leaves no usable system tools
                 error("load system mcp tools failed.", exc=e)
                 return {}
             self._mcp_tools_cache_update_time = now

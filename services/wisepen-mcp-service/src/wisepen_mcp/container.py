@@ -1,12 +1,19 @@
+from common.cloud.service_discovery import ServiceDiscovery
+from common.http.rpc_client import RpcClient
 from dependency_injector import containers, providers
 from v2.nacos import NacosNamingService
 
-from common.cloud.service_discovery import ServiceDiscovery
-from common.http.rpc_client import RpcClient
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.core.config.bootstrap_settings import bootstrap_settings
 from wisepen_mcp.core.config.nacos import nacos_client_manager
-from wisepen_mcp.service_client import AIAssetClient, DocumentClient, NoteClient, NoteCollabClient, ResourceClient
+from wisepen_mcp.service_client import (
+    AIAssetClient,
+    DocumentClient,
+    NoteClient,
+    NoteCollabClient,
+    RagServiceClient,
+    ResourceClient,
+)
 
 
 async def _provide_nacos_naming() -> NacosNamingService:
@@ -41,6 +48,7 @@ class Container(containers.DeclarativeContainer):
         ResourceClient,
         rpc=rpc_client,
     )
+    rag_service_client = providers.Singleton(RagServiceClient, rpc=rpc_client)
     document_client = providers.Singleton(
         DocumentClient,
         rpc=rpc_client,

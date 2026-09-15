@@ -7,6 +7,7 @@ dependencies = [
     "litellm>=1.81.3",
     "wisepen-chat-service",
     "wisepen-mcp-service",
+    "wisepen-rag-service",
     "wisepen-common",
     "wisepen-sandbox-service",
     "mcp>=1.27,<2",
@@ -22,3 +23,4 @@ wisepen-chat-service = { workspace = true }
 wisepen-mcp-service = { workspace = true }
 wisepen-common = { workspace = true }
 wisepen-sandbox-service = { workspace = true }
+wisepen-rag-service = { workspace = true }

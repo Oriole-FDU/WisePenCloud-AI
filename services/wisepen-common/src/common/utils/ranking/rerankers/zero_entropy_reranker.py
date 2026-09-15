@@ -43,6 +43,8 @@ class ZeroEntropyReranker:
 
         if not ranked:
             return ()
+        if not query.semantic_query or not query.semantic_query.strip():
+            return ranked
 
         cfg = self.config
         top_n = (
@@ -56,7 +58,7 @@ class ZeroEntropyReranker:
         try:
             response = await self.client.models.rerank(
                 model=cfg.model,
-                query=query.text,
+                query=query.semantic_query,
                 documents=documents,
                 top_n=top_n,
             )

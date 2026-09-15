@@ -1,72 +1,148 @@
 from __future__ import annotations
 
+import inspect
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Annotated, ClassVar
+from functools import wraps
+from typing import Annotated, Any, ClassVar
 
+from common.core.exceptions import ServiceException
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel, Field
 
-from common.core.exceptions import ServiceException
-from common.utils.ranking import (
-    RankCandidate,
-    RankQuery,
-    RankRequest,
-    RankingPipeline,
-)
 from wisepen_mcp.capabilities.core.tool_metadata import get_tool_config_value
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
+DEFAULT_SEARCH_RESULTS = 10
+MAX_SEARCH_RESULTS = 20
+
 
 class SearchMode(StrEnum):
-    WEB = "web" # 普通网页
-    ACADEMIC = "academic" # 学术内容
+    WEB = "web"  # 普通网页
+    ACADEMIC = "academic"  # 学术内容
+
+
+class SearchRecency(StrEnum):
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+    YEAR = "year"
 
 
 @dataclass(frozen=True, slots=True)
 class SearchResult:
     title: str | None = None
     url: str | None = None
-    snippet: str | None = None
-    highlights: list[str] | None = None
+    published_date: str | None = None
+    evidences: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class SearchResponse:
     results: list[SearchResult]
-    answer: str | None = None
+    summary: str | None = None
 
-class WebSearchCandidateResult(BaseModel):
-    candidate_id: str = Field(description="Result label to use when referring to this candidate.")
-    title: str | None = Field(default=None, description="Page or document title reported by the search provider.")
-    url: str | None = Field(default=None, description="Source URL for opening or citing the result.")
-    snippet: str | None = Field(default=None, description="Provider excerpt for judging whether the source is relevant.")
-    highlights: list[str] | None = Field(default=None, description="Additional excerpts that directly matched the search.")
+
+class ProviderSearchRequest(BaseModel):
+    """Provider 无关的搜索意图；不暴露供应商成本或深度旋钮。"""
+
+    query: str = Field(min_length=1)
+    mode: SearchMode = SearchMode.WEB
+    focus: str | None = None
+    recency: SearchRecency | None = None
+    max_results: int = Field(
+        default=DEFAULT_SEARCH_RESULTS,
+        ge=1,
+        le=MAX_SEARCH_RESULTS,
+    )
+
+
+class WebSearchCandidate(BaseModel):
+    title: str | None = Field(
+        default=None,
+        description="Page or document title reported by the search provider.",
+    )
+    url: str | None = Field(
+        default=None,
+        description="Source URL for opening, verification, or citation.",
+    )
+    published_date: str | None = Field(
+        default=None,
+        description="Publication date when available.",
+    )
+    evidences: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Relevant excerpts, passages, highlights, or provider-prepared content "
+            "that may directly support factual reasoning."
+        ),
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider-specific source metadata and relevance signals.",
+    )
 
 
 class WebSearchToolResult(BaseModel):
-    query: str = Field(description="Normalized query that was sent to the search provider.")
-    mode: SearchMode = Field(description="Search scope used for this request.")
-    candidates: list[WebSearchCandidateResult] = Field(description="Search evidence ordered by relevance to ranking_query; inspect each candidate's URL and excerpts before relying on it.")
-    supplier_answer: str | None = Field(default=None, description=("Optional provider-generated summary. Treat it as a lead and verify it against the returned candidates."))
+    query: str = Field(
+        description="Normalized query sent to the search provider.",
+    )
+    mode: SearchMode = Field(
+        description="Search scope actually used for this request.",
+    )
+    candidates: list[WebSearchCandidate] = Field(
+        description=(
+            "Ranked source candidates. Treat `evidences` as the primary factual grounding "
+            "and inspect source metadata before relying on a candidate."
+        ),
+    )
+    summary: str | None = Field(
+        default=None,
+        description=(
+            "Optional provider-generated overview. Treat it only as a lead; factual claims "
+            "should be supported by candidate evidence."
+        ),
+    )
 
 
-DEFAULT_SEARCH_RESULTS = 10
-MAX_SEARCH_RESULTS = 20
 TOOL_DESCRIPTION = (
-    "Description:\n"
-    "Search external information. search_query controls what the provider retrieves, "
-    "while ranking_query describes the full information need used to reorder results. "
-    "Use academic mode for literature search; providers without native academic "
-    "support fall back to web search.\n"
-    "Output:\n"
-    "Returns relevance-ordered source candidates with URLs and excerpts. Use those "
-    "candidates as evidence. supplier_answer, when present, is only a provider summary "
-    "and should be checked against the sources. In the final response, every conclusion "
-    "supported by a returned URL must cite it with an inline Markdown link in the form "
-    "[brief description, usually the official website name](exact URL)."
+    "### Purpose\n"
+    "Search external resources for relevant evidence to support factual reasoning.\n\n"
+    "### Rules\n"
+    "1. Use concise, specific search terms targeting the information needed.\n"
+    "2. Treat `candidates[].evidences` as the primary factual grounding. Use source title, "
+    "URL, publication date, and metadata to assess relevance, authority, and freshness.\n"
+    "3. Do not infer unsupported facts. If the evidence is weak, irrelevant, ambiguous, "
+    "or insufficient, refine the search instead of stretching it.\n"
+    "4. Treat any top-level `summary` only as a lead; factual claims should be supported "
+    "by candidate evidence.\n"
 )
+
+
+def _keyword_parameters(handler: Callable) -> set[str]:
+    # 只有显式声明的关键字参数才表达能力；**kwargs 不代表原生支持任意搜索选项。
+    return {
+        name
+        for name, parameter in inspect.signature(handler).parameters.items()
+        if parameter.kind
+        in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    }
+
+
+def _filter_search_kwargs(handler: Callable, **kwargs: Any) -> dict[str, Any]:
+    parameters = _keyword_parameters(handler)
+    return {
+        name: value
+        for name, value in kwargs.items()
+        if name in parameters
+    }
+
 
 class BaseSearchTool(ABC):
     tool_name: ClassVar[str]
@@ -74,96 +150,219 @@ class BaseSearchTool(ABC):
     description: ClassVar[str] = TOOL_DESCRIPTION
     requires_api_key: ClassVar[bool] = True
 
-    __slots__ = ("_ranking_pipeline",)
-
-    def __init__(self, *, ranking_pipeline: RankingPipeline) -> None:
-        self._ranking_pipeline = ranking_pipeline
+    def _has_academic_search(self) -> bool:
+        return type(self).search_academic is not BaseSearchTool.search_academic
 
     def register(self, mcp: FastMCP) -> None:
-        mcp.tool(name=self.tool_name, description=self.description)(self.execute)
+        hidden_parameters: set[str] = set()
+        description = self.description
+
+        if self._has_academic_search():
+            description += (
+                "\n### Academic Search\n"
+                "Use `mode='academic'` when the task specifically requires papers, "
+                "preprints, or scholarly publications rather than general web sources.\n"
+            )
+        else:
+            hidden_parameters.add("mode")
+
+        if "focus" in _keyword_parameters(self.search_web):
+            description += (
+                "\n### Focused Extraction\n"
+                "Use `focus` for the specific fact, metric, comparison, or passage to "
+                "prioritize within matched sources. Keep `query` optimized for retrieval "
+                "and `focus` optimized for evidence extraction.\n"
+            )
+        else:
+            hidden_parameters.add("focus")
+
+        # 整个工具的实际搜索路径都接收四档 recency 才暴露，不生成按 mode 分支的 Schema。
+        if "recency" in _keyword_parameters(self.search_web) and (
+            not self._has_academic_search()
+            or "recency" in _keyword_parameters(self.search_academic)
+        ):
+            description += (
+                "\n### Recency\n"
+                "Use `recency` (day, week, month, year) as a soft freshness filter; "
+                "omit it for unrestricted search. Exact boundaries follow the provider. "
+                "Express precise date requirements in `query`.\n"
+            )
+        else:
+            hidden_parameters.add("recency")
+
+        @wraps(self.execute)
+        async def execute(**kwargs: Any) -> WebSearchToolResult:
+            return await self.execute(**kwargs)
+
+        # FastMCP 分别读取 signature 构建 Schema、type hints 识别 Context。
+        # 在实例包装函数上同步两者，保留已解析的 Annotated/返回类型和 ctx 注入，
+        # 避免修改 BaseSearchTool.execute 这一共享方法。
+        signature = inspect.signature(self.execute, eval_str=True)
+        parameters = [
+            parameter
+            for name, parameter in signature.parameters.items()
+            if name not in hidden_parameters
+        ]
+
+        execute.__signature__ = signature.replace(parameters=parameters)
+        execute.__annotations__ = {
+            parameter.name: parameter.annotation
+            for parameter in parameters
+        }
+        execute.__annotations__["return"] = signature.return_annotation
+
+        mcp.tool(
+            name=self.tool_name,
+            description=description,
+        )(execute)
 
     async def execute(
         self,
         *,
         ctx: Context,
-        search_query: Annotated[str, Field(min_length=1, description="Concise keywords sent to the search provider.")],
-        ranking_query: Annotated[str, Field(min_length=1, description="Complete natural-language question used to rank the returned candidates, such as 'What is the best way to learn Python programming?'")],
-        mode: Annotated[SearchMode, Field(description="Use academic for literature search; unsupported providers fall back to web.")],
-        max_results: Annotated[int, Field(ge=1, le=MAX_SEARCH_RESULTS, description="Maximum number of search candidates to return.")]
+        query: Annotated[
+            str,
+            Field(
+                min_length=1,
+                description="Concise, specific search terms targeting the needed information.",
+            ),
+        ],
+        mode: Annotated[
+            SearchMode,
+            Field(
+                description=(
+                    "Search scope: use academic for scholarly publications "
+                    "or web for general external resources."
+                ),
+            ),
+        ] = SearchMode.WEB,
+        focus: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Specific fact, metric, comparison, or passage to prioritize "
+                    "within matched sources."
+                ),
+            ),
+        ] = None,
+        recency: Annotated[
+            SearchRecency | None,
+            Field(description="Soft freshness preference: day, week, month, or year. Omit for no time restriction."),
+        ] = None,
+        max_results: Annotated[
+            int,
+            Field(
+                ge=1,
+                le=MAX_SEARCH_RESULTS,
+                description="Maximum number of ranked search candidates to return.",
+            ),
+        ] = DEFAULT_SEARCH_RESULTS,
     ) -> WebSearchToolResult:
-        search_query = search_query.strip()
-        ranking_query = ranking_query.strip()
-        if not search_query or not ranking_query:
-            raise ServiceException(McpErrorCode.WEB_SEARCH_INVALID, "search_query and ranking_query must not be blank.")
+        query = query.strip()
+        if not query:
+            raise ServiceException(
+                McpErrorCode.WEB_SEARCH_INVALID,
+                "query must not be blank.",
+            )
+
+        request = ProviderSearchRequest(
+            query=query,
+            # 未实现独立学术路径时，输出 scope 也应反映实际执行的网页搜索。
+            mode=mode if self._has_academic_search() else SearchMode.WEB,
+            focus=focus.strip() if focus and focus.strip() else None,
+            recency=recency,
+            max_results=max_results,
+        )
 
         api_key = get_tool_config_value(ctx, "api_key")
-        api_key = api_key.strip() if isinstance(api_key, str) and api_key.strip() else None
-        if self.requires_api_key and not api_key:
-            raise ServiceException(McpErrorCode.WEB_SEARCH_CONFIG_MISSING,f"{self.tool_name} API key is not configured.",)
-
-        if mode is SearchMode.ACADEMIC:
-            response = await self.search_academic(query=search_query, max_results=max_results, api_key=api_key)
-        else:
-            response = await self.search_web(query=search_query, max_results=max_results, api_key=api_key)
-
-        seen_urls: set[str | None] = set()
-        search_results: list[SearchResult] = []
-        for result in response.results:
-            if result.url in seen_urls: continue
-            seen_urls.add(result.url)
-            search_results.append(result)
-            if len(search_results) >= max_results: break
-
-        # 分配候选项 ID
-        candidates_by_id = { f"[{index}]": result for index, result in enumerate(search_results, 1)}
-        if not candidates_by_id: raise ServiceException(McpErrorCode.WEB_SEARCH_EMPTY_RESULT,"The search provider returned no results.")
-
-        # 重排序
-        rank_candidates: list[RankCandidate] = []
-        for candidate_id, result in candidates_by_id.items():
-            ranking_text_parts: list[str] = []
-
-            if result.title: ranking_text_parts.append(f"Title: {result.title}")
-            if result.snippet: ranking_text_parts.append(f"Snippet: {result.snippet}")
-            for highlight in result.highlights or (): ranking_text_parts.append(f"Highlight: {highlight}")
-
-            rank_candidates.append(RankCandidate(
-                candidate_id=candidate_id,
-                text="\n".join(ranking_text_parts),
-                fields={
-                    "title": result.title or "",
-                    "snippet": result.snippet or "",
-                    "highlights": "\n".join(result.highlights or ()),
-                },
-            ))
-
-        rank_request = RankRequest(
-            query=RankQuery(text=ranking_query),
-            candidates=tuple(rank_candidates),
-            top_k=len(rank_candidates),
-            candidate_limit=len(rank_candidates),
+        api_key = (
+            api_key.strip()
+            if isinstance(api_key, str) and api_key.strip()
+            else None
         )
-        ranked = await self._ranking_pipeline.arank(rank_request)
+        if self.requires_api_key and not api_key:
+            raise ServiceException(
+                McpErrorCode.WEB_SEARCH_CONFIG_MISSING,
+                f"{self.tool_name} API key is not configured.",
+            )
+
+        handler = (
+            self.search_academic
+            if request.mode is SearchMode.ACADEMIC
+            else self.search_web
+        )
+        kwargs = _filter_search_kwargs(
+            handler,
+            query=request.query,
+            focus=request.focus,
+            recency=request.recency,
+            max_results=request.max_results,
+            api_key=api_key,
+        )
+        response = await handler(**kwargs)
+
+        seen_urls: set[str] = set()
+        search_results: list[SearchResult] = []
+
+        for result in response.results:
+            # 无 URL 的论文结果不能以 None 互相去重，否则会无故丢失不同论文的标题与摘要证据。
+            if result.url and result.url in seen_urls:
+                continue
+            if result.url:
+                seen_urls.add(result.url)
+
+            search_results.append(result)
+            if len(search_results) >= request.max_results:
+                break
+
+        if not search_results:
+            raise ServiceException(
+                McpErrorCode.WEB_SEARCH_EMPTY_RESULT,
+                "The search provider returned no results.",
+            )
 
         return WebSearchToolResult(
-            query=search_query,
-            mode=mode,
+            query=request.query,
+            mode=request.mode,
             candidates=[
-                WebSearchCandidateResult(
-                    candidate_id=item.candidate_id,
-                    title=candidates_by_id[item.candidate_id].title,
-                    url=candidates_by_id[item.candidate_id].url,
-                    snippet=candidates_by_id[item.candidate_id].snippet,
-                    highlights=candidates_by_id[item.candidate_id].highlights,
+                WebSearchCandidate(
+                    title=result.title,
+                    url=result.url,
+                    published_date=result.published_date,
+                    evidences=result.evidences,
+                    metadata=result.metadata,
                 )
-                for item in ranked.ranked
+                for result in search_results
             ],
-            supplier_answer=response.answer,
+            summary=response.summary,
         )
 
     @abstractmethod
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        api_key: str | None,
+    ) -> SearchResponse:
         pass
 
-    async def search_academic(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
-        return await self.search_web(query=query, max_results=max_results, api_key=api_key)
+    async def search_academic(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        api_key: str | None,
+        focus: str | None = None,
+        recency: SearchRecency | None = None,
+    ) -> SearchResponse:
+        # 保留内部 fallback，但只向目标网页实现传递其明确接收的参数。
+        kwargs = _filter_search_kwargs(
+            self.search_web,
+            query=query,
+            focus=focus,
+            recency=recency,
+            max_results=max_results,
+            api_key=api_key,
+        )
+        return await self.search_web(**kwargs)

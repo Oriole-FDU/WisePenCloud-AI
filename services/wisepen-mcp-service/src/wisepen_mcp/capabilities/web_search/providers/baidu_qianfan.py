@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-
 from common.core.exceptions import ServiceException
-from common.utils.ranking import RankingPipeline
+
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
 from ..search_tools import (
     BaseSearchTool,
+    SearchRecency,
     SearchResponse,
     SearchResult,
 )
@@ -19,12 +20,12 @@ from ..search_tools import (
 class BaiduQianfanSearchTool(BaseSearchTool):
     tool_name = "baidu_qianfan_search"
     provider_name = "baidu_qianfan"
+    description = BaseSearchTool.description + "For this tool, recency='day' means the current calendar day in Beijing time.\n"
 
-    def __init__(self, *, http_client: httpx.AsyncClient, ranking_pipeline: RankingPipeline) -> None:
-        super().__init__(ranking_pipeline=ranking_pipeline)
+    def __init__(self, *, http_client: httpx.AsyncClient) -> None:
         self._http_client = http_client
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(self, *, query: str, max_results: int, api_key: str | None, recency: SearchRecency | None = None) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "Baidu Qianfan API key is required.")
 
@@ -34,6 +35,13 @@ class BaiduQianfanSearchTool(BaseSearchTool):
             "search_source": "baidu_search_v2",
             "resource_type_filter": [{"type": "web", "top_k": max_results}],
         }
+        if recency is SearchRecency.DAY:
+            # 实测 now+1d/d 被拒绝；同一显式日期的 gte/lte 包含该日的非零点结果。
+            # 百度当天按北京时间计算，避免服务主机的本地时区改变检索日期。
+            today = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
+            payload["search_filter"] = {"range": {"page_time": {"gte": today, "lte": today}}}
+        elif recency is not None:
+            payload["search_recency_filter"] = recency.value
 
         try:
             response = await self._http_client.post(url, headers={"X-Appbuilder-Authorization": f"Bearer {api_key}"}, json=payload)
@@ -64,7 +72,13 @@ class BaiduQianfanSearchTool(BaseSearchTool):
     def map_response(data: dict[str, Any]) -> SearchResponse:
         return SearchResponse(
             results=[
-                SearchResult(title=item.get("title"), url=item.get("url"), snippet=item.get("snippet"))
+                SearchResult(
+                    title=item.get("title"),
+                    url=item.get("url"),
+                    published_date=item.get("date"),
+                    evidences=[item[key] for key in ("markdown_content", "content", "snippet") if item.get(key)][:1],
+                    metadata={key: item[key] for key in ("authority_score", "rerank_score", "aladdin") if item.get(key) is not None},
+                )
                 for item in data["references"]
             ]
         )

@@ -566,9 +566,21 @@ def _has_cached_tool_output(messages: list[ChatMessage]) -> bool:
             continue
         if not isinstance(output_payload, dict):
             continue
-        contents = output_payload.get("contents")
-        if not isinstance(contents, list):
-            continue
-        if any(isinstance(item, dict) and item.get("content_id") for item in contents):
+        if _contains_content_id(output_payload):
             return True
+    return False
+
+
+def _contains_content_id(value: object) -> bool:
+    """递归识别树内 claim-check 回执，避免依赖旧的顶层 contents 协议。"""
+    if isinstance(value, dict):
+        if any(
+            isinstance(item, str) and item
+            and (key == "content_id" or key.endswith("_content_id"))
+            for key, item in value.items()
+        ):
+            return True
+        return any(_contains_content_id(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_content_id(item) for item in value)
     return False
