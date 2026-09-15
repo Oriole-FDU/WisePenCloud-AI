@@ -18,7 +18,7 @@ class TavilySearchTool(BaseSearchTool):
     tool_name = "tavily_search"
     provider_name = "tavily"
 
-    async def search_web(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "Tavily API key is required.")
 

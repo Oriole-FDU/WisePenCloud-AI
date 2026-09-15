@@ -22,10 +22,10 @@ class TinyFishSearchTool(BaseSearchTool):
     def __init__(self, *, http_client: httpx.AsyncClient) -> None:
         self._http_client = http_client
 
-    async def search_web(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(self, *, query: str, max_results: int, api_key: str | None, focus: str | None = None) -> SearchResponse:
         return await self._search(query=query, focus=focus, api_key=api_key, academic=False)
 
-    async def search_academic(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_academic(self, *, query: str, max_results: int, api_key: str | None, focus: str | None = None) -> SearchResponse:
         return await self._search(query=query, focus=focus, api_key=api_key, academic=True)
 
     async def _search(self, *, query: str, focus: str | None, api_key: str | None, academic: bool) -> SearchResponse:

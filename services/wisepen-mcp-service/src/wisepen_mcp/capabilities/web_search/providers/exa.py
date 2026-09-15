@@ -18,10 +18,10 @@ class ExaSearchTool(BaseSearchTool):
     tool_name = "exa_search"
     provider_name = "exa"
 
-    async def search_web(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(self, *, query: str, max_results: int, api_key: str | None, focus: str | None = None) -> SearchResponse:
         return await self._search(query=query, focus=focus, api_key=api_key, max_results=max_results, academic=False)
 
-    async def search_academic(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_academic(self, *, query: str, max_results: int, api_key: str | None, focus: str | None = None) -> SearchResponse:
         return await self._search(query=query, focus=focus, api_key=api_key, max_results=max_results, academic=True)
 
     async def _search(self, *, query: str, focus: str | None, max_results: int, api_key: str | None, academic: bool) -> SearchResponse:

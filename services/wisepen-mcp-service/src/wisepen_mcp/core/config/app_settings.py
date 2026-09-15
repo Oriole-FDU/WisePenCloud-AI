@@ -3,9 +3,9 @@ import threading
 from typing import Literal
 
 import yaml
+from common.logger import error, info
 from pydantic import BaseModel, ConfigDict
 
-from common.logger import error, info
 from wisepen_mcp.core.config.nacos import nacos_client_manager
 
 
@@ -19,7 +19,8 @@ class AppSettings(BaseModel):
     RPC_DEFAULT_RETRIES: int = 2
     SERVICE_DISCOVERY_CACHE_TTL_SECONDS: float = 30.0
 
-    WEB_SEARCH_FOURGET_BASE_URL: str = "http://127.0.0.1:8088"
+    WEB_SEARCH_API_KEY: str = ""  # 平台默认搜索的 GLM 托管密钥，不接受请求侧覆盖。
+    WEB_SEARCH_GLM_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
     WEB_SEARCH_EXA_BASE_URL: str = "https://api.exa.ai"
     WEB_SEARCH_TAVILY_BASE_URL: str = "https://api.tavily.com"
     WEB_SEARCH_ANYSEARCH_BASE_URL: str = "https://api.anysearch.com"

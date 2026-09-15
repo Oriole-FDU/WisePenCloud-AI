@@ -18,10 +18,10 @@ class FirecrawlSearchTool(BaseSearchTool):
     tool_name = "firecrawl_search"
     provider_name = "firecrawl"
 
-    async def search_web(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
         return await self._search(query=query, api_key=api_key, max_results=max_results, academic=False)
 
-    async def search_academic(self, *, query: str, focus: str | None, max_results: int, api_key: str | None) -> SearchResponse:
+    async def search_academic(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
         return await self._search(query=query, api_key=api_key, max_results=max_results, academic=True)
 
 
