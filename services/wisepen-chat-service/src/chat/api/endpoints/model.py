@@ -57,6 +57,7 @@ def to_mapping_response(
         provider_id=str(mapping.provider_id),
         provider_name=provider.name if provider is not None and provider.scope != ProviderScope.SYSTEM else None,
         provider_model_name=mapping.provider_model_name,
+        billing_ratio=mapping.billing_ratio,
         support_runtime_options=llm_provider_resolver.runtime_options_manifest(provider.type) if provider else {},
         is_preferred=mapping.is_preferred,
         is_active=mapping.is_active,
@@ -71,7 +72,6 @@ def to_model_response(
         scope=model.scope,
         display_name=model.display_name,
         model_family=model.model_family,
-        billing_ratio=model.billing_ratio,
         support_thinking=model.support_thinking,
         support_vision=model.support_vision,
         support_tools=model.support_tools,
@@ -320,7 +320,7 @@ async def list_models(
     summary="创建用户模型",
     description="""
 - 用途：为当前用户新增一个个人模型定义。
-- 请求：display_name、model_family、billing_ratio、能力开关和上下文窗口字段描述模型能力。
+- 请求：display_name、model_family、能力开关和上下文窗口字段描述模型能力。
 - 约束：当前用户必须已登录；同一用户下模型展示名不能重复；请求参数必须满足 schema 约束。
 - 处理：创建归属于当前用户的模型定义；不自动创建 Provider 或模型映射。
 - 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；模型已存在 -> ChatErrorCode.MODEL_ALREADY_EXISTS；请求参数校验失败 -> ResultCode.PARAM_ERROR。
@@ -337,7 +337,6 @@ async def create_user_model(
         Model(
             display_name=req.display_name,
             model_family=req.model_family,
-            billing_ratio=req.billing_ratio,
             support_thinking=req.support_thinking,
             support_vision=req.support_vision,
             support_tools=req.support_tools,
@@ -355,7 +354,7 @@ async def create_user_model(
     summary="更新用户模型",
     description="""
 - 用途：维护当前用户的个人模型定义。
-- 请求：model_id 指定目标模型；display_name、model_family、billing_ratio、能力开关、上下文窗口和 is_active 未传时不更新对应字段。
+- 请求：model_id 指定目标模型；display_name、model_family、能力开关、上下文窗口和 is_active 未传时不更新对应字段。
 - 约束：当前用户必须已登录；目标模型必须属于当前用户；更新后的模型展示名不能与同用户其他模型冲突。
 - 处理：按传入字段更新模型定义；不直接修改 Provider 或模型映射。
 - 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；模型不存在或不属于当前用户 -> ChatErrorCode.MODEL_NOT_FOUND；模型展示名冲突 -> ChatErrorCode.MODEL_ALREADY_EXISTS；请求参数校验失败 -> ResultCode.PARAM_ERROR。
@@ -406,7 +405,7 @@ async def delete_user_model(
     summary="绑定模型 Provider",
     description="""
 - 用途：为当前用户可访问的模型绑定一个个人 Provider 侧模型名称。
-- 请求：model_id 指定系统模型或用户模型；provider_id 指定用户 Provider；provider_model_name 是 Provider 实际模型名；is_preferred 和 is_active 控制映射偏好与启用状态。
+- 请求：model_id 指定系统模型或用户模型；provider_id 指定用户 Provider；provider_model_name 是 Provider 实际模型名；billing_ratio 描述该映射的计费倍率；is_preferred 和 is_active 控制映射偏好与启用状态。
 - 约束：当前用户必须已登录；模型必须是系统模型或当前用户模型；Provider 必须属于当前用户。
 - 处理：创建或更新模型到 Provider 的映射关系；设置 Provider 侧模型名、启用状态和首选状态；不修改模型定义或 Provider 凭证。
 - 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；模型不存在或不可访问 -> ChatErrorCode.MODEL_NOT_FOUND；Provider 不存在或不属于当前用户 -> ChatErrorCode.PROVIDER_NOT_FOUND；并发创建映射冲突 -> ChatErrorCode.MODEL_MAPPING_ALREADY_EXISTS；请求参数校验失败 -> ResultCode.PARAM_ERROR。
@@ -424,6 +423,7 @@ async def bind_model_provider(
         PydanticObjectId(req.provider_id),
         req.provider_model_name,
         user_id,
+        billing_ratio=req.billing_ratio,
         is_preferred=req.is_preferred,
         is_active=req.is_active,
     )

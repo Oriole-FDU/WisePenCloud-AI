@@ -117,8 +117,6 @@ class MongoModelRepository(ModelRepository):
             model.model_family = updates["model_family"]
         if "runtime_options" in updates:
             model.runtime_options = updates["runtime_options"]
-        if "billing_ratio" in updates:
-            model.billing_ratio = updates["billing_ratio"]
         if "support_thinking" in updates:
             model.support_thinking = updates["support_thinking"]
         if "support_vision" in updates:
@@ -164,6 +162,7 @@ class MongoModelRepository(ModelRepository):
         provider_id: PydanticObjectId,
         provider_model_name: str,
         user_id: Optional[str] = None,
+        billing_ratio: int = 1,
         is_preferred: bool = True,
         is_active: bool = True,
     ) -> ModelProviderMapping:
@@ -190,6 +189,7 @@ class MongoModelRepository(ModelRepository):
                 model_id=model_id,
                 provider_id=provider_id,
                 provider_model_name=provider_model_name,
+                billing_ratio=billing_ratio,
                 owner_user_id=user_id,
                 is_preferred=is_preferred,
                 is_active=is_active,
@@ -208,6 +208,7 @@ class MongoModelRepository(ModelRepository):
             return mapping
 
         mapping.provider_model_name = provider_model_name
+        mapping.billing_ratio = billing_ratio
         mapping.updated_at = now
 
         try:

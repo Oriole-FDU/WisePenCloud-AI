@@ -67,16 +67,16 @@ class ModelRequestInfo:
 
     @property
     def billing_ratio(self) -> int:
-        return self.model.billing_ratio
+        return self.mapping.billing_ratio
 
     @property
     def is_billable(self) -> bool:
-        return self.provider.scope == ProviderScope.SYSTEM and self.model.billing_ratio > 0
+        return self.provider.scope == ProviderScope.SYSTEM and self.mapping.billing_ratio > 0
 
     def billable_tokens(self, token_usage: int) -> int:
         if token_usage <= 0 or not self.is_billable:
             return 0
-        return token_usage * self.model.billing_ratio
+        return token_usage * self.mapping.billing_ratio
 
     @property
     def support_tools(self) -> bool:
@@ -125,6 +125,7 @@ class ModelRepository(ABC):
         provider_id: PydanticObjectId,
         provider_model_name: str,
         user_id: Optional[str] = None,
+        billing_ratio: int = 1,
         is_preferred: bool = True,
         is_active: bool = True,
     ) -> ModelProviderMapping:

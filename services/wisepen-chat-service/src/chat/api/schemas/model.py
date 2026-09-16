@@ -23,6 +23,7 @@ class ModelProviderMappingResponse(BaseModel):
     provider_id: str
     provider_name: Optional[str] = None
     provider_model_name: str
+    billing_ratio: int
     support_runtime_options: Dict = Field(default_factory=dict)
     is_preferred: bool
     is_active: bool
@@ -34,7 +35,6 @@ class ModelResponse(BaseModel):
     scope: ModelScope
     display_name: str
     model_family: ModelFamily
-    billing_ratio: int
     support_thinking: bool
     support_vision: bool
     support_tools: bool
@@ -80,7 +80,6 @@ class DeleteUserProviderRequest(BaseModel):
 class CreateUserModelRequest(BaseModel):
     display_name: str
     model_family: ModelFamily = ModelFamily.GENERIC
-    billing_ratio: int = 1
     support_thinking: bool = False
     support_vision: bool = False
     support_tools: bool = True
@@ -92,7 +91,6 @@ class UpdateUserModelRequest(BaseModel):
     model_id: str
     display_name: Optional[str] = None
     model_family: Optional[ModelFamily] = None
-    billing_ratio: Optional[int] = None
     support_thinking: Optional[bool] = None
     support_vision: Optional[bool] = None
     support_tools: Optional[bool] = None
@@ -109,6 +107,7 @@ class BindModelProviderRequest(BaseModel):
     model_id: str
     provider_id: str
     provider_model_name: str
+    billing_ratio: int = 1
     is_preferred: bool = True
     is_active: bool = True
 

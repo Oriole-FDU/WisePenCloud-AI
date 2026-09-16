@@ -270,9 +270,9 @@ async def pin_session(
     description="""
 - 用途：在会话开始前绑定、切换或清除会话使用的 Agent。
 - 请求：session_id 指定目标会话；agent_id 为空时清除绑定，非空时指定目标 Agent。
-- 约束：当前用户必须已登录；目标会话必须属于当前用户；已有消息的会话不能切换 Agent；agent_id 非空时必须能解析到可用 Agent。
+- 约束：当前用户必须已登录；目标会话必须属于当前用户；agent_id 非空时必须能解析到可用 Agent。
 - 处理：校验会话归属和消息状态后写入 Agent ID 与版本，或清空 Agent 绑定；不修改历史消息或附件。
-- 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；已有消息的会话切换 Agent -> ChatErrorCode.SESSION_AGENT_CHANGE_FORBIDDEN；Agent 不存在或未发布 -> ChatErrorCode.AGENT_NOT_FOUND；请求参数校验失败 -> ResultCode.PARAM_ERROR。
+- 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；Agent 不存在或未发布 -> ChatErrorCode.AGENT_NOT_FOUND；请求参数校验失败 -> ResultCode.PARAM_ERROR。
 - 响应：返回更新后的会话信息。
 """,
 )
@@ -282,12 +282,14 @@ async def set_session_agent(
         req: SetSessionAgentRequest,
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
-        message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
+        # message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
         agent_resolver: AgentResolver = Depends(Provide[Container.agent_resolver]),
 ):
     await session_repo.get_session_for_user(session_id, user_id)
-    if await message_repo.has_session_messages(session_id):
-        raise ServiceException(ChatErrorCode.SESSION_AGENT_CHANGE_FORBIDDEN)
+
+    # 不再限制已有消息的会话不能切换 Agent
+    # if await message_repo.has_session_messages(session_id):
+    #     raise ServiceException(ChatErrorCode.SESSION_AGENT_CHANGE_FORBIDDEN)
 
     if not req.agent_id:
         session = await session_repo.set_session_agent(session_id, user_id, None, None)

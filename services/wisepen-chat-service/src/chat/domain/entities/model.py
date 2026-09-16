@@ -29,8 +29,6 @@ class Model(Document):
 
     model_family: ModelFamily = Field(default=ModelFamily.GENERIC, description="模型协议族")
 
-    billing_ratio: int = Field(default=1, description="计费倍率")
-
     support_thinking: bool = Field(default=False, description="是否支持深度思考")
     support_vision: bool = Field(default=False, description="是否支持视觉输入")
     support_tools: bool = Field(default=True, description="是否支持 tool calling")
@@ -65,6 +63,7 @@ class ModelProviderMapping(Document):
     model_id: PydanticObjectId = Field(..., description="关联 Model._id")
     provider_id: PydanticObjectId = Field(..., description="关联 Provider._id")
     provider_model_name: str = Field(..., description="供应商侧实际模型名（如 openai/gpt-4o）")
+    billing_ratio: int = Field(default=1, description="计费倍率")
 
     owner_user_id: Optional[str] = Field(default=None, description="归属用户 ID")
 

@@ -63,7 +63,7 @@ class OpenAIAdapter(LLMProvider):
                 },
             },
             "defaults": {
-                "reasoning": {"effort": "medium", "summary": "auto"},
+                "reasoning": {"effort": "high", "summary": "auto"},
             },
         }
 
@@ -77,7 +77,10 @@ class OpenAIAdapter(LLMProvider):
         client_kwargs = {"api_key": model_request.api_key}
         if model_request.base_url:
             client_kwargs["base_url"] = model_request.base_url
-        client = AsyncOpenAI(**client_kwargs)
+        client = AsyncOpenAI(**client_kwargs,  default_headers={
+            "User-Agent": "WisePen/1.0.0",
+            "Accept": "text/event-stream",
+        })
 
         # 内部消息投影为 OpenAI Responses API input 格式
         request_input, instructions = self._openai_messages_formatter(messages)
