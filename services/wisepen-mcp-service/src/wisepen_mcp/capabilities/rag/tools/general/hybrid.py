@@ -20,4 +20,4 @@ def register_hybrid_tool(mcp: FastMCP, client: RagServiceClient) -> None:
         value = query.strip()
         if not value:
             raise ValueError("query must not be blank")
-        return await client.search_hybrid(semantic_query=value, top_k=top_k)
+        return await client.search_hybrid(query=value, top_k=top_k)

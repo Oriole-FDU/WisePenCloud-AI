@@ -32,7 +32,7 @@ from chat.application.tools.session_tools.cached_tool_output_tools import (
     CachedToolOutputReadByRangeTool,
     CachedToolOutputReadBySectionTool,
     CachedToolOutputSearchByRegexTool,
-    CachedToolOutputSearchBySemanticsTool,
+    CachedToolOutputSearchByRelevanceTool,
 )
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import (
     GetHistoricalChatMessagesTool,
@@ -307,8 +307,8 @@ class Container(containers.DeclarativeContainer):
     search_cached_tool_output_by_regex_tool = providers.Singleton(
         CachedToolOutputSearchByRegexTool,
     )
-    search_cached_tool_output_by_semantics_tool = providers.Singleton(
-        CachedToolOutputSearchBySemanticsTool,
+    search_cached_tool_output_by_relevance_tool = providers.Singleton(
+        CachedToolOutputSearchByRelevanceTool,
     )
     web_fetch_static_session = providers.Resource(_provide_web_fetch_static_session)
     web_fetch_browser_session = providers.Resource(_provide_web_fetch_browser_session)
@@ -342,7 +342,7 @@ class Container(containers.DeclarativeContainer):
         read_cached_tool_output_by_range_tool,
         read_cached_tool_output_by_section_tool,
         search_cached_tool_output_by_regex_tool,
-        search_cached_tool_output_by_semantics_tool,
+        search_cached_tool_output_by_relevance_tool,
         web_fetch_tool,
         web_crawl_tool,
     )

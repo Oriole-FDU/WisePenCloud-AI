@@ -22,7 +22,7 @@ _CACHED_TOOL_OUTPUT_TOOL_NAMES = frozenset({
     "read_cached_tool_output_by_range",
     "read_cached_tool_output_by_section",
     "search_cached_tool_output_by_regex",
-    "search_cached_tool_output_by_semantics",
+    "search_cached_tool_output_by_relevance",
 })
 
 

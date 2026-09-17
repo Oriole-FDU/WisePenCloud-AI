@@ -14,7 +14,6 @@ from common.utils.ranking import (
     RankQuery,
     RankRequest,
 )
-from openai import AsyncOpenAI
 
 from rag.application.document.models import DocChunk, Document
 from rag.application.plugins.core import RagPluginRegistry
@@ -31,8 +30,9 @@ from rag.domain.repositories.document_vectors import (
     VectorCandidate,
 )
 from rag.domain.repositories.documents import DocumentRepository
-from rag.domain.repositories.metadata_filters import MetadataFilterCondition
 from rag.domain.repositories.index_state import ResourceIndexStateRepository
+from rag.domain.repositories.metadata_filters import MetadataFilterCondition
+from rag.utils import EmbeddingClient
 
 # --- 常量配置 ---
 
@@ -65,9 +65,10 @@ class HybridRetriever:
         index_states: ResourceIndexStateRepository,
         resource_acls: ResourceAclRepository,
         ranking_pipeline: RankingPipeline,
-        openai_client: AsyncOpenAI,
+        embedding_client: EmbeddingClient,
         embedding_model: str,
         embedding_dimensions: int,
+        embedding_semaphore: asyncio.Semaphore,
         plugin_registry: RagPluginRegistry,
     ) -> None:
         self._documents = documents
@@ -76,29 +77,28 @@ class HybridRetriever:
         self._index_states = index_states
         self._resource_acls = resource_acls
         self._ranking_pipeline = ranking_pipeline
-        self._openai_client = openai_client
+        self._embedding_client = embedding_client
         self._embedding_model = embedding_model
         self._embedding_dimensions = embedding_dimensions
+        self._embedding_semaphore = embedding_semaphore
         self._plugin_registry = plugin_registry
 
     async def retrieve(
         self,
-        semantic_query: str,
+        query: str,
         top_k: int,
         *,
-        lexical_query: str = "",
         scope: PermissionScope,
         plugin_id: str | None = None,
         metadata_filter=None,
     ) -> HybridRetrievalResult:
         """独立召回两路 Top 30，在 Mongo 当前事实和 ACL 快照校验后才产生 Hit。"""
         # 输入校验
-        semantic_query = semantic_query.strip()
-        if not semantic_query:
-            raise ValueError("semantic_query must not be empty")
+        query = query.strip()
+        if not query:
+            raise ValueError("query must not be empty")
         if top_k <= 0:
             raise ValueError("top_k must be positive")
-        lexical_query = lexical_query.strip() or semantic_query
         metadata_filters = _compile_metadata_filters(
             plugin_registry=self._plugin_registry,
             plugin_id=plugin_id,
@@ -106,12 +106,14 @@ class HybridRetriever:
         )
 
         # 1. 生成查询向量并并行检索稠密和BM25
-        query_vector = await _embed_query(
-            self._openai_client,
-            model=self._embedding_model,
-            dimensions=self._embedding_dimensions,
-            query=semantic_query,
-        )
+        async with self._embedding_semaphore:
+            query_vector = (
+                await self._embedding_client.embed(
+                    model=self._embedding_model,
+                    texts=[query],
+                    dimensions=self._embedding_dimensions,
+                )
+            )[0]
         dense, lexical = await asyncio.gather(
             self._document_vectors.search_dense(
                 query_vector=query_vector,
@@ -120,7 +122,7 @@ class HybridRetriever:
                 limit=_CANDIDATE_LIMIT,
             ),
             self._document_vectors.search_bm25(
-                query=lexical_query,
+                query=query,
                 scope=scope,
                 metadata_filters=metadata_filters,
                 limit=_CANDIDATE_LIMIT,
@@ -157,12 +159,9 @@ class HybridRetriever:
         # 5. 执行精排
         rank_result = await self._ranking_pipeline.arank(
             RankRequest(
-                query=RankQuery(
-                    semantic_query=semantic_query,
-                    lexical_query=lexical_query,
-                ),
+                query=RankQuery(text=query),
                 candidates=ranking_candidates,
-            top_k=top_k,
+                top_k=top_k,
                 candidate_limit=len(ranking_candidates),
             )
         )
@@ -236,28 +235,6 @@ class HybridRetriever:
                 continue
             visible.append(chunk)
         return visible, documents
-
-
-# --- 辅助函数：向量嵌入 ---
-
-async def _embed_query(
-    openai_client: AsyncOpenAI,
-    *,
-    model: str,
-    dimensions: int,
-    query: str,
-) -> list[float]:
-    response = await openai_client.embeddings.create(
-        model=model,
-        input=query,
-        dimensions=dimensions,
-    )
-    if len(response.data) != 1:
-        raise ValueError("embedding response count does not match query")
-    vector = list(response.data[0].embedding)
-    if len(vector) != dimensions:
-        raise ValueError("embedding response dimensions do not match settings")
-    return vector
 
 
 # --- 辅助函数：metadata 过滤 ---

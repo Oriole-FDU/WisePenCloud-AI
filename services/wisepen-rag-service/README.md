@@ -17,7 +17,7 @@ RAG 服务是一次全量重写。Common 只提供无业务含义的文档结构
   -> 解析后的 Markdown
   -> Document（内容、结构、metadata、ACL）
   -> DocChunk（检索原子）
-  -> contextual_prefix / key_terms 增强
+  -> retrieval_context 增强
   -> Dense + BM25 文本索引
   -> LLM 图谱抽取或垂类确定性 producer
   -> Mongo GraphNode / GraphEdge / TextGraphEvidence
@@ -32,8 +32,8 @@ RAG 服务是一次全量重写。Common 只提供无业务含义的文档结构
 领域模型定义在 [领域模型.md](领域模型.md)：
 
 - `Document` 是当前内容和结构的聚合根，运行时持有 Markdown、Common 结构、强类型 metadata 和 RAG ACL 投影；ACL 在独立仓储维护，不与内容 revision 一起冻结；
-- `DocChunk` 是小粒度检索原子，保存原文坐标、增强产物和 `extracted_node_ids`，不保存静态父块；
-- `get_semantic_text()` 和 `get_lexical_text()` 在调用时生成 Dense/BM25 输入，不升级为持久化字段；
+- `DocChunk` 是小粒度检索原子，保存原文坐标、`retrieval_context` 和 `extracted_node_ids`，不保存静态父块；
+- `get_retrieval_text()` 在调用时生成 Dense/BM25 共用输入，不把拼接文本升级为持久化字段；
 - `GraphNode`、`GraphEdge` 与 `DocChunk` 正交；LLM 图元通过 `TextGraphEvidence` 回到 Markdown，确定性 producer 直接从强类型事实生成图元；
 - Ontology、metadata filter compiler 和确定性 producer 是插件扩展点，不把论文字段写进通用模型，也不为确定性来源创建 Evidence resolver。
 
@@ -65,7 +65,7 @@ Qdrant BM25 Top-N ──┘
   -> 动态构建不截断的父块
 ```
 
-Dense 输入是标题路径、contextual prefix 和正文；BM25 输入是标题路径、key terms 和正文。reranker 只看标题和权威正文。
+Dense 与 BM25 都使用 `retrieval_context + raw_text`；没有增强结果时只使用权威正文。reranker 仍只看标题和权威正文。
 
 `ChunkHit` 由回查后的当前 `DocChunk` 和 reranker 分数构造，`node_ids` 来自该 Chunk 的 `extracted_node_ids`。它们与具体 `chunk_id` 绑定，供调用方选择后续图谱 seed。
 
@@ -139,7 +139,7 @@ Qdrant payload、Neo4j 属性、标题树视图和动态父块都不是权威来
 | ACL `can_read()`、VIEW 权限位、用户/群组例外和排除规则 | 直接复用判断语义及测试；存储改为本方案的 `resource_acls` 投影 |
 | 权威 ACL 读取、`save_if_newer`、同 revision 重试 | 复用读取与版本比较行为；不要让索引 ACL 取代最终判权 |
 | OpenAI/Embedding/Reranker 客户端的超时、重试、关闭和错误映射 | 复用客户端边界；业务层不自行创建一套调用协议 |
-| contextualize、关键词提取的提示词、并发限制和缓存键 | 复用已验证的调用策略；结果只写入 `DocChunk` 增强产物 |
+| retrieval context 的提示词、并发限制和缓存键 | 复用已验证的调用策略；结果只写入 `DocChunk` 增强产物 |
 | 图谱连续窗口、坐标映射、LLM TextGraphEvidence 校验、稳定 ID 去重 | 复用算法和校验顺序；抽取协议改为 Instructor + Pydantic + OpenAI |
 | staged/applied 条件更新和批量写入 | 复用并落实到 [持久化.md](持久化.md) 的发布流程 |
 

@@ -13,7 +13,6 @@ from common.utils.ranking import (
     RankQuery,
     RankRequest,
 )
-from openai import AsyncOpenAI
 
 from rag.application.document.models import DocChunk, Document
 from rag.application.plugins.core.registry import RagPluginRegistry
@@ -33,12 +32,13 @@ from rag.domain.repositories.graph_node_vectors import (
     GraphNodeVectorRepository,
     GraphVectorCandidate,
 )
-from rag.domain.repositories.metadata_filters import MetadataFilterCondition
 from rag.domain.repositories.graph_topology import (
     GraphSourceProjection,
     GraphTopologyRepository,
 )
 from rag.domain.repositories.index_state import ResourceIndexStateRepository
+from rag.domain.repositories.metadata_filters import MetadataFilterCondition
+from rag.utils import EmbeddingClient
 
 # --- 内部数据类 ---
 
@@ -70,9 +70,10 @@ class GraphRetriever:
         resource_acls: ResourceAclRepository,
         ranking_pipeline: RankingPipeline,
         plugin_registry: RagPluginRegistry,
-        openai_client: AsyncOpenAI,
+        embedding_client: EmbeddingClient,
         embedding_model: str,
         embedding_dimensions: int,
+        embedding_semaphore: asyncio.Semaphore,
     ) -> None:
         self._enabled = enabled
         self._topology = topology
@@ -85,9 +86,10 @@ class GraphRetriever:
         self._resource_acls = resource_acls
         self._ranking_pipeline = ranking_pipeline
         self._plugin_registry = plugin_registry
-        self._openai_client = openai_client
+        self._embedding_client = embedding_client
         self._embedding_model = embedding_model
         self._embedding_dimensions = embedding_dimensions
+        self._embedding_semaphore = embedding_semaphore
 
     async def search(
         self,
@@ -151,10 +153,7 @@ class GraphRetriever:
         candidates = candidates[: request.candidate_limit]
         ranked = await self._ranking_pipeline.arank(
             RankRequest(
-                query=RankQuery(
-                    semantic_query=query,
-                    lexical_query=query,
-                ),
+                query=RankQuery(text=query),
                 candidates=[
                     RankCandidate(
                         candidate_id=item.candidate_id,
@@ -216,12 +215,14 @@ class GraphRetriever:
             # seed 是调用方已经选定的图入口，不能被向量召回替换或混入
             return []
 
-        query_vector = await _embed_query(
-            self._openai_client,
-            model=self._embedding_model,
-            dimensions=self._embedding_dimensions,
-            query=query,
-        )
+        async with self._embedding_semaphore:
+            query_vector = (
+                await self._embedding_client.embed(
+                    model=self._embedding_model,
+                    texts=[query],
+                    dimensions=self._embedding_dimensions,
+                )
+            )[0]
 
         tasks = []
         if request.level in (GraphSearchLevel.LOW, GraphSearchLevel.HYBRID):
@@ -406,21 +407,6 @@ def _merge_vector_candidates(
         index += 1
 
 
-async def _embed_query(
-    openai_client: AsyncOpenAI,
-    *,
-    model: str,
-    dimensions: int,
-    query: str,
-) -> list[float]:
-    response = await openai_client.embeddings.create(
-        model=model,
-        input=query,
-        dimensions=dimensions,
-    )
-    if len(response.data) != 1 or len(response.data[0].embedding) != dimensions:
-        raise ValueError("embedding response dimensions do not match settings")
-    return list(response.data[0].embedding)
 
 
 def _valid_evidence(

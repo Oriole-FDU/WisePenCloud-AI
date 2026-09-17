@@ -118,8 +118,7 @@ def _to_document(
         "source_spans": chunk.source_spans,
         "page_labels": chunk.page_labels,
         "anchor_labels": chunk.anchor_labels,
-        "contextual_prefix": chunk.contextual_prefix,
-        "key_terms": chunk.key_terms,
+        "retrieval_context": chunk.retrieval_context,
         "extracted_node_ids": chunk.extracted_node_ids,
         "metadata": metadata_codec.encode(chunk.metadata),
     }
@@ -137,8 +136,7 @@ def _to_domain(entity: DocChunkEntity, metadata_codec: DocChunkMetadataCodec) ->
         source_spans=entity.source_spans,
         page_labels=entity.page_labels,
         anchor_labels=entity.anchor_labels,
-        contextual_prefix=entity.contextual_prefix,
-        key_terms=entity.key_terms,
+        retrieval_context=entity.retrieval_context,
         extracted_node_ids=entity.extracted_node_ids,
         metadata=metadata_codec.decode(entity.metadata),
     )

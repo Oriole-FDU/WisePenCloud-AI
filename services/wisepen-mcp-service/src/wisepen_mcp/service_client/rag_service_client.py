@@ -31,42 +31,10 @@ class RagServiceClient:
             )
         return data
 
-    async def search_hybrid(self, *, semantic_query: str, top_k: int) -> dict[str, Any]:
+    async def search_hybrid(self, *, query: str, top_k: int) -> dict[str, Any]:
         return await self._post(
             "/rag/retrieval/searchHybrid",
-            {"semantic_query": semantic_query, "lexical_query": "", "top_k": top_k},
-        )
-
-    async def search_graph(
-        self,
-        *,
-        query: str,
-        seed_node_ids: list[str],
-        resource_ids: list[str] | None,
-        level: str,
-        node_categories: list[str],
-        relation_types: list[str],
-        direction: str,
-        max_depth: int,
-        vector_top_n: int,
-        candidate_limit: int,
-        top_k: int,
-    ) -> dict[str, Any]:
-        return await self._post(
-            "/rag/retrieval/searchGraph",
-            {
-                "query": query,
-                "seed_node_ids": seed_node_ids,
-                "resource_ids": resource_ids,
-                "level": level,
-                "node_categories": node_categories,
-                "relation_types": relation_types,
-                "direction": direction,
-                "max_depth": max_depth,
-                "vector_top_n": vector_top_n,
-                "candidate_limit": candidate_limit,
-                "top_k": top_k,
-            },
+            {"query": query, "top_k": top_k},
         )
 
     async def read_pages(self, *, resource_id: str, page_labels: list[str]) -> dict[str, Any]:

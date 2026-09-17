@@ -205,7 +205,7 @@ def _to_point(
         vector={
             dense_vector_name: list(dense_vector),
             sparse_vector_name: qdrant_models.Document(
-                text=chunk.get_lexical_text(),
+                text=chunk.get_retrieval_text(),
                 model="qdrant/bm25",
                 options={"tokenizer": "multilingual"},
             ),

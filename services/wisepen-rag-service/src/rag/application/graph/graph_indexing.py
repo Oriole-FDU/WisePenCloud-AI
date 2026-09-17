@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-
-from openai import AsyncOpenAI
 
 from rag.application.graph.models import (
     GraphEdgeProjection,
@@ -21,6 +20,9 @@ from rag.domain.repositories.graph_fact import GraphFactRepository
 from rag.domain.repositories.graph_node_vectors import GraphNodeVectorRepository
 from rag.domain.repositories.graph_topology import GraphTopologyRepository
 from rag.domain.repositories.index_state import ResourceIndexStateRepository
+from rag.utils import EmbeddingClient
+
+_EMBEDDING_BATCH_SIZE = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,9 +51,10 @@ class GraphIndexBuilder:
         topology: GraphTopologyRepository | None,
         node_vectors: GraphNodeVectorRepository,
         edge_vectors: GraphEdgeVectorRepository,
-        openai_client: AsyncOpenAI,
+        embedding_client: EmbeddingClient,
         embedding_model: str,
         embedding_dimensions: int,
+        embedding_semaphore: asyncio.Semaphore,
     ) -> None:
         if embedding_dimensions <= 0:
             raise ValueError("embedding_dimensions must be positive")
@@ -64,9 +67,10 @@ class GraphIndexBuilder:
         self._topology = topology
         self._node_vectors = node_vectors
         self._edge_vectors = edge_vectors
-        self._openai_client = openai_client
+        self._embedding_client = embedding_client
         self._embedding_model = embedding_model
         self._embedding_dimensions = embedding_dimensions
+        self._embedding_semaphore = embedding_semaphore
 
     async def index(
         self,
@@ -181,18 +185,21 @@ class GraphIndexBuilder:
         return state.applied_content_revision
 
     async def _embed(self, texts: list[str]) -> list[list[float]]:
+        """按固定上限顺序生成图投影向量，保持节点和边的回填顺序。"""
         if not texts:
             return []
-        response = await self._openai_client.embeddings.create(
-            model=self._embedding_model,
-            input=texts,
-            dimensions=self._embedding_dimensions,
-        )
-        vectors = [item.embedding for item in response.data]
-        if len(vectors) != len(texts) or any(
-            len(vector) != self._embedding_dimensions for vector in vectors
-        ):
-            raise ValueError("embedding response dimensions do not match settings")
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), _EMBEDDING_BATCH_SIZE):
+            batch = texts[start : start + _EMBEDDING_BATCH_SIZE]
+            # 与文档索引使用同一单次上限，避免一个大图投影耗尽 provider 配额。
+            async with self._embedding_semaphore:
+                vectors.extend(
+                    await self._embedding_client.embed(
+                        model=self._embedding_model,
+                        texts=batch,
+                        dimensions=self._embedding_dimensions,
+                    )
+                )
         return vectors
 
 

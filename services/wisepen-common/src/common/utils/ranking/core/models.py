@@ -28,22 +28,16 @@ class RankDecision(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class RankQuery:
-    """同时承载语义重排和稀疏检索各自使用的查询文本。"""
+    """排序阶段共享的 canonical information need。"""
 
-    semantic_query: str | None = None  # reranker 使用的语义意图，可为问句或普通语义陈述。
-    lexical_query: str | None = None  # BM25 使用的稀疏关键词，可包含同义改写和跨语言词形。
+    text: str  # 同时提供给 BM25、向量阶段和 reranker 的完整查询文本。
     metadata: Metadata = field(
         default_factory=dict
     )  # 调用方附加元数据，pipeline 不解释其含义
 
     def __post_init__(self) -> None:
-        if not any(
-            query is not None and query.strip()
-            for query in (self.semantic_query, self.lexical_query)
-        ):
-            raise ValueError(
-                "RankQuery requires at least one non-empty semantic_query or lexical_query."
-            )
+        if not self.text.strip():
+            raise ValueError("RankQuery.text must not be empty.")
 
 
 @dataclass(frozen=True, slots=True)

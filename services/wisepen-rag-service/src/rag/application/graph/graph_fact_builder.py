@@ -12,7 +12,7 @@ from common.utils.document import SourceSpan
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
-from rag.application.document.indexing import _shared_window
+from rag.application.document.context import build_inline_document_context
 from rag.application.document.models import DocChunk, Document
 from rag.application.graph.models import (
     GraphEdge,
@@ -34,7 +34,7 @@ from rag.domain.repositories.index_state import ResourceIndexStateRepository
 # --- LLM 抽取提示词与 Schema ---
 
 _SYSTEM_PROMPT = """Extract verifiable knowledge graph nodes and relations strictly grounded in the <target_chunk>.
-The <shared_window> provides context only; never extract facts that exist solely in the <shared_window>.
+The <context_chunk> elements provide context only; never extract facts that exist solely in them.
 
 Core Extraction Rules:
 1. Grounding & Zero Hallucination: Extract a fact ONLY if it is explicitly stated in <target_chunk>. Return empty lists if no valid facts exist.
@@ -134,22 +134,19 @@ class GraphFactBuilder:
         plugin_registry: RagPluginRegistry,
         openai_client: AsyncOpenAI,
         query_model: str,
-        max_concurrency: int,
+        llm_semaphore: asyncio.Semaphore,
     ) -> None:
-        if max_concurrency <= 0:
-            raise ValueError("max_concurrency must be positive")
         self._enabled = enabled
         self._documents = documents
         self._doc_chunks = doc_chunks
         self._graph_facts = graph_facts
         self._index_states = index_states
         self._plugin_registry = plugin_registry
-        self._openai_client = openai_client
         self._instructor_client = (
             instructor.from_openai(openai_client) if openai_client is not None else None
         )
         self._query_model = query_model
-        self._max_concurrency = max_concurrency
+        self._llm_semaphore = llm_semaphore
 
     async def build(self, *, resource_id: str) -> GraphBuildResult | None:
         """只补建当前 active revision；没有匹配插件时不调用模型也不写图。"""
@@ -250,10 +247,6 @@ class GraphFactBuilder:
         # 3. LLM 抽取（仅在插件启用且有 chunk 时进行）
         selected_chunks = plugin.select_chunks(chunks)
         if plugin.enable_llm_extraction and selected_chunks:
-            semaphore = asyncio.Semaphore(self._max_concurrency)
-            chunk_indices = {
-                chunk.chunk_id: index for index, chunk in enumerate(chunks)
-            }
             extracted = await asyncio.gather(
                 *(
                     _extract_chunk(
@@ -261,9 +254,8 @@ class GraphFactBuilder:
                         model=self._query_model,
                         document=document,
                         chunks=chunks,
-                        chunk_indices=chunk_indices,
                         chunk=chunk,
-                        semaphore=semaphore,
+                        semaphore=self._llm_semaphore,
                     )
                     for chunk in selected_chunks
                 )
@@ -363,12 +355,11 @@ async def _extract_chunk(
     model: str,
     document: Document,
     chunks: list[DocChunk],
-    chunk_indices: dict[str, int],
     chunk: DocChunk,
     semaphore: asyncio.Semaphore,
 ) -> _GraphExtraction:
     """对单个 chunk 调用 LLM 抽取，使用共享窗口提供上下文但限制证据只来自 target chunk。"""
-    shared_window = _shared_window(document, chunks, chunk, chunk_indices)
+    document_context = build_inline_document_context(document, chunks, chunk)
     async with semaphore:
         return await instructor_client.chat.completions.create(
             model=model,
@@ -376,15 +367,7 @@ async def _extract_chunk(
             max_retries=1,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": "\n\n".join(
-                        (
-                            "<shared_window>\n" + shared_window + "\n</shared_window>",
-                            "<target_chunk>\n" + chunk.raw_text + "\n</target_chunk>",
-                        )
-                    ),
-                },
+                {"role": "user", "content": document_context},
             ],
         )
 

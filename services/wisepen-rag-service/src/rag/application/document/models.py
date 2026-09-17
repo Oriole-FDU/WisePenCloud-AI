@@ -123,8 +123,7 @@ class DocChunk:
     anchor_labels: list[str] = field(default_factory=list)
 
     # 依赖 LLM 的可选语义增强
-    contextual_prefix: str = ""
-    key_terms: list[str] = field(default_factory=list)
+    retrieval_context: str = ""
     extracted_node_ids: list[str] = field(default_factory=list)
 
     # 依赖插件的可选 metadata，用于垂类拓展；通用 Chunk 仅支持 GeneralChunkMetadata
@@ -141,7 +140,7 @@ class DocChunk:
 
     @property
     def chunk_span(self) -> SourceSpan:
-        """返回覆盖 Chunk 所有来源片段的最小连续范围。"""
+        """返回所有来源片段的最小包络区间，不代表实际源覆盖。"""
         return SourceSpan(
             min(span.start_offset for span in self.source_spans),
             max(span.end_offset for span in self.source_spans),
@@ -159,22 +158,7 @@ class DocChunk:
         title = " > ".join(self.section_path)
         return f"{title}\n\n{self.raw_text}" if title else self.raw_text
 
-    def get_semantic_text(self) -> str:
-        """构建 Dense 输入；不将该拼接结果作为持久化字段。"""
-        parts: list[str] = []
-        if self.section_path:
-            parts.append(" > ".join(self.section_path))
-        if self.contextual_prefix.strip():
-            parts.append(self.contextual_prefix.strip())
-        parts.append(self.raw_text)
-        return "\n\n".join(parts)
-
-    def get_lexical_text(self) -> str:
-        """构建 BM25 输入；不将该拼接结果作为持久化字段。"""
-        parts: list[str] = []
-        if self.section_path:
-            parts.append(" ".join(self.section_path))
-        if self.key_terms:
-            parts.append(" ".join(self.key_terms))
-        parts.append(self.raw_text)
-        return " ".join(parts)
+    def get_retrieval_text(self) -> str:
+        """构建 Dense 与 BM25 共用的增强检索文本。"""
+        context = self.retrieval_context.strip()
+        return f"{context}\n\n{self.raw_text}" if context else self.raw_text

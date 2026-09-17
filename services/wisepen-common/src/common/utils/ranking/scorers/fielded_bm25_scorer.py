@@ -51,12 +51,9 @@ class FieldedBM25Scorer:
     ) -> tuple[ScoreSignal, ...]:
         if not candidates:
             return ()
-        if not query.lexical_query or not query.lexical_query.strip():
-            return ()
-
         positions = candidate_positions(candidates)
 
-        query_tokens = list(self.tokenizer.tokenize(query.lexical_query))
+        query_tokens = list(self.tokenizer.tokenize(query.text))
         if not query_tokens:
             return ()
 

@@ -42,9 +42,8 @@ async def search_hybrid(
     """执行单次文档混合检索，不隐式进入图谱或读取流程。"""
     try:
         result = await retriever.retrieve(
-            request.semantic_query,
+            request.query,
             request.top_k,
-            lexical_query=request.lexical_query,
             scope=permission_scope(user_id),
         )
     except ValueError as error:

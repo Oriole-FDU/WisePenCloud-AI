@@ -5,7 +5,7 @@ import threading
 
 import yaml
 from common.logger import error, info
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .nacos import nacos_client_manager
 
@@ -15,48 +15,84 @@ class AppSettings(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    # 基础安全与凭证
+    FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
+
+    # MongoDB 数据库
+
     MONGODB_URL: str
     MONGODB_DB_NAME: str
     RESOURCE_MONGODB_DB_NAME: str | None = None
-    FROM_SOURCE_SECRET: str = "APISIX-wX0iR6tY"
+
+    # LLM 与 Embedding 模型
+
     LLM_BASE_URL: str
     LLM_API_KEY: str
     QUERY_MODEL: str
     EMBEDDING_MODEL: str
     EMBEDDING_DIMENSIONS: int
+
+    # Reranker 重排配置
+
     ZERO_ENTROPY_API_KEY: str = ""
     RERANKER_MODEL: str = "zerank-2"
     RAG_RERANK_RELEVANCE_LOW_WATERMARK: float = 0.2
     RAG_RERANK_RELEVANCE_HIGH_WATERMARK: float = 0.6
     RAG_RERANK_UNCERTAIN_LIMIT: int = 3
-    DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY: int = 5
+
+    # RAG 并发与增强策略
+
     DOCUMENT_ENHANCEMENT_ENABLED: bool = False
-    KAFKA_ENABLED: bool = False
-    KAFKA_BOOTSTRAP_SERVERS: str = ""
-    KAFKA_DOCUMENT_READY_TOPIC: str = "wisepen-document-ready-topic"
-    KAFKA_RAG_DOCUMENT_READY_GROUP_ID: str = "wisepen-rag-v3-document-ready-group"
-    KAFKA_RESOURCE_ACL_RECALC_TOPIC: str = "wisepen-resource-acl-recalc-topic"
-    KAFKA_RAG_ACL_RECALC_GROUP_ID: str = "wisepen-rag-v3-acl-recalc-group"
-    KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC: str = "wisepen-resource-physical-destroy-topic"
-    KAFKA_RAG_RESOURCE_DESTROY_GROUP_ID: str = "wisepen-rag-v3-resource-destroy-group"
-    KAFKA_RAG_DEAD_LETTER_TOPIC: str = "wisepen-rag-v3-failed-events-topic"
-    KAFKA_RAG_MAX_DELIVERY_ATTEMPTS: int = 3
-    KAFKA_RAG_RETRY_DELAY_SECONDS: float = 1.0
-    GRAPH_ENABLED: bool = False
-    NEO4J_URI: str = ""
-    NEO4J_USERNAME: str = ""
-    NEO4J_PASSWORD: str = ""
+    DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY: int = Field(default=5, gt=0)
+    RAG_EMBEDDING_MAX_CONCURRENCY: int = Field(default=4, gt=0)
+
+    # Qdrant 向量数据库
+
+    # 连接信息
     QDRANT_HOST: str
     QDRANT_PORT: int = 6333
     QDRANT_PASSWORD: str = ""
+
+    # 文档 Chunk 向量集合
     QDRANT_DOCUMENT_CHUNK_COLLECTION_NAME: str = "document_chunk_vectors"
     QDRANT_DOCUMENT_DENSE_VECTOR_NAME: str = "dense"
     QDRANT_DOCUMENT_SPARSE_VECTOR_NAME: str = "sparse"
+
+    # 知识图谱向量集合
     QDRANT_GRAPH_NODE_COLLECTION_NAME: str = "graph_node_vectors"
     QDRANT_GRAPH_EDGE_COLLECTION_NAME: str = "graph_edge_vectors"
     QDRANT_GRAPH_NODE_DENSE_VECTOR_NAME: str = "dense"
     QDRANT_GRAPH_EDGE_DENSE_VECTOR_NAME: str = "dense"
     QDRANT_GRAPH_EDGE_SPARSE_VECTOR_NAME: str = "sparse"
+
+
+    # Neo4j 图数据库
+
+    GRAPH_ENABLED: bool = False
+    NEO4J_URI: str = ""
+    NEO4J_USERNAME: str = ""
+    NEO4J_PASSWORD: str = ""
+
+
+    # Kafka 消息队列
+
+    KAFKA_ENABLED: bool = False
+    KAFKA_BOOTSTRAP_SERVERS: str = ""
+
+    # 投递与重试策略
+    KAFKA_RAG_MAX_DELIVERY_ATTEMPTS: int = 3
+    KAFKA_RAG_RETRY_DELAY_SECONDS: float = 1.0
+    KAFKA_RAG_DEAD_LETTER_TOPIC: str = "wisepen-rag-v3-failed-events-topic"
+
+    # 业务 Topic 与 Consumer Group
+    KAFKA_DOCUMENT_READY_TOPIC: str = "wisepen-document-ready-topic"
+    KAFKA_RAG_DOCUMENT_READY_GROUP_ID: str = "wisepen-rag-v3-document-ready-group"
+
+    KAFKA_RESOURCE_ACL_RECALC_TOPIC: str = "wisepen-resource-acl-recalc-topic"
+    KAFKA_RAG_ACL_RECALC_GROUP_ID: str = "wisepen-rag-v3-acl-recalc-group"
+
+    KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC: str = "wisepen-resource-physical-destroy-topic"
+    KAFKA_RAG_RESOURCE_DESTROY_GROUP_ID: str = "wisepen-rag-v3-resource-destroy-group"
 
     @property
     def resource_mongodb_db_name(self) -> str:

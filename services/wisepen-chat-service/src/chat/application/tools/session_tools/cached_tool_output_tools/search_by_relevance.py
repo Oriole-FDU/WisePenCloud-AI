@@ -1,10 +1,10 @@
-"""基于会话缓存的轻量级嵌入式 RAG（小型检索增强生成）系统。
+"""基于会话缓存的轻量级相关性检索与上下文组装系统。
 
-本模块为大模型提供在单个或多个缓存工具输出（Cached Tool Output）之上的端到端语义检索与上下文组装能力，
+本模块为大模型提供在单个或多个缓存工具输出（Cached Tool Output）之上的相关性检索与上下文组装能力，
 遵循“细粒度索引召回，粗粒度拓扑组装，分级决策呈现”的设计哲学：
 
 1. 混合检索与重排流水线 (Hybrid Retrieval & Reranking):
-   - 采用双通道查询输入：自然语言问题 (semantic_query) 与稀疏关键词 (lexical_query)。
+   - 一条 canonical query 同时驱动 BM25 粗排与 ZeroEntropy 相关性重排。
    - 融合 BM25 与考虑文档结构权重的 Fielded BM25 (加权 Section 路径与 Anchor 标签)。
    - 使用 Cross-Encoder (ZeroEntropy) 深度语义重排，并通过 HighLowRelevanceGate 动态过滤低相关噪声。
 
@@ -89,23 +89,13 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "description": "One or more cached tool output content_id values returned in previous tool results.",
         },
 
-        "semantic_query": {
+        "query": {
             "type": "string",
             "minLength": 1,
             "description": (
-                "Information need used by the semantic reranker. Prefer a complete natural-language "
-                "question, such as 'Why is self-attention more efficient than recurrent layers?', but "
-                "ordinary semantic statements are also supported. Use formal phrasing and domain-specific "
-                "terminology; avoid colloquialisms, slang, and emojis."
-            ),
-        },
-        "lexical_query": {
-            "type": "string",
-            "minLength": 1,
-            "description": (
-                "Sparse keywords used by BM25 lexical retrieval. Prefer concise keywords rather than a "
-                "full sentence, and try useful synonyms, terminology variants, and cross-language terms "
-                "when they may improve matching."
+                "A complete, standalone information need for relevance search. Preserve entity names, "
+                "proper nouns, technical terms, identifiers, and other distinctive lexical anchors. "
+                "The query may be a question, statement, topic, or phrase."
             ),
         },
         "top_k": {
@@ -116,14 +106,14 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "description": "Maximum final parent contexts and read recommendations returned; at most 10.",
         },
     },
-    "required": ["content_ids", "semantic_query", "lexical_query"],
+    "required": ["content_ids", "query"],
     "additionalProperties": False,
 }
 
 
 @dataclass(slots=True)
-class CachedToolOutputSearchBySemanticsItem:
-    """语义检索构造出的局部连续父块。"""
+class CachedToolOutputSearchByRelevanceItem:
+    """相关性检索构造出的局部连续父块。"""
 
     content_id: str
     rank: int  # 所有父块和读取建议合并后的排名，从 1 开始。
@@ -162,7 +152,7 @@ class CachedToolOutputRangeReadRecommendation:
 
 
 @dataclass(slots=True)
-class CachedToolOutputSearchBySemanticsResult:
+class CachedToolOutputSearchByRelevanceResult:
     """语义检索结果；读取建议优先于局部父块展示给模型。"""
 
     # 这些列表使用默认空值，执行出口会通过 TypeAdapter 将空列表移除。
@@ -172,12 +162,12 @@ class CachedToolOutputSearchBySemanticsResult:
     range_recommendations: list[CachedToolOutputRangeReadRecommendation] = field(
         default_factory=list
     )
-    results: list[CachedToolOutputSearchBySemanticsItem] = field(
+    results: list[CachedToolOutputSearchByRelevanceItem] = field(
         default_factory=list
     )
 
 # 由于含有大量空白可选分支，此处进行紧凑序列化处理
-_RESULT_ADAPTER = TypeAdapter(CachedToolOutputSearchBySemanticsResult)
+_RESULT_ADAPTER = TypeAdapter(CachedToolOutputSearchByRelevanceResult)
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,7 +198,7 @@ class _ParentCandidate:
 
 
 @lru_cache(maxsize=1)
-def build_cached_tool_output_search_by_semantics_pipeline() -> RankingPipeline:
+def build_cached_tool_output_search_by_relevance_pipeline() -> RankingPipeline:
     tokenizer = ThuLacRankingTokenizer()
     return RankingPipeline(
         scorers=(
@@ -239,21 +229,20 @@ def build_cached_tool_output_search_by_semantics_pipeline() -> RankingPipeline:
     )
 
 
-class CachedToolOutputSearchBySemanticsTool:
+class CachedToolOutputSearchByRelevanceTool:
 
     def __init__(
         self,
     ) -> None:
-        self._ranking_pipeline = build_cached_tool_output_search_by_semantics_pipeline()
+        self._ranking_pipeline = build_cached_tool_output_search_by_relevance_pipeline()
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
-                name="search_cached_tool_output_by_semantics",
-                description = (
-                    "Perform hybrid semantic search across cached tool outputs to retrieve relevant context windows "
+                name="search_cached_tool_output_by_relevance",
+                description=(
+                    "Perform hybrid relevance search across cached tool outputs to retrieve relevant context windows "
                     "and read recommendations. Merges nearby matches to preserve complete context without fragmenting sections.\n\n"
-                    "Parameters:\n"
-                    "- semantic_query: Natural language question or descriptive statement for the semantic reranker.\n"
-                    "- lexical_query: Concise keywords, synonyms, and terminology variants for BM25 matching.\n\n"
+                    "Provide one standalone query that preserves distinctive names, terms, and identifiers. "
+                    "The retrieval pipeline decides how BM25 and the reranker interpret it.\n\n"
                     "Returns a unified ranking of:\n"
                     "1. results: Ready-to-read local text windows.\n"
                     "2. section_recommendations: High-coverage sections; follow up with read_cached_tool_output_by_section.\n"
@@ -264,8 +253,8 @@ class CachedToolOutputSearchBySemanticsTool:
             ),
             policy=_policy(),
             ui_spec=ToolUISpec(
-                display_name="语义搜索缓存的工具输出",
-                description="按问题语义检索缓存工具输出中的相关片段，并返回可继续按页、章节或范围读取的上下文。",
+                display_name="相关性搜索缓存的工具输出",
+                description="按当前信息需求检索缓存工具输出中的相关片段，并返回可继续按页、章节或范围读取的上下文。",
             ),
         )
 
@@ -280,8 +269,7 @@ class CachedToolOutputSearchBySemanticsTool:
         **kwargs: Any,
     ) -> dict[str, Any]:
         del config
-        semantic_query = kwargs["semantic_query"].strip()
-        lexical_query = kwargs["lexical_query"].strip()
+        query = kwargs["query"].strip()
 
         try:
             # 允许多个 content 混排；不存在的 content 不参与候选构建。
@@ -294,10 +282,9 @@ class CachedToolOutputSearchBySemanticsTool:
                 )
                 if stored is not None:
                     stored_items.append(stored)
-            result = await _search_by_semantics(
+            result = await _search_by_relevance(
                 stored_items=stored_items,
-                semantic_query=semantic_query,
-                lexical_query=lexical_query,
+                query=query,
                 top_k=kwargs["top_k"],
                 ranking_pipeline=self._ranking_pipeline,
             )
@@ -310,20 +297,19 @@ class CachedToolOutputSearchBySemanticsTool:
             )
         except Exception as exc:
             raise ToolExecutionError(
-                reason="search_cached_tool_output_by_semantics_failed",
+                reason="search_cached_tool_output_by_relevance_failed",
                 detail_reason=str(exc),
                 retryable=False,
             ) from exc
 
 
-async def _search_by_semantics(
+async def _search_by_relevance(
     *,
     stored_items: Sequence[StoredCachedToolOutput],
-    semantic_query: str,
-    lexical_query: str,
+    query: str,
     top_k: int,
     ranking_pipeline: RankingPipeline,
-) -> CachedToolOutputSearchBySemanticsResult:
+) -> CachedToolOutputSearchByRelevanceResult:
     candidates: list[RankCandidate] = []
     sources: dict[
         str,
@@ -372,15 +358,12 @@ async def _search_by_semantics(
 
     if not candidates:
         # 没有候选时，返回空检索结果。
-        return CachedToolOutputSearchBySemanticsResult()
+        return CachedToolOutputSearchByRelevanceResult()
 
     # 先保留通过 gate 的全部子块， 再由本工具按父块组装并应用 top_k，避免一个 Section 的多个小子块挤占最终结果。
     result = await ranking_pipeline.arank(
         RankRequest(
-            query=RankQuery(
-                semantic_query=semantic_query,
-                lexical_query=lexical_query,
-            ),
+            query=RankQuery(text=query),
             candidates=tuple(candidates),
             top_k=min(len(candidates), _CANDIDATE_LIMIT),
             candidate_limit=min(len(candidates), _CANDIDATE_LIMIT),
@@ -674,7 +657,7 @@ def _build_search_result(
     parent_candidates: Sequence[_ParentCandidate],
     *,
     top_k: int,
-) -> CachedToolOutputSearchBySemanticsResult:
+) -> CachedToolOutputSearchByRelevanceResult:
     """按父块代表分数选出最终候选；每个建议或窗口各占一个 top_k。
 
     一个内部候选最终只会落入三种公开视图之一：Section 读取建议、range 读取建议或
@@ -686,7 +669,7 @@ def _build_search_result(
         parent_candidates,
         key=lambda item: (-item.score, item.sort_rank),
     )[:top_k]
-    result = CachedToolOutputSearchBySemanticsResult()
+    result = CachedToolOutputSearchByRelevanceResult()
     for rank, candidate in enumerate(selected_candidates, start=1):
         if candidate.coverage_ratio is not None:
             section = candidate.section
@@ -727,7 +710,7 @@ def _build_search_result(
         if window is None:
             raise ValueError("parent candidate requires a window or recommendation")
         result.results.append(
-            CachedToolOutputSearchBySemanticsItem(
+            CachedToolOutputSearchByRelevanceItem(
                 content_id=candidate.content_id,
                 rank=rank,
                 score=candidate.score,

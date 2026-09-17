@@ -21,8 +21,7 @@ class DocChunkEntity(Document):
     source_spans: list[SourceSpan]
     page_labels: list[str] = Field(default_factory=list)
     anchor_labels: list[str] = Field(default_factory=list)
-    contextual_prefix: str = ""
-    key_terms: list[str] = Field(default_factory=list)
+    retrieval_context: str = ""
     extracted_node_ids: list[str] = Field(default_factory=list)
     # Mongo 先保留完整对象，仓储再按注册表恢复具体 metadata 子类。
     metadata: dict[str, Any] = Field(default_factory=lambda: {"chunk_type": "general"})

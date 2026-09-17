@@ -105,7 +105,7 @@ class CachedToolOutputSearchByRegexTool:
                     "- max_matches limits total exact regex hits, which are then clustered into compact context windows.\n"
                     "- Windows provide absolute start_offset and end_offset for follow-up reads with read_cached_tool_output_by_range.\n"
                     "- Highlight offsets are relative to each returned window's text.\n\n"
-                    "For meaning-based or conceptual queries, use search_cached_tool_output_by_semantics instead."
+                    "For relevance-based discovery, use search_cached_tool_output_by_relevance instead."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),

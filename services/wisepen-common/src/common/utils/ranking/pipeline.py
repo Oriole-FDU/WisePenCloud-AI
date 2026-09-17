@@ -152,17 +152,15 @@ class RankingPipeline:
         signals: list[ScoreSignal] = []
         for scorer in self.scorers:
             signals.extend(scorer.score(query=request.query, candidates=candidates))
-        if not signals and not (
-            request.query.lexical_query and request.query.lexical_query.strip()
-        ):
-            # 只有 semantic_query 时没有 BM25 初始信号，保留候选输入顺序交给 reranker。
+        if not signals and self.reranker is not None:
+            # Query 可能只包含停用词；仍把候选交给 reranker，由其统一判断相关性。
             return assign_ranks(
                 tuple(
                     RankedCandidate(
                         candidate=candidate,
                         rank=0,
                         score=0.0,
-                        reason="Seeded from input order without lexical query.",
+                        reason="Seeded from input order without scorer signal.",
                         metadata={"initial_ranker": "input_order"},
                     )
                     for candidate in candidates

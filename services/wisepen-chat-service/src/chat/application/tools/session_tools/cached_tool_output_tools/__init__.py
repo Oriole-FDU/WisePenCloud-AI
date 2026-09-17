@@ -11,11 +11,11 @@ from chat.application.tools.session_tools.cached_tool_output_tools.read_by_secti
     CachedToolOutputReadBySectionTool,
 )
 from chat.application.tools.session_tools.cached_tool_output_tools.search_by_regex import (
-    CachedToolOutputSearchByRegexTool,
     CachedToolOutputSearchByRegexResult,
+    CachedToolOutputSearchByRegexTool,
 )
-from chat.application.tools.session_tools.cached_tool_output_tools.search_by_semantics import (
-    CachedToolOutputSearchBySemanticsTool,
+from chat.application.tools.session_tools.cached_tool_output_tools.search_by_relevance import (
+    CachedToolOutputSearchByRelevanceTool,
 )
 
 __all__ = [
@@ -23,7 +23,7 @@ __all__ = [
     "CachedToolOutputReadByPageTool",
     "CachedToolOutputReadByRangeTool",
     "CachedToolOutputReadBySectionTool",
-    "CachedToolOutputSearchByRegexTool",
     "CachedToolOutputSearchByRegexResult",
-    "CachedToolOutputSearchBySemanticsTool",
+    "CachedToolOutputSearchByRegexTool",
+    "CachedToolOutputSearchByRelevanceTool",
 ]

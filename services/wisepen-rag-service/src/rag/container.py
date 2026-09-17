@@ -1,5 +1,7 @@
 """依赖装配"""
 
+import asyncio
+
 from common.utils.ranking import RankingPipeline
 from common.utils.ranking.rank_gates import (
     HighLowRelevanceGate,
@@ -47,6 +49,7 @@ from rag.core.persistence.qdrant import (
     QdrantGraphEdgeVectorRepository,
     QdrantGraphNodeVectorRepository,
 )
+from rag.utils import ChatClient, EmbeddingClient
 
 
 def _resource_items_collection(client: AsyncMongoClient):
@@ -75,6 +78,9 @@ def _build_ranking_pipeline(
 class Container(containers.DeclarativeContainer):
     """集中管理当前已落地的 Mongo 生命周期和 application 用例。"""
 
+    # --------------------------------------------------------------------------
+    # 存储与外部客户端
+    # --------------------------------------------------------------------------
     mongo_client = providers.Singleton(AsyncMongoClient, settings.MONGODB_URL)
     resource_items_collection = providers.Factory(
         _resource_items_collection,
@@ -87,6 +93,7 @@ class Container(containers.DeclarativeContainer):
         RagPluginRegistry,
         plugins=graph_plugins,
     )
+
     documents = providers.Singleton(
         MongoDocumentRepository,
         metadata_codec=graph_plugin_registry.provided.document_metadata_codec,
@@ -101,11 +108,27 @@ class Container(containers.DeclarativeContainer):
         MongoAuthoritativeAclReader,
         collection=resource_items_collection,
     )
+
     openai_client = providers.Singleton(
         AsyncOpenAI,
         base_url=settings.LLM_BASE_URL,
         api_key=settings.LLM_API_KEY,
     )
+    openai_chat_client = providers.Singleton(ChatClient, client=openai_client)
+    openai_embedding_client = providers.Singleton(
+        EmbeddingClient,
+        client=openai_client,
+    )
+    # 同一进程内的所有调用用例共享 provider 并发预算。
+    llm_request_semaphore = providers.Singleton(
+        asyncio.Semaphore,
+        settings.DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY,
+    )
+    embedding_request_semaphore = providers.Singleton(
+        asyncio.Semaphore,
+        settings.RAG_EMBEDDING_MAX_CONCURRENCY,
+    )
+
     zero_entropy_client = providers.Singleton(
         AsyncZeroEntropy,
         api_key=settings.ZERO_ENTROPY_API_KEY,
@@ -114,6 +137,7 @@ class Container(containers.DeclarativeContainer):
         _build_ranking_pipeline,
         zero_entropy_client=zero_entropy_client,
     )
+
     qdrant_client = providers.Singleton(
         AsyncQdrantClient,
         host=settings.QDRANT_HOST,
@@ -143,6 +167,7 @@ class Container(containers.DeclarativeContainer):
         dense_vector_name=settings.QDRANT_GRAPH_EDGE_DENSE_VECTOR_NAME,
         sparse_vector_name=settings.QDRANT_GRAPH_EDGE_SPARSE_VECTOR_NAME,
     )
+
     if settings.GRAPH_ENABLED:
         neo4j_driver = providers.Singleton(
             AsyncGraphDatabase.driver,
@@ -157,6 +182,11 @@ class Container(containers.DeclarativeContainer):
         neo4j_driver = providers.Object(None)
         graph_topology = providers.Object(None)
 
+    graph_facts = providers.Singleton(MongoGraphFactRepository)
+
+    # --------------------------------------------------------------------------
+    # 应用服务 / 用例
+    # --------------------------------------------------------------------------
     document_publication = providers.Factory(
         DocumentPublication,
         documents=documents,
@@ -178,11 +208,13 @@ class Container(containers.DeclarativeContainer):
         index_states=index_states,
         publication=document_publication,
         document_vectors=document_vectors,
-        openai_client=openai_client,
+        chat_client=openai_chat_client,
+        embedding_client=openai_embedding_client,
         query_model=settings.QUERY_MODEL,
         embedding_model=settings.EMBEDDING_MODEL,
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
-        max_concurrency=settings.DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY,
+        llm_semaphore=llm_request_semaphore,
+        embedding_semaphore=embedding_request_semaphore,
         enhancement_enabled=settings.DOCUMENT_ENHANCEMENT_ENABLED,
         plugin_registry=graph_plugin_registry,
     )
@@ -223,7 +255,6 @@ class Container(containers.DeclarativeContainer):
         OutlineBuilder,
         snapshots=active_document_snapshots,
     )
-    graph_facts = providers.Singleton(MongoGraphFactRepository)
     graph_fact_builder = providers.Factory(
         GraphFactBuilder,
         enabled=settings.GRAPH_ENABLED,
@@ -234,7 +265,7 @@ class Container(containers.DeclarativeContainer):
         plugin_registry=graph_plugin_registry,
         openai_client=openai_client,
         query_model=settings.QUERY_MODEL,
-        max_concurrency=settings.DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY,
+        llm_semaphore=llm_request_semaphore,
     )
     graph_index_builder = providers.Factory(
         GraphIndexBuilder,
@@ -247,10 +278,10 @@ class Container(containers.DeclarativeContainer):
         topology=graph_topology,
         node_vectors=graph_node_vectors,
         edge_vectors=graph_edge_vectors,
-        openai_client=openai_client,
+        embedding_client=openai_embedding_client,
         embedding_model=settings.EMBEDDING_MODEL,
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
-        plugin_registry=graph_plugin_registry,
+        embedding_semaphore=embedding_request_semaphore,
     )
     hybrid_retriever = providers.Factory(
         HybridRetriever,
@@ -260,9 +291,11 @@ class Container(containers.DeclarativeContainer):
         index_states=index_states,
         resource_acls=resource_acls,
         ranking_pipeline=hybrid_ranking_pipeline,
-        openai_client=openai_client,
+        embedding_client=openai_embedding_client,
         embedding_model=settings.EMBEDDING_MODEL,
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
+        embedding_semaphore=embedding_request_semaphore,
+        plugin_registry=graph_plugin_registry,
     )
     graph_retriever = providers.Factory(
         GraphRetriever,
@@ -277,9 +310,10 @@ class Container(containers.DeclarativeContainer):
         resource_acls=resource_acls,
         ranking_pipeline=hybrid_ranking_pipeline,
         plugin_registry=graph_plugin_registry,
-        openai_client=openai_client,
+        embedding_client=openai_embedding_client,
         embedding_model=settings.EMBEDDING_MODEL,
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
+        embedding_semaphore=embedding_request_semaphore,
     )
 
 

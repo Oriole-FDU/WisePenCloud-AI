@@ -69,7 +69,7 @@ class CachedToolOutputReadByRangeTool:
                     "DO NOT TRIGGER when:\n"
                     "  - You need pages or sections; use read_cached_tool_output_by_page or "
                     "read_cached_tool_output_by_section.\n"
-                    "  - You need discovery; use search_cached_tool_output_by_semantics or "
+                    "  - You need discovery; use search_cached_tool_output_by_relevance or "
                     "search_cached_tool_output_by_regex.\n\n"
                     "INPUT RULES:\n"
                     "  - Ranges use Python slice semantics: start is inclusive and end is exclusive.\n"

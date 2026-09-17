@@ -13,8 +13,9 @@ class SearchHybridRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    semantic_query: NonEmptyText = Field(description="用于语义检索的查询文本。")
-    lexical_query: str = Field(default="", description="可选的关键词检索文本。")
+    query: NonEmptyText = Field(
+        description="完整表达当前 information need 的检索查询，保留实体、术语和标识符。"
+    )
     top_k: int = Field(gt=0, description="最多返回的检索父块数量。")
 
 
