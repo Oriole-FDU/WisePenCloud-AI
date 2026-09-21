@@ -4,7 +4,6 @@ pipeline {
     environment {
         PROJECT_NAME = 'wisepencloud'
         DOCKER_REGISTRY = 'local'
-        BUILDX_BUILDER = 'wisepen-builder'
         IMAGE_TAG = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         COMPOSE_FILE_PATH = 'docker-compose-app.yml'
     }
@@ -23,20 +22,7 @@ pipeline {
             }
         }
 
-        stage('准备 Docker BuildKit') {
-            steps {
-                sh '''
-                    if ! docker buildx inspect "${BUILDX_BUILDER}" >/dev/null 2>&1; then
-                        docker buildx create \
-                            --name "${BUILDX_BUILDER}" \
-                            --driver docker-container
-                    fi
-                    docker buildx inspect "${BUILDX_BUILDER}" --bootstrap >/dev/null
-                '''
-            }
-        }
-
-        stage('2. 构建 Docker 镜像 (Docker Build)') {
+        stage('2. 构建 Docker 镜像') {
             failFast true
 
             parallel {
@@ -44,10 +30,7 @@ pipeline {
                     steps {
                         script {
                             sh """
-                                docker buildx build \\
-                                    --builder ${BUILDX_BUILDER} \\
-                                    --load \\
-                                    --progress=plain \\
+                                docker build \\
                                     -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-chat:${IMAGE_TAG} \\
                                     --build-arg SERVICE_DIR=wisepen-chat-service \\
                                     --build-arg SERVICE_PKG=chat \\
@@ -63,10 +46,7 @@ pipeline {
                     steps {
                         script {
                             sh """
-                                docker buildx build \\
-                                    --builder ${BUILDX_BUILDER} \\
-                                    --load \\
-                                    --progress=plain \\
+                                docker build \\
                                     -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-mcp:${IMAGE_TAG} \\
                                     --build-arg SERVICE_DIR=wisepen-mcp-service \\
                                     --build-arg SERVICE_PKG=wisepen_mcp \\

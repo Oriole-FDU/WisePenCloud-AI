@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 # =============================================================================
 # wisepen-cloud-ai/Dockerfile
 # -----------------------------------------------------------------------------
@@ -28,13 +26,11 @@ COPY services/wisepen-mcp-service/pyproject.toml    services/wisepen-mcp-service
 COPY services/wisepen-sandbox-service/pyproject.toml services/wisepen-sandbox-service/pyproject.toml
 
 # 只预装当前服务及其依赖的第三方包，不把整个 workspace 的依赖带入镜像。
-RUN --mount=type=cache,id=wisepen-uv,target=/root/.cache/uv,sharing=locked \
-    uv sync --frozen --no-dev --no-install-workspace --package ${SERVICE_PROJECT}
+RUN uv sync --frozen --no-dev --no-install-workspace --package ${SERVICE_PROJECT}
 
 # 复制全部源码并安装 workspace 包
 COPY services/ services/
-RUN --mount=type=cache,id=wisepen-uv,target=/root/.cache/uv,sharing=locked \
-    uv sync --frozen --no-dev --package ${SERVICE_PROJECT}
+RUN uv sync --frozen --no-dev --package ${SERVICE_PROJECT}
 
 
 # ---- 运行阶段：仅包含运行时，不含 uv / 编译工具链 ----
