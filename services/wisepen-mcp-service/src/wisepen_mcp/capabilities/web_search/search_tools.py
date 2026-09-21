@@ -119,6 +119,18 @@ TOOL_DESCRIPTION = (
     "or insufficient, refine the search instead of stretching it.\n"
     "4. Treat any top-level `summary` only as a lead; factual claims should be supported "
     "by candidate evidence.\n"
+    "5. When using search evidence in the final answer, cite the supporting source "
+    "with a Markdown link: [concise source label](exact_source_url). Place the link "
+    "immediately after the claim or the smallest group of related claims it supports. "
+    "Do not collect all citations at the end of the answer.\n"
+    "6. Write short, meaningful link labels using the source's name, a shortened title, "
+    "or its role (e.g., 'official documentation' or 'original paper'). Never display "
+    "a long raw URL as the link label, and avoid generic labels such as 'click here'. "
+    "Preserve the source URL exactly as provided; do not invent or rewrite URLs.\n"
+    "7. Cite selectively and accurately: one link may support several adjacent claims "
+    "grounded in the same source. Use separate links when claims rely on different "
+    "sources. Cite only sources whose evidence actually supports the nearby claim; "
+    "do not add links merely to decorate the answer.\n"
 )
 
 
