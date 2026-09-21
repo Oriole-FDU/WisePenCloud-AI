@@ -33,7 +33,21 @@ pipeline {
                                     -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-chat:${IMAGE_TAG} \\
                                     --build-arg SERVICE_DIR=wisepen-chat-service \\
                                     --build-arg SERVICE_PKG=chat \\
-                                    --build-arg SERVICE_PORT=9200 \\
+                                    --build-arg SERVICE_PORT=19904 \\
+                                    -f Dockerfile .
+                            """
+                        }
+                    }
+                }
+                stage('MCP Service') {
+                    steps {
+                        script {
+                            sh """
+                                docker build \\
+                                    -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-mcp:${IMAGE_TAG} \\
+                                    --build-arg SERVICE_DIR=wisepen-mcp-service \\
+                                    --build-arg SERVICE_PKG=wisepen_mcp \\
+                                    --build-arg SERVICE_PORT=19911 \\
                                     -f Dockerfile .
                             """
                         }
@@ -72,7 +86,7 @@ pipeline {
                         COMPOSE_FILES="\$COMPOSE_FILES -f docker-compose-app.legacy-net.yml"
                     fi
 
-                    docker-compose \$COMPOSE_FILES up -d --remove-orphans
+                    docker-compose \$COMPOSE_FILES up -d --no-build --remove-orphans
                     """
                 }
             }
