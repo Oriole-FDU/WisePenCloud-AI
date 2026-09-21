@@ -30,6 +30,7 @@ ENV/
 # lock 文件应提交，仅忽略 uv 自身缓存
 .uv/
 .uv-cache/
+.docker-build-cache/
 
 # PyCharm / VS Code
 .idea/

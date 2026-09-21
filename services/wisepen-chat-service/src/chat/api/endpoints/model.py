@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Dict
 
 from beanie import PydanticObjectId
@@ -41,8 +42,10 @@ def to_provider_response(provider: Provider) -> ProviderResponse:
         scope=provider.scope,
         type=provider.type,
         is_active=provider.is_active,
-        token_usage=provider.token_usage,
-        billable_token_usage=provider.billable_token_usage,
+        input_tokens=provider.input_tokens,
+        cached_input_tokens=provider.cached_input_tokens,
+        output_tokens=provider.output_tokens,
+        billable_tokens=provider.billable_tokens,
     )
 
 
@@ -57,7 +60,9 @@ def to_mapping_response(
         provider_id=str(mapping.provider_id),
         provider_name=provider.name if provider is not None and provider.scope != ProviderScope.SYSTEM else None,
         provider_model_name=mapping.provider_model_name,
-        billing_ratio=mapping.billing_ratio,
+        input_billing_ratio=str(mapping.input_billing_ratio),
+        cached_input_billing_ratio=str(mapping.cached_input_billing_ratio),
+        output_billing_ratio=str(mapping.output_billing_ratio),
         support_runtime_options=llm_provider_resolver.runtime_options_manifest(provider.type) if provider else {},
         is_preferred=mapping.is_preferred,
         is_active=mapping.is_active,
@@ -405,7 +410,7 @@ async def delete_user_model(
     summary="绑定模型 Provider",
     description="""
 - 用途：为当前用户可访问的模型绑定一个个人 Provider 侧模型名称。
-- 请求：model_id 指定系统模型或用户模型；provider_id 指定用户 Provider；provider_model_name 是 Provider 实际模型名；billing_ratio 描述该映射的计费倍率；is_preferred 和 is_active 控制映射偏好与启用状态。
+- 请求：model_id 指定系统模型或用户模型；provider_id 指定用户 Provider；provider_model_name 是 Provider 实际模型名；三档 billing ratio 描述输入、缓存输入、输出的计费倍率；is_preferred 和 is_active 控制映射偏好与启用状态。
 - 约束：当前用户必须已登录；模型必须是系统模型或当前用户模型；Provider 必须属于当前用户。
 - 处理：创建或更新模型到 Provider 的映射关系；设置 Provider 侧模型名、启用状态和首选状态；不修改模型定义或 Provider 凭证。
 - 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；模型不存在或不可访问 -> ChatErrorCode.MODEL_NOT_FOUND；Provider 不存在或不属于当前用户 -> ChatErrorCode.PROVIDER_NOT_FOUND；并发创建映射冲突 -> ChatErrorCode.MODEL_MAPPING_ALREADY_EXISTS；请求参数校验失败 -> ResultCode.PARAM_ERROR。
@@ -423,7 +428,9 @@ async def bind_model_provider(
         PydanticObjectId(req.provider_id),
         req.provider_model_name,
         user_id,
-        billing_ratio=req.billing_ratio,
+        input_billing_ratio=Decimal(req.input_billing_ratio),
+        cached_input_billing_ratio=Decimal(req.cached_input_billing_ratio),
+        output_billing_ratio=Decimal(req.output_billing_ratio),
         is_preferred=req.is_preferred,
         is_active=req.is_active,
     )

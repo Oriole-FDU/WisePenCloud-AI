@@ -18,6 +18,9 @@ members = [
     "services/*",   # 扫描 services 下的所有子文件夹
 ]
 
+[tool.uv]
+index-url = "https://mirrors.aliyun.com/pypi/simple/"
+
 [tool.uv.sources]
 wisepen-chat-service = { workspace = true }
 wisepen-mcp-service = { workspace = true }

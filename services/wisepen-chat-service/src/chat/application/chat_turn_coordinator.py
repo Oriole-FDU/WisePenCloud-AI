@@ -16,7 +16,7 @@ from chat.domain.entities import ChatMessage, Role
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
 from chat.core.providers import OssFileLoader
-from chat.domain.interfaces.llm import TextCompletionProvider
+from chat.domain.interfaces.llm import TextCompletionProvider, TokenUsage
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, \
     ProviderRepository, SuspendedChatRepository
@@ -49,7 +49,7 @@ class ChatTurnContext:
     tool_scope: ToolScope = None
     messages_for_llm: list[ChatMessage] = field(default_factory=list)
     chat_record_messages: list[ChatMessage] = field(default_factory=list)
-    token_usage: int = 0
+    token_usage: TokenUsage = field(default_factory=TokenUsage)
 
 class ChatTurnCoordinator:
     """
@@ -131,7 +131,7 @@ class ChatTurnCoordinator:
             messages_for_llm=list(suspended_chat.context.messages_for_llm),
             # 挂起前的消息和 token 由首次批次处理；恢复批次只记录新增工具结果和回复。
             chat_record_messages=[],
-            token_usage=0,
+            token_usage=TokenUsage(),
         )
         await self._ensure_billable_chat_allowed(
             user_id=user_id,
@@ -147,7 +147,11 @@ class ChatTurnCoordinator:
             cancel_requested=cancel_requested,
         ):
             yield event
-        self.set_background_task(background_tasks, chat_turn_context, skip_first_user_message=False)
+        await self._persist_message_and_token_bill(
+            chat_turn_context,
+            skip_first_user_message=False,
+        )
+        self._set_post_completion_tasks(background_tasks, chat_turn_context)
 
         await self._suspended_chat_repo.delete_by_id(suspended_chat_id)
 
@@ -345,7 +349,7 @@ class ChatTurnCoordinator:
             memory_policy=memory_policy,
         )
 
-        chat_turn_context.token_usage = 0
+        chat_turn_context.token_usage = TokenUsage()
         async for event in self.query_llm(
                 chat_turn_context=chat_turn_context,
                 client_tool_results=None,
@@ -353,7 +357,11 @@ class ChatTurnCoordinator:
                 cancel_requested=cancel_requested,
         ):
             yield event
-        self.set_background_task(background_tasks, chat_turn_context, skip_first_user_message=True)
+        await self._persist_message_and_token_bill(
+            chat_turn_context,
+            skip_first_user_message=True,
+        )
+        self._set_post_completion_tasks(background_tasks, chat_turn_context)
 
     async def query_llm(
             self,
@@ -378,7 +386,7 @@ class ChatTurnCoordinator:
             ):
                 # QueryLoopRuntime 产出的事件如果是 StepFinishEvent 额外处理消息累积
                 if isinstance(event, StepFinishEvent):
-                    chat_turn_context.token_usage += event.token_usage # 计费
+                    chat_turn_context.token_usage.add(event.token_usage) # 计费
                     if not event.is_finished:
                         # 向 chat_record_messages 追加中间消息（Tool Calls）
                         chat_turn_context.chat_record_messages.extend(event.intermediate_messages)
@@ -417,26 +425,31 @@ class ChatTurnCoordinator:
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
 
-    def set_background_task(
+    async def _persist_message_and_token_bill(
         self,
-        background_tasks,
         chat_turn_context: ChatTurnContext,
         *,
         skip_first_user_message: bool,
-    ):
-        # 使用 FastAPI 的 BackgroundTasks 在响应返回给用户后，异步执行
+    ) -> None:
+        """在流完成事件发送前持久化本轮消息并完成用量记录。"""
+        await self._turn_finalizer.persist_message_and_token_bill(
+            user_id=chat_turn_context.user_id,
+            session_id=chat_turn_context.session_id,
+            chat_record_messages=chat_turn_context.chat_record_messages,
+            memory_policy=chat_turn_context.agent_spec.memory_policy,
+            model_info=chat_turn_context.model_info,
+            token_usage=chat_turn_context.token_usage,
+            billing_group_id=chat_turn_context.agent_spec.billing_group_id,
+            skip_first_user_message=skip_first_user_message,
+        )
+
+    def _set_post_completion_tasks(
+        self,
+        background_tasks,
+        chat_turn_context: ChatTurnContext,
+    ) -> None:
+        # 摘要和标题不影响答案落库，放到完成事件发送后执行。
         if background_tasks is not None:
-            background_tasks.add_task(
-                self._turn_finalizer.persist_message_and_token_bill,
-                user_id=chat_turn_context.user_id,
-                session_id=chat_turn_context.session_id,
-                chat_record_messages=chat_turn_context.chat_record_messages,
-                memory_policy=chat_turn_context.agent_spec.memory_policy,
-                model_info=chat_turn_context.model_info,
-                token_usage=chat_turn_context.token_usage,
-                billing_group_id=chat_turn_context.agent_spec.billing_group_id,
-                skip_first_user_message=skip_first_user_message,
-            )
             # 调用轻量级模型生成并更新会话的全局摘要
             if (chat_turn_context.agent_spec.memory_policy.enable_chat_memory
                     and chat_turn_context.agent_spec.memory_policy.enable_chat_memory_summary

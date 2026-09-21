@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from enum import Enum
 from typing import Optional
 
@@ -63,7 +64,9 @@ class ModelProviderMapping(Document):
     model_id: PydanticObjectId = Field(..., description="关联 Model._id")
     provider_id: PydanticObjectId = Field(..., description="关联 Provider._id")
     provider_model_name: str = Field(..., description="供应商侧实际模型名（如 openai/gpt-4o）")
-    billing_ratio: int = Field(default=1, description="计费倍率")
+    input_billing_ratio: Decimal = Field(default=Decimal("1"), description="普通输入 Token 计费倍率")
+    cached_input_billing_ratio: Decimal = Field(default=Decimal("1"), description="缓存命中输入 Token 计费倍率")
+    output_billing_ratio: Decimal = Field(default=Decimal("1"), description="输出 Token 计费倍率")
 
     owner_user_id: Optional[str] = Field(default=None, description="归属用户 ID")
 

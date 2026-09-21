@@ -9,7 +9,7 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.provider import ProviderType
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
-from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, LLMUsage
+from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, TokenUsage, TokenUsageSource
 from chat.domain.entities.message import ToolCallMessage
 from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.core.exceptions import ServiceException
@@ -108,9 +108,22 @@ class GeminiAdapter(LLMProvider):
             raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Gemini Provider Error: {e}")
 
         # 计费
-        token_usage = int(getattr(final_usage, "total_token_count", 0) or 0) if final_usage else 0
-        if token_usage: # 传递 LLMStreamEvent USAGE
-            yield LLMStreamEvent(type=LLMEventType.USAGE, usage=LLMUsage(output_tokens=token_usage))
+        if final_usage:
+            input_tokens = int(getattr(final_usage, "prompt_token_count", 0) or 0)
+            output_tokens = int(getattr(final_usage, "candidates_token_count", 0) or 0)
+            cached_input_tokens = int(getattr(final_usage, "cached_content_token_count", 0) or 0)
+            total_tokens = int(getattr(final_usage, "total_token_count", 0) or 0) # 在 input_tokens 与 output_tokens 不可用时备用
+            if input_tokens or output_tokens:
+                yield LLMStreamEvent(
+                    type=LLMEventType.USAGE,
+                    usage=TokenUsage(
+                        input_tokens=input_tokens,
+                        cached_input_tokens=cached_input_tokens,
+                        output_tokens=output_tokens,
+                    ),
+                )
+            elif total_tokens:
+                yield LLMStreamEvent(type=LLMEventType.USAGE, usage=TokenUsage(output_tokens=total_tokens))
 
         # 解析工具调用
         calls: list[ToolCallMessage] = []

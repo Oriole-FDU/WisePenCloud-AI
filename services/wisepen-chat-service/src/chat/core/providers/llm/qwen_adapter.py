@@ -7,7 +7,7 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.provider import ProviderType
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
-from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, LLMUsage
+from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, TokenUsage
 from chat.domain.entities.message import ToolCallMessage
 from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.core.exceptions import ServiceException
@@ -77,7 +77,7 @@ class QwenAdapter(LLMProvider):
         reasoning_text = ""
         tool_calls: list[ToolCallMessage] = []
         tool_call_payloads: dict[int, dict[str, Any]] = {}
-        token_usage = 0
+        usage_payload = {}
         try:
             # 上游已用 support_vision 拦截不支持视觉的图片请求，这里沿用同一能力边界选接口。
             call = (
@@ -102,9 +102,10 @@ class QwenAdapter(LLMProvider):
 
                 output = read_provider_value(response, "output", {}) or {}
 
-                # 如果本次 response.usage.total_tokens 有值，就更新 token_usage，否则保留之前的 token_usage
+                # DashScope 流式 usage 通常在最后一个 chunk 更新，保留最新 usage 载荷。
                 usage = read_provider_value(response, "usage", {}) or {}
-                token_usage = int(read_provider_value(usage, "total_tokens", token_usage) or token_usage)
+                if usage:
+                    usage_payload = usage
 
                 # Qwen response 里通常有 candidates，当前只取第一个
                 choices = read_provider_value(output, "choices", []) or []
@@ -137,8 +138,25 @@ class QwenAdapter(LLMProvider):
             raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"Qwen Provider Error: {e}")
 
         # 计费
-        if token_usage: # 传递 LLMStreamEvent USAGE
-            yield LLMStreamEvent(type=LLMEventType.USAGE, usage=LLMUsage(output_tokens=token_usage))
+        if usage_payload: # 传递 LLMStreamEvent USAGE
+            input_tokens = int(read_provider_value(usage_payload, "input_tokens", 0) or 0)
+            output_tokens = int(read_provider_value(usage_payload, "output_tokens", 0) or 0)
+            input_details = (read_provider_value(usage_payload, "prompt_tokens_details", {}) or {})
+            cached_input_tokens = int(read_provider_value(input_details, "cached_tokens", 0) or 0)
+
+            total_tokens = int(read_provider_value(usage_payload, "total_tokens", 0) or 0) # 在 input_tokens 与 output_tokens 不可用时备用
+
+            if input_tokens or output_tokens:
+                yield LLMStreamEvent(
+                    type=LLMEventType.USAGE,
+                    usage=TokenUsage(
+                        input_tokens=input_tokens,
+                        cached_input_tokens=cached_input_tokens,
+                        output_tokens=output_tokens,
+                    ),
+                )
+            elif total_tokens:
+                yield LLMStreamEvent(type=LLMEventType.USAGE, usage=TokenUsage(output_tokens=total_tokens))
 
         # 只有完整聚合后的原生调用才能进入业务事件和下一轮 assistant 回放。
         for payload in tool_call_payloads.values():

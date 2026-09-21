@@ -34,7 +34,7 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.message import MessageModelInfo, ToolCallMessage
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
-from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent
+from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, TokenUsage, TokenUsageSource
 from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.core.exceptions import ServiceException
 from common.logger import warn
@@ -191,7 +191,7 @@ class QueryLoopRuntime:
         for iteration in range(start_iteration, max_iterations):
             # 请求取消检查点
             if cancel_requested is not None and await cancel_requested():
-                yield StepFinishEvent(is_finished=False, token_usage=0, aborted=True)
+                yield StepFinishEvent(is_finished=False, token_usage=TokenUsage(), aborted=True)
                 return
 
             tool_scope.suppress_schemas(
@@ -259,7 +259,7 @@ class QueryLoopRuntime:
         # 发 step 开始事件
         yield StepStartEvent()
 
-        token_usage = 0
+        token_usage = TokenUsage()
         is_resumed_tool_step = client_tool_results is not None or tool_approval_status is not None
         if is_resumed_tool_step:
             # 挂起前的 assistant 工具调用已在 messages 末尾，恢复时由它重建本轮工具阶段。
@@ -283,7 +283,7 @@ class QueryLoopRuntime:
                     if cancel_requested is not None and await cancel_requested():
                         raise asyncio.CancelledError
                     if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
-                        token_usage += llm_provider_event.usage.total_tokens
+                        token_usage.add(llm_provider_event.usage)
 
                     # 把 LLMStreamEvent 事件交给解释器，产出 StreamEvent
                     for event in event_interpreter.consume(llm_provider_event):
@@ -303,7 +303,19 @@ class QueryLoopRuntime:
                     tool_calls=event_interpreter.tool_calls,
                     metadata={"aborted_by_user": True},
                 )
-                assistant_msg.token_usage = token_usage
+                token_usage = await self._resolve_usage_with_fallback(
+                    usage=token_usage,
+                    messages=messages,
+                    assistant_msg=assistant_msg,
+                    model_info=model_info,
+                    tools=tool_schemas or None,
+                )
+
+                assistant_msg.input_tokens = token_usage.input_tokens
+                assistant_msg.cached_input_tokens = token_usage.cached_input_tokens
+                assistant_msg.output_tokens = token_usage.output_tokens
+                assistant_msg.usage_source = token_usage.usage_source
+
                 aborted_messages = [assistant_msg]
                 if event_interpreter.tool_calls: # 如果有工具调用
                     aborted_messages.extend(
@@ -347,19 +359,18 @@ class QueryLoopRuntime:
                 tool_calls=event_interpreter.tool_calls
             )
 
-            if token_usage == 0:
-                # 未能正确计费，需要兜底
-                token_usage += await self._token_counter.count_messages(
-                    messages=messages,
-                    model_name=model_info.model_name,
-                    tools=tool_schemas or None,
-                ) # 统计输入 tokens
-                token_usage += await self._token_counter.count_messages(
-                    messages=[assistant_msg],
-                    model_name=model_info.model_name,
-                ) # 统计输出 tokens
+            token_usage = await self._resolve_usage_with_fallback(
+                usage=token_usage,
+                messages=messages,
+                assistant_msg=assistant_msg,
+                model_info=model_info,
+                tools=tool_schemas or None,
+            )
 
-            assistant_msg.token_usage = token_usage
+            assistant_msg.input_tokens = token_usage.input_tokens
+            assistant_msg.cached_input_tokens = token_usage.cached_input_tokens
+            assistant_msg.output_tokens = token_usage.output_tokens
+            assistant_msg.usage_source = token_usage.usage_source
 
             # 如果没有工具调用，则结束这一轮（也结束整个循环）
             if not event_interpreter.tool_calls:
@@ -528,6 +539,42 @@ class QueryLoopRuntime:
             )
         return messages
 
+    async def _resolve_usage_with_fallback(
+            self, *,
+            usage: TokenUsage,
+            messages: list[ChatMessage], assistant_msg: ChatMessage, model_info: ModelRequestInfo, tools: list[dict] | None,
+    ) -> TokenUsage:
+        if usage.input_tokens == 0 and usage.total_tokens > 0: # 没有 Input Token 记录，但有 Output Token 记录
+            estimated_input_tokens = await self._token_counter.count_messages(
+                messages=messages, model_name=model_info.model_name, tools=tools
+            ) # 估计 Input Token
+            estimated_output_token = usage.total_tokens - estimated_input_tokens
+
+            return TokenUsage(
+                input_tokens=estimated_input_tokens,
+                cached_input_tokens=0, # 未知缓存命中情况，记为 0
+                output_tokens=max(estimated_output_token, 0),
+                usage_source=TokenUsageSource.ESTIMATED_SPLIT, # 基于估计分割
+            )
+        if usage.total_tokens <= 0:
+            estimated_input_tokens = await self._token_counter.count_messages(
+                messages=messages,
+                model_name=model_info.model_name,
+                tools=tools,
+            ) # 估计 Input Token
+            estimated_output_token = await self._token_counter.count_messages(
+                messages=[assistant_msg],
+                model_name=model_info.model_name,
+            ) # 估计 Output Token
+
+            return TokenUsage(
+                input_tokens=estimated_input_tokens,
+                cached_input_tokens=0, # 未知缓存命中情况，记为 0
+                output_tokens=estimated_output_token,
+                usage_source=TokenUsageSource.ESTIMATED, # 基于完全估计
+            )
+        return usage
+
     async def _emit_exhausted_warning(
         self, session_id: str
     ) -> AsyncIterator[StreamEvent]:
@@ -544,7 +591,11 @@ class QueryLoopRuntime:
             role=Role.ASSISTANT,
             content=warning_text,
         )
-        yield StepFinishEvent(is_finished=True, final_assistant_message=final_message, token_usage=0)
+        yield StepFinishEvent(
+            is_finished=True,
+            final_assistant_message=final_message,
+            token_usage=TokenUsage(),
+        )
 
 
 def _has_cached_tool_output(messages: list[ChatMessage]) -> bool:

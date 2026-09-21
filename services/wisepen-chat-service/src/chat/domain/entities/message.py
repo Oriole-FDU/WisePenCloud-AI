@@ -9,6 +9,7 @@ from pymongo import IndexModel, ASCENDING
 
 from chat.domain.entities.model import ModelFamily, ModelScope
 from chat.domain.entities.provider import ProviderScope, ProviderType
+from chat.domain.entities.token_usage import TokenUsageSource
 
 if TYPE_CHECKING:
     from chat.domain.repositories.model_repo import ModelRequestInfo
@@ -96,7 +97,10 @@ class ChatMessage(Document):
     # 仅 assistant 消息必填
     reasoning_content: Optional[str] = None  # 大模型的推理/思考内容
     tool_calls: Optional[List[ToolCallMessage]] = None
-    token_usage: int = 0
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    usage_source: TokenUsageSource = TokenUsageSource.PROVIDER
 
     content: Optional[str] = None   # 返回内容
     content_token_count: int = 0 # 消息 token 计数，用于上下文压缩

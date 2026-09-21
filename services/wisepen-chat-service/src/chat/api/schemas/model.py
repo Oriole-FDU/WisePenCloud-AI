@@ -14,8 +14,10 @@ class ProviderResponse(BaseModel):
     scope: ProviderScope
     type: ProviderType
     is_active: bool
-    token_usage: int
-    billable_token_usage: int
+    input_tokens: int
+    cached_input_tokens: int
+    output_tokens: int
+    billable_tokens: int
 
 
 class ModelProviderMappingResponse(BaseModel):
@@ -23,7 +25,9 @@ class ModelProviderMappingResponse(BaseModel):
     provider_id: str
     provider_name: Optional[str] = None
     provider_model_name: str
-    billing_ratio: int
+    input_billing_ratio: str
+    cached_input_billing_ratio: str
+    output_billing_ratio: str
     support_runtime_options: Dict = Field(default_factory=dict)
     is_preferred: bool
     is_active: bool
@@ -107,7 +111,9 @@ class BindModelProviderRequest(BaseModel):
     model_id: str
     provider_id: str
     provider_model_name: str
-    billing_ratio: int = 1
+    input_billing_ratio: str = "1"
+    cached_input_billing_ratio: str = "1"
+    output_billing_ratio: str = "1"
     is_preferred: bool = True
     is_active: bool = True
 

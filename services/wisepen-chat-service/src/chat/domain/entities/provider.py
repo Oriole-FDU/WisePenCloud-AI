@@ -34,8 +34,10 @@ class Provider(Document):
     type: ProviderType = Field(default=ProviderType.LITELLM_OPENAI_COMPATIBLE, description="供应商类型")
 
     is_active: bool = Field(default=True, description="是否启用")
-    token_usage: int = Field(default=0, description="累计原始 token 用量")
-    billable_token_usage: int = Field(default=0, description="累计可计费 token 用量")
+    input_tokens: int = Field(default=0, description="累计输入 token 用量")
+    cached_input_tokens: int = Field(default=0, description="累计缓存命中输入 token 用量")
+    output_tokens: int = Field(default=0, description="累计输出 token 用量")
+    billable_tokens: int = Field(default=0, description="累计可计费 token 用量")
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

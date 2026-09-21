@@ -10,6 +10,7 @@ pipeline {
 
     parameters {
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: '选择需要构建的 Git 分支')
+        string(name: 'PYPI_INDEX_URL', defaultValue: 'https://mirrors.aliyun.com/pypi/simple/', description: 'Python 包索引地址，默认使用中国大陆镜像')
     }
 
     stages {
@@ -21,7 +22,7 @@ pipeline {
             }
         }
 
-        stage('2. 构建 Docker 镜像 (Docker Build)') {
+        stage('2. 构建 Docker 镜像') {
             failFast true
 
             parallel {
@@ -33,7 +34,25 @@ pipeline {
                                     -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-chat:${IMAGE_TAG} \\
                                     --build-arg SERVICE_DIR=wisepen-chat-service \\
                                     --build-arg SERVICE_PKG=chat \\
-                                    --build-arg SERVICE_PORT=9200 \\
+                                    --build-arg SERVICE_PORT=19904 \\
+                                    --build-arg SERVICE_PROJECT=wisepen-chat-service \\
+                                    --build-arg PYPI_INDEX_URL="\${PYPI_INDEX_URL}" \\
+                                    -f Dockerfile .
+                            """
+                        }
+                    }
+                }
+                stage('MCP Service') {
+                    steps {
+                        script {
+                            sh """
+                                docker build \\
+                                    -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-mcp:${IMAGE_TAG} \\
+                                    --build-arg SERVICE_DIR=wisepen-mcp-service \\
+                                    --build-arg SERVICE_PKG=wisepen_mcp \\
+                                    --build-arg SERVICE_PORT=19911 \\
+                                    --build-arg SERVICE_PROJECT=wisepen-mcp-service \\
+                                    --build-arg PYPI_INDEX_URL="\${PYPI_INDEX_URL}" \\
                                     -f Dockerfile .
                             """
                         }
@@ -72,7 +91,7 @@ pipeline {
                         COMPOSE_FILES="\$COMPOSE_FILES -f docker-compose-app.legacy-net.yml"
                     fi
 
-                    docker-compose \$COMPOSE_FILES up -d --remove-orphans
+                    docker-compose \$COMPOSE_FILES up -d --no-build --remove-orphans
                     """
                 }
             }

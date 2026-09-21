@@ -7,7 +7,7 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.provider import ProviderType
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
-from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, LLMUsage
+from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, TokenUsage
 from chat.domain.entities.message import ToolCallMessage
 from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.core.exceptions import ServiceException
@@ -116,10 +116,20 @@ class AnthropicAdapter(LLMProvider):
 
         # 计费
         usage = getattr(final_message, "usage", None) # 提取 final_message 的 usage
-        input_tokens = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
+        raw_input_tokens = int(getattr(usage, "input_tokens", 0) or 0) if usage else 0
+        cache_creation_input_tokens = int(getattr(usage, "cache_creation_input_tokens", 0) or 0) if usage else 0
+        cached_input_tokens = int(getattr(usage, "cache_read_input_tokens", 0) or 0) if usage else 0
+        input_tokens = raw_input_tokens + cache_creation_input_tokens + cached_input_tokens
         output_tokens = int(getattr(usage, "output_tokens", 0) or 0) if usage else 0
         if input_tokens or output_tokens: # 传递 LLMStreamEvent USAGE
-            yield LLMStreamEvent(type=LLMEventType.USAGE, usage=LLMUsage(input_tokens=input_tokens, output_tokens=output_tokens))
+            yield LLMStreamEvent(
+                type=LLMEventType.USAGE,
+                usage=TokenUsage(
+                    input_tokens=input_tokens,
+                    cached_input_tokens=cached_input_tokens,
+                    output_tokens=output_tokens,
+                ),
+            )
 
         # 把 SDK 对象转成可 JSON 持久化的 dict/list
         content_blocks = [dump_provider_value(block) for block in getattr(final_message, "content", [])] # 提取 final_message 的 content

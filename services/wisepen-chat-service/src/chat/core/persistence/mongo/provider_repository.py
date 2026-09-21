@@ -113,10 +113,12 @@ class MongoProviderRepository(ProviderRepository):
         self,
         provider_id: PydanticObjectId,
         user_id: Optional[str],
-        token_usage: int,
-        billable_token_usage: int = 0,
+        input_tokens: int,
+        cached_input_tokens: int,
+        output_tokens: int,
+        billable_tokens: int,
     ) -> None:
-        if token_usage <= 0 and billable_token_usage <= 0:
+        if input_tokens <= 0 and cached_input_tokens <= 0 and output_tokens <= 0 and billable_tokens <= 0:
             return
 
         result = await Provider.get_pymongo_collection().update_one(
@@ -127,8 +129,10 @@ class MongoProviderRepository(ProviderRepository):
             },
             {
                 "$inc": {
-                    "token_usage": max(token_usage, 0),
-                    "billable_token_usage": max(billable_token_usage, 0),
+                    "input_tokens": max(input_tokens, 0),
+                    "cached_input_tokens": max(cached_input_tokens, 0),
+                    "output_tokens": max(output_tokens, 0),
+                    "billable_tokens": max(billable_tokens, 0),
                 },
                 "$set": {"updated_at": datetime.now(timezone.utc)},
             },

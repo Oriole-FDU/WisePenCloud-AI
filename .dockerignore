@@ -1,0 +1,11 @@
+.git
+.venv
+.uv-cache
+.docker-build-cache
+__pycache__
+*.pyc
+.idea
+.run
+.vscode
+docs
+logs

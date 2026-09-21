@@ -26,7 +26,7 @@ class SuspendedTurnContext:
     tool_scope_data: dict[str, Any]
     messages_for_llm: List[ChatMessage]
     chat_record_messages: List[ChatMessage]
-    token_usage: int
+    token_usage: Any
     turn_suspension: TurnSuspension
 
 

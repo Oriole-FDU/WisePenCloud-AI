@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, List, Optional
 
 from beanie import PydanticObjectId
@@ -162,7 +163,9 @@ class MongoModelRepository(ModelRepository):
         provider_id: PydanticObjectId,
         provider_model_name: str,
         user_id: Optional[str] = None,
-        billing_ratio: int = 1,
+        input_billing_ratio: Decimal = Decimal("1"),
+        cached_input_billing_ratio: Decimal = Decimal("1"),
+        output_billing_ratio: Decimal = Decimal("1"),
         is_preferred: bool = True,
         is_active: bool = True,
     ) -> ModelProviderMapping:
@@ -189,7 +192,9 @@ class MongoModelRepository(ModelRepository):
                 model_id=model_id,
                 provider_id=provider_id,
                 provider_model_name=provider_model_name,
-                billing_ratio=billing_ratio,
+                input_billing_ratio=input_billing_ratio,
+                cached_input_billing_ratio=cached_input_billing_ratio,
+                output_billing_ratio=output_billing_ratio,
                 owner_user_id=user_id,
                 is_preferred=is_preferred,
                 is_active=is_active,
@@ -208,7 +213,9 @@ class MongoModelRepository(ModelRepository):
             return mapping
 
         mapping.provider_model_name = provider_model_name
-        mapping.billing_ratio = billing_ratio
+        mapping.input_billing_ratio = input_billing_ratio
+        mapping.cached_input_billing_ratio = cached_input_billing_ratio
+        mapping.output_billing_ratio = output_billing_ratio
         mapping.updated_at = now
 
         try:

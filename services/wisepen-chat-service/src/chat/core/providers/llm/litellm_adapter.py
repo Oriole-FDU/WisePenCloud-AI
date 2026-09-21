@@ -13,7 +13,8 @@ from chat.domain.interfaces.llm import (
     LLMCompletionResult,
     LLMEventType,
     LLMStreamEvent,
-    LLMUsage,
+    TokenUsage,
+    TokenUsageSource,
     TextCompletionProvider,
 )
 from chat.domain.entities.message import ToolCallMessage
@@ -129,9 +130,8 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
                 api_key=api_key or self._default_api_key,
             )
             usage = getattr(response, "usage", None)
-            token_usage = getattr(usage, "total_tokens", 0) if usage else 0
             content = response.choices[0].message.content or ""
-            return LLMCompletionResult(content=content, token_usage=int(token_usage), raw=response)
+            return LLMCompletionResult(content=content, usage=self._build_token_usage_from_payload(usage), raw=response)
 
         except litellm.ContextWindowExceededError:
             raise ServiceException(ChatErrorCode.CONTEXT_LIMIT_EXCEEDED)
@@ -151,7 +151,7 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
 
         # 设置请求参数
         # LiteLLM 作为 fallback 路径，tools 继续透传 OpenAI-compatible schema
-        token_usage = 0
+        usage_payload: Any = {}
         tool_acc: dict[int, dict[str, str]] = {}
         try:
             response = await litellm.acompletion(
@@ -170,9 +170,10 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
 
             # 流式调用
             async for chunk in stream:
-                # 如果本次 response.usage.total_tokens 有值，就更新 token_usage，否则保留之前的 token_usage
+                # LiteLLM 仅在部分流式 chunk 携带 usage，保留最新 usage 载荷。
                 usage = read_provider_value(chunk, "usage", {}) or {}
-                token_usage = int(read_provider_value(usage, "total_tokens", token_usage) or token_usage)
+                if usage:
+                    usage_payload = usage
 
                 # Qwen response 里通常有 candidates，当前只取第一个
                 choices = read_provider_value(chunk, "choices", None) or []
@@ -206,8 +207,8 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
             raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=str(e))
 
         # 计费
-        if token_usage:  # 传递 LLMStreamEvent USAGE
-            yield LLMStreamEvent(type=LLMEventType.USAGE, usage=LLMUsage(output_tokens=int(token_usage)))
+        if usage_payload:  # 传递 LLMStreamEvent USAGE
+            yield LLMStreamEvent(type=LLMEventType.USAGE, usage=self._build_token_usage_from_payload(usage_payload))
 
         # 解析工具调用
         tool_calls: list[ToolCallMessage] = []
@@ -235,3 +236,40 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
         if tool_call_payloads:
             assistant_message["tool_calls"] = tool_call_payloads
         yield LLMStreamEvent(type=LLMEventType.STATE, provider_payload={ "message": assistant_message })
+
+    @staticmethod
+    def _build_token_usage_from_payload(usage_payload: Any) -> TokenUsage:
+        input_tokens = int(
+            read_provider_value(usage_payload, "input_tokens", None) # Responses 风格
+            or read_provider_value(usage_payload, "prompt_tokens", 0) # Chat Completions 风格
+            or 0
+        )
+
+        output_tokens = int(
+            read_provider_value(usage_payload, "output_tokens", None) # Responses 风格
+            or read_provider_value(usage_payload, "completion_tokens", 0)  # Chat Completions 风格
+            or 0
+        )
+
+        input_details = (
+                read_provider_value(usage_payload, "input_tokens_details", None)
+                or read_provider_value(usage_payload, "prompt_tokens_details", None)
+                or {}
+        )
+
+        cached_input_tokens = int(
+            read_provider_value(input_details, "cached_tokens", None)  # Responses 风格
+            or read_provider_value(usage_payload, "cached_tokens", 0)  # Chat Completions 风格
+            or 0
+        )
+
+        total_tokens = int(read_provider_value(usage_payload, "total_tokens", 0) or 0)
+
+        if input_tokens or output_tokens:
+            return TokenUsage(
+                input_tokens=input_tokens,
+                cached_input_tokens=cached_input_tokens,
+                output_tokens=output_tokens,
+            )
+
+        return TokenUsage(output_tokens=total_tokens)

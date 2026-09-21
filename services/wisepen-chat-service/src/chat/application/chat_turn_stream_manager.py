@@ -99,6 +99,9 @@ class ChatTurnStreamManager:
                     return
                 await self._stream_repo.append_frame(turn_id, frame)
 
+            # 在执行后台任务前释放 active_turn
+            await self._stream_repo.release_active_turn(user_id, session_id, turn_id)
+
             await self._stream_repo.append_frame(turn_id, message_finish())
             await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
         except Exception as exc:
@@ -111,5 +114,3 @@ class ChatTurnStreamManager:
                 await background_tasks()
             except Exception as exc:
                 error("chat turn background tasks failed.", turn_id=turn_id, session_id=session_id, exc=exc)
-
-            await self._stream_repo.release_active_turn(user_id, session_id, turn_id)

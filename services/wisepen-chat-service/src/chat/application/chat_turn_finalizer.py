@@ -11,7 +11,7 @@ from chat.domain.error_codes import ChatErrorCode
 
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
-from chat.domain.interfaces.llm import TextCompletionProvider
+from chat.domain.interfaces.llm import TextCompletionProvider, TokenUsage
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository, ProviderRepository
 from chat.domain.repositories.model_repo import ModelRequestInfo
@@ -50,7 +50,7 @@ class ChatTurnFinalizer:
         chat_record_messages: List[ChatMessage],
         memory_policy: AgentMemoryPolicy,
         model_info: ModelRequestInfo,
-        token_usage: int,
+        token_usage: TokenUsage,
         billing_group_id: Optional[str] = None,
         skip_first_user_message: bool = False,
     ) -> None:
@@ -94,36 +94,48 @@ class ChatTurnFinalizer:
         self,
         user_id: str,
         model_info: ModelRequestInfo,
-        token_usage: int,
+        token_usage: TokenUsage,
         billing_group_id: Optional[str] = None,
     ) -> None:
         """
         发送 token 计费消息到 Kafka
         """
-        if token_usage == 0:
+        if token_usage.total_tokens == 0:
             return
 
         # 计费只看本次实际使用的 Provider：用户自带 Provider 与免费官方模型都只累计用量，不扣钱包余额
-        billable_token_usage = model_info.billable_tokens(token_usage)
+        billable_tokens = model_info.billable_tokens(token_usage)
 
         await self.provider_repo.increment_usage(
             provider_id=model_info.provider_id,
             user_id=model_info.provider_owner_user_id,
-            token_usage=token_usage,
-            billable_token_usage=billable_token_usage,
+            input_tokens=token_usage.input_tokens,
+            cached_input_tokens=token_usage.cached_input_tokens,
+            output_tokens=token_usage.output_tokens,
+            billable_tokens=billable_tokens,
         )
 
-        if billable_token_usage <= 0:
+        if billable_tokens <= 0:
             billing_group_id = None
 
         value = {
             "userId": user_id,
             "groupId": billing_group_id,
-            "usageTokens": token_usage,
-            "billableTokens": billable_token_usage,
-            "billingRatio": model_info.billing_ratio,
+            "usageTokens": token_usage.total_tokens,
+            "billableTokens": billable_tokens,
+            "billingDetail": {
+                "inputTokens": token_usage.input_tokens,
+                "cachedInputTokens": token_usage.cached_input_tokens,
+                "outputTokens": token_usage.output_tokens,
+                "inputBillingRatio": str(model_info.input_billing_ratio),
+                "cachedInputBillingRatio": str(model_info.cached_input_billing_ratio),
+                "outputBillingRatio": str(model_info.output_billing_ratio),
+                "usageSource": token_usage.usage_source.value,
+                "modelName": model_info.model.display_name,
+                "providerName": model_info.provider.name,
+                "providerScope": model_info.provider_scope.value,
+            },
             "traceId": uuid.uuid4().hex,
-            "modelName": model_info.model.display_name,
             "requestTime": datetime.now(timezone.utc).isoformat(),
         }
 

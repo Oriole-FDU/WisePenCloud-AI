@@ -7,7 +7,7 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.provider import ProviderType
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
-from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, LLMUsage
+from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, TokenUsage, TokenUsageSource
 from chat.domain.entities.message import ToolCallMessage
 from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.core.exceptions import ServiceException
@@ -129,9 +129,25 @@ class OpenAIAdapter(LLMProvider):
                     response = getattr(event, "response", None)
                     response_id = getattr(response, "id", None) or response_id # 更新 response id，最终值覆盖或兜底
                     usage = getattr(response, "usage", None) # 计费
-                    token_usage = int(getattr(usage, "total_tokens", 0) or 0) if usage else 0
-                    if token_usage: # 传递 LLMStreamEvent USAGE
-                        yield LLMStreamEvent(type=LLMEventType.USAGE, usage=LLMUsage(output_tokens=token_usage))
+                    if usage:
+                        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+                        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+                        input_details = getattr(usage, "input_tokens_details", None)
+                        cached_input_tokens = int(getattr(input_details, "cached_tokens", 0) or 0) if input_details else 0
+
+                        total_tokens = int(getattr(usage, "total_tokens", 0) or 0) # 在 input_tokens 与 output_tokens 不可用时备用
+                        if input_tokens or output_tokens:
+                            yield LLMStreamEvent(
+                                type=LLMEventType.USAGE,
+                                usage=TokenUsage(
+                                    input_tokens=input_tokens,
+                                    cached_input_tokens=cached_input_tokens,
+                                    output_tokens=output_tokens,
+                                ),
+                            )
+                        elif total_tokens:
+                            yield LLMStreamEvent(type=LLMEventType.USAGE, usage=TokenUsage(output_tokens=total_tokens))
+
                 elif event_type in {"response.incomplete", "response.failed"}:
                     # 非 completed 终止不能继续生成空 assistant，应记录上游详情并转换为业务错误
                     response = getattr(event, "response", None)
