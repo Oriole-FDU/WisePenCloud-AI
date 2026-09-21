@@ -5172,6 +5172,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "wisepen-common" },
+    { name = "zeroentropy" },
 ]
 
 [package.metadata]
@@ -5187,6 +5188,7 @@ requires-dist = [
     { name = "pyyaml" },
     { name = "uvicorn", extras = ["standard"] },
     { name = "wisepen-common", editable = "services/wisepen-common" },
+    { name = "zeroentropy" },
 ]
 
 [[package]]

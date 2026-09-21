@@ -18,5 +18,6 @@ dependencies = [
     "mcp>=1.27,<2",
     "pyyaml",
     "nacos-sdk-python",
+    "zeroentropy",
     "wisepen-common",
 ]
