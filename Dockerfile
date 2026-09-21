@@ -26,11 +26,13 @@ COPY services/wisepen-mcp-service/pyproject.toml    services/wisepen-mcp-service
 COPY services/wisepen-sandbox-service/pyproject.toml services/wisepen-sandbox-service/pyproject.toml
 
 # 只预装当前服务及其依赖的第三方包，不把整个 workspace 的依赖带入镜像。
-RUN uv sync --frozen --no-dev --no-install-workspace --package ${SERVICE_PROJECT}
+RUN uv sync --frozen --no-dev --no-install-workspace --package ${SERVICE_PROJECT} \
+    --default-index ${PYPI_INDEX_URL}
 
 # 复制全部源码并安装 workspace 包
 COPY services/ services/
-RUN uv sync --frozen --no-dev --package ${SERVICE_PROJECT}
+RUN uv sync --frozen --no-dev --package ${SERVICE_PROJECT} \
+    --default-index ${PYPI_INDEX_URL}
 
 
 # ---- 运行阶段：仅包含运行时，不含 uv / 编译工具链 ----
