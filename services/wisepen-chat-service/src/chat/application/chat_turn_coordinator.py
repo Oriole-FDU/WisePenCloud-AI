@@ -147,7 +147,7 @@ class ChatTurnCoordinator:
             cancel_requested=cancel_requested,
         ):
             yield event
-        await self._persist_turn_before_completion(
+        await self._persist_message_and_token_bill(
             chat_turn_context,
             skip_first_user_message=False,
         )
@@ -357,7 +357,7 @@ class ChatTurnCoordinator:
                 cancel_requested=cancel_requested,
         ):
             yield event
-        await self._persist_turn_before_completion(
+        await self._persist_message_and_token_bill(
             chat_turn_context,
             skip_first_user_message=True,
         )
@@ -425,7 +425,7 @@ class ChatTurnCoordinator:
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
 
-    async def _persist_turn_before_completion(
+    async def _persist_message_and_token_bill(
         self,
         chat_turn_context: ChatTurnContext,
         *,
