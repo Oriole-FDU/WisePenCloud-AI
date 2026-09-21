@@ -4,12 +4,14 @@ pipeline {
     environment {
         PROJECT_NAME = 'wisepencloud'
         DOCKER_REGISTRY = 'local'
+        BUILDX_BUILDER = 'wisepen-builder'
         IMAGE_TAG = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         COMPOSE_FILE_PATH = 'docker-compose-app.yml'
     }
 
     parameters {
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: '选择需要构建的 Git 分支')
+        string(name: 'PYPI_INDEX_URL', defaultValue: 'https://mirrors.aliyun.com/pypi/simple/', description: 'Python 包索引地址，默认使用中国大陆镜像')
     }
 
     stages {
@@ -21,6 +23,19 @@ pipeline {
             }
         }
 
+        stage('准备 Docker BuildKit') {
+            steps {
+                sh '''
+                    if ! docker buildx inspect "${BUILDX_BUILDER}" >/dev/null 2>&1; then
+                        docker buildx create \
+                            --name "${BUILDX_BUILDER}" \
+                            --driver docker-container
+                    fi
+                    docker buildx inspect "${BUILDX_BUILDER}" --bootstrap >/dev/null
+                '''
+            }
+        }
+
         stage('2. 构建 Docker 镜像 (Docker Build)') {
             failFast true
 
@@ -29,11 +44,16 @@ pipeline {
                     steps {
                         script {
                             sh """
-                                docker build \\
+                                docker buildx build \\
+                                    --builder ${BUILDX_BUILDER} \\
+                                    --load \\
+                                    --progress=plain \\
                                     -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-chat:${IMAGE_TAG} \\
                                     --build-arg SERVICE_DIR=wisepen-chat-service \\
                                     --build-arg SERVICE_PKG=chat \\
                                     --build-arg SERVICE_PORT=19904 \\
+                                    --build-arg SERVICE_PROJECT=wisepen-chat-service \\
+                                    --build-arg PYPI_INDEX_URL="\${PYPI_INDEX_URL}" \\
                                     -f Dockerfile .
                             """
                         }
@@ -43,11 +63,16 @@ pipeline {
                     steps {
                         script {
                             sh """
-                                docker build \\
+                                docker buildx build \\
+                                    --builder ${BUILDX_BUILDER} \\
+                                    --load \\
+                                    --progress=plain \\
                                     -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-mcp:${IMAGE_TAG} \\
                                     --build-arg SERVICE_DIR=wisepen-mcp-service \\
                                     --build-arg SERVICE_PKG=wisepen_mcp \\
                                     --build-arg SERVICE_PORT=19911 \\
+                                    --build-arg SERVICE_PROJECT=wisepen-mcp-service \\
+                                    --build-arg PYPI_INDEX_URL="\${PYPI_INDEX_URL}" \\
                                     -f Dockerfile .
                             """
                         }

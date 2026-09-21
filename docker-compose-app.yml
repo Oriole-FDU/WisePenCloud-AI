@@ -9,6 +9,8 @@ services:
         SERVICE_DIR: wisepen-chat-service
         SERVICE_PKG: chat
         SERVICE_PORT: "19904"
+        SERVICE_PROJECT: wisepen-chat-service
+        PYPI_INDEX_URL: ${PYPI_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
     image: ${DOCKER_REGISTRY}/wisepencloud-chat:${APP_VERSION}
     container_name: wisepen-chat-service
     restart: always
@@ -44,6 +46,8 @@ services:
         SERVICE_DIR: wisepen-mcp-service
         SERVICE_PKG: wisepen_mcp
         SERVICE_PORT: "19911"
+        SERVICE_PROJECT: wisepen-mcp-service
+        PYPI_INDEX_URL: ${PYPI_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
     image: ${DOCKER_REGISTRY}/wisepencloud-mcp:${APP_VERSION}
     container_name: wisepen-mcp-service
     restart: always

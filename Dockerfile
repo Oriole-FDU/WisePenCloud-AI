@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # =============================================================================
 # wisepen-cloud-ai/Dockerfile
 # -----------------------------------------------------------------------------
@@ -9,6 +11,14 @@ FROM ghcr.io/astral-sh/uv:0.6-python3.11-bookworm-slim AS builder
 
 WORKDIR /app
 
+ARG SERVICE_PROJECT
+ARG PYPI_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+
+ENV UV_DEFAULT_INDEX=${PYPI_INDEX_URL}
+ENV UV_INDEX_URL=${PYPI_INDEX_URL}
+ENV UV_CACHE_DIR=/root/.cache/uv
+ENV UV_LINK_MODE=copy
+
 # 先复制依赖定义文件，利用 Docker layer 缓存——源码变更时此层不会重建
 COPY pyproject.toml uv.lock ./
 # workspace 成员的 pyproject 预拷（仅为 layer cache）；新增 service 时在下方追加一行
@@ -17,12 +27,14 @@ COPY services/wisepen-chat-service/pyproject.toml   services/wisepen-chat-servic
 COPY services/wisepen-mcp-service/pyproject.toml    services/wisepen-mcp-service/pyproject.toml
 COPY services/wisepen-sandbox-service/pyproject.toml services/wisepen-sandbox-service/pyproject.toml
 
-# 预装第三方依赖（不安装 workspace 包本身，纯缓存层）
-RUN uv sync --frozen --no-dev --no-install-workspace
+# 只预装当前服务及其依赖的第三方包，不把整个 workspace 的依赖带入镜像。
+RUN --mount=type=cache,id=wisepen-uv,target=/root/.cache/uv,sharing=locked \
+    uv sync --frozen --no-dev --no-install-workspace --package ${SERVICE_PROJECT}
 
 # 复制全部源码并安装 workspace 包
 COPY services/ services/
-RUN uv sync --frozen --no-dev
+RUN --mount=type=cache,id=wisepen-uv,target=/root/.cache/uv,sharing=locked \
+    uv sync --frozen --no-dev --package ${SERVICE_PROJECT}
 
 
 # ---- 运行阶段：仅包含运行时，不含 uv / 编译工具链 ----
