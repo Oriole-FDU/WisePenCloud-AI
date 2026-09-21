@@ -20,7 +20,7 @@ RAG 服务是一次全量重写。Common 只提供无业务含义的文档结构
   -> retrieval_context 增强
   -> Dense + BM25 文本索引
   -> LLM 图谱抽取或垂类确定性 producer
-  -> Mongo GraphNode / GraphEdge / TextGraphEvidence
+  -> Mongo GraphNode / GraphEdge / GraphChunkSource
   -> 独立补建 Neo4j 拓扑 + 图谱 Node/Edge 向量投影
   -> active revision 发布
 ```
@@ -34,14 +34,14 @@ RAG 服务是一次全量重写。Common 只提供无业务含义的文档结构
 - `Document` 是当前内容和结构的聚合根，运行时持有 Markdown、Common 结构、强类型 metadata 和 RAG ACL 投影；ACL 在独立仓储维护，不与内容 revision 一起冻结；
 - `DocChunk` 是小粒度检索原子，保存原文坐标、`retrieval_context` 和 `extracted_node_ids`，不保存静态父块；
 - `get_retrieval_text()` 在调用时生成 Dense/BM25 共用输入，不把拼接文本升级为持久化字段；
-- `GraphNode`、`GraphEdge` 与 `DocChunk` 正交；LLM 图元通过 `TextGraphEvidence` 回到 Markdown，确定性 producer 直接从强类型事实生成图元；
+- `GraphNode`、`GraphEdge` 与 `DocChunk` 正交；LLM 图元通过 `GraphChunkSource` 回到所属 Chunk，确定性 producer 直接从强类型事实生成图元；
 - Ontology、metadata filter compiler 和确定性 producer 是插件扩展点，不把论文字段写进通用模型，也不为确定性来源创建 Evidence resolver。
 
 ## 4. 持久化和发布一致性
 
 持久化边界定义在 [持久化.md](持久化.md)。
 
-Mongo 保存一个 revision 的正文、结构和 metadata，以及独立的 `doc_chunks`、`text_graph_evidences`。`resource_index_states` 只保存：
+Mongo 保存一个 revision 的正文、结构和 metadata，以及独立的 `doc_chunks`、`graph_chunk_sources`。`resource_index_states` 只保存：
 
 - `staged_content_revision`：正在构建的一版；
 - `staged_document_version`：构建版本的单调判断依据；
@@ -67,25 +67,25 @@ Qdrant BM25 Top-N ──┘
 
 Dense 与 BM25 都使用 `retrieval_context + raw_text`；没有增强结果时只使用权威正文。reranker 仍只看标题和权威正文。
 
-`ChunkHit` 由回查后的当前 `DocChunk` 和 reranker 分数构造，`node_ids` 来自该 Chunk 的 `extracted_node_ids`。它们与具体 `chunk_id` 绑定，供调用方选择后续图谱 seed。
+动态父块额外暴露 `seed_nodes[{node_id,name,category}]`。这些节点按命中 Chunk 的首次出现顺序从当前 resource/revision 的 Mongo 图事实读取，供模型阅读名称和类别后选择稳定 `node_id`，不要求模型从正文或哈希 ID 猜节点。
 
 ## 6. 图谱检索
 
-完整设计见 [图谱检索.md](图谱检索.md)。图谱检索不是直接返回子图，而是：
+图谱检索不是直接返回子图，而是：
 
 ```text
 Low：节点 Dense 召回
 High：关系 Dense + BM25 召回
 Hybrid：Low 和 High 并行
   -> Neo4j 有限遍历和过滤
-  -> LLM 图元回查 TextGraphEvidence 和 Chunk
+  -> LLM 图元回查 GraphChunkSource 和 Chunk
   -> 确定性图元直接校验 active revision 和 ACL
   -> 候选粗排
   -> 只对前 N 条做 reranker
   -> Top-K Chunk / 确定性图事实
 ```
 
-调用方可以只传 `query`，也可以传 `seed_node_ids + query`。支持 `direction`、`relation_types`、`max_depth`、资源和垂类 metadata 过滤。LLM 抽取必须回到 Chunk；论文作者、机构、引用等确定性事实直接作为图事实检索，不强制伪造正文引用或 metadata Evidence。
+HTTP 入口为 `/rag/retrieval/retrieveHybrid` 和 `/rag/retrieval/retrieveGraph`。Graph Retrieve 保留三种调用行为：只有 `query` 时执行向量召回、图遍历和精排；`query + seed_node_ids` 时跳过向量召回，只对遍历候选精排；只有 `seed_node_ids` 时按遍历顺序返回，不生成 embedding、不调用 reranker，响应省略 `score` 和 `relevance_decision`。支持 `direction`、`relation_types`、`node_categories`、`max_depth`、资源和垂类 metadata 过滤。
 
 Ontology 是垂类图谱的核心：插件声明合法实体、关系端点、metadata 事实 producer 和过滤投影。论文 `CITES` 只是示例，不是通用模型的一等公民。
 
@@ -124,7 +124,7 @@ Qdrant payload、Neo4j 属性、标题树视图和动态父块都不是权威来
 1. 先实现领域模型、Mongo revision/ACL 仓储和 staged/applied 发布状态。
 2. 再实现 DocChunk 生成、增强产物和 Qdrant Dense/BM25 入库。
 3. 实现混合检索、回查、相关性门控和动态父块。
-4. 接入图谱 Node/Edge、LLM TextGraphEvidence、Ontology/确定性 producer 插件，以及发布后独立的 Neo4j/Qdrant 图谱投影。
+4. 接入图谱 Node/Edge、LLM GraphChunkSource、Ontology/确定性 producer 插件，以及发布后独立的 Neo4j/Qdrant 图谱投影。
 5. 实现统一标题树渲染、三种入口和读取 Page/Section。
 6. 最后接入上层工具编排；工具层不反向扩张 RAG 契约。
 
@@ -140,7 +140,7 @@ Qdrant payload、Neo4j 属性、标题树视图和动态父块都不是权威来
 | 权威 ACL 读取、`save_if_newer`、同 revision 重试 | 复用读取与版本比较行为；不要让索引 ACL 取代最终判权 |
 | OpenAI/Embedding/Reranker 客户端的超时、重试、关闭和错误映射 | 复用客户端边界；业务层不自行创建一套调用协议 |
 | retrieval context 的提示词、并发限制和缓存键 | 复用已验证的调用策略；结果只写入 `DocChunk` 增强产物 |
-| 图谱连续窗口、坐标映射、LLM TextGraphEvidence 校验、稳定 ID 去重 | 复用算法和校验顺序；抽取协议改为 Instructor + Pydantic + OpenAI |
+| 图谱连续窗口、Chunk 来源校验、稳定 ID 去重 | 复用算法和校验顺序；抽取协议改为 Instructor + Pydantic + OpenAI |
 | staged/applied 条件更新和批量写入 | 复用并落实到 [持久化.md](持久化.md) 的发布流程 |
 
 以下旧设计明确不带入：MCP 章节对内部能力的反向约束、静态 ReadingBlock、任意 Range/图谱证据读取接口、PPR/贡献聚合、`mention_count`/置信度累加、Kafka offset 状态和逻辑删除回滚状态机。它们不是遗漏，而是当前边界下的主动删除。

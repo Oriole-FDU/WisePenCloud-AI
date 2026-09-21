@@ -11,7 +11,6 @@ from wisepen_mcp.service_client import (
     DocumentClient,
     NoteClient,
     NoteCollabClient,
-    RagServiceClient,
     ResourceClient,
 )
 
@@ -48,7 +47,6 @@ class Container(containers.DeclarativeContainer):
         ResourceClient,
         rpc=rpc_client,
     )
-    rag_service_client = providers.Singleton(RagServiceClient, rpc=rpc_client)
     document_client = providers.Singleton(
         DocumentClient,
         rpc=rpc_client,

@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 # --- 枚举定义 ---
 
-class GraphSearchLevel(StrEnum):
+class GraphRetrieveLevel(StrEnum):
     LOW = "low"
     HIGH = "high"
     HYBRID = "hybrid"
@@ -24,15 +24,15 @@ class TraversalDirection(StrEnum):
 # --- 图谱检索请求与响应 ---
 
 @dataclass(frozen=True, slots=True)
-class GraphSearchRequest:
+class GraphRetrieveRequest:
     """图谱检索能力参数，不承担 API 层的输入 schema 限制。
 
     `vector_top_n` 是每个向量分支的召回上限；`candidate_limit` 是并集池
     和有限遍历送入精排的上限；`top_k` 只决定最终返回多少项。
     """
 
-    query: str
-    level: GraphSearchLevel = GraphSearchLevel.HYBRID
+    query: str | None = None
+    level: GraphRetrieveLevel = GraphRetrieveLevel.HYBRID
     seed_node_ids: list[str] = field(default_factory=list)
     resource_ids: list[str] | None = None   # 仅在资源 revision 范围内检索；None 表示不限制。
     node_categories: list[str] = field(default_factory=list)
@@ -47,20 +47,20 @@ class GraphSearchRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class GraphSearchHit:
+class GraphRetrieveHit:
     """图谱检索的模型可读结果，不暴露来源投影或生命周期指针。"""
 
     resource_id: str
     text: str
-    score: float
+    score: float | None
     # LLM 来源可以定位到证据 Chunk；确定性事实没有 Chunk 定位时保持空值。
     section_id: str | None = None
     section_path: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
-class GraphSearchResult:
-    hits: list[GraphSearchHit]
+class GraphRetrieveResult:
+    hits: list[GraphRetrieveHit]
     relevance_decision: str | None = None
 
 
@@ -93,10 +93,20 @@ class DynamicParent:
     source_spans: list[SourceSpan]  # Python 字符半开区间。
     matched_chunk_ids: list[str]
     score: float
+    seed_nodes: list["GraphNodeReference"] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
-class HybridRetrievalResult:
+class GraphNodeReference:
+    """Hybrid 父块向模型暴露的可读图节点引用。"""
+
+    node_id: str
+    name: str
+    category: str
+
+
+@dataclass(frozen=True, slots=True)
+class HybridRetrieveResult:
     """混合检索结果；实体节点始终随具体命中 Chunk 返回。"""
 
     hits: list[ChunkHit]

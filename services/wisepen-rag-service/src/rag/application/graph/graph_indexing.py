@@ -9,6 +9,8 @@ from rag.application.graph.models import (
     GraphEdgeProjection,
     GraphNode,
     GraphNodeProjection,
+    graph_node_semantic_text,
+    graph_edge_semantic_text,
     graph_source_projection_id,
 )
 from rag.application.plugins.core.metadata import GeneralDocumentMetadata
@@ -109,7 +111,7 @@ class GraphIndexBuilder:
         nodes_by_id = {item.node.node_id: item.node for item in facts.nodes}
 
         node_texts = {
-            _node_projection_id(item): _node_index_text(item.node)
+            _node_projection_id(item): graph_node_semantic_text(item.node)
             for item in facts.nodes
         }
         edge_texts = {
@@ -209,7 +211,7 @@ def _node_projection_id(item: GraphNodeProjection) -> str:
         target_id=item.node.node_id,
         resource_id=item.resource_id,
         content_revision=item.content_revision,
-        evidence_ids=item.evidence_ids,
+        source_ids=item.source_ids,
         producer_id=item.producer_id,
     )
 
@@ -220,14 +222,8 @@ def _edge_projection_id(item: GraphEdgeProjection) -> str:
         target_id=item.edge.edge_id,
         resource_id=item.resource_id,
         content_revision=item.content_revision,
-        evidence_ids=item.evidence_ids,
+        source_ids=item.source_ids,
         producer_id=item.producer_id,
-    )
-
-
-def _node_index_text(node: GraphNode) -> str:
-    return "\n".join(
-        part for part in (node.name, *node.aliases, node.description) if part
     )
 
 
@@ -235,9 +231,8 @@ def _edge_index_text(
     item: GraphEdgeProjection, nodes_by_id: dict[str, GraphNode]
 ) -> str:
     edge = item.edge
-    parts = [
-        f"{nodes_by_id[edge.source_node_id].name} -> {edge.relation_type} -> {nodes_by_id[edge.target_node_id].name}",
-        " ".join(edge.keywords),
-        edge.description,
-    ]
-    return "\n".join(part for part in parts if part)
+    return graph_edge_semantic_text(
+        edge,
+        source_name=nodes_by_id[edge.source_node_id].name,
+        target_name=nodes_by_id[edge.target_node_id].name,
+    )

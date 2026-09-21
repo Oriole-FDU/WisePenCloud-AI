@@ -3,7 +3,7 @@
 import asyncio
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 
 from common.utils.document import SourceSpan
@@ -20,7 +20,8 @@ from rag.application.plugins.core import RagPluginRegistry
 from rag.application.retrieval.models import (
     ChunkHit,
     DynamicParent,
-    HybridRetrievalResult,
+    HybridRetrieveResult,
+    GraphNodeReference,
 )
 from rag.domain.acl import PermissionScope
 from rag.domain.repositories.acl import ResourceAclRepository
@@ -30,6 +31,7 @@ from rag.domain.repositories.document_vectors import (
     VectorCandidate,
 )
 from rag.domain.repositories.documents import DocumentRepository
+from rag.domain.repositories.graph_fact import GraphFactRepository
 from rag.domain.repositories.index_state import ResourceIndexStateRepository
 from rag.domain.repositories.metadata_filters import MetadataFilterCondition
 from rag.utils import EmbeddingClient
@@ -70,6 +72,7 @@ class HybridRetriever:
         embedding_dimensions: int,
         embedding_semaphore: asyncio.Semaphore,
         plugin_registry: RagPluginRegistry,
+        graph_facts: GraphFactRepository,
     ) -> None:
         self._documents = documents
         self._doc_chunks = doc_chunks
@@ -82,6 +85,7 @@ class HybridRetriever:
         self._embedding_dimensions = embedding_dimensions
         self._embedding_semaphore = embedding_semaphore
         self._plugin_registry = plugin_registry
+        self._graph_facts = graph_facts
 
     async def retrieve(
         self,
@@ -91,7 +95,7 @@ class HybridRetriever:
         scope: PermissionScope,
         plugin_id: str | None = None,
         metadata_filter=None,
-    ) -> HybridRetrievalResult:
+    ) -> HybridRetrieveResult:
         """独立召回两路 Top 30，在 Mongo 当前事实和 ACL 快照校验后才产生 Hit。"""
         # 输入校验
         query = query.strip()
@@ -189,11 +193,44 @@ class HybridRetriever:
             revision_chunks=revision_chunks,
         )
 
-        return HybridRetrievalResult(
+        result = HybridRetrieveResult(
             hits=hits,
             parents=parents,
             relevance_decision=decision,
         )
+        return await self._attach_seed_nodes(result, ranked_chunks)
+
+    async def _attach_seed_nodes(self, result: HybridRetrieveResult, ranked_chunks: list[_RankedChunk]) -> HybridRetrieveResult:
+        refs = [
+            (item.chunk.resource_id, item.chunk.content_revision, node_id)
+            for item in ranked_chunks
+            for node_id in item.chunk.extracted_node_ids
+        ]
+        projections = await self._graph_facts.get_node_projections(refs)
+        nodes = {
+            (item.resource_id, item.content_revision, item.node.node_id): item.node
+            for item in projections
+        }
+        refs_by_chunk = {
+            item.chunk.chunk_id: [
+                nodes[key]
+                for node_id in item.chunk.extracted_node_ids
+                if (key := (item.chunk.resource_id, item.chunk.content_revision, node_id)) in nodes
+            ]
+            for item in ranked_chunks
+        }
+        parents = [
+            replace(
+                parent,
+                seed_nodes=_dedupe_seed_nodes(
+                    node
+                    for chunk_id in parent.matched_chunk_ids
+                    for node in refs_by_chunk.get(chunk_id, ())
+                ),
+            )
+            for parent in result.parents
+        ]
+        return replace(result, parents=parents)
 
     async def _load_visible_chunks(
         self,
@@ -477,9 +514,20 @@ def _covered_length(spans: Sequence[SourceSpan], scope: SourceSpan) -> int:
 
 # --- 辅助函数：空结果 ---
 
-def _empty_result() -> HybridRetrievalResult:
-    return HybridRetrievalResult(
+def _empty_result() -> HybridRetrieveResult:
+    return HybridRetrieveResult(
         hits=[],
         parents=[],
         relevance_decision=RankDecision.IRRELEVANT,
     )
+
+
+def _dedupe_seed_nodes(nodes) -> list[GraphNodeReference]:
+    result: list[GraphNodeReference] = []
+    seen: set[str] = set()
+    for node in nodes:
+        if node.node_id in seen:
+            continue
+        seen.add(node.node_id)
+        result.append(GraphNodeReference(node_id=node.node_id, name=node.name, category=node.category))
+    return result

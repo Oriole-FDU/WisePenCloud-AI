@@ -296,6 +296,7 @@ class Container(containers.DeclarativeContainer):
         embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
         embedding_semaphore=embedding_request_semaphore,
         plugin_registry=graph_plugin_registry,
+        graph_facts=graph_facts,
     )
     graph_retriever = providers.Factory(
         GraphRetriever,

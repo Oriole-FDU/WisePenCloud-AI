@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
-class SearchHybridRequest(BaseModel):
+class RetrieveHybridRequest(BaseModel):
     """混合检索传输参数；用户与 ACL 均由可信请求上下文提供。"""
 
     model_config = ConfigDict(extra="forbid")
@@ -29,12 +29,22 @@ class DynamicParentResponse(BaseModel):
     section_path: str = Field(description="父块所属的标题路径，以 ` > ` 连接。")
     text: str = Field(description="可直接提供给模型阅读的连续正文。")
     score: float = Field(description="该父块的相关性分数。")
+    seed_nodes: list["GraphNodeReferenceResponse"] = Field(default_factory=list)
 
 
-class SearchHybridResponse(BaseModel):
+class GraphNodeReferenceResponse(BaseModel):
+    node_id: str
+    name: str
+    category: str
+
+
+class RetrieveHybridResponse(BaseModel):
     """混合检索结果，只保留模型消费所需的相关性和阅读父块。"""
 
     model_config = ConfigDict(from_attributes=True)
 
     relevance_decision: RankDecision = Field(description="整体相关性门控结果。")
     parents: list[DynamicParentResponse] = Field(description="模型可直接消费的动态父块。")
+
+
+DynamicParentResponse.model_rebuild()

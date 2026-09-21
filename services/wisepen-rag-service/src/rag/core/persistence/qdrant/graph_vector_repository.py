@@ -329,7 +329,7 @@ def _source_payload(
         "resource_id": item.resource_id,
         "content_revision": item.content_revision,
         "producer_id": item.producer_id,
-        "evidence_ids": list(item.evidence_ids),
+        "source_ids": list(item.source_ids),
         "filter_values": item.filter_values,
         "acl_revision": acl.acl_revision,
         "owner_id": acl.owner_id,
@@ -382,7 +382,7 @@ def _node_projection_id(item: GraphNodeProjection) -> str:
         target_id=item.node.node_id,
         resource_id=item.resource_id,
         content_revision=item.content_revision,
-        evidence_ids=item.evidence_ids,
+        source_ids=item.source_ids,
         producer_id=item.producer_id,
     )
 
@@ -393,7 +393,7 @@ def _edge_projection_id(item: GraphEdgeProjection) -> str:
         target_id=item.edge.edge_id,
         resource_id=item.resource_id,
         content_revision=item.content_revision,
-        evidence_ids=item.evidence_ids,
+        source_ids=item.source_ids,
         producer_id=item.producer_id,
     )
 

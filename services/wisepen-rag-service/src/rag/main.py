@@ -46,7 +46,7 @@ from rag.domain.entities import (
     GraphNodeProjectionEntity,
     ResourceAclEntity,
     ResourceIndexStateEntity,
-    TextGraphEvidenceEntity,
+    GraphChunkSourceEntity,
 )
 
 no_proxy = ",".join(
@@ -75,7 +75,7 @@ async def lifespan(_: FastAPI):
             DocChunkEntity,
             GraphNodeProjectionEntity,
             GraphEdgeProjectionEntity,
-            TextGraphEvidenceEntity,
+            GraphChunkSourceEntity,
         ],
     )
     kafka_consumers: list[KafkaEventConsumer] = []

@@ -36,8 +36,6 @@ class BaiduQianfanSearchTool(BaseSearchTool):
             "resource_type_filter": [{"type": "web", "top_k": max_results}],
         }
         if recency is SearchRecency.DAY:
-            # 实测 now+1d/d 被拒绝；同一显式日期的 gte/lte 包含该日的非零点结果。
-            # 百度当天按北京时间计算，避免服务主机的本地时区改变检索日期。
             today = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
             payload["search_filter"] = {"range": {"page_time": {"gte": today, "lte": today}}}
         elif recency is not None:

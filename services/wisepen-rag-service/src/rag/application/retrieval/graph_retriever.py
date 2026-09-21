@@ -14,13 +14,13 @@ from common.utils.ranking import (
     RankRequest,
 )
 
-from rag.application.document.models import DocChunk, Document
+from rag.application.document.models import DocChunk
 from rag.application.plugins.core.registry import RagPluginRegistry
 from rag.application.retrieval.models import (
-    GraphSearchHit,
-    GraphSearchLevel,
-    GraphSearchRequest,
-    GraphSearchResult,
+    GraphRetrieveHit,
+    GraphRetrieveLevel,
+    GraphRetrieveRequest,
+    GraphRetrieveResult,
 )
 from rag.domain.acl import PermissionScope
 from rag.domain.repositories.acl import ResourceAclRepository
@@ -47,6 +47,7 @@ class _Candidate:
     candidate_id: str
     kind: Literal["chunk", "fact"]
     text: str
+    rank_text: str
     source: GraphSourceProjection
     chunk: DocChunk | None
 
@@ -91,20 +92,20 @@ class GraphRetriever:
         self._embedding_dimensions = embedding_dimensions
         self._embedding_semaphore = embedding_semaphore
 
-    async def search(
+    async def retrieve(
         self,
-        request: GraphSearchRequest,
+        request: GraphRetrieveRequest,
         scope: PermissionScope,
-    ) -> GraphSearchResult:
+    ) -> GraphRetrieveResult:
         """执行有限图检索；任一来源失效只丢弃该来源，不泄露其资源状态。"""
+        query = request.query.strip() if request.query else ""
+        if not query and not request.seed_node_ids:
+            raise ValueError("query or seed_node_ids must be provided")
         if not self._enabled:
-            return GraphSearchResult([])
+            return GraphRetrieveResult([])
         if self._topology is None:
             raise RuntimeError("graph topology repository is not configured")
 
-        query = request.query.strip()
-        if not query:
-            raise ValueError("query must not be empty")
         if (
             request.vector_top_n <= 0
             or request.candidate_limit <= 0
@@ -123,7 +124,7 @@ class GraphRetriever:
             metadata_filters=metadata_filters,
         )
         if not vector_candidates and not request.seed_node_ids:
-            return GraphSearchResult([])
+            return GraphRetrieveResult([])
 
         # 图遍历，获取来源投影
         # 各分支先各取 vector_top_n，合并后由 candidate_limit 控制图遍历
@@ -135,6 +136,7 @@ class GraphRetriever:
             scope=scope,
             resource_ids=request.resource_ids,
             relation_types=request.relation_types,
+            node_categories=request.node_categories,
             direction=request.direction,
             max_depth=request.max_depth,
             metadata_filters=metadata_filters,
@@ -145,19 +147,26 @@ class GraphRetriever:
         visible_sources = await self._visible_sources(sources, scope=scope)
         candidates = await self._load_candidates(visible_sources)
         if not candidates:
-            return GraphSearchResult([])
+            return GraphRetrieveResult([])
 
         # 粗排顺序沿用 LightRAG：向量命中保留分支顺序，遍历结果按
         # 有界的 hop 批次追加。不同 Dense/BM25 分数不合并；candidate_limit
         # 只负责截断候选数量，不负责定义候选顺序。
         candidates = candidates[: request.candidate_limit]
+        if not query:
+            return GraphRetrieveResult(
+                [
+                    _to_hit(candidate, score=None)
+                    for candidate in candidates[: request.top_k]
+                ]
+            )
         ranked = await self._ranking_pipeline.arank(
             RankRequest(
                 query=RankQuery(text=query),
                 candidates=[
                     RankCandidate(
                         candidate_id=item.candidate_id,
-                        text=item.text,
+                        text=item.rank_text,
                         prior_rank=index,
                     )
                     for index, item in enumerate(candidates, start=1)
@@ -168,13 +177,13 @@ class GraphRetriever:
         )
         decision = ranked.decision or RankDecision.IRRELEVANT
         if decision is RankDecision.IRRELEVANT:
-            return GraphSearchResult([], relevance_decision=decision.value)
+            return GraphRetrieveResult([], relevance_decision=decision.value)
 
         # 请求候选确定后建立的 ACL/active 快照。上游 ACL 通过异步
         # 投影传播，查询中再次读取本地副本既不能消除传播延迟，也会增加 IO。
         by_id = {item.candidate_id: item for item in candidates}
 
-        hits: list[GraphSearchHit] = []
+        hits: list[GraphRetrieveHit] = []
         for item in ranked.ranked:
             candidate = by_id.get(item.candidate_id)
             if candidate is None:
@@ -184,7 +193,7 @@ class GraphRetriever:
                 if chunk is None:
                     continue
                 hits.append(
-                    GraphSearchHit(
+                    GraphRetrieveHit(
                         resource_id=chunk.resource_id,
                         text=candidate.text,
                         score=item.score,
@@ -194,17 +203,17 @@ class GraphRetriever:
                 )
             else:
                 hits.append(
-                    GraphSearchHit(
+                    GraphRetrieveHit(
                         resource_id=candidate.source.resource_id,
                         text=candidate.text,
                         score=item.score,
                     )
                 )
-        return GraphSearchResult(hits, relevance_decision=decision.value)
+        return GraphRetrieveResult(hits, relevance_decision=decision.value)
 
     async def _retrieve_vectors(
         self,
-        request: GraphSearchRequest,
+        request: GraphRetrieveRequest,
         *,
         query: str,
         scope: PermissionScope,
@@ -225,7 +234,7 @@ class GraphRetriever:
             )[0]
 
         tasks = []
-        if request.level in (GraphSearchLevel.LOW, GraphSearchLevel.HYBRID):
+        if request.level in (GraphRetrieveLevel.LOW, GraphRetrieveLevel.HYBRID):
             tasks.append(
                 self._node_vectors.search_dense(
                     query_vector=query_vector,
@@ -236,7 +245,7 @@ class GraphRetriever:
                     limit=request.vector_top_n,
                 )
             )
-        if request.level in (GraphSearchLevel.HIGH, GraphSearchLevel.HYBRID):
+        if request.level in (GraphRetrieveLevel.HIGH, GraphRetrieveLevel.HYBRID):
             tasks.extend(
                 (
                     self._edge_vectors.search_dense(
@@ -258,9 +267,9 @@ class GraphRetriever:
                 )
             )
         groups = await asyncio.gather(*tasks)
-        if request.level is GraphSearchLevel.LOW:
+        if request.level is GraphRetrieveLevel.LOW:
             return _merge_vector_candidates([groups[0]])
-        if request.level is GraphSearchLevel.HIGH:
+        if request.level is GraphRetrieveLevel.HIGH:
             return _merge_vector_candidates([groups[0], groups[1]])
         high = _merge_vector_candidates([groups[1], groups[2]])
         return _merge_vector_candidates([groups[0], high])
@@ -270,21 +279,18 @@ class GraphRetriever:
         sources: list[GraphSourceProjection],
     ) -> list[_Candidate]:
         """将来源投影转换为可精排的候选（chunk 文本或事实文本）。"""
-        # 先批量加载所有 LLM 来源需要的 Evidence；候选仍按 topology 的
-        # 顺序逐项组装，避免把 Chunk 和确定性事实拆成两段而改变粗排顺序。
-        llm_sources = [source for source in sources if source.evidence_ids]
-
-        # 加载 evidence 和对应的 chunk
-        evidences = await self._graph_facts.get_evidences(
+        # 先批量加载所有 LLM 来源的 Chunk 记录；来源契约不再包含字符偏移。
+        llm_sources = [source for source in sources if source.source_ids]
+        source_records = await self._graph_facts.get_sources(
             [
-                evidence_id
+                source_id
                 for source in llm_sources
-                for evidence_id in source.evidence_ids
+                for source_id in source.source_ids
             ]
         )
-        evidence_by_id = {evidence.evidence_id: evidence for evidence in evidences}
+        source_by_id = {source.source_id: source for source in source_records}
         chunks = await self._doc_chunks.get_chunks_by_ids(
-            [evidence.chunk_id for evidence in evidences]
+            [source.chunk_id for source in source_records]
         )
         allowed_revisions = {
             (source.resource_id, source.content_revision) for source in sources
@@ -304,16 +310,18 @@ class GraphRetriever:
         by_chunk: dict[str, _Candidate] = {}
         ordered: list[_Candidate] = []
         for source in sources:
-            if source.evidence_ids:
-                for evidence_id in source.evidence_ids:
-                    evidence = evidence_by_id.get(evidence_id)
-                    if evidence is None:
+            if source.source_ids:
+                for source_id in source.source_ids:
+                    source_record = source_by_id.get(source_id)
+                    if source_record is None:
                         continue
-                    chunk = chunks_by_id.get(evidence.chunk_id)
+                    chunk = chunks_by_id.get(source_record.chunk_id)
                     if (
                         chunk is None
-                        or chunk.resource_id != evidence.resource_id
-                        or not _valid_evidence(evidence, source, chunk, documents)
+                        or chunk.resource_id != source_record.resource_id
+                        or chunk.content_revision != source_record.content_revision
+                        or source_record.target_id != source.target_id
+                        or source_record.target_type != source.target_type
                     ):
                         continue
                     current = by_chunk.get(chunk.chunk_id)
@@ -322,6 +330,7 @@ class GraphRetriever:
                             candidate_id=f"chunk:{chunk.chunk_id}",
                             kind="chunk",
                             text=chunk.get_full_text(),
+                            rank_text=f"{source.get_fact_text()}\n\n{chunk.get_full_text()}",
                             source=source,
                             chunk=chunk,
                         )
@@ -336,6 +345,7 @@ class GraphRetriever:
                             candidate_id=f"fact:{source.projection_id}",
                             kind="fact",
                             text=text,
+                            rank_text=text,
                             source=source,
                             chunk=None,
                         )
@@ -366,7 +376,7 @@ class GraphRetriever:
 # --- 模块级辅助函数 ---
 
 def _compile_filters(
-    request: GraphSearchRequest,
+    request: GraphRetrieveRequest,
     plugin_registry: RagPluginRegistry,
 ) -> tuple[MetadataFilterCondition, ...]:
     """根据请求中的 plugin_id 和 metadata_filter 编译过滤条件。"""
@@ -378,6 +388,18 @@ def _compile_filters(
     if plugin is None:
         raise ValueError("RAG plugin is not registered")
     return plugin.compile_filter(request.metadata_filter)
+
+
+def _to_hit(candidate: _Candidate, *, score: float | None) -> GraphRetrieveHit:
+    if candidate.kind == "chunk" and candidate.chunk is not None:
+        return GraphRetrieveHit(
+            resource_id=candidate.chunk.resource_id,
+            text=candidate.text,
+            score=score,
+            section_id=candidate.chunk.section_id,
+            section_path=list(candidate.chunk.section_path),
+        )
+    return GraphRetrieveHit(resource_id=candidate.source.resource_id, text=candidate.text, score=score)
 
 
 def _merge_vector_candidates(
@@ -405,39 +427,3 @@ def _merge_vector_candidates(
         if not added:
             return merged
         index += 1
-
-
-
-
-def _valid_evidence(
-    evidence,
-    source: GraphSourceProjection,
-    chunk: DocChunk,
-    documents: dict[tuple[str, str], Document],
-) -> bool:
-    """校验 evidence 与来源投影及 chunk 的一致性和 span 归属。"""
-    if (
-        evidence.resource_id != source.resource_id
-        or evidence.content_revision != source.content_revision
-        or evidence.target_id != source.target_id
-        or evidence.target_type != source.target_type
-    ):
-        return False
-    document = documents.get((evidence.resource_id, evidence.content_revision))
-    if document is None:
-        return False
-    # Evidence 可以引用多个相邻 span，但每一段都必须属于它声明的目标 Chunk
-    if not all(
-        any(
-            chunk_span.start_offset <= span.start_offset
-            and span.end_offset <= chunk_span.end_offset
-            for chunk_span in chunk.source_spans
-        )
-        for span in evidence.source_spans
-    ):
-        return False
-    quote = "".join(
-        document.raw_content[span.start_offset : span.end_offset]
-        for span in evidence.source_spans
-    )
-    return quote == evidence.quote_text

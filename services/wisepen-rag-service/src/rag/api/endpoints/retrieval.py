@@ -11,8 +11,8 @@ from fastapi import APIRouter, Depends
 from rag.api.endpoints.common import permission_scope
 from rag.api.schemas.retrieval import (
     DynamicParentResponse,
-    SearchHybridRequest,
-    SearchHybridResponse,
+    RetrieveHybridRequest,
+    RetrieveHybridResponse,
 )
 from rag.application.retrieval.hybrid_retriever import HybridRetriever
 from rag.container import Container
@@ -28,17 +28,17 @@ Retriever = Annotated[
 
 
 @router.post(
-    "/searchHybrid",
-    response_model=R[SearchHybridResponse],
+    "/retrieveHybrid",
+    response_model=R[RetrieveHybridResponse],
     response_model_exclude_none=True,
     summary="混合检索",
 )
 @inject
-async def search_hybrid(
-    request: SearchHybridRequest,
+async def retrieve_hybrid(
+    request: RetrieveHybridRequest,
     user_id: AuthenticatedUser,
     retriever: Retriever,
-) -> R[SearchHybridResponse]:
+) -> R[RetrieveHybridResponse]:
     """执行单次文档混合检索，不隐式进入图谱或读取流程。"""
     try:
         result = await retriever.retrieve(
@@ -53,7 +53,7 @@ async def search_hybrid(
         raise ServiceException(RagErrorCode.QUERY_FAILED) from error
 
     return R.success(
-        SearchHybridResponse(
+        RetrieveHybridResponse(
             relevance_decision=result.relevance_decision,
             parents=[
                 DynamicParentResponse(
@@ -62,6 +62,10 @@ async def search_hybrid(
                     section_path=" > ".join(item.section_path),
                     text=item.text,
                     score=item.score,
+                    seed_nodes=[
+                        {"node_id": node.node_id, "name": node.name, "category": node.category}
+                        for node in item.seed_nodes
+                    ],
                 )
                 for item in result.parents
             ],

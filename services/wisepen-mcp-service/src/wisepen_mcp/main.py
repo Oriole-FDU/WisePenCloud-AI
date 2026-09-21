@@ -39,7 +39,6 @@ mcp_server = build_mcp_server(
     resource_client=container.resource_client(),
     document_client=container.document_client(),
     note_client=container.note_client(),
-    rag_client=container.rag_service_client(),
 )
 mcp_app = mcp_server.streamable_http_app()
 

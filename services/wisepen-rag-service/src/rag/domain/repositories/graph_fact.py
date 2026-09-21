@@ -7,7 +7,7 @@ from typing import Protocol
 from rag.application.graph.models import (
     GraphEdgeProjection,
     GraphNodeProjection,
-    TextGraphEvidence,
+    GraphChunkSource,
 )
 
 
@@ -17,7 +17,7 @@ class GraphRevisionFacts:
 
     nodes: list[GraphNodeProjection] = field(default_factory=list)
     edges: list[GraphEdgeProjection] = field(default_factory=list)
-    evidences: list[TextGraphEvidence] = field(default_factory=list)
+    sources: list[GraphChunkSource] = field(default_factory=list)
 
 
 class GraphFactRepository(Protocol):
@@ -30,7 +30,7 @@ class GraphFactRepository(Protocol):
         content_revision: str,
         nodes: list[GraphNodeProjection],
         edges: list[GraphEdgeProjection],
-        evidences: list[TextGraphEvidence],
+        sources: list[GraphChunkSource],
     ) -> None: ...
 
     async def get_revision_facts(
@@ -40,6 +40,8 @@ class GraphFactRepository(Protocol):
         content_revision: str,
     ) -> GraphRevisionFacts: ...
 
-    async def get_evidences(
-        self, evidence_ids: Sequence[str]
-    ) -> list[TextGraphEvidence]: ...
+    async def get_sources(self, source_ids: Sequence[str]) -> list[GraphChunkSource]: ...
+
+    async def get_node_projections(
+        self, refs: Sequence[tuple[str, str, str]]
+    ) -> list[GraphNodeProjection]: ...

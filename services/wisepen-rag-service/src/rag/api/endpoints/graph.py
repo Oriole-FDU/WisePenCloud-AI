@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends
 
 from rag.api.endpoints.common import permission_scope
 from rag.api.schemas.graph import (
-    GraphHitResponse,
-    SearchGraphRequest,
-    SearchGraphResponse,
+    GraphRetrieveHitResponse,
+    RetrieveGraphRequest,
+    RetrieveGraphResponse,
 )
 from rag.application.retrieval.graph_retriever import GraphRetriever
-from rag.application.retrieval.models import GraphSearchRequest
+from rag.application.retrieval.models import GraphRetrieveRequest
 from rag.container import Container
 from rag.domain.error_codes import RagErrorCode
 
@@ -24,16 +24,16 @@ AuthenticatedUser = Annotated[str, Depends(require_login)]
 Retriever = Annotated[GraphRetriever, Depends(Provide[Container.graph_retriever])]
 
 
-@router.post("/searchGraph", response_model=R[SearchGraphResponse], response_model_exclude_none=True)
+@router.post("/retrieveGraph", response_model=R[RetrieveGraphResponse], response_model_exclude_none=True)
 @inject
-async def search_graph(
-    request: SearchGraphRequest,
+async def retrieve_graph(
+    request: RetrieveGraphRequest,
     user_id: AuthenticatedUser,
     retriever: Retriever,
-) -> R[SearchGraphResponse]:
+    ) -> R[RetrieveGraphResponse]:
     try:
-        result = await retriever.search(
-            GraphSearchRequest(
+        result = await retriever.retrieve(
+            GraphRetrieveRequest(
                 query=request.query,
                 level=request.level,
                 seed_node_ids=list(request.seed_node_ids),
@@ -54,8 +54,8 @@ async def search_graph(
         raise ServiceException(RagErrorCode.QUERY_FAILED) from error
 
     return R.success(
-        SearchGraphResponse(
+        RetrieveGraphResponse(
             relevance_decision=result.relevance_decision,
-            hits=[GraphHitResponse.model_validate(item) for item in result.hits],
+            hits=[GraphRetrieveHitResponse.model_validate(item) for item in result.hits],
         )
     )

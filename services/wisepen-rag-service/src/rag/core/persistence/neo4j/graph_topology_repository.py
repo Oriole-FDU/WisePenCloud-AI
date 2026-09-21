@@ -65,7 +65,6 @@ SET node.name = item.name,
     node.node_type = item.node_type,
     node.category = item.category,
     node.description = item.description,
-    node.aliases = item.aliases,
     node.extra_meta = item.extra_meta
 MERGE (source:{_SOURCE_LABEL} {{projection_id: item.projection_id}})
 SET source.target_type = 'node',
@@ -73,7 +72,7 @@ SET source.target_type = 'node',
     source.resource_id = item.resource_id,
     source.content_revision = item.content_revision,
     source.producer_id = item.producer_id,
-    source.evidence_ids = item.evidence_ids,
+    source.source_ids = item.source_ids,
     source.acl_revision = item.acl_revision,
     source.owner_id = item.owner_id,
     source.readable_users = item.readable_users,
@@ -104,7 +103,7 @@ SET source.target_type = 'edge',
     source.resource_id = item.resource_id,
     source.content_revision = item.content_revision,
     source.producer_id = item.producer_id,
-    source.evidence_ids = item.evidence_ids,
+    source.source_ids = item.source_ids,
     source.acl_revision = item.acl_revision,
     source.owner_id = item.owner_id,
     source.readable_users = item.readable_users,
@@ -182,6 +181,7 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
         scope: PermissionScope,
         resource_ids: Sequence[str] | None,
         relation_types: Sequence[str],
+        node_categories: Sequence[str],
         direction: TraversalDirection,
         max_depth: int,
         metadata_filters: Sequence[MetadataFilterCondition],
@@ -212,6 +212,9 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
                   AND {predicate}
                 OPTIONAL MATCH (target)-[:RAG_V3_FROM]->(source_node:{_NODE_LABEL})
                 OPTIONAL MATCH (target)-[:RAG_V3_TO]->(target_node:{_NODE_LABEL})
+                WHERE (size($relation_types) = 0 OR target.target_type = 'node' OR target.relation_type IN $relation_types)
+                  AND (size($node_categories) = 0 OR target.target_type = 'node'
+                       OR source_node.category IN $node_categories OR target_node.category IN $node_categories)
                 RETURN source, target, source_node.node_id AS source_node_id,
                        target_node.node_id AS target_node_id,
                        source_node.name AS source_node_name,
@@ -246,6 +249,9 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
                     MATCH (edge:{_EDGE_LABEL})-[:RAG_V3_FROM]->(source_node:{_NODE_LABEL})
                     MATCH (edge)-[:RAG_V3_TO]->(target_node:{_NODE_LABEL})
                     WHERE (size($relation_types) = 0 OR edge.relation_type IN $relation_types)
+                      AND (size($node_categories) = 0
+                           OR source_node.category IN $node_categories
+                           OR target_node.category IN $node_categories)
                       AND {_direction_predicate(direction)}
                     MATCH (source:{_SOURCE_LABEL})-[:RAG_V3_PROJECTS_EDGE]->(edge)
                     WHERE {predicate}
@@ -258,6 +264,7 @@ class Neo4jGraphTopologyRepository(GraphTopologyRepository):
                     """,
                     frontier_node_ids=list(frontier),
                     relation_types=list(relation_types),
+                    node_categories=list(node_categories),
                     limit=limit - len(result),
                     **parameters,
                 )
@@ -297,7 +304,7 @@ def _node_item(item: GraphNodeProjection, acl: ResourceAcl) -> dict[str, Any]:
             target_id=item.node.node_id,
             resource_id=item.resource_id,
             content_revision=item.content_revision,
-            evidence_ids=item.evidence_ids,
+            source_ids=item.source_ids,
             producer_id=item.producer_id,
         ),
         "node_id": item.node.node_id,
@@ -305,7 +312,6 @@ def _node_item(item: GraphNodeProjection, acl: ResourceAcl) -> dict[str, Any]:
         "node_type": item.node.node_type.value,
         "category": item.node.category,
         "description": item.node.description,
-        "aliases": item.node.aliases,
         "extra_meta": item.node.extra_meta,
         **_source_properties(item, acl),
     }
@@ -319,7 +325,7 @@ def _edge_item(item: GraphEdgeProjection, acl: ResourceAcl) -> dict[str, Any]:
             target_id=item.edge.edge_id,
             resource_id=item.resource_id,
             content_revision=item.content_revision,
-            evidence_ids=item.evidence_ids,
+            source_ids=item.source_ids,
             producer_id=item.producer_id,
         ),
         "edge_id": item.edge.edge_id,
@@ -342,7 +348,7 @@ def _source_properties(
         "resource_id": item.resource_id,
         "content_revision": item.content_revision,
         "producer_id": item.producer_id,
-        "evidence_ids": item.evidence_ids,
+        "source_ids": item.source_ids,
         # 过滤字段加上前缀，以便 Cypher 中可以用 source['filter_xxx'] 匹配
         "filter_properties": {
             f"filter_{key}": value for key, value in item.filter_values.items()
@@ -446,7 +452,6 @@ def _source_from_record(
             node_type=target["node_type"],
             category=target["category"],
             description=target.get("description", ""),
-            aliases=tuple(target.get("aliases", ())),
             extra_meta=target.get("extra_meta", {}),
         )
     else:
@@ -465,7 +470,7 @@ def _source_from_record(
         target_id=source["target_id"],
         resource_id=source["resource_id"],
         content_revision=source["content_revision"],
-        evidence_ids=source.get("evidence_ids", []),
+        source_ids=source.get("source_ids", []),
         producer_id=source.get("producer_id"),
         node=node,
         edge=edge,

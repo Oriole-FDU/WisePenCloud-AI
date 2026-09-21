@@ -1,25 +1,3 @@
-"""基于会话缓存的轻量级相关性检索与上下文组装系统。
-
-本模块为大模型提供在单个或多个缓存工具输出（Cached Tool Output）之上的相关性检索与上下文组装能力，
-遵循“细粒度索引召回，粗粒度拓扑组装，分级决策呈现”的设计哲学：
-
-1. 混合检索与重排流水线 (Hybrid Retrieval & Reranking):
-   - 一条 canonical query 同时驱动 BM25 粗排与 ZeroEntropy 相关性重排。
-   - 融合 BM25 与考虑文档结构权重的 Fielded BM25 (加权 Section 路径与 Anchor 标签)。
-   - 使用 Cross-Encoder (ZeroEntropy) 深度语义重排，并通过 HighLowRelevanceGate 动态过滤低相关噪声。
-
-2. 文档拓扑驱动的父块聚合 (Parent Document Aggregation):
-   - 以原子 Chunk 为召回单位保证检索灵敏度，召回后按 (content_id, section_id) 聚合。
-   - 弃用脆弱的字符几何切分，基于预存的 chunk_index 离散拓扑向同 Section 邻近 Chunk 扩展上下文，
-     在保证段落边界完整的同时，天然阻断跨章节的语义渗漏。
-
-3. 智能三路分流呈现策略 (Tri-branch Presentation Strategy):
-   根据章节长度、连通块覆盖密度与模型阅读预算，统一在全局 Top-K 下分流输出：
-   - 短章节 (≤ 4k chars): 直接返回整章完整视窗。
-   - 高密度章节 (≤ 8k chars 且覆盖率 ≥ 80%): 降级为 Section 读取建议，引导模型按章精准精读。
-   - 局部连通块: ≤ 6k chars 返回局部连续视窗；超大连通块生成 Range 读取建议，支持按偏移量连续续读。
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence

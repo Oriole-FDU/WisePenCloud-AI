@@ -15,5 +15,3 @@ class McpErrorCode(IErrorCode):
     WEB_SEARCH_FAILED = (51010, "Web Search 请求失败")
     WEB_SEARCH_UNAVAILABLE = (51011, "Web Search 服务不可用")
     WEB_SEARCH_EMPTY_RESULT = (51012, "Web Search 没有结果")
-    RAG_REQUEST_INVALID = (41020, "RAG 请求参数不合法")
-    RAG_SERVICE_UNAVAILABLE = (52020, "RAG 服务不可用")

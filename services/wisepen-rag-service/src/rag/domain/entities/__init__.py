@@ -5,7 +5,7 @@ from .documents import DocumentRevisionEntity, ResourceIndexStateEntity
 from .graph import (
     GraphEdgeProjectionEntity,
     GraphNodeProjectionEntity,
-    TextGraphEvidenceEntity,
+    GraphChunkSourceEntity,
 )
 from .resource_acl import ResourceAclEntity
 
@@ -16,5 +16,5 @@ __all__ = [
     "GraphNodeProjectionEntity",
     "ResourceAclEntity",
     "ResourceIndexStateEntity",
-    "TextGraphEvidenceEntity",
+    "GraphChunkSourceEntity",
 ]
