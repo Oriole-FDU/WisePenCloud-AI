@@ -235,6 +235,8 @@ class ChatTurnFinalizer:
         """
         if windowed_history_messages is None or chat_record_messages is None:
             return
+        if not windowed_history_messages.messages_compress_candidates:
+            return
 
         # 处理持久化占位符，如果有占位符应使用占位符替换原本的内容
         chat_record_messages = ChatMessage.for_persistence(chat_record_messages)
@@ -293,8 +295,13 @@ class ChatTurnFinalizer:
 
         # 持久化新摘要到 MongoDB，同时写入压缩时间戳
         try:
+            # 摘要边界必须对应已纳入摘要的最后一条消息，不能使用摘要完成时间
+            summary_updated_at = max(
+                message.created_at
+                for message in windowed_history_messages.messages_compress_candidates
+            )
             await self.session_repo.update_session_summary(session_id=session_id, current_summary=new_summary,
-                                                           summary_updated_at=datetime.now(timezone.utc))
+                                                           summary_updated_at=summary_updated_at)
         except Exception as e:
             error("chat summary persist failed.", session_id=session_id, exc=e)
 
