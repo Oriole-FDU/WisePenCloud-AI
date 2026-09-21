@@ -49,7 +49,7 @@ _RESULT_ADAPTER = TypeAdapter(CachedToolOutputStructureResult)
 
 
 class CachedToolOutputInspectStructureTool:
-    
+
     def __init__(self) -> None:
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
@@ -57,9 +57,15 @@ class CachedToolOutputInspectStructureTool:
                 description=(
                     "Get a compact section outline for one cached tool output "
                     "without reading body text.\n\n"
-                    "Use outline[].section_id with "
-                    "read_cached_tool_output_by_section. Page ranges and anchor "
-                    "labels are navigation hints attached to each outline node."
+                    "The outline is a heuristic navigation preview, not an authoritative "
+                    "table of contents. It may be incomplete, noisy, or have incorrect "
+                    "hierarchy or labels. Page ranges and anchor labels are approximate "
+                    "navigation hints, not verified facts.\n\n"
+                    "Use outline[].section_id with read_cached_tool_output_by_section to "
+                    "read the actual content. Treat the outline as a soft prior for "
+                    "navigation only. Do not infer that a section is absent solely from "
+                    "this outline. If the outline conflicts with the retrieved body text, "
+                    "trust the body text."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
