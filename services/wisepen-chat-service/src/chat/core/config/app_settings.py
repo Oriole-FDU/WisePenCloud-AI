@@ -33,10 +33,11 @@ class AppSettings(BaseModel):
 
     # 模型配置 (请求依赖 LLM 默认网关配置)
     # Memory相关模型
-    MEMORY_LLM_MODEL: str
-    MEMORY_EMBEDDING_MODEL: str
-    MEMORY_RERANKER_ZE_MODEL: str
-    ZERO_ENTROPY_API_KEY: str
+    # 可选功能的配置延迟到实际调用时校验。
+    MEMORY_LLM_MODEL: str | None = None
+    MEMORY_EMBEDDING_MODEL: str | None = None
+    MEMORY_RERANKER_ZE_MODEL: str | None = None
+    ZERO_ENTROPY_API_KEY: str = ""
 
     RERANKER_MODEL: str  # 重排模型
 
@@ -66,9 +67,9 @@ class AppSettings(BaseModel):
     REDIS_URL: str
     MONGODB_URL: str
     MONGODB_DB_NAME: str
-    QDRANT_HOST: str
+    QDRANT_HOST: str | None = None
     QDRANT_PORT: int = 6333
-    QDRANT_PASSWORD: str
+    QDRANT_PASSWORD: str | None = None
 
     # 参数配置
 
