@@ -33,10 +33,15 @@ class OutlineBuilder:
         sibling_steps: int = 1,
         scope: PermissionScope,
     ) -> list[NeighborhoodItem]:
-        """为每个 section 生成邻域大纲：显示父级、同级及一级子级。"""
+        """为每个 section 生成带完整祖先链的局部大纲。"""
         locations = await self._snapshots.locate_sections(section_ids, scope=scope)
 
         items: list[NeighborhoodItem] = []
+        # 同一请求可能定位到同一文档的多个 Section；这些结构索引只需构建一次。
+        document_indexes: dict[
+            str,
+            tuple[dict[str, Section], dict[str | None, list[Section]]],
+        ] = {}
         for section_id in section_ids:
             location = locations.get(section_id)
             if location is None:
@@ -44,26 +49,22 @@ class OutlineBuilder:
                 raise DocumentReadError("section is not visible")
 
             structure = location.document.structure
+            indexes = document_indexes.get(location.document.resource_id)
+            if indexes is None:
+                sections_by_id = {
+                    section.section_id: section for section in structure.sections
+                }
+                indexes = (sections_by_id, _children_by_parent(structure.sections))
+                document_indexes[location.document.resource_id] = indexes
+            sections_by_id, children_by_parent = indexes
 
-            # 获取同一父级下的所有兄弟节点
-            siblings = sorted(
-                (
-                    section
-                    for section in structure.sections
-                    if section.parent_section_id == location.section.parent_section_id
-                ),
-                key=lambda s: s.ordinal,
+            siblings = children_by_parent.get(
+                location.section.parent_section_id, []
             )
-            index = siblings.index(location.section)
-
-            # 查找父节点（如果存在）
-            parent = next(
-                (
-                    section
-                    for section in structure.sections
-                    if section.section_id == location.section.parent_section_id
-                ),
-                None,
+            index = next(
+                index
+                for index, sibling in enumerate(siblings)
+                if sibling.section_id == section_id
             )
 
             # 取邻域窗口内的兄弟节点
@@ -71,47 +72,60 @@ class OutlineBuilder:
             end = index + sibling_steps + 1
             visible_siblings = siblings[start:end]
 
-            # 构建父子关系映射
-            children_by_parent = _children_by_parent(structure.sections)
-
             lines: list[str] = []
+            rendered_ids: set[str] = set()
 
-            # 1. 父节点行（若存在）
-            if parent is not None:
+            def append_node(
+                section: Section,
+                *,
+                indent: int,
+                current: bool = False,
+                rendered_ids: set[str] = rendered_ids,
+                lines: list[str] = lines,
+                structure=structure,
+                children_by_parent=children_by_parent,
+            ) -> None:
+                # 有效 Section Tree 不会重复引用节点；集合同时保护输出不重复。
+                if section.section_id in rendered_ids:
+                    return
+                rendered_ids.add(section.section_id)
                 lines.append(
                     _node_line(
                         structure,
-                        parent,
-                        indent=0,
+                        section,
+                        indent=indent,
+                        current=current,
                         children_by_parent=children_by_parent,
                     )
                 )
 
-            # 2. 可见兄弟节点（含当前节点标记）
+            # 沿 parent_section_id 回溯，再反转为根到父节点的真实缩进路径。
+            ancestors: list[Section] = []
+            parent_id = location.section.parent_section_id
+            visited_ids = {location.section.section_id}
+            while parent_id is not None and parent_id not in visited_ids:
+                parent = sections_by_id.get(parent_id)
+                if parent is None:
+                    break
+                ancestors.append(parent)
+                visited_ids.add(parent.section_id)
+                parent_id = parent.parent_section_id
+            ancestors.reverse()
+            for indent, ancestor in enumerate(ancestors):
+                append_node(ancestor, indent=indent)
+
+            current_indent = len(ancestors)
+            # 当前层只保留 sibling_steps 窗口，不展开祖先节点的其他分支。
             for sibling in visible_siblings:
                 is_current = sibling.section_id == section_id
-                indent = 1 if parent is not None else 0
-                lines.append(
-                    _node_line(
-                        structure,
-                        sibling,
-                        indent=indent,
-                        current=is_current,
-                        children_by_parent=children_by_parent,
-                    )
+                append_node(
+                    sibling,
+                    indent=current_indent,
+                    current=is_current,
                 )
-                # 3. 若为当前节点，展开其直接子节点（缩进+1）
                 if is_current:
-                    child_indent = 2 if parent is not None else 1
                     for child in children_by_parent.get(section_id, []):
-                        lines.append(
-                            _node_line(
-                                structure,
-                                child,
-                                indent=child_indent,
-                                children_by_parent=children_by_parent,
-                            )
-                        )
+                        append_node(child, indent=current_indent + 1)
 
             items.append(
                 _item(
@@ -131,7 +145,7 @@ class OutlineBuilder:
         max_level: int = 2,
         scope: PermissionScope,
     ) -> str:
-        """生成整个文档的全局大纲，限制最大层级。"""
+        """生成整个文档的全局大纲，限制相对于根节点的最大深度。"""
         documents = await self._snapshots.load_documents([resource_id], scope=scope)
         document = documents.get(resource_id)
         if document is None:
@@ -140,9 +154,9 @@ class OutlineBuilder:
         children_by_parent = _children_by_parent(document.structure.sections)
         lines: list[str] = []
 
-        def visit(section: Section, indent: int) -> None:
-            # 当 max_level 为 0 时，表现为不限制层级，显示所有层级
-            if max_level > 0 and section.level > max_level:
+        def visit(section: Section, indent: int, depth: int) -> None:
+            # max_level 表示相对于目录根节点的树深度，而非 Markdown 标题级别。
+            if max_level > 0 and depth > max_level:
                 return
             lines.append(
                 _node_line(
@@ -153,11 +167,11 @@ class OutlineBuilder:
                 )
             )
             for child in children_by_parent.get(section.section_id, []):
-                visit(child, indent + 1)
+                visit(child, indent + 1, depth + 1)
 
         # 从根节点（parent_section_id 为 None）开始遍历
         for root in children_by_parent.get(None, []):
-            visit(root, 0)
+            visit(root, 0, 1)
 
         return "\n".join(lines)
 
@@ -201,9 +215,14 @@ def _node_line(
     """
     children = (children_by_parent or {}).get(section.section_id, [])
     suffix = f" [+{len(children)}]" if children else ""
-    marker = " [C]" if current else f" {{#{section.section_id}}}"
+    marker = (
+        f" {{#{section.section_id}}} [current]"
+        if current
+        else f" {{#{section.section_id}}}"
+    )
 
     page_range = _page_range(structure.pages, section.subtree_span)
+    # 字符数对应默认 DIRECT 读取的直属正文；页码则表示包含子章节的整体覆盖范围。
     char_count = sum(span.length for span in section.content_spans)
     metadata = f" ({char_count} chars"
     if page_range:

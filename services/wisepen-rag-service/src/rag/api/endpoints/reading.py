@@ -126,7 +126,7 @@ async def get_global_outline(
     user_id: AuthenticatedUser,
     outline: Outline,
 ) -> R[GetGlobalOutlineResponse]:
-    """返回一个资源的 Markdown 目录；max_level=0 表示展开全部层级。"""
+    """返回一个资源的 Markdown 目录；max_level=0 表示展开全部树深度。"""
     try:
         content = await outline.global_outline(
             request.resource_id,

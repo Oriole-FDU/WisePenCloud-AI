@@ -52,7 +52,8 @@ _CANDIDATE_LIMIT = 60  # 保留前60个粗召回
 _DEFAULT_TOP_K = 5  # 返回topk个父块
 _MAX_TOP_K = 10
 _SHORT_SECTION_MAX_CHARS = 4_000  # 只控制短 Section 是否直接返回全文。
-_LOCAL_PARENT_HARD_MAX_CHARS = 6_000  # 只控制局部父块的文本输出上限。
+_LOCAL_PARENT_HARD_MAX_CHARS = 8_000  # 只控制单个父块的直接文本输出上限。
+_SEARCH_TOTAL_CHAR_BUDGET = 24_000  # 只控制本次 Search 直接返回的正文总量。
 _SECTION_RECOMMENDATION_MAX_CHARS = 8_000  # 控制是否允许建议整章读取。
 _SECTION_RECOMMENDATION_COVERAGE = 0.8  # 高相关性section覆盖率阈值
 
@@ -131,7 +132,7 @@ class CachedToolOutputRangeReadRecommendation:
 
 @dataclass(slots=True)
 class CachedToolOutputSearchByRelevanceResult:
-    """语义检索结果；读取建议优先于局部父块展示给模型。"""
+    """语义检索结果；正文与续读指针共享同一父块排名。"""
 
     # 这些列表使用默认空值，执行出口会通过 TypeAdapter 将空列表移除。
     section_recommendations: list[CachedToolOutputSectionReadRecommendation] = field(
@@ -173,6 +174,7 @@ class _ParentCandidate:
     coverage_ratio: float | None = None
     source_range: SourceSpan | None = None
     matched_chunk_count: int = 0
+    is_full_section: bool = False
 
 
 @lru_cache(maxsize=1)
@@ -223,7 +225,7 @@ class CachedToolOutputSearchByRelevanceTool:
                     "The retrieval pipeline decides how BM25 and the reranker interpret it.\n\n"
                     "Returns a unified ranking of:\n"
                     "1. results: Ready-to-read local text windows.\n"
-                    "2. section_recommendations: High-coverage sections; follow up with read_cached_tool_output_by_section.\n"
+                    "2. section_recommendations: Sections deferred by the direct-output budget; follow up with read_cached_tool_output_by_section.\n"
                     "3. range_recommendations: Broad continuous matches; follow up with read_cached_tool_output_by_range.\n\n"
                     "For exact literal patterns or identifiers, use search_cached_tool_output_by_regex instead."
                 ),
@@ -386,8 +388,8 @@ def _build_parent_candidates(
 ) -> list[_ParentCandidate]:
     """按 Section 的长度和命中密度，将通过 gate 的 chunk 组装为父块候选。
 
-    先构造不受局部输出预算限制的完整扩展连通块，再决定是否推荐读取整个 Section。
-    只有整章推荐失败后，局部父块才应用 6000 字符硬上限。
+    先构造不受输出预算限制的完整扩展连通块，再决定父块的内容范围。
+    最终是否直接展示正文由统一的 Search 总预算阶段决定。
     """
 
     first_match = min(matched_chunks, key=lambda item: item.rank)
@@ -397,7 +399,7 @@ def _build_parent_candidates(
 
     if section is not None:
         scope = section.own_span
-        if _span_length(scope) <= _SHORT_SECTION_MAX_CHARS:
+        if scope.length <= _SHORT_SECTION_MAX_CHARS:
             # 短 Section 直接完整返回，避免为本可一次理解的内容引入窗口组装。
             return [
                 _ParentCandidate(
@@ -411,6 +413,7 @@ def _build_parent_candidates(
                         span=scope,
                         scope=scope,
                     ),
+                    is_full_section=True,
                     matched_chunk_count=len(matched_chunks),
                 )
             ]
@@ -423,17 +426,17 @@ def _build_parent_candidates(
         scope=scope,
         matched_chunks=matched_chunks,
     )
-    # 如果section长度低于最大建议章节阈值，连通窗口唯一且连续，覆盖率超过80%，则落入建议章节分区
+    # 高覆盖只决定父块扩展到完整 Section；是否立即展示正文由最终预算阶段判断。
     if (
         section is not None
-        and _span_length(scope) <= _SECTION_RECOMMENDATION_MAX_CHARS
+        and scope.length <= _SECTION_RECOMMENDATION_MAX_CHARS
         and len(expanded_groups) == 1
     ):
         expanded_spans = [span for span, _ in expanded_groups]
         coverage_ratio = _covered_length(
             spans=expanded_spans,
             scope=scope,
-        ) / _span_length(scope)
+        ) / scope.length
         if coverage_ratio >= _SECTION_RECOMMENDATION_COVERAGE:
             return [
                 _ParentCandidate(
@@ -443,6 +446,12 @@ def _build_parent_candidates(
                     sort_rank=first_match.rank,
                     score=max(item.score for item in matched_chunks),
                     coverage_ratio=coverage_ratio,
+                    window=_window_from_span(
+                        stored=stored,
+                        span=scope,
+                        scope=scope,
+                    ),
+                    is_full_section=True,
                     matched_chunk_count=len(matched_chunks),
                 )
             ]
@@ -468,7 +477,7 @@ def _build_local_parent_candidates(
 ) -> list[_ParentCandidate]:
     """将重叠的 chunk 上下文贪婪合并为局部父块或大范围读取建议。
 
-    扩展范围已经在 Section 推荐判断前完成合并；本函数只负责按 6000 字符硬上限
+    扩展范围已经在 Section 覆盖率判断前完成合并；本函数只负责按 8000 字符硬上限
     将每个完整连通块投影为文本窗口或单个连续 range。
     """
     return [
@@ -607,7 +616,7 @@ def _local_parent_candidate(
 ) -> _ParentCandidate:
     sort_rank = min(item.rank for item in matched_chunks)
     score = max(item.score for item in matched_chunks)
-    if _span_length(span) > _LOCAL_PARENT_HARD_MAX_CHARS:
+    if span.length > _LOCAL_PARENT_HARD_MAX_CHARS:
         # 重叠命中覆盖的连续原文超过父块预算时，不能截断任何命中；将连续范围交给
         # range 工具续读，保留完整命中范围而不是返回一个语义不完整的父块。
         return _ParentCandidate(
@@ -636,10 +645,11 @@ def _build_search_result(
     *,
     top_k: int,
 ) -> CachedToolOutputSearchByRelevanceResult:
-    """按父块代表分数选出最终候选；每个建议或窗口各占一个 top_k。
+    """按父块代表分数选出最终候选，并统一分配直接正文预算。
 
     一个内部候选最终只会落入三种公开视图之一：Section 读取建议、range 读取建议或
-    普通父块。统一在这里分配 rank，确保不同视图共享同一套 top_k 计数。
+    普通父块。先确定 top_k 和 rank，再按排名尝试消耗总正文预算；预算不足的候选保留
+    原文定位信息，不影响后续候选继续使用剩余预算。
     """
 
     # 代表分数取父块内最高命中分数；最早 rank 只用于相同分数时稳定排序。
@@ -648,24 +658,8 @@ def _build_search_result(
         key=lambda item: (-item.score, item.sort_rank),
     )[:top_k]
     result = CachedToolOutputSearchByRelevanceResult()
+    remaining_budget = _SEARCH_TOTAL_CHAR_BUDGET
     for rank, candidate in enumerate(selected_candidates, start=1):
-        if candidate.coverage_ratio is not None:
-            section = candidate.section
-            if section is None:
-                raise ValueError("section recommendation requires a section")
-            result.section_recommendations.append(
-                CachedToolOutputSectionReadRecommendation(
-                    content_id=candidate.content_id,
-                    section_id=section.section_id,
-                    title=section.title,
-                    section_path=candidate.section_path or "",
-                    rank=rank,
-                    score=candidate.score,
-                    coverage_ratio=candidate.coverage_ratio,
-                )
-            )
-            continue
-
         if candidate.source_range is not None:
             result.range_recommendations.append(
                 CachedToolOutputRangeReadRecommendation(
@@ -687,18 +681,67 @@ def _build_search_result(
         window = candidate.window
         if window is None:
             raise ValueError("parent candidate requires a window or recommendation")
-        result.results.append(
-            CachedToolOutputSearchByRelevanceItem(
+
+        window_length = len(window.text)
+        if (
+            window_length <= _LOCAL_PARENT_HARD_MAX_CHARS
+            and window_length <= remaining_budget
+        ):
+            result.results.append(
+                CachedToolOutputSearchByRelevanceItem(
+                    content_id=candidate.content_id,
+                    rank=rank,
+                    score=candidate.score,
+                    section_id=(
+                        candidate.section.section_id
+                        if candidate.section is not None
+                        else None
+                    ),
+                    section_path=candidate.section_path,
+                    window=window,
+                )
+            )
+            remaining_budget -= window_length
+            continue
+
+        if candidate.is_full_section:
+            section = candidate.section
+            if section is None:
+                raise ValueError("section recommendation requires a section")
+            result.section_recommendations.append(
+                CachedToolOutputSectionReadRecommendation(
+                    content_id=candidate.content_id,
+                    section_id=section.section_id,
+                    title=section.title,
+                    section_path=candidate.section_path or "",
+                    rank=rank,
+                    score=candidate.score,
+                    coverage_ratio=(
+                        candidate.coverage_ratio
+                        if candidate.coverage_ratio is not None
+                        else 1.0
+                    ),
+                )
+            )
+            continue
+
+        # 预算不足时保留当前父块的完整原文范围，后续由 range 工具按需读取，且不
+        # 阻塞后续更短候选继续消耗剩余预算。
+        result.range_recommendations.append(
+            CachedToolOutputRangeReadRecommendation(
                 content_id=candidate.content_id,
-                rank=rank,
-                score=candidate.score,
                 section_id=(
                     candidate.section.section_id
                     if candidate.section is not None
                     else None
                 ),
                 section_path=candidate.section_path,
-                window=window,
+                rank=rank,
+                score=candidate.score,
+                range=_format_range(
+                    SourceSpan(window.start_offset, window.end_offset)
+                ),
+                matched_chunk_count=candidate.matched_chunk_count,
             )
         )
     return result
@@ -739,9 +782,9 @@ def _covered_length(
                 max(current.end_offset, span.end_offset),
             )
             continue
-        covered_length += _span_length(current)
+        covered_length += current.length
         current = span
-    return covered_length + _span_length(current)
+    return covered_length + current.length
 
 
 def _window_from_span(
@@ -759,10 +802,6 @@ def _window_from_span(
         # 局部父块不是完整 Section 或完整 flat 文本时，需要向模型暴露仍有可续读内容。
         truncated=span != scope,
     )
-
-
-def _span_length(span: SourceSpan) -> int:
-    return span.end_offset - span.start_offset
 
 
 def _format_range(span: SourceSpan) -> str:

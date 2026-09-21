@@ -81,7 +81,11 @@ class GetGlobalOutlineRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     resource_id: NonEmptyText = Field(description="要读取大纲的资源标识。")
-    max_level: int = Field(default=2, ge=0, description="最大标题层级；0 表示展开全部层级。")
+    max_level: int = Field(
+        default=2,
+        ge=0,
+        description="相对于目录根节点的最大展示深度；0 表示展开全部层级。",
+    )
 
 
 class GetGlobalOutlineResponse(BaseModel):
