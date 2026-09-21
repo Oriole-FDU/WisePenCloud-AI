@@ -69,7 +69,10 @@ class ChatTurnToolPolicyBuilder:
                 skill_match_top_k=tool_and_skill_policy.skill_match_top_k,
             )
 
-        current_note_edit_enabled = find_opened_note_resource(frontend_states) is not None
+        current_note_edit_enabled = (
+            tool_and_skill_policy.enable_use_tool
+            and find_opened_note_resource(frontend_states) is not None
+        )
 
         tool_context: dict[str, Any] = {
             "session_id": session_id,
@@ -91,10 +94,13 @@ class ChatTurnToolPolicyBuilder:
             expose_tool_name_set.update(_SKILL_TOOL_NAMES)
         if current_note_edit_enabled:
             expose_tool_name_set.update(_CURRENT_NOTE_EDIT_TOOL_NAMES)
-        if has_session_summary:
+        if tool_and_skill_policy.enable_use_tool and has_session_summary:
             # 如有压缩摘要，则暴露会话工具，用于召回被压缩的上下文
             expose_tool_name_set.update(_SESSION_TOOL_NAMES)
-        if has_history_image_record(chat_history_record_messages):
+        if (
+            tool_and_skill_policy.enable_use_tool
+            and has_history_image_record(chat_history_record_messages)
+        ):
             # 如历史上下文中有图片，则暴露图片附件读取工具
             expose_tool_name_set.update(_IMAGE_ATTACHMENT_TOOL_NAMES)
 
@@ -102,20 +108,27 @@ class ChatTurnToolPolicyBuilder:
             # 只要开启了工具，工具输出缓存系列工具就始终加载
             expose_tool_name_set.update(_CACHED_TOOL_OUTPUT_TOOL_NAMES)
 
+        if tool_and_skill_policy.enable_use_tool:
+            effective_tool_selection_default_enabled = (
+                tool_selection_default_enabled
+                if tool_selection_default_enabled is not None
+                else tool_and_skill_policy.tool_selection_default_enabled
+            )
+            effective_tool_selection_overrides = (
+                dict(tool_selection_overrides)
+                if tool_selection_overrides is not None
+                else dict(tool_and_skill_policy.tool_selection_overrides)
+            )
+        else:
+            effective_tool_selection_default_enabled = False
+            effective_tool_selection_overrides = {}
+
         return ChatTurnToolPolicyResult(
             available_skills=available_skills,
             tool_context=tool_context,
             expose_tool_name_set=expose_tool_name_set,
-            tool_selection_default_enabled=(
-                tool_selection_default_enabled
-                if tool_selection_default_enabled is not None
-                else tool_and_skill_policy.tool_selection_default_enabled
-            ),
-            tool_selection_overrides=(
-                dict(tool_selection_overrides)
-                if tool_selection_overrides is not None
-                else dict(tool_and_skill_policy.tool_selection_overrides)
-            ),
+            tool_selection_default_enabled=effective_tool_selection_default_enabled,
+            tool_selection_overrides=effective_tool_selection_overrides,
         )
 
 
