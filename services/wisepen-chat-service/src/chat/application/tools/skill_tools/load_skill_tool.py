@@ -88,7 +88,12 @@ class LoadSkillTool:
         if is_builtin_skill_id(skill_id):
             skill = get_builtin_skill(skill_id)
         else:
-            skill = await self._ai_asset_client.get_published_skill(skill_id)
+            skill_version = (context.get("skill_versions") or {}).get(skill_id)
+            skill = (
+                await self._ai_asset_client.get_skill_with_version(skill_id, skill_version)
+                if isinstance(skill_version, int) and skill_version > 0
+                else await self._ai_asset_client.get_published_skill(skill_id)
+            )
         if skill is None:
             raise ToolExecutionError(
                 reason="Skill Not Found",
