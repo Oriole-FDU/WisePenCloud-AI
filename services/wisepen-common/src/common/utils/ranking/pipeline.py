@@ -42,8 +42,8 @@ class RankingPipeline:
                 ranked=(),
                 total_candidates=len(request.candidates),
             )
-
-        ranked = ranked[: request.candidate_limit]
+        candidate_count = len(request.candidates)
+        ranked = ranked[: min(request.candidate_limit, candidate_count)]
         decision: RankDecision | None = None
         decision_score: float | None = None
         if self.gate is not None:
@@ -57,7 +57,7 @@ class RankingPipeline:
 
         return RankResult(
             ranked=assign_ranks(ranked[: request.top_k]),
-            total_candidates=len(request.candidates),
+            total_candidates=candidate_count,
             decision=decision,
             decision_score=decision_score,
         )
@@ -70,11 +70,11 @@ class RankingPipeline:
                 ranked=(),
                 total_candidates=len(request.candidates),
             )
-
-        ranked = ranked[: request.candidate_limit]
+        candidate_count = len(request.candidates)
+        ranked = ranked[: min(request.candidate_limit, candidate_count)]
         if self.reranker is not None:
             ranked = await self.reranker.rerank(query=request.query, ranked=ranked)
-            ranked = assign_ranks(ranked)[: request.candidate_limit]
+            ranked = assign_ranks(ranked)
 
         decision: RankDecision | None = None
         decision_score: float | None = None
@@ -91,8 +91,8 @@ class RankingPipeline:
             )
 
         return RankResult(
-            ranked=assign_ranks(ranked[: request.top_k]),
-            total_candidates=len(request.candidates),
+            ranked=assign_ranks(ranked[: min(request.top_k, candidate_count)]),
+            total_candidates=candidate_count,
             decision=decision,
             decision_score=decision_score,
         )
@@ -152,6 +152,20 @@ class RankingPipeline:
         signals: list[ScoreSignal] = []
         for scorer in self.scorers:
             signals.extend(scorer.score(query=request.query, candidates=candidates))
+        if not signals and self.reranker is not None:
+            # Query 可能只包含停用词；仍把候选交给 reranker，由其统一判断相关性。
+            return assign_ranks(
+                tuple(
+                    RankedCandidate(
+                        candidate=candidate,
+                        rank=0,
+                        score=0.0,
+                        reason="Seeded from input order without scorer signal.",
+                        metadata={"initial_ranker": "input_order"},
+                    )
+                    for candidate in candidates
+                )
+            )
         return assign_ranks(
             self.fusion.fuse(candidates=candidates, signals=tuple(signals))
         )

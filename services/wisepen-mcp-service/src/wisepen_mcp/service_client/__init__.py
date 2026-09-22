@@ -4,4 +4,10 @@ from wisepen_mcp.service_client.note_collab_service_client import NoteCollabClie
 from wisepen_mcp.service_client.note_service_client import NoteClient
 from wisepen_mcp.service_client.resource_service_client import ResourceClient
 
-__all__ = ["AIAssetClient", "DocumentClient", "NoteClient", "NoteCollabClient", "ResourceClient"]
+__all__ = [
+    "AIAssetClient",
+    "DocumentClient",
+    "NoteClient",
+    "NoteCollabClient",
+    "ResourceClient",
+]

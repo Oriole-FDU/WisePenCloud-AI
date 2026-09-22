@@ -46,13 +46,6 @@ class AppSettings(BaseModel):
     # 语音识别配置
     SPEECH_CONFIG: SpeechConfig | None = None
 
-    # PaddleOCR 云端服务
-    PADDLE_OCR_TOKEN: str = ""
-    PADDLE_OCR_API_URL: str = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
-    PADDLE_OCR_MODEL: str = "PaddleOCR-VL-1.6"
-
-    # MinerU PDF 解析服务
-    MINERU_API_URL: str = "http://wisepen-dev-server:8000/file_parse"
 
     # 安全配置
     # 与 APISIX 网关约定的请求来源 token
@@ -113,15 +106,11 @@ class AppSettings(BaseModel):
     # 工具返回内容的字符截断上限（约 ~1000 token），防止超长结果撑爆后续迭代的上下文水位
     TOOL_RESULT_MAX_CHARS: int = 4000
 
-    # 可缓存工具正文按字符预算裁剪模型可见窗口；完整正文仍进入 ToolContentStore
+    # 可缓存工具正文按字符预算裁剪模型可见窗口；完整正文仍进入正文 Store
     TOOL_CONTENT_PREVIEW_PER_CHAR_BUDGET: int = 4_000
     TOOL_CONTENT_PREVIEW_TOTAL_CHAR_BUDGET: int = 12_000
     TOOL_CONTENT_READ_WINDOW_CHAR_BUDGET: int = 24_000
     TOOL_CONTENT_READ_TOTAL_CHAR_BUDGET: int = 48_000
-    TOOL_CONTENT_SEMANTIC_SEARCH_WINDOW_CHAR_BUDGET: int = 4_000
-    TOOL_CONTENT_SEMANTIC_SEARCH_TOTAL_CHAR_BUDGET: int = 24_000
-    TOOL_CONTENT_REGEX_CONTEXT_SIDE_CHAR_BUDGET: int = 1_500
-    TOOL_CONTENT_REGEX_TOTAL_CHAR_BUDGET: int = 24_000
     TOOL_CONTENT_DEFAULT_TTL_SECONDS: int = 3600
     TOOL_CONTENT_MAX_CHARS: int = 20_000_000
 

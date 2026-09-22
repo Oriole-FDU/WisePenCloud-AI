@@ -1,10 +1,12 @@
 import os
 import warnings
+from contextlib import asynccontextmanager
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"websockets\.legacy")
 
 from common.logger import error, info, setup_logging_intercept
 from common.observability import instrument_fastapi_app, setup_observability
+
 from wisepen_mcp.core.config.bootstrap_settings import bootstrap_settings
 
 setup_logging_intercept(bootstrap_settings.LOG_LEVEL)
@@ -14,11 +16,10 @@ setup_observability(
 )
 
 import uvicorn
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-
 from common.web.exception_handlers import setup_global_exception_handlers
 from common.web.middleware import SecurityHeaderMiddleware
+from fastapi import FastAPI
+
 from wisepen_mcp.capabilities import build_mcp_server
 from wisepen_mcp.container import container
 from wisepen_mcp.core.config.app_settings import settings

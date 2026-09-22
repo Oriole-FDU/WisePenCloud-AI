@@ -3,9 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-
 from common.core.exceptions import ServiceException
-from common.utils.ranking import RankingPipeline
+
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
@@ -20,21 +19,20 @@ class TinyFishSearchTool(BaseSearchTool):
     tool_name = "tinyfish_search"
     provider_name = "tinyfish"
 
-    def __init__(self, *, http_client: httpx.AsyncClient, ranking_pipeline: RankingPipeline) -> None:
-        super().__init__(ranking_pipeline=ranking_pipeline)
+    def __init__(self, *, http_client: httpx.AsyncClient) -> None:
         self._http_client = http_client
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
-        return await self._search(query=query, api_key=api_key, academic=False)
+    async def search_web(self, *, query: str, max_results: int, api_key: str | None, focus: str | None = None) -> SearchResponse:
+        return await self._search(query=query, focus=focus, api_key=api_key, academic=False)
 
-    async def search_academic(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
-        return await self._search(query=query, api_key=api_key, academic=True)
+    async def search_academic(self, *, query: str, max_results: int, api_key: str | None, focus: str | None = None) -> SearchResponse:
+        return await self._search(query=query, focus=focus, api_key=api_key, academic=True)
 
-    async def _search(self, *, query: str, api_key: str | None, academic: bool) -> SearchResponse:
+    async def _search(self, *, query: str, focus: str | None, api_key: str | None, academic: bool) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "TinyFish API key is required.")
 
-        params: dict[str, object] = {"query": query}
+        params: dict[str, object] = {"query": query, "purpose": focus} if focus else {"query": query}
         if academic:
             params["domain_type"] = "research_paper"
 
@@ -67,7 +65,7 @@ class TinyFishSearchTool(BaseSearchTool):
     def map_response(data: dict[str, Any]) -> SearchResponse:
         return SearchResponse(
             results=[
-                SearchResult(title=item.get("title"), url=item.get("url"), snippet=item.get("snippet"))
+                SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["snippet"]] if item.get("snippet") else [], metadata={"site_name": item["site_name"]} if item.get("site_name") else {})
                 for item in data["results"]
             ],
         )

@@ -28,12 +28,16 @@ class RankDecision(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class RankQuery:
-    """排序查询对象。"""
+    """排序阶段共享的 canonical information need。"""
 
-    text: str  # 查询文本
+    text: str  # 同时提供给 BM25、向量阶段和 reranker 的完整查询文本。
     metadata: Metadata = field(
         default_factory=dict
     )  # 调用方附加元数据，pipeline 不解释其含义
+
+    def __post_init__(self) -> None:
+        if not self.text.strip():
+            raise ValueError("RankQuery.text must not be empty.")
 
 
 @dataclass(frozen=True, slots=True)

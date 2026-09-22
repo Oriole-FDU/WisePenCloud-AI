@@ -51,7 +51,6 @@ class FieldedBM25Scorer:
     ) -> tuple[ScoreSignal, ...]:
         if not candidates:
             return ()
-
         positions = candidate_positions(candidates)
 
         query_tokens = list(self.tokenizer.tokenize(query.text))

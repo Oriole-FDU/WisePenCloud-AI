@@ -44,7 +44,6 @@ class BM25Scorer:
     ) -> tuple[ScoreSignal, ...]:
         if not candidates:
             return ()
-
         positions = candidate_positions(candidates)
 
         corpus_tokens = [
