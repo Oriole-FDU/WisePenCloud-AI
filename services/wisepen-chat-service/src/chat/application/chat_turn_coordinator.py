@@ -35,7 +35,10 @@ from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.client_tools import ClientToolCapability
 from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
+from chat.application.tools.skill_tools.utils.builtin_skills import is_builtin_skill_id
+from chat.service_client import ResourceClient
 from common.kafka.producer import KafkaProducerClient
+from common.security import SecurityContextHolder
 
 
 @dataclass(frozen=False)
@@ -75,6 +78,7 @@ class ChatTurnCoordinator:
             tool_policy_builder: ChatTurnToolPolicyBuilder,
             oss_file_loader: OssFileLoader,
             agent_resolver: AgentResolver | None = None,
+            resource_client: ResourceClient | None = None,
             redis_client: redis.Redis | None = None,
     ):
         self._memory = memory
@@ -100,9 +104,44 @@ class ChatTurnCoordinator:
         )
         self._tool_policy_builder = tool_policy_builder
         self._agent_resolver = agent_resolver or DefaultAgentResolver()
+        self._resource_client = resource_client
         self._redis = redis_client or redis.from_url(settings.REDIS_URL, decode_responses=True)
 
         self._suspended_chat_repo = suspended_chat_repo
+
+    async def _ensure_skill_load_permissions(
+        self,
+        tool_context: dict[str, Any],
+        user_id: str,
+    ) -> None:
+        if self._resource_client is None:
+            raise ServiceException(
+                ChatErrorCode.TOOL_CONFIG_INVALID,
+                custom_msg="恢复对话缺少资源权限校验器",
+            )
+
+        skill_versions = tool_context.get("skill_versions") or {}
+        skill_ids = tool_context.get("allowed_skill_ids") or skill_versions.keys()
+        for skill_id in skill_ids:
+            if is_builtin_skill_id(skill_id):
+                continue
+            target_version = skill_versions.get(skill_id)
+            if not isinstance(target_version, int) or target_version <= 0:
+                target_version = None
+            try:
+                allowed = await self._resource_client.has_load_permission(
+                    resource_id=skill_id,
+                    user_id=user_id,
+                    group_role_map=SecurityContextHolder.get_group_role_map(),
+                    target_version=target_version,
+                )
+            except Exception:
+                allowed = False
+            if not allowed:
+                raise ServiceException(
+                    ChatErrorCode.TOOL_NOT_FOUND,
+                    custom_msg=f"恢复对话所需 Skill 不可用: {skill_id}",
+                )
 
     async def handle_suspended_chat_recover(
             self,
@@ -117,13 +156,27 @@ class ChatTurnCoordinator:
         if suspended_chat is None:
             raise ServiceException(ChatErrorCode.SUSPENDED_CHAT_NOT_FOUND)
         suspended_chat_id = str(suspended_chat.id)
+
+        suspended_tool_context = suspended_chat.context.tool_scope_data.get("context") or {}
+        agent_id = suspended_tool_context.get("agent_id")
+        agent_version = suspended_tool_context.get("agent_version")
+        if not agent_id:
+            session = await self._session_repo.get_session_for_user(session_id, user_id)
+            agent_id = session.agent_id
+            agent_version = session.agent_version
+        agent = await self._agent_resolver.resolve(agent_id, agent_version)
+        if agent is None:
+            raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
+
+        await self._ensure_skill_load_permissions(suspended_tool_context, user_id)
+
         tool_scope = await self._tool_registry.recover_derived(suspended_chat.context.tool_scope_data, user_id)
 
         chat_turn_context = ChatTurnContext(
             user_id=user_id,
             session_id=session_id,
             model_info=suspended_chat.context.model_info,
-            agent_spec=suspended_chat.context.agent_spec,
+            agent_spec=agent.spec,
             session_summary=suspended_chat.context.session_summary,
             windowed_history_messages=suspended_chat.context.windowed_history_messages,
             tool_scope=tool_scope,
@@ -293,6 +346,8 @@ class ChatTurnCoordinator:
             chat_history_record_messages=chat_history_record_messages,
             has_session_summary=has_session_summary,
             temporary_attachment_refs=temp_attachments,
+            agent_id=session.agent_id,
+            agent_version=session.agent_version,
             tool_selection_default_enabled=tool_selection_default_enabled,
             tool_selection_overrides=tool_selection_overrides,
             user_defined_on_demand_skill_ids=user_defined_on_demand_skill_ids | agent_on_demand_skill_ids,
