@@ -117,7 +117,11 @@ class ChatTurnCoordinator:
         if suspended_chat is None:
             raise ServiceException(ChatErrorCode.SUSPENDED_CHAT_NOT_FOUND)
         suspended_chat_id = str(suspended_chat.id)
-        tool_scope = await self._tool_registry.recover_derived(suspended_chat.context.tool_scope_data, user_id)
+        tool_scope = await self._tool_registry.recover_derived(
+            suspended_chat.context.tool_scope_data,
+            user_id,
+            enable_use_tool=suspended_chat.context.agent_spec.tool_and_skill_policy.enable_use_tool,
+        )
 
         chat_turn_context = ChatTurnContext(
             user_id=user_id,
@@ -306,6 +310,7 @@ class ChatTurnCoordinator:
             tool_selection_overrides=tool_policy.tool_selection_overrides,
             user_id=user_id,
             client_tool_capabilities=client_tool_capabilities,
+            enable_use_tool=tool_and_skill_policy.enable_use_tool,
         )
 
         # 提示词组装
