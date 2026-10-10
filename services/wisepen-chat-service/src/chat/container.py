@@ -36,6 +36,7 @@ from chat.application.tools.session_tools.tool_output import (
     InspectToolOutputStructureTool,
     ReadToolOutputRangeTool,
     ReadToolOutputSectionTool,
+    SearchToolOutputBM25Tool,
     SearchToolOutputRegexTool,
 )
 from chat.application.tools.skill_tools import LoadSkillAssetTool, LoadSkillTool
@@ -302,6 +303,9 @@ class Container(containers.DeclarativeContainer):
     search_tool_output_regex_tool = providers.Singleton(
         SearchToolOutputRegexTool,
     )
+    search_tool_output_bm25_tool = providers.Singleton(
+        SearchToolOutputBM25Tool,
+    )
     web_fetch_static_session = providers.Resource(_provide_web_fetch_static_session)
     web_fetch_browser_session = providers.Resource(_provide_web_fetch_browser_session)
     web_static_page_fetcher = providers.Singleton(
@@ -333,6 +337,7 @@ class Container(containers.DeclarativeContainer):
         read_tool_output_range_tool,
         read_tool_output_section_tool,
         search_tool_output_regex_tool,
+        search_tool_output_bm25_tool,
         web_fetch_tool,
         web_crawl_tool,
     )

@@ -12,6 +12,7 @@ from functools import lru_cache
 
 from common.utils.markdown import (
     Anchor,
+    MarkdownChunk,
     MarkdownChunker,
     Section,
 )
@@ -39,6 +40,7 @@ class StoredToolContent:
     sections: list[Section] = field(default_factory=list)
     anchors: list[Anchor] = field(default_factory=list)
     sections_by_id: dict[str, Section] = field(default_factory=dict)
+    chunks: list[MarkdownChunk] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """建立按 ID 的索引；旧缓存缺少索引时也能在读取后补齐。"""
@@ -66,6 +68,7 @@ async def put_tool_content(
         content_id=f"cnt_{uuid.uuid4().hex[:16]}",
         session_id=session_id,
         text=text,
+        chunks=result.chunks,
         sections=result.sections,
         anchors=result.anchors,
     )

@@ -44,6 +44,7 @@ _TOOL_OUTPUT_TOOL_NAMES = frozenset({
     "read_tool_output_range",
     "read_tool_output_section",
     "search_tool_output_regex",
+    "search_tool_output_bm25",
 })
 
 

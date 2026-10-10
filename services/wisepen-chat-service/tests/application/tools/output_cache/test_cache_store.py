@@ -14,22 +14,24 @@ from chat.application.tools.session_tools.tool_output.read_by_section import (
 )
 
 
-def test_stored_content_round_trips_and_ignores_old_chunk_index_field():
+def test_stored_content_round_trips_and_reads_legacy_without_chunks():
     text = "<!-- ignored by parser -->\n\n# Heading\n\nbody\n"
     result = MarkdownChunker().chunk(text)
     stored = StoredToolContent(
         content_id="c",
         session_id="s",
         text=text,
+        chunks=list(result.chunks),
         sections=list(result.sections),
         anchors=list(result.anchors),
     )
     adapter = TypeAdapter(StoredToolContent)
     decoded = json.loads(adapter.dump_json(stored))
-    decoded["chunks"] = [{"old": "index data"}]
-
     assert adapter.validate_json(json.dumps(decoded)) == stored
-    assert not hasattr(stored, "chunks")
+
+    legacy = dict(decoded)
+    legacy.pop("chunks")
+    assert adapter.validate_json(json.dumps(legacy)).chunks == []
 
 
 @pytest.mark.asyncio
@@ -49,6 +51,7 @@ async def test_put_tool_content_returns_content_id_and_source_length(monkeypatch
     )
 
     assert receipt == (repository.stored.content_id, len(repository.stored.text))
+    assert repository.stored.chunks
 
 
 def test_section_reader_uses_own_and_subtree_source_spans_and_offsets():
