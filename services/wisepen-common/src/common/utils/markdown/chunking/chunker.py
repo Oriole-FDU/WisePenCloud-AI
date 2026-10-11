@@ -47,19 +47,11 @@ class MarkdownChunkingResult:
 
 
 @dataclass(frozen=True, slots=True)
-class MarkdownDocument:
-    """Markdown 分块输入；title 是外部文档标题，不要求出现在正文中。"""
-
-    text: str
-    title: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class MarkdownChunkerConfig:
     """Chunking 目标尺寸与结构拆分触发阈值。"""
 
     target_chunk_tokens: int = 800
-    split_threshold_tokens: int = 1600
+    split_threshold_tokens: int = 1200
 
     def __post_init__(self) -> None:
         if self.target_chunk_tokens <= 0:
@@ -108,18 +100,15 @@ class MarkdownChunker:
         self._splitter = StructuralNodeSplitter(policy)
         self._packer = ChunkPacker(policy)
 
-    def chunk(self, document: str | MarkdownDocument) -> MarkdownChunkingResult:
-        """解析并分块文档；纯字符串输入保留旧接口，结构输入可提供标题。"""
-        if isinstance(document, str):
-            document = MarkdownDocument(document)
-
-        nodes = self._parser.parse(document.text)
+    def chunk(self, text: str, title: str = "") -> MarkdownChunkingResult:
+        """解析并分块文档；title 是外部文档标题，不要求出现在正文中。"""
+        nodes = self._parser.parse(text)
         anchors = _build_anchors(nodes)
         sections = (
             _build_heading_sections(
-                text=document.text,
+                text=text,
                 nodes=nodes,
-                root_title=document.title,
+                root_title=title,
             )
             if any(node.kind is MarkdownNodeKind.SECTION for node in nodes)
             else []

@@ -3,15 +3,13 @@
 import json
 from pathlib import Path
 
-from common.utils.markdown import MarkdownChunker, MarkdownDocument, OutlineFormatter
+from common.utils.markdown import MarkdownChunker, OutlineFormatter
 
 
 def main() -> None:
     demo_dir = Path(__file__).resolve().parent
     source = (demo_dir / "sample.md").read_text(encoding="utf-8")
-    result = MarkdownChunker().chunk(
-        MarkdownDocument(source, title="研究笔记")
-    )
+    result = MarkdownChunker().chunk(source, title="研究笔记")
     # Global 和 neighborhood 共用生产环境的 Markdown 格式化器。
     formatter = OutlineFormatter(sections=result.sections, anchors=result.anchors)
     current_section = next(
