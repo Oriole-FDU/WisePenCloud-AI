@@ -4,7 +4,6 @@ import pytest
 
 from common.utils.markdown import (
     MarkdownChunker,
-    MarkdownChunkerConfig,
     MarkdownNode,
     MarkdownNodeKind,
     MarkdownParser,
@@ -24,9 +23,7 @@ class CharacterCounter:
 
 
 def _chunker(target=12, threshold=24):
-    return MarkdownChunker(
-        MarkdownChunkerConfig(target, threshold), token_counter=CharacterCounter()
-    )
+    return MarkdownChunker(target, threshold, token_counter=CharacterCounter())
 
 
 def _walk(nodes):

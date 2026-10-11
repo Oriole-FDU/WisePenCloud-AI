@@ -1,7 +1,6 @@
 """将 Common Markdown 分块结果投影为 RAG 摄入 Chunk。"""
 
 from common.utils.markdown import MarkdownChunker as CommonMarkdownChunker
-from common.utils.markdown import MarkdownChunkerConfig
 
 from rag.core.schema import Document
 from rag.ingestion.chunkers.base import Chunk
@@ -12,12 +11,11 @@ class MarkdownChunker:
 
     def __init__(
         self,
-        chunker: CommonMarkdownChunker | None = None,
-        config: MarkdownChunkerConfig | None = None,
+        target_chunk_tokens: int = 800,
+        split_threshold_tokens: int = 1200,
     ) -> None:
-        # config 仅在未注入完整 chunker 时用于覆盖默认尺寸配置
-        self._chunker = (
-            chunker if chunker is not None else CommonMarkdownChunker(config)
+        self._chunker = CommonMarkdownChunker(
+            target_chunk_tokens, split_threshold_tokens
         )
 
     async def split(self, document: Document) -> list[Chunk]:

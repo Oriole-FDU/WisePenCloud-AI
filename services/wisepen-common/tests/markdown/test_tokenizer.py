@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 import tiktoken
 
-from common.utils.markdown import MarkdownChunkerConfig, TiktokenTokenCounter
+from common.utils.markdown import MarkdownChunker, TiktokenTokenCounter
 from common.utils.markdown.chunking.tokenizer import _local_encoding
 
 
@@ -59,4 +59,4 @@ def test_count_cache_and_token_unit() -> None:
 @pytest.mark.parametrize("soft,hard", [(0, 1), (-1, 2), (3, 2)])
 def test_invalid_budgets(soft, hard) -> None:
     with pytest.raises(ValueError):
-        MarkdownChunkerConfig(target_chunk_tokens=soft, split_threshold_tokens=hard)
+        MarkdownChunker(soft, hard)

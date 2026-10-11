@@ -47,20 +47,6 @@ class MarkdownChunkingResult:
 
 
 @dataclass(frozen=True, slots=True)
-class MarkdownChunkerConfig:
-    """Chunking 目标尺寸与结构拆分触发阈值。"""
-
-    target_chunk_tokens: int = 800
-    split_threshold_tokens: int = 1200
-
-    def __post_init__(self) -> None:
-        if self.target_chunk_tokens <= 0:
-            raise ValueError("target_chunk_tokens must be positive")
-        if self.split_threshold_tokens < self.target_chunk_tokens:
-            raise ValueError("split_threshold_tokens must be >= target_chunk_tokens")
-
-
-@dataclass(frozen=True, slots=True)
 class ChunkingPolicy:
     """Splitter 和 Packer 共用的预算取舍，不承诺结构单元必须小于阈值。"""
 
@@ -82,19 +68,23 @@ class ChunkingPolicy:
 class MarkdownChunker:
     """编排解析、章节组织、结构拆分和 Chunk 装箱，不参与预算取舍。"""
 
-    __slots__ = ("_packer", "_parser", "_splitter", "config")
+    __slots__ = ("_packer", "_parser", "_splitter")
 
     def __init__(
         self,
-        config: MarkdownChunkerConfig | None = None,
+        target_chunk_tokens: int = 800,
+        split_threshold_tokens: int = 1200,
         *,
         token_counter: TokenCounter | None = None,
     ) -> None:
-        self.config = config or MarkdownChunkerConfig()
+        if target_chunk_tokens <= 0:
+            raise ValueError("target_chunk_tokens must be positive")
+        if split_threshold_tokens < target_chunk_tokens:
+            raise ValueError("split_threshold_tokens must be >= target_chunk_tokens")
         self._parser = MarkdownParser()
         policy = ChunkingPolicy(
-            target_chunk_tokens=self.config.target_chunk_tokens,
-            split_threshold_tokens=self.config.split_threshold_tokens,
+            target_chunk_tokens=target_chunk_tokens,
+            split_threshold_tokens=split_threshold_tokens,
             token_counter=token_counter or default_token_counter(),
         )
         self._splitter = StructuralNodeSplitter(policy)

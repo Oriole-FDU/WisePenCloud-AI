@@ -2,7 +2,6 @@ from .chunker import (
     Anchor,
     ChunkingPolicy,
     MarkdownChunker,
-    MarkdownChunkerConfig,
     MarkdownChunkingResult,
     Section,
 )
@@ -16,7 +15,6 @@ __all__ = [
     "ChunkingPolicy",
     "MarkdownChunk",
     "MarkdownChunker",
-    "MarkdownChunkerConfig",
     "MarkdownChunkingResult",
     "Section",
     "StructuralNodeSplitter",

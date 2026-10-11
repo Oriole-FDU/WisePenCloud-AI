@@ -1,12 +1,8 @@
 from dataclasses import fields, replace
-from unittest.mock import Mock
 
 import pytest
 from common.utils.markdown import (
     MarkdownChunker as CommonMarkdownChunker,
-)
-from common.utils.markdown import (
-    MarkdownChunkerConfig,
 )
 
 from rag.core.schema import Document, DocumentStructure
@@ -16,9 +12,7 @@ from rag.ingestion.chunkers import MarkdownChunker
 
 @pytest.fixture
 def common_chunker():
-    return CommonMarkdownChunker(
-        MarkdownChunkerConfig(target_chunk_tokens=40, split_threshold_tokens=70)
-    )
+    return CommonMarkdownChunker(40, 70)
 
 
 @pytest.fixture
@@ -45,7 +39,7 @@ async def test_markdown_chunker_adapts_common_fields_without_internal_details(
     document, common_chunker
 ):
     result = common_chunker.chunk(document.raw_markdown)
-    adapter = MarkdownChunker(common_chunker)
+    adapter = MarkdownChunker(40, 70)
 
     chunks = await adapter.split(document)
 
@@ -81,10 +75,8 @@ async def test_markdown_chunker_adapts_common_fields_without_internal_details(
         assert not hasattr(chunk, "content_hash")
 
 
-async def test_markdown_identity_is_stable_and_scoped_to_resource_revision(
-    document, common_chunker
-):
-    adapter = MarkdownChunker(common_chunker)
+async def test_markdown_identity_is_stable_and_scoped_to_resource_revision(document):
+    adapter = MarkdownChunker(40, 70)
     first = await adapter.split(document)
     repeated = await adapter.split(document)
     new_version = await adapter.split(replace(document, document_version=99))
@@ -108,32 +100,14 @@ async def test_markdown_identity_is_stable_and_scoped_to_resource_revision(
         assert original.raw_text == resource.raw_text == revision.raw_text
 
 
-async def test_markdown_adapter_calls_common_once_with_raw_markdown(
-    document, common_chunker
-):
-    result = common_chunker.chunk(document.raw_markdown)
-    # Common 使用 slots，使用包装 spy 记录调用，不修改其生产构造方式。
-    spy = Mock(wraps=common_chunker)
-    spy.chunk.return_value = result
-
-    chunks = await MarkdownChunker(spy).split(document)
-
-    spy.chunk.assert_called_once_with(document.raw_markdown)
-    assert len(chunks) == len(result.chunks)
-    assert document.structure.sections == result.sections
-    assert document.structure.anchors == result.anchors
-
-
-async def test_markdown_chunker_uses_overridden_config():
+async def test_markdown_chunker_uses_overridden_token_budgets():
     # 单个小节含超长正文：默认预算装箱为 1 个 chunk，小预算覆盖后被拆分为多个
     markdown = "# 长章节\n\n" + "这是一段足够长的正文内容，用于验证分块预算是否生效。\n\n" * 20
     document = Document(
         "resource", 1, "revision", markdown, DocumentStructure(len(markdown))
     )
 
-    configured = await MarkdownChunker(
-        config=MarkdownChunkerConfig(target_chunk_tokens=40, split_threshold_tokens=70)
-    ).split(document)
+    configured = await MarkdownChunker(40, 70).split(document)
     default_chunks = await MarkdownChunker().split(document)
 
     assert len(configured) > 1

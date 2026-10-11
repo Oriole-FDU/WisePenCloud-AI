@@ -2,7 +2,6 @@ import pytest
 
 from common.utils.markdown import (
     MarkdownChunker,
-    MarkdownChunkerConfig,
     MarkdownNode,
     MarkdownNodeKind,
     MarkdownParser,
@@ -65,7 +64,7 @@ def test_code_long_line_is_preserved_and_becomes_overflow():
     fence = chr(96) * 3
     line = "    x = '" + "🙂" * 100 + "'\n"
     source = fence + "python\nshort = 1\n" + line + "last = 2\n" + fence + "\n"
-    result = MarkdownChunker(MarkdownChunkerConfig(32, 64)).chunk(source)
+    result = MarkdownChunker(32, 64).chunk(source)
     chunk = next(chunk for chunk in result.chunks if line in chunk.text)
     assert chunk.text == fence + "python\n" + line + fence + "\n"
     assert chunk.overflow
@@ -124,7 +123,7 @@ def test_table_caption_stays_whole_with_first_row_and_keeps_position(before):
     table = "| a | b |\n| - | - |\n" + "| row | data |\n" * 20
     caption = "Table 1: " + "caption " * 100 + "\n"
     source = caption + "\n" + table if before else table + "\n" + caption
-    result = MarkdownChunker(MarkdownChunkerConfig(32, 64)).chunk(source)
+    result = MarkdownChunker(32, 64).chunk(source)
     first = result.chunks[0]
     assert first.overflow
     assert caption.rstrip("\n") in first.text and "| row | data |" in first.text
@@ -141,7 +140,7 @@ def test_table_caption_stays_whole_with_first_row_and_keeps_position(before):
 def test_wide_row_is_not_reconstructed_as_cell_fragments():
     row = "| " + "word " * 100 + " | " + "value " * 100 + " |\n"
     source = "| a | b |\n| - | - |\n| short | one |\n" + row + "| last | two |\n"
-    result = MarkdownChunker(MarkdownChunkerConfig(32, 64)).chunk(source)
+    result = MarkdownChunker(32, 64).chunk(source)
     wide = next(chunk for chunk in result.chunks if row.rstrip("\n") in chunk.text)
     assert wide.overflow
     assert "short" not in wide.text and "last" not in wide.text
@@ -168,7 +167,7 @@ def test_nested_ordered_list_preserves_oversized_item():
     assert all(
         part.metadata["ordered"] and part.metadata["start"] == 3 for part in parts
     )
-    result = MarkdownChunker(MarkdownChunkerConfig(32, 64)).chunk(source)
+    result = MarkdownChunker(32, 64).chunk(source)
     assert result.chunks[0].overflow
     assert "second" not in result.chunks[0].text
 

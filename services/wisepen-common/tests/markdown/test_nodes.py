@@ -1,6 +1,5 @@
 from common.utils.markdown import (
     MarkdownChunker,
-    MarkdownChunkerConfig,
     MarkdownParser,
     MarkdownNodeKind,
 )
@@ -26,9 +25,7 @@ def test_parser_preserves_nested_markdown_structure() -> None:
 
 def test_table_wide_row_stays_complete_with_overflow() -> None:
     source = "| a | b |\n| - | - |\n| " + "x" * 300 + " | " + "y" * 300 + " |\n"
-    result = MarkdownChunker(
-        MarkdownChunkerConfig(target_chunk_tokens=40, split_threshold_tokens=80),
-    ).chunk(source)
+    result = MarkdownChunker(40, 80).chunk(source)
 
     assert len(result.chunks) == 1
     assert result.chunks[0].text == source.rstrip("\n")
@@ -38,9 +35,7 @@ def test_table_wide_row_stays_complete_with_overflow() -> None:
 def test_code_split_preserves_content_under_token_budget() -> None:
     fence = chr(96) * 3
     source = fence + "python\n" + ("    value = 1\n" * 20) + fence + "\n"
-    result = MarkdownChunker(
-        MarkdownChunkerConfig(target_chunk_tokens=40, split_threshold_tokens=80),
-    ).chunk(source)
+    result = MarkdownChunker(40, 80).chunk(source)
 
     assert len(result.chunks) > 1
     assert all(chunk.content_token_count <= 80 for chunk in result.chunks)
@@ -49,9 +44,7 @@ def test_code_split_preserves_content_under_token_budget() -> None:
 
 def test_chunks_use_token_budget_without_overlap() -> None:
     source = "中文内容。 " * 600
-    result = MarkdownChunker(
-        MarkdownChunkerConfig(target_chunk_tokens=40, split_threshold_tokens=80),
-    ).chunk(source)
+    result = MarkdownChunker(40, 80).chunk(source)
 
     assert len(result.chunks) > 1
     assert all(chunk.content_token_count <= 80 for chunk in result.chunks)

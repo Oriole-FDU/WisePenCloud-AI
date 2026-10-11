@@ -5,7 +5,6 @@ from dataclasses import replace
 from common.utils.markdown import (
     MarkdownChunk,
     MarkdownChunker,
-    MarkdownChunkerConfig,
     Section,
 )
 
@@ -35,14 +34,14 @@ class DocumentPreparer:
         *,
         publication: DocumentPublication,
         doc_chunks: DocChunkRepository,
-        chunker_config: MarkdownChunkerConfig | None = None,
+        target_chunk_tokens: int = 800,
+        split_threshold_tokens: int = 1600,
         chunk_metadata_builder: MarkdownChunkMetadataBuilder | None = None,
     ) -> None:
         self._publication = publication
         self._doc_chunks = doc_chunks
-        self._chunker_config = chunker_config or MarkdownChunkerConfig(
-            target_chunk_tokens=800,
-            split_threshold_tokens=1600,
+        self._chunker = MarkdownChunker(
+            target_chunk_tokens, split_threshold_tokens
         )
         self._chunk_metadata_builder = chunk_metadata_builder
 
@@ -60,7 +59,7 @@ class DocumentPreparer:
             document_version=document_version,
             raw_content=markdown,
         )
-        chunking = MarkdownChunker(self._chunker_config).chunk(markdown)
+        chunking = self._chunker.chunk(markdown)
 
         section_ids = {
             section.section_id: rag_section_id(

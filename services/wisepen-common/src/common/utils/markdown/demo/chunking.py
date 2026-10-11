@@ -4,22 +4,24 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from common.utils.markdown import MarkdownChunker, MarkdownChunkerConfig
+from common.utils.markdown import MarkdownChunker
 
 
 def main() -> None:
     demo_dir = Path(__file__).resolve().parent
     source = (demo_dir / "sample.md").read_text(encoding="utf-8")
     # 使用较小预算，让短样例也能展示列表、表格和代码的拆分效果。
-    config = MarkdownChunkerConfig(target_chunk_tokens=80, split_threshold_tokens=160)
-    result = MarkdownChunker(config).chunk(source)
+    budgets = {"target_chunk_tokens": 80, "split_threshold_tokens": 160}
+    result = MarkdownChunker(
+        budgets["target_chunk_tokens"], budgets["split_threshold_tokens"]
+    ).chunk(source)
     output_dir = demo_dir / "results"
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "chunking.json").write_text(
         json.dumps(
             {
                 "source": "../sample.md",
-                "config": asdict(config),
+                "config": budgets,
                 "chunks": [asdict(chunk) for chunk in result.chunks],
                 "sections": [asdict(section) for section in result.sections],
                 "anchors": [asdict(anchor) for anchor in result.anchors],
@@ -36,7 +38,7 @@ def main() -> None:
         "",
         "输入：[sample.md](../sample.md)。完整结构字段见 [chunking.json](chunking.json)。",
         "",
-        f"目标：{config.target_chunk_tokens} tokens；拆分阈值：{config.split_threshold_tokens} tokens。",
+        f"目标：{budgets['target_chunk_tokens']} tokens；拆分阈值：{budgets['split_threshold_tokens']} tokens。",
         "计数器：离线 o200k_base。不可安全拆分的结构可以超过阈值，以 overflow 标识。",
         "",
         f"共 {len(result.chunks)} 个 chunk，{len(result.sections)} 个 section，{len(result.anchors)} 个 anchor。",
