@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
+from typing import Any, TypeVar
 
 from common.utils.ai_clients import RerankClient
 
@@ -12,49 +13,57 @@ from .base import Reranker
 logger = logging.getLogger(__name__)
 
 
-class ModelReranker(Reranker):
+PayloadT = TypeVar("PayloadT")
+
+
+class ModelReranker(Reranker[PayloadT]):
     """通过已配置模型客户端执行精排，失败时保留原始顺序。"""
 
     def __init__(
         self,
         *,
         client: RerankClient,
+        text_getter: Callable[[PayloadT], str],
         top_n: int | None = None,
         instruct: str = "",
     ) -> None:
-        self.client = client          # 精排模型客户端
-        self.name = client.model      # 模型名，用于写入元数据
-        self.top_n = top_n            # 最多返回条数
-        self.instruct = instruct      # 精排指令
+        self.client = client  # 精排模型客户端
+        self.name = client.model
+        self.text_getter = text_getter
+        self.top_n = top_n  # 最多返回条数
+        self.instruct = instruct  # 精排指令
 
     async def rerank(
         self,
         focus: str,
-        candidates: list[Candidate],
-    ) -> list[Candidate]:
+        candidates: list[Candidate[PayloadT]],
+    ) -> list[Candidate[PayloadT]]:
         original = candidates
         if not original:
-            return []                 # 无候选直接返回空列表
+            return []  # 无候选直接返回空列表
 
         try:
             response = await self.client.rerank(
                 query=focus,
-                documents=[candidate.text for candidate in original],
+                documents=[
+                    self.text_getter(candidate.payload) for candidate in original
+                ],
                 instruct=self.instruct or None,
                 top_n=self.top_n,
             )
-            return _apply_response(original, response, self.name)
+            return _apply_response(original, response)
         except Exception as exc:
-            logger.warning("reranker failed; preserving retrieval order", exc_info=exc)  # 精排失败时回退原顺序
+            logger.warning(
+                "reranker failed; preserving retrieval order", exc_info=exc
+            )  # 精排失败时回退原顺序
             return original
 
 
 def _apply_response(
-    candidates: list[Candidate],
+    candidates: list[Candidate[PayloadT]],
     response: list[dict[str, Any]],
-    model: str,
-) -> list[Candidate]:
-    selected: list[Candidate] = []
+) -> list[Candidate[PayloadT]]:
+    selected: list[Candidate[PayloadT]] = []
     selected_indexes: set[int] = set()
 
     for item in response:
@@ -81,8 +90,7 @@ def _apply_response(
             replace(
                 source,
                 rank=len(selected) + 1,  # 按精排顺序重设排名
-                score=score,             # 写入精排分数
-                metadata={**source.metadata, "reranker": model},  # 标记精排模型
+                score=score,  # 写入精排分数
             )
         )
 

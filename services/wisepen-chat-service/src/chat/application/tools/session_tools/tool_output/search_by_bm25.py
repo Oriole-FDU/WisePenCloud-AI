@@ -66,6 +66,14 @@ class ToolOutputBM25Chunk:
     section_path: str
 
 
+@dataclass(frozen=True, slots=True)
+class _CachedChunk:
+    """缓存检索 payload，保留会话内正文身份与原始 Markdown 定位。"""
+
+    content_id: str
+    chunk: MarkdownChunk
+
+
 class SearchToolOutputBM25Tool:
     def __init__(self) -> None:
         self._definition = ToolDefinition(
@@ -163,23 +171,25 @@ async def _search_chunks(
         for stored in stored_items
         for chunk in stored.chunks
     ]
-    ranked = await BM25Retriever(candidates=candidates, top_k=top_k).retrieve(query)
+    ranked = await BM25Retriever(
+        candidates=candidates,
+        text_getter=lambda payload: payload.chunk.text,
+        top_k=top_k,
+    ).retrieve(query)
     return [
         _result_chunk(
-            content_id=candidate.metadata["content_id"],
-            chunk=candidate.metadata["chunk"],
+            content_id=candidate.payload.content_id,
+            chunk=candidate.payload.chunk,
         )
         for candidate in ranked
     ]
 
 
-def _candidate(*, content_id: str, chunk: MarkdownChunk) -> Candidate:
+def _candidate(*, content_id: str, chunk: MarkdownChunk) -> Candidate[_CachedChunk]:
     return Candidate(
         candidate_id=f"{content_id}:{chunk.chunk_index}",
-        text=chunk.text,
+        payload=_CachedChunk(content_id=content_id, chunk=chunk),
         rank=chunk.chunk_index + 1,
-        # 仅携带结果投影所需的信息，定位字段在 _result_chunk 中按需计算
-        metadata={"content_id": content_id, "chunk": chunk},
     )
 
 

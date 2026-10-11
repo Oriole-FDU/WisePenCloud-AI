@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 import numpy as np
 
@@ -11,16 +12,22 @@ if TYPE_CHECKING:
     from ..retrievers.base import Candidate
 
 
-class MmrDiversity(Diversity):
+PayloadT = TypeVar("PayloadT")
+
+
+class MmrDiversity(Diversity[PayloadT]):
     """使用候选向量余弦相似度执行 MMR，并将选择分数写回候选。"""
 
     name = "mmr"
 
+    def __init__(self, *, vector_getter: Callable[[PayloadT], list[float]]) -> None:
+        self.vector_getter = vector_getter
+
     def diversify(
         self,
-        candidates: list[Candidate],
+        candidates: list[Candidate[PayloadT]],
         mode: Literal["off", "moderate", "high"],
-    ) -> list[Candidate]:
+    ) -> list[Candidate[PayloadT]]:
         if mode == "off":  # 关闭多样性时直接返回
             return candidates
         if mode not in {"moderate", "high"}:  # 校验模式
@@ -32,11 +39,15 @@ class MmrDiversity(Diversity):
 
         lambda_mult = 0.75 if mode == "moderate" else 0.5  # 相关性权重
         relevance = _normalized_scores(ranked)  # 归一化相关性
-        selected: list[Candidate] = []
+        # 向量属于 payload；本次调用局部提取，避免在共享组件中保存请求数据。
+        vectors = {
+            item.candidate_id: self.vector_getter(item.payload) for item in ranked
+        }
+        selected: list[Candidate[PayloadT]] = []
         selected_ids: set[str] = set()
 
         while len(selected) < len(ranked):
-            best: Candidate | None = None
+            best: Candidate[PayloadT] | None = None
             best_value = float("-inf")
 
             for candidate in ranked:
@@ -46,27 +57,26 @@ class MmrDiversity(Diversity):
                 # 与已选候选的最大余弦相似度，作为冗余惩罚
                 penalty = max(
                     (
-                        _cosine_similarity(candidate.vector, previous.vector)
+                        _cosine_similarity(
+                            vectors[candidate.candidate_id],
+                            vectors[previous.candidate_id],
+                        )
                         for previous in selected
                     ),
                     default=0.0,
                 )
 
                 # MMR 得分：相关性 - 冗余惩罚
-                value = lambda_mult * relevance[candidate.candidate_id] - (
-                    1 - lambda_mult
-                ) * penalty
+                value = (
+                    lambda_mult * relevance[candidate.candidate_id]
+                    - (1 - lambda_mult) * penalty
+                )
 
                 if value > best_value:
                     best = replace(
                         candidate,
                         rank=len(selected) + 1,
                         score=value,
-                        metadata={
-                            **candidate.metadata,
-                            "diversity": self.name,
-                            "relevance_score": candidate.score,
-                        },
                     )
                     best_value = value
 
@@ -79,7 +89,7 @@ class MmrDiversity(Diversity):
         return selected
 
 
-def _normalized_scores(candidates: list[Candidate]) -> dict[str, float]:
+def _normalized_scores(candidates: list[Candidate[PayloadT]]) -> dict[str, float]:
     """将候选分数线性归一化到 [0, 1]。"""
     scores = [candidate.score for candidate in candidates]
     minimum = min(scores)

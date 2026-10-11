@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from .base import Fusion
 
@@ -9,7 +9,10 @@ if TYPE_CHECKING:
     from ..retrievers.base import Candidate
 
 
-class RrfFusion(Fusion):
+PayloadT = TypeVar("PayloadT")
+
+
+class RrfFusion(Fusion[PayloadT]):
     """使用标准倒数排名分数"""
 
     name = "rrf"
@@ -21,16 +24,16 @@ class RrfFusion(Fusion):
 
     def fuse(
         self,
-        result_sets: list[list[Candidate]],
-    ) -> list[Candidate]:
-        candidates: dict[str, Candidate] = {}      # 候选 ID -> 候选对象
-        scores: dict[str, float] = {}              # 候选 ID -> RRF 累加分数
+        result_sets: list[list[Candidate[PayloadT]]],
+    ) -> list[Candidate[PayloadT]]:
+        candidates: dict[str, Candidate[PayloadT]] = {}  # 候选 ID -> 候选对象
+        scores: dict[str, float] = {}  # 候选 ID -> RRF 累加分数
 
         for result_set in result_sets:
-            seen: set[str] = set()                 # 当前结果集内已处理的候选 ID
+            seen: set[str] = set()  # 当前结果集内已处理的候选 ID
             for position, candidate in enumerate(result_set, start=1):
                 cid = candidate.candidate_id
-                if cid in seen:                    # 同一结果集内去重
+                if cid in seen:  # 同一结果集内去重
                     continue
                 seen.add(cid)
 
@@ -39,7 +42,7 @@ class RrfFusion(Fusion):
                 rrf_score = 1.0 / (self.k + rank)
 
                 if cid not in candidates:
-                    candidates[cid] = candidate    # 记录候选对象
+                    candidates[cid] = candidate  # 记录候选对象
                     scores[cid] = rrf_score
                 else:
                     scores[cid] += rrf_score

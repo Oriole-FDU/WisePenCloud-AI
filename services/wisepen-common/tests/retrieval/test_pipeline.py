@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from common.utils.retrieval import (
     BM25Retriever,
     Candidate,
@@ -26,7 +25,7 @@ class RecordingRetriever(Retriever):
 
     async def retrieve(self, query: str) -> list[Candidate]:
         self.queries.append(query)
-        return self.items[:self.top_k]
+        return self.items[: self.top_k]
 
 
 class RecordingReranker(Reranker):
@@ -189,16 +188,21 @@ async def test_fusion_retriever_can_be_nested() -> None:
 def test_bm25_default_tokenizer_normalizes_unicode() -> None:
     assert "abc" in tokenize("ＡＢＣ")
     assert tokenize("123") == ["123"]
-    assert BM25Retriever(candidates=[Candidate("a", "abc", rank=0)]).top_k == 30
+    assert (
+        BM25Retriever(
+            candidates=[Candidate("a", "abc", rank=0)], text_getter=lambda text: text
+        ).top_k
+        == 30
+    )
 
 
 def test_mmr_uses_vectors_and_supports_modes() -> None:
     candidates = [
-        Candidate("a", "", rank=1, score=1.0, vector=[1.0, 0.0]),
-        Candidate("b", "", rank=2, score=0.95, vector=[1.0, 0.0]),
-        Candidate("c", "", rank=3, score=0.7, vector=[0.0, 1.0]),
+        Candidate("a", [1.0, 0.0], rank=1, score=1.0),
+        Candidate("b", [1.0, 0.0], rank=2, score=0.95),
+        Candidate("c", [0.0, 1.0], rank=3, score=0.7),
     ]
-    diversity = MmrDiversity()
+    diversity = MmrDiversity(vector_getter=lambda vector: vector)
 
     assert [item.candidate_id for item in diversity.diversify(candidates, "off")] == [
         "a",
@@ -223,6 +227,6 @@ async def test_model_reranker_failure_preserves_candidate_order() -> None:
         Candidate("a", "alpha", rank=1, score=0.4),
         Candidate("b", "beta", rank=2, score=0.3),
     ]
-    reranker = ModelReranker(client=FailingClient())  # type: ignore[arg-type]
+    reranker = ModelReranker(client=FailingClient(), text_getter=lambda text: text)  # type: ignore[arg-type]
 
     assert await reranker.rerank("focus", candidates) == candidates

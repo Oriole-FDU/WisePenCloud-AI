@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Callable
 from dataclasses import replace
+from typing import TypeVar
 
 import bm25s
 import jieba
 
 from .base import Candidate, Retriever
+
+PayloadT = TypeVar("PayloadT")
 
 
 def tokenize(text: str) -> list[str]:
@@ -19,7 +23,7 @@ def tokenize(text: str) -> list[str]:
     ]
 
 
-class BM25Retriever(Retriever):
+class BM25Retriever(Retriever[PayloadT]):
     """对调用方提供的候选文本执行普通 BM25。"""
 
     name = "bm25"
@@ -27,23 +31,28 @@ class BM25Retriever(Retriever):
     def __init__(
         self,
         *,
-        candidates: list[Candidate] | None = None,
+        text_getter: Callable[[PayloadT], str],
+        candidates: list[Candidate[PayloadT]] | None = None,
         top_k: int = 30,
     ) -> None:
         super().__init__(top_k=top_k)
+        self.text_getter = text_getter
         self.candidates = candidates if candidates is not None else []
 
-    async def retrieve(self, query: str) -> list[Candidate]:
+    async def retrieve(self, query: str) -> list[Candidate[PayloadT]]:
         if not self.candidates:
             return []
 
         query_tokens = tokenize(query)
         if not query_tokens:  # 查询为空则按原顺序返回
-            return self.candidates[:self.top_k]
+            return self.candidates[: self.top_k]
 
-        corpus_tokens = [tokenize(candidate.text) for candidate in self.candidates]
+        corpus_tokens = [
+            tokenize(self.text_getter(candidate.payload))
+            for candidate in self.candidates
+        ]
         if not any(corpus_tokens):  # 语料全为空
-            return self.candidates[:self.top_k]
+            return self.candidates[: self.top_k]
 
         retriever = bm25s.BM25()
         retriever.index(corpus_tokens, show_progress=False)  # 建索引
@@ -55,16 +64,12 @@ class BM25Retriever(Retriever):
             show_progress=False,
         )
 
-        # 按 BM25 排名重写候选，写入 rank、score 和 metadata
+        # 排名字段属于当前算法阶段，payload 保留原始业务身份与定位。
         return [
             replace(
                 self.candidates[int(index)],
                 rank=rank + 1,
                 score=float(scores[0][rank]),
-                metadata={
-                    **self.candidates[int(index)].metadata,
-                    "retriever": self.name,
-                },
             )
             for rank, index in enumerate(documents[0])
         ]
