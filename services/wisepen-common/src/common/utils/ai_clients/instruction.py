@@ -1,4 +1,3 @@
-
 """OpenAI 兼容接口的异步文本与结构化生成客户端。"""
 
 import json
@@ -13,10 +12,13 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class InstructionClient:
-    """封装文本生成、JSON 生成和 Pydantic 结构化生成。"""
+    """绑定固定模型，封装文本、JSON 和 Pydantic 结构化生成。"""
 
-    def __init__(self, client: AsyncOpenAI) -> None:
+    def __init__(self, client: AsyncOpenAI, *, model: str) -> None:
+        if not model.strip():
+            raise ValueError("model must not be empty")
         self._client = client
+        self._model = model
         self._structured_client = instructor.from_openai(
             client,
             mode=instructor.Mode.JSON,
@@ -25,22 +27,21 @@ class InstructionClient:
     async def complete(
         self,
         *,
-        model: str,
         messages: Iterable[dict[str, Any]],
         max_tokens: int | None = None,
     ) -> str:
         """生成普通文本，返回非空字符串。
 
         示例：
+            instruction = InstructionClient(openai_client, model="qwen-plus")
             text = await instruction.complete(
-                model="qwen-plus",
                 messages=[
                     {"role": "user", "content": "解释 RAG 的原理"},
                 ],
             )
         """
         request: dict[str, Any] = {
-            "model": model,
+            "model": self._model,
             "messages": list(messages),
         }
         if max_tokens is not None:
@@ -57,7 +58,6 @@ class InstructionClient:
     async def structured_complete(
         self,
         *,
-        model: str,
         messages: Iterable[dict[str, Any]],
         response_model: type[T] | None = None,
         max_tokens: int | None = None,
@@ -69,7 +69,6 @@ class InstructionClient:
 
         示例一：普通 JSON
             result = await instruction.structured_complete(
-                model="qwen-plus",
                 messages=[
                     {
                         "role": "user",
@@ -85,7 +84,6 @@ class InstructionClient:
                 age: int
 
             result = await instruction.structured_complete(
-                model="qwen-plus",
                 messages=[
                     {
                         "role": "user",
@@ -97,7 +95,7 @@ class InstructionClient:
             print(result.name, result.age)
         """
         request: dict[str, Any] = {
-            "model": model,
+            "model": self._model,
             "messages": list(messages),
         }
         if max_tokens is not None:
@@ -128,6 +126,7 @@ class InstructionClient:
 
         result = json.loads(content)
         if not isinstance(result, dict):
-            raise ValueError("JSON response must be an object")
+            # 供应商 JSON 格式不符合合同，沿用响应校验的 ValueError 分类。
+            raise ValueError("JSON response must be an object")  # noqa: TRY004
 
         return result

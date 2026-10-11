@@ -23,6 +23,7 @@ class VectorQuery:
     text: str | None = None
     top_k: int = 10
     filters: MetadataFilters | None = None
+    include_embedding: bool = False  # 多样化可请求命中的已存 dense 向量。
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,3 +33,4 @@ class VectorMatch:
     record_id: str
     score: float
     metadata: dict[str, object] = field(default_factory=dict)
+    embedding: list[float] | None = None  # 默认不加载；不对候选正文重新 embedding。

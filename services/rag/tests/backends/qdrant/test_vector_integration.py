@@ -62,6 +62,13 @@ async def test_real_dense_bm25_revision_filters_and_delete(real_vectors):
         match.record_id
         for match in await vectors.query(VectorQuery(text="量子", filters=filters))
     ] == ["physics-new"]
+    for request in (
+        VectorQuery(embedding=[1.0, 0.0], filters=filters, include_embedding=True),
+        VectorQuery(text="量子", filters=filters, include_embedding=True),
+    ):
+        matches = await vectors.query(request)
+        assert [match.record_id for match in matches] == ["physics-new"]
+        assert matches[0].embedding == [1.0, 0.0]
     await vectors.delete(
         MetadataFilters([MetadataFilter("resource_id", ["physics"], FilterOperator.IN)])
     )
@@ -113,9 +120,10 @@ async def test_publication_pipeline_with_real_qdrant(
     )
     # 此测试验证真实向量写入与发布闭环，embedding 和 Mongo 使用显式测试替身。
     embedding = SimpleNamespace(
+        dimensions=2,
         embed=AsyncMock(
             side_effect=lambda **kwargs: [[1.0, 0.0] for _ in kwargs["texts"]]
-        )
+        ),
     )
     publisher = DocumentPublication(
         store=publication_store,
@@ -128,8 +136,6 @@ async def test_publication_pipeline_with_real_qdrant(
                 ChunkFactsIndexer(storage),
                 VectorIndexer(
                     embedding_client=embedding,
-                    model="test-model",
-                    dimensions=2,
                     writer=vectors,
                 ),
             ],

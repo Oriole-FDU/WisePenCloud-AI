@@ -24,9 +24,10 @@ def vector_flow(storage, publication_store):
         )
     )
     embedding = SimpleNamespace(
+        dimensions=2,
         embed=AsyncMock(
             side_effect=lambda **kwargs: [[1.0, 0.0] for _ in kwargs["texts"]]
-        )
+        ),
     )
     vectors = QdrantVectorStorage(
         client=client, collection="isolated", dense_vector_size=2
@@ -42,8 +43,6 @@ def vector_flow(storage, publication_store):
                 ChunkFactsIndexer(writer=storage),
                 VectorIndexer(
                     embedding_client=embedding,
-                    model="test-model",
-                    dimensions=2,
                     writer=vectors,
                 ),
             ],

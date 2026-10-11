@@ -6,24 +6,37 @@ from openai import AsyncOpenAI
 
 
 class EmbeddingClient:
-    """封装 OpenAI embedding 请求并返回按输入顺序排列的向量。"""
+    """绑定模型与输出维度，返回按输入顺序排列的向量。"""
 
-    def __init__(self, client: AsyncOpenAI) -> None:
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        *,
+        model: str,
+        dimensions: int | None = None,
+    ) -> None:
+        if not model.strip():
+            raise ValueError("model must not be empty")
+        if dimensions is not None and dimensions <= 0:
+            raise ValueError("dimensions must be positive")
         self._client = client
+        self._model = model
+        self._dimensions = dimensions
+
+    @property
+    def dimensions(self) -> int | None:
+        """固定输出维度，供向量消费方核对响应；None 表示使用供应商默认值。"""
+        return self._dimensions
 
     async def embed(
         self,
         *,
-        model: str,
         texts: list[str],
-        dimensions: int | None = None,
     ) -> list[list[float]]:
         """异步生成文本向量。
 
         Args:
-            model: 供应商支持的 embedding 模型名称。
             texts: 待向量化的文本列表，不能为空。
-            dimensions: 可选，仅在需要显式指定维度时传给供应商。
 
         Returns:
             与输入顺序严格对应的向量列表。
@@ -35,11 +48,11 @@ class EmbeddingClient:
             raise ValueError("embedding texts must not be empty")
 
         kwargs: dict[str, object] = {
-            "model": model,
+            "model": self._model,
             "input": texts,
         }
-        if dimensions is not None:
-            kwargs["dimensions"] = dimensions
+        if self._dimensions is not None:
+            kwargs["dimensions"] = self._dimensions
 
         response = await self._client.embeddings.create(**kwargs)
 

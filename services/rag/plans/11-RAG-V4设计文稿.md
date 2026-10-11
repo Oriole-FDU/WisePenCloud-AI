@@ -4,7 +4,7 @@
 
 本文是 RAG V4 的实现设计合同，整合 00–10 方案中已经确认的边界。它描述核心模型、写入管线、存储端口、普通检索、图谱能力、权限和版本语义。
 
-2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，实际合同见第 5.3、6.1–6.4 节与 [17 实施记录](17-vector-publication-implementation.md)。生产配置和入口装配、selected revision 读取、普通 Retriever、Contextualizer 及图谱仍未实现。
+2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，实际合同见第 5.3、6.1–6.4 节与 [17 实施记录](17-vector-publication-implementation.md)。application 请求内资源快照与 Document／Chunk 读取已实现，见 [18 实施记录](18-application-snapshot-implementation.md)。普通检索已实现 Common 泛型 Pipeline、VectorRetriever 和 application HybridRetrieval，见 [19 实施记录](19-hybrid-retrieval-implementation.md)。Contextualizer、父块和图谱后续讨论实现；生产配置和生命周期装配继续留后。
 
 本设计不包含 HTTP 路由、MCP 工具注册和最终 transport composition。MCP 只作为可信身份来源的既有边界被引用：最终用户身份由可信安全上下文注入，RAG application 接收 `PermissionScope`，不从业务参数读取用户 ID。
 
@@ -34,9 +34,11 @@ Retriever
 | `Transformer` | 对完整 Chunk 列表做内容加工或知识增强 | Storage、Embedding、持久化 |
 | `Indexer` | 保存最终 Chunk 事实或生成检索投影，并调用 Writer | 底层 provider CRUD、检索策略 |
 | `Storage` | 内容、向量、图存取原语 | ACL、revision 生命周期、检索模式 |
-| `Retriever` | 查询构造、候选生成、组合和读取回查 | 索引构建和持久化 |
+| `Retriever` | 查询构造、候选生成和融合算法；固定依赖与配置 | 请求身份、资源版本选择、授权、正文回查、索引构建和持久化 |
 
 `IngestionPipeline` 只是顺序编排器，不是新的业务仓储层、事务协调器或错误补偿器。
+
+读取与检索用例属于 application。普通混合检索 use case 编排召回、资源版本与授权、正文回查、重排和响应组装，不能与执行融合算法的 HybridRetriever 混为一体。Retriever.retrieve 只接收字符串查询；预算、filters 和返回向量选项在初始化时确定，由 application 直接调用 VectorRetriever.from_storage 按本次配置装配；请求内版本与权限决定不注入 Retriever constructor，也不通过全局变量或隐式上下文传递。
 
 ### 2.2 最小接口
 
@@ -185,6 +187,8 @@ application、repository、Retriever 和 GraphRetriever 不解析 HTTP header、
 
 查询中所有结果必须经过同一个 `ResourceAcl.can_read(scope)`。Qdrant/Neo4j ACL 条件只能做候选预过滤，不能取代最终判权。没有本地 ACL 投影时不能直接判定资源可读。
 
+判权以 Document 所属 resource_id 为单位，Chunk、标题树及图谱来源继承这一决定，不增加 Chunk 或 Section 级 ACL。一次调用中已确定的可见性保持固定；新调用重新读取本地投影。
+
 ### 4.3 ContentRevision
 
 ```text
@@ -200,6 +204,10 @@ ContentRevision 是 `core.schema` 的不可变内容身份；摘要基于完整 
 
 DocumentRevision、Chunk 和各类向量/图投影都必须携带 `resource_id/content_revision`。一次能力调用中，资源第一次确定 applied revision 后，后续正文、Chunk 和投影回查都固定使用该 revision。active 期间变化不触发重试或切换。
 
+`application/snapshot.py` 是多个读取／检索用例共享的入口。`ResourceSnapshot(scope)` 只保存本次调用逐资源确定的 `ContentRevision | None`；`ResourceSnapshotReader(store, resource_acls, reader)` 内部批量解析状态和 ACL，公开读取 Document／Chunk，不保留请求状态。普通混合检索已使用 Reader，后续标题树和图谱用例复用同一入口，不再单独装配 resolver。
+
+每次独立调用创建新 ResourceSnapshot，同一次编排显式共享它。首次不可见也缓存；调用期间 applied、ACL 或 destroyed 变化均沿用首次完成的决定，不增加输出前回查。已选事实缺失或身份不符则省略，不切换新版或回退其他 revision。Document 回查重新计算完整正文身份；Chunk 继承资源级判权并匹配 selected revision。批量去重保序、空输入无 I/O，连接／查询／解码异常直接传播。这个请求内资源快照不提供跨后端原子观察点，也不保存正文。
+
 ### 4.4 staged/applied
 
 staged 是后台构建中的候选，不对用户可见。只有正文/结构、Chunk 集合、普通检索所需向量投影和 staged 条件仍成立时，外部 publication capability 才能切换 applied。
@@ -210,7 +218,7 @@ publication 属于 `application.publication` 的用例编排：接收资源变�
 
 图谱是附加能力。GraphIndexer 失败不会回滚已完成的普通向量写入；是否允许该 revision 成为普通检索 active 由外部发布策略决定，不由 Pipeline 伪造跨存储原子性。
 
-物理销毁先置永久 destroyed 标记并撤销 staged/applied，再清理内容与投影。同 ID 不提供恢复；迟到内容不能重新发布。上游个人 `.Trash`、软删除审计集合与物理销毁是不同阶段，前两者不调用永久销毁操作；回收站搜索可见性尚未处理。残留投影不能通过 active revision、ACL 或 Chunk 来源回查返回。
+物理销毁先置永久 destroyed 标记并撤销 staged/applied，再清理内容与投影。同 ID 不提供恢复；迟到内容不能重新发布。上游个人 `.Trash`、软删除审计集合与物理销毁是不同阶段，前两者不调用永久销毁操作；回收站搜索可见性尚未处理。新调用观察到 destroyed 后不得返回残留事实；已经确定可见性与版本的调用沿用首次决定，事实缺失则省略。
 
 ## 5. 写入管线
 
@@ -247,7 +255,7 @@ VectorIndexer：
 4. 调用 Chunk collection 对应的 `VectorWriter.upsert()`；
 5. 每批写入成功才处理下一批，全部批次成功才返回；不承担查询策略。
 
-当前实现在 `ingestion/indexers/vector.py`。显式注入 Common EmbeddingClient、model、dimensions、VectorWriter，embedding 默认每批 32 条。投影只包含 Chunk ID、retrieval_text、dense embedding 与 resource/revision metadata；不修改 Chunk。供应商响应数量、维度或数值错误属于可重试的 RuntimeError，I/O 原样传播。零 Chunk 无 embedding/数据库 I/O。普通 Qdrant point 同时写 dense 与服务端 BM25 sparse，任一失败阻止 apply；本轮不删除批次外旧投影，不实现换分块配置后的同 revision 替换。
+当前实现在 `ingestion/indexers/vector.py`。显式注入 已绑定 model/dimensions 的 Common EmbeddingClient 与 VectorWriter，embedding 默认每批 32 条。投影只包含 Chunk ID、retrieval_text、dense embedding 与 resource/revision metadata；不修改 Chunk。供应商响应数量、维度或数值错误属于可重试的 RuntimeError，I/O 原样传播。零 Chunk 无 embedding/数据库 I/O。普通 Qdrant point 同时写 dense 与服务端 BM25 sparse，任一失败阻止 apply；本轮不删除批次外旧投影，不实现换分块配置后的同 revision 替换。
 
 #### ChunkFactsIndexer
 
@@ -297,7 +305,7 @@ class GraphWriter(Protocol):
 
 VectorStorage 使用 `core/schema/vector.py` 中的通用 `VectorRecord`、`VectorQuery`、`VectorMatch`，`storage/vector.py` 只声明读写 Protocol。Chunk、Entity 和 Relationship 的语义由各自 Indexer 负责投影，Storage 不接收业务实体；当前只落地普通 Chunk 用例。
 
-Record 包含 record_id、text、embedding 与普通 dict metadata。Query 只允许 embedding/text 二选一，分别执行 dense/sparse 召回；Match 返回原 record_id、provider score 与 metadata，不返回正文。upsert/delete 成功返回 None，不新增 Receipt；上文 GraphWriter 仍是未来方案示例，不能据此建立通用 Receipt 层。
+Record 包含 record_id、text、embedding 与普通 dict metadata。Query 只允许 embedding/text 二选一，分别执行 dense/sparse 召回；Match 返回原 record_id、provider score 与 metadata，不返回正文。VectorQuery.include_embedding 默认为 False，按需返回 VectorMatch.embedding 中已存的 dense 向量；dense 与 sparse 查询均使用配置的 dense 名称请求向量。缺失、错误维度与非有限数值作为后端数据错误传播，不重做候选 embedding。upsert/delete 成功返回 None，不新增 Receipt；上文 GraphWriter 仍是未来方案示例，不能据此建立通用 Receipt 层。
 
 不同 collection 通过不同 Storage 实例绑定：
 
@@ -320,7 +328,7 @@ Qdrant 客户端由外部注入且须设置 cloud_inference=True，使 qdrant/bm
 
 GraphStorage 直接保存/读取统一的 `GraphNode`、`GraphEdge`，提供节点、关系、邻接和有界遍历。Neo4j 是从持久化 Chunk metadata 重建的拓扑投影，不包含 ACL、active revision、Ontology 解释、local/global/hybrid 或 Cypher 合同。
 
-Mongo Chunk 事实保存 GraphExtractor 输出的 `metadata["entities"]` / `metadata["relationships"]`，是图投影的重建输入。GraphIndexer 从事实所属 Chunk 派生来源关联并写入 Neo4j 图投影；GraphRetriever 再从投影取得 Chunk ID，从 Mongo 批量读取 Chunk 正文并执行 revision/ACL 校验。Entity/Relationship vectors 与 Neo4j topology 均为可重建投影。
+Mongo Chunk 事实保存 GraphExtractor 输出的 `metadata["entities"]` / `metadata["relationships"]`，是图投影的重建输入。GraphIndexer 从事实所属 Chunk 派生来源关联并写入 Neo4j 图投影；GraphRetriever 从投影取得候选与来源 Chunk ID，application 图谱用例通过共享读取入口批量回查 Mongo 正文并应用资源版本与权限决定。Entity/Relationship vectors 与 Neo4j topology 均为可重建投影。
 
 旧 `GraphFactStore` 的职责是保存抽取事实及其 Chunk 来源映射；现在抽取事实随 Chunk 持久化，来源关联进入 Neo4j 查询投影，因此再加一份仓储只会重复维护事实和增加写入/重建路径，不再保留独立 GraphFactStore 或 GraphChunkSource repository。
 
@@ -341,34 +349,37 @@ Storage 只执行通用 `MetadataFilters`，不解释 plugin、ACL、active revi
 
 ### 7.1 Chunk 混合检索
 
-普通 Chunk 检索独立于图谱能力。复用 `common.utils.retrieval` 的通用候选模型和组合能力，但保留 RAG 自己的 Qdrant 查询、版本/ACL 检查与 Chunk 回查：
+普通检索复用完整 Common RetrievalPipeline。Common 只理解 Candidate[T] 的 candidate_id、payload、rank、score；业务 payload 不被排名算法改写，RankedCandidate 已移除。
 
 ```text
-query + request scope
-  -> RAG Qdrant Dense/Sparse retrievers
-  -> Common Candidate + explicit Fusion
-  -> RAG selected-revision/ACL validation
-  -> Mongo Chunk batch lookup and authorized text hydration
-  -> Common RetrievalPipeline rerank/diversity
-  -> RankedCandidate -> RAG ChunkHit
+application: query + ResourceSnapshot + 本次检索配置
+  -> 直接 VectorRetriever.from_storage 构造召回组件
+  -> VectorRetriever.retrieve(query: str)
+  -> Common 并发 dense/sparse + 默认 RoundRobin（可注入 RRF）
+  -> Candidate[VectorMatch]
+  -> Pipeline.prepare_candidates: ResourceSnapshotReader.read_chunks
+  -> 资源授权、selected revision、向量投影 resource/revision 身份核对
+  -> Candidate[PreparedChunk]
+  -> Common rerank / diversity
+  -> application ChunkHit
+  -> 可选异步 postprocess_hits(hits, snapshot)
 ```
 
-Qdrant 候选先只携带 Chunk ID、resource/revision 等过滤 metadata；必须通过本地 ACL 和 selected revision 检查并从 Mongo 读到正文后，才构造带正文的 `Candidate` 交给 reranker。这样未授权或过期正文不会进入外部重排模型。
+VectorRetriever.from_storage 初始化选择 VectorRetrievalMode（dense/sparse/hybrid，默认 hybrid）；dense/hybrid 注入 VectorReader 与已配置的 EmbeddingClient，sparse 只需 VectorReader。在装配时确定 dense_top_k=30、sparse_top_k=30、candidate_limit=60、filters=None、include_embedding=False 和融合策略。仅 hybrid 通过 Common FusionRetriever 并发两路；单路直接召回，保留 provider score。启用路线各自构造 Storage VectorQuery；dense/hybrid 查询 embedding 只生成一次，sparse 不生成。candidate_limit 对所有模式生效，未启用路线不进行 I/O 或预算校验。每路初始 Candidate.score 是 provider score，融合只改 Candidate 排名字段，VectorMatch.score 保留 provider 分数。非法配置在初始化时失败，空白查询在 I/O 前失败，任一路异常直接传播。
 
-复用边界：
+HybridRetrieval 显式注入 ResourceSnapshotReader、VectorReader、已配置的 EmbeddingClient、可选 Fusion[VectorMatch]、Reranker[PreparedChunk] 与命中后处理器。用例直接调用 VectorRetriever.from_storage，显式选择 hybrid，将固定依赖与本次 dense_top_k、sparse_top_k、candidate_limit、filters、include_embedding 组合成召回组件。已连接的客户端与仓储共享，每次组装不新建数据库连接，不修改共享组件的配置。
 
-- 直接使用 Common 的 `Candidate`、`RankedCandidate`、`FusionRetriever` 和显式 `RoundRobinFusion`/`RrfFusion`；Dense 与 Qdrant sparse 查询由 RAG 实现为 Retriever adapter。
-- RAG 的 request scope 通过请求级 Retriever 组合绑定，不写入共享 Retriever 实例的可变状态。
-- `RetrievalPipeline` 可负责授权候选之后的 rerank、diversity 和最终 `RankedCandidate` 转换；RAG 再按 candidate ID/metadata 映射为 `ChunkHit`。
-- Common `BM25Retriever` 使用调用方传入的内存 Candidate 列表并在本地建 BM25 索引，不等同于 Qdrant sparse 查询；不把它当成 Qdrant adapter。
-- Fusion 必须显式选择算法；不依赖基类默认行为。
-- 复用当前 `RetrievalPipeline` 会继承 reranker 失败时记录日志并保留原候选顺序的行为。P4 验收确认此降级语义；若业务要求 reranker 失败直接失败，只复用 Candidate/Fusion 等通用组件，由 RAG 编排重排阶段。
+用例 retrieve(query, *, snapshot, top_k=5, focus="", diversity="off", filters=None, dense_top_k=30, sparse_top_k=30, candidate_limit=60) 先通过显式快照批量读取，过滤缺失定位、不可见、旧版本、错误投影身份和缺失事实。PreparedChunk 只承载授权 Chunk 与可选候选 embedding。ModelReranker 通过文本提取函数只读取 Chunk.raw_text；focus 去空白为空时使用 query。MMR 使用向量提取函数，off 不请求向量，moderate/high 使用已存向量和 Common 的 0.75/0.5 参数，不重新 embedding 正文。
 
-图谱不可用、未启用或没有图节点来源时，普通 ChunkHit 仍然有效。
+授权过滤后不补召回、不重查 publication/ACL，结果允许少于 top_k。召回或准备为空时跳过排序；准备失败不调用外部模型。重排失败记录日志并保留重排前顺序与分数，召回、准备、多样化及后处理异常直接传播。
+
+ChunkHit 仅包含 chunk_id、resource_id、content_revision、section_id、section_path、text（raw_text）、rank、score；score 属于最终排序阶段，不限定为 0–1，不命名为 rerank_score。内部 metadata 和向量不进入结果。Pipeline 截取 top_k 并连续编号，application 组装后才调用可选后处理器；空结果不调用。
+
+Common BM25Retriever 使用调用方提供的 payload 文本提取函数在内存建索引，不等同于 Qdrant sparse 查询。Chat 缓存输出搜索已迁移到类型化 payload，保留原文定位与会话隔离行为。图谱不可用或未启用时普通检索独立工作。
 
 ### 7.2 图谱检索
 
-GraphRetriever 只对齐 LightRAG 的 `local`、`global`、`hybrid`。它组合 GraphStorage Reader、Chunk 正文回查、Ontology filter、selected revision、ACL 和有界遍历。
+GraphRetriever 只对齐 LightRAG 的 `local`、`global`、`hybrid`，组合固定 GraphStorage Reader、向量 Reader 与有界遍历算法；查询与装配配置合同在真实图切片确定，本轮不预建 graph 抽象。application 图谱检索用例负责资源版本与 ACL 决定、来源 Chunk 正文回查和上下文组装，共享读取模块不依赖 GraphRetriever 或该具体用例。
 
 `mix` 是外层能力：由 Chunk hybrid retrieval 与 graph retrieval 组合，不下沉到 GraphStorage 或 GraphRetriever。
 
@@ -386,7 +397,7 @@ ChunkHit 可以附带可选的 Entity `GraphNodeReference` 列表。它们只是
 
 ### 7.4 父块
 
-父块展开由外层工具参数控制，默认关闭。它不改变 Chunk identity、Chunk 中的图谱来源事实、Storage 合同或普通检索排序。
+本轮只提供排序与组装后的异步 postprocess_hits(hits, snapshot) 扩展点，不冻结 ParentBuilder、父块结果承载或空 parents 字段。实际父块构建、参数及结果模型在后续切片讨论；它不改变 Chunk identity、图谱来源事实或 Storage 合同。
 
 ## 8. Ontology、Producer 和 Plugin
 
@@ -426,9 +437,12 @@ src/rag/
   acl/
   application/
     publication/  # models.py、store.py、publish.py；后者包含事件、消费者及完整发布
+    snapshot.py   # ResourceSnapshot 与 ResourceSnapshotReader，共享版本／权限决定和内容读取
+    retrieval.py  # HybridRetrieval、PreparedChunk、ChunkHit 与固定读取/模型依赖装配
+                   # 标题树、图谱及种子校验用例在后续切片实现
   ingestion/       # Chunker, Transformer, Indexer, IngestionPipeline
   storage/         # ContentStorage, VectorStorage, GraphStorage
-  retrieval/       # Chunk Retriever, GraphRetriever, seed validation
+  retrieval/       # vector.py: 配置式 VectorRetriever；graph 抽象留到图切片
   graph/            # LightRAG core, Ontology, PluginRegistry
   backends/         # Mongo, Kafka, Qdrant, Neo4j
 ```
@@ -437,7 +451,7 @@ src/rag/
 
 ```text
 core.schema <- ingestion/storage/retrieval/graph
-storage ports <- ingestion indexers/retrieval/application.publication
+storage ports <- ingestion indexers/retrieval/application
 backends -> storage ports
 backends -> graph/acl/application.publication ports
 composition -> all concrete implementations
@@ -453,7 +467,7 @@ Kafka 后端提供通用传输重试而不导入 application/acl。内容、销�
 
 - ACL 本地投影允许短暂最终一致；RAG 不补偿上游重算完成语义；
 - 多后端不存在统一瞬时观察点；
-- 请求内固定开始时的 active revision，不追求请求结束时最新；
+- 请求内逐资源固定首次完成的版本与可见性决定，不追求请求结束时最新，也不增加输出前 ACL／destroyed 回查；
 - 单个图谱投影失败不回滚已经完成的普通投影；
 - 普通检索、图谱查询和直接读取分别决定局部失败和部分返回。
 

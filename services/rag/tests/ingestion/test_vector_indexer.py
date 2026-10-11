@@ -14,9 +14,10 @@ from rag.ingestion.indexers import VectorIndexer
 @pytest.fixture
 def embedding_client():
     return SimpleNamespace(
+        dimensions=2,
         embed=AsyncMock(
             side_effect=lambda **kwargs: [[1.0, 0.0] for _ in kwargs["texts"]]
-        )
+        ),
     )
 
 
@@ -29,8 +30,6 @@ def vector_writer():
 def indexer(embedding_client, vector_writer):
     return VectorIndexer(
         embedding_client=embedding_client,
-        model="test-model",
-        dimensions=2,
         writer=vector_writer,
         batch_size=2,
     )
@@ -44,6 +43,16 @@ async def test_zero_chunks_has_no_embedding_or_storage_io(
     vector_writer.upsert.assert_not_awaited()
 
 
+async def test_provider_default_dimensions_are_used_without_indexer_override(
+    indexer, embedding_client, vector_writer, chunk
+):
+    embedding_client.dimensions = None
+    embedding_client.embed.side_effect = None
+    embedding_client.embed.return_value = [[1.0, 0.0, 0.5]]
+    await indexer.index([chunk])
+    assert vector_writer.upsert.call_args.args[0][0].embedding == [1.0, 0.0, 0.5]
+
+
 async def test_retrieval_text_and_identity_projection_preserve_input(
     indexer, embedding_client, vector_writer, chunk
 ):
@@ -55,7 +64,7 @@ async def test_retrieval_text_and_identity_projection_preserve_input(
     await indexer.index(chunks)
     assert chunks == before
     embedding_client.embed.assert_awaited_once_with(
-        model="test-model", dimensions=2, texts=["文档上下文\n\n  中文正文\n", "第二块"]
+        texts=["文档上下文\n\n  中文正文\n", "第二块"]
     )
     records = vector_writer.upsert.call_args.args[0]
     assert [record.record_id for record in records] == [chunk.chunk_id, second.chunk_id]

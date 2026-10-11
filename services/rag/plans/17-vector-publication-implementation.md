@@ -28,7 +28,7 @@ VectorIndexer 每批先 embedding 再等待向量写入，然后进入下一批�
 
 ## 发布装配与验收
 
-外部固定普通配置：
+外部固定普通配置（示例已同步客户端初始化合同：EmbeddingClient 初始化绑定 model/dimensions，VectorIndexer 不重复接收）：
 
 ```python
 vectors = QdrantVectorStorage(
@@ -44,8 +44,6 @@ pipeline = IngestionPipeline(
         ChunkFactsIndexer(writer=content),
         VectorIndexer(
             embedding_client=embedding_client,
-            model=embedding_model,
-            dimensions=embedding_dimensions,
             writer=vectors,
         ),
     ],

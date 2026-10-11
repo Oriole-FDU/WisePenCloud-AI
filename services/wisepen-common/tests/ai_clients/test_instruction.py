@@ -3,9 +3,16 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from common.utils.ai_clients import InstructionClient
 from pydantic import BaseModel
 
-from common.utils.ai_clients import InstructionClient
+
+@pytest.mark.parametrize("model", ["", " \t"])
+def test_empty_model_fails_before_client_wrapping(model):
+    with patch("common.utils.ai_clients.instruction.instructor.from_openai") as wrap:
+        with pytest.raises(ValueError, match="model"):
+            InstructionClient(SimpleNamespace(), model=model)
+        wrap.assert_not_called()
 
 
 def _text_client(content: str, *, finish_reason: str = "stop"):
@@ -29,8 +36,7 @@ def _text_client(content: str, *, finish_reason: str = "stop"):
 async def test_complete_returns_text_and_forwards_request():
     client, create = _text_client("answer")
     with patch("common.utils.ai_clients.instruction.instructor.from_openai"):
-        result = await InstructionClient(client).complete(
-            model="instruction-model",
+        result = await InstructionClient(client, model="instruction-model").complete(
             messages=[{"role": "user", "content": "question"}],
             max_tokens=64,
         )
@@ -50,7 +56,7 @@ async def test_complete_rejects_empty_text():
         patch("common.utils.ai_clients.instruction.instructor.from_openai"),
         pytest.raises(ValueError, match="empty"),
     ):
-        await InstructionClient(client).complete(model="m", messages=[])
+        await InstructionClient(client, model="m").complete(messages=[])
 
 
 class Person(BaseModel):
@@ -62,8 +68,9 @@ class Person(BaseModel):
 async def test_structured_complete_uses_json_mode_and_parses_object():
     client, create = _text_client('{"name": "张三", "age": 20}')
     with patch("common.utils.ai_clients.instruction.instructor.from_openai"):
-        result = await InstructionClient(client).structured_complete(
-            model="instruction-model",
+        result = await InstructionClient(
+            client, model="instruction-model"
+        ).structured_complete(
             messages=[{"role": "user", "content": "extract person"}],
             max_tokens=64,
         )
@@ -89,9 +96,8 @@ async def test_structured_complete_validates_pydantic_model_through_instructor()
     )
     with patch("common.utils.ai_clients.instruction.instructor.from_openai") as wrap:
         wrap.return_value = structured_client
-        client = InstructionClient(SimpleNamespace())
+        client = InstructionClient(SimpleNamespace(), model="instruction-model")
         result = await client.structured_complete(
-            model="instruction-model",
             messages=[{"role": "user", "content": "extract person"}],
             response_model=Person,
         )
@@ -122,4 +128,4 @@ async def test_structured_complete_rejects_invalid_json_response(
         patch("common.utils.ai_clients.instruction.instructor.from_openai"),
         pytest.raises(error),
     ):
-        await InstructionClient(client).structured_complete(model="m", messages=[])
+        await InstructionClient(client, model="m").structured_complete(messages=[])

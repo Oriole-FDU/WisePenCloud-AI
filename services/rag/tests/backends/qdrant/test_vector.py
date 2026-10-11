@@ -250,3 +250,71 @@ async def test_real_client_forwards_bm25_documents_without_local_inference(compl
         )
     finally:
         await client.close()
+
+
+@pytest.mark.parametrize("dense", [True, False])
+async def test_queries_request_named_dense_vector_for_either_recall_route(
+    qdrant_client, dense
+):
+    vectors = QdrantVectorStorage(
+        client=qdrant_client,
+        collection="test",
+        dense_vector_size=2,
+        dense_vector_name="custom_dense",
+        sparse_vector_name="custom_sparse",
+    )
+    qdrant_client.query_points.return_value = SimpleNamespace(
+        points=[
+            SimpleNamespace(
+                payload={"record_id": "chunk", "metadata": {}},
+                score=0.7,
+                vector={"custom_dense": [1.0, 0.0]},
+            )
+        ]
+    )
+    request = (
+        VectorQuery(embedding=[1.0, 0.0], include_embedding=True)
+        if dense
+        else VectorQuery(text="中文", include_embedding=True)
+    )
+    assert await vectors.query(request) == [VectorMatch("chunk", 0.7, {}, [1.0, 0.0])]
+    assert qdrant_client.query_points.call_args.kwargs["with_vectors"] == [
+        "custom_dense"
+    ]
+
+
+@pytest.mark.parametrize("dense", [True, False])
+@pytest.mark.parametrize(
+    "vector",
+    [
+        None,
+        {},
+        {"sparse": [1.0, 0.0]},
+        [1.0, 0.0],
+        {"dense": []},
+        {"dense": [1.0]},
+        {"dense": [float("nan"), 0.0]},
+        {"dense": [float("inf"), 0.0]},
+        {"dense": [True, 0.0]},
+        {"dense": ["1", 0.0]},
+    ],
+)
+async def test_requested_vector_data_errors_propagate(
+    vectors, qdrant_client, dense, vector
+):
+    qdrant_client.query_points.return_value = SimpleNamespace(
+        points=[
+            SimpleNamespace(
+                payload={"record_id": "chunk", "metadata": {}},
+                score=0.7,
+                vector=vector,
+            )
+        ]
+    )
+    request = (
+        VectorQuery(embedding=[1.0, 0.0], include_embedding=True)
+        if dense
+        else VectorQuery(text="中文", include_embedding=True)
+    )
+    with pytest.raises(RuntimeError, match="embedding"):
+        await vectors.query(request)

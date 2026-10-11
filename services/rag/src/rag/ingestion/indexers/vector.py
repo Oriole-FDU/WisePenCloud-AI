@@ -17,18 +17,12 @@ class VectorIndexer(Indexer):
         self,
         *,
         embedding_client: EmbeddingClient,
-        model: str,
-        dimensions: int,
         writer: VectorWriter,
         batch_size: int = 32,
     ) -> None:
-        if not model or dimensions <= 0 or batch_size <= 0:
-            raise ValueError(
-                "model must be nonempty; dimensions and batch size positive"
-            )
+        if batch_size <= 0:
+            raise ValueError("batch size must be positive")
         self._embedding_client = embedding_client
-        self._model = model
-        self._dimensions = dimensions
         self._writer = writer
         self._batch_size = batch_size
 
@@ -39,16 +33,17 @@ class VectorIndexer(Indexer):
             texts = [chunk.retrieval_text for chunk in batch]
 
             try:
-                vectors = await self._embedding_client.embed(
-                    model=self._model, texts=texts, dimensions=self._dimensions
-                )
+                vectors = await self._embedding_client.embed(texts=texts)
             except ValueError as exc:
                 # Common 的响应数量错误是 ValueError，不是上游事件的永久输入错误
                 raise RuntimeError("invalid embedding response") from exc
 
             # 数量、维度、取值必须全部匹配；任一不合规都视为供应商响应异常
             if len(vectors) != len(batch) or any(
-                len(vector) != self._dimensions
+                (
+                    self._embedding_client.dimensions is not None
+                    and len(vector) != self._embedding_client.dimensions
+                )
                 or any(
                     type(value) not in (int, float) or not isfinite(value)
                     for value in vector

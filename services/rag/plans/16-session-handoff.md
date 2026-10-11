@@ -1,19 +1,21 @@
 # RAG V4 会话接手文档
 
-记录日期：2026-10-12。本文是新会话的首读入口，描述已完成实现、已查清事实、用户确认的设计约束和建议继续顺序。不是要求一次实现全部后续阶段。本轮向量更新见 [17 普通向量发布实施记录](17-vector-publication-implementation.md)：建议顺序第 1–4 步已实现，下一步是第 5 步生产装配。
+记录日期：2026-10-12。本文是新会话的首读入口，描述已完成实现、已查清事实、用户确认的设计约束和建议继续顺序。不是要求一次实现全部后续阶段。向量闭环见 [17 普通向量发布实施记录](17-vector-publication-implementation.md)；共享资源快照和内容读取见 [18 实施记录](18-application-snapshot-implementation.md)。本轮泛型 Pipeline、VectorRetriever 与普通混合检索见 [19 实施记录](19-hybrid-retrieval-implementation.md)。父块、标题树、Contextualizer 与图谱后续讨论；生产生命周期装配继续留后。
 
 ## 1. 快速定位与当前基线
 
 - 工作区：`D:\WisePenCloud-AI\wisepen_common\WisePenCloud-AI`，PowerShell。
-- 当前分支：`dev/common`；本次交接前 HEAD 为 `de7bb34d`（`feat(rag-v4): 完成发布流程逻辑`），前一内容存储提交为 `5cb34e74`。后续会话先核对 HEAD，避免把记录中的提交位置当成永久状态。
+- 当前分支：`dev/common`；本轮开始时 HEAD 为 `9e1f3b37`（`feat(rag-v4): 实现rag 向量仓储抽象和qdrant集成`）。后续会话先核对 HEAD，避免把记录中的提交位置当成永久状态。
 - 新实现只在 `services/rag/src/rag`，测试在 `services/rag/tests`。旧 `services/wisepen-rag-service/src/rag` 与 `services/rag/references` 只作源码参考。
-- 初次交接前 RAG 相关源码已提交；本轮新增向量模型、后端、Indexer 与测试，尚未提交。`WisePenView`、`services/rag/references/LightRAG` 有既存子模块状态变化，本轮没有处理；不要为清理工作区而恢复或提交它们。
-- 最新服务测试：**274 passed、17 skipped**；服务 Ruff check 通过。17 个跳过项为 11 Mongo、3 Kafka、3 Qdrant 集成测试，均未配置测试连接，不能宣称真实后端已验证。向量轮次前基线为 202 passed、14 skipped。
-- 前一实现轮次已通过修改文件 Ruff format、源码与测试 compileall、git diff --check，以及 core.schema 独立导入的依赖边界检查。
+- 向量实现已提交；本地已新增 application 资源快照 Reader、Common 泛型检索、VectorRetriever、HybridRetrieval、Chat BM25 payload 迁移及测试与文档，尚未提交。`WisePenView`、`services/rag/references/LightRAG` 有既存子模块状态变化，本轮没有处理；不要为清理工作区而恢复或提交它们。
+- 最新服务测试：**411 passed、17 skipped**；Common 检索 **24 passed**，Chat 缓存 BM25 工具 **3 passed**，服务及修改范围 Ruff check 通过。17 个跳过项为 11 Mongo、3 Kafka、3 Qdrant 集成测试，均未配置测试连接，不能宣称真实后端已验证。检索切片前基线为 322 passed、17 skipped；向量切片为 274 passed、17 skipped。
+- 本轮通过修改文件 Ruff format、源码与测试 compileall、git diff --check，以及 snapshot 模块不导入具体检索用例或运行配置、VectorRetriever 不加载 application/ACL/后端运行模块的依赖边界检查。
 
-最短阅读顺序：本文 → [17 向量与发布实施记录](17-vector-publication-implementation.md) → `container.py`、`main.py`、`core/config/app_settings.py` → [15 Kafka 与发布实施记录](15-kafka-publication-implementation.md) 的生命周期要求。模型/存储合同见 11 相关章节与当前代码，无需先遍历整个仓库或 references。
+装配关系可直接读 [demo/hybrid.md](../demo/hybrid.md)，其中显式展示 from_storage 的调用位置及完整用例连接。
 
-文档与决策优先级：用户后续明确决策 > 已确认合同及当前实现 > 10／11 整合计划 > 00–09 历史背景。12–15、17 是实施记录，部分验收数字是阶段历史值。`架构图.md` 仍含 `document.py` 等旧目录和未来组件，不能据其判断当前文件存在。遇到真实合同冲突应向用户确认，不能自行把示例升级为已确认要求。
+最短阅读顺序：本文 → [19 检索实施记录](19-hybrid-retrieval-implementation.md) → `application/retrieval.py` 与 `retrieval/vector.py` → 11 第 7.1 节；需要了解资源决定时再读 [18](18-application-snapshot-implementation.md) 与 `application/snapshot.py`。生产生命周期仍留后；无需先遍历整个仓库或 references。
+
+文档与决策优先级：用户后续明确决策 > 已确认合同及当前实现 > 10／11 整合计划 > 00–09 历史背景。12–15、17–19 是实施记录，部分验收数字是阶段历史值。`架构图.md` 仍含 `document.py` 等旧目录和未来组件，不能据其判断当前文件存在。遇到真实合同冲突应向用户确认，不能自行把示例升级为已确认要求。
 
 ## 2. 已完成什么
 
@@ -30,10 +32,14 @@
 | 普通 VectorIndexer | `ingestion/indexers/vector.py` | retrieval_text → 分批 embedding → 双向量投影输入，只读 Chunk，全部成功才返回 |
 | 发布完整用例 | `application/publication/publish.py` | 输入事件、消费者、publish 内部摄入与回查、条件发布、永久销毁 |
 | 发布状态后端 | `backends/mongo/publication.py` | Mongo 条件 stage／apply、永久 destroyed 标记 |
+| 请求内资源快照与内容读取 | `application/snapshot.py` | ResourceSnapshot 保存版本／资源授权决定；ResourceSnapshotReader 批量读取 Document／Chunk，身份回查、首次决定复用、部分结果与请求隔离 |
+| 普通向量召回 | `retrieval/vector.py` | VectorRetriever.from_storage 初始化预算/filters/向量返回；retrieve 只接收字符串；Common 并发 dense/sparse 与显式融合 |
+| 普通混合检索 | `application/retrieval.py` | 直接 from_storage 按调用配置装配、快照授权回查、投影身份核对、重排/MMR、ChunkHit 与可选异步后处理 |
+| Common 泛型检索与 Chat 消费方 | Common `utils/retrieval`、Chat 缓存 BM25 工具 | Candidate[T]、异步准备、payload 提取器；已移除 RankedCandidate，缓存定位行为保持 |
 | 通用 Kafka | `backends/kafka/consumer.py`、`retry.py` | 有限快速重试、延迟回投、DLQ、精确 offset 提交及资源清理 |
 | 服务生命周期 | `container.py`、`main.py`、`api/router.py` | 目前装配 ACL；等待连接后就绪，消费异常撤销健康状态 |
 
-当前**没有** Contextualizer、普通 Retriever、selected revision 读取用例、GraphStorage／GraphIndexer。VectorStorage、VectorIndexer、Qdrant adapter 与外部普通发布 Pipeline 已通过测试；真实 Qdrant 尚未验证。`ingestion/transformers/base.py` 只是接口，不能把空目录或 Protocol 计为增强能力已完成。
+当前**没有** Contextualizer、父块实现、标题树、GraphRetriever／GraphStorage／GraphIndexer。资源快照、Document／Chunk 读取和普通混合检索已完成；VectorStorage、VectorIndexer、Qdrant adapter 与外部普通发布 Pipeline 已通过测试，真实 Qdrant 尚未验证。`ingestion/transformers/base.py` 只是接口，不能把空目录或 Protocol 计为增强能力已完成。
 
 publication 消费者可通过显式依赖真实运行 Kafka；尚未注入全局 Container／main／Nacos。必需向量能力现已实现，但模型/连接配置、显式初始化与 publication 生命周期尚未装配。生产发布不能以 fake 或空必需投影替代。现有服务入口只运行 ACL 消费。物理销毁现在只撤销可见性并保留标记，尚未执行内容／向量／图物理清理。
 
@@ -92,7 +98,18 @@ stage：先 destroyed，再低于 staged/applied 最高版本，再最高版本�
 
 destroy_resources 永久置 destroyed=True，清空 staged/applied；未摄入资源也建标记，每批 500 个有序 upsert。标记不删除、不恢复；正在运行的任务可能留下事实或投影，但不能恢复发布。物理清理由后续用例完成。
 
-### 3.4 Kafka 已定策略
+### 3.4 请求内资源快照与共享读取
+
+- `application/snapshot.py` 只包含 ResourceSnapshot 与 ResourceSnapshotReader；版本与 ACL resolver 已收为 Reader 内部方法，后续读取和检索用例统一使用 Reader。
+- ResourceSnapshot 绑定可信 PermissionScope，只缓存 `resource_id -> ContentRevision | None`；不保存正文、拒绝原因或跨服务一致性版本。不可见也缓存。
+- 每次独立能力调用创建新快照；同一次上层编排的 Document、Chunk 和后续子操作显式共享。共享 Reader 仅保存 PublicationStore、ResourceAclRepository、ContentReader 固定依赖，不跨用户或聊天会话复用请求状态。
+- 只对尚未观察资源批量读 publication，对未 destroyed 且已 applied 的资源批量读 ACL。判权按资源／Document，Chunk 继承；不增加 Chunk 或 Section 级 ACL。
+- 首次完成的版本和可见性决定固定；applied、ACL、destroyed 后续变化不触发回查、切换或重试，新调用重新观察。交错子操作保留最先完成的决定，不引入锁或全局上下文。
+- Document 核对 resource、version、revision 和原始 text 的完整摘要；Chunk 核对所属资源与 selected revision。事实缺失或身份不符只省略该对象，不回退其他版本。批量去重保序，空输入无 I/O；连接、查询和解码异常直接传播。
+- 混合检索 use case 与 HybridRetriever 分开：application 编排资源决定、授权正文回查、重排与组装；Retriever 只保存固定依赖／配置，retrieve 只接收字符串查询，预算/filters/include_embedding 在初始化时确定；application 每次直接调用 from_storage 构造组件，不在 constructor 绑定快照或请求 scope。
+- snapshot 名称仅表示一次调用内的资源版本与权限决定，不承诺 Mongo／Qdrant／Neo4j 同一时间点，也不缓存正文。
+
+### 3.5 Kafka 已定策略
 
 - **不使用或改造 common.kafka**；先前尝试已复原。ACL 和 publication 都使用 `rag.backends.kafka`，后端不导入业务模块。
 - 默认快速重试 3 次，等待 1／2／4 秒；随后 `<main>-retry-1m`、`<main>-retry-10m` 各一次；仍失败进入 `<main>.DLT`。正常链最多 5 次重试、6 次业务执行。
@@ -116,8 +133,9 @@ destroy_resources 永久置 destroyed=True，清空 staged/applied；未摄入�
 ### 4.2 Common 与旧代码复用点
 
 - Markdown：`services/wisepen-common/src/common/utils/markdown`。RAG 只适配字段与资源/revision 内 ID，不重写解析或分块算法。事件 to_document 通过 Common 完整分块结果提取 sections/anchors，Pipeline 再正式分块；当前存在这次重复解析，已知且未另造解析接口。
-- Embedding：`services/wisepen-common/src/common/utils/ai_clients/embedding.py` 的 EmbeddingClient 已有 `embed(model=..., texts=list[str], dimensions=...) -> list[list[float]]`，按 response.index 保序并核对数量。它拒绝空 texts，所以 VectorIndexer 的零 Chunk 成功路径必须在调用前结束。
-- 检索：`services/wisepen-common/src/common/utils/retrieval` 已导出 Candidate、Retriever、FusionRetriever、RoundRobinFusion、RrfFusion、RetrievalPipeline、RankedCandidate、reranker／diversity。
+- Instruction：Common InstructionClient 在 `__init__(client, *, model)` 固定模型；complete/structured_complete 只接收本次 messages、max_tokens 与结构化 response_model。
+- Embedding：`services/wisepen-common/src/common/utils/ai_clients/embedding.py` 的 EmbeddingClient 在 `__init__(client, *, model, dimensions=None)` 固定模型/维度，调用合同为 `embed(texts=list[str]) -> list[list[float]]`，只读 dimensions 供向量消费方核对响应，按 response.index 保序并核对数量。它拒绝空 texts，所以 VectorIndexer 的零 Chunk 成功路径必须在调用前结束。
+- 检索：`services/wisepen-common/src/common/utils/retrieval` 已导出泛型 Candidate、Retriever、FusionRetriever、RoundRobinFusion、RrfFusion、RetrievalPipeline、reranker／diversity。Candidate 仅有 candidate_id/payload/rank/score，RankedCandidate 已删除；Pipeline.prepare_candidates 可在重排前异步转换 payload。文本与向量通过 payload 提取函数提供。
 - Common BM25Retriever 为传入的内存 Candidate 列表建索引，**不能当作 Qdrant sparse adapter**。Dense／sparse 的 provider 召回适配留在 RAG。
 - Common RetrievalPipeline 在 reranker 失败时保留原召回顺序，计划已接受此降级行为；需要严格失败合同的用例应明确讨论，不能默认为与 ingestion 同样 fail-fast。
 - 旧向量源码优先看 `services/wisepen-rag-service/src/rag/core/persistence/qdrant/document_vector_repository.py`、`graph_vector_repository.py`，旧普通索引编排在 `application/document/indexing.py`。只提取 provider 行为、算法或用例，不复用旧 repository、发布完整性 API、payload 或运行时。
@@ -149,7 +167,7 @@ VIEW 顺序与已有 ACL 测试已冻结：所有者、全局白名单、全局�
 
 ## 5. 建议下一步开发顺序
 
-现有 10 的 P0–P8 是大阶段规划，完成情况不能简单按编号连续推断：内容事实、publication、Kafka 与普通向量投影已落地，生产 publication 装配、读取和图谱仍待实现。当前优先完成真实后端验证与生产装配。
+现有 10 的 P0–P8 是大阶段规划，完成情况不能简单按编号连续推断：内容事实、publication、Kafka、普通向量投影与共享资源快照读取已落地。普通混合检索切片已完成；后续父块后处理与结果承载、标题树、Contextualizer 或图谱范围在下一轮讨论，生产 publication 生命周期装配继续留后。
 
 | 顺序 | 切片与范围 | 完成标准 |
 | --- | --- | --- |
@@ -157,24 +175,30 @@ VIEW 顺序与已有 ACL 测试已冻结：所有者、全局白名单、全局�
 | 2（已实现） | Qdrant collection-bound 后端及显式初始化 | upsert/query/delete、过滤翻译、completed 确认通过；3 个隔离集成测试未配置而跳过 |
 | 3（已实现） | 普通 Chunk VectorIndexer | retrieval_text → 分批 embedding → VectorWriter；只读输入、零 I/O、失败保留与响应校验通过 |
 | 4（已实现） | 外部完整普通 Pipeline 与发布闭环 | 事实在向量前；向量失败不 apply，成功才 apply；重放／高版本／销毁通过。测试替换驱动 I/O，真实 Qdrant 未验证 |
-| 5 | 完整生产装配与 publication 运行入口 | 确认配置、索引初始化、必需投影和消费者生命周期后接 Container／main；不能先上线只有 Chunk facts 的“原文落库即发布” |
-| 6 | selected revision 读取边界、Dense／sparse hybrid 与直接内容读取 | 请求首次选择 applied 后固定该 revision；本地 ACL 验证，Mongo 正文回查；授权正文才进 rerank／context；旧候选不混入新 revision |
+| 5（留后） | 完整生产装配与 publication 运行入口 | 确认配置、索引初始化、必需投影和消费者生命周期后接 Container／main；不能先上线只有 Chunk facts 的“原文落库即发布” |
+| 6-A（已实现） | application 共享资源快照与 Document／Chunk 读取 | ResourceSnapshot／Reader 两对象；首次版本与资源授权决定固定，负结果缓存、正文身份检查、批量与异常合同通过 |
+| 6-B（已实现） | 普通混合检索 use case 与无请求状态的 Dense／Sparse／Fusion | application 显式共享快照，编排候选、授权正文回查和重排；旧候选不混版，授权正文才进外部模型 |
 | 7 | Contextualizer 与普通内容能力完善 | 同 resource/revision/section 连续上下文，预算明确，只增强 metadata；接在事实 Indexer 前；图谱不可用时普通检索仍独立工作 |
 | 8 | 物理清理、按事实重建投影及回收站可见性 | 先永久撤销发布，再清内容与各投影；不删销毁标记；重复／部分失败可继续；回收站 issue 需独立明确上游合同 |
 | 9 | 可选图谱生产与读取 | Ontology／Plugin → GraphExtractor → Chunk metadata 事实 → GraphIndexer／GraphStorage → LightRAG local/global/hybrid → seed／有界遍历 |
 
-第 1–4 步已由本轮完成，下一轮优先第 5 步生产装配，并配置隔离测试验证真实 Qdrant。第 6–7 步属于 P4 普通检索与增强；原大计划先排 Contextualizer，实际是否提前由下一轮目标决定，**基础向量发布可以直接使用 raw_text 派生的 retrieval_text，不以 contextual LLM 为前置条件**。可选图谱始终在普通发布成功后独立构建，失败不撤销普通内容。
+第 1–4、6-A、6-B 步已完成；普通检索的父块后处理仍仅有扩展位置，实际构建与承载未冻结。第 5 步生命周期装配留后。第 6-B–7 步属于 P4 普通检索与增强，**基础向量发布可以直接使用 raw_text 派生的 retrieval_text，不以 contextual LLM 为前置条件**。可选图谱始终在普通发布成功后独立构建，失败不撤销普通内容。
 
-### 本轮已确认的向量选择与下一轮待确认项
+### 已确认的向量与检索选择、后续边界
 
-用户确认本轮执行范围到向量发布闭环；共享 VectorRecord/Query/Match 提升到 core/schema/vector.py，Storage 只保留端口。其他已确认选择：
+向量发布闭环与普通混合检索已按确认计划完成；共享 VectorRecord/Query/Match 提升到 core/schema/vector.py，Storage 只保留端口。其他已确认选择：
 
 - 普通发布要求 dense 与 sparse 全部成功；sparse 固定服务端 qdrant/bm25 multilingual，client 使用 cloud_inference=True，失败不降级 dense-only。
 - 沿用 EMBEDDING_MODEL/DIMENSIONS 与旧连接配置键，集合独立 V4，后续默认 document_chunk_vectors_v4，named vectors 为 dense/sparse。模型与维度目前显式注入，生产实际值仍待确认；embedding batch 默认 32，Qdrant upsert batch 默认 256，可注入。
 - Adapter 内使用 uuid5(NAMESPACE_URL, "wisepen-rag-v4:vector:" + record_id)，核心 Chunk ID 不变；payload 保存原 record_id 与 metadata 中资源/revision，不保存 text、ACL 或未来图字段。
 - VectorWriter upsert/delete 返回 None，无 Receipt；每批 wait=True 且 completed 才算成功，不做向量完整性回查。
 - 同 revision 换分块/embedding 配置及旧投影删除仍是后续重建用例，本轮只保证当前配置下身份重放。
-- 下一轮确认生产配置值、Qdrant 服务端版本/BM25 支持、启动初始化/清理和健康状态时序；不重新询问上述已冻结合同。
+- VectorRetriever.retrieve(query: str) 返回 Candidate[VectorMatch]；不保留 VectorRetrievalQuery。from_storage 固定默认预算 dense=30、sparse=30、融合上限=60，filters=None、include_embedding=False；默认显式 RoundRobin，可注入 RRF。FusionRetriever 不增加调用时预算覆盖。
+- VectorRetriever 初始化 mode 为 dense/sparse/hybrid（默认 hybrid）；sparse 只依赖 VectorReader、不需要 embedding 客户端，单路保留 provider score，hybrid 才执行 Common 并发融合。candidate_limit 统一限制输出，未启用路线不执行 I/O 或预算校验。
+- HybridRetrieval 绑定固定 VectorReader 与已配置的 EmbeddingClient，直接调用 from_storage 显式选择 hybrid，按本次配置构造 Retriever，最终 top_k 默认 5；focus 空白回退 query，diversity 为 off/moderate/high。off 不取向量，MMR 使用已存 dense 向量，不对正文重新 embedding。
+- Pipeline 的授权准备先于模型：批量 ResourceSnapshotReader.read_chunks，再核对向量 metadata 的 resource/revision 与实际 Chunk。不可见、旧候选、错误身份和缺失事实省略，不补召回、不重查 ACL/publication。重排失败降级，其他阶段异常传播。
+- ChunkHit 只有 chunk/resource/revision、section_id/section_path、raw text、rank、score；向量与内部 metadata 不进入结果。可选后处理在排序、top_k 和组装后调用，显式接收同一 snapshot；父块结果、ParentBuilder、graph 抽象尚未冻结。
+- 生产配置值、Qdrant 服务端版本/BM25 支持与生命周期时序在装配切片再确认。
 
 用户偏好：细节拿不准要问，尤其上述业务／部署取舍；不要擅自补一套“生产级”状态或策略。已确认的内部合同无需重复征求意见，普通命名、测试适配和可逆实现按当前风格推进。
 
@@ -198,6 +222,12 @@ git diff --check
 | 状态判断、CAS 与永久销毁 | `tests/backends/mongo/test_publication.py` |
 | 完整 publish 顺序及失败保留 | `tests/application/publication/test_publish_flow.py` |
 | 精确内容回查 | `tests/application/publication/test_publish_facts.py` |
+| 请求内版本／权限决定、不可见缓存与请求隔离 | `tests/application/test_snapshot_selection.py` |
+| Document／Chunk 授权读取、身份回查、缺失及异常合同 | `tests/application/test_snapshot_reading.py` |
+| 向量 Retriever 配置、融合、响应校验、并发隔离 | `tests/retrieval/test_vector_retriever.py` |
+| 普通混合检索授权、准备、排序、结果与后处理 | `tests/application/test_retrieval.py` |
+| 实际仓储到混合检索的完整装配示例 | `tests/backends/qdrant/test_hybrid_composition.py`（显式调用 from_storage，off/high 两种组合） |
+| Qdrant 按需向量与后端错误 | `tests/backends/qdrant/test_vector.py` |
 | 消费者、事件校验与确认时序 | `tests/application/publication/test_consumer.py` |
 | 重试／延迟／DLQ／基础设施异常 | `tests/backends/kafka/test_kafka_consumer.py` |
 | ACL 规则、权威刷新及消费 | `tests/acl` |
@@ -209,4 +239,4 @@ git diff --check
 
 ## 7. 可以直接发给新会话的开场指令
 
-> 请先读 `services/rag/plans/16-session-handoff.md` 与 17 向量实施记录。当前统一内容模型、内容存储、publication/Mongo 状态、RAG 独立 Kafka、共享向量/过滤模型、Qdrant 后端和 VectorIndexer 已完成，最新测试 274 passed、17 skipped；真实 Mongo/Kafka/Qdrant 未配置。普通发布要求 dense 与服务端 BM25 sparse 全部写入 completed，Pipeline 外部装配、事实 Indexer 在向量前，不做组件校验或向量回查。下一轮先规划生产配置、显式初始化与 Container/main publication 装配，按交接文档对未确认运行细节提窄问题，不重新设计已冻结合同。代码继续写在 services/rag，不改 common.kafka、不加旧 API 兼容。
+> 请先读 `services/rag/plans/16-session-handoff.md` 与 19 检索实施记录。统一内容、publication、向量投影、资源快照、Common 泛型 Pipeline、配置式 VectorRetriever 和 HybridRetrieval 已完成；最新 RAG 411 passed／17 skipped，Common 检索 24 passed，Chat 工具 3 passed，真实 Mongo/Kafka/Qdrant 未配置。Retriever.retrieve 只接收字符串，预算/filters/向量返回在初始化时确定；application 直接调用 from_storage 装配本次组件，显式共享 ResourceSnapshot，在外部模型前授权回查并核对向量投影身份。下一轮讨论父块构建与结果承载、标题树/Contextualizer 或图谱；不预建空 parents 字段或 graph 抽象。生产生命周期装配继续留后；代码写在 services/rag，不加旧 API 兼容。

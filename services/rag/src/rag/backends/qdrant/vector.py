@@ -1,5 +1,6 @@
 """Collection-bound 向量后端，保存可重建投影并等待实际写入完成。"""
 
+from math import isfinite
 from uuid import NAMESPACE_URL, uuid5
 
 from qdrant_client import AsyncQdrantClient, models
@@ -141,7 +142,10 @@ class QdrantVectorStorage:
             ),
             limit=request.top_k,
             with_payload=["record_id", "metadata"],
-            with_vectors=False,
+            # 即使是 sparse 召回，多样化也使用命中已有的 dense 向量。
+            with_vectors=[self._dense_vector_name]
+            if request.include_embedding
+            else False,
         )
         matches = []
         for point in response.points:
@@ -154,7 +158,24 @@ class QdrantVectorStorage:
                 or not isinstance(metadata, dict)
             ):
                 raise RuntimeError("invalid vector match payload")
-            matches.append(VectorMatch(record_id, point.score, metadata))
+            embedding = None
+            if request.include_embedding:
+                embedding = (
+                    point.vector.get(self._dense_vector_name)
+                    if isinstance(point.vector, dict)
+                    else None
+                )
+                # 请求向量后缺失或坏数据必须暴露，不能用空向量掩盖后端错误。
+                if (
+                    not isinstance(embedding, list)
+                    or len(embedding) != self._dense_vector_size
+                    or any(
+                        type(value) not in (int, float) or not isfinite(value)
+                        for value in embedding
+                    )
+                ):
+                    raise RuntimeError("invalid vector match embedding")
+            matches.append(VectorMatch(record_id, point.score, metadata, embedding))
         return matches
 
     async def delete(self, filters: MetadataFilters) -> None:
