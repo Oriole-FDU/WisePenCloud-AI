@@ -5,7 +5,6 @@ import pytest
 from common.utils.markdown import (
     MarkdownChunker,
     MarkdownChunkerConfig,
-    MarkdownDocument,
     MarkdownNode,
     MarkdownNodeKind,
     MarkdownParser,
@@ -78,9 +77,7 @@ def test_between_target_and_threshold_is_atomic_and_sections_do_not_mix():
 
 
 def test_document_title_names_preface_root_section():
-    result = _chunker().chunk(
-        MarkdownDocument("前言内容\n\n# 正文\n\nbody\n", title="我的文档")
-    )
+    result = _chunker().chunk("前言内容\n\n# 正文\n\nbody\n", title="我的文档")
     assert [section.title for section in result.sections] == [
         "我的文档<文档开头>",
         "正文",

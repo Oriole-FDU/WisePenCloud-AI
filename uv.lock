@@ -13,6 +13,7 @@ members = [
     "wisepen-chat-service",
     "wisepen-common",
     "wisepen-mcp-service",
+    "wisepen-rag",
     "wisepen-rag-service",
     "wisepen-sandbox-service",
     "wisepen-server-py",
@@ -499,6 +500,15 @@ dependencies = [
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/43/65/318323f98dbee45d42dff61d8f047181bc6f2268a9068cfad035a46be5af/beautifulsoup4-4.15.0.tar.gz", hash = "sha256:288e3ca7d54b06f2ac191970bc275c1939cb46d450b255bf6718b04aa37ab4f7" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/88/c6/92fcd42f1ba33e1184263f25bfabf3d27c383410470f169e4b8163bf9c17/beautifulsoup4-4.15.0-py3-none-any.whl", hash = "sha256:d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9" },
+]
+
+[[package]]
+name = "blingfire"
+version = "0.1.8"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/0f/55/e5b9ac53281b89b7fb182c9858b78c6109e350797e93f5e4cbdb90dfbbe6/blingfire-0.1.8.tar.gz", hash = "sha256:fac20b4c1bb6519a32716a8bf64f0fcb7b6ea7631ad1ffab29f14df85c5b4d6a" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/44/6e/bbf134837ca86e416183e98c4ed2f4e35cb805296a940fb96e58faaa2123/blingfire-0.1.8-py3-none-any.whl", hash = "sha256:9534102bb81f69bc175e2373ef46d8eb0a2a43da052442c7708bfcef171899df" },
 ]
 
 [[package]]
@@ -5137,6 +5147,7 @@ dependencies = [
     { name = "anthropic" },
     { name = "anyio" },
     { name = "beanie" },
+    { name = "blingfire" },
     { name = "charset-normalizer" },
     { name = "dashscope" },
     { name = "dependency-injector" },
@@ -5172,6 +5183,7 @@ requires-dist = [
     { name = "anthropic" },
     { name = "anyio" },
     { name = "beanie" },
+    { name = "blingfire", specifier = ">=0.1.8" },
     { name = "charset-normalizer" },
     { name = "dashscope" },
     { name = "dependency-injector" },
@@ -5208,6 +5220,7 @@ version = "0.1.0"
 source = { editable = "services/wisepen-common" }
 dependencies = [
     { name = "aiokafka" },
+    { name = "blingfire" },
     { name = "bm25s" },
     { name = "dashscope" },
     { name = "fastapi" },
@@ -5239,6 +5252,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiokafka" },
+    { name = "blingfire", specifier = ">=0.1.8" },
     { name = "bm25s", specifier = ">=0.3.9" },
     { name = "dashscope", specifier = ">=1.25,<2" },
     { name = "fastapi" },
@@ -5304,6 +5318,45 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"] },
     { name = "wisepen-common", editable = "services/wisepen-common" },
     { name = "zeroentropy" },
+]
+
+[[package]]
+name = "wisepen-rag"
+version = "0.1.0"
+source = { editable = "services/rag" }
+dependencies = [
+    { name = "aiokafka" },
+    { name = "fastapi" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pymongo" },
+    { name = "uvicorn" },
+    { name = "wisepen-common" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiokafka", specifier = ">=0.12,<1" },
+    { name = "fastapi", specifier = ">=0.136,<1" },
+    { name = "pydantic", specifier = ">=2,<3" },
+    { name = "pydantic-settings", specifier = ">=2,<3" },
+    { name = "pymongo", specifier = ">=4.17,<5" },
+    { name = "uvicorn", specifier = ">=0.34,<1" },
+    { name = "wisepen-common", editable = "services/wisepen-common" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "ruff", specifier = ">=0.9" },
 ]
 
 [[package]]

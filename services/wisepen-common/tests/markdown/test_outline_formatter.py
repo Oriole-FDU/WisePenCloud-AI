@@ -58,11 +58,7 @@ def test_neighborhood_keeps_ancestors_marks_current_and_limits_sibling_window() 
 
 
 def test_document_title_is_kept_distinct_from_document_start() -> None:
-    from common.utils.markdown import MarkdownDocument
-
-    result = MarkdownChunker().chunk(
-        MarkdownDocument("# Alpha\n\nBody\n", title="Report")
-    )
+    result = MarkdownChunker().chunk("# Alpha\n\nBody\n", title="Report")
     outline = OutlineFormatter(
         sections=result.sections,
         anchors=result.anchors,
@@ -74,15 +70,13 @@ def test_document_title_is_kept_distinct_from_document_start() -> None:
     assert outline.splitlines()[1].startswith("# Alpha id=")
 
 
-def test_node_line_prefers_summary_then_preview() -> None:
-    result = MarkdownChunker().chunk("# Alpha\n\nAlpha text.\n\n## Beta\n\nBeta text.\n")
-    # 用 replace 模拟 LLM 生成的章节摘要，并覆盖 preview 回退路径。
+def test_node_line_prefers_summary_over_preview() -> None:
+    result = MarkdownChunker().chunk(
+        "# Alpha\n\nAlpha text.\n\n## Beta\n\nBeta preview\n"
+    )
+    # frozen dataclass：用 replace 模拟 LLM 生成的章节摘要
     sections = [
-        replace(
-            section,
-            summary=f"  {section.title} 摘要  " if section.title == "Alpha" else "",
-            preview="Beta preview" if section.title == "Beta" else section.preview,
-        )
+        replace(section, summary="Alpha 摘要" if section.title == "Alpha" else "")
         for section in result.sections
     ]
     outline = OutlineFormatter(sections=sections, anchors=result.anchors).global_outline()
