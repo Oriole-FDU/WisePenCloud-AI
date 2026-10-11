@@ -39,4 +39,5 @@ dependencies = [
     "openpyxl",
     "werkzeug",
     "jieba>=0.42.1",
+    "blingfire>=0.1.8",
 ]

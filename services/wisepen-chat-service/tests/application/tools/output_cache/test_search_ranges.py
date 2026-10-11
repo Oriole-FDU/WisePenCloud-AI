@@ -9,6 +9,7 @@ from chat.application.tools.core.output_cache.cache_store import StoredToolConte
 from chat.application.tools.session_tools.tool_output import search_by_regex
 from chat.application.tools.session_tools.tool_output.read_by_range import _read_range
 from chat.application.tools.session_tools.tool_output.search_by_regex import (
+    _regex_window_range,
     _search_by_regex,
 )
 
@@ -63,6 +64,20 @@ def test_regex_limits_single_match_display_and_window_length():
     assert len(result.windows[0].text) <= 640
     assert result.windows[0].end_offset - result.windows[0].start_offset <= 640
     assert result.windows[0].matched_count == 1
+
+
+def test_regex_expands_to_blingfire_sentence_boundaries():
+    text = "Before one. Before two. Target sentence. After one. After two."
+    target_start = text.index("Target")
+    target_end = target_start + len("Target sentence")
+
+    start, end = _regex_window_range(
+        text,
+        match_start=target_start,
+        match_end=target_end,
+    )
+
+    assert text[start:end] == "Before two. Target sentence. After one."
 
 
 def test_regex_returns_exactly_one_hundred_matches_without_truncating():

@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from common.utils.markdown import MarkdownChunker, OutlineFormatter
 
 
@@ -26,7 +28,7 @@ def test_global_outline_formats_tree_depth_ids_offsets_and_anchor_labels() -> No
     assert "@" in outline
     assert "{#" not in outline
     assert "chars" not in outline
-    assert formatter.global_outline(max_level=1).count("\n") == 1
+    assert formatter.global_outline(max_level=1).count("\n") == 3
 
 
 def test_neighborhood_keeps_ancestors_marks_current_and_limits_sibling_window() -> None:
@@ -70,3 +72,32 @@ def test_document_title_is_kept_distinct_from_document_start() -> None:
         f"Report<文档开头> id={result.sections[0].section_id} @0"
     )
     assert outline.splitlines()[1].startswith("# Alpha id=")
+
+
+def test_node_line_prefers_summary_then_preview() -> None:
+    result = MarkdownChunker().chunk("# Alpha\n\nAlpha text.\n\n## Beta\n\nBeta text.\n")
+    # 用 replace 模拟 LLM 生成的章节摘要，并覆盖 preview 回退路径。
+    sections = [
+        replace(
+            section,
+            summary=f"  {section.title} 摘要  " if section.title == "Alpha" else "",
+            preview="Beta preview" if section.title == "Beta" else section.preview,
+        )
+        for section in result.sections
+    ]
+    outline = OutlineFormatter(sections=sections, anchors=result.anchors).global_outline()
+
+    lines = outline.splitlines()
+    alpha_index = next(index for index, line in enumerate(lines) if line.startswith("# Alpha"))
+    assert lines[alpha_index + 1] == "[Summary]: Alpha 摘要"
+    beta_line = next(line for line in lines if line.startswith("## Beta"))
+    beta_index = lines.index(beta_line)
+    assert lines[beta_index + 1] == "[Preview]: Beta preview"
+
+
+def test_chunker_persists_two_sentence_preview_for_each_section() -> None:
+    result = MarkdownChunker().chunk(
+        "# Alpha\n\nFirst sentence. Second sentence. Third sentence.\n"
+    )
+
+    assert result.sections[0].preview == "First sentence.Second sentence."

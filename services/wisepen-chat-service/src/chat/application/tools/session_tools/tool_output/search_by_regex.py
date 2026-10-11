@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from bisect import bisect_right
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import regex
+from blingfire import text_to_sentences_and_offsets
 
 from chat.application.tools.core import (
     ToolDefinition,
@@ -27,7 +29,7 @@ _MAX_MATCHES = 100                # 最多返回的命中数
 _REGEX_CONTEXT_CHARS = 200        # 命中两侧上下文扩展字符数
 _MAX_MATCH_DISPLAY_CHARS = 240    # 单个命中展示的最大字符数
 _MAX_WINDOW_CHARS = 640           # 单个窗口最大字符数
-_REGEX_SENTENCE_BOUNDARIES = frozenset(".。!?！？;；\n")  # 句子边界字符
+_SENTENCE_EXPANSION_WINDOW = 600
 _SEARCH_TIMEOUT_SECONDS = 5       # 正则扫描超时
 _TIMEOUT_SECONDS = 300.0          # 工具整体超时
 
@@ -234,26 +236,13 @@ def _regex_window_range(
     """每侧最多扩展 200 字符，并将单个窗口限制在 640 字符内。"""
 
     display_match_end = min(match_end, match_start + _MAX_MATCH_DISPLAY_CHARS)  # 命中展示上限
-    candidate_start = max(match_start - _REGEX_CONTEXT_CHARS, 0)
-    candidate_end = min(display_match_end + _REGEX_CONTEXT_CHARS, len(text))
-
-    # 向左对齐到最近的句界
-    left_boundary = max(
-        (
-            index + 1
-            for index in range(candidate_start, match_start)
-            if text[index] in _REGEX_SENTENCE_BOUNDARIES
-        ),
-        default=candidate_start,
-    )
-    # 向右对齐到最近的句界
-    right_boundary = next(
-        (
-            index + 1
-            for index in range(display_match_end, candidate_end)
-            if text[index] in _REGEX_SENTENCE_BOUNDARIES
-        ),
-        candidate_end,
+    left_boundary, right_boundary = _expand_match_to_sentences(
+        text,
+        start=match_start,
+        end=display_match_end,
+        before=1,
+        after=1,
+        window=_SENTENCE_EXPANSION_WINDOW,
     )
 
     if right_boundary - left_boundary <= _MAX_WINDOW_CHARS:  # 未超长直接返回
@@ -265,3 +254,38 @@ def _regex_window_range(
         bounded_end = display_match_end
         left_boundary = max(0, bounded_end - _MAX_WINDOW_CHARS)
     return left_boundary, bounded_end
+
+
+def _expand_match_to_sentences(
+    text: str,
+    *,
+    start: int,
+    end: int,
+    before: int,
+    after: int,
+    window: int,
+) -> tuple[int, int]:
+    """使用 blingfire 的句子偏移，把命中范围扩展到邻近完整句子。"""
+
+    source_start = max(0, start - window)
+    source_end = min(len(text), end + window)
+    _, offsets = text_to_sentences_and_offsets(text[source_start:source_end])
+    absolute_offsets = [
+        (sentence_start + source_start, sentence_end + source_start)
+        for sentence_start, sentence_end in offsets
+    ]
+    if not absolute_offsets:
+        return start, end
+
+    first_complete = 0 if source_start == 0 else 1
+    last_complete = (
+        len(absolute_offsets) - 1
+        if source_end == len(text)
+        else len(absolute_offsets) - 2
+    )
+    starts = [sentence_start for sentence_start, _ in absolute_offsets]
+    start_index = max(bisect_right(starts, start) - 1, 0)
+    end_index = max(bisect_right(starts, max(end - 1, start)) - 1, 0)
+    start_index = max(start_index - before, first_complete)
+    end_index = min(end_index + after, max(last_complete, end_index))
+    return absolute_offsets[start_index][0], absolute_offsets[end_index][1]

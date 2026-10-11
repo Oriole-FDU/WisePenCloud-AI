@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, field, replace
 
+from blingfire import text_to_sentences
+
 from ..parsing.parser import MarkdownNode, MarkdownNodeKind, MarkdownParser, SourceSpan
 from .packer import ChunkPacker, MarkdownChunk
 from .splitter import StructuralNodeSplitter
@@ -31,6 +33,7 @@ class Section:
     subtree_span: SourceSpan
     content_spans: list[SourceSpan] = field(default_factory=list)
     summary: str = ""  # 可以接入llm summarize等
+    preview: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,7 +264,22 @@ def _build_heading_sections(
         )
         sections.append(section)
         open_indexes.append(len(sections) - 1)  # 压入祖先栈
-    return sections
+    return [
+        replace(section, preview=_build_section_preview(text, section))
+        for section in sections
+    ]
+
+
+def _build_section_preview(text: str, section: Section) -> str:
+    """从章节直属正文提取前两句，作为持久化的轻量导航预览。"""
+
+    if not section.content_spans:
+        return ""
+    section_text = "\n".join(
+        text[span.start_offset : span.end_offset] for span in section.content_spans
+    )
+    sentences = text_to_sentences(section_text).split("\n")
+    return "".join(sentences[:2])[:120]
 
 
 def _content_spans(

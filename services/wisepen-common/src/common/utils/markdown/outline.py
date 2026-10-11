@@ -131,4 +131,10 @@ class OutlineFormatter:
             [*markers, f"id={section.section_id}", f"@{section.own_span.start_offset}"]
         )
         prefix = f"{heading} " if heading else ""
-        return f"{prefix}{title} {suffix}"
+        line = f"{prefix}{title} {suffix}"
+        summary = section.summary.strip()
+        if summary:
+            return f"{line}\n[Summary]: {summary}"
+        if preview := section.preview.strip():
+            return f"{line}\n[Preview]: {preview}"
+        return line
