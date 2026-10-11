@@ -59,9 +59,9 @@ async def test_authoritative_acl_is_projected_and_saved():
         resource_id=resource_id,
         acl_revision=1767225600000,
         owner_id="owner",
-        readable_users=("reader",),
-        excluded_read_users=("blocked",),
-        group_acls=(),
+        readable_users=["reader"],
+        excluded_read_users=["blocked"],
+        group_acls=[],
     )
 
 
