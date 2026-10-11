@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2,<3",
     "pydantic-settings>=2,<3",
     "pymongo>=4.17,<5",
+    "qdrant-client>=1.18,<2",
     "uvicorn>=0.34,<1",
     "wisepen-common",
 ]
@@ -34,6 +35,7 @@ asyncio_mode = "auto"
 markers = [
     "mongo_integration: requires an explicit RAG_TEST_MONGODB_URI and uses an isolated test database",
     "kafka_integration: requires RAG_TEST_KAFKA_BOOTSTRAP_SERVERS and uses isolated random test topics",
+    "qdrant_integration: requires RAG_TEST_QDRANT_URL and uses isolated random test collections",
 ]
 
 [tool.ruff]

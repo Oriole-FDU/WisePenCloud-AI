@@ -4,6 +4,8 @@
 
 本文是 RAG V4 的实现设计合同，整合 00–10 方案中已经确认的边界。它描述核心模型、写入管线、存储端口、普通检索、图谱能力、权限和版本语义。
 
+2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，实际合同见第 5.3、6.1–6.4 节与 [17 实施记录](17-vector-publication-implementation.md)。生产配置和入口装配、selected revision 读取、普通 Retriever、Contextualizer 及图谱仍未实现。
+
 本设计不包含 HTTP 路由、MCP 工具注册和最终 transport composition。MCP 只作为可信身份来源的既有边界被引用：最终用户身份由可信安全上下文注入，RAG application 接收 `PermissionScope`，不从业务参数读取用户 ID。
 
 本设计也不追求 Mongo、Qdrant、Neo4j 的全局强一致。它只消除会造成错误的内容混版、越权访问、跨版本图谱读取和不受控的索引语义漂移。
@@ -243,7 +245,9 @@ VectorIndexer：
 2. 调用 embedder；
 3. 生成 `VectorRecord`；
 4. 调用 Chunk collection 对应的 `VectorWriter.upsert()`；
-5. 必要时按 projection 规则删除旧记录，但不承担查询策略。
+5. 每批写入成功才处理下一批，全部批次成功才返回；不承担查询策略。
+
+当前实现在 `ingestion/indexers/vector.py`。显式注入 Common EmbeddingClient、model、dimensions、VectorWriter，embedding 默认每批 32 条。投影只包含 Chunk ID、retrieval_text、dense embedding 与 resource/revision metadata；不修改 Chunk。供应商响应数量、维度或数值错误属于可重试的 RuntimeError，I/O 原样传播。零 Chunk 无 embedding/数据库 I/O。普通 Qdrant point 同时写 dense 与服务端 BM25 sparse，任一失败阻止 apply；本轮不删除批次外旧投影，不实现换分块配置后的同 revision 替换。
 
 #### ChunkFactsIndexer
 
@@ -274,8 +278,8 @@ class VectorReader(Protocol):
 
 
 class VectorWriter(Protocol):
-    async def upsert(self, records: Sequence[VectorRecord]) -> WriteReceipt: ...
-    async def delete(self, filters: MetadataFilters) -> DeleteReceipt: ...
+    async def upsert(self, records: list[VectorRecord]) -> None: ...
+    async def delete(self, filters: MetadataFilters) -> None: ...
 
 
 class GraphReader(Protocol):
@@ -291,17 +295,26 @@ class GraphWriter(Protocol):
 
 ### 6.2 VectorStorage
 
-VectorStorage 使用通用 `VectorRecord`、`VectorQuery`、`VectorMatch`。Chunk、Entity 和 Relationship 的语义由 Indexer 负责投影，Storage 不接收业务实体。
+VectorStorage 使用 `core/schema/vector.py` 中的通用 `VectorRecord`、`VectorQuery`、`VectorMatch`，`storage/vector.py` 只声明读写 Protocol。Chunk、Entity 和 Relationship 的语义由各自 Indexer 负责投影，Storage 不接收业务实体；当前只落地普通 Chunk 用例。
+
+Record 包含 record_id、text、embedding 与普通 dict metadata。Query 只允许 embedding/text 二选一，分别执行 dense/sparse 召回；Match 返回原 record_id、provider score 与 metadata，不返回正文。upsert/delete 成功返回 None，不新增 Receipt；上文 GraphWriter 仍是未来方案示例，不能据此建立通用 Receipt 层。
 
 不同 collection 通过不同 Storage 实例绑定：
 
 ```python
-chunk_vectors = QdrantVectorStorage(client, collection="rag_chunks")
-entity_vectors = QdrantVectorStorage(client, collection="rag_entities")
-relation_vectors = QdrantVectorStorage(client, collection="rag_relations")
+chunk_vectors = QdrantVectorStorage(
+    client=client,
+    collection="document_chunk_vectors_v4",
+    dense_vector_size=embedding_dimensions,
+    dense_vector_name="dense",
+    sparse_vector_name="sparse",
+)
+await chunk_vectors.ensure_collection()
 ```
 
 Record 不携带 namespace。resource、content revision 和 plugin projection metadata 只是可过滤字段。
+
+Qdrant 客户端由外部注入且须设置 cloud_inference=True，使 qdrant/bm25 Document 转发到服务端；写入和查询使用相同的 multilingual tokenizer。ensure_collection 显式创建或核对 dense Cosine、sparse IDF 和资源/revision keyword 索引。CRUD 不隐式初始化。默认每批 256 条；upsert/delete 使用 wait=True，并核对 completed，部分成功保留，不自动重试。point ID 为 uuid5(NAMESPACE_URL, "wisepen-rag-v4:vector:" + record_id)，原 record_id 存在 payload；metadata 下只写当前消费者需要的 resource_id/content_revision，不持久化 text、ACL 或未来图字段。
 
 ### 6.3 GraphStorage 与 Chunk 图事实
 
@@ -312,6 +325,8 @@ Mongo Chunk 事实保存 GraphExtractor 输出的 `metadata["entities"]` / `meta
 旧 `GraphFactStore` 的职责是保存抽取事实及其 Chunk 来源映射；现在抽取事实随 Chunk 持久化，来源关联进入 Neo4j 查询投影，因此再加一份仓储只会重复维护事实和增加写入/重建路径，不再保留独立 GraphFactStore 或 GraphChunkSource repository。
 
 ### 6.4 MetadataFilters
+
+当前通用模型位于 `core/schema/filters.py`。单项 MetadataFilter 使用 key/value/operator，key 为 metadata 内相对路径；支持 EQ、IN、GT/GTE/LT/LTE。EQ 接受字符串、布尔与有限数值；IN 接受非空同类型字符串或整数列表，范围只接受有限数值且排除 bool。MetadataFilters 支持递归 AND/OR/NOT，组必须非空，NOT 恰好一个子条件。Qdrant 转换位于后端，实际字段前缀为 metadata.；不支持的操作和值明确报错。查询 filters=None 表示不限制，删除必须提供非空条件。
 
 Plugin 负责：
 

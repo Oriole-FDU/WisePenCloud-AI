@@ -2,5 +2,6 @@
 
 from .base import Indexer
 from .chunk import ChunkFactsIndexer
+from .vector import VectorIndexer
 
-__all__ = ["ChunkFactsIndexer", "Indexer"]
+__all__ = ["ChunkFactsIndexer", "Indexer", "VectorIndexer"]

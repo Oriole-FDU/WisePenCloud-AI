@@ -4,7 +4,7 @@
 
 - `core/schema/content.py` 统一定义 Document、DocumentStructure、Chunk，字段、默认值、slots 和 retrieval_text 行为保持不变。`core.schema` 导出三种内容模型及图模型；ingestion 从 schema 导入模型，不保留旧 document 模块或 ingestion 的 Chunk 导出。
 - `storage/content.py` 定义 ContentReader、ContentWriter 两个接口，ContentStorage 组合二者。存储能力统一，Document 与 Chunk 模型和访问方法保持独立。
-- `backends/mongo/content.py` 的 MongoContentStorage 显式绑定两个 AsyncCollection；Chunk 操作位于 `backends/mongo/chunk`，Document 操作位于相邻 document 包。没有 Repository、Storage Router、全局连接或配置依赖。
+- `backends/mongo/content.py` 的 MongoContentStorage 显式绑定两个 AsyncCollection；当前 Document、Chunk 映射、批量操作与索引已统一收敛在此文件，早期 chunk／document 子包不再保留。没有 Repository、Storage Router、全局连接或配置依赖。
 - `ingestion/indexers/chunk.py` 的 ChunkFactsIndexer 只调用 ContentWriter.upsert_chunks，接入现有有序 Pipeline；不修改输入、不维护 Document 或发布状态。
 
 ## 存储合同
