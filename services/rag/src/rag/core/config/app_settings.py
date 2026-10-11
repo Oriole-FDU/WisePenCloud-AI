@@ -21,6 +21,7 @@ class AppSettings(BaseModel):
 
     KAFKA_ENABLED: bool = False
     KAFKA_BOOTSTRAP_SERVERS: str = ""
+    KAFKA_MAX_POLL_INTERVAL_MS: int = 300_000  # 覆盖单条业务处理及快速重试的总耗时。
     KAFKA_RESOURCE_ACL_RECALC_TOPIC: str = "wispen-resource-acl-recalc-topic"
     KAFKA_RAG_ACL_RECALC_GROUP_ID: str = "wispen-rag-v4-acl-recalc-group"
 

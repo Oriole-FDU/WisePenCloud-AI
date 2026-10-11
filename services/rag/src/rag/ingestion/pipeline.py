@@ -1,6 +1,6 @@
 """摄入阶段的有序编排；不管理组件内部 I/O、重试或事务。"""
 
-from rag.core.schema import Document
+from rag.core.schema import Chunk, Document
 from rag.ingestion.chunkers.base import Chunker
 from rag.ingestion.indexers.base import Indexer
 from rag.ingestion.transformers.base import Transformer
@@ -20,7 +20,7 @@ class IngestionPipeline:
         self.transformers = transformers
         self.indexers = indexers
 
-    async def run(self, document: Document) -> None:
+    async def run(self, document: Document) -> list[Chunk]:
         chunks = await self.chunker.split(document)
 
         for transformer in self.transformers:
@@ -29,3 +29,6 @@ class IngestionPipeline:
         # 不捕获异常：后续阶段立即停止，已成功写入的投影由调用方处理。
         for indexer in self.indexers:
             await indexer.index(chunks)
+
+        # 只有全部写入成功才交出最终列表，供外部 publication 核对预期集合。
+        return chunks

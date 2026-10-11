@@ -1,12 +1,15 @@
 """内容存储测试使用 BSON 往返的内存 collection，不读取服务配置。"""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from bson import BSON
 from common.utils.markdown import MarkdownChunker
+from pymongo.errors import DuplicateKeyError
 
 from rag.backends.mongo.content import MongoContentStorage
+from rag.backends.mongo.publication import MongoPublicationStore
 from rag.core.schema import Chunk, Document, DocumentStructure
 
 
@@ -78,6 +81,82 @@ class MemoryCollection:
         self.records[:] = [
             record for record in self.records if not _matches(record, query)
         ]
+
+
+class MemoryPublicationCollection(MemoryCollection):
+    """模拟发布用到的相等条件更新与唯一资源身份；真实竞争另由集成测试验证。"""
+
+    def __init__(self):
+        super().__init__()
+        self.before_insert = None
+        self.before_update = None
+        self.after_find = None
+        self.find_one = AsyncMock(side_effect=self._find_one)
+        self.insert_one = AsyncMock(side_effect=self._insert_one)
+        self.update_one = AsyncMock(side_effect=self._update_one)
+
+    async def _find_one(self, query):
+        records = self._find(query)._records
+        record = records[0] if records else None
+        # 先取观察副本，再触发竞争写入，模拟读与条件更新之间的状态变化。
+        hook, self.after_find = self.after_find, None
+        if hook is not None:
+            await hook()
+        return record
+
+    async def _insert_one(self, record):
+        hook, self.before_insert = self.before_insert, None
+        if hook is not None:
+            await hook()
+        if any(
+            existing["resource_id"] == record["resource_id"]
+            for existing in self.records
+        ):
+            raise DuplicateKeyError("duplicate resource_id")
+        record = BSON(BSON.encode(record)).decode()
+        record["_id"] = len(self.records)
+        self.records.append(record)
+        return SimpleNamespace(inserted_id=record["_id"])
+
+    async def _update_one(self, query, update, *, upsert=False):
+        hook, self.before_update = self.before_update, None
+        if hook is not None:
+            await hook()
+        for index, existing in enumerate(self.records):
+            if _matches(existing, query):
+                record = BSON(BSON.encode({**existing, **update["$set"]})).decode()
+                self.records[index] = record
+                return SimpleNamespace(
+                    matched_count=1,
+                    modified_count=int(record != existing),
+                    upserted_id=None,
+                )
+        if upsert:
+            record = {**query, **update.get("$setOnInsert", {}), **update["$set"]}
+            result = await self._insert_one(record)
+            return SimpleNamespace(
+                matched_count=0, modified_count=0, upserted_id=result.inserted_id
+            )
+        return SimpleNamespace(matched_count=0, modified_count=0, upserted_id=None)
+
+    async def _bulk_write(self, operations, *, ordered):
+        assert ordered is True
+        if self.bulk_write.await_count == self.fail_bulk_call:
+            raise self.error
+        for operation in operations:
+            await self._update_one(
+                operation._filter, operation._doc, upsert=operation._upsert
+            )
+
+
+@pytest.fixture
+def publication_collection():
+    return MemoryPublicationCollection()
+
+
+@pytest.fixture
+def publication_store(publication_collection):
+    return MongoPublicationStore(publication_collection)
 
 
 @pytest.fixture

@@ -1,11 +1,14 @@
 """ACL 事件、权威事实读取和本地投影编排。"""
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 from bson import ObjectId
 from pydantic import BaseModel, ConfigDict, Field
+
+from rag.backends.kafka import KafkaConsumerClient, RetryPolicy
 
 from .models import GroupResourceAcl, ResourceAcl
 from .store import ResourceAclRepository
@@ -52,7 +55,9 @@ class AclSynchronizer:
                 synchronized.append(resource_id)
         return synchronized
 
-    async def _read_authoritative(self, resource_ids: Sequence[str]) -> dict[str, ResourceAcl]:
+    async def _read_authoritative(
+        self, resource_ids: Sequence[str]
+    ) -> dict[str, ResourceAcl]:
         if not resource_ids:
             return {}
         if any(not ObjectId.is_valid(resource_id) for resource_id in resource_ids):
@@ -70,7 +75,7 @@ class AclSynchronizer:
 
 
 class AclEventConsumer:
-    """使用 Common Kafka consumer 接收 ACL 重算事件。"""
+    """用 RAG 共用消费者接收 ACL 重算事件，投影成功后才确认消息。"""
 
     def __init__(
         self,
@@ -79,22 +84,22 @@ class AclEventConsumer:
         bootstrap_servers: str,
         topic: str,
         group_id: str,
+        max_poll_interval_ms: int = 300_000,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
-        from common.kafka import KafkaConsumerClient
-
         self._projection = projection
         self._consumer = KafkaConsumerClient(
             bootstrap_servers=bootstrap_servers,
             topic=topic,
             group_id=group_id,
             handler=projection.handle_event,
+            max_poll_interval_ms=max_poll_interval_ms,
+            retry_policy=retry_policy,
+            is_retryable=lambda error: not isinstance(error, ValueError),
         )
 
-    async def start(self) -> None:
-        await self._consumer.start()
-
-    async def stop(self) -> None:
-        await self._consumer.stop()
+    async def run(self, *, started: asyncio.Event | None = None) -> None:
+        await self._consumer.run(started=started)
 
 
 def _has_view(mask: Any) -> bool:
@@ -132,7 +137,9 @@ def _read_group_acls(value: Any) -> list[GroupResourceAcl]:
             continue
 
         default_readable = _has_view(group_value.get("baseMask"))
-        readable_users, excluded_read_users = _read_user_masks(group_value.get("userMasks"))
+        readable_users, excluded_read_users = _read_user_masks(
+            group_value.get("userMasks")
+        )
         # 群组默认可读时，群组级白名单/排除名单不再有意义
         result.append(
             GroupResourceAcl(

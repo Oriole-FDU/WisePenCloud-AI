@@ -4,7 +4,7 @@ from dependency_injector import containers, providers
 from pymongo import AsyncMongoClient
 
 from rag.acl.synchronizer import AclEventConsumer, AclSynchronizer
-from rag.backends.acl.repository import MongoResourceAclRepository
+from rag.backends.mongo.acl import MongoResourceAclRepository
 from rag.core.config.app_settings import settings
 
 
@@ -38,6 +38,7 @@ class Container(containers.DeclarativeContainer):
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
         topic=settings.KAFKA_RESOURCE_ACL_RECALC_TOPIC,
         group_id=settings.KAFKA_RAG_ACL_RECALC_GROUP_ID,
+        max_poll_interval_ms=settings.KAFKA_MAX_POLL_INTERVAL_MS,
     )
 
 

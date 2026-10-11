@@ -69,12 +69,13 @@ class IngestionPipeline:
         self.transformers = transformers
         self.indexers = indexers
 
-    async def run(self, document: Document) -> None:
+    async def run(self, document: Document) -> list[Chunk]:
         chunks = await self.chunker.split(document)
         for transformer in self.transformers:
             chunks = await transformer.transform(chunks, document=document)
         for indexer in self.indexers:
             await indexer.index(chunks)
+        return chunks
 ```
 
 接口约束如下：
@@ -90,14 +91,11 @@ class IngestionPipeline:
 - Pipeline 不提供回滚、`continue_on_error`、跨 Indexer 并行或统一 failure object；
 - 只有所有阶段成功返回，部分索引可见性和 revision 发布由外部 capability 决定。
 
-### 2.3 装配完整性
+### 2.3 开发者装配合同
 
-装配入口只做静态、直接的检查，不增加依赖图或新的注册抽象：
+Pipeline 是内部执行组件，不增加装配校验、组件类型识别、依赖图或空配置检查。开发者在外部固定普通 Pipeline 顺序，并将完整 Pipeline 注入应用用例，保证必需 Indexer/Writer 齐全，测试验证实际执行行为。各 Indexer 仅在全部必需写入确认后成功，应用用例在所有阶段成功后才能发布。
 
-- `GraphExtractor` 存在时必须存在消费其结果的 `GraphIndexer`；
-- Entity/Relationship embedding 配置存在时必须有对应 VectorWriter；
-- `graph_enabled=False` 的外部 Pipeline 配置不包含图谱组件；
-- 错误装配在构造或启动阶段报错，不能运行后静默丢弃 metadata。
+GraphExtractor/GraphIndexer 配对和 `graph_enabled=False` 时的组件选择同样属于开发者合同。Pipeline 全部成功后返回最终同一 `list[Chunk]`，供发布用例核对落库集合。
 
 ## 3. Document、Chunk 和 metadata
 
@@ -111,7 +109,7 @@ Document、DocumentStructure 和 Chunk 统一定义在 `core/schema/content.py`�
 resource_id
 document_version
 content_revision
-raw_markdown
+text
 structure
 metadata
 ```
@@ -194,6 +192,8 @@ content_sha256     RAG 对完整 Markdown 计算的摘要
 content_revision   上述字段组成的本地组合键
 ```
 
+ContentRevision 是 `core.schema` 的不可变内容身份；摘要基于完整 `Document.text` 的 UTF-8 字节，不去空白或规范化。组合键为 `resource_id@document_version#完整SHA-256`，不是旧实现的摘要前缀。
+
 同一版本同一 hash 的事件幂等；同一版本不同 hash 是内容合同冲突，拒绝覆盖；低版本事件不能恢复旧 staged/applied；高版本才创建新 staged revision。
 
 DocumentRevision、Chunk 和各类向量/图投影都必须携带 `resource_id/content_revision`。一次能力调用中，资源第一次确定 applied revision 后，后续正文、Chunk 和投影回查都固定使用该 revision。active 期间变化不触发重试或切换。
@@ -202,9 +202,13 @@ DocumentRevision、Chunk 和各类向量/图投影都必须携带 `resource_id/c
 
 staged 是后台构建中的候选，不对用户可见。只有正文/结构、Chunk 集合、普通检索所需向量投影和 staged 条件仍成立时，外部 publication capability 才能切换 applied。
 
+publication 属于 `application.publication` 的用例编排：接收资源变更后，协调内容保存、Pipeline、事实回查与可见性切换。ResourcePublicationState 是该用例的流程状态，不是与 ACL 并列的独立领域能力。Mongo 在 `resource_publications` 保存 staged/applied 两个完整 ContentRevision 与永久 destroyed 标记。
+
+模块收敛为 models.py、store.py、publish.py，另有包导出 __init__.py。publish.py 同时定义事件、消费者和 DocumentPublication，消费者仅注入 publisher 并调用 publish(document) 或 destroy_resources。DocumentPublication.publish 接收已构造 Document，校验身份后由 Store 判断版本、冲突与销毁状态并 stage，再保存 Document、执行外部完整 Pipeline，最后回查正文身份和精确有序的预期 Chunk ID 集合并条件 apply。摄入是发布的内部步骤，不再提供独立 DocumentIngestion 或公开 stage/apply 方法。投影完整性依赖必需 Indexer 的成功合同，不增加向量完整性查询接口。同资源构建由调用方串行；重复已发布、旧版本和已销毁提交返回明确跳过结果，不重写 metadata。允许零 Chunk 内容。
+
 图谱是附加能力。GraphIndexer 失败不会回滚已完成的普通向量写入；是否允许该 revision 成为普通检索 active 由外部发布策略决定，不由 Pipeline 伪造跨存储原子性。
 
-删除先撤销 staged/applied 可见性，再异步清理 Mongo Chunk、Qdrant 和 Neo4j。残留投影不能通过 active revision、ACL 或 Chunk 来源回查返回。
+物理销毁先置永久 destroyed 标记并撤销 staged/applied，再清理内容与投影。同 ID 不提供恢复；迟到内容不能重新发布。上游个人 `.Trash`、软删除审计集合与物理销毁是不同阶段，前两者不调用永久销毁操作；回收站搜索可见性尚未处理。残留投影不能通过 active revision、ACL 或 Chunk 来源回查返回。
 
 ## 5. 写入管线
 
@@ -403,27 +407,30 @@ PluginRegistry 负责空值、重复注册和名称冲突判定。不为 ontolog
 
 ```text
 src/rag/
-  core/schema/     # content.py: Document, DocumentStructure, Chunk; graph.py
+  core/schema/     # content.py: ContentRevision, Document, DocumentStructure, Chunk; graph.py
   acl/
-  publication/
+  application/
+    publication/  # models.py、store.py、publish.py；后者包含事件、消费者及完整发布
   ingestion/       # Chunker, Transformer, Indexer, IngestionPipeline
   storage/         # ContentStorage, VectorStorage, GraphStorage
   retrieval/       # Chunk Retriever, GraphRetriever, seed validation
   graph/            # LightRAG core, Ontology, PluginRegistry
-  backends/         # Mongo, Qdrant, Neo4j
+  backends/         # Mongo, Kafka, Qdrant, Neo4j
 ```
 
 依赖方向：
 
 ```text
 core.schema <- ingestion/storage/retrieval/graph
-storage ports <- ingestion indexers/retrieval/publication
+storage ports <- ingestion indexers/retrieval/application.publication
 backends -> storage ports
-backends -> graph/acl/publication ports
+backends -> graph/acl/application.publication ports
 composition -> all concrete implementations
 ```
 
 Transformer 不依赖 Storage；Storage 不依赖业务策略；Retriever 不依赖 Indexer；HTTP/MCP 未来只依赖 application/composition 入口。
+
+Kafka 后端提供通用传输重试而不导入 application/acl。内容、销毁与 ACL 的 handler 和异常分类由各用例拥有；retry topic 只等待并送回原主分区，不执行业务。默认快速重试 1/2/4 秒，再延迟 1 分钟、10 分钟各一次，最终进入 `<main>.DLT`。转发确认后才提交源 offset，允许故障窗口中的重复投递，由内容版本和 ACL 幂等合同承接；不承诺 Kafka 与 Mongo/向量之间的事务。
 
 ## 10. 一致性、失败和可观测性
 

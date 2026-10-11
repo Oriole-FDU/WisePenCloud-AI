@@ -1,5 +1,6 @@
 """RAG V4 ACL 阶段服务入口。"""
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -34,26 +35,34 @@ os.environ["NO_PROXY"] = no_proxy
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(application: FastAPI):
+    application.state.ready = False
     info("service starting.", service=bootstrap_settings.SERVICE_NAME)
-    consumer = None
-    if settings.KAFKA_ENABLED:
-        consumer = container.acl_consumer()
-        await consumer.start()
     try:
-        try:
-            await nacos_client_manager.register_instance()
-        except Exception as exc:  # noqa: BLE001
-            error("nacos instance register failed.", exc=exc)
-        info("service ready.", service=bootstrap_settings.SERVICE_NAME)
-        yield
-    finally:
-        info("service stopping.", service=bootstrap_settings.SERVICE_NAME)
-        if consumer is not None:
+        # 消费异常必须进入应用生命周期，不能遗留一个失败但无人等待的后台任务。
+        async with asyncio.TaskGroup() as consumers:
+            task = None
+            if settings.KAFKA_ENABLED:
+                connected = asyncio.Event()
+                task = consumers.create_task(
+                    container.acl_consumer().run(started=connected)
+                )
+                # TaskGroup 会在启动失败时取消等待者并传播异常，不会卡住或误报就绪。
+                await connected.wait()
             try:
-                await consumer.stop()
+                await nacos_client_manager.register_instance()
             except Exception as exc:  # noqa: BLE001
-                error("acl kafka consumer stop failed.", exc=exc)
+                error("nacos instance register failed.", exc=exc)
+            info("service ready.", service=bootstrap_settings.SERVICE_NAME)
+            application.state.ready = True
+            try:
+                yield
+            finally:
+                if task is not None:
+                    task.cancel()
+    finally:
+        application.state.ready = False
+        info("service stopping.", service=bootstrap_settings.SERVICE_NAME)
         try:
             await container.mongo_client().close()
         except Exception as exc:  # noqa: BLE001

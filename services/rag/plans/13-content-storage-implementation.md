@@ -63,7 +63,7 @@ await pipeline.run(document)
 
 stage 允许事实尚未完整。Mongo 内容写入成功不触发 apply。删除先撤销 staged/applied，再清理内容与投影；读取固定 applied revision 后回查内容并检查本地 ACL。不假定内容、ACL 和删除事件跨 topic 有序，也不把 Common 当前的消费循环当成已经验证的失败重试合同。
 
-代码构建顺序为：本轮内容存储 → 内容身份与 publication（用 fake 必需投影验证）→ 真实 VectorIndexer 与普通发布闭环 → 内容/删除事件确认、重试和乱序处理 → 可选图谱。下一阶段需在 publication 验证版本冲突、条件发布及内容/投影完整性，不把生命周期判断下沉到 Storage。
+内容身份与 publication 的后续实施见 14：publication 位于 application.publication，作为资源变更到可检索内容的应用用例；用例流程状态存于独立 resource_publications，不改变 ContentStorage。Pipeline 全部成功后返回最终列表，发布用例回查正文身份和精确 Chunk 集合；必需投影依赖 Indexer 成功合同，不增加独立向量完整性查询。后续接真实 VectorIndexer、用例内事件确认与重试，再扩展物理清理与可选图谱。
 
 ## 验证
 
@@ -84,4 +84,4 @@ stage 允许事实尚未完整。Mongo 内容写入成功不触发 apply。删�
 uv run --project services/rag pytest -q services/rag/tests/backends/mongo/test_content_integration.py
 ```
 
-每个 fixture 创建并只清理自己的 `codex_rag_content_test_<随机ID>` 数据库。配置存在但连接失败时测试报错，不转成跳过。本轮未验证真实 Mongo 读写与唯一索引，也未实现或验证 publication、向量/图谱投影和上游事件接入。
+每个 fixture 创建并只清理自己的 `codex_rag_content_test_<随机ID>` 数据库。配置存在但连接失败时测试报错，不转成跳过。表中 63/3 是本内容存储阶段结果；后续 publication 与当前验证见 14。真实向量/图谱投影和上游事件接入仍未验证。

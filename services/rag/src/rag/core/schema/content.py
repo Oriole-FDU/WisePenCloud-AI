@@ -1,8 +1,31 @@
 """摄入与内容存储共享的文档、结构和分块事实，不依赖执行阶段。"""
 
 from dataclasses import dataclass, field
+from hashlib import sha256
 
 from common.utils.markdown import Anchor, Section
+
+
+@dataclass(frozen=True, slots=True)
+class ContentRevision:
+    """完整原文与上游版本的不可变身份；不包含 metadata 或构建配置。"""
+
+    resource_id: str
+    document_version: int
+    content_sha256: str
+
+    @classmethod
+    def create(
+        cls, *, resource_id: str, document_version: int, text: str
+    ) -> "ContentRevision":
+        # 原文空白和 Unicode 编码都是内容身份的一部分，不进行规范化。
+        return cls(
+            resource_id, document_version, sha256(text.encode("utf-8")).hexdigest()
+        )
+
+    @property
+    def content_revision(self) -> str:
+        return f"{self.resource_id}@{self.document_version}#{self.content_sha256}"
 
 
 @dataclass(slots=True)

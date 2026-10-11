@@ -64,7 +64,7 @@ async def test_pipeline_preserves_order_identity_and_in_place_metadata(
         chunker=chunker, transformers=transformers, indexers=indexers
     )
 
-    assert await pipeline.run(document) is None
+    assert await pipeline.run(document) is chunks
     assert calls == [
         "chunker",
         "transformer-1",
@@ -95,7 +95,7 @@ async def test_pipeline_passes_each_returned_list_and_indexes_only_final_list(
         chunker=chunker, transformers=[first, second], indexers=indexers
     )
 
-    await pipeline.run(document)
+    assert await pipeline.run(document) is final
 
     assert first.transform.call_args.args[0] is chunks
     assert second.transform.call_args.args[0] is intermediate
@@ -167,7 +167,7 @@ async def test_pipeline_without_transformers_passes_chunker_list(
     indexer = SimpleNamespace(index=AsyncMock())
     pipeline = IngestionPipeline(chunker=chunker, transformers=[], indexers=[indexer])
 
-    await pipeline.run(document)
+    assert await pipeline.run(document) is initial
 
     chunker.split.assert_awaited_once_with(document)
     assert indexer.index.call_args.args[0] is initial
@@ -180,5 +180,5 @@ async def test_pipeline_with_no_indexers_still_runs_transformers(document, chunk
         chunker=chunker, transformers=[transformer], indexers=[]
     )
 
-    assert await pipeline.run(document) is None
+    assert await pipeline.run(document) == []
     transformer.transform.assert_awaited_once_with(chunks, document=document)

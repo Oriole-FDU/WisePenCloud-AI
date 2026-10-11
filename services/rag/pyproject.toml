@@ -5,6 +5,7 @@ description = "WisePen RAG V4"
 requires-python = ">=3.11"
 dependencies = [
     "aiokafka>=0.12,<1",
+    "dependency-injector>=4.49,<5",
     "fastapi>=0.136,<1",
     "pydantic>=2,<3",
     "pydantic-settings>=2,<3",
@@ -32,6 +33,7 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "mongo_integration: requires an explicit RAG_TEST_MONGODB_URI and uses an isolated test database",
+    "kafka_integration: requires RAG_TEST_KAFKA_BOOTSTRAP_SERVERS and uses isolated random test topics",
 ]
 
 [tool.ruff]

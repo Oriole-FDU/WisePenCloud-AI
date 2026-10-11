@@ -13,7 +13,7 @@
 - `Chunk` 是 RAG 的基本单元。不会引入 LlamaIndex `Node`、`NodeWithScore`、`BaseNodePostprocessor` 或第二套通用检索接口。
 - 写入侧统一采用 `Chunker`、`Transformer`、`Indexer`、`Storage`、`Retriever` 五类核心抽象，由 `IngestionPipeline` 负责按顺序组合；`Document` 只进入 `Chunker.split()`，后续阶段只接收 Chunk 序列。
 - Pipeline 配置由上层根据 Document 策略选择并复用；Transformer 接收完整列表，可原地加工 metadata，Indexer 只读。各阶段按配置顺序串行执行、fail-fast，无回滚；部分索引可见性与 revision 发布属于外部职责。
-- 装配入口在启动时检查现有生产和消费组件是否齐全，例如 GraphExtractor 的结果必须有 GraphIndexer 消费；不增加依赖图、深拷贝或通用 metadata schema。
+- 开发者固定正确的内部组件组合，测试验证事实与必需投影顺序；不增加装配校验、依赖图、深拷贝或通用 metadata schema。
 - LlamaIndex 只借鉴“转换步骤顺序组合、检索器与索引解耦”的组织方式。
 - LightRAG 采用“复制内核语义到本仓库”的方式，不在运行时依赖 LightRAG，也不照搬它的 workspace、多租户或存储生命周期。
 - `resource_id + version/content_revision` 是当前唯一的外部来源身份。RAG 内部的 section/chunk ID 只能定位 Markdown 副本中的本地位置。
@@ -312,7 +312,7 @@ query
 - document factory：chunker、document repository、chunk repository、contextual builder；
 - retrieval factory：vector repositories、fusion、reranker、request read context；
 - graph factory：graph core、ontology registry、fact repository、projection writers；
-- publication/ACL factory：revision state 和权限仓储。
+- application.publication 装配：资源变更到可检索状态的用例、流程状态及内容依赖；ACL 保持独立能力。
 
 factory 只组装依赖，不持有请求状态、不承担流程判断。Kafka handler 和 FastAPI endpoint 只调用能力入口。
 
@@ -371,17 +371,17 @@ factory 只组装依赖，不持有请求状态、不承担流程判断。Kafka 
 
 不在旧 `src/rag` 上逐文件打补丁。旧实现冻结为行为参考，新实现先在独立 capability package 中完成。此次是无线上调用、无兼容要求的完整重构，不做双写、灰度、旧数据迁移、双版本结果对照或旧 schema 清理窗口：
 
-1. 建立新的 ingestion/retrieval/graph/publication/ACL package；旧 package 在此阶段不接收新功能。
+1. 建立新的 ingestion/retrieval/graph/ACL package，以及 application.publication 用例；旧 package 在此阶段不接收新功能。
 2. 先实现并测试 ACL、ContentRevision、staged/applied 和 MarkdownChunker 投影，这些是所有后续能力的底座。
 3. 以固定 fixture、行为合同和 LightRAG 原始参考用例验收新能力；旧实现只用于定位既有业务语义，不要求新旧结果逐项兼容。
 4. 普通检索、读取、图谱生产与查询分别通过 capability 验收后，在同一重构交付中替换旧实现及其数据模型；按新模型从上游现有内容和 ACL 事件重建本地投影。
-5. 删除旧 `src/rag` 流程、无消费字段和旧投影定义，不保留兼容桥或过渡运行窗口。HTTP/Kafka composition 的具体接入不属于当前排期。
+5. 删除旧 `src/rag` 流程、无消费字段和旧投影定义，不保留兼容桥或过渡运行窗口。Kafka 消费与重试已按 15 增量提前接入；HTTP 内容能力与完整生产 Pipeline 装配仍待后续。
 
 新 package 的临时目录和切换规则：
 
-- 代码放在 `src/rag_v4/`，按 `ingestion`、`contextual`、`retrieval`、`graph`、`publication`、`acl`、`adapters` 组织；不得从旧 `rag.application` 反向导入流程类。
+- 当前代码直接放在 `services/rag/src/rag`，publication 作为 application 下的用例模块，事件消费者也归该模块；旧 services/wisepen-rag-service 仅作源码参考，不作为运行时依赖。
 - 旧 `src/rag` 只允许作为阅读参考，不被新 package 导入；新 package 不复制旧 container、domain/application 分层。
-- 本轮不修改 HTTP/Kafka 入口；后续 transport 接入直接调用新 application capability，不经过旧流程。
+- Kafka 已直接调用新用例，ACL 与 publication 共用 RAG Kafka 后端；不经过旧流程。HTTP 内容能力的 transport 继续留到后续阶段。
 
 ### 6.2 删除顺序
 
@@ -400,7 +400,8 @@ factory 只组装依赖，不持有请求状态、不承担流程判断。Kafka 
 
 - `services/wisepen-rag-service/src/rag_v4/acl/`：复制并冻结 `PermissionScope`、`ResourceAcl.can_read()`、ACL 仓储端口和本地最终一致投影语义。
 - `services/wisepen-rag-service/src/rag_v4/ingestion/`：封装 `utils.markdown.MarkdownChunker` 到 `Document/Chunk` 的投影，保留内部 sections/anchors/spans，并由 `IngestionPipeline` 组合后续阶段。
-- `services/wisepen-rag-service/src/rag_v4/publication/`：实现 staged/applied、版本单调、向量完整性检查、可见性撤销和清理任务。
+- `services/rag/src/rag/application/publication/`：收敛为 models、store、publish 三个实现文件；publish 定义事件、消费者和完整发布操作。消费者直接调用 publisher.publish 或 destroy_resources，摄入、版本判断、外部 Pipeline、内容回查及条件发布归入同一用例；必需投影完整性依赖 Indexer 成功合同。内容与物理销毁消费者已接入，物理清理后续实现；销毁先永久撤销可见性。
+- `services/rag/src/rag/backends/kafka/`：ACL 与 publication 共用的有限重试、延迟回投、DLQ 和精确分区确认；业务校验和幂等仍由用例负责，不修改 common.kafka。
 - `services/wisepen-rag-service/src/rag_v4/contextual/`：实现 `Transformer.transform(chunks)` 的连续上下文变换及 graph target-only builder。
 - `services/wisepen-rag-service/src/rag_v4/retrieval/`：适配 Qdrant dense/BM25 和 `utils.retrieval` 的 Candidate/Fusion/RankedCandidate，返回本地 chunk 引用。
 - `services/wisepen-rag-service/src/rag_v4/graph/`：放入本地 LightRAG prompt、抽取解析、合并、查询、ontology 和 plugin 边界。
