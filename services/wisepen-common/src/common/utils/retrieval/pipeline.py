@@ -36,7 +36,7 @@ class RetrievalPipeline:
         self.reranker = reranker if reranker is not None else Reranker()
         self.diversity = diversity if diversity is not None else Diversity()
 
-    async def retrieve(
+    async def run(
         self,
         *,
         query: str,

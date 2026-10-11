@@ -53,7 +53,7 @@ async def test_pipeline_passes_query_to_retriever_and_focus_to_reranker() -> Non
     result = await RetrievalPipeline(
         retriever=retriever,
         reranker=reranker,
-    ).retrieve(query="召回查询", focus="精排需求", top_k=5)
+    ).run(query="召回查询", focus="精排需求", top_k=5)
 
     assert retriever.queries == ["召回查询"]
     assert reranker.focuses == ["精排需求"]
@@ -71,7 +71,7 @@ async def test_pipeline_falls_back_to_query_and_default_stages_are_identity() ->
     result = await RetrievalPipeline(
         retriever=retriever,
         reranker=reranker,
-    ).retrieve(query="same query", focus="   ", top_k=1, diversity="moderate")
+    ).run(query="same query", focus="   ", top_k=1, diversity="moderate")
 
     assert reranker.focuses == ["same query"]
     assert (result[0].candidate_id, result[0].rank, result[0].score) == ("a", 1, 0.8)
@@ -134,7 +134,7 @@ async def test_fusion_retriever_composes_retrievers_and_owns_budget() -> None:
         fusion=RoundRobinFusion(),
         top_k=3,
     )
-    result = await RetrievalPipeline(retriever=retriever).retrieve(
+    result = await RetrievalPipeline(retriever=retriever).run(
         query="query",
         top_k=2,
     )
@@ -177,7 +177,7 @@ async def test_fusion_retriever_can_be_nested() -> None:
         top_k=1,
     )
 
-    result = await RetrievalPipeline(retriever=outer).retrieve(
+    result = await RetrievalPipeline(retriever=outer).run(
         query="query",
         top_k=1,
     )
