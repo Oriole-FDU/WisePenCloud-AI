@@ -2,8 +2,7 @@
 
 from typing import Protocol
 
-from rag.core.schema import Document
-from rag.ingestion.chunkers.base import Chunk
+from rag.core.schema import Chunk, Document
 
 
 class Transformer(Protocol):

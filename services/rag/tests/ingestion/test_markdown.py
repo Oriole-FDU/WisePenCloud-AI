@@ -5,8 +5,7 @@ from common.utils.markdown import (
     MarkdownChunker as CommonMarkdownChunker,
 )
 
-from rag.core.schema import Document, DocumentStructure
-from rag.ingestion import Chunk
+from rag.core.schema import Chunk, Document, DocumentStructure
 from rag.ingestion.chunkers import MarkdownChunker
 
 
@@ -29,7 +28,7 @@ def document(common_chunker):
         resource_id="resource",
         document_version=5,
         content_revision="revision",
-        raw_markdown=markdown,
+        text=markdown,
         structure=DocumentStructure(len(markdown), result.sections, result.anchors),
         metadata={"custom": "文档 metadata 不复制到 Chunk"},
     )
@@ -38,7 +37,7 @@ def document(common_chunker):
 async def test_markdown_chunker_adapts_common_fields_without_internal_details(
     document, common_chunker
 ):
-    result = common_chunker.chunk(document.raw_markdown)
+    result = common_chunker.chunk(document.text)
     adapter = MarkdownChunker(40, 70)
 
     chunks = await adapter.split(document)
@@ -102,7 +101,9 @@ async def test_markdown_identity_is_stable_and_scoped_to_resource_revision(docum
 
 async def test_markdown_chunker_uses_overridden_token_budgets():
     # 单个小节含超长正文：默认预算装箱为 1 个 chunk，小预算覆盖后被拆分为多个
-    markdown = "# 长章节\n\n" + "这是一段足够长的正文内容，用于验证分块预算是否生效。\n\n" * 20
+    markdown = (
+        "# 长章节\n\n" + "这是一段足够长的正文内容，用于验证分块预算是否生效。\n\n" * 20
+    )
     document = Document(
         "resource", 1, "revision", markdown, DocumentStructure(len(markdown))
     )

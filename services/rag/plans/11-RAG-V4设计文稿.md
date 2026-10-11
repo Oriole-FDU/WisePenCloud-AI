@@ -18,7 +18,7 @@
 Document
   -> Chunker.split(document)
   -> list[Chunk]
-  -> Transformer.transform(document, chunks) ...
+  -> Transformer.transform(chunks, document=document) ...
   -> Indexer.index(chunks) ...
   -> Storage
 
@@ -30,8 +30,8 @@ Retriever
 |---|---|---|
 | `Chunker` | Document 分块、边界、顺序和结构归属 | Embedding、图谱抽取、持久化 |
 | `Transformer` | 对完整 Chunk 列表做内容加工或知识增强 | Storage、Embedding、持久化 |
-| `Indexer` | 选择索引对象、生成投影并调用 Writer | 底层 provider CRUD、检索策略 |
-| `Storage` | 通用向量/图存取原语 | Chunk 业务、ACL、revision、检索模式 |
+| `Indexer` | 保存最终 Chunk 事实或生成检索投影，并调用 Writer | 底层 provider CRUD、检索策略 |
+| `Storage` | 内容、向量、图存取原语 | ACL、revision 生命周期、检索模式 |
 | `Retriever` | 查询构造、候选生成、组合和读取回查 | 索引构建和持久化 |
 
 `IngestionPipeline` 只是顺序编排器，不是新的业务仓储层、事务协调器或错误补偿器。
@@ -44,7 +44,12 @@ class Chunker(Protocol):
 
 
 class Transformer(Protocol):
-    async def transform(self, chunks: list[Chunk]) -> list[Chunk]: ...
+    async def transform(
+        self,
+        chunks: list[Chunk],
+        *,
+        document: Document | None = None,
+    ) -> list[Chunk]: ...
 
 
 class Indexer(Protocol):
@@ -63,19 +68,18 @@ class IngestionPipeline:
         self.chunker = chunker
         self.transformers = transformers
         self.indexers = indexers
-        self._validate_assembly()
 
     async def run(self, document: Document) -> None:
         chunks = await self.chunker.split(document)
         for transformer in self.transformers:
-            chunks = await transformer.transform(chunks)
+            chunks = await transformer.transform(chunks, document=document)
         for indexer in self.indexers:
             await indexer.index(chunks)
 ```
 
 接口约束如下：
 
-- `Document` 只进入 `Chunker.split()`；
+- `Document` 进入 `Chunker.split()`，并作为可选参数传给 Transformer；
 - Transformer 和 Indexer 接收完整 `list[Chunk]`；
 - Transformer 可以原地修改 Chunk，也可以返回新 Chunk；Pipeline 始终使用返回值；
 - Pipeline 不自动深拷贝，不要求不可变 Chunk；
@@ -96,6 +100,8 @@ class IngestionPipeline:
 - 错误装配在构造或启动阶段报错，不能运行后静默丢弃 metadata。
 
 ## 3. Document、Chunk 和 metadata
+
+Document、DocumentStructure 和 Chunk 统一定义在 `core/schema/content.py`，独立模型共同服务 ingestion 与 ContentStorage。框架 schema 不依赖执行阶段或具体后端。
 
 ### 3.1 Document
 
@@ -237,7 +243,7 @@ VectorIndexer：
 
 #### ChunkFactsIndexer
 
-完整 ingestion 配置包含一个具体的 `ChunkFactsIndexer`，把 Transformer 返回的 Chunk（包括普通 dict metadata）写入既有 Mongo Chunk 内容事实集合。它是 `Indexer` 的一个实现，不增加新的核心抽象或通用 Mongo Storage；必须在其他投影 Indexer 前成功，使图谱抽取结果可以在进程退出后用于重建。
+完整 ingestion 配置包含一个具体的 `ChunkFactsIndexer`，通过 ContentWriter 把 Transformer 返回的 Chunk（包括普通 dict metadata）写入内容事实集合。ContentReader、ContentWriter 两个接口组合为 ContentStorage，MongoContentStorage 保存独立的 Document 和 Chunk，不增加 Repository、Node 或通用 Mongo 框架。ChunkFactsIndexer 必须在投影 Indexer 前成功，使派生事实可以在进程退出后用于重建。
 
 #### GraphIndexer
 
@@ -396,26 +402,24 @@ PluginRegistry 负责空值、重复注册和名称冲突判定。不为 ontolog
 建议新实现目录如下：
 
 ```text
-src/rag_v4/
-  models/
+src/rag/
+  core/schema/     # content.py: Document, DocumentStructure, Chunk; graph.py
   acl/
   publication/
-  ingestion/       # Document, Chunker, IngestionPipeline
-  contextual/      # Contextualizer
-  indexing/        # VectorIndexer, GraphIndexer
-  storage/         # ports, VectorStorage, GraphStorage
+  ingestion/       # Chunker, Transformer, Indexer, IngestionPipeline
+  storage/         # ContentStorage, VectorStorage, GraphStorage
   retrieval/       # Chunk Retriever, GraphRetriever, seed validation
   graph/            # LightRAG core, Ontology, PluginRegistry
-  adapters/         # Mongo, Qdrant, Neo4j, LLM, embedding
+  backends/         # Mongo, Qdrant, Neo4j
 ```
 
 依赖方向：
 
 ```text
-models <- ingestion/contextual/indexing/retrieval/graph
-storage ports <- indexing/retrieval
-adapters -> storage ports
-adapters -> graph/acl/publication ports
+core.schema <- ingestion/storage/retrieval/graph
+storage ports <- ingestion indexers/retrieval/publication
+backends -> storage ports
+backends -> graph/acl/publication ports
 composition -> all concrete implementations
 ```
 

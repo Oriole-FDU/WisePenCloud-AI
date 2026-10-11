@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from rag.ingestion.chunkers.base import Chunk
+from rag.core.schema import Chunk
 
 
 class Indexer(Protocol):

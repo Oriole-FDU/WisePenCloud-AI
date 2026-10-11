@@ -30,6 +30,9 @@ packages = ["src/rag"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "mongo_integration: requires an explicit RAG_TEST_MONGODB_URI and uses an isolated test database",
+]
 
 [tool.ruff]
 target-version = "py311"

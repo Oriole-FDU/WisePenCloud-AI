@@ -2,8 +2,7 @@
 
 from common.utils.markdown import MarkdownChunker as CommonMarkdownChunker
 
-from rag.core.schema import Document
-from rag.ingestion.chunkers.base import Chunk
+from rag.core.schema import Chunk, Document
 
 
 class MarkdownChunker:
@@ -19,7 +18,7 @@ class MarkdownChunker:
         )
 
     async def split(self, document: Document) -> list[Chunk]:
-        result = self._chunker.chunk(document.raw_markdown)
+        result = self._chunker.chunk(document.text)
         # Common ID 只描述文档内部结构，RAG 用资源与 revision 限定其身份。
         identity_prefix = f"{document.resource_id}:{document.content_revision}"
         return [

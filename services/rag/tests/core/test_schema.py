@@ -4,8 +4,16 @@ import pytest
 from common.utils.markdown import Anchor, Section, SourceSpan
 from pydantic import BaseModel
 
-from rag.core.schema import Document, DocumentStructure, GraphEdge, GraphNode
-from rag.ingestion import Chunk
+from rag import ingestion
+from rag.core.schema import Chunk, Document, DocumentStructure, GraphEdge, GraphNode
+
+
+def test_content_models_are_owned_by_schema():
+    assert all(
+        model.__module__ == "rag.core.schema.content"
+        for model in (Document, DocumentStructure, Chunk)
+    )
+    assert not hasattr(ingestion, "Chunk")
 
 
 def test_document_keeps_common_structure_and_content_facts():
@@ -30,7 +38,7 @@ def test_document_keeps_common_structure_and_content_facts():
         resource_id="resource",
         document_version=7,
         content_revision="revision",
-        raw_markdown=markdown,
+        text=markdown,
         structure=structure,
         metadata=metadata,
     )
@@ -38,7 +46,7 @@ def test_document_keeps_common_structure_and_content_facts():
     assert document.resource_id == "resource"
     assert document.document_version == 7
     assert document.content_revision == "revision"
-    assert document.raw_markdown == markdown
+    assert document.text == markdown
     assert document.structure is structure
     assert structure.total_length == len(markdown)
     assert structure.sections[0] is section
@@ -48,7 +56,7 @@ def test_document_keeps_common_structure_and_content_facts():
         "resource_id",
         "document_version",
         "content_revision",
-        "raw_markdown",
+        "text",
         "structure",
         "metadata",
     }

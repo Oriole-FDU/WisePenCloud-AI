@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.core.schema import Document, DocumentStructure
-from rag.ingestion import Chunk, IngestionPipeline
+from rag.core.schema import Chunk, Document, DocumentStructure
+from rag.ingestion import IngestionPipeline
 
 
 @pytest.fixture

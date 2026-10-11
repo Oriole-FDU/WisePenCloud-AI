@@ -24,6 +24,8 @@
 10. Mongo Chunk facts（含图谱 metadata）作为可重建输入，Neo4j GraphStorage 作为拓扑及来源 Chunk 关联投影；
 11. 不增加额外 Repository 层、Storage Router 或跨存储一致性机制。
 
+内容事实采用同样的接口隔离：`ContentReader`、`ContentWriter` 组合成 `ContentStorage`。统一后端分别存取 Document、Chunk，不把两者统一成 Node；模型位于 `core/schema/content.py`。
+
 ## 2. LlamaIndex 对本方案的启发
 
 ### 2.1 VectorStore
@@ -67,6 +69,12 @@ class RagStorageContext:
 ```
 
 这只是依赖组合对象，不是动态 Router，也不改变各 Storage 的最小接口。
+
+### 2.4 ContentStorage
+
+内容存储已经独立实现在 `storage/content.py`：Reader 按明确 revision 批量读取 Document、按 ID 批量读取 Chunk，并按 revision 顺序读取 Chunk；Writer 批量 upsert 两种对象，按 revision 或资源物理删除二者。MongoContentStorage 绑定 `document_revisions`、`doc_chunks` 两个集合，显式创建身份唯一索引，每批 500 条有序 upsert。
+
+内容写入不推断 active、不隐式删除批次之外的 Chunk、不解释 ACL；删除由调用方先撤销可见性。ChunkFactsIndexer 只依赖 ContentWriter。向量与图适配器继续只保存可重建投影。
 
 ## 3. VectorStorage
 
