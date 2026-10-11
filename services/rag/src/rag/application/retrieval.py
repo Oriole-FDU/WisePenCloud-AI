@@ -1,6 +1,5 @@
 """普通混合检索用例；授权回查完成后，正文才能进入重排与结果组装。"""
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -53,17 +52,12 @@ class HybridRetrieval:
         embedding_client: EmbeddingClient,
         fusion: Fusion[VectorMatch] | None = None,
         reranker: Reranker[PreparedChunk] | None = None,
-        postprocess_hits: Callable[
-            [list[ChunkHit], ResourceSnapshot], Awaitable[list[ChunkHit]]
-        ]
-        | None = None,
     ) -> None:
         self._snapshot_reader = snapshot_reader
         self._vector_reader = vector_reader
         self._embedding_client = embedding_client
         self._fusion = fusion
         self._reranker = reranker
-        self._postprocess_hits = postprocess_hits
 
     async def retrieve(
         self,
@@ -124,8 +118,7 @@ class HybridRetrieval:
             )
             for item in ranked
         ]
-        if hits and self._postprocess_hits is not None:
-            return await self._postprocess_hits(hits, snapshot)
+
         return hits
 
     async def _prepare(

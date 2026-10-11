@@ -12,13 +12,13 @@
 - `ingestion/pipeline.py`：Chunker 执行一次，Transformer 依次传递返回列表，Indexer 依次串行消费最终列表；全部成功后返回最终同一 `list[Chunk]`。异常原样传播，不重试、不回滚、不复制 Chunk，不增加装配校验。
 - `tests/core/test_schema.py`、`tests/ingestion/test_pipeline.py`、`tests/ingestion/test_markdown.py`：覆盖模型合同、归属、顺序、对象 identity、metadata 增强、新列表交接、逐阶段失败和真实 Common 分块适配。
 
-RAG Chunk 和 section 的本地 ID 格式为：
+RAG Chunk ID 保持原格式：
 
 ```text
 {resource_id}:{content_revision}:{Common ID}
 ```
 
-DocumentStructure 保留 Common 原始结构，不由 Chunker 重写；Chunk.section_id 在适配时加上资源与 revision 前缀。document_version 不参与 Chunk identity。
+章节身份已在后续结构化读取切片统一，见 [20 实施记录](20-structured-reading-implementation.md)。Document 构造与 Chunker 共用 `core/schema/content.py` 的 rag_section_id，使用 `rsec_ + sha256(resource_id + "\0" + content_revision + "\0" + common_section_id)[:24]`。Document 章节及父章节 ID、Chunk.section_id 和 ChunkHit.section_id 一致；Common Section 类型、树、原文范围、路径、摘要、preview 和 anchors 保留。Chunk ID 格式不变，document_version 不直接参与 Chunk identity（内容版本已由 revision 限定）。
 
 ## 验证结果
 

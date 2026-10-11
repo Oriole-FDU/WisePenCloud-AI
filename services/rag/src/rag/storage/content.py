@@ -10,8 +10,14 @@ class ContentReader(Protocol):
 
     async def get_documents(
         self,
-        revisions: list[tuple[str, str]],   # (resource_id, content_revision)
+        revisions: list[tuple[str, str]],  # (resource_id, content_revision)
     ) -> list[Document]: ...
+
+    async def get_documents_by_section_ids(
+        self, section_ids: list[str]
+    ) -> list[Document]:
+        """按章节 ID 批量定位文档；文档去重，按首次匹配章节的请求顺序返回。"""
+        ...
 
     async def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]: ...
 

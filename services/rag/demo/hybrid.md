@@ -92,7 +92,7 @@ hybrid = HybridRetrieval(
 
 这里的 reranker 接收的是 `Candidate[PreparedChunk]`。PreparedChunk 中的正文已经通过资源授权、selected revision 和向量投影身份检查，因此文本提取函数只需要读取 Chunk.raw_text。
 
-不需要模型重排时，可以省略 reranker；Pipeline 会保留准备后的候选顺序与分数。可选命中后处理器也在 HybridRetrieval 初始化时注入，这个示例使用直接返回 ChunkHit 的默认行为。
+不需要模型重排时，可以省略 reranker；Pipeline 会保留准备后的候选顺序与分数。用例直接返回 ChunkHit；命中后处理接口已移除，父块构建暂缓。
 
 ## 4. 发起一次检索
 
@@ -161,12 +161,12 @@ dense_retriever = VectorRetriever.from_storage(
     reader=vector_storage,
     embedding_client=embedding_client,
     mode=VectorRetrievalMode.DENSE,
-    dense_top_k=30,
+    candidate_limit=30,
 )
 sparse_retriever = VectorRetriever.from_storage(
     reader=vector_storage,
     mode=VectorRetrievalMode.SPARSE,
-    sparse_top_k=30,
+    candidate_limit=30,
 )
 hybrid_retriever = VectorRetriever.from_storage(
     reader=vector_storage,
@@ -179,7 +179,7 @@ hybrid_retriever = VectorRetriever.from_storage(
 candidates = await sparse_retriever.retrieve("检索增强生成")
 ```
 
-单路保留 provider score；融合策略仅作用于 hybrid，融合分数属于 Candidate.score。candidate_limit 对所有模式限制最终候选数，dense_top_k/sparse_top_k 只约束对应已启用的路线；未启用路线不参与 I/O 或预算校验。include_embedding 在单路同样有效，sparse 也可以请求命中已有的 dense 向量，这不需要生成查询 embedding。
+单路保留 provider score；融合策略仅作用于 hybrid，融合分数属于 Candidate.score。单路直接用 candidate_limit 作为仓储 top_k，不接受 dense_top_k/sparse_top_k；hybrid 使用两路预算（未传时各为 30），candidate_limit 限制融合后的候选数。include_embedding 在单路同样有效，sparse 也可以请求命中已有的 dense 向量，这不需要生成查询 embedding。
 
 这里返回的仍是内部 VectorMatch 候选。面向用户的正文结果需要经过 application 的授权、版本与身份检查。HybridRetrieval 用例显式固定使用 hybrid 模式。
 
@@ -217,3 +217,39 @@ documents = await snapshot_reader.read_documents(
 ```
 
 资源的首次版本与可见性决定会被复用。授权过滤后不补召回，结果允许少于 top_k；事实缺失、旧版本或错误投影身份省略。重排失败保留重排前顺序与分数，其他阶段异常传播。ChunkHit 只暴露正文与定位、rank、最终阶段 score，内部 metadata 和向量留在排序流程中。
+
+## 7. 从检索命中继续读取章节
+
+目录、Chunk 和 ChunkHit 共用 RAG 在摄入时生成的 rsec_ 章节 ID。调用方直接使用返回的 section_id，无需传入资源 ID、revision 或解析 ID；版本和资源授权由共享 snapshot 决定。这里只在读取整份文档目录时使用 resource_id。
+
+```python
+from rag.application.reading import DocumentReading, SectionReadScope
+
+reading = DocumentReading(reader=snapshot_reader)
+section_ids = list(dict.fromkeys(
+    hit.section_id for hit in hits if hit.section_id is not None
+))
+
+# 与上面的 hybrid.retrieve 共用 snapshot，沿用首次版本与权限决定。
+neighbors = await reading.neighborhood(section_ids, snapshot=snapshot)
+for item in neighbors:
+    print(item.outline)
+
+own_sections = await reading.read_sections(
+    section_ids, snapshot=snapshot, scope=SectionReadScope.OWN,
+)
+subtrees = await reading.read_sections(
+    section_ids, snapshot=snapshot, scope=SectionReadScope.SUBTREE,
+)
+for item in own_sections:
+    print(item.section_id, item.text)
+
+if hits:
+    outline = await reading.global_outline(hits[0].resource_id, snapshot=snapshot)
+    if outline is not None:
+        print(outline.outline)
+```
+
+own 是当前标题至下一个标题前的完整原文；subtree 包含该章节的全部子章节。两者均保留标题、空白与 Markdown，不提供窗口、预算或续读。无权、旧版本、缺失章节省略，不切换到新版；损坏的源范围或数据库解码错误明确传播。目录内容和格式直接由 Common OutlineFormatter 生成。
+
+实际 adapter 装配的回归测试见 [test_hybrid_composition.py](../tests/backends/qdrant/test_hybrid_composition.py)，覆盖检索命中后直接使用章节 ID 读取邻域、own 与 subtree，且只判定一次资源授权。

@@ -3,10 +3,11 @@
 from common.utils.markdown import MarkdownChunker as CommonMarkdownChunker
 
 from rag.core.schema import Chunk, Document
+from rag.core.schema.content import rag_section_id
 
 
 class MarkdownChunker:
-    """复用 Common 的解析和分块算法，仅适配字段及资源内标识。"""
+    """复用 Common 算法，仅适配字段与资源/revision 限定的内容身份。"""
 
     def __init__(
         self,
@@ -19,7 +20,7 @@ class MarkdownChunker:
 
     async def split(self, document: Document) -> list[Chunk]:
         result = self._chunker.chunk(document.text)
-        # Common ID 只描述文档内部结构，RAG 用资源与 revision 限定其身份。
+        # Chunk ID 保持原格式，章节 ID 则与 Document 的不透明 hash 身份一致。
         identity_prefix = f"{document.resource_id}:{document.content_revision}"
         return [
             Chunk(
@@ -28,7 +29,11 @@ class MarkdownChunker:
                 content_revision=document.content_revision,
                 chunk_index=chunk.chunk_index,
                 section_id=(
-                    f"{identity_prefix}:{chunk.section_id}"
+                    rag_section_id(
+                        resource_id=document.resource_id,
+                        content_revision=document.content_revision,
+                        common_section_id=chunk.section_id,
+                    )
                     if chunk.section_id is not None
                     else None
                 ),

@@ -4,10 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from common.utils.markdown import MarkdownChunker as CommonMarkdownChunker
 
-from rag.application.publication import DocumentPublication
-from rag.core.schema import ContentRevision, Document, DocumentStructure
+from rag.application.publication import DocumentPublication, DocumentReadyEvent
 from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer
 from rag.ingestion.pipeline import IngestionPipeline
@@ -22,18 +20,11 @@ def make_document():
         resource_id="resource",
         metadata=None,
     ):
-        revision = ContentRevision.create(
-            resource_id=resource_id, document_version=version, text=text
-        )
-        result = CommonMarkdownChunker().chunk(text)
-        return Document(
-            resource_id,
-            version,
-            revision.content_revision,
-            text,
-            DocumentStructure(len(text), result.sections, result.anchors),
-            metadata if metadata is not None else {"custom": True},
-        )
+        document = DocumentReadyEvent.model_validate(
+            {"resourceId": resource_id, "version": version, "content": text}
+        ).to_document()
+        document.metadata = metadata if metadata is not None else {"custom": True}
+        return document
 
     return make
 

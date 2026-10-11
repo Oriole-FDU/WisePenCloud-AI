@@ -52,6 +52,17 @@ async def test_real_mongo_round_trip_idempotency_and_unique_indexes(
     assert await documents.count_documents({}) == 1
     assert await chunks.count_documents({}) == 1
     assert await storage.get_documents([("resource", "revision")]) == [document]
+    assert await storage.get_documents_by_section_ids(
+        [
+            document.structure.sections[0].section_id,
+            "missing",
+            document.structure.sections[0].section_id,
+        ]
+    ) == [document]
+    indexes = await documents.index_information()
+    assert indexes["document_section_id"]["key"] == [
+        ("structure.sections.section_id", 1)
+    ]
     assert await storage.get_chunks(["chunk", "missing", "chunk"]) == [chunk]
     assert await storage.get_revision_chunks(
         resource_id="resource", content_revision="revision"

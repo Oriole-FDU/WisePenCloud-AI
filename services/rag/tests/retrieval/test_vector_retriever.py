@@ -42,8 +42,6 @@ async def test_single_mode_queries_only_selected_route_and_preserves_scores(deps
     result = await build(
         deps,
         mode=mode,
-        dense_top_k=7,
-        sparse_top_k=9,
         candidate_limit=1,
         filters=filters,
         include_embedding=True,
@@ -52,7 +50,7 @@ async def test_single_mode_queries_only_selected_route_and_preserves_scores(deps
     reader.query.assert_awaited_once()
     request = reader.query.call_args.args[0]
     assert request.filters is filters and request.include_embedding
-    assert request.top_k == (7 if mode is VectorRetrievalMode.DENSE else 9)
+    assert request.top_k == 1
     assert result[0].payload is matches[0]
     assert len(result) == 1 and result[0].score == 8.0 and result[0].rank == 1
     if mode is VectorRetrievalMode.DENSE:
@@ -63,14 +61,26 @@ async def test_single_mode_queries_only_selected_route_and_preserves_scores(deps
         assert request.embedding is None and request.text == "query"
 
 
-async def test_sparse_requires_only_vector_reader_and_ignores_dense_budget(deps):
+async def test_sparse_requires_only_vector_reader_and_uses_candidate_budget(deps):
     reader, _ = deps
     retriever = VectorRetriever.from_storage(
-        reader=reader, mode="sparse", dense_top_k=0, sparse_top_k=4
+        reader=reader, mode="sparse", candidate_limit=4
     )
     await retriever.retrieve("query")
     reader.query.assert_awaited_once()
     assert reader.query.call_args.args[0].text == "query"
+    assert reader.query.call_args.args[0].top_k == 4
+
+
+@pytest.mark.parametrize(
+    "mode", [VectorRetrievalMode.DENSE, VectorRetrievalMode.SPARSE]
+)
+@pytest.mark.parametrize("budget", [{"dense_top_k": 4}, {"sparse_top_k": 5}])
+def test_single_route_rejects_hybrid_budget_parameters_before_io(deps, mode, budget):
+    with pytest.raises(ValueError, match="only supported in hybrid"):
+        build(deps, mode=mode, **budget)
+    deps[0].query.assert_not_called()
+    deps[1].embed.assert_not_called()
 
 
 @pytest.mark.parametrize(

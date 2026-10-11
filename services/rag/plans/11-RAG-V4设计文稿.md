@@ -4,7 +4,7 @@
 
 本文是 RAG V4 的实现设计合同，整合 00–10 方案中已经确认的边界。它描述核心模型、写入管线、存储端口、普通检索、图谱能力、权限和版本语义。
 
-2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，实际合同见第 5.3、6.1–6.4 节与 [17 实施记录](17-vector-publication-implementation.md)。application 请求内资源快照与 Document／Chunk 读取已实现，见 [18 实施记录](18-application-snapshot-implementation.md)。普通检索已实现 Common 泛型 Pipeline、VectorRetriever 和 application HybridRetrieval，见 [19 实施记录](19-hybrid-retrieval-implementation.md)。Contextualizer、父块和图谱后续讨论实现；生产配置和生命周期装配继续留后。
+2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，实际合同见第 5.3、6.1–6.4 节与 [17 实施记录](17-vector-publication-implementation.md)。application 请求内资源快照与 Document／Chunk 读取已实现，见 [18 实施记录](18-application-snapshot-implementation.md)。普通检索已实现 Common 泛型 Pipeline、VectorRetriever 和 application HybridRetrieval，见 [19 实施记录](19-hybrid-retrieval-implementation.md)。统一章节身份、全局目录、标题邻域与原文范围读取已实现，见 [20 实施记录](20-structured-reading-implementation.md)。下一切片为 Contextualizer，随后推进图谱；父块暂缓，不做检索效果基线；生产配置和生命周期装配继续留后。
 
 本设计不包含 HTTP 路由、MCP 工具注册和最终 transport composition。MCP 只作为可信身份来源的既有边界被引用：最终用户身份由可信安全上下文注入，RAG application 接收 `PermissionScope`，不从业务参数读取用户 ID。
 
@@ -118,6 +118,8 @@ structure
 metadata
 ```
 
+Document 结构沿用 Common Section/Anchor，但章节及父章节 ID 在摄入适配时统一为 `rsec_ + sha256(resource_id + "\0" + content_revision + "\0" + common_section_id)[:24]`；Chunker 共用同一身份函数，ChunkHit 传递同一 ID。树、范围、路径、摘要和 preview 保留；不改 Chunk.chunk_id 或向量 record_id。调用方只传章节 ID，不解析 ID 或额外携带资源/revision。
+
 Document metadata 继续作为垂类扩展和 Pipeline 组装依据。Document 级策略由上层选择 Pipeline 配置，不由 GraphExtractor 或 GraphIndexer 自行判断。
 
 `graph_enabled` 是上层可采用的策略输入示例，不是 `Document` 必须包含的核心字段。外部装配逻辑读取所需业务元数据后选择并复用对应 Pipeline；组件不读取此开关，也不把它复制到 Chunk。
@@ -204,7 +206,7 @@ ContentRevision 是 `core.schema` 的不可变内容身份；摘要基于完整 
 
 DocumentRevision、Chunk 和各类向量/图投影都必须携带 `resource_id/content_revision`。一次能力调用中，资源第一次确定 applied revision 后，后续正文、Chunk 和投影回查都固定使用该 revision。active 期间变化不触发重试或切换。
 
-`application/snapshot.py` 是多个读取／检索用例共享的入口。`ResourceSnapshot(scope)` 只保存本次调用逐资源确定的 `ContentRevision | None`；`ResourceSnapshotReader(store, resource_acls, reader)` 内部批量解析状态和 ACL，公开读取 Document／Chunk，不保留请求状态。普通混合检索已使用 Reader，后续标题树和图谱用例复用同一入口，不再单独装配 resolver。
+`application/snapshot.py` 是多个读取／检索用例共享的入口。`ResourceSnapshot(scope)` 只保存本次调用逐资源确定的 `ContentRevision | None`；`ResourceSnapshotReader(store, resource_acls, reader)` 内部批量解析状态和 ACL，公开读取 Document／Chunk 及按章节 ID 定位的可见 Document，不保留请求状态。普通混合检索、目录/邻域与章节读取已使用 Reader，后续图谱用例复用同一入口，不再单独装配 resolver。
 
 每次独立调用创建新 ResourceSnapshot，同一次编排显式共享它。首次不可见也缓存；调用期间 applied、ACL 或 destroyed 变化均沿用首次完成的决定，不增加输出前回查。已选事实缺失或身份不符则省略，不切换新版或回退其他 revision。Document 回查重新计算完整正文身份；Chunk 继承资源级判权并匹配 selected revision。批量去重保序、空输入无 I/O，连接／查询／解码异常直接传播。这个请求内资源快照不提供跨后端原子观察点，也不保存正文。
 
@@ -362,18 +364,17 @@ application: query + ResourceSnapshot + 本次检索配置
   -> Candidate[PreparedChunk]
   -> Common rerank / diversity
   -> application ChunkHit
-  -> 可选异步 postprocess_hits(hits, snapshot)
 ```
 
-VectorRetriever.from_storage 初始化选择 VectorRetrievalMode（dense/sparse/hybrid，默认 hybrid）；dense/hybrid 注入 VectorReader 与已配置的 EmbeddingClient，sparse 只需 VectorReader。在装配时确定 dense_top_k=30、sparse_top_k=30、candidate_limit=60、filters=None、include_embedding=False 和融合策略。仅 hybrid 通过 Common FusionRetriever 并发两路；单路直接召回，保留 provider score。启用路线各自构造 Storage VectorQuery；dense/hybrid 查询 embedding 只生成一次，sparse 不生成。candidate_limit 对所有模式生效，未启用路线不进行 I/O 或预算校验。每路初始 Candidate.score 是 provider score，融合只改 Candidate 排名字段，VectorMatch.score 保留 provider 分数。非法配置在初始化时失败，空白查询在 I/O 前失败，任一路异常直接传播。
+VectorRetriever.from_storage 初始化选择 VectorRetrievalMode（dense/sparse/hybrid，默认 hybrid）；dense/hybrid 注入 VectorReader 与已配置的 EmbeddingClient，sparse 只需 VectorReader。在装配时确定 hybrid 的 dense/sparse 预算（默认各为 30）、candidate_limit=60、filters=None、include_embedding=False 和融合策略。仅 hybrid 通过 Common FusionRetriever 并发两路；单路直接召回，保留 provider score。启用路线各自构造 Storage VectorQuery；dense/hybrid 查询 embedding 只生成一次，sparse 不生成。单路使用 candidate_limit 作为仓储 top_k，拒绝 dense_top_k/sparse_top_k；hybrid 两路预算未传时各为 30，candidate_limit 限制融合输出。每路初始 Candidate.score 是 provider score，融合只改 Candidate 排名字段，VectorMatch.score 保留 provider 分数。非法配置在初始化时失败，空白查询在 I/O 前失败，任一路异常直接传播。
 
-HybridRetrieval 显式注入 ResourceSnapshotReader、VectorReader、已配置的 EmbeddingClient、可选 Fusion[VectorMatch]、Reranker[PreparedChunk] 与命中后处理器。用例直接调用 VectorRetriever.from_storage，显式选择 hybrid，将固定依赖与本次 dense_top_k、sparse_top_k、candidate_limit、filters、include_embedding 组合成召回组件。已连接的客户端与仓储共享，每次组装不新建数据库连接，不修改共享组件的配置。
+HybridRetrieval 显式注入 ResourceSnapshotReader、VectorReader、已配置的 EmbeddingClient、可选 Fusion[VectorMatch] 与可选 Reranker[PreparedChunk]。用例直接调用 VectorRetriever.from_storage，显式选择 hybrid，将固定依赖与本次 dense_top_k、sparse_top_k、candidate_limit、filters、include_embedding 组合成召回组件。已连接的客户端与仓储共享，每次组装不新建数据库连接，不修改共享组件的配置。
 
 用例 retrieve(query, *, snapshot, top_k=5, focus="", diversity="off", filters=None, dense_top_k=30, sparse_top_k=30, candidate_limit=60) 先通过显式快照批量读取，过滤缺失定位、不可见、旧版本、错误投影身份和缺失事实。PreparedChunk 只承载授权 Chunk 与可选候选 embedding。ModelReranker 通过文本提取函数只读取 Chunk.raw_text；focus 去空白为空时使用 query。MMR 使用向量提取函数，off 不请求向量，moderate/high 使用已存向量和 Common 的 0.75/0.5 参数，不重新 embedding 正文。
 
-授权过滤后不补召回、不重查 publication/ACL，结果允许少于 top_k。召回或准备为空时跳过排序；准备失败不调用外部模型。重排失败记录日志并保留重排前顺序与分数，召回、准备、多样化及后处理异常直接传播。
+授权过滤后不补召回、不重查 publication/ACL，结果允许少于 top_k。召回或准备为空时跳过排序；准备失败不调用外部模型。重排失败记录日志并保留重排前顺序与分数，召回、准备与多样化异常直接传播。
 
-ChunkHit 仅包含 chunk_id、resource_id、content_revision、section_id、section_path、text（raw_text）、rank、score；score 属于最终排序阶段，不限定为 0–1，不命名为 rerank_score。内部 metadata 和向量不进入结果。Pipeline 截取 top_k 并连续编号，application 组装后才调用可选后处理器；空结果不调用。
+ChunkHit 仅包含 chunk_id、resource_id、content_revision、section_id、section_path、text（raw_text）、rank、score；score 属于最终排序阶段，不限定为 0–1，不命名为 rerank_score。内部 metadata 和向量不进入结果。Pipeline 截取 top_k 并连续编号，application 组装后直接返回命中；命中后处理接口已移除。
 
 Common BM25Retriever 使用调用方提供的 payload 文本提取函数在内存建索引，不等同于 Qdrant sparse 查询。Chat 缓存输出搜索已迁移到类型化 payload，保留原文定位与会话隔离行为。图谱不可用或未启用时普通检索独立工作。
 
@@ -397,7 +398,15 @@ ChunkHit 可以附带可选的 Entity `GraphNodeReference` 列表。它们只是
 
 ### 7.4 父块
 
-本轮只提供排序与组装后的异步 postprocess_hits(hits, snapshot) 扩展点，不冻结 ParentBuilder、父块结果承载或空 parents 字段。实际父块构建、参数及结果模型在后续切片讨论；它不改变 Chunk identity、图谱来源事实或 Storage 合同。
+父块构建因收益尚不明确而暂缓，不保留命中后处理接口、ParentBuilder 或空 parents 字段。显式章节读取独立于检索，可读取 own 或完整 subtree；它不自动扩展命中正文。
+
+### 7.5 结构化读取（已实现）
+
+DocumentReading 仅注入共享 ResourceSnapshotReader，提供 global_outline(resource_id, *, snapshot, max_level=0)、neighborhood(section_ids, *, snapshot, sibling_steps=1) 与 read_sections(section_ids, *, snapshot, scope=own)。目录及邻域复用 Common OutlineFormatter，不重写格式或树算法。结果包含资源/revision 及 outline 或 text，章节结果另含 section_id 与 list[str] section_path。
+
+ContentReader.get_documents_by_section_ids 批量查询 Document 中的章节 ID；Mongo 为 structure.sections.section_id 建普通索引，按首个匹配章节的请求顺序返回去重文档。Storage 不选择版本或判权。Reader 内部定位后核对 selected revision、ACL、文档版本和完整正文摘要，旧版本不回退。不可信定位正文不提前交给用例。
+
+SectionReadScope 为 own/subtree，分别按 own_span/subtree_span 完整切原文；保留标题、空白和 Markdown，无递归深度、窗口或续读。范围越过正文长度抛 RuntimeError；SourceSpan 自身拒绝负数或倒序，数据库解码异常直接传播。批量输入去重保序，不可见或缺失省略；全局目录不可见为 None，可见但无章节返回空目录。负目录/邻域参数及非法 scope 在 I/O 前失败。共享用例无请求缓存，同次上层操作显式共享 snapshot。
 
 ## 8. Ontology、Producer 和 Plugin
 
@@ -439,7 +448,7 @@ src/rag/
     publication/  # models.py、store.py、publish.py；后者包含事件、消费者及完整发布
     snapshot.py   # ResourceSnapshot 与 ResourceSnapshotReader，共享版本／权限决定和内容读取
     retrieval.py  # HybridRetrieval、PreparedChunk、ChunkHit 与固定读取/模型依赖装配
-                   # 标题树、图谱及种子校验用例在后续切片实现
+                   # 目录/邻域与章节读取已实现；图谱及种子校验后续实现
   ingestion/       # Chunker, Transformer, Indexer, IngestionPipeline
   storage/         # ContentStorage, VectorStorage, GraphStorage
   retrieval/       # vector.py: 配置式 VectorRetriever；graph 抽象留到图切片

@@ -1,5 +1,7 @@
 # 统一内容模型、ContentStorage 与 Mongo ChunkFactsIndexer 实施记录
 
+后续结构化读取已扩展 ContentReader.get_documents_by_section_ids 和 Mongo 普通章节索引，按请求章节的首次匹配顺序返回去重 Document，见 [20 实施记录](20-structured-reading-implementation.md)。查询不解释 ACL 或 publication；共享快照 Reader 负责正文身份、版本与授权检查。下文验收结果保留内容存储切片的历史记录。
+
 ## 完成能力
 
 - `core/schema/content.py` 统一定义 Document、DocumentStructure、Chunk，字段、默认值、slots 和 retrieval_text 行为保持不变。`core.schema` 导出三种内容模型及图模型；ingestion 从 schema 导入模型，不保留旧 document 模块或 ingestion 的 Chunk 导出。

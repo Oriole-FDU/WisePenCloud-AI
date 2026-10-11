@@ -5,23 +5,17 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from rag.application.publication.publish import DocumentReadyEvent
 from rag.application.snapshot import ResourceSnapshotReader
-from rag.core.schema import Chunk, ContentRevision, Document, DocumentStructure
+from rag.core.schema import Chunk, ContentRevision
 
 
 @pytest.fixture
 def make_read_document():
     def make(resource_id="resource", version=1, text="  中文原文😀\n"):
-        revision = ContentRevision.create(
-            resource_id=resource_id, document_version=version, text=text
-        )
-        return Document(
-            resource_id,
-            version,
-            revision.content_revision,
-            text,
-            DocumentStructure(len(text)),
-        )
+        return DocumentReadyEvent.model_validate(
+            {"resourceId": resource_id, "version": version, "content": text}
+        ).to_document()
 
     return make
 

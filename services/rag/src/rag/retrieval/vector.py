@@ -16,6 +16,9 @@ from rag.core.schema.filters import MetadataFilters
 from rag.core.schema.vector import VectorMatch, VectorQuery
 from rag.storage.vector import VectorReader
 
+# hybrid 模式下各路未显式指定 top_k 时的默认召回量。
+_DEFAULT_HYBRID_ROUTE_TOP_K = 30
+
 
 class VectorRetrievalMode(StrEnum):
     """初始化时选择召回路线；仅 hybrid 使用融合策略。"""
@@ -41,15 +44,34 @@ class VectorRetriever(Retriever[VectorMatch]):
         reader: VectorReader,
         embedding_client: EmbeddingClient | None = None,
         mode: VectorRetrievalMode = VectorRetrievalMode.HYBRID,
-        dense_top_k: int = 30,
-        sparse_top_k: int = 30,
+        dense_top_k: int | None = None,
+        sparse_top_k: int | None = None,
         candidate_limit: int = 60,
         filters: MetadataFilters | None = None,
         include_embedding: bool = False,
         fusion: Fusion[VectorMatch] | None = None,
     ) -> "VectorRetriever":
-        """固定召回模式与配置；sparse 无需 embedding，单路保留 provider 分数。"""
+        """固定召回模式与配置；sparse 无需 embedding。
+
+        单路模式直接使用 candidate_limit 作为路内 top_k，保留 provider 排名和分数；
+        dense_top_k / sparse_top_k 仅在 hybrid 下用于控制各路召回量。
+        """
         mode = VectorRetrievalMode(mode)
+        if mode is VectorRetrievalMode.HYBRID:
+            dense_k = (
+                _DEFAULT_HYBRID_ROUTE_TOP_K if dense_top_k is None else dense_top_k
+            )
+            sparse_k = (
+                _DEFAULT_HYBRID_ROUTE_TOP_K if sparse_top_k is None else sparse_top_k
+            )
+        else:
+            if dense_top_k is not None or sparse_top_k is not None:
+                raise ValueError(
+                    "dense_top_k and sparse_top_k are only supported in hybrid mode; "
+                    "single-route modes use candidate_limit"
+                )
+            dense_k = sparse_k = candidate_limit
+
         retrievers: list[Retriever[VectorMatch]] = []
         if mode in {VectorRetrievalMode.DENSE, VectorRetrievalMode.HYBRID}:
             if embedding_client is None:
@@ -58,7 +80,7 @@ class VectorRetriever(Retriever[VectorMatch]):
                 _DenseRetriever(
                     reader=reader,
                     embedding_client=embedding_client,
-                    top_k=dense_top_k,
+                    top_k=dense_k,
                     filters=filters,
                     include_embedding=include_embedding,
                 )
@@ -67,7 +89,7 @@ class VectorRetriever(Retriever[VectorMatch]):
             retrievers.append(
                 _SparseRetriever(
                     reader=reader,
-                    top_k=sparse_top_k,
+                    top_k=sparse_k,
                     filters=filters,
                     include_embedding=include_embedding,
                 )

@@ -19,7 +19,7 @@ Common 原有的并发组合、基础展平、RoundRobin、RRF 去重及稳定�
 
 VectorRetriever.from_storage 显式接收 reader 与已绑定 model/dimensions 的 embedding_client；检索配置默认 dense_top_k=30、sparse_top_k=30、candidate_limit=60、filters=None、include_embedding=False。融合默认显式 RoundRobinFusion，可注入 RrfFusion 等策略。
 
-初始化 mode 支持 dense/sparse/hybrid，默认 hybrid；dense/hybrid 需要 embedding 客户端，sparse 只需 VectorReader。仅 hybrid 装配 Common FusionRetriever 并发融合；单路保留 provider 排名/分数，candidate_limit 对所有模式生效，未启用路线不进行 I/O 或预算校验。模式参考 [LlamaIndex VectorIndexRetriever](https://developers.llamaindex.ai/python/framework-api-reference/retrievers/vector/)，不引入其完整模式集合或仓储合同。
+初始化 mode 支持 dense/sparse/hybrid，默认 hybrid；dense/hybrid 需要 embedding 客户端，sparse 只需 VectorReader。仅 hybrid 装配 Common FusionRetriever 并发融合；单路保留 provider 排名/分数，candidate_limit 对所有模式生效，单路仅使用 candidate_limit 作为仓储预算，并拒绝 hybrid 专属 dense_top_k/sparse_top_k 参数。模式参考 [LlamaIndex VectorIndexRetriever](https://developers.llamaindex.ai/python/framework-api-reference/retrievers/vector/)，不引入其完整模式集合或仓储合同。
 
 各路线按 provider 返回顺序构造 Candidate，初始 score 是 provider score；融合更新 Candidate，原 VectorMatch.score 保留。RoundRobin 阶段分数仍为 0，RRF 写倒数排名累计分数。Dense 为查询生成一次 embedding，并沿用 VectorIndexer 的数量、维度、有限数值及响应错误合同；Sparse 直接发出文本查询。Hybrid 两路失败不降级为单路。
 
@@ -47,7 +47,7 @@ prepare_candidates 先省略缺少有效资源/revision 定位的投影，再批
 
 ChunkHit 仅包含 chunk_id、resource_id、content_revision、section_id、section_path、text（raw_text）、rank、score。score 是最终排序阶段分数，可来自融合、重排或 MMR；内部 metadata 与向量不进入结果。
 
-Pipeline 召回或准备为空时跳过排序。只有重排失败记录日志并保留重排前顺序与分数；召回、准备、多样化及后处理异常直接传播。排序、top_k 和结果组装之后，可选异步 postprocess_hits(hits, snapshot) 返回应用命中；空命中不调用。
+Pipeline 召回或准备为空时跳过排序。只有重排失败记录日志并保留重排前顺序与分数；召回、准备与多样化异常直接传播。排序、top_k 和组装后直接返回应用命中；可选后处理接口已在后续 20 切片按用户确认完整移除。
 
 Qdrant 的 VectorQuery.include_embedding 默认 False；开启时 with_vectors 只请求配置的 dense 名称，dense/sparse 两路都返回 VectorMatch.embedding。请求后缺失、维度错误、非法类型或非有限数值作为后端数据错误传播。写入、collection 初始化和 publication 合同没有改变。
 
@@ -87,7 +87,7 @@ uv run ruff check src/rag tests
 uv run --with pytest --with pytest-asyncio pytest tests/application/tools/output_cache/test_search_by_bm25.py -q
 ```
 
-新增测试覆盖准备阶段先于模型、准备失败和空结果跳过模型、payload 透传、预算与提取函数、provider/阶段分数分离、两路并发、查询隔离；Qdrant 按需向量与坏数据；application 授权/版本/投影身份、快照复用与新快照、部分结果、排序/top_k/focus/MMR、每调用配置、融合上限、后处理及异常传播。真实 Qdrant 既有集成测试已增加两路向量返回断言，但未执行到真实后端。
+新增测试覆盖准备阶段先于模型、准备失败和空结果跳过模型、payload 透传、预算与提取函数、provider/阶段分数分离、两路并发、查询隔离；Qdrant 按需向量与坏数据；application 授权/版本/投影身份、快照复用与新快照、部分结果、排序/top_k/focus/MMR、每调用配置、融合上限及异常传播（后处理相关测试已在 20 切片移除）。真实 Qdrant 既有集成测试已增加两路向量返回断言，但未执行到真实后端。
 
 17 个跳过项为 11 Mongo、3 Kafka、3 Qdrant 集成测试，未配置隔离端点；不据此宣称真实后端、模型服务或生产部署完成。
 
@@ -116,8 +116,8 @@ uv run pytest tests/backends/qdrant/test_hybrid_composition.py -v
 
 ## 7. 后续边界
 
-- 父块只保留命中后处理扩展位置；实际 ParentBuilder、参数与结果承载后续讨论，不增加空 parents 字段。
-- 标题树、Contextualizer、图谱生产及图检索后续实现；graph 抽象在真实图用例需求确定后定义。
+- 父块暂缓，命中后处理接口已移除，不增加 ParentBuilder 或空 parents 字段。
+- 标题树与章节读取已在 [20 实施记录](20-structured-reading-implementation.md) 落地；下一切片为 Contextualizer，图谱生产及图检索按排期推进；graph 抽象在真实图用例需求确定后定义。
 - 普通混合检索独立于图谱，当前不增加资源范围参数。
 - 生产模型/连接配置、显式初始化和 Container/main 生命周期装配继续留后。
 - 已同步 04、10、11、16；18 保留资源快照切片的历史验收结果。本轮改动未提交或推送，既有子模块状态未处理。

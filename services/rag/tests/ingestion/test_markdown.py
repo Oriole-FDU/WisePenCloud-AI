@@ -6,6 +6,7 @@ from common.utils.markdown import (
 )
 
 from rag.core.schema import Chunk, Document, DocumentStructure
+from rag.core.schema.content import rag_section_id
 from rag.ingestion.chunkers import MarkdownChunker
 
 
@@ -24,12 +25,32 @@ def document(common_chunker):
         "# 第二章\n\n第二章正文。\n"
     )
     result = common_chunker.chunk(markdown)
+    section_ids = {
+        section.section_id: rag_section_id(
+            resource_id="resource",
+            content_revision="revision",
+            common_section_id=section.section_id,
+        )
+        for section in result.sections
+    }
+    sections = [
+        replace(
+            section,
+            section_id=section_ids[section.section_id],
+            parent_section_id=(
+                section_ids[section.parent_section_id]
+                if section.parent_section_id is not None
+                else None
+            ),
+        )
+        for section in result.sections
+    ]
     return Document(
         resource_id="resource",
         document_version=5,
         content_revision="revision",
         text=markdown,
-        structure=DocumentStructure(len(markdown), result.sections, result.anchors),
+        structure=DocumentStructure(len(markdown), sections, result.anchors),
         metadata={"custom": "文档 metadata 不复制到 Chunk"},
     )
 
@@ -62,7 +83,11 @@ async def test_markdown_chunker_adapts_common_fields_without_internal_details(
         assert chunk.resource_id == document.resource_id
         assert chunk.content_revision == document.content_revision
         assert chunk.chunk_id == f"resource:revision:{source.chunk_id}"
-        assert chunk.section_id == f"resource:revision:{source.section_id}"
+        assert chunk.section_id == rag_section_id(
+            resource_id="resource",
+            content_revision="revision",
+            common_section_id=source.section_id,
+        )
         assert chunk.section_path == source.section_path
         assert chunk.raw_text == source.text
         assert chunk.content_token_count == source.content_token_count

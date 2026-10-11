@@ -327,27 +327,6 @@ async def test_call_configuration_focus_and_diversity_are_explicit(
         assert hits[0].score == pytest.approx(2 / 61)
 
 
-async def test_postprocessor_receives_sorted_truncated_hits_and_same_snapshot(
-    retrieval_deps, visible_chunks, snapshot_reader
-):
-    retrieval_deps.matches[:] = [match(chunk) for chunk in visible_chunks]
-    retrieval_deps.client.rerank.return_value = [{"index": 2, "relevance_score": 0.9}]
-    returned = []
-    postprocess = AsyncMock(return_value=returned)
-    usecase = HybridRetrieval(
-        snapshot_reader=snapshot_reader,
-        **retrieval_deps.dependencies,
-        reranker=retrieval_deps.reranker,
-        postprocess_hits=postprocess,
-    )
-    snapshot = ResourceSnapshot(PermissionScope("reader"))
-    assert await usecase.retrieve("query", snapshot=snapshot, top_k=1) is returned
-    hits, received_snapshot = postprocess.call_args.args
-    assert received_snapshot is snapshot
-    assert len(hits) == 1 and hits[0].chunk_id == visible_chunks[2].chunk_id
-    assert hits[0].rank == 1 and hits[0].score == 0.9
-
-
 async def test_candidate_limit_applies_before_preparation_and_reranking(
     retrieval_deps, visible_chunks
 ):
@@ -365,22 +344,18 @@ async def test_candidate_limit_applies_before_preparation_and_reranking(
     ]
 
 
-@pytest.mark.parametrize("failure", ["read", "postprocess", "diversity"])
+@pytest.mark.parametrize("failure", ["read", "diversity"])
 async def test_usecase_failure_propagates_at_owning_stage(
     retrieval_deps, visible_chunks, snapshot_reader, storage, failure
 ):
     retrieval_deps.matches[:] = [match(visible_chunks[0])]
     error = OSError("failed")
-    postprocess = AsyncMock(
-        side_effect=error if failure == "postprocess" else lambda hits, snapshot: hits
-    )
     if failure == "read":
         storage.get_chunks = AsyncMock(side_effect=error)
     usecase = HybridRetrieval(
         snapshot_reader=snapshot_reader,
         **retrieval_deps.dependencies,
         reranker=retrieval_deps.reranker,
-        postprocess_hits=postprocess,
     )
     if failure == "diversity":
         with pytest.raises(RuntimeError, match="embedding"):
@@ -389,7 +364,6 @@ async def test_usecase_failure_propagates_at_owning_stage(
                 snapshot=ResourceSnapshot(PermissionScope("reader")),
                 diversity="high",
             )
-        postprocess.assert_not_awaited()
     else:
         with pytest.raises(OSError) as caught:
             await usecase.retrieve(
@@ -398,19 +372,16 @@ async def test_usecase_failure_propagates_at_owning_stage(
         assert caught.value is error
     if failure == "read":
         retrieval_deps.client.rerank.assert_not_awaited()
-        postprocess.assert_not_awaited()
 
 
-async def test_empty_recall_skips_content_model_and_postprocessing(
+async def test_empty_recall_skips_content_and_model(
     retrieval_deps, snapshot_reader, storage
 ):
     storage.get_chunks = AsyncMock(wraps=storage.get_chunks)
-    postprocess = AsyncMock()
     usecase = HybridRetrieval(
         snapshot_reader=snapshot_reader,
         **retrieval_deps.dependencies,
         reranker=retrieval_deps.reranker,
-        postprocess_hits=postprocess,
     )
     assert (
         await usecase.retrieve(
@@ -420,7 +391,6 @@ async def test_empty_recall_skips_content_model_and_postprocessing(
     )
     storage.get_chunks.assert_not_awaited()
     retrieval_deps.client.rerank.assert_not_awaited()
-    postprocess.assert_not_awaited()
 
 
 async def test_one_shared_usecase_serves_concurrent_snapshots_and_configs(

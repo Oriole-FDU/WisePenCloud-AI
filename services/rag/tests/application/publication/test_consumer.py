@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -17,7 +18,8 @@ from rag.application.publication import (
     ResourceDestroyedEvent,
 )
 from rag.backends.kafka import DeliveryHeader, RetryPolicy
-from rag.core.schema import ContentRevision, DocumentStructure
+from rag.core.schema import ContentRevision
+from rag.core.schema.content import rag_section_id
 
 DOCUMENT_TOPIC = "wisepen-document-ready-topic"
 DESTROY_TOPIC = "wisepen-resource-physical-destroy-topic"
@@ -368,9 +370,19 @@ def test_content_event_builds_canonical_document_without_changing_text(text):
     assert document.resource_id == "resource" and document.document_version == 7
     assert document.content_revision == revision.content_revision
     assert document.text == text and document.metadata == {}
-    assert document.structure == DocumentStructure(
-        len(text), parsed.sections, parsed.anchors
-    )
+    assert document.structure.total_length == len(text)
+    assert document.structure.anchors == parsed.anchors
+    for actual, source in zip(
+        document.structure.sections, parsed.sections, strict=True
+    ):
+        assert actual == replace(
+            source,
+            section_id=rag_section_id(
+                resource_id="resource",
+                content_revision=revision.content_revision,
+                common_section_id=source.section_id,
+            ),
+        )
 
 
 @pytest.mark.parametrize(

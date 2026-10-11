@@ -1,6 +1,7 @@
 """资源事件到可检索状态的发布用例：校验、摄入、事实回查及条件发布。"""
 
 import asyncio
+from dataclasses import replace
 from typing import Annotated
 
 from common.utils.markdown import MarkdownChunker
@@ -14,6 +15,7 @@ from rag.application.publication.models import (
 from rag.application.publication.store import PublicationStore
 from rag.backends.kafka import KafkaConsumerClient, RetryPolicy
 from rag.core.schema import ContentRevision, Document, DocumentStructure
+from rag.core.schema.content import rag_section_id
 from rag.ingestion.pipeline import IngestionPipeline
 from rag.storage.content import ContentReader, ContentWriter
 
@@ -116,14 +118,33 @@ class DocumentReadyEvent(BaseModel):
             text=self.content,
         )
         parsed = MarkdownChunker().chunk(self.content)
+        # 只重写身份与父引用，Common 的树、原文范围与预览仍是结构事实。
+        section_ids = {
+            section.section_id: rag_section_id(
+                resource_id=self.resource_id,
+                content_revision=revision.content_revision,
+                common_section_id=section.section_id,
+            )
+            for section in parsed.sections
+        }
+        sections = [
+            replace(
+                section,
+                section_id=section_ids[section.section_id],
+                parent_section_id=(
+                    section_ids[section.parent_section_id]
+                    if section.parent_section_id is not None
+                    else None
+                ),
+            )
+            for section in parsed.sections
+        ]
         return Document(
             resource_id=self.resource_id,
             document_version=self.document_version,
             content_revision=revision.content_revision,
             text=self.content,
-            structure=DocumentStructure(
-                len(self.content), parsed.sections, parsed.anchors
-            ),
+            structure=DocumentStructure(len(self.content), sections, parsed.anchors),
         )
 
 

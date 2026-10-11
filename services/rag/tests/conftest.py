@@ -1,5 +1,6 @@
 """内容存储测试使用 BSON 往返的内存 collection，不读取服务配置。"""
 
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -11,6 +12,7 @@ from pymongo.errors import DuplicateKeyError
 from rag.backends.mongo.content import MongoContentStorage
 from rag.backends.mongo.publication import MongoPublicationStore
 from rag.core.schema import Chunk, Document, DocumentStructure
+from rag.core.schema.content import rag_section_id
 
 
 def _matches(record, query):
@@ -19,7 +21,17 @@ def _matches(record, query):
             if not any(_matches(record, clause) for clause in value):
                 return False
         elif isinstance(value, dict) and "$in" in value:
-            if record.get(key) not in value["$in"]:
+            # 模拟 Mongo 点路径穿过嵌套文档和数组，验证真实章节定位查询形态。
+            values = [record]
+            for part in key.split("."):
+                next_values = []
+                for item in values:
+                    children = item if isinstance(item, list) else [item]
+                    next_values.extend(
+                        child[part] for child in children if part in child
+                    )
+                values = next_values
+            if not any(item in value["$in"] for item in values):
                 return False
         elif record.get(key) != value:
             return False
@@ -165,12 +177,32 @@ def document():
         "# 标题\n\n  中文正文。\n\n表 1: 数据\n\n| A | B |\n| - | - |\n| 1 | 2 |\n"
     )
     result = MarkdownChunker().chunk(markdown)
+    section_ids = {
+        section.section_id: rag_section_id(
+            resource_id="resource",
+            content_revision="revision",
+            common_section_id=section.section_id,
+        )
+        for section in result.sections
+    }
+    sections = [
+        replace(
+            section,
+            section_id=section_ids[section.section_id],
+            parent_section_id=(
+                section_ids[section.parent_section_id]
+                if section.parent_section_id is not None
+                else None
+            ),
+        )
+        for section in result.sections
+    ]
     return Document(
         resource_id="resource",
         document_version=7,
         content_revision="revision",
         text=markdown,
-        structure=DocumentStructure(len(markdown), result.sections, result.anchors),
+        structure=DocumentStructure(len(markdown), sections, result.anchors),
         metadata={"custom": {"enabled": True}},
     )
 

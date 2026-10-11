@@ -46,23 +46,21 @@ class ResourceSnapshotReader:
                 for resource_id, revision in revisions.items()
             ]
         )
-        visible = []
-        for document in documents:
-            selected = revisions.get(document.resource_id)
-            if (
-                selected is None
-                or document.content_revision != selected.content_revision
-            ):
-                continue
-            # 数据库边界核对完整正文身份，不能仅凭持久化的 revision 标签信任正文。
-            actual = ContentRevision.create(
-                resource_id=document.resource_id,
-                document_version=document.document_version,
-                text=document.text,
-            )
-            if actual == selected:
-                visible.append(document)
-        return visible
+        return _visible_documents(documents, revisions)
+
+    async def read_documents_by_section_ids(
+        self, section_ids: list[str], *, snapshot: ResourceSnapshot
+    ) -> list[Document]:
+        """先批量定位，再按首次版本与资源授权过滤；内部正文不提前交给用例。"""
+        unique_ids = list(dict.fromkeys(section_ids))
+        if not unique_ids:
+            return []
+        documents = await self._reader.get_documents_by_section_ids(unique_ids)
+        revisions = await self._resolve(
+            [document.resource_id for document in documents], snapshot=snapshot
+        )
+        # 只核对定位到的事实，不换读新版；旧章节 ID 不能成为新版正文入口。
+        return _visible_documents(documents, revisions)
 
     async def read_chunks(
         self, chunk_ids: list[str], *, snapshot: ResourceSnapshot
@@ -123,3 +121,23 @@ class ResourceSnapshotReader:
             for resource_id in unique_ids
             if snapshot._revisions[resource_id] is not None
         }
+
+
+def _visible_documents(
+    documents: list[Document], revisions: dict[str, ContentRevision]
+) -> list[Document]:
+    """所有 Document 读取路径共用完整正文身份检查。"""
+    visible = []
+    for document in documents:
+        selected = revisions.get(document.resource_id)
+        if selected is None or document.content_revision != selected.content_revision:
+            continue
+        # 不能仅凭持久化的 revision 标签信任正文。
+        actual = ContentRevision.create(
+            resource_id=document.resource_id,
+            document_version=document.document_version,
+            text=document.text,
+        )
+        if actual == selected:
+            visible.append(document)
+    return visible

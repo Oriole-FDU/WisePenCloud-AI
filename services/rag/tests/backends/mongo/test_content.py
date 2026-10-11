@@ -76,9 +76,7 @@ async def test_bson_native_metadata_values_are_preserved(storage, chunk):
 @pytest.mark.parametrize("kind", ["document", "chunk"])
 async def test_empty_content_round_trip(storage, document, chunk, kind):
     if kind == "document":
-        value = replace(
-            document, text="", structure=DocumentStructure(0), metadata={}
-        )
+        value = replace(document, text="", structure=DocumentStructure(0), metadata={})
         await storage.upsert_documents([value])
         assert await storage.get_documents([("resource", "revision")]) == [value]
     else:
@@ -170,6 +168,7 @@ async def test_empty_batches_do_not_access_mongo(storage, collections):
     await storage.upsert_documents([])
     await storage.upsert_chunks([])
     assert await storage.get_documents([]) == []
+    assert await storage.get_documents_by_section_ids([]) == []
     assert await storage.get_chunks([]) == []
     await storage.delete_revisions([])
     await storage.delete_resources([])
@@ -350,13 +349,16 @@ async def test_ensure_indexes_is_explicit_and_defines_content_identity(
     chunk_indexes = chunks.create_indexes.call_args.args[0]
 
     assert [dict(index.document["key"]) for index in document_indexes] == [
-        {"resource_id": 1, "content_revision": 1}
+        {"resource_id": 1, "content_revision": 1},
+        {"structure.sections.section_id": 1},
     ]
     assert [dict(index.document["key"]) for index in chunk_indexes] == [
         {"chunk_id": 1},
         {"resource_id": 1, "content_revision": 1, "chunk_index": 1},
     ]
-    assert all(index.document["unique"] for index in document_indexes + chunk_indexes)
+    assert document_indexes[0].document["unique"]
+    assert "unique" not in document_indexes[1].document
+    assert all(index.document["unique"] for index in chunk_indexes)
 
 
 async def test_pipeline_persists_real_markdown_before_projection(storage, document):

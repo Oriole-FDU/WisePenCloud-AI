@@ -6,6 +6,14 @@ from hashlib import sha256
 from common.utils.markdown import Anchor, Section
 
 
+def rag_section_id(
+    *, resource_id: str, content_revision: str, common_section_id: str
+) -> str:
+    """限定 Common 章节身份；目录、Chunk 与后续读取共用不透明 ID。"""
+    identity = f"{resource_id}\0{content_revision}\0{common_section_id}"
+    return f"rsec_{sha256(identity.encode('utf-8')).hexdigest()[:24]}"
+
+
 @dataclass(frozen=True, slots=True)
 class ContentRevision:
     """完整原文与上游版本的不可变身份；不包含 metadata 或构建配置。"""
@@ -30,7 +38,7 @@ class ContentRevision:
 
 @dataclass(slots=True)
 class DocumentStructure:
-    """复用 Common 结构模型，保留原文范围与章节树。"""
+    """复用 Common 结构模型与原文范围，章节及父章节 ID 已限定到资源/revision。"""
 
     total_length: int  # 完整 text 字段的 Python 字符数。
     sections: list[Section] = field(default_factory=list)
@@ -57,7 +65,7 @@ class Chunk:
     resource_id: str
     content_revision: str
     chunk_index: int
-    section_id: str | None  # 当前资源与 revision 下的本地章节 ID。
+    section_id: str | None  # 与 Document 结构一致的 RAG 不透明章节 ID。
     section_path: list[str]
     raw_text: str  # 唯一正文事实，上下文不写回正文。
     content_token_count: int  # Common 对正文的 token 计数，不包含派生上下文。

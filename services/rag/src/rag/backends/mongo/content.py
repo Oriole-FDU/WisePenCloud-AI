@@ -79,6 +79,33 @@ class MongoContentStorage(ContentStorage):
             ]
             await self._chunks.bulk_write(operations, ordered=True)
 
+    async def get_documents_by_section_ids(
+        self, section_ids: list[str]
+    ) -> list[Document]:
+        """定位章节事实所属的文档；不选择发布版本或判断可见性。"""
+        unique_ids = list(dict.fromkeys(section_ids))
+        if not unique_ids:
+            return []
+        records = await self._documents.find(
+            {"structure.sections.section_id": {"$in": unique_ids}}
+        ).to_list(length=None)
+
+        documents_by_section = {}
+        for record in records:
+            document = _document_adapter.validate_python(record)
+            for section in document.structure.sections:
+                documents_by_section[section.section_id] = document
+
+        # 同一文档可能匹配多个章节；按请求还原顺序且只返回一次。
+        documents: dict[tuple[str, str], Document] = {}
+        for section_id in unique_ids:
+            if (document := documents_by_section.get(section_id)) is not None:
+                documents.setdefault(
+                    (document.resource_id, document.content_revision), document
+                )
+
+        return list(documents.values())
+
     async def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]:
         """按 chunk_id 批量读取；去重保序，缺失项跳过。"""
         unique_ids = list(dict.fromkeys(chunk_ids))
@@ -149,11 +176,17 @@ class MongoContentStorage(ContentStorage):
                     name="document_resource_revision_unique",
                     unique=True,
                 ),
+                IndexModel(
+                    [("structure.sections.section_id", ASCENDING)],
+                    name="document_section_id",
+                ),
             ]
         )
         await self._chunks.create_indexes(
             [
-                IndexModel([("chunk_id", ASCENDING)], name="chunk_id_unique", unique=True),
+                IndexModel(
+                    [("chunk_id", ASCENDING)], name="chunk_id_unique", unique=True
+                ),
                 IndexModel(
                     [
                         ("resource_id", ASCENDING),
