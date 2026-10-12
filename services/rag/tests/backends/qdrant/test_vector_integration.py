@@ -6,6 +6,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 
+from rag.application.gc import GcReport, ResourceGarbageCollector
 from rag.application.publication import DocumentPublication, PublicationAction
 from rag.core.schema import ContentRevision, Document, DocumentStructure
 from rag.core.schema.filters import FilterOperator, MetadataFilter, MetadataFilters
@@ -15,6 +16,45 @@ from rag.ingestion.pipeline import IngestionPipeline
 from rag.storage.vector import VectorQuery, VectorRecord
 
 pytestmark = pytest.mark.qdrant_integration
+
+
+async def test_real_gc_clears_all_vector_collections_by_resource(
+    real_vectors, real_graph_vectors
+):
+    normal, _, _ = real_vectors
+    entities, relationships, _ = real_graph_vectors
+    for storage in (normal, entities, relationships):
+        await storage.upsert(
+            [
+                VectorRecord(
+                    f"{resource}-{revision}",
+                    "正文",
+                    [1.0, 0.0],
+                    {"resource_id": resource, "content_revision": revision},
+                )
+                for resource, revision in (
+                    ("gone", "old"),
+                    ("gone", "current"),
+                    ("live", "current"),
+                )
+            ]
+        )
+    store = SimpleNamespace(
+        list_destroyed_resource_ids=AsyncMock(side_effect=[["gone"], []])
+    )
+    gc = ResourceGarbageCollector(
+        store=store,
+        content_writer=SimpleNamespace(delete_resources=AsyncMock()),
+        resource_acls=SimpleNamespace(delete=AsyncMock()),
+        vector_writers=[normal, entities, relationships],
+        graph_writers=[],
+    )
+    assert await gc.collect() == GcReport(1, 1, 0)
+    for storage in (normal, entities, relationships):
+        assert [
+            match.record_id
+            for match in await storage.query(VectorQuery(embedding=[1.0, 0.0]))
+        ] == ["live-current"]
 
 
 async def test_real_dense_bm25_revision_filters_and_delete(real_vectors):

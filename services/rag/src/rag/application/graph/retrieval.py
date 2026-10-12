@@ -14,7 +14,7 @@ from common.utils.retrieval import (
 
 from rag.application.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.core.schema.filters import MetadataFilters
-from rag.retrieval.graph import GraphMatch, GraphRetrievalMode, GraphRetriever
+from rag.retrievers.graph import GraphMatch, GraphRetrievalMode, GraphRetriever
 from rag.storage.graph import (
     GraphDirection,
     GraphReader,

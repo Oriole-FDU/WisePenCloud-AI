@@ -22,6 +22,22 @@ def revision(version=1, text="正文", resource_id="resource"):
     )
 
 
+async def test_destroyed_cursor_orders_filters_and_does_not_skip_late_markers(
+    publication_store,
+):
+    await publication_store.destroy_resources(["z", "a", "m"])
+    await publication_store.stage_revision(revision(resource_id="live"))
+    assert await publication_store.list_destroyed_resource_ids(limit=2) == ["a", "m"]
+    assert await publication_store.list_destroyed_resource_ids(
+        after_resource_id="m", limit=2
+    ) == ["z"]
+    assert (
+        await publication_store.list_destroyed_resource_ids(after_resource_id="z") == []
+    )
+    await publication_store.destroy_resources(["b"])
+    assert await publication_store.list_destroyed_resource_ids() == ["a", "b", "m", "z"]
+
+
 async def test_stage_apply_replay_and_newer_candidate_preserve_applied(
     publication_store, publication_collection
 ):
@@ -126,9 +142,10 @@ async def test_empty_batches_have_no_io_and_indexes_are_explicit(
     publication_collection.create_indexes.assert_not_awaited()
     await publication_store.ensure_indexes()
     indexes = publication_collection.create_indexes.call_args.args[0]
-    assert len(indexes) == 1
+    assert len(indexes) == 2
     assert dict(indexes[0].document["key"]) == {"resource_id": 1}
     assert indexes[0].document["unique"] is True
+    assert dict(indexes[1].document["key"]) == {"destroyed": 1, "resource_id": 1}
 
 
 async def test_destroy_is_permanent_idempotent_scoped_and_can_precede_stage(

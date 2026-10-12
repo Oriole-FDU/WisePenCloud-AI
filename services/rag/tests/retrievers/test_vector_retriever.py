@@ -10,7 +10,7 @@ import pytest
 from common.utils.retrieval import RrfFusion
 
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
-from rag.retrieval.vector import VectorRetrievalMode, VectorRetriever
+from rag.retrievers.vector import VectorRetrievalMode, VectorRetriever
 from rag.storage.vector import VectorMatch
 
 
@@ -287,7 +287,7 @@ def test_vector_retriever_import_does_not_load_business_or_runtime_modules():
             "-c",
             """
 import sys
-from rag.retrieval.vector import VectorRetriever
+from rag.retrievers.vector import VectorRetriever
 assert not any(name.startswith(('rag.application',
     'rag.core.config', 'rag.backends')) for name in sys.modules)
 """,

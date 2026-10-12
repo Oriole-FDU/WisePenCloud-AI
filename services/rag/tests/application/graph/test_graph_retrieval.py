@@ -19,7 +19,7 @@ from rag.core.schema.filters import (
     MetadataFilters,
 )
 from rag.ingestion.indexers import GraphIndexer
-from rag.retrieval.graph import GraphRetrievalMode
+from rag.retrievers.graph import GraphRetrievalMode
 from rag.storage.graph import GraphDirection, GraphVectorKind
 from rag.storage.vector import VectorMatch
 

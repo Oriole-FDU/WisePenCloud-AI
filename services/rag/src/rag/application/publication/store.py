@@ -27,3 +27,9 @@ class PublicationStore(Protocol):
     async def destroy_resources(self, resource_ids: list[str]) -> None:
         """永久禁止发布并清空指针；部分成功保留，不清理物理内容。"""
         ...
+
+    async def list_destroyed_resource_ids(
+        self, *, after_resource_id: str | None = None, limit: int = 100
+    ) -> list[str]:
+        """按资源 ID 升序分页永久销毁标记；只提供定位，不删除标记。"""
+        ...

@@ -1,6 +1,6 @@
 # Ontology 图事实抽取与离线 repair
 
-当前支持 Chunk 图事实及可选 Neo4j 来源拓扑投影。生产入口仍只运行 ACL；显式装配不代表图谱已自动接入 publication。
+当前支持 Chunk 图事实及可选 Neo4j 来源拓扑投影。平台入口已装配默认发布/查询与 GC，配置见 [platform.md](platform.md)。默认 Pipeline 不自动生成图事实；扩展包须显式传 Ontology，流程见 [extensions.md](extensions.md)。
 
 ## 显式装配
 
@@ -198,7 +198,7 @@ CLI 对应 --qdrant-url、--qdrant-api-key、--embedding-base-url、--embedding-
 ```python
 from common.utils.retrieval import RetrievalPipeline, RrfFusion
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
-from rag.retrieval import GraphRetrievalMode, GraphRetriever
+from rag.retrievers import GraphRetrievalMode, GraphRetriever
 
 retriever = GraphRetriever.from_storage(
     entity_reader=entity_vectors,
@@ -241,7 +241,7 @@ nodes, edges = ontology.parse_chunk_facts(chunk, strict=True)
 from rag.application.acl.models import PermissionScope
 from rag.application.graph import GraphRetrieval, GraphTraversal
 from rag.application.snapshot import ResourceSnapshot
-from rag.retrieval.graph import GraphRetrievalMode
+from rag.retrievers.graph import GraphRetrievalMode
 
 # 各 reader/client 已由调用方连接；不创建 Container，不绑定查询侧 Ontology。
 graph_retrieval = GraphRetrieval(

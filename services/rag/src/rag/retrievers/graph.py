@@ -13,7 +13,7 @@ from common.utils.retrieval import (
 )
 
 from rag.core.schema.filters import MetadataFilters
-from rag.retrieval.vector import embed_query
+from rag.retrievers.vector import embed_query
 from rag.storage.graph import GraphVectorKind
 from rag.storage.vector import VectorMatch, VectorQuery, VectorReader
 

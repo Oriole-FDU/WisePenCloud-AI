@@ -122,6 +122,66 @@ async def test_commit_happens_after_applied_and_only_for_current_partition(
     factory.destroy_client.stop.assert_awaited_once()
 
 
+async def test_platform_consumer_routes_type_and_preserves_metadata(
+    consumer,
+    kafka,
+    pipeline_routes,
+    storage,
+    publication_store,
+):
+    from rag.ingestion import IngestionPipeline
+    from rag.ingestion.chunkers import MarkdownChunker as RagMarkdownChunker
+    from rag.ingestion.indexers import ChunkFactsIndexer
+
+    marker = SimpleNamespace(index=AsyncMock())
+    pipeline_routes["history"] = IngestionPipeline(
+        chunker=RagMarkdownChunker(),
+        transformers=[],
+        indexers=[ChunkFactsIndexer(storage), marker],
+    )
+    payload = content() | {"type": "history", "metadata": {"year": 1850}}
+    client, factory = kafka
+    client.getone.side_effect = [record(payload), asyncio.CancelledError()]
+    with pytest.raises(asyncio.CancelledError):
+        await consumer.run()
+    state = (await publication_store.get_states(["resource"]))[0]
+    document = (
+        await storage.get_documents(
+            [("resource", state.applied_revision.content_revision)]
+        )
+    )[0]
+    assert document.type == "history" and document.metadata == {"year": 1850}
+    marker.index.assert_awaited_once()
+    client.commit.assert_awaited_once()
+    factory.producer.send_and_wait.assert_not_awaited()
+
+
+async def test_unknown_type_uses_existing_permanent_error_dlq_contract(
+    consumer,
+    kafka,
+    collections,
+    publication_collection,
+):
+    client, factory = kafka
+    client.getone.side_effect = [
+        record(content() | {"type": "unregistered"}),
+        asyncio.CancelledError(),
+    ]
+    with pytest.raises(asyncio.CancelledError):
+        await consumer.run()
+    assert (
+        dict(factory.producer.send_and_wait.call_args.kwargs["headers"])[
+            DeliveryHeader.RETRY_COUNT
+        ]
+        == b"0"
+    )
+    client.commit.assert_awaited_once()
+    publication_collection.find_one.assert_not_awaited()
+    publication_collection.update_one.assert_not_awaited()
+    for collection in collections:
+        collection.bulk_write.assert_not_awaited()
+
+
 @pytest.mark.parametrize("skip", ["duplicate", "stale", "destroyed"])
 async def test_explicit_skips_are_committed_without_rebuilding(
     consumer, kafka, publication, projection, skip
@@ -432,3 +492,50 @@ def test_destroy_event_flattens_all_resource_types_without_inventing_type_policy
 def test_destroy_event_rejects_invalid_external_groups(payload):
     with pytest.raises(ValidationError):
         ResourceDestroyedEvent.model_validate(payload)
+
+
+async def test_publication_started_requires_both_main_consumers(consumer, kafka):
+    client, factory = kafka
+    allowed, destroy_entered = asyncio.Event(), asyncio.Event()
+
+    async def delayed_start():
+        destroy_entered.set()
+        await allowed.wait()
+
+    async def idle():
+        await asyncio.Event().wait()
+
+    factory.destroy_client.start.side_effect = delayed_start
+    client.getone.side_effect = idle
+    ready = asyncio.Event()
+    task = asyncio.create_task(consumer.run(started=ready))
+    try:
+        await asyncio.wait_for(destroy_entered.wait(), 1)
+        assert not ready.is_set()
+        allowed.set()
+        await asyncio.wait_for(ready.wait(), 1)
+        assert not task.done()
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    client.stop.assert_awaited_once()
+    factory.destroy_client.stop.assert_awaited_once()
+
+
+async def test_failed_publication_start_never_signals_ready_and_stops_both(
+    consumer, kafka
+):
+    client, factory = kafka
+    factory.destroy_client.start.side_effect = OSError("broker unavailable")
+
+    async def idle():
+        await asyncio.Event().wait()
+
+    client.getone.side_effect = idle
+    ready = asyncio.Event()
+    with pytest.raises(OSError):
+        await asyncio.wait_for(consumer.run(started=ready), 1)
+    assert not ready.is_set()
+    client.stop.assert_awaited_once()
+    factory.destroy_client.stop.assert_awaited_once()

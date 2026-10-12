@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from rag.ingestion.indexers import GraphIndexer
-from rag.retrieval import GraphRetrievalMode, GraphRetriever
+from rag.retrievers import GraphRetrievalMode, GraphRetriever
 from rag.storage.graph import GraphVectorKind
 from rag.storage.vector import VectorQuery
 

@@ -352,7 +352,7 @@ def test_snapshot_module_does_not_import_retrieval_use_cases_or_runtime_config()
     code = """
 import sys
 from rag.application.snapshot import ResourceSnapshot, ResourceSnapshotReader
-assert not any(name.startswith(('rag.reading', 'rag.retrieval', 'rag.application.retrieval',
+assert not any(name.startswith(('rag.reading', 'rag.retrievers', 'rag.application.retrieval',
     'rag.core.config')) for name in sys.modules)
 """
     subprocess.run([sys.executable, "-c", code], check=True)

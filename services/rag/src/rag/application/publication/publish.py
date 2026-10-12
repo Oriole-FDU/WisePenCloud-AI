@@ -21,7 +21,7 @@ from rag.storage.content import ContentReader, ContentWriter
 
 
 class DocumentPublication:
-    """发布完整文档或永久销毁资源；调用方提供完整 Pipeline 并串行同资源构建。"""
+    """按摄入类别选择完整 Pipeline 并发布；同资源构建由调用方串行。"""
 
     def __init__(
         self,
@@ -30,12 +30,15 @@ class DocumentPublication:
         reader: ContentReader,
         writer: ContentWriter,
         pipeline: IngestionPipeline,
+        pipelines: dict[str, IngestionPipeline] | None = None,
     ) -> None:
         self._store = store
         self._reader = reader
         self._writer = writer
         # 外部固定事实 Indexer 与全部必需投影顺序；用例不检查 Pipeline 的组件
         self._pipeline = pipeline
+        # 保留注册字典本身，启动组合入口在构造 publisher 后注册也可生效。
+        self._pipelines = pipelines if pipelines is not None else {}
 
     async def publish(self, document: Document) -> PublicationAction:
         """核对身份并摄入，再回查事实和条件发布；重复、旧版本及销毁返回跳过结果。
@@ -53,13 +56,25 @@ class DocumentPublication:
                 f"document {document.resource_id} content_revision does not match its text"
             )
 
-        # Store 原子判断版本、冲突与销毁状态，只有仍需构建的候选进入摄入
+        # 在任何写入前选定一次；显式未知类别不能悄悄退回默认摄入链。
+        if document.type is None:
+            pipeline = self._pipeline
+        else:
+            try:
+                pipeline = self._pipelines[document.type]
+            except KeyError:
+                raise ValueError(
+                    f"unregistered document type: {document.type!r}"
+                ) from None
+
+        # Store 原子判断版本、冲突与销毁状态，只有仍需构建的候选进入摄入。
+        # type/metadata 不改变 revision；改变摄入材料须提高上游 version。
         action = await self._store.stage_revision(revision)
         if action is not PublicationAction.STAGED:
             return action
 
         await self._writer.upsert_documents([document])
-        expected_chunks = await self._pipeline.run(document)
+        expected_chunks = await pipeline.run(document)
 
         documents = await self._reader.get_documents(
             [(revision.resource_id, revision.content_revision)]
@@ -102,13 +117,15 @@ class DocumentPublication:
 
 
 class DocumentReadyEvent(BaseModel):
-    """对应 DocumentReadyMessage，仅消费资源身份、版本与完整 Markdown。"""
+    """接收资源身份、正文及可选摄入类别/业务字段，兼容旧 DocumentReadyMessage。"""
 
     model_config = ConfigDict(strict=True, extra="ignore")
 
     resource_id: str = Field(alias="resourceId", min_length=1)
     document_version: int = Field(alias="version")
     content: str  # 空白也是正文事实，允许零 Chunk 文档
+    type: str | None = None  # 开放类别标识，按原值路由；不推断资源物理类型。
+    metadata: dict[str, object] = Field(default_factory=dict)
 
     def to_document(self) -> Document:
         """构造领域文档；结构复用 Common MarkdownChunker，不重写章节与锚点算法。"""
@@ -145,6 +162,8 @@ class DocumentReadyEvent(BaseModel):
             content_revision=revision.content_revision,
             text=self.content,
             structure=DocumentStructure(len(self.content), sections, parsed.anchors),
+            metadata=self.metadata,
+            type=self.type,
         )
 
 
@@ -202,23 +221,38 @@ class PublicationEventConsumer:
             is_retryable=_is_retryable,
         )
 
-    async def run(self) -> None:
+    async def run(self, *, started: asyncio.Event | None = None) -> None:
         """前台运行到失败或取消；运行入口须 await 此协程并观察异常。
 
         首次无已提交 offset 时从最早记录开始。内容与销毁不依赖跨 topic 顺序；
         内容循环逐条执行，上游须继续以 resourceId 作为内容事件的 Kafka key。
         销毁独立消费，即使普通构建正在等待 I/O，也能撤销候选可见性。
         """
+        content_started = asyncio.Event() if started is not None else None
+        destroy_started = asyncio.Event() if started is not None else None
         tasks = [
             asyncio.create_task(
-                self._content_consumer.run(), name="publication-content"
+                self._content_consumer.run(started=content_started),
+                name="publication-content",
             ),
             asyncio.create_task(
-                self._destroy_consumer.run(), name="publication-destroy"
+                self._destroy_consumer.run(started=destroy_started),
+                name="publication-destroy",
             ),
         ]
+        if started is not None:
+
+            async def signal_started() -> None:
+                # 两个主消费者实际连接后才允许宿主宣布发布能力就绪。
+                await asyncio.gather(content_started.wait(), destroy_started.wait())
+                started.set()
+
+            tasks.append(
+                asyncio.create_task(signal_started(), name="publication-started")
+            )
         try:
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            # 握手任务正常完成不表示消费者退出；失败的循环仍须及时传播。
+            done, _ = await asyncio.wait(tasks[:2], return_when=asyncio.FIRST_COMPLETED)
             for task in done:
                 task.result()
         finally:

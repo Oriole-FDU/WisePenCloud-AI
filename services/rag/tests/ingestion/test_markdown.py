@@ -51,7 +51,7 @@ def document(common_chunker):
         content_revision="revision",
         text=markdown,
         structure=DocumentStructure(len(markdown), sections, result.anchors),
-        metadata={"custom": "文档 metadata 不复制到 Chunk"},
+        metadata={"custom": "业务 metadata 逐块透传"},
     )
 
 
@@ -92,11 +92,26 @@ async def test_markdown_chunker_adapts_common_fields_without_internal_details(
         assert chunk.raw_text == source.text
         assert chunk.content_token_count == source.content_token_count
         assert chunk.anchor_labels == source.anchor_labels
-        assert chunk.metadata == {}
+        assert chunk.metadata == document.metadata
         assert not hasattr(chunk, "source_spans")
         assert not hasattr(chunk, "node_ids")
         assert not hasattr(chunk, "overflow")
         assert not hasattr(chunk, "content_hash")
+
+
+async def test_business_metadata_is_deep_copied_per_chunk_without_type_shadow(document):
+    document.type = "history"
+    document.metadata = {"catalog": {"year": 1850, "tags": ["历史"]}}
+    chunks = await MarkdownChunker(40, 70).split(document)
+    assert len(chunks) > 1
+    assert all(chunk.metadata == document.metadata for chunk in chunks)
+    chunks[0].metadata["catalog"]["tags"].append("局部增强")
+    chunks[0].metadata["catalog"]["year"] = 1900
+    assert document.metadata == {"catalog": {"year": 1850, "tags": ["历史"]}}
+    assert all(chunk.metadata == document.metadata for chunk in chunks[1:])
+    assert all(
+        "type" not in chunk.metadata and not hasattr(chunk, "type") for chunk in chunks
+    )
 
 
 async def test_markdown_identity_is_stable_and_scoped_to_resource_revision(document):

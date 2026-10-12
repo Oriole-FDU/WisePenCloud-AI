@@ -16,7 +16,7 @@ def rag_section_id(
 
 @dataclass(frozen=True, slots=True)
 class ContentRevision:
-    """完整原文与上游版本的不可变身份；不包含 metadata 或构建配置。"""
+    """完整原文与上游版本的不可变身份；不包含 type、metadata 或构建配置。"""
 
     resource_id: str
     document_version: int
@@ -55,6 +55,7 @@ class Document:
     text: str
     structure: DocumentStructure
     metadata: dict[str, object] = field(default_factory=dict)
+    type: str | None = None  # 摄入类别；None 使用默认 Pipeline，不参与内容身份。
 
 
 @dataclass(slots=True)

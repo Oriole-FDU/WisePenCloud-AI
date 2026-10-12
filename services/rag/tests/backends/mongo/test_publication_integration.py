@@ -13,6 +13,7 @@ from pydantic import TypeAdapter
 from pymongo import AsyncMongoClient
 from pymongo.errors import DuplicateKeyError
 
+from rag.application.gc import GcReport, ResourceGarbageCollector
 from rag.application.publication import (
     DocumentPublication,
     PublicationAction,
@@ -20,6 +21,7 @@ from rag.application.publication import (
     ResourcePublicationState,
 )
 from rag.backends.mongo import MongoContentStorage, MongoPublicationStore
+from rag.backends.mongo.acl import MongoResourceAclRepository
 from rag.core.schema import ContentRevision
 from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer
@@ -52,6 +54,44 @@ def revision(version=1, resource_id="resource"):
     return ContentRevision.create(
         resource_id=resource_id, document_version=version, text="  中文😀\n"
     )
+
+
+async def test_real_gc_keyset_all_revisions_local_acl_and_permanent_markers(
+    mongo_publication,
+):
+    store, database = mongo_publication
+    storage = MongoContentStorage(
+        documents=database["document_revisions"], chunks=database["doc_chunks"]
+    )
+    acls = MongoResourceAclRepository(database["resource_acls"])
+    await storage.ensure_indexes()
+    await acls.ensure_indexes()
+    for resource in ("c", "a", "b", "live"):
+        for version in (1, 2):
+            from rag.application.publication import DocumentReadyEvent
+
+            doc = DocumentReadyEvent.model_validate(
+                {"resourceId": resource, "version": version, "content": "正文"}
+            ).to_document()
+            await storage.upsert_documents([doc])
+            await storage.upsert_chunks(await MarkdownChunker().split(doc))
+        await database["resource_acls"].insert_one({"resource_id": resource})
+    await store.destroy_resources(["c", "a", "b"])
+    gc = ResourceGarbageCollector(
+        store=store,
+        content_writer=storage,
+        resource_acls=acls,
+        vector_writers=[],
+        graph_writers=[],
+        batch_size=2,
+    )
+    assert await gc.collect() == GcReport(3, 3, 0)
+    assert await database["document_revisions"].distinct("resource_id") == ["live"]
+    assert await database["doc_chunks"].distinct("resource_id") == ["live"]
+    assert await database["resource_acls"].distinct("resource_id") == ["live"]
+    assert await store.list_destroyed_resource_ids() == ["a", "b", "c"]
+    assert await store.stage_revision(revision(3, "a")) is PublicationAction.DESTROYED
+    assert await gc.collect() == GcReport(3, 3, 0)
 
 
 async def test_real_state_round_trip_order_and_unique_identity(mongo_publication):

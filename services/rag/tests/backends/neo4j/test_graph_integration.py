@@ -2,12 +2,15 @@
 
 import os
 from dataclasses import asdict, replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from neo4j import AsyncGraphDatabase
 
+from rag.application.gc import GcReport, ResourceGarbageCollector
 from rag.backends.neo4j import Neo4jGraphStorage
 from rag.core.schema import GraphEdge, GraphNode
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
@@ -83,6 +86,39 @@ def make_source(chunk_id, resource_id, *, description="来源描述"):
         [person, company],
         [edge],
     )
+
+
+async def test_real_gc_shared_contributions_then_orphan_cleanup(real_storage):
+    storage, driver, database, graph_name = real_storage
+    first, second = make_source("first", "gone"), make_source("second", "live")
+    await storage.replace_sources([first, second])
+    store = SimpleNamespace(
+        list_destroyed_resource_ids=AsyncMock(side_effect=[["gone"], []])
+    )
+    gc = ResourceGarbageCollector(
+        store=store,
+        content_writer=SimpleNamespace(delete_resources=AsyncMock()),
+        resource_acls=SimpleNamespace(delete=AsyncMock()),
+        vector_writers=[],
+        graph_writers=[storage],
+    )
+    assert await gc.collect() == GcReport(1, 1, 0)
+    assert [
+        node.source_id for node in await storage.get_nodes([first.nodes[0].id])
+    ] == ["second"]
+    assert [
+        edge.source_ids for edge in await storage.get_relations([first.edges[0].id])
+    ] == [["second"]]
+    store.list_destroyed_resource_ids.side_effect = [["live"], []]
+    assert await gc.collect() == GcReport(1, 1, 0)
+    async with driver.session(database=database) as session:
+        result = await session.run(
+            "MATCH (n) WHERE any(label IN labels(n) WHERE label IN $labels) RETURN count(n) AS remaining",
+            labels=[
+                f"{graph_name}_{kind}" for kind in ("Entity", "Relation", "Source")
+            ],
+        )
+        assert (await result.single())["remaining"] == 0
 
 
 async def test_real_shared_provenance_replacement_reading_and_orphan_cleanup(

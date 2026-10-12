@@ -25,6 +25,34 @@ from rag.core.schema.content import rag_section_id
 
 
 @pytest.fixture
+def platform_settings(monkeypatch):
+    import json
+    import sys
+    from types import ModuleType
+
+    values = {
+        "MONGODB_URL": "mongodb://localhost:27017",
+        "MONGODB_DB_NAME": "rag-test",
+        "QDRANT_URL": "http://localhost:6333",
+        "EMBEDDING_BASE_URL": "http://localhost:8000/v1",
+        "EMBEDDING_API_KEY": "test-key",
+        "EMBEDDING_MODEL": "test-embedding",
+        "EMBEDDING_DIMENSIONS": 2,
+        "QWEN_RERANKER_MODEL": "test-rerank",
+        "QWEN_API_KEY": "test-qwen",
+    }
+    # app_settings 保持项目惯用的默认加载；测试只替换 Nacos 边界。
+    module = ModuleType("rag.core.config.nacos")
+    module.nacos_client_manager = SimpleNamespace(
+        pull_config=AsyncMock(return_value=json.dumps(values))
+    )
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    from rag.core.config.app_settings import AppSettings
+
+    return AppSettings(**values)
+
+
+@pytest.fixture
 def graph_ontology():
     return Ontology(
         domain="work",
@@ -110,6 +138,9 @@ def _matches(record, query):
                 values = next_values
             if not any(item in value["$in"] for item in values):
                 return False
+        elif isinstance(value, dict) and "$gt" in value:
+            if record[key] <= value["$gt"]:
+                return False
         elif record.get(key) != value:
             return False
     return True
@@ -121,6 +152,10 @@ class MemoryCursor:
 
     def sort(self, key, direction):
         self._records.sort(key=lambda record: record[key], reverse=direction < 0)
+        return self
+
+    def limit(self, count):
+        self._records = self._records[:count]
         return self
 
     async def to_list(self, *, length):
@@ -156,15 +191,19 @@ class MemoryCollection:
                 record["_id"] = len(self.records)
                 self.records.append(record)
 
-    def _find(self, query):
+    def _find(self, query, projection=None):
         # 返回与插入相反的顺序，避免测试意外依赖 Mongo 的自然顺序。
-        return MemoryCursor(
-            [
-                BSON(BSON.encode(record)).decode()
-                for record in reversed(self.records)
-                if _matches(record, query)
+        records = [
+            BSON(BSON.encode(record)).decode()
+            for record in reversed(self.records)
+            if _matches(record, query)
+        ]
+        if projection is not None:
+            records = [
+                {key: value for key, value in record.items() if projection.get(key)}
+                for record in records
             ]
-        )
+        return MemoryCursor(records)
 
     async def _delete_many(self, query):
         self.records[:] = [

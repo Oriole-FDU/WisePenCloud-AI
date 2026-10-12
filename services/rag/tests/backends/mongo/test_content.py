@@ -7,7 +7,7 @@ from bson.errors import InvalidDocument
 from common.utils.markdown import Anchor, Section
 from pydantic import ValidationError
 
-from rag.core.schema import DocumentStructure, GraphEdge, GraphNode
+from rag.core.schema import Document, DocumentStructure, GraphEdge, GraphNode
 from rag.ingestion import IngestionPipeline
 from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer
@@ -38,6 +38,33 @@ async def test_document_and_chunk_bson_round_trip(
     assert "source_spans" not in chunks.records[0]
     assert "node_ids" not in chunks.records[0]
     assert "retrieval_context" not in chunks.records[0]
+
+
+async def test_document_type_round_trip_legacy_read_and_positional_metadata(
+    storage,
+    collections,
+    document,
+):
+    document.type = "history"
+    await storage.upsert_documents([document])
+    assert (
+        await storage.get_documents([(document.resource_id, document.content_revision)])
+    )[0] == document
+    # 老记录无需迁移；默认值只在模型读取边界补齐。
+    collections[0].records[0].pop("type")
+    restored = (
+        await storage.get_documents([(document.resource_id, document.content_revision)])
+    )[0]
+    assert restored.type is None and restored.metadata == document.metadata
+    positional = Document(
+        document.resource_id,
+        document.document_version,
+        document.content_revision,
+        document.text,
+        document.structure,
+        document.metadata,
+    )
+    assert positional.metadata is document.metadata and positional.type is None
 
 
 async def test_graph_metadata_is_plain_data_and_input_is_not_modified(storage, chunk):

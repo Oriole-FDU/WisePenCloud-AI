@@ -11,7 +11,7 @@ import pytest
 from common.utils.retrieval import Candidate, RetrievalPipeline, RrfFusion
 
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
-from rag.retrieval import GraphMatch, GraphRetrievalMode, GraphRetriever
+from rag.retrievers import GraphMatch, GraphRetrievalMode, GraphRetriever
 from rag.storage.graph import GraphVectorKind
 from rag.storage.vector import VectorMatch
 
@@ -263,7 +263,7 @@ def test_retriever_dependency_boundary():
             "-c",
             """
 import sys
-from rag.retrieval.graph import GraphRetriever
+from rag.retrievers.graph import GraphRetriever
 assert not any(name.startswith(('rag.application', 'rag.ingestion', 'rag.backends', 'rag.core.config')) for name in sys.modules)
 """,
         ],

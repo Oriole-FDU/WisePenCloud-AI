@@ -1,5 +1,7 @@
 # 普通混合检索装配示例
 
+平台默认装配与共享客户端生命周期现已在 Container/main 实现，见 [platform.md](platform.md)；下文保留组件级显式组合。垂类注入与 provider 覆盖见 [extensions.md](extensions.md)。
+
 这个示例展示实际组件之间如何连接，重点是 `VectorRetriever.from_storage` 的调用位置，以及它与 application 用例的关系。代码按阅读顺序分段，连接、凭证和模型配置由外部提供，可以将这些段落放进自己的装配入口；这里省略启动、关闭连接与 API 入口。
 
 ## 1. 准备固定依赖
@@ -129,7 +131,7 @@ for hit in hits:
 **from_storage 的调用位置就在 HybridRetrieval.retrieve 内部。** 这次调用展开为：
 
 ```python
-from rag.retrieval.vector import VectorRetrievalMode, VectorRetriever
+from rag.retrievers.vector import VectorRetrievalMode, VectorRetriever
 
 # HybridRetrieval 内部的装配步骤；moderate/high 需要候选已存向量。
 retriever = VectorRetriever.from_storage(

@@ -1,8 +1,6 @@
-"""ACL 阶段保留的健康检查路由。"""
+"""平台健康检查；服务身份由实际组合入口提供。"""
 
 from fastapi import APIRouter, Request, Response
-
-from rag.core.config.bootstrap_settings import bootstrap_settings
 
 api_router = APIRouter()
 
@@ -14,5 +12,5 @@ async def health(request: Request, response: Response) -> dict[str, str]:
         response.status_code = 503
     return {
         "status": "ok" if ready else "not_ready",
-        "service": bootstrap_settings.SERVICE_NAME,
+        "service": request.app.state.service_name,
     }

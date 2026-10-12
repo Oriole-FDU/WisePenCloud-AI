@@ -1,5 +1,7 @@
 # 上下文增强与离线 repair 装配
 
+平台默认装配与共享客户端生命周期现已在 Container/main 实现，见 [platform.md](platform.md)；下文保留组件级显式组合。垂类注入与 provider 覆盖见 [extensions.md](extensions.md)。
+
 普通摄入在分块后生成上下文，先落库最终 Chunk，再写 dense 与服务端 BM25。模型固定在 InstructionClient 初始化时，Contextualizer 只负责材料、提示词和可选增强；连接与模型配置由装配入口传入。参考方法见 [Anthropic Contextual Retrieval](https://www.anthropic.com/engineering/contextual-retrieval)。这里的 8000 token 是完整提示文本输入上限，包含目标 Chunk、指令、分隔符及局部模式下的 metadata/大纲。
 
 ## 普通 Pipeline

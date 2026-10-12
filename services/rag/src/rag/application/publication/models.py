@@ -8,7 +8,7 @@ from rag.core.schema import ContentRevision
 
 @dataclass(frozen=True, slots=True)
 class ResourcePublicationState:
-    """一个资源的发布事实；destroyed 仅表示不可恢复的物理销毁。"""
+    """一个资源的发布事实；destroyed 是永久逻辑销毁，不表示 GC 已完成。"""
 
     resource_id: str
     staged_revision: ContentRevision | None = None

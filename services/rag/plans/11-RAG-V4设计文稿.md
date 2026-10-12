@@ -4,7 +4,7 @@
 
 本文是 RAG V4 的实现设计合同，整合 00–10 方案中已经确认的边界。它描述核心模型、写入管线、存储端口、普通检索、图谱能力、权限和版本语义。
 
-2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。图事实首片已完成（见 22），多来源拓扑投影已完成（见 23），图向量和三种种子召回组件已完成（见 24），授权图检索、一跳 traversal 与 Chunk 实体候选已实现（见 25）；父块暂缓，不做检索效果基线；在线重构建、生产配置和生命周期装配继续留后。
+2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。图事实首片已完成（见 22），多来源拓扑投影已完成（见 23），图向量和三种种子召回组件已完成（见 24），授权图检索、一跳 traversal 与 Chunk 实体候选已实现（见 25）；父块暂缓，不做检索效果基线；P8 首片已实现生产配置、通用装配、服务 GC 与生命周期（见 26）；在线重构建、历史贡献回收和真实环境联调留后。
 
 2026-10-12 P5 首片已完成 Ontology、GraphExtractor、增量复用、可选补漏、Chunk 图事实落库与离线图 repair，见 [22](22-graph-extraction-implementation.md)。图事实/本体统一为 core.schema.graph 中的 dataclass，只有 Instructor 输出 DTO 使用 Pydantic。GraphStorage/GraphIndexer、Neo4j 多来源投影与可选 repair 已完成（见 23）；当前排期不做确定性 Producer。
 
@@ -118,15 +118,16 @@ content_revision
 text
 structure
 metadata
+type  # 可选摄入类别，None 使用默认链
 ```
 
 Document 结构沿用 Common Section/Anchor，但章节及父章节 ID 在摄入适配时统一为 `rsec_ + sha256(resource_id + "\0" + content_revision + "\0" + common_section_id)[:24]`；Chunker 共用同一身份函数，ChunkHit 传递同一 ID。树、范围、路径、摘要和 preview 保留；不改 Chunk.chunk_id 或向量 record_id。调用方只传章节 ID，不解析 ID 或额外携带资源/revision。
 
-Document metadata 继续作为垂类扩展和 Pipeline 组装依据。Document 级策略由上层选择 Pipeline 配置，不由 GraphExtractor 或 GraphIndexer 自行判断。
+Document.type 由 publication 在正文身份校验后、stage 前按原值精确选择注册 Pipeline；None 使用默认链，未知类别抛出 ValueError，不进行写入。Document metadata 保存垂类业务事实，组件不自行选择摄入链；type 与 Ontology domain、资源物理类型分开。
 
-`graph_enabled` 是上层可采用的策略输入示例，不是 `Document` 必须包含的核心字段。外部装配逻辑读取所需业务元数据后选择并复用对应 Pipeline；组件不读取此开关，也不把它复制到 Chunk。
+平台不预设 graph_enabled 等垂类业务字段。外层组合入口把完整 IngestionPipeline 注册到 Container.pipeline_routes() 的类别键，平台消费者和发布用例共享这一映射；type 使用开放字符串，允许不同类别装配不同本体。
 
-不要求将全部 Document metadata 复制到每个 Chunk。只有后续 Chunker、Transformer 或 Indexer 实际需要的结构信息才传递到 Chunk 字段或普通 metadata。
+默认 MarkdownChunker 将 Document.metadata 深复制到每个 Chunk，嵌套可变对象互不共享。不另增 Chunk.type 或影子 metadata 字段，不自动将任意业务字段投影到向量/图后端。Mongo 旧 Document 缺失 type 读为 None，位置参数的 metadata 兼容保留。
 
 ### 3.2 Chunk
 
@@ -221,7 +222,7 @@ staged 是后台构建中的候选，不对用户可见。只有正文/结构、
 
 publication 属于 `application.publication` 的用例编排：接收资源变更后，协调内容保存、Pipeline、事实回查与可见性切换。ResourcePublicationState 是该用例的流程状态，不是与 ACL 并列的独立领域能力。Mongo 在 `resource_publications` 保存 staged/applied 两个完整 ContentRevision 与永久 destroyed 标记。
 
-模块收敛为 models.py、store.py、publish.py，另有包导出 __init__.py。publish.py 同时定义事件、消费者和 DocumentPublication，消费者仅注入 publisher 并调用 publish(document) 或 destroy_resources。DocumentPublication.publish 接收已构造 Document，校验身份后由 Store 判断版本、冲突与销毁状态并 stage，再保存 Document、执行外部完整 Pipeline，最后回查正文身份和精确有序的预期 Chunk ID 集合并条件 apply。摄入是发布的内部步骤，不再提供独立 DocumentIngestion 或公开 stage/apply 方法。投影完整性依赖必需 Indexer 的成功合同，不增加向量完整性查询接口。同资源构建由调用方串行；重复已发布、旧版本和已销毁提交返回明确跳过结果，不重写 metadata。允许零 Chunk 内容。
+模块收敛为 models.py、store.py、publish.py，另有包导出 __init__.py。publish.py 同时定义事件、消费者和 DocumentPublication，消费者仅注入 publisher 并调用 publish(document) 或 destroy_resources。DocumentPublication.publish 接收已构造 Document，校验身份后选定本次 Pipeline，再由 Store 判断版本、冲突与销毁状态并 stage，再保存 Document、执行外部完整 Pipeline，最后回查正文身份和精确有序的预期 Chunk ID 集合并条件 apply。摄入是发布的内部步骤，不再提供独立 DocumentIngestion 或公开 stage/apply 方法。注册链内全部阶段都是必需阶段，包含 GraphIndexer 时其失败同样阻止 apply；可选发布后图流程不放进这条必需链。投影完整性依赖必需 Indexer 的成功合同，不增加向量完整性查询接口。同资源构建由调用方串行；重复已发布、旧版本和已销毁提交返回明确跳过结果，不重写 metadata。允许零 Chunk 内容。
 
 图谱是附加能力。GraphIndexer 失败不会回滚已完成的普通向量写入；是否允许该 revision 成为普通检索 active 由外部发布策略决定，不由 Pipeline 伪造跨存储原子性。
 
@@ -491,6 +492,34 @@ composition -> all concrete implementations
 Transformer 不依赖 Storage；Storage 不依赖业务策略；Retriever 不依赖 Indexer；HTTP/MCP 未来只依赖 application/composition 入口。
 
 Kafka 后端提供通用传输重试而不导入 application/acl。内容、销毁与 ACL 的 handler 和异常分类由各用例拥有；retry topic 只等待并送回原主分区，不执行业务。默认快速重试 1/2/4 秒，再延迟 1 分钟、10 分钟各一次，最终进入 `<main>.DLT`。转发确认后才提交源 offset，允许故障窗口中的重复投递，由内容版本和 ACL 幂等合同承接；不承诺 Kafka 与 Mongo/向量之间的事务。
+
+### 9.1 通用平台装配与生命周期（P8 首片）
+
+`core/config/app_settings.py` 统一定义运行配置与 Nacos 默认 settings；`container.py` 声明通用 provider 和默认实例；`main.py` 单个 lifespan 负责存储初始化、消费者握手、ready、GC 和客户端收尾，沿用 Chat/Sandbox 的入口习惯。外层可构造新 Container(settings=...) 或显式覆盖 provider，不新增 runtime/models 文件或第二套启动框架。
+
+Mongo 内容/发布/ACL 索引、三个 Qdrant collection 与 metadata 索引、可选 Neo4j schema 均显式初始化。普通集合 dense/sparse，图集合 dense-only，共享 embedding 模型和维度。普通/图查询共享 SnapshotReader 与 Qwen RerankClient，各自 ModelReranker 的材料分别是完整 raw_text、种子 ID 与来源图描述/关键词；空候选不调用模型，失败按 Common 原顺序降级。
+
+默认摄入只执行 MarkdownChunker → [Contextualizer] → ChunkFactsIndexer → VectorIndexer。ENABLE_CONTEXTUALIZE 默认为 false；事实与普通向量不可禁用。GraphExtractor/GraphIndexer 工厂要求调用方传入 Ontology，通用容器不持有业务本体；读取不反向绑定本体。GraphRetrieval/GraphTraversal 需要已启用拓扑存储。
+
+GC 和 rerank 没有启用开关；GC_INTERVAL_SECONDS=600、GC_BATCH_SIZE=100。KAFKA_ENABLED=false 仅关闭消费，GC 和查询组件仍装配。Kafka 开启后 ACL 与发布使用不同 group，发布内容/销毁两个主消费者均连接才发出 started；全部启用消费者与存储就绪后置 ready，不等待 GC 首轮，不调用模型作启动探测。任务意外退出撤销 ready，停止先取消并等待后台任务，再关闭所有已创建底层客户端；部分初始化失败同样清理，共享实例只关闭一次，RerankClient 沿用 SDK 没有关闭接口。
+
+### 9.2 永久销毁资源 GC
+
+PublicationStore.list_destroyed_resource_ids 使用 destroyed/resource_id 复合索引，按字符串游标升序分页，不用 offset。ResourceGarbageCollector.collect 返回本轮 scanned/cleaned/errors；run 启动立即执行，结束后等待间隔，不重叠。每轮从头扫描永久标记，不记录已清理完成。
+
+逐资源按明确 resource_id 删除普通/实体/关系向量，再删除 Neo4j 来源贡献并清理孤儿，再删除本地 ACL，最后删除全部 Document/Chunk revision。永久 destroyed 与发布记录保留，GC 不操作上游资源主库。单资源失败记录阶段、保留已完成删除并继续其他资源，扫描失败结束本轮并等待下一轮；取消传播。执行错误不撤销服务 ready，循环意外退出由宿主观察；多实例可幂等重复清理，无锁/租约/leader、同轮重试或跨库补偿。
+
+迟到摄入/ACL 写入可能发生在某次删除之后，下轮重复回收，不承诺一次清理永久无残留。清理目标由平台已配置后端决定，与垂类算法开关无关；停用后端前先回收其数据。非销毁旧 revision 及历史分块贡献回收仍留后。
+
+### 9.3 垂类扩展开发
+
+P8 第二片提供 `pipeline_routes = providers.Singleton(dict)`，注入平台唯一 DocumentPublication 的可选 pipelines 参数。每个容器实例独立持有映射，构造 publisher 前后注册均生效；正常在消费者启动前注册，使用普通字典赋值/显式替换，不增加 Registry/冻结/在线热更新协议。业务包只组装 Pipeline，不覆盖 publisher、不接触 Kafka。Future DocumentReadyEvent 的 type/metadata 已支持，但本片不修改上游生产者。
+
+ContentRevision 不包含 type/metadata/路由配置。影响摄入的 type/metadata 变化必须提高上游 version，相同已发布 revision 仍跳过；注册/替换 Pipeline 不自动重建历史事实，继续使用显式维护流程。实施与验证见 [27](27-document-type-routing-implementation.md)。
+
+独立包保存业务本体、metadata、摄入组件、Pipeline、用例、工具适配与外层入口；以子容器或构造函数接收平台依赖，业务模块不导入全局 Container。平台负责共享连接、schema 初始化和 GC，垂类不管理连接和删除。纯输入映射复用通用用例，有业务准备时组合 Retriever/Common Pipeline/SnapshotReader，保留来源授权、完整 metadata、stage/apply 和普通向量确认。
+
+业务 metadata 必须先进入权威 Chunk，再由垂类显式投影到后端并核对当前值；默认 Indexer 不自动索引年代等任意字段，GraphRetrieval 不自动接受时间条件。新增存储由平台接入清理目标。实际 type/Pipeline 注册、依赖替身测试和外层启动示例见 [extensions.md](../demo/extensions.md)；不预建插件 Runtime/Registry、动态 tag 路由、自动发现或运维入口。
 
 ## 10. 一致性、失败和可观测性
 

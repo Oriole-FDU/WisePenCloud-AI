@@ -17,6 +17,7 @@ from rag.core.schema import ContentRevision
 
 _state_adapter = TypeAdapter(ResourcePublicationState)
 _revision_adapter = TypeAdapter(ContentRevision | None)
+_resource_ids_adapter = TypeAdapter(list[str])
 _BATCH_SIZE = 500  # bulk_write 批大小
 
 
@@ -154,8 +155,30 @@ class MongoPublicationStore(PublicationStore):
                     [("resource_id", ASCENDING)],
                     unique=True,
                     name="resource_publication_resource_unique",
-                )
+                ),
+                IndexModel(
+                    [("destroyed", ASCENDING), ("resource_id", ASCENDING)],
+                    name="resource_publication_destroyed_resource",
+                ),
             ]
+        )
+
+    async def list_destroyed_resource_ids(
+        self, *, after_resource_id: str | None = None, limit: int = 100
+    ) -> list[str]:
+        if limit <= 0:
+            raise ValueError("destroyed resource page size must be positive")
+        query = {"destroyed": True}
+        if after_resource_id is not None:
+            query["resource_id"] = {"$gt": after_resource_id}
+        records = (
+            await self._collection.find(query, {"resource_id": 1, "_id": 0})
+            .sort("resource_id", ASCENDING)
+            .limit(limit)
+            .to_list(length=limit)
+        )
+        return _resource_ids_adapter.validate_python(
+            [record["resource_id"] for record in records]
         )
 
     async def _get_state(self, resource_id: str) -> ResourcePublicationState | None:

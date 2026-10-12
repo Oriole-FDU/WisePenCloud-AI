@@ -16,7 +16,7 @@ from common.utils.retrieval import (
 from rag.application.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.core.schema import Chunk, GraphRelationOption, parse_graph_facts
 from rag.core.schema.filters import MetadataFilters
-from rag.retrieval.vector import VectorRetrievalMode, VectorRetriever
+from rag.retrievers.vector import VectorRetrievalMode, VectorRetriever
 from rag.storage.vector import VectorMatch, VectorReader
 
 

@@ -3,6 +3,7 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from pymongo import ASCENDING, IndexModel
 from pymongo.errors import DuplicateKeyError
 
 from rag.application.acl.models import GroupResourceAcl, ResourceAcl
@@ -60,7 +61,10 @@ class MongoResourceAclRepository(ResourceAclRepository):
         try:
             result = await self._collection.update_one(
                 revision_filter,
-                {"$set": fields, "$setOnInsert": {"resource_id": resource_acl.resource_id}},
+                {
+                    "$set": fields,
+                    "$setOnInsert": {"resource_id": resource_acl.resource_id},
+                },
                 upsert=True,
             )
         except DuplicateKeyError:
@@ -72,6 +76,17 @@ class MongoResourceAclRepository(ResourceAclRepository):
 
     async def delete(self, resource_id: str) -> None:
         await self._collection.delete_one({"resource_id": resource_id})
+
+    async def ensure_indexes(self) -> None:
+        await self._collection.create_indexes(
+            [
+                IndexModel(
+                    [("resource_id", ASCENDING)],
+                    unique=True,
+                    name="resource_acl_resource_unique",
+                )
+            ]
+        )
 
 
 def _to_domain(record: Mapping[str, Any]) -> ResourceAcl:

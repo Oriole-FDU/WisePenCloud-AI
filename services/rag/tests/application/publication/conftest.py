@@ -35,7 +35,12 @@ def projection():
 
 
 @pytest.fixture
-def publication(storage, publication_store, projection):
+def pipeline_routes():
+    return {}
+
+
+@pytest.fixture
+def publication(storage, publication_store, projection, pipeline_routes):
     return DocumentPublication(
         store=publication_store,
         reader=storage,
@@ -45,4 +50,5 @@ def publication(storage, publication_store, projection):
             transformers=[],
             indexers=[ChunkFactsIndexer(writer=storage), projection],
         ),
+        pipelines=pipeline_routes,
     )

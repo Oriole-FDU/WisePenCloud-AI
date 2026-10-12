@@ -58,6 +58,7 @@ def test_document_keeps_common_structure_and_content_facts():
         "text",
         "structure",
         "metadata",
+        "type",
     }
     assert {item.name for item in fields(DocumentStructure)} == {
         "total_length",

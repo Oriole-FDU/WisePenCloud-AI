@@ -1,5 +1,7 @@
 """将 Common Markdown 分块结果投影为 RAG 摄入 Chunk。"""
 
+from copy import deepcopy
+
 from common.utils.markdown import MarkdownChunker as CommonMarkdownChunker
 
 from rag.core.schema import Chunk, Document
@@ -41,6 +43,8 @@ class MarkdownChunker:
                 raw_text=chunk.text,
                 content_token_count=chunk.content_token_count,
                 anchor_labels=chunk.anchor_labels,
+                # 业务字段逐块透传，嵌套值不能与 Document 或其他 Chunk 共享。
+                metadata=deepcopy(document.metadata),
                 # source_spans、node_ids 等内部事实留在 Common，不注入 metadata。
             )
             for chunk in result.chunks
