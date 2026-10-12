@@ -1,23 +1,26 @@
-"""维护窗口内修复显式资源的图事实，不重新分块或推进 publication。"""
+"""维护窗口内修复图事实并可选重建 Neo4j，不重新分块或推进 publication。"""
 
 import argparse
 import asyncio
 import json
 import os
+import re
 from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from common.logger import error
 from common.utils.ai_clients import InstructionClient
+from neo4j import AsyncGraphDatabase
 from openai import AsyncOpenAI
 from pymongo import AsyncMongoClient
 
 from rag.application.publication.store import PublicationStore
 from rag.backends.mongo.content import MongoContentStorage
 from rag.backends.mongo.publication import MongoPublicationStore
+from rag.backends.neo4j import Neo4jGraphStorage
 from rag.core.schema import ContentRevision, Ontology
-from rag.ingestion.indexers import ChunkFactsIndexer
+from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer
 from rag.ingestion.transformers import GraphExtractor
 from rag.storage.content import ContentReader
 
@@ -42,6 +45,7 @@ async def repair_resources(
     content: ContentReader,
     extractor: GraphExtractor,
     facts: ChunkFactsIndexer,
+    graph: GraphIndexer | None = None,
 ) -> RepairReport:
     """当前 applied 事实逐资源修复；同资源不得存在其他 Chunk 写任务。
 
@@ -98,6 +102,9 @@ async def repair_resources(
                 continue
             # 图字段不改变 retrieval_text，不重写普通向量；成功缓存也不能跳过事实写入。
             await facts.index(chunks)
+            # 抽取缓存不证明上次图投影完成；启用时每次重写全部来源贡献。
+            if graph is not None:
+                await graph.index(chunks)
             report.repaired += 1
         except Exception as exc:  # noqa: BLE001
             error("graph_repair_failed", exc=exc, resource_id=resource_id)
@@ -126,6 +133,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-concurrency", type=int, default=4)
     parser.add_argument("--gleaning", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--with-graph", action="store_true")
+    for name, default in (
+        ("uri", None),
+        ("username", None),
+        ("password", None),
+        ("database", "neo4j"),
+        ("graph-name", "rag_v4"),
+    ):
+        parser.add_argument(
+            f"--neo4j-{name}",
+            default=os.getenv(
+                f"RAG_GRAPH_REPAIR_NEO4J_{name.upper().replace('-', '_')}", default
+            ),
+        )
     args = parser.parse_args(argv)
     try:
         file_ids = (
@@ -162,6 +183,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         )
     ):
         parser.error("token and concurrency limits must be positive")
+    if args.with_graph:
+        for name in ("uri", "username", "password", "database", "graph_name"):
+            value = getattr(args, f"neo4j_{name}")
+            if not value or not value.strip():
+                parser.error(f"missing --neo4j-{name.replace('_', '-')}")
+        # 图名构成后端标识符，连接前拒绝不合法配置。
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", args.neo4j_graph_name):
+            parser.error("neo4j graph name must be a Cypher identifier")
     return args
 
 
@@ -188,12 +217,26 @@ async def run(args: argparse.Namespace) -> RepairReport:
             gleaning=args.gleaning,
             reuse_existing=not args.force,
         )
+        graph = None
+        if args.with_graph:
+            driver = AsyncGraphDatabase.driver(
+                args.neo4j_uri, auth=(args.neo4j_username, args.neo4j_password)
+            )
+            stack.push_async_callback(driver.close)
+            topology = Neo4jGraphStorage(
+                driver=driver,
+                database=args.neo4j_database,
+                graph_name=args.neo4j_graph_name,
+            )
+            await topology.ensure_schema()
+            graph = GraphIndexer(ontology=args.ontology, writer=topology)
         return await repair_resources(
             args.resource_ids,
             publication=publication,
             content=content,
             extractor=extractor,
             facts=ChunkFactsIndexer(content),
+            graph=graph,
         )
 
 

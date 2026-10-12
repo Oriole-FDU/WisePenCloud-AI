@@ -13,10 +13,10 @@ from common.utils.retrieval import (
 )
 
 from rag.application.snapshot import ResourceSnapshot, ResourceSnapshotReader
-from rag.core.schema import Chunk, VectorMatch
+from rag.core.schema import Chunk
 from rag.core.schema.filters import MetadataFilters
 from rag.retrieval.vector import VectorRetrievalMode, VectorRetriever
-from rag.storage.vector import VectorReader
+from rag.storage.vector import VectorMatch, VectorReader
 
 
 @dataclass(frozen=True, slots=True)

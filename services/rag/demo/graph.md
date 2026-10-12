@@ -1,6 +1,6 @@
 # Ontology 图事实抽取与离线 repair
 
-本片只生成并保存 Chunk 图事实。生产入口目前仍只运行 ACL；下面的显式装配不代表图谱已自动接入 publication。
+当前支持 Chunk 图事实及可选 Neo4j 来源拓扑投影。生产入口仍只运行 ACL；显式装配不代表图谱已自动接入 publication。
 
 ## 显式装配
 
@@ -90,4 +90,46 @@ RAG_GRAPH_REPAIR_INSTRUCTION_MODEL
 
 repair 选择当前 applied 未 destroyed 的资源，核对完整正文身份并读取既有块；写前复核完整发布状态，变化则跳过。成功后保存全部 Chunk，即使全由缓存复用。资源失败继续下一资源，输出 repaired/skipped/document_errors；有错误退出 1，否则退出 0。setup 失败退出 1，取消传播，全部客户端关闭。
 
-脚本不加载 Nacos、不 stage/apply、不启动消费者、不重分块、不重写普通向量或图拓扑。状态复核遵循维护窗口约定，不提供并发更新协议。
+脚本不加载 Nacos、不 stage/apply、不启动消费者、不重分块、不重写普通向量。默认只修复事实，状态复核遵循维护窗口约定，不提供并发更新协议。
+
+## 可选 Neo4j 投影
+
+配置以下变量，或使用同名 CLI 参数（如 --neo4j-uri、--neo4j-username、--neo4j-password）：
+
+```text
+RAG_GRAPH_REPAIR_NEO4J_URI
+RAG_GRAPH_REPAIR_NEO4J_USERNAME
+RAG_GRAPH_REPAIR_NEO4J_PASSWORD
+RAG_GRAPH_REPAIR_NEO4J_DATABASE       # 默认 neo4j
+RAG_GRAPH_REPAIR_NEO4J_GRAPH_NAME     # 默认 rag_v4
+```
+
+```powershell
+.venv/Scripts/python.exe services/rag/scripts/repair_graph.py `
+    --ontology-file services/rag/demo/graph-ontology.yaml `
+    --resource-id RESOURCE_ID `
+    --with-graph
+```
+
+固定顺序是抽取/缓存复用 → 写前状态复核 → 保存全部 Chunk → GraphIndexer。即使全部命中抽取缓存，也重写图投影；Mongo 成功但 Neo4j 失败时保留事实，资源计错并非零退出，重跑可以复用模型结果。不开 --with-graph 时不创建 Neo4j driver。
+
+也可以单独从既有事实投影，不调用模型：
+
+```python
+from neo4j import AsyncGraphDatabase
+from rag.backends.neo4j import Neo4jGraphStorage
+from rag.ingestion.indexers import GraphIndexer
+
+async with AsyncGraphDatabase.driver(neo4j_uri, auth=neo4j_auth) as driver:
+    topology = Neo4jGraphStorage(driver=driver)
+    await topology.ensure_schema()
+    await GraphIndexer(ontology=ontology, writer=topology).index(stored_chunks)
+```
+
+driver、URI/auth、Ontology 和已读回的完整 Chunk 列表由调用方提供；同资源写任务串行。当前默认每批 64 个来源，用显式事务完整替换该批来源，空事实移除旧贡献，其他来源保留。写入阶段失败回滚当前批，之前成功批次保留；提交确认网络异常可能结果未知，不报告成功，重新替换同一来源是幂等的。
+
+共享实体/有向关系只保存逻辑身份，每个来源关联分别保存名称、描述、关键词和关系 metadata。读回同一 ID 可以得到多个来源事实，不生成聚合描述。graph_name 绑定独立标签/约束，不进入 GraphNode/GraphEdge ID；ensure_schema 显式执行，CRUD 不隐式建索引。
+
+GraphReader 支持 get_nodes、get_relations、get_neighbors。一跳方向为 outgoing/incoming/both，谓词可过滤，默认 limit=100 限制逻辑关系数，选中关系的匹配来源完整返回。MetadataFilters 只执行来源 metadata 的平面属性条件，不代表 ACL；结果仍是候选，应用层授权和 selected revision 回查在后续查询切片实现。
+
+本片不回收未传入的历史 revision 或重新分块后旧 Chunk，不写图向量，不实现图查询生成。

@@ -1,5 +1,6 @@
 """图事实 repair 的显式范围、写前复核、部分写入和客户端清理。"""
 
+import asyncio
 import importlib.util
 import json
 import sys
@@ -13,7 +14,7 @@ import pytest
 from rag.application.publication import DocumentReadyEvent
 from rag.core.schema import ContentRevision
 from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer
+from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer
 from rag.ingestion.transformers import GraphExtractor
 from rag.ingestion.transformers.graph import GraphExtraction
 
@@ -358,3 +359,179 @@ def test_main_reports_nonzero_and_setup_errors(
     assert '"document_errors": 1' in capsys.readouterr().out
     monkeypatch.setattr(repair, "run", AsyncMock(side_effect=OSError("setup failure")))
     assert repair.main(arguments) == 1
+
+
+async def test_graph_failure_keeps_facts_then_reuses_cache_and_rewrites_topology(
+    repair, flow
+):
+    document, chunks = await prepare(flow)
+    writer = SimpleNamespace(
+        replace_sources=AsyncMock(side_effect=OSError("Neo4j unavailable"))
+    )
+    graph = GraphIndexer(ontology=flow.ontology, writer=writer)
+    options = {
+        "publication": flow.publication,
+        "content": flow.content,
+        "extractor": flow.extractor,
+        "facts": flow.facts,
+        "graph": graph,
+    }
+    first = await repair.repair_resources(["resource"], **options)
+    assert (first.document_errors, first.repaired, first.exit_code) == (1, 0, 1)
+    stored = await flow.content.get_revision_chunks(
+        resource_id="resource", content_revision=document.content_revision
+    )
+    assert all(chunk.metadata.get("graph_version") for chunk in stored)
+    flow.client.structured_complete.reset_mock()
+    writer.replace_sources.side_effect = None
+    second = await repair.repair_resources(["resource"], **options)
+    assert (second.repaired, second.exit_code) == (1, 0)
+    flow.client.structured_complete.assert_not_awaited()
+    assert writer.replace_sources.await_count == 2
+    assert len(writer.replace_sources.await_args.args[0]) == len(chunks)
+
+
+async def test_graph_stage_after_facts_and_failed_resource_continues(repair, flow):
+    await prepare(flow, "bad")
+    await prepare(flow, "good")
+    observed = []
+
+    async def index(chunks):
+        observed.append(chunks[0].resource_id)
+        stored = await flow.content.get_chunks([chunks[0].chunk_id])
+        assert (
+            stored[0].metadata["graph_version"] == chunks[0].metadata["graph_version"]
+        )
+        if chunks[0].resource_id == "bad":
+            raise OSError("graph failed")
+
+    graph = SimpleNamespace(index=index)
+    report = await repair.repair_resources(
+        ["bad", "good"],
+        publication=flow.publication,
+        content=flow.content,
+        extractor=flow.extractor,
+        facts=flow.facts,
+        graph=graph,
+    )
+    assert (report.repaired, report.document_errors, report.exit_code) == (1, 1, 1)
+    assert observed == ["bad", "good"]
+
+
+async def test_fact_failure_prevents_graph_write(repair, flow):
+    await prepare(flow)
+    flow.facts.index = AsyncMock(side_effect=OSError("facts failed"))
+    graph = SimpleNamespace(index=AsyncMock())
+    report = await repair.repair_resources(
+        ["resource"],
+        publication=flow.publication,
+        content=flow.content,
+        extractor=flow.extractor,
+        facts=flow.facts,
+        graph=graph,
+    )
+    assert report.document_errors == 1
+    graph.index.assert_not_awaited()
+
+
+def graph_arguments():
+    return [
+        "--with-graph",
+        "--neo4j-uri",
+        "neo4j://isolated",
+        "--neo4j-username",
+        "neo4j",
+        "--neo4j-password",
+        "test",
+    ]
+
+
+def test_cli_graph_opt_in_defaults_and_environment_validation(
+    repair, tmp_path, graph_ontology, monkeypatch
+):
+    for name in ("URI", "USERNAME", "PASSWORD", "DATABASE", "GRAPH_NAME"):
+        monkeypatch.delenv(f"RAG_GRAPH_REPAIR_NEO4J_{name}", raising=False)
+    arguments = [
+        *config_arguments(tmp_path, graph_ontology),
+        "--resource-id",
+        "resource",
+    ]
+    assert repair.parse_args(arguments).with_graph is False
+    with pytest.raises(SystemExit):
+        repair.parse_args([*arguments, "--with-graph"])
+    args = repair.parse_args([*arguments, *graph_arguments()])
+    assert args.neo4j_database == "neo4j" and args.neo4j_graph_name == "rag_v4"
+    with pytest.raises(SystemExit):
+        repair.parse_args(
+            [*arguments, *graph_arguments(), "--neo4j-graph-name", "bad`name"]
+        )
+    monkeypatch.setenv("RAG_GRAPH_REPAIR_NEO4J_URI", "neo4j://isolated")
+    monkeypatch.setenv("RAG_GRAPH_REPAIR_NEO4J_USERNAME", "user")
+    monkeypatch.setenv("RAG_GRAPH_REPAIR_NEO4J_PASSWORD", "test")
+    args = repair.parse_args([*arguments, "--with-graph"])
+    assert args.neo4j_username == "user"
+
+
+@pytest.mark.parametrize("failure", [None, "schema", "repair", "cancel"])
+async def test_graph_mode_explicit_initialization_and_all_clients_close(
+    repair, monkeypatch, tmp_path, graph_ontology, failure
+):
+    args = repair.parse_args(
+        [
+            *config_arguments(tmp_path, graph_ontology),
+            "--resource-id",
+            "resource",
+            *graph_arguments(),
+        ]
+    )
+    mongo = DatabaseClient()
+    api = SimpleNamespace(close=AsyncMock())
+    driver = SimpleNamespace(close=AsyncMock())
+    topology = SimpleNamespace(ensure_schema=AsyncMock())
+    if failure == "schema":
+        topology.ensure_schema.side_effect = OSError("schema failed")
+    execute = AsyncMock(return_value=repair.RepairReport(repaired=1))
+    if failure == "repair":
+        execute.side_effect = OSError("repair failed")
+    elif failure == "cancel":
+        execute.side_effect = asyncio.CancelledError()
+    monkeypatch.setattr(repair, "AsyncMongoClient", Mock(return_value=mongo))
+    monkeypatch.setattr(repair, "AsyncOpenAI", Mock(return_value=api))
+    monkeypatch.setattr(
+        repair, "InstructionClient", Mock(return_value=SimpleNamespace(model="model"))
+    )
+    factory = Mock(return_value=driver)
+    monkeypatch.setattr(repair, "AsyncGraphDatabase", SimpleNamespace(driver=factory))
+    monkeypatch.setattr(repair, "Neo4jGraphStorage", Mock(return_value=topology))
+    monkeypatch.setattr(repair, "repair_resources", execute)
+    if failure:
+        with pytest.raises((OSError, asyncio.CancelledError)):
+            await repair.run(args)
+    else:
+        assert (await repair.run(args)).repaired == 1
+        assert isinstance(execute.await_args.kwargs["graph"], GraphIndexer)
+    topology.ensure_schema.assert_awaited_once()
+    for client in (mongo, api, driver):
+        client.close.assert_awaited_once()
+
+
+async def test_graph_disabled_does_not_create_driver(
+    repair, monkeypatch, tmp_path, graph_ontology
+):
+    args = repair.parse_args(
+        [*config_arguments(tmp_path, graph_ontology), "--resource-id", "resource"]
+    )
+    mongo = DatabaseClient()
+    api = SimpleNamespace(close=AsyncMock())
+    monkeypatch.setattr(repair, "AsyncMongoClient", Mock(return_value=mongo))
+    monkeypatch.setattr(repair, "AsyncOpenAI", Mock(return_value=api))
+    monkeypatch.setattr(
+        repair, "InstructionClient", Mock(return_value=SimpleNamespace(model="model"))
+    )
+    factory = Mock()
+    monkeypatch.setattr(repair, "AsyncGraphDatabase", SimpleNamespace(driver=factory))
+    execute = AsyncMock(return_value=repair.RepairReport(repaired=1))
+    monkeypatch.setattr(repair, "repair_resources", execute)
+    await repair.run(args)
+    factory.assert_not_called()
+    assert execute.await_args.kwargs["graph"] is None

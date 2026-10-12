@@ -4,9 +4,9 @@
 
 本文是 RAG V4 的实现设计合同，整合 00–10 方案中已经确认的边界。它描述核心模型、写入管线、存储端口、普通检索、图谱能力、权限和版本语义。
 
-2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。图事实首片已完成（见 22），下一切片讨论多来源拓扑投影；父块暂缓，不做检索效果基线；在线重构建、生产配置和生命周期装配继续留后。
+2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。图事实首片已完成（见 22），多来源拓扑投影已完成（见 23），下一切片讨论图向量与受授权查询；父块暂缓，不做检索效果基线；在线重构建、生产配置和生命周期装配继续留后。
 
-2026-10-12 P5 首片已完成 Ontology、GraphExtractor、增量复用、可选补漏、Chunk 图事实落库与离线图 repair，见 [22](22-graph-extraction-implementation.md)。图事实/本体统一为 core.schema.graph 中的 dataclass，只有 Instructor 输出 DTO 使用 Pydantic。下一片讨论 GraphStorage/GraphIndexer 多来源投影；当前排期不做确定性 Producer。
+2026-10-12 P5 首片已完成 Ontology、GraphExtractor、增量复用、可选补漏、Chunk 图事实落库与离线图 repair，见 [22](22-graph-extraction-implementation.md)。图事实/本体统一为 core.schema.graph 中的 dataclass，只有 Instructor 输出 DTO 使用 Pydantic。GraphStorage/GraphIndexer、Neo4j 多来源投影与可选 repair 已完成（见 23）；当前排期不做确定性 Producer。
 
 本设计不包含 HTTP 路由、MCP 工具注册和最终 transport composition。MCP 只作为可信身份来源的既有边界被引用：最终用户身份由可信安全上下文注入，RAG application 接收 `PermissionScope`，不从业务参数读取用户 ID。
 
@@ -287,16 +287,9 @@ VectorIndexer：
 
 #### GraphIndexer
 
-GraphIndexer：
+GraphIndexer 已实现在 ingestion/indexers/graph.py：只读完整 Chunk 列表，解析实体/关系、本体校验和来源核对，再生成 GraphSourceProjection 并调用 Writer.replace_sources。缺少图列表或结构/来源损坏写前报错；本体非法事实逐条丢弃，同来源重复 ID 保留首次合法事实。合法空列表仍写完整来源替换输入。
 
-1. 从 Chunk metadata 收集实体和关系；
-2. 只消费已落库事实，不生成新事实或修改 Chunk metadata；
-3. 统一执行实体归一、关系去重和 Ontology 校验；
-4. 调用 `GraphWriter.upsert_nodes()` / `upsert_relations()`；
-5. 按配置调用 Entity/Relationship VectorWriter；
-6. 将每个图事实关联到其来源 Chunk ID，并据此写入 GraphStorage 投影；来源事实本身保留在 Chunk metadata，不额外写 Mongo 图事实集合。
-
-GraphIndexer 不实现 Neo4j、Qdrant 或 Mongo CRUD，不实现 local/global/hybrid 查询。
+它不调用模型、不访问 publication/ACL、不修改 Chunk。图向量不在本片，未来按实际查询需求装配。repair --with-graph 在事实保存后调用它，即使抽取缓存全部复用也重写拓扑。
 
 ## 6. Storage
 
@@ -315,21 +308,22 @@ class VectorWriter(Protocol):
 
 
 class GraphReader(Protocol):
-    async def get_nodes(...): ...
-    async def get_relations(...): ...
-    async def get_rel_map(self, request: GraphTraversalQuery) -> list[GraphPath]: ...
+    async def get_nodes(self, node_ids, *, filters=None) -> list[GraphNode]: ...
+    async def get_relations(self, edge_ids, *, filters=None) -> list[GraphEdge]: ...
+    async def get_neighbors(self, node_ids, *, direction=GraphDirection.OUTGOING,
+                            relation_types=None, filters=None, limit=100) -> list[GraphEdge]: ...
 
 
 class GraphWriter(Protocol):
-    async def upsert_nodes(self, nodes: Sequence[GraphNode]) -> WriteReceipt: ...
-    async def upsert_relations(self, edges: Sequence[GraphEdge]) -> WriteReceipt: ...
+    async def replace_sources(self, projections: list[GraphSourceProjection]) -> None: ...
+    async def delete_sources(self, filters: MetadataFilters) -> None: ...
 ```
 
 ### 6.2 VectorStorage
 
-VectorStorage 使用 `core/schema/vector.py` 中的通用 `VectorRecord`、`VectorQuery`、`VectorMatch`，`storage/vector.py` 只声明读写 Protocol。Chunk、Entity 和 Relationship 的语义由各自 Indexer 负责投影，Storage 不接收业务实体；当前只落地普通 Chunk 用例。
+VectorRecord/VectorQuery/VectorMatch 与读写 Protocol 统一定义在 storage/vector.py；原 core/schema/vector.py 和 core.schema 导出已移除，不保留兼容别名。Chunk、Entity 和 Relationship 的语义由各自 Indexer 负责投影，Storage 不接收业务实体；当前只落地普通 Chunk 用例。
 
-Record 包含 record_id、text、embedding 与普通 dict metadata。Query 只允许 embedding/text 二选一，分别执行 dense/sparse 召回；Match 返回原 record_id、provider score 与 metadata，不返回正文。VectorQuery.include_embedding 默认为 False，按需返回 VectorMatch.embedding 中已存的 dense 向量；dense 与 sparse 查询均使用配置的 dense 名称请求向量。缺失、错误维度与非有限数值作为后端数据错误传播，不重做候选 embedding。upsert/delete 成功返回 None，不新增 Receipt；上文 GraphWriter 仍是未来方案示例，不能据此建立通用 Receipt 层。
+Record 包含 record_id、text、embedding 与普通 dict metadata。Query 只允许 embedding/text 二选一，分别执行 dense/sparse 召回；Match 返回原 record_id、provider score 与 metadata，不返回正文。VectorQuery.include_embedding 默认为 False，按需返回 VectorMatch.embedding 中已存的 dense 向量；dense 与 sparse 查询均使用配置的 dense 名称请求向量。缺失、错误维度与非有限数值作为后端数据错误传播，不重做候选 embedding。upsert/delete 成功返回 None，不新增 Receipt；GraphWriter 同样确认全部写入后返回 None，不建立通用 Receipt 层。
 
 不同 collection 通过不同 Storage 实例绑定：
 
@@ -350,11 +344,11 @@ Qdrant 客户端由外部注入且须设置 cloud_inference=True，使 qdrant/bm
 
 ### 6.3 GraphStorage 与 Chunk 图事实
 
-GraphStorage 直接保存/读取统一的 `GraphNode`、`GraphEdge`，提供节点、关系、邻接和有界遍历。Neo4j 是从持久化 Chunk metadata 重建的拓扑投影，不包含 ACL、active revision、Ontology 解释、local/global/hybrid 或 Cypher 合同。
+GraphStorage 已实现在 storage/graph.py，按 Chunk 完整来源输入 GraphSourceProjection（chunk_id、metadata、nodes、edges）替换/删除贡献，读回仍是 GraphNode/GraphEdge 来源事实。同一逻辑 ID 可返回多个来源，不合并描述。一跳支持 outgoing/incoming/both、谓词筛选及默认 100 个逻辑关系预算，匹配来源完整返回，多跳留到实际查询切片。
 
-Mongo Chunk 事实保存 GraphExtractor 输出的 `metadata["entities"]` / `metadata["relationships"]`，是图投影的重建输入。GraphIndexer 从事实所属 Chunk 派生来源关联并写入 Neo4j 图投影；GraphRetriever 从投影取得候选与来源 Chunk ID，application 图谱用例通过共享读取入口批量回查 Mongo 正文并应用资源版本与权限决定。Entity/Relationship vectors 与 Neo4j topology 均为可重建投影。
+Neo4jGraphStorage 绑定 driver/database/graph_name，默认 neo4j/rag_v4 和每批 64 来源。共享实体/有向关系图元只存身份，来源关联各自保存 JSON 事实与原生平面 metadata 属性。ensure_schema 显式创建独立标签约束，CRUD 不初始化。每批显式事务移除旧贡献、写新事实并清理受影响孤儿；前置异常回滚当前批，前批提交保留；提交网络异常可能结果未知，传播后幂等重跑，不自动重试。
 
-旧 `GraphFactStore` 的职责是保存抽取事实及其 Chunk 来源映射；现在抽取事实随 Chunk 持久化，来源关联进入 Neo4j 查询投影，因此再加一份仓储只会重复维护事实和增加写入/重建路径，不再保留独立 GraphFactStore 或 GraphChunkSource repository。
+Mongo Chunk metadata 仍是权威重建输入；没有 Mongo 图事实新集合。Storage 不判 ACL、选择 applied 或调用模型。后续 application 必须用 ResourceSnapshotReader 回查 selected revision 和授权来源，从事实组装材料，不能把图 JSON 或跨来源描述作为正文权威。允许跨可见文档形成路径；图向量/检索和全面回收留后。
 
 ### 6.4 MetadataFilters
 

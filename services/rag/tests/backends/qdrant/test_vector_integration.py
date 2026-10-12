@@ -7,17 +7,12 @@ from uuid import NAMESPACE_URL, uuid5
 import pytest
 
 from rag.application.publication import DocumentPublication, PublicationAction
-from rag.core.schema import (
-    ContentRevision,
-    Document,
-    DocumentStructure,
-    VectorQuery,
-    VectorRecord,
-)
+from rag.core.schema import ContentRevision, Document, DocumentStructure
 from rag.core.schema.filters import FilterOperator, MetadataFilter, MetadataFilters
 from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer, VectorIndexer
 from rag.ingestion.pipeline import IngestionPipeline
+from rag.storage.vector import VectorQuery, VectorRecord
 
 pytestmark = pytest.mark.qdrant_integration
 

@@ -4,8 +4,8 @@ from math import isfinite
 
 from common.utils.ai_clients.embedding import EmbeddingClient
 
-from rag.core.schema import Chunk, VectorRecord
-from rag.storage.vector import VectorWriter
+from rag.core.schema import Chunk
+from rag.storage.vector import VectorRecord, VectorWriter
 
 from .base import Indexer
 

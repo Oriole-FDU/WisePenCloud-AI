@@ -6,7 +6,7 @@ from uuid import NAMESPACE_URL, uuid5
 from qdrant_client import AsyncQdrantClient, models
 
 from rag.core.schema.filters import MetadataFilters
-from rag.core.schema.vector import VectorMatch, VectorQuery, VectorRecord
+from rag.storage.vector import VectorMatch, VectorQuery, VectorRecord
 
 from .filters import compile_filters
 

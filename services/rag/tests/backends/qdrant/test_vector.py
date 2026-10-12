@@ -8,8 +8,8 @@ import pytest
 from qdrant_client import AsyncQdrantClient, models
 
 from rag.backends.qdrant import QdrantVectorStorage
-from rag.core.schema import VectorMatch, VectorQuery, VectorRecord
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
+from rag.storage.vector import VectorMatch, VectorQuery, VectorRecord
 
 
 def record(index=0):

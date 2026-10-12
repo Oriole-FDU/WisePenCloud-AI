@@ -13,8 +13,7 @@ from common.utils.retrieval import (
 )
 
 from rag.core.schema.filters import MetadataFilters
-from rag.core.schema.vector import VectorMatch, VectorQuery
-from rag.storage.vector import VectorReader
+from rag.storage.vector import VectorMatch, VectorQuery, VectorReader
 
 # hybrid 模式下各路未显式指定 top_k 时的默认召回量。
 _DEFAULT_HYBRID_ROUTE_TOP_K = 30

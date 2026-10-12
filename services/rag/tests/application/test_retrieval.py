@@ -11,8 +11,9 @@ from common.utils.retrieval import ModelReranker, RrfFusion
 from rag.acl.models import PermissionScope, ResourceAcl
 from rag.application.retrieval import HybridRetrieval
 from rag.application.snapshot import ResourceSnapshot
-from rag.core.schema import ContentRevision, VectorMatch
+from rag.core.schema import ContentRevision
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
+from rag.storage.vector import VectorMatch
 
 
 def match(chunk, score=1.0, embedding=None, **metadata):

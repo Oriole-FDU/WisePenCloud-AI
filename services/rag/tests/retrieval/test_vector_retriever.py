@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock
 import pytest
 from common.utils.retrieval import RrfFusion
 
-from rag.core.schema import VectorMatch
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
 from rag.retrieval.vector import VectorRetrievalMode, VectorRetriever
+from rag.storage.vector import VectorMatch
 
 
 @pytest.fixture
