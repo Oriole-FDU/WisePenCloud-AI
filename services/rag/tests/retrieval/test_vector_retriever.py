@@ -288,7 +288,7 @@ def test_vector_retriever_import_does_not_load_business_or_runtime_modules():
             """
 import sys
 from rag.retrieval.vector import VectorRetriever
-assert not any(name.startswith(('rag.application', 'rag.acl',
+assert not any(name.startswith(('rag.application',
     'rag.core.config', 'rag.backends')) for name in sys.modules)
 """,
         ],

@@ -5,8 +5,8 @@ from typing import Any
 
 from pymongo.errors import DuplicateKeyError
 
-from rag.acl.models import GroupResourceAcl, ResourceAcl
-from rag.acl.store import ResourceAclRepository
+from rag.application.acl.models import GroupResourceAcl, ResourceAcl
+from rag.application.acl.store import ResourceAclRepository
 
 
 class MongoResourceAclRepository(ResourceAclRepository):

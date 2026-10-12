@@ -3,7 +3,7 @@
 from dependency_injector import containers, providers
 from pymongo import AsyncMongoClient
 
-from rag.acl.synchronizer import AclEventConsumer, AclSynchronizer
+from rag.application.acl.synchronizer import AclEventConsumer, AclSynchronizer
 from rag.backends.mongo.acl import MongoResourceAclRepository
 from rag.core.config.app_settings import settings
 

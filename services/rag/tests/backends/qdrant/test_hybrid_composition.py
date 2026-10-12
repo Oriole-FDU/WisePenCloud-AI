@@ -7,7 +7,7 @@ import pytest
 from common.utils.ai_clients import EmbeddingClient
 from common.utils.retrieval import ModelReranker
 
-from rag.acl.models import PermissionScope, ResourceAcl
+from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.publication import DocumentReadyEvent
 from rag.application.reading import DocumentReading, SectionReadScope
 from rag.application.retrieval import HybridRetrieval

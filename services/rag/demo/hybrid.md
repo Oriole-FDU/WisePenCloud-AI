@@ -99,7 +99,7 @@ hybrid = HybridRetrieval(
 请求入口从可信身份得到 PermissionScope，然后为这次独立能力调用创建 ResourceSnapshot。
 
 ```python
-from rag.acl.models import PermissionScope
+from rag.application.acl.models import PermissionScope
 from rag.application.snapshot import ResourceSnapshot
 
 # trusted_user_id 和 trusted_group_roles 来自已认证的入口。

@@ -8,7 +8,7 @@ from dataclasses import replace
 import pytest
 from common.core.domain import GroupRoleType
 
-from rag.acl.models import GroupResourceAcl, PermissionScope, ResourceAcl
+from rag.application.acl.models import GroupResourceAcl, PermissionScope, ResourceAcl
 from rag.application.snapshot import ResourceSnapshot
 from rag.core.schema import ContentRevision
 

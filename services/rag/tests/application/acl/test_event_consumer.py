@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from aiokafka import TopicPartition
 
-from rag.acl.synchronizer import AclEventConsumer, AuthoritativeAclError
+from rag.application.acl.synchronizer import AclEventConsumer, AuthoritativeAclError
 from rag.backends.kafka import DeliveryHeader, RetryPolicy
 
 

@@ -1,6 +1,6 @@
 from common.core.domain import GroupRoleType
 
-from rag.acl.models import GroupResourceAcl, PermissionScope, ResourceAcl
+from rag.application.acl.models import GroupResourceAcl, PermissionScope, ResourceAcl
 
 
 def test_resource_acl_uses_existing_priority_order():

@@ -2,8 +2,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from rag.acl.models import ResourceAcl
-from rag.acl.synchronizer import AclSynchronizer, AuthoritativeAclError
+from rag.application.acl.models import ResourceAcl
+from rag.application.acl.synchronizer import AclSynchronizer, AuthoritativeAclError
 
 
 class _Cursor:

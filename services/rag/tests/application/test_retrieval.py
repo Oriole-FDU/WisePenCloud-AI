@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from common.utils.retrieval import ModelReranker, RrfFusion
 
-from rag.acl.models import PermissionScope, ResourceAcl
+from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.retrieval import HybridRetrieval
 from rag.application.snapshot import ResourceSnapshot
 from rag.core.schema import ContentRevision

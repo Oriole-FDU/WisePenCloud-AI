@@ -10,7 +10,7 @@ import pytest
 from common.utils.markdown import MarkdownChunker, OutlineFormatter, SourceSpan
 from pydantic import ValidationError
 
-from rag.acl.models import PermissionScope, ResourceAcl
+from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.reading import DocumentReading, SectionReadScope
 from rag.application.snapshot import ResourceSnapshot
 from rag.core.schema import ContentRevision

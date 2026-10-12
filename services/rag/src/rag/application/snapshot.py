@@ -2,8 +2,8 @@
 
 from dataclasses import dataclass, field
 
-from rag.acl.models import PermissionScope
-from rag.acl.store import ResourceAclRepository
+from rag.application.acl.models import PermissionScope
+from rag.application.acl.store import ResourceAclRepository
 from rag.application.publication.store import PublicationStore
 from rag.core.schema import Chunk, ContentRevision, Document
 from rag.storage.content import ContentReader
