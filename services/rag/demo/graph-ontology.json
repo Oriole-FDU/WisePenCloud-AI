@@ -1,0 +1,22 @@
+{
+  "domain": "work-demo",
+  "description": "示例：从当前块正文抽取人员、组织及任职关系。",
+  "entity_specs": {
+    "Person": {
+      "category": "Person",
+      "description": "正文明确提到的人员。"
+    },
+    "Organization": {
+      "category": "Organization",
+      "description": "正文明确提到的组织。"
+    }
+  },
+  "relation_specs": {
+    "works_at": {
+      "relation_type": "works_at",
+      "description": "起点人员在终点组织任职，必须有正文依据。",
+      "allowed_sources": ["Person"],
+      "allowed_targets": ["Organization"]
+    }
+  }
+}

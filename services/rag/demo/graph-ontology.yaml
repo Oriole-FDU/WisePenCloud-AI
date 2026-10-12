@@ -1,0 +1,23 @@
+# 与 graph-ontology.json 表达相同本体，可用 Ontology.from_file 加载。
+domain: work-demo
+description: 示例：从当前块正文抽取人员、组织及任职关系。
+
+entity_specs:
+  # 字典键必须与 category 一致。
+  Person:
+    category: Person
+    description: 正文明确提到的人员。
+  Organization:
+    category: Organization
+    description: 正文明确提到的组织。
+
+relation_specs:
+  # 字典键必须与 relation_type 一致；方向是人员 → 组织。
+  works_at:
+    relation_type: works_at
+    description: 起点人员在终点组织任职，必须有正文依据。
+    allowed_sources:
+      - Person
+    allowed_targets:
+      - Organization
+    # 任一端点类别列表设为 []，表示不限制该侧的本体类别。

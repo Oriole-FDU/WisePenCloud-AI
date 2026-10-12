@@ -1,8 +1,7 @@
-from dataclasses import fields
+from dataclasses import asdict, fields, is_dataclass, replace
 
 import pytest
 from common.utils.markdown import Anchor, Section, SourceSpan
-from pydantic import BaseModel
 
 from rag import ingestion
 from rag.core.schema import Chunk, Document, DocumentStructure, GraphEdge, GraphNode
@@ -84,11 +83,11 @@ def test_graph_node_id_normalizes_only_name(name, ontology_name, category, expec
         name=name, ontology_name=ontology_name, category=category, source_id="chunk-1"
     )
 
-    assert isinstance(node, BaseModel)
+    assert is_dataclass(node) and not hasattr(node, "__dict__")
     assert node.id == expected
     assert node.name == name
     assert node.source_id == "chunk-1"
-    assert set(node.model_dump()) == {
+    assert set(asdict(node)) == {
         "name",
         "ontology_name",
         "category",
@@ -96,7 +95,7 @@ def test_graph_node_id_normalizes_only_name(name, ontology_name, category, expec
         "source_id",
     }
     # 来源不同不改变实体的语义身份，provenance 仍留在事实中。
-    assert node.model_copy(update={"source_id": "chunk-2"}).id == node.id
+    assert replace(node, source_id="chunk-2").id == node.id
 
 
 def test_graph_edge_id_preserves_direction_relation_and_provenance():
@@ -112,11 +111,11 @@ def test_graph_edge_id_preserves_direction_relation_and_provenance():
         metadata={"custom": {"weight": 2}},
     )
 
-    assert isinstance(edge, BaseModel)
+    assert is_dataclass(edge) and not hasattr(edge, "__dict__")
     assert edge.id == "Person:alice::Knows::Person:bob"
     assert edge.source_ids == ["chunk-1", "chunk-2"]
     assert edge.metadata == {"custom": {"weight": 2}}
-    assert set(edge.model_dump()) == {
+    assert set(asdict(edge)) == {
         "source_id",
         "target_id",
         "relation_type",
@@ -125,9 +124,7 @@ def test_graph_edge_id_preserves_direction_relation_and_provenance():
         "source_ids",
         "metadata",
     }
-    reversed_edge = edge.model_copy(
-        update={"source_id": target.id, "target_id": source.id}
-    )
+    reversed_edge = replace(edge, source_id=target.id, target_id=source.id)
     assert reversed_edge.id != edge.id
 
 

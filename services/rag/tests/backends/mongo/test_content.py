@@ -1,4 +1,4 @@
-from dataclasses import fields, replace
+from dataclasses import asdict, fields, replace
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
@@ -50,8 +50,8 @@ async def test_graph_metadata_is_plain_data_and_input_is_not_modified(storage, c
     restored = (await storage.get_chunks([chunk.chunk_id]))[0]
 
     assert restored.metadata == {
-        "entities": [node.model_dump()],
-        "relationships": [edge.model_dump()],
+        "entities": [asdict(node)],
+        "relationships": [asdict(edge)],
     }
     assert chunk.metadata is metadata
     assert chunk.metadata["entities"][0] is node

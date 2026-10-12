@@ -11,8 +11,35 @@ from pymongo.errors import DuplicateKeyError
 
 from rag.backends.mongo.content import MongoContentStorage
 from rag.backends.mongo.publication import MongoPublicationStore
-from rag.core.schema import Chunk, Document, DocumentStructure
+from rag.core.schema import (
+    Chunk,
+    Document,
+    DocumentStructure,
+    EntitySpec,
+    Ontology,
+    RelationSpec,
+)
 from rag.core.schema.content import rag_section_id
+
+
+@pytest.fixture
+def graph_ontology():
+    return Ontology(
+        domain="work",
+        description="工作关系",
+        entity_specs={
+            "Person": EntitySpec("Person", "人员"),
+            "Company": EntitySpec("Company", "公司"),
+        },
+        relation_specs={
+            "works_at": RelationSpec(
+                "works_at",
+                "人员就职于公司",
+                allowed_sources=["Person"],
+                allowed_targets=["Company"],
+            )
+        },
+    )
 
 
 def _matches(record, query):

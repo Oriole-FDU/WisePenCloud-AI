@@ -2,6 +2,8 @@
 
 import os
 from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -12,8 +14,45 @@ from pymongo.errors import DuplicateKeyError
 
 from rag.backends.mongo.content import MongoContentStorage
 from rag.core.schema import Chunk
+from rag.ingestion.indexers import ChunkFactsIndexer
+from rag.ingestion.transformers import GraphExtractor
+from rag.ingestion.transformers.graph import GraphExtraction
 
 pytestmark = pytest.mark.mongo_integration
+
+
+async def test_real_mongo_extracted_graph_facts_round_trip(
+    mongo_storage, chunk, graph_ontology
+):
+    storage, _, _ = mongo_storage
+    client = SimpleNamespace(
+        model="model",
+        structured_complete=AsyncMock(
+            return_value=GraphExtraction.model_validate(
+                {
+                    "entities": [
+                        {"name": "张三", "category": "Person"},
+                        {"name": "甲公司", "category": "Company"},
+                    ],
+                    "relationships": [
+                        {
+                            "source": {"name": "张三", "category": "Person"},
+                            "target": {"name": "甲公司", "category": "Company"},
+                            "relation_type": "works_at",
+                        }
+                    ],
+                }
+            )
+        ),
+    )
+    extractor = GraphExtractor(ontology=graph_ontology, client=client)
+    await extractor.transform([chunk])
+    await ChunkFactsIndexer(storage).index([chunk])
+    restored = (await storage.get_chunks([chunk.chunk_id]))[0]
+    assert restored == chunk
+    assert isinstance(restored.metadata["entities"][0], dict)
+    await extractor.transform([restored])
+    assert client.structured_complete.await_count == 1
 
 
 @pytest_asyncio.fixture

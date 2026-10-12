@@ -4,7 +4,9 @@
 
 本文是 RAG V4 的实现设计合同，整合 00–10 方案中已经确认的边界。它描述核心模型、写入管线、存储端口、普通检索、图谱能力、权限和版本语义。
 
-2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。下一切片按 P5 推进图谱；父块暂缓，不做检索效果基线；在线重构建、生产配置和生命周期装配继续留后。
+2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。图事实首片已完成（见 22），下一切片讨论多来源拓扑投影；父块暂缓，不做检索效果基线；在线重构建、生产配置和生命周期装配继续留后。
+
+2026-10-12 P5 首片已完成 Ontology、GraphExtractor、增量复用、可选补漏、Chunk 图事实落库与离线图 repair，见 [22](22-graph-extraction-implementation.md)。图事实/本体统一为 core.schema.graph 中的 dataclass，只有 Instructor 输出 DTO 使用 Pydantic。下一片讨论 GraphStorage/GraphIndexer 多来源投影；当前排期不做确定性 Producer。
 
 本设计不包含 HTTP 路由、MCP 工具注册和最终 transport composition。MCP 只作为可信身份来源的既有边界被引用：最终用户身份由可信安全上下文注入，RAG application 接收 `PermissionScope`，不从业务参数读取用户 ID。
 
@@ -251,14 +253,19 @@ Chunker 封装现有 `MarkdownChunker`，负责分块边界、chunk_index、sect
 
 #### GraphExtractor
 
-GraphExtractor 接收 ontology 和完整 Chunk 列表，从 raw text 及允许的背景上下文提取 LightRAG 风格 Entity/Relationship，写入：
+GraphExtractor 已实现在 ingestion/transformers/graph.py。接收显式 Ontology、InstructionClient 和完整 Chunk 列表，只从当前 raw_text 提取有向实体/关系，section_path 只用于消歧，不读取生成上下文或其他正文，写入：
 
 ```python
 chunk.metadata["entities"]
 chunk.metadata["relationships"]
+chunk.metadata["graph_version"]
 ```
 
-它不访问 GraphStorage 或 VectorStorage，也不负责实体归一、关系去重和图投影写入。没有抽取结果可以作为成功结果写入空 metadata；真正异常必须传播并终止 Pipeline。
+GraphNode/GraphEdge/本体为 core.schema.graph 的 dataclass；Instructor 输出 DTO 的每个字段有 description。程序绑定 Chunk 来源并计算已有稳定 ID，同块首次合法事实保留。未知类别、谓词或非法端点逐事实丢弃；整个模型/解析异常传播，取消并等待其他任务，所有块成功后才替换图 metadata。
+
+成功指纹覆盖策略、模型、tokenizer、本体、schema、生成配置和实际消息；复用前解析缓存并检查本体/来源，合法空列表可复用。补漏默认关闭，开启最多一次，不修改/重复首轮合法事实，无增量允许空返回；新关系可引用首轮实体。默认输入 8000 token、输出 4096 token、实例并发 4；首轮超预算抛错，补漏历史超预算记录并接受首轮结果。
+
+独立 scripts/repair_graph.py 读取显式资源当前 applied 身份与已有块，写前复核完整发布状态，再经 ChunkFactsIndexer 保存全部块；force 禁用复用，资源级异常继续其他资源并非零退出。维护窗口同资源无其他写任务；不重新分块、不 stage/apply、不写普通向量，不连接生产入口。
 
 ### 5.3 Indexer
 
@@ -283,7 +290,7 @@ VectorIndexer：
 GraphIndexer：
 
 1. 从 Chunk metadata 收集实体和关系；
-2. 从 Chunk 结构字段生成确定性结构关系；
+2. 只消费已落库事实，不生成新事实或修改 Chunk metadata；
 3. 统一执行实体归一、关系去重和 Ontology 校验；
 4. 调用 `GraphWriter.upsert_nodes()` / `upsert_relations()`；
 5. 按配置调用 Entity/Relationship VectorWriter；
@@ -433,11 +440,11 @@ SectionReadScope 为 own/subtree，分别按 own_span/subtree_span 完整切原�
 
 非法事实按事实粒度丢弃，合法事实继续写入。Ontology 不增加独立版本号。
 
-### 8.2 两条 Producer 路径
+### 8.2 当前 LLM 路径与确定性 Producer 边界
 
-确定性结构 Producer 使用 Chunk 携带的结构字段和必要 metadata，构建 Resource、组织、人员、栏目和文档层级等事实。LLM GraphExtractor 补充正文语义事实。两者形成相同的 Entity/Relationship 模型，并将来源 Chunk ID 写入 GraphStorage 投影。
+当前排期不做确定性 Producer，只实现 LLM GraphExtractor。将来接入确定性 Producer 时，应在 ChunkFactsIndexer 保存前生产事实，不能放在只读 GraphIndexer 内；它仍应使用相同 GraphNode/GraphEdge 与本体校验规则。
 
-两条路径只保留基础 ID 去重和 upsert，不设计权威优先级、事实冲突仲裁或复杂合并状态机。LLM 可以补充结构 Entity 的 description，但 description 不是节点成立的必要条件。Chunk metadata 保存每个来源的抽取结果；跨 Chunk 的节点归一由 GraphIndexer 在构建投影时确定性完成。
+当前 Chunk metadata 保存每个来源的合法抽取结果。跨 Chunk 的归一和多来源投影留给 GraphIndexer，不设计事实优先级、冲突仲裁或跨类型实体链接。补漏只增加事实，不覆盖首轮合法 description。
 
 ### 8.3 Plugin identity
 
@@ -467,7 +474,7 @@ src/rag/
   ingestion/       # Chunker, Transformer, Indexer, IngestionPipeline
   storage/         # ContentStorage, VectorStorage, GraphStorage
   retrieval/       # vector.py: 配置式 VectorRetriever；graph 抽象留到图切片
-  graph/            # LightRAG core, Ontology, PluginRegistry
+  # 图/本体定义在 core/schema/graph.py，抽取位于 ingestion/transformers/graph.py；插件未实现
   backends/         # Mongo, Kafka, Qdrant, Neo4j
 ```
 
