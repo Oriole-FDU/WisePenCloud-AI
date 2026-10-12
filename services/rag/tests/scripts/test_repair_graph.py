@@ -535,3 +535,223 @@ async def test_graph_disabled_does_not_create_driver(
     await repair.run(args)
     factory.assert_not_called()
     assert execute.await_args.kwargs["graph"] is None
+
+
+def vector_arguments():
+    return [
+        "--with-graph-vectors",
+        "--qdrant-url",
+        "http://isolated",
+        "--embedding-base-url",
+        "http://embedding/v1",
+        "--embedding-api-key",
+        "test",
+        "--embedding-model",
+        "embedding",
+        "--embedding-dimensions",
+        "2",
+    ]
+
+
+async def test_projection_only_skips_extraction_and_fact_write(repair, flow):
+    _, chunks = await prepare(flow)
+    await run_repair(repair, flow, ["resource"])
+    before = await flow.content.get_chunks([chunk.chunk_id for chunk in chunks])
+    flow.client.structured_complete.reset_mock()
+    facts = SimpleNamespace(index=AsyncMock())
+    writer = SimpleNamespace(replace_sources=AsyncMock())
+    report = await repair.repair_resources(
+        ["resource"],
+        publication=flow.publication,
+        content=flow.content,
+        extractor=flow.extractor,
+        facts=facts,
+        graph=GraphIndexer(ontology=flow.ontology, writer=writer),
+        projection_only=True,
+    )
+    assert report.repaired == 1 and report.exit_code == 0
+    flow.client.structured_complete.assert_not_awaited()
+    facts.index.assert_not_awaited()
+    writer.replace_sources.assert_awaited_once()
+    assert await flow.content.get_chunks([chunk.chunk_id for chunk in chunks]) == before
+
+
+async def test_projection_only_bad_fact_input_does_not_write(repair, flow):
+    await prepare(flow)
+    writer = SimpleNamespace(replace_sources=AsyncMock())
+    report = await repair.repair_resources(
+        ["resource"],
+        publication=flow.publication,
+        content=flow.content,
+        graph=GraphIndexer(ontology=flow.ontology, writer=writer),
+        projection_only=True,
+    )
+    assert report.document_errors == 1
+    writer.replace_sources.assert_not_awaited()
+    flow.client.structured_complete.assert_not_awaited()
+
+
+async def test_projection_only_state_change_skips_indexer(repair, flow):
+    await prepare(flow)
+    original = flow.publication.get_states
+    calls = 0
+
+    async def get_states(ids):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            await flow.publication.destroy_resources(ids)
+        return await original(ids)
+
+    flow.publication.get_states = get_states
+    graph = SimpleNamespace(index=AsyncMock())
+    report = await repair.repair_resources(
+        ["resource"],
+        publication=flow.publication,
+        content=flow.content,
+        graph=graph,
+        projection_only=True,
+    )
+    assert report.skipped == 1
+    graph.index.assert_not_awaited()
+
+
+async def test_combined_indexer_failure_keeps_mongo_cache_and_continues(repair, flow):
+    await prepare(flow, "bad")
+    await prepare(flow, "good")
+    seen = []
+
+    async def index(chunks):
+        assert (
+            "graph_version"
+            in (await flow.content.get_chunks([chunks[0].chunk_id]))[0].metadata
+        )
+        seen.append(chunks[0].resource_id)
+        if seen[-1] == "bad":
+            raise OSError("vector partial write")
+
+    graph = SimpleNamespace(index=AsyncMock(side_effect=index))
+    options = {
+        "publication": flow.publication,
+        "content": flow.content,
+        "extractor": flow.extractor,
+        "facts": flow.facts,
+        "graph": graph,
+    }
+    report = await repair.repair_resources(["bad", "good"], **options)
+    assert (report.repaired, report.document_errors) == (1, 1)
+    flow.client.structured_complete.reset_mock()
+    graph.index.side_effect = None
+    assert (await repair.repair_resources(["bad"], **options)).repaired == 1
+    flow.client.structured_complete.assert_not_awaited()
+    assert seen == ["bad", "good"]
+
+
+def test_cli_projection_only_vector_configuration(
+    repair, tmp_path, graph_ontology, monkeypatch
+):
+    arguments = [
+        *config_arguments(tmp_path, graph_ontology)[:6],
+        "--resource-id",
+        "resource",
+    ]
+    args = repair.parse_args([*arguments, "--projection-only", *vector_arguments()])
+    assert args.instruction_model is None
+    assert args.entity_vector_collection == "graph_entity_source_vectors_v4"
+    assert args.relation_vector_collection == "graph_relation_source_vectors_v4"
+    for extra in (
+        ["--projection-only"],
+        ["--projection-only", *vector_arguments(), "--force"],
+        ["--projection-only", *vector_arguments(), "--gleaning"],
+        ["--projection-only", *vector_arguments(), "--embedding-dimensions", "0"],
+        [
+            "--projection-only",
+            *vector_arguments(),
+            "--entity-vector-collection",
+            "same",
+            "--relation-vector-collection",
+            "same",
+        ],
+    ):
+        with pytest.raises(SystemExit):
+            repair.parse_args([*arguments, *extra])
+    for name, value in (
+        ("QDRANT_URL", "http://isolated"),
+        ("EMBEDDING_BASE_URL", "http://embedding/v1"),
+        ("EMBEDDING_API_KEY", "test"),
+        ("EMBEDDING_MODEL", "model"),
+        ("EMBEDDING_DIMENSIONS", "2"),
+    ):
+        monkeypatch.setenv(f"RAG_GRAPH_REPAIR_{name}", value)
+    args = repair.parse_args([*arguments, "--projection-only", "--with-graph-vectors"])
+    assert args.embedding_dimensions == 2 and args.embedding_model == "model"
+
+
+@pytest.mark.parametrize("failure", [None, "schema", "repair", "cancel"])
+async def test_vectors_only_setup_no_instruction_or_neo4j_and_closes_clients(
+    repair, monkeypatch, tmp_path, graph_ontology, failure
+):
+    args = repair.parse_args(
+        [
+            *config_arguments(tmp_path, graph_ontology)[:6],
+            "--resource-id",
+            "resource",
+            "--projection-only",
+            *vector_arguments(),
+        ]
+    )
+    mongo = DatabaseClient()
+    api = SimpleNamespace(close=AsyncMock())
+    qdrant = SimpleNamespace(close=AsyncMock())
+    vectors = [
+        SimpleNamespace(ensure_collection=AsyncMock()),
+        SimpleNamespace(ensure_collection=AsyncMock()),
+    ]
+    if failure == "schema":
+        vectors[1].ensure_collection.side_effect = OSError("index failure")
+    execute = AsyncMock(return_value=repair.RepairReport(repaired=1))
+    if failure == "repair":
+        execute.side_effect = OSError("write failed")
+    elif failure == "cancel":
+        execute.side_effect = asyncio.CancelledError()
+    monkeypatch.setattr(repair, "AsyncMongoClient", Mock(return_value=mongo))
+    monkeypatch.setattr(repair, "AsyncOpenAI", Mock(return_value=api))
+    instruction = Mock()
+    monkeypatch.setattr(repair, "InstructionClient", instruction)
+    driver = Mock()
+    monkeypatch.setattr(repair, "AsyncGraphDatabase", SimpleNamespace(driver=driver))
+    monkeypatch.setattr(repair, "AsyncQdrantClient", Mock(return_value=qdrant))
+    storage = Mock(side_effect=vectors)
+    monkeypatch.setattr(repair, "QdrantVectorStorage", storage)
+    monkeypatch.setattr(repair, "repair_resources", execute)
+    if failure:
+        with pytest.raises((OSError, asyncio.CancelledError)):
+            await repair.run(args)
+    else:
+        assert (await repair.run(args)).repaired == 1
+        graph = execute.await_args.kwargs["graph"]
+        assert isinstance(graph, GraphIndexer) and graph._writer is None
+        assert (
+            graph._entity_writer is vectors[0]
+            and graph._relationship_writer is vectors[1]
+        )
+        assert (
+            execute.await_args.kwargs["extractor"] is None
+            and execute.await_args.kwargs["facts"] is None
+        )
+    for storage_instance in vectors:
+        storage_instance.ensure_collection.assert_awaited_once_with(
+            metadata_index_fields=[
+                "resource_id",
+                "content_revision",
+                "chunk_id",
+                "ontology_name",
+            ]
+        )
+    assert all(
+        call.kwargs["sparse_vector_name"] is None for call in storage.call_args_list
+    )
+    instruction.assert_not_called()
+    driver.assert_not_called()
+    for client in (mongo, api, qdrant):
+        client.close.assert_awaited_once()

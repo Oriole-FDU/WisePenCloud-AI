@@ -130,26 +130,11 @@ class _DenseRetriever(Retriever[VectorMatch]):
         self._include_embedding = include_embedding
 
     async def retrieve(self, query: str) -> list[Candidate[VectorMatch]]:
-        try:
-            vectors = await self._embedding_client.embed(texts=[query])
-        except ValueError as exc:
-            raise RuntimeError("invalid embedding response") from exc
-        if len(vectors) != 1 or any(
-            (
-                self._embedding_client.dimensions is not None
-                and len(vector) != self._embedding_client.dimensions
-            )
-            or any(
-                type(value) not in (int, float) or not isfinite(value)
-                for value in vector
-            )
-            for vector in vectors
-        ):
-            raise RuntimeError("invalid embedding response count, dimensions or values")
+        embedding = await embed_query(self._embedding_client, query)
 
         matches = await self._reader.query(
             VectorQuery(
-                embedding=vectors[0],
+                embedding=embedding,
                 top_k=self.top_k,
                 filters=self._filters,
                 include_embedding=self._include_embedding,
@@ -190,3 +175,23 @@ class _SparseRetriever(Retriever[VectorMatch]):
             Candidate(match.record_id, match, rank, match.score)
             for rank, match in enumerate(matches, start=1)
         ]
+
+
+async def embed_query(embedding_client: EmbeddingClient, query: str) -> list[float]:
+    """统一校验查询 embedding 的数量、配置维度和有限值。"""
+    try:
+        vectors = await embedding_client.embed(texts=[query])
+    except ValueError as exc:
+        raise RuntimeError("invalid embedding response") from exc
+    if len(vectors) != 1 or any(
+        (
+            embedding_client.dimensions is not None
+            and len(vector) != embedding_client.dimensions
+        )
+        or any(
+            type(value) not in (int, float) or not isfinite(value) for value in vector
+        )
+        for vector in vectors
+    ):
+        raise RuntimeError("invalid embedding response count, dimensions or values")
+    return vectors[0]

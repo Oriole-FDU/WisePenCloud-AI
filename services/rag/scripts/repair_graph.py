@@ -1,4 +1,4 @@
-"""维护窗口内修复图事实并可选重建 Neo4j，不重新分块或推进 publication。"""
+"""维护窗口内修复图事实或重建拓扑/来源向量，不重新分块或推进 publication。"""
 
 import argparse
 import asyncio
@@ -10,15 +10,17 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from common.logger import error
-from common.utils.ai_clients import InstructionClient
+from common.utils.ai_clients import EmbeddingClient, InstructionClient
 from neo4j import AsyncGraphDatabase
 from openai import AsyncOpenAI
 from pymongo import AsyncMongoClient
+from qdrant_client import AsyncQdrantClient
 
 from rag.application.publication.store import PublicationStore
 from rag.backends.mongo.content import MongoContentStorage
 from rag.backends.mongo.publication import MongoPublicationStore
 from rag.backends.neo4j import Neo4jGraphStorage
+from rag.backends.qdrant import QdrantVectorStorage
 from rag.core.schema import ContentRevision, Ontology
 from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer
 from rag.ingestion.transformers import GraphExtractor
@@ -43,15 +45,21 @@ async def repair_resources(
     *,
     publication: PublicationStore,
     content: ContentReader,
-    extractor: GraphExtractor,
-    facts: ChunkFactsIndexer,
+    extractor: GraphExtractor | None = None,
+    facts: ChunkFactsIndexer | None = None,
     graph: GraphIndexer | None = None,
+    projection_only: bool = False,
 ) -> RepairReport:
     """当前 applied 事实逐资源修复；同资源不得存在其他 Chunk 写任务。
 
     模型异常停止当前资源，旧数据库事实不被清空；保存失败的部分写入保留。
     写前状态复核只适用于维护窗口，不提供并发更新协议。
     """
+    if projection_only:
+        if graph is None:
+            raise ValueError("projection-only repair requires a graph indexer")
+    elif extractor is None or facts is None:
+        raise ValueError("fact repair requires extractor and facts indexer")
     report = RepairReport()
     for resource_id in dict.fromkeys(resource_ids):
         try:
@@ -91,7 +99,8 @@ async def repair_resources(
                 for chunk in chunks
             ):
                 raise RuntimeError("selected chunks do not match publication")
-            chunks = await extractor.transform(chunks, document=document)
+            if not projection_only:
+                chunks = await extractor.transform(chunks, document=document)
             current_states = await publication.get_states([resource_id])
             current = next(
                 (item for item in current_states if item.resource_id == resource_id),
@@ -101,7 +110,8 @@ async def repair_resources(
                 report.skipped += 1
                 continue
             # 图字段不改变 retrieval_text，不重写普通向量；成功缓存也不能跳过事实写入。
-            await facts.index(chunks)
+            if not projection_only:
+                await facts.index(chunks)
             # 抽取缓存不证明上次图投影完成；启用时每次重写全部来源贡献。
             if graph is not None:
                 await graph.index(chunks)
@@ -134,6 +144,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--gleaning", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--with-graph", action="store_true")
+    parser.add_argument("--with-graph-vectors", action="store_true")
+    parser.add_argument("--projection-only", action="store_true")
+    for name, default in (
+        ("qdrant-url", None),
+        ("qdrant-api-key", None),
+        ("embedding-base-url", None),
+        ("embedding-api-key", None),
+        ("embedding-model", None),
+        ("entity-vector-collection", "graph_entity_source_vectors_v4"),
+        ("relation-vector-collection", "graph_relation_source_vectors_v4"),
+    ):
+        parser.add_argument(
+            f"--{name}",
+            default=os.getenv(
+                f"RAG_GRAPH_REPAIR_{name.upper().replace('-', '_')}", default
+            ),
+        )
+    parser.add_argument(
+        "--embedding-dimensions",
+        type=int,
+        default=os.getenv("RAG_GRAPH_REPAIR_EMBEDDING_DIMENSIONS"),
+    )
     for name, default in (
         ("uri", None),
         ("username", None),
@@ -165,14 +197,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     if not args.resource_ids:
         parser.error("provide --resource-id or a nonempty --resource-file")
-    for name in (
-        "mongo_url",
-        "mongo_database",
-        "instruction_base_url",
-        "instruction_api_key",
-        "instruction_model",
-    ):
-        if not getattr(args, name):
+    required = ["mongo_url", "mongo_database"]
+    if args.projection_only:
+        if not (args.with_graph or args.with_graph_vectors):
+            parser.error("--projection-only requires a projection stage")
+        if args.force or args.gleaning:
+            parser.error("--projection-only cannot use --force or --gleaning")
+    else:
+        required += ["instruction_base_url", "instruction_api_key", "instruction_model"]
+    if args.with_graph_vectors:
+        required += [
+            "qdrant_url",
+            "embedding_base_url",
+            "embedding_api_key",
+            "embedding_model",
+            "entity_vector_collection",
+            "relation_vector_collection",
+        ]
+        if args.embedding_dimensions is None or args.embedding_dimensions <= 0:
+            parser.error("--embedding-dimensions must be positive")
+        if args.entity_vector_collection == args.relation_vector_collection:
+            parser.error("entity and relation vector collections must differ")
+    for name in required:
+        if not getattr(args, name) or not getattr(args, name).strip():
             parser.error(f"missing --{name.replace('_', '-')}")
     if any(
         value <= 0
@@ -195,29 +242,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 async def run(args: argparse.Namespace) -> RepairReport:
-    """显式装配 Mongo 与模型客户端，成功和异常路径均关闭资源。"""
+    """按启用阶段装配 Mongo、投影与模型客户端，成功和异常路径均关闭资源。"""
     async with AsyncExitStack() as stack:
         mongo = AsyncMongoClient(args.mongo_url)
         stack.push_async_callback(mongo.close)
-        instruction_api = AsyncOpenAI(
-            base_url=args.instruction_base_url, api_key=args.instruction_api_key
-        )
-        stack.push_async_callback(instruction_api.close)
         database = mongo[args.mongo_database]
         content = MongoContentStorage(
             documents=database["document_revisions"], chunks=database["doc_chunks"]
         )
         publication = MongoPublicationStore(database["resource_publications"])
-        extractor = GraphExtractor(
-            ontology=args.ontology,
-            client=InstructionClient(instruction_api, model=args.instruction_model),
-            max_input_tokens=args.max_input_tokens,
-            max_output_tokens=args.max_output_tokens,
-            max_concurrency=args.max_concurrency,
-            gleaning=args.gleaning,
-            reuse_existing=not args.force,
-        )
-        graph = None
+        extractor = None
+        if not args.projection_only:
+            instruction_api = AsyncOpenAI(
+                base_url=args.instruction_base_url, api_key=args.instruction_api_key
+            )
+            stack.push_async_callback(instruction_api.close)
+            extractor = GraphExtractor(
+                ontology=args.ontology,
+                client=InstructionClient(instruction_api, model=args.instruction_model),
+                max_input_tokens=args.max_input_tokens,
+                max_output_tokens=args.max_output_tokens,
+                max_concurrency=args.max_concurrency,
+                gleaning=args.gleaning,
+                reuse_existing=not args.force,
+            )
+        topology = None
         if args.with_graph:
             driver = AsyncGraphDatabase.driver(
                 args.neo4j_uri, auth=(args.neo4j_username, args.neo4j_password)
@@ -229,14 +278,63 @@ async def run(args: argparse.Namespace) -> RepairReport:
                 graph_name=args.neo4j_graph_name,
             )
             await topology.ensure_schema()
-            graph = GraphIndexer(ontology=args.ontology, writer=topology)
+        embedding_client = None
+        entity_vectors = None
+        relation_vectors = None
+        if args.with_graph_vectors:
+            embedding_api = AsyncOpenAI(
+                base_url=args.embedding_base_url, api_key=args.embedding_api_key
+            )
+            stack.push_async_callback(embedding_api.close)
+            qdrant = AsyncQdrantClient(
+                url=args.qdrant_url, api_key=args.qdrant_api_key or None
+            )
+            stack.push_async_callback(qdrant.close)
+            entity_vectors = QdrantVectorStorage(
+                client=qdrant,
+                collection=args.entity_vector_collection,
+                dense_vector_size=args.embedding_dimensions,
+                sparse_vector_name=None,
+            )
+            relation_vectors = QdrantVectorStorage(
+                client=qdrant,
+                collection=args.relation_vector_collection,
+                dense_vector_size=args.embedding_dimensions,
+                sparse_vector_name=None,
+            )
+            for vectors in (entity_vectors, relation_vectors):
+                await vectors.ensure_collection(
+                    metadata_index_fields=[
+                        "resource_id",
+                        "content_revision",
+                        "chunk_id",
+                        "ontology_name",
+                    ]
+                )
+            embedding_client = EmbeddingClient(
+                embedding_api,
+                model=args.embedding_model,
+                dimensions=args.embedding_dimensions,
+            )
+        graph = (
+            GraphIndexer(
+                ontology=args.ontology,
+                writer=topology,
+                embedding_client=embedding_client,
+                entity_writer=entity_vectors,
+                relationship_writer=relation_vectors,
+            )
+            if args.with_graph or args.with_graph_vectors
+            else None
+        )
         return await repair_resources(
             args.resource_ids,
             publication=publication,
             content=content,
             extractor=extractor,
-            facts=ChunkFactsIndexer(content),
+            facts=ChunkFactsIndexer(content) if not args.projection_only else None,
             graph=graph,
+            projection_only=args.projection_only,
         )
 
 

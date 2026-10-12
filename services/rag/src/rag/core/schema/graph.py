@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+from common.logger import warning
 from pydantic import TypeAdapter
+
+from .content import Chunk
 
 
 @dataclass(slots=True)
@@ -43,7 +46,12 @@ class GraphEdge:
 
     @property
     def id(self) -> str:
+        # 端点 + 谓词组成关系身份
         return f"{self.source_id}::{self.relation_type}::{self.target_id}"
+
+
+_node_adapter = TypeAdapter(GraphNode)
+_edge_adapter = TypeAdapter(GraphEdge)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +93,7 @@ class Ontology:
         if suffix not in (".json", ".yaml", ".yml"):
             raise ValueError("ontology file must be JSON or YAML")
 
+        # utf-8-sig 兼容 BOM；JSON/YAML 分别走对应解析器
         text = path.read_text(encoding="utf-8-sig")
         try:
             data = json.loads(text) if suffix == ".json" else yaml.safe_load(text)
@@ -102,6 +111,7 @@ class Ontology:
         for relation_type, spec in ontology.relation_specs.items():
             if not relation_type.strip() or relation_type != spec.relation_type:
                 raise ValueError("relation spec key must match its nonblank type")
+            # 关系两端的类别必须在本体中声明
             if any(
                 category not in ontology.entity_specs
                 for category in [*spec.allowed_sources, *spec.allowed_targets]
@@ -110,6 +120,7 @@ class Ontology:
         return ontology
 
     def validate_node(self, node: GraphNode) -> None:
+        """校验实体属于本域、名称非空、类别已声明。"""
         if node.ontology_name != self.domain:
             raise ValueError("entity ontology does not match")
         if not node.name.strip():
@@ -118,14 +129,116 @@ class Ontology:
             raise ValueError(f"unknown entity category: {node.category}")
 
     def validate_edge(self, edge: GraphEdge, nodes: Mapping[str, GraphNode]) -> None:
+        """校验谓词已声明，且端点存在、类别符合允许集合。"""
         spec = self.relation_specs.get(edge.relation_type)
         if spec is None:
             raise ValueError(f"unknown relation type: {edge.relation_type}")
+
         source = nodes.get(edge.source_id)
         target = nodes.get(edge.target_id)
         if source is None or target is None:
             raise ValueError("relation endpoint is missing")
+
+        # 允许集合为空表示不限制该端
         if spec.allowed_sources and source.category not in spec.allowed_sources:
             raise ValueError("relation source category is not allowed")
         if spec.allowed_targets and target.category not in spec.allowed_targets:
             raise ValueError("relation target category is not allowed")
+
+    def create_node(
+        self,
+        *,
+        name: str,
+        category: str,
+        source_id: str,
+        description: str | None = None,
+    ) -> GraphNode:
+        """在本体内构造实体，namespace 由本体绑定，不由模型指定。"""
+        node = GraphNode(name, source_id, self.domain, category, description)
+        self.validate_node(node)
+        return node
+
+    def create_edge(
+        self,
+        *,
+        nodes: Mapping[str, GraphNode],
+        source_id: str,
+        target_id: str,
+        relation_type: str,
+        chunk_id: str,
+        description: str | None = None,
+        keywords: list[str] | None = None,
+    ) -> GraphEdge:
+        """连接当前已接受实体，绑定单一 Chunk 来源，不自动补建端点。"""
+        edge = GraphEdge(
+            source_id=source_id,
+            target_id=target_id,
+            relation_type=relation_type,
+            description=description,
+            keywords=keywords,
+            source_ids=[chunk_id],
+        )
+        self.validate_edge(edge, nodes)
+        return edge
+
+    def parse_chunk_facts(
+        self, chunk: Chunk, *, strict: bool = False
+    ) -> tuple[dict[str, GraphNode], dict[str, GraphEdge]]:
+        """读取普通字典事实；结构/来源损坏报错，本体非法项按事实丢弃。
+
+        strict=True 用于成功缓存：非法项和重复 ID 均拒绝，不能丢弃后当作
+        已完整成功。普通读取保留首次合法事实，不修改输入，不决定授权。
+        """
+        entities = chunk.metadata.get("entities")
+        relationships = chunk.metadata.get("relationships")
+
+        # 事实字段必须是列表
+        if not isinstance(entities, list) or not isinstance(relationships, list):
+            raise TypeError("graph facts must contain entity and relationship lists")
+
+        nodes: dict[str, GraphNode] = {}
+        edges: dict[str, GraphEdge] = {}
+
+        # 实体：结构错误报错；本体非法项按 strict 决定丢弃或抛错
+        for value in entities:
+            if not isinstance(value, dict):
+                raise TypeError("graph facts must be ordinary dictionaries")
+            node = _node_adapter.validate_python(value, extra="forbid")
+            if node.source_id != chunk.chunk_id:
+                raise ValueError("graph entity source does not match its chunk")
+            try:
+                self.validate_node(node)
+            except ValueError as exc:
+                if strict:
+                    raise
+                warning(
+                    "graph_entity_rejected", chunk_id=chunk.chunk_id, error=str(exc)
+                )
+                continue
+            if strict and node.id in nodes:
+                raise ValueError("duplicate cached entity")
+            nodes.setdefault(node.id, node)  # 同 ID 去重，保留首个
+
+        # 关系：同上，端点必须已在 nodes 中
+        for value in relationships:
+            if not isinstance(value, dict):
+                raise TypeError("graph facts must be ordinary dictionaries")
+            edge = _edge_adapter.validate_python(value, extra="forbid")
+            if edge.source_ids != [chunk.chunk_id]:
+                raise ValueError("graph relationship sources do not match its chunk")
+            try:
+                self.validate_edge(edge, nodes)
+            except ValueError as exc:
+                if strict:
+                    raise
+                warning(
+                    "graph_relationship_rejected",
+                    chunk_id=chunk.chunk_id,
+                    error=str(exc),
+                )
+                continue
+            if strict and edge.id in edges:
+                raise ValueError("duplicate cached relationship")
+            edges.setdefault(edge.id, edge)  # 同 ID 去重，保留首个
+
+        return nodes, edges

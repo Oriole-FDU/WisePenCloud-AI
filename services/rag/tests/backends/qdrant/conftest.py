@@ -1,6 +1,7 @@
 """Qdrant 驱动 fake 与显式启用的随机隔离 collection，均不读取生产配置。"""
 
 import os
+from contextlib import AsyncExitStack
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -69,3 +70,42 @@ async def real_vectors():
                 await client.delete_collection(collection)
         finally:
             await client.close()
+
+
+@pytest.fixture
+async def real_graph_vectors():
+    url = os.environ.get("RAG_TEST_QDRANT_URL")
+    if not url:
+        pytest.skip("RAG_TEST_QDRANT_URL is not configured")
+    async with AsyncExitStack() as stack:
+        client = AsyncQdrantClient(
+            url=url,
+            api_key=os.environ.get("RAG_TEST_QDRANT_API_KEY") or None,
+            timeout=30,
+        )
+        stack.push_async_callback(client.close)
+
+        async def remove(collection):
+            if await client.collection_exists(collection):
+                await client.delete_collection(collection)
+
+        stores = []
+        for kind in ("entity", "relationship"):
+            collection = f"rag_test_graph_{kind}_{uuid4().hex}"
+            stack.push_async_callback(remove, collection)
+            storage = QdrantVectorStorage(
+                client=client,
+                collection=collection,
+                dense_vector_size=2,
+                sparse_vector_name=None,
+            )
+            await storage.ensure_collection(
+                metadata_index_fields=[
+                    "resource_id",
+                    "content_revision",
+                    "chunk_id",
+                    "ontology_name",
+                ]
+            )
+            stores.append(storage)
+        yield stores[0], stores[1], client

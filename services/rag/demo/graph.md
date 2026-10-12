@@ -133,3 +133,104 @@ driver、URI/auth、Ontology 和已读回的完整 Chunk 列表由调用方提�
 GraphReader 支持 get_nodes、get_relations、get_neighbors。一跳方向为 outgoing/incoming/both，谓词可过滤，默认 limit=100 限制逻辑关系数，选中关系的匹配来源完整返回。MetadataFilters 只执行来源 metadata 的平面属性条件，不代表 ACL；结果仍是候选，应用层授权和 selected revision 回查在后续查询切片实现。
 
 本片不回收未传入的历史 revision 或重新分块后旧 Chunk，不写图向量，不实现图查询生成。
+
+
+## 图向量与同一个 GraphIndexer
+
+实体和关系按来源独立写入两个 dense collection，索引文本包含 Ontology 的标识/业务说明、类别/谓词说明及当前来源描述。不跨来源摘要，不索引 contextual_context 或原文。连接和 embedding 配置由装配入口提供：
+
+```python
+from rag.backends.qdrant import QdrantVectorStorage
+from rag.ingestion.indexers import GraphIndexer
+
+entity_vectors = QdrantVectorStorage(
+    client=qdrant_client, collection="graph_entity_source_vectors_v4",
+    dense_vector_size=EMBEDDING_DIMENSIONS, sparse_vector_name=None,
+)
+relationship_vectors = QdrantVectorStorage(
+    client=qdrant_client, collection="graph_relation_source_vectors_v4",
+    dense_vector_size=EMBEDDING_DIMENSIONS, sparse_vector_name=None,
+)
+for vectors in (entity_vectors, relationship_vectors):
+    await vectors.ensure_collection(
+        metadata_index_fields=["resource_id", "content_revision", "chunk_id", "ontology_name"],
+    )
+
+# 两种 writer 由一个 Indexer 按拓扑→向量顺序执行，不增加第二个 Indexer。
+indexer = GraphIndexer(
+    ontology=ontology, writer=topology,
+    embedding_client=embedding_client,
+    entity_writer=entity_vectors, relationship_writer=relationship_vectors,
+)
+await indexer.index(stored_chunks)
+```
+
+仅拓扑时只注入 writer；仅向量时省略 writer 并注入完整向量依赖组。当前批全部 embedding 成功后才删旧向量并写入，空事实清除该来源。跨集合/数据库不补偿，部分失败通过重跑恢复；输入解析和来源校验只做一次。调用方保证同资源串行。
+
+## repair 图向量与仅投影模式
+
+--with-graph-vectors 独立启用图向量，CLI 参数及环境变量如下。URL、embedding 配置和正整数维度必填，Qdrant key 可选，两个集合不得相同：
+
+```text
+RAG_GRAPH_REPAIR_QDRANT_URL
+RAG_GRAPH_REPAIR_QDRANT_API_KEY
+RAG_GRAPH_REPAIR_EMBEDDING_BASE_URL
+RAG_GRAPH_REPAIR_EMBEDDING_API_KEY
+RAG_GRAPH_REPAIR_EMBEDDING_MODEL
+RAG_GRAPH_REPAIR_EMBEDDING_DIMENSIONS
+RAG_GRAPH_REPAIR_ENTITY_VECTOR_COLLECTION    # 默认 graph_entity_source_vectors_v4
+RAG_GRAPH_REPAIR_RELATION_VECTOR_COLLECTION  # 默认 graph_relation_source_vectors_v4
+```
+
+CLI 对应 --qdrant-url、--qdrant-api-key、--embedding-base-url、--embedding-api-key、--embedding-model、--embedding-dimensions、--entity-vector-collection、--relation-vector-collection。比如已配好维护环境后：
+
+```powershell
+.venv/Scripts/python.exe services/rag/scripts/repair_graph.py `
+    --ontology-file services/rag/demo/graph-ontology.yaml `
+    --resource-id RESOURCE_ID `
+    --projection-only --with-graph --with-graph-vectors
+```
+
+仅投影模式不需要 instruction 配置、不调用抽取模型、不保存 Chunk，但图向量需要 embedding；至少启用一种投影，不可同时指定 force/gleaning。省略 --projection-only 则保持抽取→状态复核→事实保存→GraphIndexer，缓存复用仍重写所有启用投影。图向量失败保留事实和已完成拓扑，继续其他资源且最终非零退出。全部客户端关闭。
+
+## GraphRetriever 种子组件与 Common Pipeline
+
+```python
+from common.utils.retrieval import RetrievalPipeline, RrfFusion
+from rag.core.schema.filters import MetadataFilter, MetadataFilters
+from rag.retrieval import GraphRetrievalMode, GraphRetriever
+
+retriever = GraphRetriever.from_storage(
+    entity_reader=entity_vectors,
+    relationship_reader=relationship_vectors,
+    embedding_client=embedding_client,
+    mode=GraphRetrievalMode.HYBRID,
+    entity_top_k=30, relationship_top_k=30, candidate_limit=60,
+    filters=MetadataFilters([MetadataFilter("ontology_name", ontology.domain)]),
+    fusion=RrfFusion(),  # 省略时使用 Common RoundRobin。
+)
+
+pipeline = RetrievalPipeline(
+    retriever=retriever,
+    prepare_candidates=prepare_graph_candidates,
+    reranker=graph_reranker,
+)
+```
+
+这里 prepare_graph_candidates 和 graph_reranker 由实际 application 用例提供，本片不装配它们。准备回调必须在同一 ResourceSnapshot 下先用 SnapshotReader 授权回查 Chunk，核对向量的 resource/revision、记录 ID、fact_id 及当前索引文本的 text_sha256，再消费 Ontology.parse_chunk_facts。仅对合法种子扩展一跳，并再次授权及核对关系/端点来源。后端过滤不能代替这一步，GraphMatch 不能直接作为 MCP 业务结果。
+
+local 仅实体路线，global 仅关系路线，单路只需对应 reader，candidate_limit 就是路内预算；单路不接受 entity_top_k/relationship_top_k。hybrid 融合两路候选，不包含普通 Chunk 检索；mix 是否排期待定。每次直接 embedding query 一次，两路共用该向量并发读取。候选身份为 kind:record_id，同逻辑事实不同来源不会提前合并。组件不读 Mongo/Neo4j，不保存请求快照，不做生成或输出 token 裁剪；完整图材料用例留到准备阶段的下一切片。
+
+## 本体构造与事实读取
+
+```python
+node = ontology.create_node(
+    name="张三", category="Person", source_id=chunk.chunk_id,
+    description="当前块支持的人员描述",
+)
+nodes, edges = ontology.parse_chunk_facts(chunk)
+# 成功缓存要求全部合法、无重复；损坏或非法项直接拒绝。
+nodes, edges = ontology.parse_chunk_facts(chunk, strict=True)
+```
+
+本体对象绑定构造与解析规则，不写入 GraphNode/GraphEdge 实例。字段仍为普通事实，可通过 asdict 写入 metadata；从外部数据库读回后仍需要当前规则和来源校验。Indexer、抽取缓存不再各写一份持久化事实解析逻辑。

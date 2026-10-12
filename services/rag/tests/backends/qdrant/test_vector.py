@@ -21,6 +21,72 @@ def record(index=0):
     )
 
 
+@pytest.fixture
+def dense_vectors(qdrant_client):
+    return QdrantVectorStorage(
+        client=qdrant_client,
+        collection="graph_entities",
+        dense_vector_size=2,
+        sparse_vector_name=None,
+    )
+
+
+async def test_dense_only_creation_indexes_upsert_and_query(
+    dense_vectors, qdrant_client
+):
+    qdrant_client.collection_exists.return_value = False
+    qdrant_client.get_collection.return_value.config.params.sparse_vectors = None
+    await dense_vectors.ensure_collection(
+        metadata_index_fields=[
+            "resource_id",
+            "content_revision",
+            "chunk_id",
+            "ontology_name",
+        ]
+    )
+    assert (
+        qdrant_client.create_collection.await_args.kwargs["sparse_vectors_config"]
+        is None
+    )
+    assert [
+        call.kwargs["field_name"]
+        for call in qdrant_client.create_payload_index.await_args_list
+    ] == [
+        "metadata.resource_id",
+        "metadata.content_revision",
+        "metadata.chunk_id",
+        "metadata.ontology_name",
+    ]
+    await dense_vectors.upsert([record()])
+    point = qdrant_client.upsert.await_args.kwargs["points"][0]
+    assert point.vector == {"dense": [1.0, 0.0]}
+    await dense_vectors.query(VectorQuery(embedding=[1.0, 0.0]))
+    assert qdrant_client.query_points.await_args.kwargs["using"] == "dense"
+
+
+async def test_dense_only_sparse_request_rejected_before_io(
+    dense_vectors, qdrant_client
+):
+    with pytest.raises(ValueError, match="sparse"):
+        await dense_vectors.query(VectorQuery(text="任职"))
+    qdrant_client.query_points.assert_not_awaited()
+
+
+@pytest.mark.parametrize("fields", [[""], ["nested.key"]])
+async def test_invalid_metadata_index_fields_fail_before_io(
+    dense_vectors, qdrant_client, fields
+):
+    with pytest.raises(ValueError):
+        await dense_vectors.ensure_collection(metadata_index_fields=fields)
+    qdrant_client.collection_exists.assert_not_awaited()
+
+
+async def test_dense_configuration_still_checked(dense_vectors, qdrant_client):
+    qdrant_client.get_collection.return_value.config.params.vectors["dense"].size = 3
+    with pytest.raises(ValueError, match="incompatible"):
+        await dense_vectors.ensure_collection()
+
+
 async def test_empty_upsert_has_no_io(vectors, qdrant_client):
     await vectors.upsert([])
     for method in vars(qdrant_client).values():

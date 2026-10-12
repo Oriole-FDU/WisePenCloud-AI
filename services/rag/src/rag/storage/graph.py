@@ -1,10 +1,12 @@
 """来源贡献与拓扑的读写端口，不解释本体、ACL 或发布状态。"""
 
+import json
 from dataclasses import dataclass, field
 from enum import StrEnum
+from hashlib import sha256
 from typing import Protocol
 
-from rag.core.schema import GraphEdge, GraphNode
+from rag.core.schema import GraphEdge, GraphNode, Ontology
 from rag.core.schema.filters import MetadataFilters
 
 
@@ -62,3 +64,54 @@ class GraphWriter(Protocol):
 
 class GraphStorage(GraphReader, GraphWriter, Protocol):
     """一个实例绑定一个物理图，核心 ID 不包含后端图命名空间。"""
+
+
+class GraphVectorKind(StrEnum):
+    ENTITY = "entity"
+    RELATIONSHIP = "relationship"
+
+
+def graph_vector_record_id(kind: GraphVectorKind, chunk_id: str, fact_id: str) -> str:
+    # 使用数组编码，来源与图 ID 内的分隔符不会改变向量身份的边界。
+    identity = json.dumps(
+        [kind, chunk_id, fact_id], ensure_ascii=False, separators=(",", ":")
+    )
+    return "gvec_" + sha256(identity.encode("utf-8")).hexdigest()
+
+
+def entity_vector_text(node: GraphNode, ontology: Ontology) -> str:
+    """仅使用本体业务说明与当前来源事实，不引入其他 Chunk 的描述。"""
+    return "\n".join(
+        [
+            f"ontology: {ontology.domain}",
+            f"ontology_description: {ontology.description}",
+            f"category: {node.category}",
+            f"category_description: {ontology.entity_specs[node.category].description}",
+            f"name: {node.name}",
+            f"description: {node.description or ''}",
+        ]
+    )
+
+
+def relationship_vector_text(
+    edge: GraphEdge, nodes: dict[str, GraphNode], ontology: Ontology
+) -> str:
+    """有向两端、谓词说明与关系来源描述共同表达关系语义。"""
+    source = nodes[edge.source_id]
+    target = nodes[edge.target_id]
+    return "\n".join(
+        [
+            f"ontology: {ontology.domain}",
+            f"ontology_description: {ontology.description}",
+            f"relation_type: {edge.relation_type}",
+            f"relation_description: {ontology.relation_specs[edge.relation_type].description}",
+            f"source: {source.name}",
+            f"source_category: {source.category}",
+            f"source_category_description: {ontology.entity_specs[source.category].description}",
+            f"target: {target.name}",
+            f"target_category: {target.category}",
+            f"target_category_description: {ontology.entity_specs[target.category].description}",
+            f"description: {edge.description or ''}",
+            f"keywords: {', '.join(edge.keywords or [])}",
+        ]
+    )

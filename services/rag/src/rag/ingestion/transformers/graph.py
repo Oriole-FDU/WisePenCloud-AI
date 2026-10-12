@@ -8,12 +8,9 @@ from hashlib import sha256
 from common.logger import warning
 from common.utils.ai_clients.instruction import InstructionClient
 from common.utils.markdown.chunking.tokenizer import TokenCounter, default_token_counter
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
 from rag.core.schema import Chunk, Document, GraphEdge, GraphNode, Ontology
-
-_node_adapter = TypeAdapter(GraphNode)  # 仅在持久化缓存边界解析普通字典。
-_edge_adapter = TypeAdapter(GraphEdge)
 
 _STRATEGY_VERSION = "graph-extractor-v1"
 _SYSTEM_PROMPT = """从当前块正文抽取本体允许的实体和有向关系，输出符合 schema 的 JSON。
@@ -104,13 +101,8 @@ def _merge_facts(
 ) -> None:
     """同一来源内首次合法事实优先；补漏只增补，不改写已接受事实。"""
     for entity in result.entities:
-        node = GraphNode(
-            **entity.model_dump(),
-            ontology_name=ontology.domain,
-            source_id=chunk.chunk_id,
-        )
         try:
-            ontology.validate_node(node)
+            node = ontology.create_node(**entity.model_dump(), source_id=chunk.chunk_id)
         except ValueError as exc:
             warning(
                 "graph_entity_rejected",
@@ -130,16 +122,16 @@ def _merge_facts(
             ).id
             for reference in (relationship.source, relationship.target)
         ]
-        edge = GraphEdge(
-            source_id=endpoints[0],
-            target_id=endpoints[1],
-            relation_type=relationship.relation_type,
-            description=relationship.description,
-            keywords=relationship.keywords,
-            source_ids=[chunk.chunk_id],
-        )
         try:
-            ontology.validate_edge(edge, nodes)
+            edge = ontology.create_edge(
+                nodes=nodes,
+                source_id=endpoints[0],
+                target_id=endpoints[1],
+                relation_type=relationship.relation_type,
+                description=relationship.description,
+                keywords=relationship.keywords,
+                chunk_id=chunk.chunk_id,
+            )
         except ValueError as exc:
             warning(
                 "graph_relationship_rejected",
@@ -152,32 +144,9 @@ def _merge_facts(
 
 def _valid_cached_facts(chunk: Chunk, ontology: Ontology) -> bool:
     """数据库缓存必须完整合法且归属当前块；损坏时重算整块。"""
-    entities = chunk.metadata.get("entities")
-    relationships = chunk.metadata.get("relationships")
-    if not isinstance(entities, list) or not isinstance(relationships, list):
-        return False
-
-    nodes: dict[str, GraphNode] = {}
-    edge_ids: set[str] = set()
     try:
-        for value in entities:
-            if not isinstance(value, dict):
-                return False
-            node = _node_adapter.validate_python(value, extra="forbid")
-            ontology.validate_node(node)
-            if node.source_id != chunk.chunk_id or node.id in nodes:
-                return False
-            nodes[node.id] = node
-
-        for value in relationships:
-            if not isinstance(value, dict):
-                return False
-            edge = _edge_adapter.validate_python(value, extra="forbid")
-            ontology.validate_edge(edge, nodes)
-            if edge.source_ids != [chunk.chunk_id] or edge.id in edge_ids:
-                return False
-            edge_ids.add(edge.id)
-    except (ValidationError, ValueError):
+        ontology.parse_chunk_facts(chunk, strict=True)
+    except (ValueError, TypeError):
         return False
     return True
 

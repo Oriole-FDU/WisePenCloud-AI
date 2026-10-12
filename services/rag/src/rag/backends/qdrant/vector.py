@@ -12,7 +12,7 @@ from .filters import compile_filters
 
 
 class QdrantVectorStorage:
-    """只执行向量 CRUD；client 须启用 cloud_inference 以转发服务端 BM25。"""
+    """只执行向量 CRUD；启用 sparse 时 client 须支持服务端 BM25 转发。"""
 
     def __init__(
         self,
@@ -21,12 +21,12 @@ class QdrantVectorStorage:
         collection: str,
         dense_vector_size: int,
         dense_vector_name: str = "dense",
-        sparse_vector_name: str = "sparse",
+        sparse_vector_name: str | None = "sparse",
         batch_size: int = 256,
     ) -> None:
         if dense_vector_size <= 0 or batch_size <= 0:
             raise ValueError("vector size and batch size must be positive")
-        if not collection or not dense_vector_name or not sparse_vector_name:
+        if not collection or not dense_vector_name or sparse_vector_name == "":
             raise ValueError("collection and vector names must not be empty")
         if dense_vector_name == sparse_vector_name:
             raise ValueError("dense and sparse vector names must differ")
@@ -37,8 +37,17 @@ class QdrantVectorStorage:
         self._sparse_vector_name = sparse_vector_name
         self._batch_size = batch_size
 
-    async def ensure_collection(self) -> None:
+    async def ensure_collection(
+        self, *, metadata_index_fields: list[str] | None = None
+    ) -> None:
         """显式创建或核对 collection，保证必要索引；配置冲突不删除或重建集合。"""
+        fields = (
+            ["resource_id", "content_revision"]
+            if metadata_index_fields is None
+            else metadata_index_fields
+        )
+        if any(not field or "." in field for field in fields):
+            raise ValueError("metadata indexes require nonempty flat field names")
         if not await self._client.collection_exists(self._collection):
             await self._client.create_collection(
                 collection_name=self._collection,
@@ -51,7 +60,9 @@ class QdrantVectorStorage:
                     self._sparse_vector_name: models.SparseVectorParams(
                         modifier=models.Modifier.IDF
                     )
-                },
+                }
+                if self._sparse_vector_name is not None
+                else None,
             )
         info = await self._client.get_collection(self._collection)
         params = info.config.params
@@ -65,16 +76,18 @@ class QdrantVectorStorage:
             dense is None
             or dense.size != self._dense_vector_size
             or dense.distance != models.Distance.COSINE
-            or sparse is None
-            or sparse.modifier != models.Modifier.IDF
+            or (
+                self._sparse_vector_name is not None
+                and (sparse is None or sparse.modifier != models.Modifier.IDF)
+            )
         ):
             raise ValueError(f"incompatible vector configuration: {self._collection}")
 
         # 每次显式初始化都补齐索引，允许上次初始化在创建集合后部分失败。
-        for field in ("metadata.resource_id", "metadata.content_revision"):
+        for field in dict.fromkeys(fields):
             result = await self._client.create_payload_index(
                 collection_name=self._collection,
-                field_name=field,
+                field_name=f"metadata.{field}",
                 field_schema=models.PayloadSchemaType.KEYWORD,
                 wait=True,
             )
@@ -82,31 +95,33 @@ class QdrantVectorStorage:
                 raise RuntimeError(f"payload index creation did not complete: {field}")
 
     async def upsert(self, records: list[VectorRecord]) -> None:
-        """整条 point 替换；每批同时写两类向量，部分成功保留，不隐式初始化。"""
+        """整条 point 替换；每批写入配置的向量，部分成功保留，不隐式初始化。"""
         for start in range(0, len(records), self._batch_size):
-            points = [
-                models.PointStruct(
-                    # Qdrant 不接受任意字符串 ID；业务原 ID 保存在 payload 中。
-                    id=str(
-                        uuid5(
-                            NAMESPACE_URL, f"wisepen-rag-v4:vector:{record.record_id}"
-                        )
-                    ),
-                    vector={
-                        self._dense_vector_name: record.embedding,
-                        self._sparse_vector_name: models.Document(
-                            text=record.text,
-                            model="qdrant/bm25",
-                            options={"tokenizer": "multilingual"},
+            points = []
+            for record in records[start : start + self._batch_size]:
+                vector = {self._dense_vector_name: record.embedding}
+                if self._sparse_vector_name is not None:
+                    vector[self._sparse_vector_name] = models.Document(
+                        text=record.text,
+                        model="qdrant/bm25",
+                        options={"tokenizer": "multilingual"},
+                    )
+                points.append(
+                    models.PointStruct(
+                        # Qdrant UUID 只是后端身份；原业务 ID 留在 payload。
+                        id=str(
+                            uuid5(
+                                NAMESPACE_URL,
+                                f"wisepen-rag-v4:vector:{record.record_id}",
+                            )
                         ),
-                    },
-                    payload={
-                        "record_id": record.record_id,
-                        "metadata": record.metadata,
-                    },
+                        vector=vector,
+                        payload={
+                            "record_id": record.record_id,
+                            "metadata": record.metadata,
+                        },
+                    )
                 )
-                for record in records[start : start + self._batch_size]
-            ]
             result = await self._client.upsert(
                 collection_name=self._collection, points=points, wait=True
             )
@@ -119,6 +134,10 @@ class QdrantVectorStorage:
             raise ValueError("query requires exactly one of embedding or text")
         if request.top_k <= 0:
             raise ValueError("top_k must be positive")
+        if request.text is not None and self._sparse_vector_name is None:
+            raise ValueError(
+                "sparse queries are unavailable in a dense-only collection"
+            )
         response = await self._client.query_points(
             collection_name=self._collection,
             query=(

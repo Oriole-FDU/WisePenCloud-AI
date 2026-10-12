@@ -4,7 +4,7 @@
 
 本文是 RAG V4 的实现设计合同，整合 00–10 方案中已经确认的边界。它描述核心模型、写入管线、存储端口、普通检索、图谱能力、权限和版本语义。
 
-2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。图事实首片已完成（见 22），多来源拓扑投影已完成（见 23），下一切片讨论图向量与受授权查询；父块暂缓，不做检索效果基线；在线重构建、生产配置和生命周期装配继续留后。
+2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。图事实首片已完成（见 22），多来源拓扑投影已完成（见 23），图向量和三种种子召回组件已完成（见 24），下一切片讨论授权准备与一跳扩展用例；父块暂缓，不做检索效果基线；在线重构建、生产配置和生命周期装配继续留后。
 
 2026-10-12 P5 首片已完成 Ontology、GraphExtractor、增量复用、可选补漏、Chunk 图事实落库与离线图 repair，见 [22](22-graph-extraction-implementation.md)。图事实/本体统一为 core.schema.graph 中的 dataclass，只有 Instructor 输出 DTO 使用 Pydantic。GraphStorage/GraphIndexer、Neo4j 多来源投影与可选 repair 已完成（见 23）；当前排期不做确定性 Producer。
 
@@ -287,9 +287,9 @@ VectorIndexer：
 
 #### GraphIndexer
 
-GraphIndexer 已实现在 ingestion/indexers/graph.py：只读完整 Chunk 列表，解析实体/关系、本体校验和来源核对，再生成 GraphSourceProjection 并调用 Writer.replace_sources。缺少图列表或结构/来源损坏写前报错；本体非法事实逐条丢弃，同来源重复 ID 保留首次合法事实。合法空列表仍写完整来源替换输入。
+GraphIndexer 已实现在 ingestion/indexers/graph.py：只读完整 Chunk 列表，解析实体/关系、本体校验和来源核对，再生成 GraphSourceProjection 并调用 Writer.replace_sources；启用向量时随后执行来源向量替换。缺少图列表或结构/来源损坏写前报错；本体非法事实逐条丢弃，同来源重复 ID 保留首次合法事实。合法空列表仍写完整来源替换输入。
 
-它不调用模型、不访问 publication/ACL、不修改 Chunk。图向量不在本片，未来按实际查询需求装配。repair --with-graph 在事实保存后调用它，即使抽取缓存全部复用也重写拓扑。
+它不调用抽取模型、不访问 publication/ACL、不修改 Chunk。GraphIndexer 现直接依赖 GraphWriter 与 VectorWriter 两种端口，完整图事实仅解析一次，依次写拓扑与来源向量；没有独立 GraphVectorIndexer。向量阶段显式注入 EmbeddingClient。repair 两个开关选择同一 Indexer 的 writer，即使抽取缓存全部复用也重写所有启用投影。见 24。
 
 ## 6. Storage
 
@@ -348,7 +348,7 @@ GraphStorage 已实现在 storage/graph.py，按 Chunk 完整来源输入 GraphS
 
 Neo4jGraphStorage 绑定 driver/database/graph_name，默认 neo4j/rag_v4 和每批 64 来源。共享实体/有向关系图元只存身份，来源关联各自保存 JSON 事实与原生平面 metadata 属性。ensure_schema 显式创建独立标签约束，CRUD 不初始化。每批显式事务移除旧贡献、写新事实并清理受影响孤儿；前置异常回滚当前批，前批提交保留；提交网络异常可能结果未知，传播后幂等重跑，不自动重试。
 
-Mongo Chunk metadata 仍是权威重建输入；没有 Mongo 图事实新集合。Storage 不判 ACL、选择 applied 或调用模型。后续 application 必须用 ResourceSnapshotReader 回查 selected revision 和授权来源，从事实组装材料，不能把图 JSON 或跨来源描述作为正文权威。允许跨可见文档形成路径；图向量/检索和全面回收留后。
+Mongo Chunk metadata 仍是权威重建输入；没有 Mongo 图事实新集合。Storage 不判 ACL、选择 applied 或调用模型。后续 application 必须用 ResourceSnapshotReader 回查 selected revision 和授权来源，从事实组装材料，不能把图 JSON 或跨来源描述作为正文权威。允许跨可见文档形成路径；图向量与种子检索已实现，授权材料用例和全面回收留后。
 
 ### 6.4 MetadataFilters
 
@@ -396,9 +396,13 @@ Common BM25Retriever 使用调用方提供的 payload 文本提取函数在内�
 
 ### 7.2 图谱检索
 
-GraphRetriever 只对齐 LightRAG 的 `local`、`global`、`hybrid`，组合固定 GraphStorage Reader、向量 Reader 与有界遍历算法；查询与装配配置合同在真实图切片确定，本轮不预建 graph 抽象。application 图谱检索用例负责资源版本与 ACL 决定、来源 Chunk 正文回查和上下文组装，共享读取模块不依赖 GraphRetriever 或该具体用例。
+GraphRetriever.from_storage 已实现 local/global/hybrid 三种种子路线：实体来源向量、关系来源向量、两路融合。只读取 VectorReader，不持有 GraphReader、Mongo、ACL 或请求快照。每次直接 embedding 查询一次，两路共用向量并发读取；默认 hybrid、各 30 条、总 60、Common RoundRobin，可注入 RRF，单路使用总预算且保留 provider 分数。
 
-`mix` 是外层能力：由 Chunk hybrid retrieval 与 graph retrieval 组合，不下沉到 GraphStorage 或 GraphRetriever。
+返回 Candidate[GraphMatch]，GraphMatch 包含 GraphVectorKind 与原始 VectorMatch；融合身份按 kind:record_id，不按逻辑图 ID 提前合并不同来源。候选不是业务响应，三个模式不表示完整授权图查询已经实现。application 多个图用例复用 Common RetrievalPipeline，prepare_candidates 负责同一 ResourceSnapshot 下授权、selected revision、向量身份/text_sha256 和 Mongo 当前事实检查，之后才扩展一跳并核对其全部来源。具体用例尚未装配。
+
+实体/关系向量按来源分别保存，文本加入本体/类别/谓词业务说明与当前来源描述；Ontology 统一事实构造和持久化解析，不把本体对象放进 Node/Edge 持久化字段。Qdrant 图集合是 dense-only，普通 Chunk 双向量不变。repair 支持 --with-graph-vectors 与免抽取/免事实写入的 --projection-only。详情与失败语义见 24。
+
+RAG 不裁剪输出原文/描述，不管理结果缓存或懒读取，预算归 Chat。`mix` 是否排期待定；若未来接入，仍属于 application 外层组合，不下沉到 GraphStorage 或 GraphRetriever。
 
 ### 7.3 Chunk 种子
 

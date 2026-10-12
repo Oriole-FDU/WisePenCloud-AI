@@ -1,6 +1,6 @@
 """内容存储测试使用 BSON 往返的内存 collection，不读取服务配置。"""
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -16,6 +16,8 @@ from rag.core.schema import (
     Document,
     DocumentStructure,
     EntitySpec,
+    GraphEdge,
+    GraphNode,
     Ontology,
     RelationSpec,
 )
@@ -40,6 +42,54 @@ def graph_ontology():
             )
         },
     )
+
+
+@pytest.fixture
+def make_graph_facts():
+    def make(chunk, person="张三", company="甲公司", description="来源描述"):
+        nodes = [
+            GraphNode(person, chunk.chunk_id, "work", "Person", description),
+            GraphNode(company, chunk.chunk_id, "work", "Company", description),
+        ]
+        edge = GraphEdge(
+            nodes[0].id,
+            nodes[1].id,
+            "works_at",
+            description,
+            ["任职"],
+            [chunk.chunk_id],
+            {"nested": {"value": 1}},
+        )
+        chunk.metadata.update(
+            entities=[asdict(node) for node in nodes], relationships=[asdict(edge)]
+        )
+        return nodes, [edge]
+
+    return make
+
+
+@pytest.fixture
+def graph_vector_writers():
+    class MemoryVectors:
+        """只模拟来源替换；Qdrant 的操作确认由后端测试验证。"""
+
+        def __init__(self):
+            self.records = {}
+            self.upsert = AsyncMock(side_effect=self._upsert)
+            self.delete = AsyncMock(side_effect=self._delete)
+
+        async def _upsert(self, records):
+            self.records.update((record.record_id, record) for record in records)
+
+        async def _delete(self, filters):
+            chunk_ids = filters.filters[0].value
+            self.records = {
+                key: record
+                for key, record in self.records.items()
+                if record.metadata["chunk_id"] not in chunk_ids
+            }
+
+    return MemoryVectors(), MemoryVectors()
 
 
 def _matches(record, query):
