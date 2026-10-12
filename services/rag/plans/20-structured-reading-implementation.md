@@ -89,4 +89,4 @@ uv run --with pytest --with pytest-asyncio pytest tests/application/tools/output
 
 保留用户在本轮前调整的预算合同：dense/sparse 单路只用 candidate_limit 作为仓储 top_k，拒绝 dense_top_k/sparse_top_k；hybrid 两路未传预算时各为 30，再以 candidate_limit 截取融合结果。同步单路测试与 demo，并增加错误预算参数在 I/O 前失败的覆盖。
 
-下一切片为 Contextualizer 上下文增强，图谱按既定排期推进；不建立检索效果基线，生产 Container/main、模型/连接配置与生命周期装配继续留后。设计、章节身份、版本读取与交接文档已同步。本轮未提交或推送，既有子模块状态保留。
+本切片完成时下一步为 Contextualizer；现已在 [21 上下文增强实施记录](21-contextualizer-implementation.md) 完成，后续按排期推进图谱。父块、检索效果基线、在线重构建和生产 Container/main、模型/连接配置与生命周期装配仍留后。本文验收数字保留本切片历史结果，最新状态见交接文档。

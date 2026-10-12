@@ -4,7 +4,7 @@
 
 本文是 RAG V4 的实现设计合同，整合 00–10 方案中已经确认的边界。它描述核心模型、写入管线、存储端口、普通检索、图谱能力、权限和版本语义。
 
-2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，实际合同见第 5.3、6.1–6.4 节与 [17 实施记录](17-vector-publication-implementation.md)。application 请求内资源快照与 Document／Chunk 读取已实现，见 [18 实施记录](18-application-snapshot-implementation.md)。普通检索已实现 Common 泛型 Pipeline、VectorRetriever 和 application HybridRetrieval，见 [19 实施记录](19-hybrid-retrieval-implementation.md)。统一章节身份、全局目录、标题邻域与原文范围读取已实现，见 [20 实施记录](20-structured-reading-implementation.md)。下一切片为 Contextualizer，随后推进图谱；父块暂缓，不做检索效果基线；生产配置和生命周期装配继续留后。
+2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。下一切片按 P5 推进图谱；父块暂缓，不做检索效果基线；在线重构建、生产配置和生命周期装配继续留后。
 
 本设计不包含 HTTP 路由、MCP 工具注册和最终 transport composition。MCP 只作为可信身份来源的既有边界被引用：最终用户身份由可信安全上下文注入，RAG application 接收 `PermissionScope`，不从业务参数读取用户 ID。
 
@@ -145,7 +145,8 @@ class Chunk:
     @property
     def retrieval_text(self) -> str:
         context = str(self.metadata.get("contextual_context") or "").strip()
-        return f"{context}\n\n{self.raw_text}" if context else self.raw_text
+        prefixes = [part for part in (">".join(self.section_path), context) if part]
+        return "\n\n".join([*prefixes, self.raw_text])
 ```
 
 `metadata` 是普通 `dict[str, object]`，依赖开发者遵守约定，不引入 Pydantic 模型、metadata 注册表或通用 schema 校验。
@@ -154,6 +155,8 @@ class Chunk:
 
 ```python
 metadata["contextual_context"]  # 检索上下文，可缺失
+metadata["context_status"]     # ContextStatus 的字符串值：ok/fallback/failed
+metadata["context_version"]    # 仅成功结果的生成指纹
 metadata["entities"]            # GraphExtractor 的实体结果
 metadata["relationships"]       # GraphExtractor 的关系结果
 ```
@@ -232,7 +235,19 @@ Chunker 封装现有 `MarkdownChunker`，负责分块边界、chunk_index、sect
 
 #### Contextualizer
 
-Contextualizer 使用完整 Chunk 列表建立同一 section 内的连续上下文，在字符预算内写入 `metadata["contextual_context"]`。它不修改 raw text 和 Chunk identity，不跨 resource、revision 或 section 边界。
+已实现在 `ingestion/transformers/contextualizer.py`。非空输入要求匹配 Document 与同一 resource/revision 的全部 Chunk；只增强三个上下文字段，保持原列表、顺序、正文 token count 与身份。普通顺序为 `Chunker → Contextualizer → ChunkFactsIndexer → VectorIndexer`。
+
+默认完整提示文本上限 8000 token、目标 100 字、API 输出硬上限 150 token、before_ratio=0.5、大纲占比 0.15、实例模型并发上限 4。注入 Common TokenCounter，默认离线 o200k_base；计数包括材料、metadata、大纲、目标、指令及分隔符。InstructionClient 初始化绑定模型，只读 model 用于指纹；finish_reason=length 拒绝输出。
+
+全文作为虚拟根先检查，能放下就省略 metadata/大纲。否则遍历当前章节全部祖先，选择完整提示词可容纳的最高 subtree；再降级为完整 own 范围或目标 Chunk 种子。全局窗口允许跨章节，每个邻居 Chunk 只加入一次，按 chunk_index 原文顺序拼接；没有 source spans 时不按字符串去重或伪造 offsets。新增邻居按 token 权重和 before_ratio 选择比例误差最小的一侧，平局优先上文；每侧都重新计数完整提示词，一侧放不下仍尝试另一侧，双侧不可容纳才停止。此为连续扩展，不保证全局最优装箱。
+
+局部提示展示非空 metadata、纯标题骨架和选定材料，明确其为局部原文，要求与目标同语言、只据材料、只输出上下文。Metadata 先 Pydantic JSON 序列化再确定性 Unicode JSON 渲染，未知对象不强制字符串化。OutlineFormatter.show_extra_info 默认 True 保持旧输出；False 去除锚点、身份、偏移、当前标记、摘要/preview，anchors 可省略。大纲按 floor(预算×占比) 限制，超限保留当前祖先链，再补邻近兄弟和顶层标题，维持父链与树序；最小链不适配时省略大纲，不截断标题。
+
+成功写 contextual_context、ok 和 SHA-256 context_version。指纹含策略版本、固定模型、tokenizer 名称、生成参数及实际完整提示词，不含并发数；已有成功有效输出与指纹匹配则复用。失败/过期再次尝试。空目标或输入预算不足为 fallback，metadata 序列化、供应商或输出检查失败为 failed，删除旧上下文与旧指纹并记录失败；程序/结构错误和取消传播。失败块不阻止其他块，必需事实/向量写入失败仍阻止发布。语言和真实性由提示词约束，不增加第二次 LLM 验真。
+
+`Chunk.retrieval_text` 按 `">".join(section_path)`、有效上下文、raw_text 空行拼接；无标题省略路径。前缀不存 raw_text，不截断/转义路径；展示、章节读取和 rerank 使用正文，dense 与 BM25 使用同一派生检索文本。
+
+维护窗口入口 `scripts/repair_context.py` 仅处理显式资源范围当前 applied 未 destroyed revision，验证完整 Document 身份、读取既有 Chunk、不重分块；写前复核完整发布状态，变化则跳过。不加载 Nacos、不启动消费者、不 stage/apply。复用增量上下文后保存全体 Chunk，**每次重写全部向量**，保证事实成功/向量失败后可重跑。逐块模型失败继续落库/索引但退出非零；文档级数据库/向量异常记录后继续其余资源，已完成写入保留，所有客户端关闭。目标 Chunk 写入不得存在其他并发任务，此维护约定不等于并发修复协议。装配与配置见 [demo/contextual.md](../demo/contextual.md)。
 
 #### GraphExtractor
 

@@ -1,5 +1,7 @@
 """OpenAI 兼容接口的异步文本与结构化生成客户端。"""
 
+from __future__ import annotations
+
 import json
 from collections.abc import Iterable
 from typing import Any, TypeVar
@@ -23,6 +25,11 @@ class InstructionClient:
             client,
             mode=instructor.Mode.JSON,
         )
+
+    @property
+    def model(self) -> str:
+        """固定生成模型，供调用方构建可重现的生成指纹。"""
+        return self._model
 
     async def complete(
         self,
@@ -48,6 +55,8 @@ class InstructionClient:
             request["max_tokens"] = max_tokens
 
         response = await self._client.chat.completions.create(**request)
+        if response.choices[0].finish_reason == "length":
+            raise ValueError("instruction response was truncated")
         content = response.choices[0].message.content
 
         if not content or not content.strip():

@@ -28,7 +28,7 @@ async def test_document_and_chunk_bson_round_trip(
     assert isinstance(restored_document.structure.sections[0], Section)
     assert isinstance(restored_document.structure.anchors[0], Anchor)
     assert restored_chunk.raw_text == "  中文正文\n"
-    assert restored_chunk.retrieval_text == "文档上下文\n\n  中文正文\n"
+    assert restored_chunk.retrieval_text == "标题\n\n文档上下文\n\n  中文正文\n"
     documents, chunks = collections
     assert set(documents.records[0]) - {"_id"} == {
         field.name for field in fields(document)

@@ -59,6 +59,18 @@ async def test_complete_rejects_empty_text():
         await InstructionClient(client, model="m").complete(messages=[])
 
 
+@pytest.mark.asyncio
+async def test_complete_rejects_truncation_and_model_is_readonly():
+    api, _ = _text_client("valid looking partial", finish_reason="length")
+    with patch("common.utils.ai_clients.instruction.instructor.from_openai"):
+        client = InstructionClient(api, model="fixed-model")
+    assert client.model == "fixed-model"
+    with pytest.raises(AttributeError):
+        client.model = "other"
+    with pytest.raises(ValueError, match="truncated"):
+        await client.complete(messages=[], max_tokens=1)
+
+
 class Person(BaseModel):
     name: str
     age: int

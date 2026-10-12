@@ -12,6 +12,7 @@ from rag.core.schema import ContentRevision
 from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer, VectorIndexer
 from rag.ingestion.pipeline import IngestionPipeline
+from rag.ingestion.transformers import Contextualizer
 
 
 @pytest.fixture
@@ -49,6 +50,57 @@ def vector_flow(storage, publication_store):
         ),
     )
     return publisher, embedding, client
+
+
+@pytest.mark.parametrize("model_fails", [False, True])
+async def test_contextualizer_optional_failure_still_publishes_required_indexes(
+    vector_flow, storage, publication_store, make_document, model_fails
+):
+    publisher, embedding, client = vector_flow
+    instruction = SimpleNamespace(
+        model="model", complete=AsyncMock(return_value="本段属于文档标题")
+    )
+    if model_fails:
+        instruction.complete.side_effect = OSError("model unavailable")
+    publisher._pipeline.transformers.append(Contextualizer(client=instruction))
+    document = make_document()
+    assert await publisher.publish(document) is PublicationAction.APPLIED
+    chunks = await storage.get_revision_chunks(
+        resource_id=document.resource_id, content_revision=document.content_revision
+    )
+    assert all(
+        chunk.metadata["context_status"] == ("failed" if model_fails else "ok")
+        for chunk in chunks
+    )
+    assert embedding.embed.await_args.kwargs["texts"] == [
+        chunk.retrieval_text for chunk in chunks
+    ]
+    points = client.upsert.await_args.kwargs["points"]
+    assert [point.vector["sparse"].text for point in points] == [
+        chunk.retrieval_text for chunk in chunks
+    ]
+    assert (await publication_store.get_states([document.resource_id]))[
+        0
+    ].applied_revision.content_revision == document.content_revision
+
+
+async def test_context_success_does_not_hide_required_vector_failure(
+    vector_flow, publication_store, make_document
+):
+    publisher, _, client = vector_flow
+    publisher._pipeline.transformers.append(
+        Contextualizer(
+            client=SimpleNamespace(
+                model="model", complete=AsyncMock(return_value="上下文")
+            )
+        )
+    )
+    client.upsert.side_effect = OSError("vector write failed")
+    with pytest.raises(OSError):
+        await publisher.publish(make_document())
+    assert (await publication_store.get_states(["resource"]))[
+        0
+    ].applied_revision is None
 
 
 async def test_facts_exist_and_publication_waits_for_both_vectors(

@@ -25,8 +25,7 @@ class RetrievalPipeline(Generic[PayloadT, PreparedT]):
         retriever: Retriever[PayloadT],
         prepare_candidates: Callable[
             [list[Candidate[PayloadT]]], Awaitable[list[Candidate[PreparedT]]]
-        ]
-        | None = None,
+        ] | None = None,
         reranker: Reranker[PreparedT] | None = None,
         diversity: Diversity[PreparedT] | None = None,
     ) -> None:

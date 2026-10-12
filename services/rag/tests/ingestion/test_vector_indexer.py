@@ -64,7 +64,7 @@ async def test_retrieval_text_and_identity_projection_preserve_input(
     await indexer.index(chunks)
     assert chunks == before
     embedding_client.embed.assert_awaited_once_with(
-        texts=["文档上下文\n\n  中文正文\n", "第二块"]
+        texts=["标题\n\n文档上下文\n\n  中文正文\n", "标题\n\n第二块"]
     )
     records = vector_writer.upsert.call_args.args[0]
     assert [record.record_id for record in records] == [chunk.chunk_id, second.chunk_id]

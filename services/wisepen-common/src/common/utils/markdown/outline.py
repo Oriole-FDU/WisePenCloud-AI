@@ -1,5 +1,7 @@
 """把 Markdown 章节和锚点格式化为全局或邻域导航目录。"""
 
+from __future__ import annotations
+
 from collections import defaultdict
 from collections.abc import Sequence
 
@@ -13,7 +15,8 @@ class OutlineFormatter:
         self,
         *,
         sections: Sequence[Section],
-        anchors: Sequence[Anchor],
+        anchors: Sequence[Anchor] | None = None,
+        show_extra_info: bool = True,
     ) -> None:
         self._sections_by_id = {section.section_id: section for section in sections}
         self._has_document_root = any(section.level == 0 for section in sections)
@@ -25,7 +28,8 @@ class OutlineFormatter:
         for children in self._children_by_parent.values():
             children.sort(key=lambda section: section.ordinal)
 
-        self._anchors = anchors
+        self._anchors = anchors or []
+        self._show_extra_info = show_extra_info
 
     def global_outline(self, *, max_level: int = 0) -> str:
         """生成全局目录；根深度为 1，max_level=0 表示展开全部。"""
@@ -108,9 +112,18 @@ class OutlineFormatter:
     ) -> str:
         """按标题树层级输出标题、状态、锚点、原始 ID 和原文起点。"""
 
-        markers = ["[C]"] if current else []
+        title = section.title.strip()
+        heading_level = (
+            0 if section.level == 0 else indent + 1 - int(self._has_document_root)
+        )
+        heading = "#" * heading_level
+        prefix = f"{heading} " if heading else ""
+        # 摄入材料只需要标题骨架，不暴露定位信息或派生摘要。
+        if not self._show_extra_info:
+            return f"{prefix}{title}"
 
-        # 只收集与本章节 own_span 相交的锚点，避免归入祖先子树
+        markers = ["[C]"] if current else []
+        # 只收集与本章节 own_span 相交的锚点，避免归入祖先子树。
         anchors = [
             anchor.label
             for anchor in self._anchors
@@ -119,18 +132,9 @@ class OutlineFormatter:
         ]
         if anchors:
             markers.extend(f"[{anchor}]" for anchor in anchors)
-
-        title = section.title.strip()
-        heading_level = (
-            0
-            if section.level == 0
-            else indent + 1 - int(self._has_document_root)
-        )
-        heading = "#" * heading_level
         suffix = " ".join(
             [*markers, f"id={section.section_id}", f"@{section.own_span.start_offset}"]
         )
-        prefix = f"{heading} " if heading else ""
         line = f"{prefix}{title} {suffix}"
         summary = section.summary.strip()
         if summary:

@@ -194,3 +194,14 @@ def test_model_collection_defaults_are_independent():
     first_edge.metadata["custom"] = True
     assert second_edge.source_ids == []
     assert second_edge.metadata == {}
+
+
+@pytest.mark.parametrize("path", [[], ["标题"], ["上层", "A>B"]])
+@pytest.mark.parametrize("context", ["", "生成上下文"])
+def test_retrieval_prefixes_do_not_change_body_facts(chunk, path, context):
+    chunk.section_path = path
+    chunk.metadata = {"contextual_context": context}
+    original = (chunk.raw_text, chunk.content_token_count, chunk.chunk_id)
+    prefixes = [part for part in (">".join(path), context) if part]
+    assert chunk.retrieval_text == "\n\n".join([*prefixes, chunk.raw_text])
+    assert (chunk.raw_text, chunk.content_token_count, chunk.chunk_id) == original

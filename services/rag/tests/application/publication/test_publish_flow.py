@@ -62,7 +62,7 @@ async def test_publish_saves_facts_before_every_required_projection(
             resource_id=document.resource_id, content_revision=document.content_revision
         )
         assert saved == chunks
-        assert saved[0].retrieval_text.startswith("增强上下文\n\n")
+        assert saved[0].retrieval_text.startswith("标题\n\n增强上下文\n\n")
         assert (await publication_store.get_states(["resource"]))[
             0
         ].applied_revision is None

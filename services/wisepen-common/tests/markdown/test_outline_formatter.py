@@ -3,6 +3,21 @@ from dataclasses import replace
 from common.utils.markdown import MarkdownChunker, OutlineFormatter
 
 
+def test_clean_outline_and_neighborhood_only_keep_headings():
+    result = MarkdownChunker().chunk("# Alpha\n\nBody\n\n## Child\n\nChild body\n")
+    sections = [
+        replace(section, summary="Summary", preview="Preview")
+        for section in result.sections
+    ]
+    child = next(section for section in sections if section.title == "Child")
+    formatter = OutlineFormatter(
+        sections=sections, anchors=result.anchors, show_extra_info=False
+    )
+    assert formatter.global_outline() == "# Alpha\n## Child"
+    assert formatter.neighborhood(child.section_id) == "# Alpha\n## Child"
+    assert "id=" in OutlineFormatter(sections=sections).global_outline()
+
+
 def test_global_outline_formats_tree_depth_ids_offsets_and_anchor_labels() -> None:
     source = (
         "# Alpha\n\nAlpha direct text.\n\n"
@@ -79,10 +94,14 @@ def test_node_line_prefers_summary_over_preview() -> None:
         replace(section, summary="Alpha 摘要" if section.title == "Alpha" else "")
         for section in result.sections
     ]
-    outline = OutlineFormatter(sections=sections, anchors=result.anchors).global_outline()
+    outline = OutlineFormatter(
+        sections=sections, anchors=result.anchors
+    ).global_outline()
 
     lines = outline.splitlines()
-    alpha_index = next(index for index, line in enumerate(lines) if line.startswith("# Alpha"))
+    alpha_index = next(
+        index for index, line in enumerate(lines) if line.startswith("# Alpha")
+    )
     assert lines[alpha_index + 1] == "[Summary]: Alpha 摘要"
     beta_line = next(line for line in lines if line.startswith("## Beta"))
     beta_index = lines.index(beta_line)

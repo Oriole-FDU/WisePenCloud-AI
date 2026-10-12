@@ -1,17 +1,19 @@
 # RAG V4 会话接手文档
 
-记录日期：2026-10-12。本文是新会话的首读入口，描述已完成实现、已查清事实、用户确认的设计约束和建议继续顺序。不是要求一次实现全部后续阶段。向量闭环见 [17 普通向量发布实施记录](17-vector-publication-implementation.md)；共享资源快照和内容读取见 [18 实施记录](18-application-snapshot-implementation.md)。本轮泛型 Pipeline、VectorRetriever 与普通混合检索见 [19 实施记录](19-hybrid-retrieval-implementation.md)。结构化读取与统一章节身份见 [20 实施记录](20-structured-reading-implementation.md)。下一切片为 Contextualizer，再按排期推进图谱；父块暂缓，不做检索效果基线；生产生命周期装配继续留后。
+记录日期：2026-10-12。本文是新会话的首读入口，描述已完成实现、已查清事实、用户确认的设计约束和继续顺序。向量闭环见 [17](17-vector-publication-implementation.md)，资源快照读取见 [18](18-application-snapshot-implementation.md)，泛型 Pipeline 与混合检索见 [19](19-hybrid-retrieval-implementation.md)，结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀及离线 repair 见 [21](21-contextualizer-implementation.md)。下一切片按 P5 推进图谱；父块、检索效果基线、在线重构建和生产生命周期装配继续留后。
 
 ## 1. 快速定位与当前基线
 
 - 工作区：`D:\WisePenCloud-AI\wisepen_common\WisePenCloud-AI`，PowerShell。
-- 当前分支：`dev/common`；前序向量切片开始时 HEAD 为 `9e1f3b37`（`feat(rag-v4): 实现rag 向量仓储抽象和qdrant集成`）。本轮结构化读取切片开始时 HEAD 为 `ef8e2bc9`。后续会话先核对 HEAD，避免把记录中的提交位置当成永久状态。
+- 当前分支：`dev/common`；上下文增强切片开始时 HEAD 为 `b07ea662`。后续会话先核对 HEAD，避免把记录中的提交位置当成永久状态。
 - 新实现只在 `services/rag/src/rag`，测试在 `services/rag/tests`。旧 `services/wisepen-rag-service/src/rag` 与 `services/rag/references` 只作源码参考。
-- 向量实现已提交；本地已新增 application 资源快照 Reader、Common 泛型检索、VectorRetriever、HybridRetrieval、Chat BM25 payload 迁移及测试与文档，尚未提交。`WisePenView`、`services/rag/references/LightRAG` 有既存子模块状态变化，本轮没有处理；不要为清理工作区而恢复或提交它们。
-- 最新服务测试：**455 passed、17 skipped**；Common OutlineFormatter **5 passed**，Chat 缓存章节读取参考测试 **6 passed**；Common 检索 **24 passed**，Chat 缓存 BM25 工具 **3 passed**，服务及修改范围 Ruff check 通过。17 个跳过项为 11 Mongo、3 Kafka、3 Qdrant 集成测试，均未配置测试连接，不能宣称真实后端已验证。检索切片前基线为 322 passed、17 skipped；向量切片为 274 passed、17 skipped。
+- 前序切片已有代码与文档保留，本轮新增 Contextualizer、repair 与测试/示例/记录，未提交。`WisePenView`、`services/rag/references/LightRAG` 的子模块状态以及 Common retrieval/pipeline.py 既有格式改动均保留；不要为清理工作区恢复或提交它们。
+- 本轮验证结果见 [21](21-contextualizer-implementation.md)：RAG **527 passed／17 skipped**，Common Markdown/AI clients/检索回归 **125 passed**，Chat 缓存工具 **19 passed**。17 个跳过项仍为 11 Mongo、3 Kafka、3 Qdrant 隔离集成测试，未配置连接，不能宣称真实后端已验证；未对现有数据库执行 repair。结构化读取切片历史基线为 **455 passed／17 skipped**。
 - 本轮通过修改文件 Ruff format、源码与测试 compileall、git diff --check，以及 snapshot 模块不导入具体检索用例或运行配置、VectorRetriever 不加载 application/ACL/后端运行模块的依赖边界检查。
 
 装配关系可直接读 [demo/hybrid.md](../demo/hybrid.md)，其中显式展示 from_storage 的调用位置及完整用例连接。
+
+普通上下文 Pipeline 与离线 repair 的配置/运行方式读 [demo/contextual.md](../demo/contextual.md)。最新材料选择与离线恢复合同以 21 和当前实现为准，不再使用字符预算或 section 内窗口限制。
 
 最短阅读顺序：本文 → [19 检索实施记录](19-hybrid-retrieval-implementation.md) → `application/retrieval.py` 与 `retrieval/vector.py` → 11 第 7.1 节；需要了解资源决定时再读 [18](18-application-snapshot-implementation.md) 与 `application/snapshot.py`。生产生命周期仍留后；无需先遍历整个仓库或 references。
 
@@ -25,6 +27,8 @@
 | 图基础模型 | `core/schema/graph.py` | GraphNode／GraphEdge；尚无图抽取、图存储或图查询实现 |
 | ACL | `acl/models.py`、`acl/synchronizer.py`、`backends/mongo/acl.py` | 本地 VIEW 规则、权威资源刷新、Mongo ACL 投影及 Kafka 消费 |
 | 摄入基础 | `ingestion/chunkers/markdown.py`、`ingestion/pipeline.py` | Common Markdown 适配、三个 Protocol、串行 fail-fast Pipeline |
+| 可选上下文增强 | `ingestion/transformers/contextualizer.py` | 完整提示词 token 预算、全文/祖先/own/Chunk 窗口、大纲收缩、逐块降级、生成指纹与实例并发限制 |
+| 离线上下文修复 | `scripts/repair_context.py` | 显式资源范围、当前 applied 身份与写前状态复核、增量生成及全部向量重写；不 stage/apply，不加载 Nacos |
 | 内容事实存储 | `storage/content.py`、`backends/mongo/content.py` | Document／Chunk 完整对象读写、物理删除、显式唯一索引 |
 | Chunk 事实 Indexer | `ingestion/indexers/chunk.py` | 仅调用 ContentWriter.upsert_chunks，保存最终 Chunk |
 | 共享向量与过滤模型 | `core/schema/vector.py`、`filters.py` | VectorRecord/Query/Match，通用 metadata 条件与组合枚举 |
@@ -39,7 +43,7 @@
 | 通用 Kafka | `backends/kafka/consumer.py`、`retry.py` | 有限快速重试、延迟回投、DLQ、精确 offset 提交及资源清理 |
 | 服务生命周期 | `container.py`、`main.py`、`api/router.py` | 目前装配 ACL；等待连接后就绪，消费异常撤销健康状态 |
 
-当前**没有** Contextualizer、父块实现、GraphRetriever／GraphStorage／GraphIndexer。标题树、邻域与章节 own/subtree 原文读取已实现；父块及命中后处理接口已明确暂缓/移除。资源快照、Document／Chunk 读取和普通混合检索已完成；VectorStorage、VectorIndexer、Qdrant adapter 与外部普通发布 Pipeline 已通过测试，真实 Qdrant 尚未验证。`ingestion/transformers/base.py` 只是接口，不能把空目录或 Protocol 计为增强能力已完成。
+Contextualizer 与离线 repair 已实现并用替身验收；标题树、邻域、章节 own/subtree、资源快照与普通混合检索已完成。当前**没有**父块、GraphRetriever／GraphStorage／GraphIndexer；命中后处理接口已移除。普通发布、可选上下文降级和必要向量写入合同通过测试，真实 Mongo/Kafka/Qdrant 尚未验证。离线脚本不是生产在线重构建或生命周期装配。
 
 publication 消费者可通过显式依赖真实运行 Kafka；尚未注入全局 Container／main／Nacos。必需向量能力现已实现，但模型/连接配置、显式初始化与 publication 生命周期尚未装配。生产发布不能以 fake 或空必需投影替代。现有服务入口只运行 ACL 消费。物理销毁现在只撤销可见性并保留标记，尚未执行内容／向量／图物理清理。
 
@@ -52,7 +56,10 @@ publication 消费者可通过显式依赖真实运行 Kafka；尚未注入全�
 - 内容模型属于 `rag.core.schema`，不依赖 ingestion、storage、具体后端或 application。`Document` 正文字段实际叫 **`text`**。
 - `ContentRevision` 是 frozen、slots dataclass；对原始 text 的 UTF-8 字节计算完整 SHA-256，不 trim、不规范化 Unicode。字符串身份为 `resource_id@document_version#完整摘要`。
 - 内容身份不包含 metadata、Chunker 配置、embedding 模型或图谱配置。已 applied 的同身份提交直接跳过，不借重放更新 metadata；投影重建须另行定义用例。
-- Chunk.raw_text 是正文事实；retrieval_text 由 `metadata["contextual_context"]` 与 raw_text 派生。增强不得改写正文、身份或来源。
+- Chunk.raw_text 是正文事实；retrieval_text 按标题路径（">".join）、非空 contextual_context、raw_text 用空行拼接。路径不转义/截断，无标题省略；展示、章节读取和 rerank 仍用原文。
+- Contextualizer 默认完整提示文本 8000 token、目标 100 字、输出硬上限 150 token；TokenCounter 默认 Common 离线 o200k_base。先全文（省略 metadata/大纲），再最高可容纳祖先 subtree、own 或目标种子；窗口可跨同文档章节，每个 Chunk 只加入一次，不虚构 offsets。大纲 show_extra_info=False，仅标题骨架，默认不超过输入预算的 15%。
+- contextual_context/context_status/context_version 是普通 metadata。成功指纹含策略/模型/tokenizer/生成配置和实际完整提示词，不含并发数；成功有效且指纹匹配复用，失败/过期重试。模型及输出失败逐块清旧值并 failed，空目标/预算不足 fallback；输入身份、结构、程序错误和取消传播。必需写入失败仍阻止发布。
+- repair 只处理显式资源当前 applied 未 destroyed revision，核对完整 Document 并读既有 Chunk，写前复核发布状态；维护窗口无其他 Chunk 写任务。增量生成后保存全部 Chunk、每次重写全部向量，不 stage/apply。模型 failed 仍写降级事实/投影且退出非零；文档级写入失败继续其他资源，已完成写入保留；关闭全部客户端，不加脚本重试。
 - metadata 保持普通字典；不加 metadata schema、codec、注册表或 Stored 镜像模型。图模型写入 metadata 后持久化为字典，读回仍是普通 metadata。
 - ACL 属于独立 ResourceAcl，不混入内容模型或发布状态。版本／冲突／销毁准入不是新增 ACL 鉴权。
 
@@ -167,7 +174,7 @@ VIEW 顺序与已有 ACL 测试已冻结：所有者、全局白名单、全局�
 
 ## 5. 建议下一步开发顺序
 
-现有 10 的 P0–P8 是大阶段规划，完成情况不能简单按编号连续推断：内容事实、publication、Kafka、普通向量投影与共享资源快照读取已落地。普通混合检索切片已完成；统一章节身份与结构化读取已完成，下一切片为 Contextualizer，随后按排期推进图谱，父块暂缓、不建立检索效果基线，生产 publication 生命周期装配继续留后。
+现有 10 的 P0–P8 是大阶段规划，完成情况不能按编号连续推断。普通混合检索、结构化读取、Contextualizer 及离线上下文 repair 已完成。下一切片按 P5 推进图谱，父块、检索效果基线、在线重构建和生产 publication 生命周期仍留后。
 
 | 顺序 | 切片与范围 | 完成标准 |
 | --- | --- | --- |
@@ -179,11 +186,11 @@ VIEW 顺序与已有 ACL 测试已冻结：所有者、全局白名单、全局�
 | 6-A（已实现） | application 共享资源快照与 Document／Chunk 读取 | ResourceSnapshot／Reader 两对象；首次版本与资源授权决定固定，负结果缓存、正文身份检查、批量与异常合同通过 |
 | 6-B（已实现） | 普通混合检索 use case 与无请求状态的 Dense／Sparse／Fusion | application 显式共享快照，编排候选、授权正文回查和重排；旧候选不混版，授权正文才进外部模型 |
 | 6-C（已实现） | 统一章节身份与结构化读取 | rsec_ hash 限定资源/revision；目录、邻域与 own/subtree 只传章节 ID，复用快照，无窗口续读 |
-| 7（下一切片） | Contextualizer 与普通内容能力完善 | 同 resource/revision/section 连续上下文，预算明确，只增强 metadata；接在事实 Indexer 前；图谱不可用时普通检索仍独立工作 |
+| 7（已实现） | Contextualizer、路径前缀与离线 repair | 完整提示文本 token 预算；跨 section 连续窗口；只增强 metadata；成功指纹复用，全部向量重写可恢复 |
 | 8 | 物理清理、按事实重建投影及回收站可见性 | 先永久撤销发布，再清内容与各投影；不删销毁标记；重复／部分失败可继续；回收站 issue 需独立明确上游合同 |
-| 9 | 可选图谱生产与读取 | Ontology／Plugin → GraphExtractor → Chunk metadata 事实 → GraphIndexer／GraphStorage → LightRAG local/global/hybrid → seed／有界遍历 |
+| 9（下一切片，按 P5 起步） | 可选图谱生产与读取 | Ontology／Plugin → GraphExtractor → Chunk metadata 事实 → GraphIndexer／GraphStorage → LightRAG local/global/hybrid → seed／有界遍历 |
 
-第 1–4、6-A、6-B、6-C 步已完成；父块构建暂缓，命中后处理接口已完整移除，不建立检索效果基线。第 5 步生命周期装配留后。第 6-B–7 步属于 P4 普通检索与增强，**基础向量发布可以直接使用 raw_text 派生的 retrieval_text，不以 contextual LLM 为前置条件**。可选图谱始终在普通发布成功后独立构建，失败不撤销普通内容。
+第 1–4、6-A、6-B、6-C、7 步已完成；父块构建暂缓，命中后处理接口已移除，不建立检索效果基线。第 5 步生命周期留后。P4 普通检索与增强已形成闭环，**基础向量发布可以使用路径/原文的 retrieval_text，不以 contextual LLM 成功为前置条件**。可选图谱始终在普通发布成功后独立构建，失败不撤销普通内容。离线上下文 repair 不代表第 8 步的全部清理/在线重建能力已实现。
 
 ### 已确认的向量与检索选择、后续边界
 
@@ -223,6 +230,8 @@ git diff --check
 | 原文与 Mongo 往返、分批／删除合同 | `tests/backends/mongo/test_content.py` |
 | 状态判断、CAS 与永久销毁 | `tests/backends/mongo/test_publication.py` |
 | 完整 publish 顺序及失败保留 | `tests/application/publication/test_publish_flow.py` |
+| 上下文材料/预算/增量/并发与降级 | `tests/ingestion/test_contextualizer.py` |
+| 离线 repair 状态复核、全部向量重写与退出 | `tests/scripts/test_repair_context.py` |
 | 精确内容回查 | `tests/application/publication/test_publish_facts.py` |
 | 请求内版本／权限决定、不可见缓存与请求隔离 | `tests/application/test_snapshot_selection.py` |
 | Document／Chunk 授权读取、身份回查、缺失及异常合同 | `tests/application/test_snapshot_reading.py` |
@@ -243,4 +252,4 @@ git diff --check
 
 ## 7. 可以直接发给新会话的开场指令
 
-> 请先读 `services/rag/plans/16-session-handoff.md` 与 20 结构化读取实施记录。统一内容、publication、向量投影、资源快照、Common 泛型 Pipeline、配置式 VectorRetriever 和 HybridRetrieval 已完成；最新 RAG 455 passed／17 skipped，Common 检索 24 passed，Chat 工具 3 passed，真实 Mongo/Kafka/Qdrant 未配置。Retriever.retrieve 只接收字符串，预算/filters/向量返回在初始化时确定；application 直接调用 from_storage 装配本次组件，显式共享 ResourceSnapshot，在外部模型前授权回查并核对向量投影身份。目录/邻域与 own/subtree 原文读取已完成，目录和 ChunkHit 共用不透明章节 hash ID。下一轮实现 Contextualizer，图谱按排期推进；父块暂缓，不做检索效果基线，不保留命中后处理接口；不预建空 parents 字段或 graph 抽象。生产生命周期装配继续留后；代码写在 services/rag，不加旧 API 兼容。
+> 请先读 `services/rag/plans/16-session-handoff.md` 与 21 上下文增强实施记录。统一内容、publication、资源快照、普通混合检索、统一章节身份与结构化读取，以及 Contextualizer、标题路径前缀和离线 repair 已完成；实际验收数字见 21，真实 Mongo/Kafka/Qdrant 未配置，未执行现有数据库 repair。Contextualizer 计数完整提示文本，窗口可跨同文档章节，默认模型失败逐块降级，必需事实/向量失败仍阻止发布；成功指纹可跳过生成，repair 每次仍重写全部向量。下一切片按 P5 推进图谱，不预建空 Retriever/Storage 抽象。父块、检索效果基线、在线重构建和生产生命周期继续留后。代码写 services/rag，无旧 API 兼容。
