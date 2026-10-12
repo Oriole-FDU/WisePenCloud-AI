@@ -1,6 +1,6 @@
 # Ontology 图事实抽取与离线 repair
 
-当前支持 Chunk 图事实及可选 Neo4j 来源拓扑投影。平台入口已装配默认发布/查询与 GC，配置见 [platform.md](platform.md)。默认 Pipeline 不自动生成图事实；扩展包须显式传 Ontology，流程见 [extensions.md](extensions.md)。
+当前支持 Chunk 图事实及可选 Neo4j 来源拓扑投影。平台入口已装配默认发布/查询与 GC，配置见 [platform.md](platform.md)。默认 Pipeline 不自动生成图事实；扩展包须显式传 Ontology，流程见 [extensions.md](../src/rag/extensions/extensions.md)。
 
 ## 显式装配
 
@@ -268,12 +268,14 @@ local 是实体种子及其一跳；global 是关系种子及支持该关系的�
 
 向量候选与全部拓扑来源经同一快照授权回查，事实从当前 Mongo metadata 解析，不以 Neo4j 描述替代原文。当前事实输入摘要 fact_sha256 与 graph_version 不符时丢弃旧向量；text_sha256 仍记录实际索引文本。查询不读取本体配置，也不按单一本体排除其他已写入事实。
 
+需要限定事实本体时，GraphRetrieval.retrieve 和 GraphTraversal.traverse 均可传 `filters=MetadataFilters([MetadataFilter("ontology_name", "work-demo")])`。该条件与 resource_id/content_revision 一样支持字符串 EQ、字符串列表 IN 及 AND/OR/NOT，约束向量、拓扑和当前 Mongo 事实；不是加载 Ontology 或解析实体 ID。拓扑来源的 ontology_name 由 GraphIndexer 写入，旧来源先用 `--projection-only --with-graph` 重建。筛选后的合法实体即使没有关系也返回，不在扩展工具里额外转换证据。
+
 ## 普通混合检索选实体与逐跳探索
 
 ```python
-from rag.application.retrieval import HybridRetrieval
+from rag.application.retrieval import VectorRetrieval
 
-hybrid = HybridRetrieval(
+hybrid = VectorRetrieval(
     snapshot_reader=snapshot_reader,
     vector_reader=chunk_vectors,
     embedding_client=embedding_client,

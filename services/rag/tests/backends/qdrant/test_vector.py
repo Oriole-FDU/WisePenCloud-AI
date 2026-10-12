@@ -9,7 +9,13 @@ from qdrant_client import AsyncQdrantClient, models
 
 from rag.backends.qdrant import QdrantVectorStorage
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
-from rag.storage.vector import VectorMatch, VectorQuery, VectorRecord
+from rag.storage.vector import (
+    IndexableField,
+    IndexKind,
+    VectorMatch,
+    VectorQuery,
+    VectorRecord,
+)
 
 
 def record(index=0):
@@ -38,10 +44,10 @@ async def test_dense_only_creation_indexes_upsert_and_query(
     qdrant_client.get_collection.return_value.config.params.sparse_vectors = None
     await dense_vectors.ensure_collection(
         metadata_index_fields=[
-            "resource_id",
-            "content_revision",
-            "chunk_id",
-            "ontology_name",
+            IndexableField("resource_id", IndexKind.KEYWORD),
+            IndexableField("content_revision", IndexKind.KEYWORD),
+            IndexableField("chunk_id", IndexKind.KEYWORD),
+            IndexableField("ontology_name", IndexKind.KEYWORD),
         ]
     )
     assert (
@@ -77,14 +83,20 @@ async def test_invalid_metadata_index_fields_fail_before_io(
     dense_vectors, qdrant_client, fields
 ):
     with pytest.raises(ValueError):
-        await dense_vectors.ensure_collection(metadata_index_fields=fields)
+        await dense_vectors.ensure_collection(
+            metadata_index_fields=[
+                IndexableField(name, IndexKind.KEYWORD) for name in fields
+            ]
+        )
     qdrant_client.collection_exists.assert_not_awaited()
 
 
 async def test_dense_configuration_still_checked(dense_vectors, qdrant_client):
     qdrant_client.get_collection.return_value.config.params.vectors["dense"].size = 3
     with pytest.raises(ValueError, match="incompatible"):
-        await dense_vectors.ensure_collection()
+        await dense_vectors.ensure_collection(
+            [IndexableField("resource_id", IndexKind.KEYWORD)]
+        )
 
 
 async def test_empty_upsert_has_no_io(vectors, qdrant_client):
@@ -155,14 +167,16 @@ async def test_only_completed_counts_as_success(
                 MetadataFilters([MetadataFilter("resource_id", "resource")])
             )
         else:
-            await vectors.ensure_collection()
+            await vectors.ensure_collection(
+                [IndexableField("resource_id", IndexKind.KEYWORD)]
+            )
 
 
 async def test_initialization_creates_collection_and_indexes_explicitly(
     vectors, qdrant_client
 ):
     qdrant_client.collection_exists.return_value = False
-    await vectors.ensure_collection()
+    await vectors.ensure_collection([IndexableField("resource_id", IndexKind.KEYWORD)])
     args = qdrant_client.create_collection.call_args.kwargs
     assert args["collection_name"] == "test_vectors"
     assert args["vectors_config"]["dense"].size == 2
@@ -171,7 +185,7 @@ async def test_initialization_creates_collection_and_indexes_explicitly(
     assert [
         call.kwargs["field_name"]
         for call in qdrant_client.create_payload_index.call_args_list
-    ] == ["metadata.resource_id", "metadata.content_revision"]
+    ] == ["metadata.resource_id"]
 
 
 async def test_existing_collection_reinitialization_repairs_partial_indexes(
@@ -182,9 +196,19 @@ async def test_existing_collection_reinitialization_repairs_partial_indexes(
         OSError("index failed"),
     ]
     with pytest.raises(OSError):
-        await vectors.ensure_collection()
+        await vectors.ensure_collection(
+            metadata_index_fields=[
+                IndexableField("resource_id", IndexKind.KEYWORD),
+                IndexableField("content_revision", IndexKind.KEYWORD),
+            ]
+        )
     qdrant_client.create_payload_index.reset_mock(side_effect=True)
-    await vectors.ensure_collection()
+    await vectors.ensure_collection(
+        metadata_index_fields=[
+            IndexableField("resource_id", IndexKind.KEYWORD),
+            IndexableField("content_revision", IndexKind.KEYWORD),
+        ]
+    )
     assert qdrant_client.create_payload_index.await_count == 2
     qdrant_client.create_collection.assert_not_awaited()
 
@@ -207,7 +231,9 @@ async def test_existing_collection_conflict_does_not_recreate(
     else:
         params.sparse_vectors["sparse"].modifier = None
     with pytest.raises(ValueError, match="incompatible"):
-        await vectors.ensure_collection()
+        await vectors.ensure_collection(
+            [IndexableField("resource_id", IndexKind.KEYWORD)]
+        )
     qdrant_client.create_collection.assert_not_awaited()
     qdrant_client.create_payload_index.assert_not_awaited()
 
@@ -384,3 +410,46 @@ async def test_requested_vector_data_errors_propagate(
     )
     with pytest.raises(RuntimeError, match="embedding"):
         await vectors.query(request)
+
+
+@pytest.mark.parametrize(
+    "kind, schema",
+    [
+        (IndexKind.KEYWORD, models.PayloadSchemaType.KEYWORD),
+        (IndexKind.INTEGER, models.PayloadSchemaType.INTEGER),
+        (IndexKind.FLOAT, models.PayloadSchemaType.FLOAT),
+        (IndexKind.BOOLEAN, models.PayloadSchemaType.BOOL),
+    ],
+)
+async def test_typed_business_payload_indexes(qdrant_client, kind, schema):
+    storage = QdrantVectorStorage(
+        client=qdrant_client,
+        collection="business",
+        dense_vector_size=2,
+        sparse_vector_name=None,
+    )
+    await storage.ensure_collection([IndexableField("value", kind)])
+    qdrant_client.create_payload_index.assert_awaited_once_with(
+        collection_name="business",
+        field_name="metadata.value",
+        field_schema=schema,
+        wait=True,
+    )
+
+
+async def test_empty_fields_still_check_vector_configuration(
+    qdrant_client, dense_vectors
+):
+    await dense_vectors.ensure_collection([])
+    qdrant_client.get_collection.assert_awaited_once_with("graph_entities")
+    qdrant_client.create_payload_index.assert_not_awaited()
+    qdrant_client.get_collection.return_value.config.params.vectors["dense"].size = 3
+    with pytest.raises(ValueError, match="incompatible"):
+        await dense_vectors.ensure_collection([])
+
+
+def test_initialization_requires_explicit_fields(dense_vectors):
+    with pytest.raises(TypeError):
+        dense_vectors.ensure_collection()
+    with pytest.raises(ValueError):
+        IndexKind("datetime")

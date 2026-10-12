@@ -1,4 +1,4 @@
-"""普通混合检索用例；授权回查完成后，正文才能进入重排与结果组装。"""
+"""普通向量检索用例；授权回查完成后，正文才能进入重排与结果组装。"""
 
 from dataclasses import dataclass, field
 from typing import Literal
@@ -45,13 +45,16 @@ class ChunkHit:
     content_revision: str
     section_id: str | None
     section_path: list[str]
-    text: str  # Chunk.raw_text，内部上下文与向量不进入结果。
+    text: str  # Chunk.raw_text；上下文不拼接到正文，完整 metadata 单独返回。
     rank: int
     score: float
     seed_entities: list[GraphNodeReference] = field(default_factory=list)
+    metadata: dict[str, object] = field(
+        default_factory=dict
+    )  # 当前已授权 Chunk 的完整 metadata。
 
 
-class HybridRetrieval:
+class VectorRetrieval:
     """共享固定依赖；每次调用构造 Retriever/Pipeline，显式使用调用方快照。"""
 
     def __init__(
@@ -74,12 +77,13 @@ class HybridRetrieval:
         query: str,
         *,
         snapshot: ResourceSnapshot,
+        mode: VectorRetrievalMode = VectorRetrievalMode.HYBRID,
         top_k: int = 5,
         focus: str = "",
         diversity: Literal["off", "moderate", "high"] = "off",
         filters: MetadataFilters | None = None,
-        dense_top_k: int = 30,
-        sparse_top_k: int = 30,
+        dense_top_k: int | None = None,
+        sparse_top_k: int | None = None,
         candidate_limit: int = 60,
     ) -> list[ChunkHit]:
         """一次召回、授权准备和排序；授权过滤后不补召回或重新观察发布/ACL。"""
@@ -92,7 +96,7 @@ class HybridRetrieval:
         retriever = VectorRetriever.from_storage(
             reader=self._vector_reader,
             embedding_client=self._embedding_client,
-            mode=VectorRetrievalMode.HYBRID,
+            mode=mode,
             fusion=self._fusion,
             dense_top_k=dense_top_k,
             sparse_top_k=sparse_top_k,
@@ -125,25 +129,13 @@ class HybridRetrieval:
                 text=item.payload.chunk.raw_text,
                 rank=item.rank,
                 score=item.score,
-                seed_entities=self._seed_entities(item.payload.chunk),
+                seed_entities=chunk_seed_entities(item.payload.chunk),
+                metadata=item.payload.chunk.metadata,
             )
             for item in ranked
         ]
 
         return hits
-
-    def _seed_entities(self, chunk: Chunk) -> list[GraphNodeReference]:
-        if "entities" not in chunk.metadata and "relationships" not in chunk.metadata:
-            return []
-        try:
-            nodes, _ = parse_graph_facts(chunk)
-        except (TypeError, ValueError) as exc:
-            # 图候选是普通正文命中的补充；图事实损坏不撤销已授权的正文。
-            warning(
-                "chunk_seed_entities_rejected", chunk_id=chunk.chunk_id, error=str(exc)
-            )
-            return []
-        return [GraphNodeReference(node.id, node.relations) for node in nodes.values()]
 
     async def _prepare(
         self,
@@ -188,6 +180,18 @@ class HybridRetrieval:
                 )
             )
         return prepared
+
+
+def chunk_seed_entities(chunk: Chunk) -> list[GraphNodeReference]:
+    """从已授权正文补充实体候选；图事实损坏不撤销正文命中。"""
+    if "entities" not in chunk.metadata and "relationships" not in chunk.metadata:
+        return []
+    try:
+        nodes, _ = parse_graph_facts(chunk)
+    except (TypeError, ValueError) as exc:
+        warning("chunk_seed_entities_rejected", chunk_id=chunk.chunk_id, error=str(exc))
+        return []
+    return [GraphNodeReference(node.id, node.relations) for node in nodes.values()]
 
 
 def _stored_embedding(payload: PreparedChunk) -> list[float]:

@@ -25,6 +25,7 @@ from rag.core.schema import ContentRevision, Ontology
 from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer
 from rag.ingestion.transformers import GraphExtractor
 from rag.storage.content import ContentReader
+from rag.storage.vector import IndexableField, IndexKind
 
 
 @dataclass(slots=True)
@@ -305,10 +306,10 @@ async def run(args: argparse.Namespace) -> RepairReport:
             for vectors in (entity_vectors, relation_vectors):
                 await vectors.ensure_collection(
                     metadata_index_fields=[
-                        "resource_id",
-                        "content_revision",
-                        "chunk_id",
-                        "ontology_name",
+                        IndexableField("resource_id", IndexKind.KEYWORD),
+                        IndexableField("content_revision", IndexKind.KEYWORD),
+                        IndexableField("chunk_id", IndexKind.KEYWORD),
+                        IndexableField("ontology_name", IndexKind.KEYWORD),
                     ]
                 )
             embedding_client = EmbeddingClient(

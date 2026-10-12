@@ -350,3 +350,50 @@ async def test_persisted_mongo_facts_to_indexer_to_topology(
     assert await topology.get_relations([sources[0].edges[0].id]) == [
         source.edges[0] for source in sources
     ]
+    selected = MetadataFilters([MetadataFilter("ontology_name", graph_ontology.domain)])
+    assert await topology.get_nodes([sources[0].nodes[0].id], filters=selected) == [
+        source.nodes[0] for source in sources
+    ]
+    assert await topology.get_relations([sources[0].edges[0].id], filters=selected) == [
+        source.edges[0] for source in sources
+    ]
+    assert await topology.get_neighbors([sources[0].nodes[0].id], filters=selected) == [
+        source.edges[0] for source in sources
+    ]
+    denied = MetadataFilters([MetadataFilter("ontology_name", "other")])
+    assert await topology.get_nodes([sources[0].nodes[0].id], filters=denied) == []
+    assert await topology.get_relations([sources[0].edges[0].id], filters=denied) == []
+    assert await topology.get_neighbors([sources[0].nodes[0].id], filters=denied) == []
+
+    foreign = replace(graph_ontology, domain="other")
+    other_chunk = replace(chunk, chunk_id="foreign", metadata={})
+    other_nodes = [
+        foreign.create_node(
+            name=node.name, category=node.category, source_id=other_chunk.chunk_id
+        )
+        for node in sources[0].nodes
+    ]
+    other_edge = foreign.create_edge(
+        nodes={node.id: node for node in other_nodes},
+        source_id=other_nodes[0].id,
+        target_id=other_nodes[1].id,
+        relation_type="works_at",
+        chunk_id=other_chunk.chunk_id,
+    )
+    other_chunk.metadata.update(
+        entities=[asdict(node) for node in other_nodes],
+        relationships=[asdict(other_edge)],
+    )
+    await GraphIndexer(ontology=foreign, writer=topology).index([other_chunk])
+    ids = [other_nodes[0].id, sources[0].nodes[0].id]
+    assert await topology.get_nodes(ids, filters=selected) == [
+        source.nodes[0] for source in sources
+    ]
+    assert await topology.get_relations(
+        [other_edge.id, sources[0].edges[0].id], filters=selected
+    ) == [source.edges[0] for source in sources]
+    # 本体条件先于逻辑关系预算执行，其他本体不能占据名额。
+    assert await topology.get_neighbors(ids, limit=1) == [other_edge]
+    assert await topology.get_neighbors(ids, filters=selected, limit=1) == [
+        source.edges[0] for source in sources
+    ]

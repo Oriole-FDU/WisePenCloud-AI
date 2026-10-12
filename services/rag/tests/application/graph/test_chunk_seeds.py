@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from rag.application.acl.models import PermissionScope
-from rag.application.retrieval import ChunkHit, HybridRetrieval
+from rag.application.retrieval import ChunkHit, VectorRetrieval
 from rag.application.snapshot import ResourceSnapshot
 from rag.storage.vector import VectorMatch
 
@@ -42,7 +42,7 @@ async def test_chunk_hits_entity_references_are_from_selected_authorized_chunk(
         {"resource_id": chunk.resource_id, "content_revision": chunk.content_revision},
     )
     vector = SimpleNamespace(query=AsyncMock(return_value=[match]))
-    usecase = HybridRetrieval(
+    usecase = VectorRetrieval(
         snapshot_reader=snapshot_reader,
         vector_reader=vector,
         embedding_client=env.embedding,

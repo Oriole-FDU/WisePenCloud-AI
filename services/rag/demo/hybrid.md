@@ -1,6 +1,6 @@
 # 普通混合检索装配示例
 
-平台默认装配与共享客户端生命周期现已在 Container/main 实现，见 [platform.md](platform.md)；下文保留组件级显式组合。垂类注入与 provider 覆盖见 [extensions.md](extensions.md)。
+平台默认装配与共享客户端生命周期现已在 Container/main 实现，见 [platform.md](platform.md)；下文保留组件级显式组合。垂类注入与 provider 覆盖见 [extensions.md](../src/rag/extensions/extensions.md)。
 
 这个示例展示实际组件之间如何连接，重点是 `VectorRetriever.from_storage` 的调用位置，以及它与 application 用例的关系。代码按阅读顺序分段，连接、凭证和模型配置由外部提供，可以将这些段落放进自己的装配入口；这里省略启动、关闭连接与 API 入口。
 
@@ -52,7 +52,7 @@ vector_storage = QdrantVectorStorage(
 )
 ```
 
-`EmbeddingClient` 在初始化时固定 model 和 dimensions，后续只调用 `embed(texts=...)`。摄入与检索应使用配置一致的客户端，dimensions 与目标 collection 一致；VectorIndexer、VectorRetriever 和 HybridRetrieval 不再单独接收 model 或 dimensions。示例假定索引已经显式初始化，Document、Chunk、向量和发布状态已经由摄入流程生成。
+`EmbeddingClient` 在初始化时固定 model 和 dimensions，后续只调用 `embed(texts=...)`。摄入与检索应使用配置一致的客户端，dimensions 与目标 collection 一致；VectorIndexer、VectorRetriever 和 VectorRetrieval 不再单独接收 model 或 dimensions。示例假定索引已经显式初始化，Document、Chunk、向量和发布状态已经由摄入流程生成。
 
 ## 2. 装配资源快照读取
 
@@ -70,18 +70,18 @@ snapshot_reader = ResourceSnapshotReader(
 
 ## 3. 装配完整的 application 用例
 
-直接将已经连接的向量仓储和已绑定模型、维度的 embedding 客户端交给 HybridRetrieval。用例在每次调用中直接执行 VectorRetriever.from_storage，创建本次配置的 Retriever。
+直接将已经连接的向量仓储和已绑定模型、维度的 embedding 客户端交给 VectorRetrieval。用例在每次调用中直接执行 VectorRetriever.from_storage，创建本次配置的 Retriever。
 
 ```python
 from common.utils.retrieval import ModelReranker, RoundRobinFusion
-from rag.application.retrieval import HybridRetrieval
+from rag.application.retrieval import VectorRetrieval
 
 reranker = ModelReranker(
     client=rerank_client,
     text_getter=lambda payload: payload.chunk.raw_text,
 )
 
-hybrid = HybridRetrieval(
+hybrid = VectorRetrieval(
     snapshot_reader=snapshot_reader,
     vector_reader=vector_storage,
     embedding_client=embedding_client,
@@ -128,12 +128,12 @@ for hit in hits:
     print(hit.text)
 ```
 
-**from_storage 的调用位置就在 HybridRetrieval.retrieve 内部。** 这次调用展开为：
+**from_storage 的调用位置就在 VectorRetrieval.retrieve 内部。** 这次调用展开为：
 
 ```python
 from rag.retrievers.vector import VectorRetrievalMode, VectorRetriever
 
-# HybridRetrieval 内部的装配步骤；moderate/high 需要候选已存向量。
+# VectorRetrieval 内部的装配步骤；moderate/high 需要候选已存向量。
 retriever = VectorRetriever.from_storage(
     reader=vector_storage,
     embedding_client=embedding_client,
@@ -183,7 +183,7 @@ candidates = await sparse_retriever.retrieve("检索增强生成")
 
 单路保留 provider score；融合策略仅作用于 hybrid，融合分数属于 Candidate.score。单路直接用 candidate_limit 作为仓储 top_k，不接受 dense_top_k/sparse_top_k；hybrid 使用两路预算（未传时各为 30），candidate_limit 限制融合后的候选数。include_embedding 在单路同样有效，sparse 也可以请求命中已有的 dense 向量，这不需要生成查询 embedding。
 
-这里返回的仍是内部 VectorMatch 候选。面向用户的正文结果需要经过 application 的授权、版本与身份检查。HybridRetrieval 用例显式固定使用 hybrid 模式。
+这里返回的仍是内部 VectorMatch 候选。面向用户的正文结果需要经过 application 的授权、版本与身份检查。VectorRetrieval 默认使用 hybrid，也支持显式 mode=DENSE/SPARSE。单路不接受 dense_top_k/sparse_top_k，使用 candidate_limit 控制召回量。
 
 ## 6. 运行时流转与对象生命周期
 
@@ -205,8 +205,8 @@ hybrid.retrieve(query, snapshot=...)
 
 | 对象 | 生命周期与内容 |
 | --- | --- |
-| 客户端、Storage、SnapshotReader、reranker、HybridRetrieval | 可以共享；保存固定依赖与配置 |
-| VectorRetriever、Pipeline、准备回调 | 每次 HybridRetrieval 调用创建；本次配置确定后不再修改 |
+| 客户端、Storage、SnapshotReader、reranker、VectorRetrieval | 可以共享；保存固定依赖与配置 |
+| VectorRetriever、Pipeline、准备回调 | 每次 VectorRetrieval 调用创建；本次配置确定后不再修改 |
 | ResourceSnapshot | 每次独立能力调用创建；同一次上层编排显式共享版本与权限决定 |
 
 若上层编排还需要读取 Document，可以显式复用同一个 snapshot：
@@ -255,3 +255,6 @@ if hits:
 own 是当前标题至下一个标题前的完整原文；subtree 包含该章节的全部子章节。两者均保留标题、空白与 Markdown，不提供窗口、预算或续读。无权、旧版本、缺失章节省略，不切换到新版；损坏的源范围或数据库解码错误明确传播。目录内容和格式直接由 Common OutlineFormatter 生成。
 
 实际 adapter 装配的回归测试见 [test_hybrid_composition.py](../tests/backends/qdrant/test_hybrid_composition.py)，覆盖检索命中后直接使用章节 ID 读取邻域、own 与 subtree，且只判定一次资源授权。
+
+
+通用正文结果现在包含当前授权 Chunk 的完整 metadata。metadata 不来自向量 payload，不设字段白名单；text 仍只包含 raw_text。业务工具可以把年份等参数翻译为 MetadataFilters，再调用同一 VectorRetrieval。业务字段在写入边界校验，变更要求提高上游 version，读取不重复执行业务过滤或解析垂类 schema。

@@ -22,6 +22,7 @@ from rag.core.schema import ContentRevision
 from rag.ingestion.indexers import ChunkFactsIndexer, VectorIndexer
 from rag.ingestion.transformers.contextualizer import ContextStatus, Contextualizer
 from rag.storage.content import ContentReader
+from rag.storage.vector import IndexableField, IndexKind
 
 
 @dataclass(slots=True)
@@ -263,7 +264,9 @@ async def run(args: argparse.Namespace) -> RepairReport:
             outline_token_ratio=args.outline_token_ratio,
             max_concurrency=args.max_concurrency,
         )
-        await vectors.ensure_collection()
+        await vectors.ensure_collection(
+            [IndexableField("resource_id", IndexKind.KEYWORD)]
+        )
         return await repair_resources(
             args.resource_ids,
             publication=publication,

@@ -1,9 +1,27 @@
 """向量存储的投影值对象和读写端口，不选择 revision 或解释 ACL。"""
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Protocol
 
 from rag.core.schema.filters import MetadataFilters
+
+
+class IndexKind(StrEnum):
+    """后端无关的 metadata 索引类型；时间由业务转换为整数时间戳。"""
+
+    KEYWORD = "keyword"
+    INTEGER = "integer"
+    FLOAT = "float"
+    BOOLEAN = "boolean"
+
+
+@dataclass(frozen=True, slots=True)
+class IndexableField:
+    """一个平面 metadata 字段的索引声明，不携带数据库 SDK 类型。"""
+
+    name: str  # metadata 内的相对字段名称。
+    kind: IndexKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,3 +73,20 @@ class VectorWriter(Protocol):
 
 class VectorStorage(VectorReader, VectorWriter, Protocol):
     """同一 adapter 组合读写能力，collection 绑定实例而非每条记录。"""
+
+    @property
+    def collection(self) -> str: ...
+
+    async def ensure_collection(
+        self, metadata_index_fields: list[IndexableField]
+    ) -> None:
+        """显式初始化并核对集合；空字段列表仍核对向量配置，失败传播。"""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class VectorCollection:
+    """装配层的集合及索引配置，启动初始化消费；GC 仅使用其中的 storage。"""
+
+    storage: VectorStorage
+    metadata_index_fields: list[IndexableField]

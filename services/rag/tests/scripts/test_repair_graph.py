@@ -17,6 +17,7 @@ from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer
 from rag.ingestion.transformers import GraphExtractor
 from rag.ingestion.transformers.graph import GraphExtraction
+from rag.storage.vector import IndexableField, IndexKind
 
 
 @pytest.fixture(scope="module")
@@ -742,10 +743,13 @@ async def test_vectors_only_setup_no_instruction_or_neo4j_and_closes_clients(
     for storage_instance in vectors:
         storage_instance.ensure_collection.assert_awaited_once_with(
             metadata_index_fields=[
-                "resource_id",
-                "content_revision",
-                "chunk_id",
-                "ontology_name",
+                IndexableField(name, IndexKind.KEYWORD)
+                for name in (
+                    "resource_id",
+                    "content_revision",
+                    "chunk_id",
+                    "ontology_name",
+                )
             ]
         )
     assert all(

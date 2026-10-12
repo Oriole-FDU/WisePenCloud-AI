@@ -4,11 +4,11 @@
 
 本文是 RAG V4 的实现设计合同，整合 00–10 方案中已经确认的边界。它描述核心模型、写入管线、存储端口、普通检索、图谱能力、权限和版本语义。
 
-2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。图事实首片已完成（见 22），多来源拓扑投影已完成（见 23），图向量和三种种子召回组件已完成（见 24），授权图检索、一跳 traversal 与 Chunk 实体候选已实现（见 25）；父块暂缓，不做检索效果基线；P8 首片已实现生产配置、通用装配、服务 GC 与生命周期（见 26）；在线重构建、历史贡献回收和真实环境联调留后。
+2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 VectorRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。图事实首片已完成（见 22），多来源拓扑投影已完成（见 23），图向量和三种种子召回组件已完成（见 24），授权图检索、一跳 traversal 与 Chunk 实体候选已实现（见 25）；父块暂缓，不做检索效果基线；P8 首片已实现生产配置、通用装配、服务 GC 与生命周期（见 26）；在线重构建、历史贡献回收和真实环境联调留后。
 
 2026-10-12 P5 首片已完成 Ontology、GraphExtractor、增量复用、可选补漏、Chunk 图事实落库与离线图 repair，见 [22](22-graph-extraction-implementation.md)。图事实/本体统一为 core.schema.graph 中的 dataclass，只有 Instructor 输出 DTO 使用 Pydantic。GraphStorage/GraphIndexer、Neo4j 多来源投影与可选 repair 已完成（见 23）；当前排期不做确定性 Producer。
 
-本设计不包含 HTTP 路由、MCP 工具注册和最终 transport composition。MCP 只作为可信身份来源的既有边界被引用：最终用户身份由可信安全上下文注入，RAG application 接收 `PermissionScope`，不从业务参数读取用户 ID。
+本设计暂不装配通用业务 HTTP/MCP transport；Employment 扩展示例已经实现只读子 API 并由平台挂载，见 [28](28-employment-extension-implementation.md)。MCP 只作为可信身份来源的既有边界被引用：最终用户身份由可信安全上下文注入，RAG application 接收 `PermissionScope`，不从业务参数读取用户 ID。
 
 本设计也不追求 Mongo、Qdrant、Neo4j 的全局强一致。它只消除会造成错误的内容混版、越权访问、跨版本图谱读取和不受控的索引语义漂移。
 
@@ -385,13 +385,13 @@ application: query + ResourceSnapshot + 本次检索配置
 
 VectorRetriever.from_storage 初始化选择 VectorRetrievalMode（dense/sparse/hybrid，默认 hybrid）；dense/hybrid 注入 VectorReader 与已配置的 EmbeddingClient，sparse 只需 VectorReader。在装配时确定 hybrid 的 dense/sparse 预算（默认各为 30）、candidate_limit=60、filters=None、include_embedding=False 和融合策略。仅 hybrid 通过 Common FusionRetriever 并发两路；单路直接召回，保留 provider score。启用路线各自构造 Storage VectorQuery；dense/hybrid 查询 embedding 只生成一次，sparse 不生成。单路使用 candidate_limit 作为仓储 top_k，拒绝 dense_top_k/sparse_top_k；hybrid 两路预算未传时各为 30，candidate_limit 限制融合输出。每路初始 Candidate.score 是 provider score，融合只改 Candidate 排名字段，VectorMatch.score 保留 provider 分数。非法配置在初始化时失败，空白查询在 I/O 前失败，任一路异常直接传播。
 
-HybridRetrieval 显式注入 ResourceSnapshotReader、VectorReader、已配置的 EmbeddingClient、可选 Fusion[VectorMatch] 与可选 Reranker[PreparedChunk]。用例直接调用 VectorRetriever.from_storage，显式选择 hybrid，将固定依赖与本次 dense_top_k、sparse_top_k、candidate_limit、filters、include_embedding 组合成召回组件。已连接的客户端与仓储共享，每次组装不新建数据库连接，不修改共享组件的配置。
+VectorRetrieval 显式注入 ResourceSnapshotReader、VectorReader、已配置的 EmbeddingClient、可选 Fusion[VectorMatch] 与可选 Reranker[PreparedChunk]。用例直接调用 VectorRetriever.from_storage，按 mode 选择 dense/sparse/hybrid（默认 hybrid），将固定依赖与本次 dense_top_k、sparse_top_k、candidate_limit、filters、include_embedding 组合成召回组件。已连接的客户端与仓储共享，每次组装不新建数据库连接，不修改共享组件的配置。
 
-用例 retrieve(query, *, snapshot, top_k=5, focus="", diversity="off", filters=None, dense_top_k=30, sparse_top_k=30, candidate_limit=60) 先通过显式快照批量读取，过滤缺失定位、不可见、旧版本、错误投影身份和缺失事实。PreparedChunk 只承载授权 Chunk 与可选候选 embedding。ModelReranker 通过文本提取函数只读取 Chunk.raw_text；focus 去空白为空时使用 query。MMR 使用向量提取函数，off 不请求向量，moderate/high 使用已存向量和 Common 的 0.75/0.5 参数，不重新 embedding 正文。
+用例 retrieve(query, *, snapshot, mode=HYBRID, top_k=5, focus="", diversity="off", filters=None, dense_top_k=None, sparse_top_k=None, candidate_limit=60) 先通过显式快照批量读取，过滤缺失定位、不可见、旧版本、错误投影身份和缺失事实。PreparedChunk 只承载授权 Chunk 与可选候选 embedding。ModelReranker 通过文本提取函数只读取 Chunk.raw_text；focus 去空白为空时使用 query。MMR 使用向量提取函数，off 不请求向量，moderate/high 使用已存向量和 Common 的 0.75/0.5 参数，不重新 embedding 正文。
 
 授权过滤后不补召回、不重查 publication/ACL，结果允许少于 top_k。召回或准备为空时跳过排序；准备失败不调用外部模型。重排失败记录日志并保留重排前顺序与分数，召回、准备与多样化异常直接传播。
 
-ChunkHit 包含 chunk_id、resource_id、content_revision、section_id、section_path、text（raw_text）、rank、score 和默认空列表 seed_entities；score 属于最终排序阶段，不限定为 0–1，不命名为 rerank_score。内部 metadata 和向量不进入结果。Pipeline 截取 top_k 并连续编号，application 组装后直接返回命中；命中后处理接口已移除。
+ChunkHit 包含 chunk_id、resource_id、content_revision、section_id、section_path、text（raw_text）、rank、score 和默认空列表 seed_entities、默认空字典 metadata；score 属于最终排序阶段，不限定为 0–1，不命名为 rerank_score。metadata 是当前已授权 Chunk 的完整字典，不来自向量 payload、不设字段白名单；向量只用于内部排序。Pipeline 截取 top_k 并连续编号，application 组装后直接返回命中；命中后处理接口已移除。
 
 Common BM25Retriever 使用调用方提供的 payload 文本提取函数在内存建索引，不等同于 Qdrant sparse 查询。Chat 缓存输出搜索已迁移到类型化 payload，保留原文定位与会话隔离行为。图谱不可用或未启用时普通检索独立工作。
 
@@ -407,17 +407,17 @@ RAG 不裁剪输出原文/描述，不管理结果缓存或懒读取，预算归
 
 ### 7.3 Chunk 种子
 
-ChunkHit.seed_entities 是默认空列表，元素 GraphNodeReference 只含 id/relations。HybridRetrieval 不依赖 Ontology，从最终已授权 Chunk 当前 metadata 生成引用；逻辑 ID 沿用本体、类别和规范化名称的身份，不解析 ID 字符串。它们只是候选，普通检索不会自动遍历。没有事实时为空，补充解析失败记录日志并保留正文命中。
+ChunkHit.seed_entities 是默认空列表，元素 GraphNodeReference 只含 id/relations。VectorRetrieval 不依赖 Ontology，从最终已授权 Chunk 当前 metadata 生成引用；逻辑 ID 沿用本体、类别和规范化名称的身份，不解析 ID 字符串。它们只是候选，普通检索不会自动遍历。没有事实时为空，补充解析失败记录日志并保留正文命中。
 
 GraphTraversal 接收调用方选择的逻辑 node_ids，先从当前任意合法可见来源确认节点，再按可选方向和谓词读取一跳。来源不必绑定原 ChunkHit，但必须经同一 ResourceSnapshotReader 的资源授权和 selected revision 回查，并在当前 Mongo metadata 中存在合法事实。None 方向为 BOTH，None 谓词不限制，[] 不读关系；不暴露 depth，模型看到结果后再选择下一跳。
 
 GraphEvidence 包含 kind/fact_id/entities/relationships/sources，实体视图 GraphEntity 为 id/source_id/description/relations，一个逻辑种子一组；GraphHit 再附最终 rank/score。关系端点来自支持该关系的同一 Chunk，各来源描述独立返回，所有事实均可定位到组内完整原文。一跳默认批量上限 100 个逻辑关系候选，已选合法来源不截取；过滤后不补读取。实体/关系/来源去重保序。来源对象不携带 contextual_context 或任意 metadata。
 
-GraphRetrieval / GraphTraversal / HybridRetrieval 不依赖 Ontology。Ontology.create_node 在写入时根据 category 整理 relations（谓词与允许方向），随 GraphNode 普通字典保存；空端点类别限制适用该侧任意类别。它是类别允许的关系提示，不声明当前可见事实存在；查询侧不反向限制遍历，指定无事实的谓词返回空关系。
+GraphRetrieval / GraphTraversal / VectorRetrieval 不依赖 Ontology。Ontology.create_node 在写入时根据 category 整理 relations（谓词与允许方向），随 GraphNode 普通字典保存；空端点类别限制适用该侧任意类别。它是类别允许的关系提示，不声明当前可见事实存在；查询侧不反向限制遍历，指定无事实的谓词返回空关系。
 
 text_sha256 继续记录实际索引文本；查询使用 fact_sha256 与 graph_version 核对当前事实输入，无需加载本体重新渲染文本。GraphNode 仍保留生产与索引需要的名称和类别，应用实体视图只保留 ID 及来源材料，不解析 ID 字符串。
 
-两个用例共享公开 GraphEvidenceLoader / EvidenceBuilder，调用内合并来源读取和事实解析；底层 adapter 已保证的投影结构和身份不再重复检查。两个图列表均缺失作为无图事实，部分缺失、结构或来源损坏异常传播，读取不套用单一本体规则，缺失合法端点的关系逐条丢弃。filters 仅支持 resource_id/content_revision 的 EQ/IN 与 AND/OR/NOT；表达式形状与类型由底层 adapter 检查，同时约束向量、拓扑和当前来源。实现与实际验证见 [25](25-graph-application-implementation.md)。
+两个用例共享公开 GraphEvidenceLoader / EvidenceBuilder，调用内合并来源读取和事实解析；底层 adapter 已保证的投影结构和身份不再重复检查。两个图列表均缺失作为无图事实，部分缺失、结构或来源损坏异常传播，读取不套用单一本体规则，缺失合法端点的关系逐条丢弃。filters 支持 resource_id/content_revision/ontology_name 的字符串 EQ、字符串列表 IN 与 AND/OR/NOT；表达式形状与类型由底层 adapter 检查，同时约束向量、拓扑和当前来源事实。GraphIndexer 将绑定的 domain 写入来源 metadata.ontology_name；Mongo 回查按当前 GraphNode.ontology_name 筛选，关系保留满足条件的同来源两端，不读取业务 metadata 或解析 ID。默认不筛选本体，查询不依赖 Ontology。旧 Neo4j 来源属性用 projection-only 重建，见 [30](30-graph-ontology-filter-implementation.md)。
 
 ### 7.4 父块
 
@@ -470,7 +470,7 @@ src/rag/
   application/
     publication/  # models.py、store.py、publish.py；后者包含事件、消费者及完整发布
     snapshot.py   # ResourceSnapshot 与 ResourceSnapshotReader，共享版本／权限决定和内容读取
-    retrieval.py  # HybridRetrieval、PreparedChunk、ChunkHit 与固定读取/模型依赖装配
+    retrieval.py  # VectorRetrieval、PreparedChunk、ChunkHit 与固定读取/模型依赖装配
                    # 目录/邻域与章节读取已实现；图谱检索与显式一跳已实现，MCP transport 留后
   ingestion/       # Chunker, Transformer, Indexer, IngestionPipeline
   storage/         # ContentStorage, VectorStorage, GraphStorage
@@ -513,13 +513,25 @@ PublicationStore.list_destroyed_resource_ids 使用 destroyed/resource_id 复合
 
 ### 9.3 垂类扩展开发
 
-P8 第二片提供 `pipeline_routes = providers.Singleton(dict)`，注入平台唯一 DocumentPublication 的可选 pipelines 参数。每个容器实例独立持有映射，构造 publisher 前后注册均生效；正常在消费者启动前注册，使用普通字典赋值/显式替换，不增加 Registry/冻结/在线热更新协议。业务包只组装 Pipeline，不覆盖 publisher、不接触 Kafka。Future DocumentReadyEvent 的 type/metadata 已支持，但本片不修改上游生产者。
+P8 第二片提供 `pipeline_routes = providers.Singleton(dict)`，注入平台唯一 DocumentPublication 的可选 pipelines 参数。每个容器实例独立持有映射，构造 publisher 前后注册均生效；正常在消费者启动前注册，使用普通字典赋值/显式替换，不增加 Registry/冻结/在线热更新协议。业务包通过 Extension 交付 Pipeline、可选额外存储和工具 API，不覆盖 publisher、不接触 Kafka。Future DocumentReadyEvent 的 type/metadata 已支持，但本片不修改上游生产者。
 
 ContentRevision 不包含 type/metadata/路由配置。影响摄入的 type/metadata 变化必须提高上游 version，相同已发布 revision 仍跳过；注册/替换 Pipeline 不自动重建历史事实，继续使用显式维护流程。实施与验证见 [27](27-document-type-routing-implementation.md)。
 
 独立包保存业务本体、metadata、摄入组件、Pipeline、用例、工具适配与外层入口；以子容器或构造函数接收平台依赖，业务模块不导入全局 Container。平台负责共享连接、schema 初始化和 GC，垂类不管理连接和删除。纯输入映射复用通用用例，有业务准备时组合 Retriever/Common Pipeline/SnapshotReader，保留来源授权、完整 metadata、stage/apply 和普通向量确认。
 
-业务 metadata 必须先进入权威 Chunk，再由垂类显式投影到后端并核对当前值；默认 Indexer 不自动索引年代等任意字段，GraphRetrieval 不自动接受时间条件。新增存储由平台接入清理目标。实际 type/Pipeline 注册、依赖替身测试和外层启动示例见 [extensions.md](../demo/extensions.md)；不预建插件 Runtime/Registry、动态 tag 路由、自动发现或运维入口。
+业务 metadata 必须先进入权威 Chunk，再由垂类显式投影到后端并核对当前值；默认 Indexer 不自动索引年代等任意字段，GraphRetrieval 不自动接受时间条件。新增存储由平台接入清理目标。实际 type/Pipeline 注册、依赖替身测试和外层启动示例见 [extensions.md](../src/rag/extensions/extensions.md)；不预建插件 Runtime/Registry、动态 tag 路由、自动发现或运维入口。
+
+### 9.4 Employment 高级扩展示例
+
+`extensions/employment` 替代旧 demo。源码显式登记扩展构造器，EXTENSIONS 选择启用；容器提供 extension()，返回真实装配产物 pipeline/vector_collections/api。main 在共享连接登记后的 lifespan 内构造、初始化、挂载，统一撤销就绪及关闭客户端；扩展不声明自己的连接生命周期。collection 与平台及其他扩展隔离，冲突启动失败。
+
+场景为某公司内部合同，上游 metadata 只含 employee/start_date，原样保存到 Document 并由 Chunker 深拷贝；Transformer 只读校验，不回写规范化业务值。year 派生自日期，仅保存到专用向量 payload。正文图抽取只使用 raw_text/section_path，抽取 Person/Department/in_department。本包在平台默认必需索引和图索引之后增加专用 VectorIndexer，metadata_factory 只返回 employee/year 增量；通用 Indexer 合并 Chunk 的 resource_id/content_revision，身份不能被业务覆盖。全部阶段成功才 apply。
+
+专用 Qdrant 集合使用相同 embedding 模型/维度，dense-only；VectorCollection 用 list[IndexableField] 声明 resource_id KEYWORD、year INTEGER、employee KEYWORD，IndexKind 限定 KEYWORD/INTEGER/FLOAT/BOOLEAN，业务需要时间索引时转整数 Unix 时间戳。VectorStorage.ensure_collection 字段列表必填，每次启动显式核对集合并等待索引确认；后端独立翻译 SDK 类型。平台 vector_storages 为共享 GC writer 列表，登记配置时同步加入 storage，GC 不解释索引声明。普通集合默认只创建 resource_id 索引，通用图集合创建 resource_id/chunk_id/ontology_name，revision 仍保存在 payload 并核对；Employment 不按 revision 过滤，也不创建该字段索引。字段存储与索引声明分开，尊重当前配置而不隐式恢复索引。
+
+EmploymentTools.search_contracts 仅把业务参数映射为 MetadataFilters，再调用专用集合绑定的通用 VectorRetrieval(mode=DENSE)，返回完整 ChunkHit.metadata。VectorReader 执行 filters，通用准备只核对授权/版本/记录身份，不重复业务筛选或业务 schema 解析；业务 metadata 变更必须提高 version，不额外保证同 revision 非合同改写后的投影新鲜度。图三模式和确定性一跳工具传 ontology_name=employment 后直接返回结果，不额外读取 Chunk、校验业务 DTO 或转换证据。共享该本体的可见来源可提供事实，无关系实体仍保留；不解析 ID、自动多跳或补召回。API 复用 Common 可信网关 Header 中间件，按请求构造 snapshot，禁止业务参数声明身份；FROM_SOURCE_SECRET 缺失拒绝装配。只读 API 不代替平台 publication/Kafka 或定义写权限。
+
+示例初版见 [28](28-employment-extension-implementation.md)，当前协议与查询收敛见 [29](29-vector-index-contract-implementation.md)，配置/样例/维护见 [Employment README](../src/rag/extensions/employment/README.md)。历史贡献全面回收、在线插件发现、通用 transport 与时间图查询继续留后。
 
 ## 10. 一致性、失败和可观测性
 
@@ -568,7 +580,7 @@ RAG V4 核心实现完成，需要同时满足：
 
 ## 12. 明确不做
 
-- HTTP API、MCP tool schema 和 transport 注册；
+- 通用 HTTP API、MCP tool schema 和 transport 注册（Employment 示例子 API 已实现）；
 - 上游 ACL 完成事件、上游版本协议或实时权威判权；
 - 跨后端事务、全局 Snapshot、Fence、ACL revision；
 - Chunk metadata Pydantic wrapper、selector、codec 注册链；

@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AppSettings(BaseModel):
-    """平台默认依赖及后台任务配置；垂类本体和路由不属于此配置。"""
+    """平台依赖、后台任务和扩展启用名称；业务本体由扩展包声明。"""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -62,6 +62,10 @@ class AppSettings(BaseModel):
         "wisepen-resource-physical-destroy-topic"
     )
     KAFKA_RAG_PUBLICATION_GROUP_ID: str = "wispen-rag-v4-publication-group"
+
+    # 垂类扩展（可选）；列出允许启用的扩展名称，未列出的一律不注册
+    EXTENSIONS: list[str] = Field(default_factory=list)
+    FROM_SOURCE_SECRET: str | None = None  # 挂载扩展 API 时必须提供可信网关密钥。
 
     @property
     def resource_mongodb_db_name(self) -> str:

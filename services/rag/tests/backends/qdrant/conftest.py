@@ -10,6 +10,7 @@ import pytest
 from qdrant_client import AsyncQdrantClient, models
 
 from rag.backends.qdrant import QdrantVectorStorage
+from rag.storage.vector import IndexableField, IndexKind
 
 
 @pytest.fixture
@@ -62,7 +63,9 @@ async def real_vectors():
         client=client, collection=collection, dense_vector_size=2
     )
     try:
-        await storage.ensure_collection()
+        await storage.ensure_collection(
+            [IndexableField("resource_id", IndexKind.KEYWORD)]
+        )
         yield storage, client, collection
     finally:
         try:
@@ -101,10 +104,10 @@ async def real_graph_vectors():
             )
             await storage.ensure_collection(
                 metadata_index_fields=[
-                    "resource_id",
-                    "content_revision",
-                    "chunk_id",
-                    "ontology_name",
+                    IndexableField("resource_id", IndexKind.KEYWORD),
+                    IndexableField("content_revision", IndexKind.KEYWORD),
+                    IndexableField("chunk_id", IndexKind.KEYWORD),
+                    IndexableField("ontology_name", IndexKind.KEYWORD),
                 ]
             )
             stores.append(storage)

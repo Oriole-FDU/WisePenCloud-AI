@@ -66,10 +66,12 @@ async def test_source_projection_scope_dedup_and_readonly(graph_ontology, chunk)
     assert projections[0].metadata == {
         "resource_id": chunk.resource_id,
         "content_revision": chunk.content_revision,
+        "ontology_name": graph_ontology.domain,
     }
     assert projections[1].metadata == {
         "resource_id": "other",
         "content_revision": "other-revision",
+        "ontology_name": graph_ontology.domain,
     }
     assert len(projections[0].nodes) == 2 and len(projections[0].edges) == 1
     assert projections[0].nodes[0].description == "人员描述"
@@ -142,6 +144,7 @@ async def test_empty_success_is_explicit_replacement_and_writer_failure_propagat
         and projection.nodes == []
         and projection.edges == []
     )
+    assert projection.metadata["ontology_name"] == graph_ontology.domain
     assert chunk == before
 
 

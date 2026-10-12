@@ -9,7 +9,7 @@ import pytest
 from common.utils.retrieval import ModelReranker, RrfFusion
 
 from rag.application.acl.models import PermissionScope, ResourceAcl
-from rag.application.retrieval import HybridRetrieval
+from rag.application.retrieval import VectorRetrieval
 from rag.application.snapshot import ResourceSnapshot
 from rag.core.schema import ContentRevision
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
@@ -61,7 +61,7 @@ def retrieval_deps(snapshot_reader):
         client=client,
         dependencies=dependencies,
         reranker=reranker,
-        usecase=HybridRetrieval(
+        usecase=VectorRetrieval(
             snapshot_reader=snapshot_reader,
             **dependencies,
             reranker=reranker,
@@ -147,6 +147,7 @@ async def test_application_only_exposes_applied_authorized_chunk_text(
         "rank",
         "score",
         "seed_entities",
+        "metadata",
     }
     assert hits[0].section_path == ["标题"] and hits[0].section_id == "section"
     assert publication_store.get_states.await_count == 1
@@ -354,7 +355,7 @@ async def test_usecase_failure_propagates_at_owning_stage(
     error = OSError("failed")
     if failure == "read":
         storage.get_chunks = AsyncMock(side_effect=error)
-    usecase = HybridRetrieval(
+    usecase = VectorRetrieval(
         snapshot_reader=snapshot_reader,
         **retrieval_deps.dependencies,
         reranker=retrieval_deps.reranker,
@@ -380,7 +381,7 @@ async def test_empty_recall_skips_content_and_model(
     retrieval_deps, snapshot_reader, storage
 ):
     storage.get_chunks = AsyncMock(wraps=storage.get_chunks)
-    usecase = HybridRetrieval(
+    usecase = VectorRetrieval(
         snapshot_reader=snapshot_reader,
         **retrieval_deps.dependencies,
         reranker=retrieval_deps.reranker,
@@ -442,6 +443,49 @@ async def test_invalid_call_fails_before_backend_io(retrieval_deps, kwargs):
         await retrieval_deps.usecase.retrieve(
             snapshot=ResourceSnapshot(PermissionScope("reader")),
             **{"query": "query", **kwargs},
+        )
+    retrieval_deps.reader.query.assert_not_awaited()
+    retrieval_deps.embedding.embed.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "mode, calls, embeddings", [("dense", 1, 1), ("sparse", 1, 0), ("hybrid", 2, 1)]
+)
+async def test_application_modes_and_authoritative_metadata(
+    retrieval_deps, visible_chunks, storage, snapshot_reader, mode, calls, embeddings
+):
+    chunk = visible_chunks[0]
+    chunk.metadata.update(business={"year": 2024, "nested": ["权威值"]})
+    await storage.upsert_chunks([chunk])
+    projection = match(chunk, business={"year": 1900}, vector_only="不进入结果")
+    retrieval_deps.matches.append(projection)
+    usecase = VectorRetrieval(
+        snapshot_reader=snapshot_reader, **retrieval_deps.dependencies
+    )
+    hits = await usecase.retrieve(
+        "query",
+        snapshot=ResourceSnapshot(PermissionScope("reader")),
+        mode=mode,
+        top_k=1,
+        candidate_limit=7,
+    )
+    assert len(hits) == 1 and hits[0].metadata == chunk.metadata
+    assert "vector_only" not in hits[0].metadata
+    assert hits[0].metadata["contextual_context"] == "内部上下文"
+    assert retrieval_deps.reader.query.await_count == calls
+    assert retrieval_deps.embedding.embed.await_count == embeddings
+    requests = [call.args[0] for call in retrieval_deps.reader.query.await_args_list]
+    assert all(request.top_k == (30 if mode == "hybrid" else 7) for request in requests)
+
+
+@pytest.mark.parametrize("mode", ["dense", "sparse"])
+async def test_single_route_rejects_hybrid_budget_before_io(retrieval_deps, mode):
+    with pytest.raises(ValueError, match="only supported in hybrid"):
+        await retrieval_deps.usecase.retrieve(
+            "q",
+            snapshot=ResourceSnapshot(PermissionScope("reader")),
+            mode=mode,
+            dense_top_k=3,
         )
     retrieval_deps.reader.query.assert_not_awaited()
     retrieval_deps.embedding.embed.assert_not_awaited()

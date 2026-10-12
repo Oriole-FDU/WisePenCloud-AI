@@ -104,6 +104,37 @@ async def test_embedding_and_storage_alternate_by_batch(
     ]
 
 
+@pytest.mark.parametrize("conflicting_identity", [False, True])
+async def test_business_metadata_factory_adds_fields_without_replacing_chunk_identity(
+    embedding_client, vector_writer, chunk, conflicting_identity
+):
+    additions = {"year": 2020, "employee": "李明"}
+    if conflicting_identity:
+        additions.update(resource_id="wrong", content_revision="wrong")
+    before = deepcopy(chunk)
+    callback = []
+
+    def metadata_factory(current):
+        callback.append(current)
+        return additions
+
+    await VectorIndexer(
+        embedding_client=embedding_client,
+        writer=vector_writer,
+        metadata_factory=metadata_factory,
+    ).index([chunk])
+    assert callback == [chunk]
+    record = vector_writer.upsert.call_args.args[0][0]
+    assert record.metadata == {
+        "year": 2020,
+        "employee": "李明",
+        "resource_id": chunk.resource_id,
+        "content_revision": chunk.content_revision,
+    }
+    assert chunk == before
+    assert additions.get("resource_id") == ("wrong" if conflicting_identity else None)
+
+
 @pytest.mark.parametrize("failure", ["embedding", "writer"])
 async def test_later_batch_failure_stops_without_compensating_completed_writes(
     indexer, embedding_client, vector_writer, chunk, failure

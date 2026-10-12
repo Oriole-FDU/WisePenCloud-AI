@@ -10,14 +10,14 @@ from common.utils.retrieval import ModelReranker
 from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.publication import DocumentReadyEvent
 from rag.application.reading import DocumentReading, SectionReadScope
-from rag.application.retrieval import HybridRetrieval
+from rag.application.retrieval import VectorRetrieval
 from rag.application.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.core.schema import ContentRevision
 from rag.ingestion.chunkers import MarkdownChunker
 
 
 @pytest.mark.parametrize("diversity", ["off", "high"])
-async def test_storage_to_hybrid_retrieval_composition(
+async def test_storage_to_vector_retrieval_composition(
     storage, publication_store, vectors, qdrant_client, document, diversity
 ):
     # storage/publication_store 是实际 Mongo adapter；vectors 是实际 Qdrant adapter。
@@ -86,7 +86,7 @@ async def test_storage_to_hybrid_retrieval_composition(
     )
 
     # 用例绑定实际仓储与模型客户端，调用时直接 from_storage 组装本次 Retriever。
-    usecase = HybridRetrieval(
+    usecase = VectorRetrieval(
         snapshot_reader=snapshot_reader,
         vector_reader=vectors,
         embedding_client=embedding_client,

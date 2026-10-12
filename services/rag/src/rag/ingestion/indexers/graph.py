@@ -83,6 +83,7 @@ class GraphIndexer(Indexer):
                     metadata={
                         "resource_id": chunk.resource_id,
                         "content_revision": chunk.content_revision,
+                        "ontology_name": self._ontology.domain,
                     },
                     nodes=list(nodes.values()),
                     edges=list(edges.values()),

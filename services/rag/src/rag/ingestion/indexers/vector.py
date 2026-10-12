@@ -1,5 +1,6 @@
 """从最终 Chunk 派生 dense 与 sparse 输入，按批等待全部必需向量投影成功。"""
 
+from collections.abc import Callable
 from math import isfinite
 
 from common.utils.ai_clients.embedding import EmbeddingClient
@@ -11,7 +12,7 @@ from .base import Indexer
 
 
 class VectorIndexer(Indexer):
-    """只读 Chunk；分批 embedding 后写入投影，不管理发布或重试。"""
+    """只读 Chunk；metadata_factory 提供业务增量，资源身份始终来自 Chunk。"""
 
     def __init__(
         self,
@@ -19,12 +20,14 @@ class VectorIndexer(Indexer):
         embedding_client: EmbeddingClient,
         writer: VectorWriter,
         batch_size: int = 32,
+        metadata_factory: Callable[[Chunk], dict[str, object]] | None = None,
     ) -> None:
         if batch_size <= 0:
             raise ValueError("batch size must be positive")
         self._embedding_client = embedding_client
         self._writer = writer
         self._batch_size = batch_size
+        self._metadata_factory = metadata_factory
 
     async def index(self, chunks: list[Chunk]) -> None:
         """每批先 embedding 后写入；失败停止后续批次，已完成的事实与投影保留。"""
@@ -59,7 +62,13 @@ class VectorIndexer(Indexer):
                     record_id=chunk.chunk_id,
                     text=text,
                     embedding=vector,
+                    # factory 无需重复定位字段，也不能覆盖通用授权回查所需身份。
                     metadata={
+                        **(
+                            self._metadata_factory(chunk)
+                            if self._metadata_factory
+                            else {}
+                        ),
                         "resource_id": chunk.resource_id,
                         "content_revision": chunk.content_revision,
                     },

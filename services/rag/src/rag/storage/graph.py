@@ -16,7 +16,7 @@ class GraphSourceProjection:
     """一个 Chunk 的完整投影输入；空事实也表达移除该来源旧贡献。"""
 
     chunk_id: str
-    metadata: dict[str, object]  # 当前包含资源/revision，后端只执行普通属性过滤。
+    metadata: dict[str, object]  # 资源/revision/ontology_name；后端执行普通属性过滤。
     nodes: list[GraphNode] = field(default_factory=list)
     edges: list[GraphEdge] = field(default_factory=list)
 

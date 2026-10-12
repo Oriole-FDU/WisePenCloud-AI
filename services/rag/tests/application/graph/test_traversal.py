@@ -1,12 +1,14 @@
 """逐跳调用的显式方向、谓词与来源授权，不能借隐藏边进入下一跳。"""
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from rag.application.acl.models import ResourceAcl
 from rag.core.schema.filters import (
+    FilterCondition,
+    FilterOperator,
     MetadataFilter,
     MetadataFilters,
 )
@@ -177,6 +179,73 @@ async def test_graph_filters_apply_to_root_and_relationship_sources(graph_env):
     assert len(result[0].relationships) == 1
     assert env.graph.get_nodes.call_args.kwargs["filters"] is filters
     assert env.graph.get_neighbors.call_args.kwargs["filters"] is filters
+
+
+@pytest.mark.parametrize("operator", [FilterOperator.EQ, FilterOperator.IN])
+async def test_ontology_filter_uses_current_facts_and_keeps_source_scope(
+    graph_env, storage, operator
+):
+    env = graph_env
+    chunk = env.chunks[0]
+    foreign = replace(env.ontology, domain="other")
+    node = foreign.create_node(
+        name="其他人员", category="Person", source_id=chunk.chunk_id
+    )
+    chunk.metadata["entities"].append(asdict(node))
+    # 业务 metadata 不能代替图事实的本体声明。
+    chunk.metadata["ontology_name"] = "other"
+    await storage.upsert_chunks([chunk])
+    env.graph.nodes.append(node)
+    filters = MetadataFilters(
+        [
+            MetadataFilter(
+                "ontology_name",
+                env.ontology.domain
+                if operator is FilterOperator.EQ
+                else [env.ontology.domain],
+                operator,
+            ),
+            MetadataFilters([MetadataFilter("resource_id", "c")], FilterCondition.NOT),
+        ]
+    )
+    groups = await env.traversal.traverse(
+        [env.facts[0][0][0].id, node.id], snapshot=env.snapshot(), filters=filters
+    )
+    assert [group.fact_id for group in groups] == [env.facts[0][0][0].id]
+    assert {source.resource_id for source in groups[0].sources} == {"a"}
+    assert len(groups[0].relationships) == 1
+    assert all(item.id != node.id for item in groups[0].entities)
+    assert env.graph.get_neighbors.call_args.args[0] == [groups[0].fact_id]
+
+    # OR 不把查询绑定到单一本体；任意一条来源条件匹配即可。
+    combined = MetadataFilters(
+        [
+            MetadataFilter("ontology_name", "other"),
+            MetadataFilter("content_revision", env.chunks[2].content_revision),
+        ],
+        FilterCondition.OR,
+    )
+    groups = await env.traversal.traverse(
+        [node.id, env.facts[0][0][0].id], snapshot=env.snapshot(), filters=combined
+    )
+    assert [group.fact_id for group in groups] == [node.id, env.facts[0][0][0].id]
+    assert {source.resource_id for source in groups[1].sources} == {"c"}
+    assert groups[0].relationships == []
+
+
+async def test_stale_ontology_projection_cannot_confirm_a_seed(graph_env, storage):
+    env = graph_env
+    company = env.facts[1][0][1]
+    # 保留旧图库投影；当前 Mongo 实体换了本体，其逻辑 ID 已不属于旧种子。
+    env.chunks[1].metadata["entities"][1]["ontology_name"] = "other"
+    await storage.upsert_chunks([env.chunks[1]])
+    result = await env.traversal.traverse(
+        [company.id],
+        snapshot=env.snapshot(),
+        filters=MetadataFilters([MetadataFilter("ontology_name", env.ontology.domain)]),
+    )
+    assert result == []
+    env.graph.get_neighbors.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

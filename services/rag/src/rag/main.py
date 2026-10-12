@@ -25,6 +25,7 @@ from rag.api.router import api_router
 from rag.container import container
 from rag.core.config.app_settings import settings
 from rag.core.config.nacos import nacos_client_manager
+from rag.extensions import register_extensions
 
 
 async def _run_background(name: str, run: Callable[[], Awaitable[None]]) -> None:
@@ -64,26 +65,25 @@ async def lifespan(app: FastAPI):
                 await driver.verify_connectivity()
             graph = container.graph_storage()
 
+            # 扩展声明在共享连接登记后解析；部分构造失败也进入统一清理。
+            extensions = register_extensions(container)
+            app.state.extensions = extensions
+
             # 存储层探活与索引/集合初始化
             await mongo.admin.command("ping")
             await container.content_storage().ensure_indexes()
             await container.publication_store().ensure_indexes()
             await container.acl_repository().ensure_indexes()
-            await container.vector_storage().ensure_collection()
-            for storage in (
-                container.entity_vector_storage(),
-                container.relationship_vector_storage(),
-            ):
-                await storage.ensure_collection(
-                    metadata_index_fields=[
-                        "resource_id",
-                        "content_revision",
-                        "chunk_id",
-                        "ontology_name",
-                    ]
+            for collection in container.vector_collections():
+                await collection.storage.ensure_collection(
+                    collection.metadata_index_fields
                 )
             if graph is not None:
                 await graph.ensure_schema()
+            for name, extension in extensions.items():
+                if extension.api is not None:
+                    path = f"/rag/extensions/{name}"
+                    app.mount(path, extension.api)
 
             # 构造绑定模型与客户端的必要组件，但不通过真实模型请求探测启动。
             container.embedding_client()
@@ -128,11 +128,17 @@ async def lifespan(app: FastAPI):
                         error("nacos instance register failed.", exc=exc)
 
                     app.state.ready = True
+                    for extension in extensions.values():
+                        if extension.api is not None:
+                            extension.api.state.ready = True
                     info("service ready.", service=bootstrap_settings.SERVICE_NAME)
                     yield
                 finally:
                     # 退出时先摘掉就绪标记，再取消后台任务
                     app.state.ready = False
+                    for extension in extensions.values():
+                        if extension.api is not None:
+                            extension.api.state.ready = False
                     for task in tasks:
                         task.cancel()
     finally:
@@ -159,8 +165,9 @@ os.environ["no_proxy"] = no_proxy
 os.environ["NO_PROXY"] = no_proxy
 
 
-# 把 Nacos 拉到的 settings 注入容器，再装配 FastAPI 应用
+# 把 Nacos 拉到的 settings 注入容器，再按配置接入垂类，最后装配 FastAPI 应用
 container.settings.override(settings)
+
 app = FastAPI(title=bootstrap_settings.APP_NAME, lifespan=lifespan, docs_url="/docs")
 app.state.ready = False
 app.state.container = container

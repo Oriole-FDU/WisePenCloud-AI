@@ -12,6 +12,7 @@ from dependency_injector import providers
 from fastapi import FastAPI
 
 from rag.container import Container
+from rag.storage.vector import IndexableField, IndexKind, VectorCollection
 
 
 @pytest.fixture
@@ -127,6 +128,10 @@ async def health(app):
         return await client.get("/rag/health")
 
 
+def test_default_entry_registers_no_extension_without_configuration(runtime):
+    assert runtime.main.container.pipeline_routes() == {}
+
+
 def enable_kafka(env):
     values = env.container.settings().model_dump() | {
         "KAFKA_ENABLED": True,
@@ -154,14 +159,14 @@ async def test_kafka_off_gc_always_starts_and_ready_does_not_wait_for_first_roun
         client.close.assert_not_awaited()
     for name in ("content_storage", "publication_store", "acl_repository"):
         env.stores[name].ensure_indexes.assert_awaited_once()
-    env.stores["vector_storage"].ensure_collection.assert_awaited_once_with()
+    env.stores["vector_storage"].ensure_collection.assert_awaited_once_with(
+        [IndexableField("resource_id", IndexKind.KEYWORD)]
+    )
     for name in ("entity_vector_storage", "relationship_vector_storage"):
         env.stores[name].ensure_collection.assert_awaited_once_with(
-            metadata_index_fields=[
-                "resource_id",
-                "content_revision",
-                "chunk_id",
-                "ontology_name",
+            [
+                IndexableField(name, IndexKind.KEYWORD)
+                for name in ("resource_id", "chunk_id", "ontology_name")
             ]
         )
 
@@ -399,3 +404,79 @@ async def test_nacos_register_failure_keeps_initialized_service_ready(runtime):
     async with env.main.lifespan(env.app):
         assert env.app.state.ready
     env.nacos.deregister_instance.assert_awaited_once()
+
+
+async def test_extension_initialization_mount_ready_and_shared_client_cleanup(
+    runtime, monkeypatch
+):
+    from rag.extensions.base import Extension
+    from rag.extensions.employment.api import build_api
+
+    env = runtime
+    tools = SimpleNamespace(search_contracts=AsyncMock(return_value=[]))
+    api = build_api(tools, from_source_secret="gateway")
+    extra = SimpleNamespace(ensure_collection=AsyncMock())
+    binding = VectorCollection(extra, [IndexableField("year", IndexKind.INTEGER)])
+    manifest = Extension(pipeline=object(), vector_collections=[binding], api=api)
+    env.container.vector_collections().append(binding)
+    build = Mock(return_value={"sample": manifest})
+    monkeypatch.setattr(env.main, "register_extensions", build)
+    async with env.main.lifespan(env.app):
+        build.assert_called_once_with(env.container)
+        extra.ensure_collection.assert_awaited_once_with(binding.metadata_index_fields)
+        assert env.app.state.extensions == {"sample": manifest} and api.state.ready
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=env.app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/rag/extensions/sample/contracts/search",
+                json={"query": "q"},
+                headers={"X-From-Source": "gateway", "X-User-Id": "reader"},
+            )
+            assert response.status_code == 200
+    assert not api.state.ready
+    for client in env.clients[:3]:
+        client.close.assert_awaited_once()
+
+
+@pytest.mark.parametrize("stage", ["construct", "collection"])
+async def test_extension_failure_closes_platform_clients_before_background(
+    runtime, monkeypatch, stage
+):
+    from rag.extensions.base import Extension
+
+    env = runtime
+    extra = SimpleNamespace(
+        ensure_collection=AsyncMock(side_effect=OSError("extension init"))
+    )
+    binding = VectorCollection(extra, [])
+    env.container.vector_collections().append(binding)
+    build = (
+        Mock(side_effect=OSError("extension construct"))
+        if stage == "construct"
+        else Mock(return_value={"sample": Extension(object(), [binding])})
+    )
+    monkeypatch.setattr(env.main, "register_extensions", build)
+    with pytest.raises(OSError):
+        async with env.main.lifespan(env.app):
+            pytest.fail("must fail startup")
+    assert not env.app.state.ready
+    env.gc.run.assert_not_called()
+    for client in env.clients[:3]:
+        client.close.assert_awaited_once()
+
+
+async def test_storage_without_initialization_method_fails_startup_and_cleans_clients(
+    runtime,
+):
+    env = runtime
+    # 只会 CRUD 的 writer 不符合启动存储合同；直接调用协议，不补 hasattr 防御。
+    binding = VectorCollection(SimpleNamespace(collection="incomplete"), [])
+    env.container.vector_collections().append(binding)
+    with pytest.raises(AttributeError, match="ensure_collection"):
+        async with env.main.lifespan(env.app):
+            pytest.fail("incomplete storage must not become ready")
+    assert not env.app.state.ready
+    env.gc.run.assert_not_called()
+    for client in env.clients[:3]:
+        client.close.assert_awaited_once()

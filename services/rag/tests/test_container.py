@@ -14,6 +14,7 @@ from rag.application.retrieval import PreparedChunk
 from rag.container import Container, graph_rerank_text
 from rag.core.schema import GraphEdge
 from rag.storage.graph import GraphVectorKind
+from rag.storage.vector import IndexableField, IndexKind
 
 
 def test_shared_config_clients_and_mandatory_indexers(platform_settings):
@@ -47,11 +48,24 @@ def test_shared_config_clients_and_mandatory_indexers(platform_settings):
     assert container.embedding_client().dimensions == 2
     assert container.vector_indexer()._embedding_client is container.embedding_client()
     assert (
-        container.hybrid_retrieval()._embedding_client is container.embedding_client()
+        container.vector_retrieval()._embedding_client is container.embedding_client()
     )
-    assert container.hybrid_retrieval()._reranker is container.chunk_reranker()
+    assert container.vector_retrieval()._reranker is container.chunk_reranker()
     assert container.rerank_client().model == "test-rerank"
     assert container.rerank_client().api_key == "test-qwen"
+    collections = container.vector_collections()
+    assert [item.storage for item in collections] == stores
+    assert collections[0].metadata_index_fields == [
+        IndexableField("resource_id", IndexKind.KEYWORD)
+    ]
+    assert all(
+        item.metadata_index_fields
+        == [
+            IndexableField(name, IndexKind.KEYWORD)
+            for name in ("resource_id", "chunk_id", "ontology_name")
+        ]
+        for item in collections[1:]
+    )
     collector = container.garbage_collector()
     assert collector._vector_writers == stores and collector._graph_writers == []
     assert container.graph_storage() is None

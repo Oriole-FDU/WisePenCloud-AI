@@ -80,15 +80,15 @@ def validate_graph_options(
     return resolved
 
 
-def _matches_source(chunk: Chunk, filters: MetadataFilters) -> bool:
-    """在 Chunk 上就地求值 MetadataFilters，支持 NOT / OR / AND 三种组合。"""
+def _matches_source(metadata: dict[str, str | None], filters: MetadataFilters) -> bool:
+    """核对当前来源和事实的筛选值；条件结构与操作类型由存储边界校验。"""
     matches = []
     for item in filters.filters:
         if isinstance(item, MetadataFilters):
             # 嵌套组递归求值
-            matches.append(_matches_source(chunk, item))
+            matches.append(_matches_source(metadata, item))
         else:
-            value = getattr(chunk, item.key)
+            value = metadata[item.key]
             matches.append(
                 value == item.value
                 if item.operator is FilterOperator.EQ
@@ -164,9 +164,9 @@ class GraphEvidenceLoader:
         self.graph_reader = graph_reader
         self.snapshot = snapshot
         self.filters = filters
-        self.chunks: dict[str, Chunk] = {}                # 本调用内已加载的 Chunk
+        self.chunks: dict[str, Chunk] = {}  # 本调用内已加载的 Chunk
         self.facts: dict[str, tuple[dict[str, GraphNode], dict[str, GraphEdge]]] = {}
-        self._observed: set[str] = set()                  # 已尝试过的 chunk ID
+        self._observed: set[str] = set()  # 已尝试过的 chunk ID
 
     async def load_chunks(self, chunk_ids: list[str]) -> None:
         """批量加载 Chunk；已在本次调用中出现过的 ID 不重复读取。"""
@@ -176,16 +176,34 @@ class GraphEvidenceLoader:
 
         chunks = await self.snapshot_reader.read_chunks(pending, snapshot=self.snapshot)
         for chunk in chunks:
-            # filters 不匹配则整块跳过
-            if self.filters is not None and not _matches_source(chunk, self.filters):
-                continue
             # 两个字段均未出现表示尚无图事实；部分缺失或损坏仍由本体解析报错。
             if (
                 "entities" not in chunk.metadata
                 and "relationships" not in chunk.metadata
             ):
                 continue
-            self.facts[chunk.chunk_id] = parse_graph_facts(chunk)
+            nodes, edges = parse_graph_facts(chunk)
+            if self.filters is not None:
+                # 本体名称以当前实体事实为准，不能信任旧投影或业务 metadata。
+                nodes = {
+                    key: node
+                    for key, node in nodes.items()
+                    if _matches_source(
+                        {
+                            "resource_id": chunk.resource_id,
+                            "content_revision": chunk.content_revision,
+                            "ontology_name": node.ontology_name,
+                        },
+                        self.filters,
+                    )
+                }
+                # 关系和两个端点必须同时满足来源/本体筛选，不引入组外端点。
+                edges = {
+                    key: edge
+                    for key, edge in edges.items()
+                    if edge.source_id in nodes and edge.target_id in nodes
+                }
+            self.facts[chunk.chunk_id] = nodes, edges
             self.chunks[chunk.chunk_id] = chunk
 
         self._observed.update(pending)  # 不可见/缺失也只读取一次，不是跨请求缓存。

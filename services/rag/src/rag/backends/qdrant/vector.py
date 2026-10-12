@@ -6,9 +6,23 @@ from uuid import NAMESPACE_URL, uuid5
 from qdrant_client import AsyncQdrantClient, models
 
 from rag.core.schema.filters import MetadataFilters
-from rag.storage.vector import VectorMatch, VectorQuery, VectorRecord
+from rag.storage.vector import (
+    IndexableField,
+    IndexKind,
+    VectorMatch,
+    VectorQuery,
+    VectorRecord,
+)
 
 from .filters import compile_filters
+
+# SDK 类型仅在后端翻译，业务和装配层使用统一声明。
+KIND_MAP = {
+    IndexKind.KEYWORD: models.PayloadSchemaType.KEYWORD,
+    IndexKind.INTEGER: models.PayloadSchemaType.INTEGER,
+    IndexKind.FLOAT: models.PayloadSchemaType.FLOAT,
+    IndexKind.BOOLEAN: models.PayloadSchemaType.BOOL,
+}
 
 
 class QdrantVectorStorage:
@@ -37,16 +51,15 @@ class QdrantVectorStorage:
         self._sparse_vector_name = sparse_vector_name
         self._batch_size = batch_size
 
+    @property
+    def collection(self) -> str:
+        return self._collection
+
     async def ensure_collection(
-        self, *, metadata_index_fields: list[str] | None = None
+        self, metadata_index_fields: list[IndexableField]
     ) -> None:
-        """显式创建或核对 collection，保证必要索引；配置冲突不删除或重建集合。"""
-        fields = (
-            ["resource_id", "content_revision"]
-            if metadata_index_fields is None
-            else metadata_index_fields
-        )
-        if any(not field or "." in field for field in fields):
+        """显式创建或核对 collection；索引按声明翻译并等待确认，空列表仍核对集合。"""
+        if any(not field.name or "." in field.name for field in metadata_index_fields):
             raise ValueError("metadata indexes require nonempty flat field names")
         if not await self._client.collection_exists(self._collection):
             await self._client.create_collection(
@@ -84,15 +97,17 @@ class QdrantVectorStorage:
             raise ValueError(f"incompatible vector configuration: {self._collection}")
 
         # 每次显式初始化都补齐索引，允许上次初始化在创建集合后部分失败。
-        for field in dict.fromkeys(fields):
+        for field in metadata_index_fields:
             result = await self._client.create_payload_index(
                 collection_name=self._collection,
-                field_name=f"metadata.{field}",
-                field_schema=models.PayloadSchemaType.KEYWORD,
+                field_name=f"metadata.{field.name}",
+                field_schema=KIND_MAP[field.kind],
                 wait=True,
             )
             if result.status != models.UpdateStatus.COMPLETED:
-                raise RuntimeError(f"payload index creation did not complete: {field}")
+                raise RuntimeError(
+                    f"payload index creation did not complete: {field.name}"
+                )
 
     async def upsert(self, records: list[VectorRecord]) -> None:
         """整条 point 替换；每批写入配置的向量，部分成功保留，不隐式初始化。"""

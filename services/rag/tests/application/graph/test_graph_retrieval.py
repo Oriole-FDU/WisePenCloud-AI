@@ -10,7 +10,7 @@ from common.utils.retrieval import ModelReranker
 
 from rag.application.acl.models import ResourceAcl
 from rag.application.graph import GraphRetrieval
-from rag.application.retrieval import HybridRetrieval
+from rag.application.retrieval import VectorRetrieval
 from rag.core.schema import EntitySpec, Ontology, RelationSpec
 from rag.core.schema.filters import (
     FilterCondition,
@@ -537,6 +537,37 @@ async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ont
     assert [
         {edge.relation_type for edge in group.relationships} for group in groups
     ] == [{"works_at"}, {"references"}]
+    relation_record = next(iter(relation_writer.records.values()))
+    env.relations[:] = [
+        env.match(kind=GraphVectorKind.RELATIONSHIP),
+        VectorMatch(relation_record.record_id, 0.9, relation_record.metadata),
+    ]
+    # 两路召回和拓扑共用条件；当前事实回查拒绝其他本体，即使旧投影仍返回它。
+    filters = MetadataFilters([MetadataFilter("ontology_name", env.ontology.domain)])
+    for mode in GraphRetrievalMode:
+        hits = await env.retrieval.retrieve(
+            "query", snapshot=env.snapshot(), mode=mode, filters=filters
+        )
+        assert len(hits) == (2 if mode is GraphRetrievalMode.HYBRID else 1)
+        assert all(
+            {source.resource_id for source in hit.evidence.sources} == {"a", "c"}
+            for hit in hits
+        )
+        assert all(
+            edge.relation_type == "works_at"
+            for hit in hits
+            for edge in hit.evidence.relationships
+        )
+        reader = (
+            env.relation_reader
+            if mode is GraphRetrievalMode.GLOBAL
+            else env.entity_reader
+        )
+        assert reader.query.call_args.args[0].filters is filters
+    groups = await env.traversal.traverse(
+        [nodes[0].id], snapshot=env.snapshot(), filters=filters
+    )
+    assert groups == []
     chunk_reader = SimpleNamespace(
         query=AsyncMock(
             return_value=[
@@ -552,7 +583,7 @@ async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ont
             ]
         )
     )
-    ordinary = HybridRetrieval(
+    ordinary = VectorRetrieval(
         snapshot_reader=snapshot_reader,
         vector_reader=chunk_reader,
         embedding_client=env.embedding,

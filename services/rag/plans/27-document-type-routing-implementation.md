@@ -27,7 +27,7 @@ ContentRevision 不包含 type、metadata 或 Pipeline 配置。影响摄入的 
 
 ## 文档与开发示例
 
-更新 demo/extensions.md：子容器仅构造垂类 Pipeline，外层入口赋值类别键；移除以覆盖整个 publisher 接入垂类的主示例。示例明确注册链中 GraphIndexer 为必需阶段，与可选发布后图流程分开。增加未来事件 JSON、字段透传、版本行为、实例内映射和启动注册说明；实际执行子容器/注册/依赖替身代码，使用真实平台工厂验证本体参数与默认链保留。
+更新 src/rag/extensions/extensions.md：子容器仅构造垂类 Pipeline，外层入口赋值类别键；移除以覆盖整个 publisher 接入垂类的主示例。示例明确注册链中 GraphIndexer 为必需阶段，与可选发布后图流程分开。增加未来事件 JSON、字段透传、版本行为、实例内映射和启动注册说明；实际执行子容器/注册/依赖替身代码，使用真实平台工厂验证本体参数与默认链保留。
 
 同步 demo/platform.md、设计 11、排期 10 和交接 16，修正旧“Document metadata 不复制到 Chunk”描述。普通向量与图投影不自动包含 type/年代等业务字段，扩展仍须显式投影和权威回查。
 
@@ -50,3 +50,25 @@ ContentRevision 不包含 type、metadata 或 Pipeline 配置。影响摄入的 
 ## 后续边界
 
 上游以后提供 type/metadata 即可使用现有入口，本片没有修改生产者协议实现。没有动态配置、自动发现、插件 Runtime、统一 Ontology 目录或发布后阶段调度。GC、来源授权、现有查询 filters 和旧 revision 回收边界不变；按业务 metadata 检索仍需要垂类自己的显式投影与准备阶段。
+
+## 源码 demo 补充（2026-10-13）
+
+用户要求将扩展写成可直接阅读的源码示例，已新增 `src/rag/extensions/demo`：DemoContainer、包内 YAML 本体、document-ready.json 与短 README。示例接收平台依赖，复用默认 Pipeline 并追加图抽取/索引；不创建自己的 publisher、消费者或连接管理。
+
+main 显式构造延迟解析的示例容器，默认注释 `container.pipeline_routes()["demo"] = demo_extension.pipeline()`。默认导入/构造不读本体或创建模型客户端，开启时仅取消注册行注释并补齐 INSTRUCTION_*；拓扑取决于平台图存储装配，两个来源图向量仍由共享 writer 维护。
+
+补充测试验证包内本体路径不依赖 cwd、构造未配置平台仍可延迟解析、实际示例 JSON 的发布/metadata/合法图事实、共享普通和图向量 writer、可选拓扑 writer，以及无类型文档继续走默认链。示例使用真实 Pipeline、GraphExtractor、Indexer 和 Mongo adapter，模型/投影 writer 为替身，不声明真实后端联调。
+
+实际验证：示例/生命周期/扩展文档定向 **29 passed**；RAG 全服务 **887 passed / 28 skipped**；本次 6 个 Python 文件 Ruff check/format、compileall 与 git diff --check 通过。Common 未改，本次未重复运行其回归。基线为用户已提交的 `e5bc145d`，仅此 demo 补充为当前未提交改动。
+
+## 配置注册与指南迁移补充（2026-10-13）
+
+用户增加 AppSettings.EXTENSIONS、extensions/__init__.py 的显式构造器表及 register_extensions，main 按配置接入而不再包含 demo 的注释注册行；默认空列表不启用扩展，未知名称直接报错。现有登记入口仅调用容器 pipeline()，不保存业务容器、挂载工具或接入额外存储生命周期。
+
+扩展指南迁到 src/rag/extensions/extensions.md，明确分成“基础文件入库与图索引”和“专用索引/高级专有工具”两个章节。前者链接 demo 并说明登记、配置、metadata 和发布；后者说明复用通用用例、专用 payload、Common Pipeline 准备/授权当前值回查，以及新 collection 的类型索引、生命周期和 GC 接入责任。同步文档引用、配置样例与交接现状，保留用户新增机制的实现。
+
+文档代码新增专有工具的 snapshot 复用验证、业务字段投影验证及相对链接检查。扩展文档/demo/生命周期定向 33 passed，修改测试文件 Ruff check/format 与 git diff --check 通过；本次只迁移扩写指南、更新引用/配置示例和验证，不修改用户新增注册机制，不以文档补充宣称时间索引或 MCP transport 已实现。
+
+## 后续替代
+
+上述 demo 和仅 Pipeline 登记是本片历史行为。Employment 高级示例已在 [28](28-employment-extension-implementation.md) 取代 demo：构造器提供 extension()，平台在 lifespan 初始化额外存储、接入 GC 并挂载 API。当前代码与启用配置见 extensions/employment 和扩展开发指南；不再取消旧 main 注释注册行。

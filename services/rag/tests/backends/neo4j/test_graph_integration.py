@@ -216,6 +216,22 @@ async def test_real_indexer_cross_document_path_and_namespace_isolation(
         for source in [first, second]
     ]
     await GraphIndexer(ontology=graph_ontology, writer=storage).index(chunks)
+    selected = MetadataFilters([MetadataFilter("ontology_name", graph_ontology.domain)])
+    assert await storage.get_nodes([first.nodes[0].id], filters=selected) == [
+        first.nodes[0]
+    ]
+    assert (
+        await storage.get_relations([first.edges[0].id], filters=selected)
+        == first.edges
+    )
+    assert (
+        await storage.get_neighbors([first.nodes[0].id], filters=selected)
+        == first.edges
+    )
+    denied = MetadataFilters([MetadataFilter("ontology_name", "other")])
+    assert await storage.get_nodes([first.nodes[0].id], filters=denied) == []
+    assert await storage.get_relations([first.edges[0].id], filters=denied) == []
+    assert await storage.get_neighbors([first.nodes[0].id], filters=denied) == []
     hop = await storage.get_neighbors([first.nodes[0].id])
     assert await storage.get_neighbors(
         [hop[0].target_id], direction=GraphDirection.INCOMING

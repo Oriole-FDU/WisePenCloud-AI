@@ -17,7 +17,7 @@ from rag.application.gc import ResourceGarbageCollector
 from rag.application.graph import GraphRetrieval, GraphTraversal, PreparedGraphEvidence
 from rag.application.publication import DocumentPublication, PublicationEventConsumer
 from rag.application.reading import DocumentReading
-from rag.application.retrieval import HybridRetrieval
+from rag.application.retrieval import VectorRetrieval
 from rag.application.snapshot import ResourceSnapshotReader
 from rag.backends.mongo.acl import MongoResourceAclRepository
 from rag.backends.mongo.content import MongoContentStorage
@@ -29,6 +29,7 @@ from rag.ingestion import IngestionPipeline
 from rag.ingestion.chunkers.markdown import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer, VectorIndexer
 from rag.ingestion.transformers import Contextualizer, GraphExtractor
+from rag.storage.vector import IndexableField, IndexKind, VectorCollection
 
 if TYPE_CHECKING:
     from rag.core.config.app_settings import AppSettings
@@ -77,14 +78,14 @@ def _default_pipeline(
 
 
 def _garbage_collector(
-    settings, store, content, acls, vectors, entities, relations, graph
+    settings, store, content, acls, vectors, graph
 ) -> ResourceGarbageCollector:
     # 清理目标来自平台存储，不取决于本次文档或垂类是否启用图算法。
     return ResourceGarbageCollector(
         store=store,
         content_writer=content,
         resource_acls=acls,
-        vector_writers=[vectors, entities, relations],
+        vector_writers=vectors,
         graph_writers=[graph] if graph is not None else [],
         batch_size=settings.GC_BATCH_SIZE,
         interval_seconds=settings.GC_INTERVAL_SECONDS,
@@ -164,6 +165,39 @@ class Container(containers.DeclarativeContainer):
         collection=settings.provided.GRAPH_RELATION_VECTOR_COLLECTION,
         dense_vector_size=settings.provided.EMBEDDING_DIMENSIONS,
         sparse_vector_name=None,
+    )
+    vector_collections = providers.Singleton(
+        list,
+        providers.List(
+            providers.Singleton(
+                VectorCollection,
+                storage=vector_storage,
+                metadata_index_fields=[
+                    IndexableField("resource_id", IndexKind.KEYWORD)
+                ],
+            ),
+            providers.Singleton(
+                VectorCollection,
+                storage=entity_vector_storage,
+                metadata_index_fields=[
+                    IndexableField(name, IndexKind.KEYWORD)
+                    for name in ("resource_id", "chunk_id", "ontology_name")
+                ],
+            ),
+            providers.Singleton(
+                VectorCollection,
+                storage=relationship_vector_storage,
+                metadata_index_fields=[
+                    IndexableField(name, IndexKind.KEYWORD)
+                    for name in ("resource_id", "chunk_id", "ontology_name")
+                ],
+            ),
+        ),
+    )
+    # GC 保留共享 writer 列表；登记扩展时追加 storage，不让清理用例解释索引配置。
+    vector_storages = providers.Singleton(
+        lambda collections: [item.storage for item in collections],
+        vector_collections,
     )
 
     # ------------------------------------------------------------------
@@ -272,8 +306,8 @@ class Container(containers.DeclarativeContainer):
         pipeline=pipeline,
         pipelines=pipeline_routes,
     )
-    hybrid_retrieval = providers.Singleton(
-        HybridRetrieval,
+    vector_retrieval = providers.Singleton(
+        VectorRetrieval,
         snapshot_reader=snapshot_reader,
         vector_reader=vector_storage,
         embedding_client=embedding_client,
@@ -298,9 +332,7 @@ class Container(containers.DeclarativeContainer):
         store=publication_store,
         content=content_storage,
         acls=acl_repository,
-        vectors=vector_storage,
-        entities=entity_vector_storage,
-        relations=relationship_vector_storage,
+        vectors=vector_storages,
         graph=graph_storage,
     )
 
