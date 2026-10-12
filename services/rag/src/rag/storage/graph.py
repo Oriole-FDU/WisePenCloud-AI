@@ -8,12 +8,7 @@ from typing import Protocol
 
 from rag.core.schema import GraphEdge, GraphNode, Ontology
 from rag.core.schema.filters import MetadataFilters
-
-
-class GraphDirection(StrEnum):
-    OUTGOING = "outgoing"
-    INCOMING = "incoming"
-    BOTH = "both"
+from rag.core.schema.graph import GraphDirection
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +72,22 @@ def graph_vector_record_id(kind: GraphVectorKind, chunk_id: str, fact_id: str) -
         [kind, chunk_id, fact_id], ensure_ascii=False, separators=(",", ":")
     )
     return "gvec_" + sha256(identity.encode("utf-8")).hexdigest()
+
+
+def graph_fact_sha256(fact: GraphNode | GraphEdge, nodes: dict[str, GraphNode]) -> str:
+    """索引文本的事实输入摘要；查询无需加载本体配置即可核对是否过期。"""
+    if isinstance(fact, GraphNode):
+        content = [fact.id, fact.name, fact.description or ""]
+    else:
+        content = [
+            fact.id,
+            nodes[fact.source_id].name,
+            nodes[fact.target_id].name,
+            fact.description or "",
+            fact.keywords or [],
+        ]
+    encoded = json.dumps(content, ensure_ascii=False, separators=(",", ":"))
+    return sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def entity_vector_text(node: GraphNode, ontology: Ontology) -> str:

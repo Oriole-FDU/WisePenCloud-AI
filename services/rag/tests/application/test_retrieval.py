@@ -146,6 +146,7 @@ async def test_application_only_exposes_applied_authorized_chunk_text(
         "text",
         "rank",
         "score",
+        "seed_entities",
     }
     assert hits[0].section_path == ["标题"] and hits[0].section_id == "section"
     assert publication_store.get_states.await_count == 1

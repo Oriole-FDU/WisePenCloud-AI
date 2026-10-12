@@ -13,6 +13,7 @@ from rag.storage.graph import (
     GraphVectorKind,
     GraphWriter,
     entity_vector_text,
+    graph_fact_sha256,
     graph_vector_record_id,
     relationship_vector_text,
 )
@@ -137,6 +138,10 @@ class GraphIndexer(Indexer):
                                     "text_sha256": sha256(
                                         text.encode("utf-8")
                                     ).hexdigest(),  # 用于校验文本一致性
+                                    "fact_sha256": graph_fact_sha256(item, nodes),
+                                    "graph_version": chunk.metadata.get(
+                                        "graph_version"
+                                    ),
                                 },
                             )
                         )

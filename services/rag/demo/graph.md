@@ -130,7 +130,7 @@ driver、URI/auth、Ontology 和已读回的完整 Chunk 列表由调用方提�
 
 共享实体/有向关系只保存逻辑身份，每个来源关联分别保存名称、描述、关键词和关系 metadata。读回同一 ID 可以得到多个来源事实，不生成聚合描述。graph_name 绑定独立标签/约束，不进入 GraphNode/GraphEdge ID；ensure_schema 显式执行，CRUD 不隐式建索引。
 
-GraphReader 支持 get_nodes、get_relations、get_neighbors。一跳方向为 outgoing/incoming/both，谓词可过滤，默认 limit=100 限制逻辑关系数，选中关系的匹配来源完整返回。MetadataFilters 只执行来源 metadata 的平面属性条件，不代表 ACL；结果仍是候选，应用层授权和 selected revision 回查在后续查询切片实现。
+GraphReader 支持 get_nodes、get_relations、get_neighbors。一跳方向为 outgoing/incoming/both，谓词可过滤，默认 limit=100 限制逻辑关系数，选中关系的匹配来源完整返回。MetadataFilters 只执行来源 metadata 的平面属性条件，不代表 ACL；结果仍是候选，应用层授权和 selected revision 回查由下方 GraphRetrieval / GraphTraversal 完成。
 
 本片不回收未传入的历史 revision 或重新分块后旧 Chunk，不写图向量，不实现图查询生成。
 
@@ -217,9 +217,9 @@ pipeline = RetrievalPipeline(
 )
 ```
 
-这里 prepare_graph_candidates 和 graph_reranker 由实际 application 用例提供，本片不装配它们。准备回调必须在同一 ResourceSnapshot 下先用 SnapshotReader 授权回查 Chunk，核对向量的 resource/revision、记录 ID、fact_id 及当前索引文本的 text_sha256，再消费 Ontology.parse_chunk_facts。仅对合法种子扩展一跳，并再次授权及核对关系/端点来源。后端过滤不能代替这一步，GraphMatch 不能直接作为 MCP 业务结果。
+上面的回调示意说明组件边界；完整用例使用下方 GraphRetrieval，无需调用方重新实现准备逻辑。准备回调必须在同一 ResourceSnapshot 下先用 SnapshotReader 授权回查 Chunk，核对向量的 resource/revision、记录 ID、fact_id 与当前事实输入的 fact_sha256/graph_version，再消费 parse_graph_facts。仅对合法种子扩展一跳，并再次授权及核对关系/端点来源。后端过滤不能代替这一步，GraphMatch 不能直接作为 MCP 业务结果。
 
-local 仅实体路线，global 仅关系路线，单路只需对应 reader，candidate_limit 就是路内预算；单路不接受 entity_top_k/relationship_top_k。hybrid 融合两路候选，不包含普通 Chunk 检索；mix 是否排期待定。每次直接 embedding query 一次，两路共用该向量并发读取。候选身份为 kind:record_id，同逻辑事实不同来源不会提前合并。组件不读 Mongo/Neo4j，不保存请求快照，不做生成或输出 token 裁剪；完整图材料用例留到准备阶段的下一切片。
+local 仅实体路线，global 仅关系路线，单路只需对应 reader，candidate_limit 就是路内预算；单路不接受 entity_top_k/relationship_top_k。hybrid 融合两路候选，不包含普通 Chunk 检索；mix 是否排期待定。每次直接 embedding query 一次，两路共用该向量并发读取。候选身份为 kind:record_id，同逻辑事实不同来源不会提前合并。组件不读 Mongo/Neo4j，不保存请求快照，不做生成或输出 token 裁剪；完整图材料用例已实现，见下方装配。
 
 ## 本体构造与事实读取
 
@@ -233,4 +233,89 @@ nodes, edges = ontology.parse_chunk_facts(chunk)
 nodes, edges = ontology.parse_chunk_facts(chunk, strict=True)
 ```
 
-本体对象绑定构造与解析规则，不写入 GraphNode/GraphEdge 实例。字段仍为普通事实，可通过 asdict 写入 metadata；从外部数据库读回后仍需要当前规则和来源校验。Indexer、抽取缓存不再各写一份持久化事实解析逻辑。
+本体对象绑定构造、写入与缓存的约束规则，不写入 GraphNode/GraphEdge 实例。字段仍为普通事实，可通过 asdict 写入 metadata。查询使用 parse_graph_facts 解析结构/来源和关系端点，不装配当前 Ontology 反向限制读取。
+
+## 三种授权图检索
+
+```python
+from rag.application.acl.models import PermissionScope
+from rag.application.graph import GraphRetrieval, GraphTraversal
+from rag.application.snapshot import ResourceSnapshot
+from rag.retrieval.graph import GraphRetrievalMode
+
+# 各 reader/client 已由调用方连接；不创建 Container，不绑定查询侧 Ontology。
+graph_retrieval = GraphRetrieval(
+    snapshot_reader=snapshot_reader,
+    graph_reader=topology,
+    embedding_client=embedding_client,
+    entity_reader=entity_vectors,
+    relationship_reader=relationship_vectors,
+)
+snapshot = ResourceSnapshot(PermissionScope(user_id=trusted_user_id))
+for mode in GraphRetrievalMode:
+    hits = await graph_retrieval.retrieve(
+        "张三的任职关系", snapshot=snapshot, mode=mode, top_k=5,
+    )
+    for hit in hits:
+        print(hit.rank, hit.score, hit.evidence.kind, hit.evidence.fact_id)
+        for entity in hit.evidence.entities:
+            print(entity.id, entity.source_id, entity.description, entity.relations)
+        for source in hit.evidence.sources:
+            print(source.chunk_id, source.section_path, source.raw_text)
+```
+
+local 是实体种子及其一跳；global 是关系种子及支持该关系的同来源端点，不收集其他文档中仅描述端点的材料；hybrid 融合两路，一个逻辑种子一个证据组。top_k 限制组数，默认候选总数 60，hybrid 每路 30。GraphHit 不返回向量、上下文或任意 Chunk metadata，不裁剪来源原文。
+
+向量候选与全部拓扑来源经同一快照授权回查，事实从当前 Mongo metadata 解析，不以 Neo4j 描述替代原文。当前事实输入摘要 fact_sha256 与 graph_version 不符时丢弃旧向量；text_sha256 仍记录实际索引文本。查询不读取本体配置，也不按单一本体排除其他已写入事实。
+
+## 普通混合检索选实体与逐跳探索
+
+```python
+from rag.application.retrieval import HybridRetrieval
+
+hybrid = HybridRetrieval(
+    snapshot_reader=snapshot_reader,
+    vector_reader=chunk_vectors,
+    embedding_client=embedding_client,
+)
+chunk_hits = await hybrid.retrieve("张三", snapshot=snapshot)
+
+# 实体引用只有逻辑 ID 与类别关系提示；来源身份在外层 ChunkHit。
+for hit in chunk_hits:
+    for seed in hit.seed_entities:
+        print(seed.id, [(option.relation_type, option.direction) for option in seed.relations])
+
+traversal = GraphTraversal(snapshot_reader=snapshot_reader, graph_reader=topology)
+# 演示调用方明确选一个 seed 和一个类别允许的关系；不自动遍历其他候选。
+selected = next((seed for hit in chunk_hits for seed in hit.seed_entities if seed.relations), None)
+if selected is not None:
+    option = selected.relations[0]
+    first = await traversal.traverse(
+        [selected.id], snapshot=snapshot,
+        direction=option.direction, relation_types=[option.relation_type],
+    )
+    # 调用方看到第一跳端点与它的关系提示后，再明确选择下一步。
+    reached = next((entity for group in first for entity in group.entities
+                    if entity.id != selected.id and entity.relations), None)
+    if reached is not None:
+        next_option = reached.relations[0]
+        second = await traversal.traverse(
+            [reached.id], snapshot=snapshot,
+            direction=next_option.direction, relation_types=[next_option.relation_type],
+        )
+```
+
+例如人员引用可以是以下形状：
+
+```json
+{
+  "id": "work-demo:Person:张三",
+  "relations": [{"relation_type": "works_at", "direction": "outgoing"}]
+}
+```
+
+relations 由 Ontology.create_node 在写入时从 category/RelationSpec 整理，随实体普通字典保存，不表示可见事实一定存在该关系。模型选择允许关系后，查不到可见事实就返回空 relationships，不补造事实。GraphEvidence 的实体视图还带 source_id/description，也不重复名称、本体和类别。
+
+traversal 只有一跳，不提供 depth；direction=None 表示 BOTH，relation_types=None 表示不限制谓词，[] 不读关系。读取不会按写入关系提示反向限制遍历。同一调用默认批量读取最多 100 个逻辑关系候选，已选关系的合法来源完整返回，过滤后不补读取。继续调用仍重新回查事实；复用 snapshot 保持同一次编排的首次资源版本与可见性决定。
+
+旧 Mongo 实体未保存 relations 时提示为空；抽取策略版本已升级，正常事实 repair 会重算旧指纹补齐提示。仅 projection-only 不会改变旧 Mongo 事实；旧图向量缺少 fact_sha256 时应重建图向量投影。维护脚本仍由调用方保证同资源写入串行。

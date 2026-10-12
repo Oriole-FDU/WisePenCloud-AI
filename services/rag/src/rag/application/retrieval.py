@@ -1,8 +1,9 @@
 """普通混合检索用例；授权回查完成后，正文才能进入重排与结果组装。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
+from common.logger import warning
 from common.utils.ai_clients.embedding import EmbeddingClient
 from common.utils.retrieval import (
     Candidate,
@@ -13,7 +14,7 @@ from common.utils.retrieval import (
 )
 
 from rag.application.snapshot import ResourceSnapshot, ResourceSnapshotReader
-from rag.core.schema import Chunk
+from rag.core.schema import Chunk, GraphRelationOption, parse_graph_facts
 from rag.core.schema.filters import MetadataFilters
 from rag.retrieval.vector import VectorRetrievalMode, VectorRetriever
 from rag.storage.vector import VectorMatch, VectorReader
@@ -28,6 +29,14 @@ class PreparedChunk:
 
 
 @dataclass(frozen=True, slots=True)
+class GraphNodeReference:
+    """命中 Chunk 中可供调用方选择的实体；来源身份沿用外层 ChunkHit。"""
+
+    id: str  # GraphNode.id：本体、类别与规范化名称联合确定。
+    relations: list[GraphRelationOption] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
 class ChunkHit:
     """应用可见的正文命中；score 表示最终排序阶段，不限定为重排分数。"""
 
@@ -39,6 +48,7 @@ class ChunkHit:
     text: str  # Chunk.raw_text，内部上下文与向量不进入结果。
     rank: int
     score: float
+    seed_entities: list[GraphNodeReference] = field(default_factory=list)
 
 
 class HybridRetrieval:
@@ -115,11 +125,25 @@ class HybridRetrieval:
                 text=item.payload.chunk.raw_text,
                 rank=item.rank,
                 score=item.score,
+                seed_entities=self._seed_entities(item.payload.chunk),
             )
             for item in ranked
         ]
 
         return hits
+
+    def _seed_entities(self, chunk: Chunk) -> list[GraphNodeReference]:
+        if "entities" not in chunk.metadata and "relationships" not in chunk.metadata:
+            return []
+        try:
+            nodes, _ = parse_graph_facts(chunk)
+        except (TypeError, ValueError) as exc:
+            # 图候选是普通正文命中的补充；图事实损坏不撤销已授权的正文。
+            warning(
+                "chunk_seed_entities_rejected", chunk_id=chunk.chunk_id, error=str(exc)
+            )
+            return []
+        return [GraphNodeReference(node.id, node.relations) for node in nodes.values()]
 
     async def _prepare(
         self,

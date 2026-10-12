@@ -136,3 +136,24 @@ def test_invalid_file_formats_and_shapes_are_rejected(tmp_path, filename, text):
 def test_missing_file_raises_io_error(tmp_path):
     with pytest.raises(FileNotFoundError):
         Ontology.from_file(tmp_path / "missing.json")
+
+
+def test_node_relation_options_are_category_permissions_not_observed_edges(
+    graph_ontology,
+):
+    graph_ontology.relation_specs["mentions"] = RelationSpec(
+        "mentions", "任意实体提及任意实体"
+    )
+    person = graph_ontology.create_node(
+        name="张三", category="Person", source_id="chunk"
+    )
+    company = graph_ontology.create_node(
+        name="甲公司", category="Company", source_id="chunk"
+    )
+    assert [
+        (option.relation_type, option.direction) for option in person.relations
+    ] == [("works_at", "outgoing"), ("mentions", "both")]
+    assert [
+        (option.relation_type, option.direction) for option in company.relations
+    ] == [("works_at", "incoming"), ("mentions", "both")]
+    assert replace(person, relations=[]).id == person.id

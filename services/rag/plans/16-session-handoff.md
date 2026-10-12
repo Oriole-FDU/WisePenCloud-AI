@@ -1,6 +1,6 @@
 # RAG V4 会话接手文档
 
-记录日期：2026-10-12。本文是新会话的首读入口，描述已完成实现、已查清事实、用户确认的设计约束和继续顺序。向量闭环见 [17](17-vector-publication-implementation.md)，资源快照读取见 [18](18-application-snapshot-implementation.md)，泛型 Pipeline 与混合检索见 [19](19-hybrid-retrieval-implementation.md)，结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀及离线 repair 见 [21](21-contextualizer-implementation.md)。P5 图事实与多来源 Neo4j 投影已完成，见 [22](22-graph-extraction-implementation.md)、[23](23-graph-projection-implementation.md)；图向量与三种 GraphRetriever 种子组件已完成（见 [24](24-graph-vector-retriever-implementation.md)），下一片讨论授权准备和一跳扩展用例，父块、效果基线、在线调度和生产装配留后。
+记录日期：2026-10-13。本文是新会话的首读入口，描述已完成实现、已查清事实、用户确认的设计约束和继续顺序。向量闭环见 [17](17-vector-publication-implementation.md)，资源快照读取见 [18](18-application-snapshot-implementation.md)，泛型 Pipeline 与混合检索见 [19](19-hybrid-retrieval-implementation.md)，结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀及离线 repair 见 [21](21-contextualizer-implementation.md)。P5 图事实与多来源 Neo4j 投影已完成，见 [22](22-graph-extraction-implementation.md)、[23](23-graph-projection-implementation.md)；图向量与三种 GraphRetriever 种子组件已完成（见 [24](24-graph-vector-retriever-implementation.md)），授权图检索、一跳 traversal 与 Chunk 实体候选已完成（见 [25](25-graph-application-implementation.md)），父块、效果基线、在线调度和生产装配留后。
 
 ## 0. 接手先读这些结论
 
@@ -8,25 +8,25 @@
 2. **能力完成不代表生产入口已装配。** Container/main 当前只运行 ACL；publication、普通检索、上下文模型与相关客户端生命周期尚未接到生产入口。没有真实 Mongo/Kafka/Qdrant 或模型联调结果。
 3. **请求快照归 application，Retriever 只接收查询内容。** ResourceSnapshot 与 ResourceSnapshotReader 两对象已经冻结；不要恢复独立 resolver、retriever_factory、VectorRetrievalQuery、Retriever 请求缓存或隐式全局 context。
 4. **原文和检索派生文本分开。** raw_text 不变，retrieval_text 为路径/上下文/原文；向量投影不能成为正文权威，未经版本/ACL/投影身份检查的正文不能进入响应或外部模型。
-5. **P5 图事实与 Neo4j 多来源投影已完成。** GraphStorage/GraphIndexer、来源批次事务、一跳读回与 repair --with-graph 已实现，向量值对象并入 storage/vector.py。图向量已由 GraphIndexer 统一写入，GraphRetriever.from_storage 支持三种种子路线；授权扩展在 Common Pipeline 准备阶段，具体图用例尚未装配。mix 排期待定，确定性 Producer 不排期。见第 5 节与 22/23/24。
+5. **P5 图事实与 Neo4j 多来源投影已完成。** GraphStorage/GraphIndexer、来源批次事务、一跳读回与 repair --with-graph 已实现，向量值对象并入 storage/vector.py。图向量已由 GraphIndexer 统一写入，GraphRetriever.from_storage 支持三种种子路线；授权扩展在 Common Pipeline 准备阶段，GraphRetrieval / GraphTraversal 已装配，查询不绑定单一本体。mix 排期待定，确定性 Producer 不排期。见第 5 节与 22/23/24/25。
 6. **本文可以独立作为交接输入。** 下文已列出已查清的代码、集合、上游事件与测试事实，不需要为理解现状连接业务数据库、重查 Java 上游或全库扫描 references。只有当前切片确实缺少的新事实才做定向查证。
 
 ## 1. 快速定位与当前基线
 
 - 工作区：`D:\WisePenCloud-AI\wisepen_common\WisePenCloud-AI`，PowerShell。
-- 本次交接更新核对到：分支 `dev/common`，HEAD **`59aa58ef`**，提交标题 `feat(rag-v4): 新增GraphIndexer和neo4j适配`。第二片已提交；第三片组件为当前未提交改动。下次仅需重新核对 git status/HEAD。
+- 本次交接更新核对到：分支 `dev/common`，HEAD **`2ff629a7`**，提交标题 `refactor(rag-v4): 将acl明确提升为用例层`。此前组件已提交；第四片用例与本轮用户修正为当前未提交改动。下次仅需重新核对 git status/HEAD。
 - 新实现只在 `services/rag/src/rag`，测试在 `services/rag/tests`。旧 `services/wisepen-rag-service/src/rag` 与 `services/rag/references` 只作源码参考。
-- 本片开始时只有 WisePenView 和 services/rag/references/LightRAG 既有子模块状态，均保留。Common decision 改动已在 HEAD；本片不修改 Common/Chat 源码。本片新增 neo4j 直接依赖并同步锁文件，仅两条关系；不修改 Common/Chat 源码。
-- **最近实际验证**见 [24](24-graph-vector-retriever-implementation.md)：RAG **734 passed / 25 skipped**，Common **125 passed**。25 个跳过项为 12 Mongo、3 Kafka、7 Qdrant、3 Neo4j；未调用真实模型或运行业务 repair。Chat 历史 19 项本片未重跑。
+- 本片开始时只有 WisePenView 和 services/rag/references/LightRAG 既有子模块状态，均保留。Common decision 改动已在 HEAD；本片不修改 Common/Chat 源码。neo4j 直接依赖在此前切片已落地，本片不修改依赖/锁文件或 Common/Chat 源码。
+- **最近实际验证**见 [25](25-graph-application-implementation.md)：定向 **269 passed**，RAG **813 passed / 25 skipped**，Common retrieval/ai_clients **51 passed**。真实后端 fixture 因无显式配置跳过；未调用真实模型或运行业务 repair。Chat 历史 19 项本片未重跑。
 - 修改文件 Ruff check/format、compileall、git diff --check、锁文件与依赖边界检查通过；全目录 Ruff check 存在既有 contextualizer.py 导入排序 I001，HEAD 原文件同样复现，保留该无关文件。
 
 装配关系可直接读 [demo/hybrid.md](../demo/hybrid.md)，其中显式展示 from_storage 的调用位置及完整用例连接。
 
 普通上下文 Pipeline 与离线 repair 的配置/运行方式读 [demo/contextual.md](../demo/contextual.md)。最新材料选择与离线恢复合同以 21 和当前实现为准，不再使用字符预算或 section 内窗口限制。
 
-**下一会话最短阅读顺序**：本文第 0、2、3、4、5 节 → 24 → ingestion/indexers/graph.py、retrieval/graph.py、core/schema/graph.py 与 demo/graph.md → 23 回顾拓扑 → 10/11 的查询段落。需要旧 ontology 规则时，只读第 4.5 节列出的旧 ontology 文件；需要回顾上一切片算法时再读 21。19/20 与两个 demo 用于具体检索/章节/摄入装配，不是讨论下一图谱切片前必须通读的材料。
+**下一会话最短阅读顺序**：本文第 0、2、3、4、5 节 → 25 → application/graph 两个用例、application/retrieval.py 与 demo/graph.md → 24 回顾组件 → 23 回顾拓扑 → 10/11 的查询段落。需要旧 ontology 规则时，只读第 4.5 节列出的旧 ontology 文件；需要回顾上一切片算法时再读 21。19/20 与两个 demo 用于具体检索/章节/摄入装配，不是讨论下一图谱切片前必须通读的材料。
 
-文档与决策优先级：用户后续明确决策 > 已确认合同及当前实现 > 10／11 整合计划 > 00–09 历史背景。12–15、17–23 是实施记录，提交状态和验收数字可能是当时的历史值。`架构图.md` 仍含旧目录和未来组件，不能据其判断当前文件存在。当前 GraphWriter.replace_sources/delete_sources 返回 None，无 Receipt。未来方案中的 GraphRetrieveRequest、GraphHit 或 ChunkHit.graph_nodes **尚未实现**，不能直接当作冻结接口。发现真实矛盾要指出并讨论，不能把历史示例自动升级为当前要求。
+文档与决策优先级：用户后续明确决策 > 已确认合同及当前实现 > 10／11 整合计划 > 00–09 历史背景。12–15、17–25 是实施记录，提交状态和验收数字可能是当时的历史值。`架构图.md` 仍含旧目录和未来组件，不能据其判断当前文件存在。当前 GraphWriter.replace_sources/delete_sources 返回 None，无 Receipt。当前结果为 GraphHit(evidence/rank/score)、GraphEvidence 和 ChunkHit.seed_entities；GraphRetrieveRequest / ChunkHit.graph_nodes 属于旧方案，不存在于当前接口。发现真实矛盾要指出并讨论，不能把历史示例自动升级为当前要求。
 
 ## 2. 已完成什么
 
@@ -34,10 +34,10 @@
 | --- | --- | --- |
 | 统一内容身份与模型 | `core/schema/content.py` | ContentRevision、Document、DocumentStructure、Chunk；正文身份与 Common 结构模型 |
 | 图事实与本体 | `core/schema/graph.py` | GraphNode／GraphEdge／Ontology 及 specs dataclass；本体支持 JSON/YAML 加载 |
-| 图抽取与增量维护 | `ingestion/transformers/graph.py`、`scripts/repair_graph.py` | 来源绑定、逐事实硬校验、可选补漏、增量缓存与离线 repair；图投影可选接入，图查询未实现 |
+| 图抽取与增量维护 | `ingestion/transformers/graph.py`、`scripts/repair_graph.py` | 来源绑定、逐事实硬校验、可选补漏、增量缓存与离线 repair；图投影可选接入，查询用例见 25 |
 | 图拓扑与来源向量投影 | `storage/graph.py`、`ingestion/indexers/graph.py`、Neo4j/Qdrant | 同一 Indexer 一次校验依次写两类投影；repair 可选接入 |
-| 图种子召回组件 | `retrieval/graph.py` | local/global/hybrid 来源候选，Common Pipeline 接口；授权扩展用例留后 |
-| ACL | `acl/models.py`、`acl/synchronizer.py`、`backends/mongo/acl.py` | 本地 VIEW 规则、权威资源刷新、Mongo ACL 投影及 Kafka 消费 |
+| 图种子召回组件 | `retrieval/graph.py` | local/global/hybrid 来源候选，Common Pipeline 接口；授权扩展用例见 application/graph |
+| ACL | `application/acl/models.py`、`application/acl/synchronizer.py`、`backends/mongo/acl.py` | 本地 VIEW 规则、权威资源刷新、Mongo ACL 投影及 Kafka 消费 |
 | 摄入基础 | `ingestion/chunkers/markdown.py`、`ingestion/pipeline.py` | Common Markdown 适配、三个 Protocol、串行 fail-fast Pipeline |
 | 可选上下文增强 | `ingestion/transformers/contextualizer.py` | 完整提示词 token 预算、全文/祖先/own/Chunk 窗口、大纲收缩、逐块降级、生成指纹与实例并发限制 |
 | 离线上下文修复 | `scripts/repair_context.py` | 显式资源范围、当前 applied 身份与写前状态复核、增量生成及全部向量重写；不 stage/apply，不加载 Nacos |
@@ -50,13 +50,14 @@
 | 发布状态后端 | `backends/mongo/publication.py` | Mongo 条件 stage／apply、永久 destroyed 标记 |
 | 请求内资源快照与内容读取 | `application/snapshot.py` | ResourceSnapshot 保存版本／资源授权决定；ResourceSnapshotReader 批量读取 Document／Chunk，身份回查、首次决定复用、部分结果与请求隔离 |
 | 普通向量召回 | `retrieval/vector.py` | VectorRetriever.from_storage 初始化预算/filters/向量返回；retrieve 只接收字符串；Common 并发 dense/sparse 与显式融合 |
+| 授权图谱检索与 traversal | `application/graph/retrieval.py`、`traversal.py` | 三种模式证据组、任意本体事实的授权回查、显式一跳；实体视图暴露 ID 与允许的关系提示 |
 | 普通混合检索 | `application/retrieval.py` | 直接 from_storage 按调用配置装配、快照授权回查、投影身份核对、重排/MMR、ChunkHit，组装后直接返回 |
 | 结构化读取 | `application/reading.py`、`application/snapshot.py` | DocumentReading.global_outline/neighborhood/read_sections；全局目录、邻域与 own/subtree 精确原文；批量章节定位复用同一资源快照 |
 | Common 泛型检索与 Chat 消费方 | Common `utils/retrieval`、Chat 缓存 BM25 工具 | Candidate[T]、异步准备、payload 提取器；已移除 RankedCandidate，缓存定位行为保持 |
 | 通用 Kafka | `backends/kafka/consumer.py`、`retry.py` | 有限快速重试、延迟回投、DLQ、精确 offset 提交及资源清理 |
 | 服务生命周期 | `container.py`、`main.py`、`api/router.py` | 目前装配 ACL；等待连接后就绪，消费异常撤销健康状态 |
 
-Contextualizer 与离线 repair 已实现并用替身验收；标题树、邻域、章节 own/subtree、资源快照与普通混合检索已完成。GraphStorage／GraphIndexer 与 Neo4j adapter 已实现；GraphRetriever 种子组件已完成；当前**没有**父块或具体授权图查询用例；命中后处理接口已移除。普通发布、可选上下文降级和必要向量写入合同通过测试，真实 Mongo/Kafka/Qdrant 尚未验证。离线脚本不是生产在线重构建或生命周期装配。
+Contextualizer 与离线 repair 已实现并用替身验收；标题树、邻域、章节 own/subtree、资源快照与普通混合检索已完成。GraphStorage／GraphIndexer 与 Neo4j adapter 已实现；GraphRetriever 种子组件已完成；授权图查询与一跳 traversal 已完成；当前**没有**父块；命中后处理接口已移除。普通发布、可选上下文降级和必要向量写入合同通过测试，真实 Mongo/Kafka/Qdrant 尚未验证。离线脚本不是生产在线重构建或生命周期装配。
 
 publication 消费者可通过显式依赖真实运行 Kafka；尚未注入全局 Container／main／Nacos。必需向量能力现已实现，但模型/连接配置、显式初始化与 publication 生命周期尚未装配。生产发布不能以 fake 或空必需投影替代。现有服务入口只运行 ACL 消费。物理销毁现在只撤销可见性并保留标记，尚未执行内容／向量／图物理清理。
 
@@ -217,7 +218,7 @@ VIEW 顺序与已有 ACL 测试已冻结：所有者、全局白名单、全局�
 
 ### 4.5 图谱已经存在的事实与可复用源码
 
-新 RAG 的 core/schema/graph.py 统一定义 GraphNode/GraphEdge/Ontology/EntitySpec/RelationSpec dataclass，GraphExtractor 与增量/补漏/离线图 repair 已实现；GraphStorage/GraphIndexer/Neo4j adapter 已实现；GraphRetriever.from_storage 种子组件已实现；没有 PluginRegistry 或授权图查询用例。图基础模型在较早切片已完成，不需要重新建立 Entity/Relationship 的第二套持久化事实模型：
+新 RAG 的 core/schema/graph.py 统一定义 GraphNode/GraphEdge/Ontology/EntitySpec/RelationSpec dataclass，GraphExtractor 与增量/补漏/离线图 repair 已实现；GraphStorage/GraphIndexer/Neo4j adapter 已实现；GraphRetriever.from_storage 种子组件已实现；授权图查询用例见 25，没有 PluginRegistry。图基础模型在较早切片已完成，不需要重新建立 Entity/Relationship 的第二套持久化事实模型：
 
 | 当前模型 | 已有字段与身份语义 |
 | --- | --- |
@@ -234,9 +235,9 @@ VIEW 顺序与已有 ACL 测试已冻结：所有者、全局白名单、全局�
 - 旧 validate_node 检查类别存在，validate_edge 检查谓词、端点存在与允许类别；可提取这些规则。
 - **不能原样导入旧模块。** 它依赖旧 GraphNodeKind、node_type 和 source_node_id/target_node_id，新模型没有这些字段；需要适配已有 GraphNode/GraphEdge，并在计划中明确 domain→ontology_name 的映射。旧 plugin/core/registry.py 与 plugin.py 只在实际需要插件消费者时定向参考，不把旧运行时一并迁入。
 
-本片已定向核对 LightRAG commit 453dce83d6d0354a06e46c8d4029a0895c4e054b 的抽取与补漏，不依赖其 runtime；查询算法 golden 与 Neo4j/图向量部署仍未验证。
+本片已定向核对 LightRAG commit 453dce83d6d0354a06e46c8d4029a0895c4e054b 的抽取与补漏，不依赖其 runtime；本片查询材料组织参考同一 commit，适配差异见 25；真实 Neo4j/图向量部署仍未验证。
 
-## 5. 图事实、投影与种子组件已完成，下一片讨论授权图用例
+## 5. 图事实、投影、种子召回与授权图用例已完成
 
 ### 5.1 当前实现与已确认合同
 
@@ -255,23 +256,31 @@ Ontology、GraphExtractor、增量复用、可选补漏及 scripts/repair_graph.
 
 GraphIndexer 只读图事实，Ontology.parse_chunk_facts 统一解析，本体非法事实逐条丢弃；结构/来源损坏写前报错。一次解析后依次写拓扑与来源向量，没有独立向量 Indexer。Writer.replace_sources 接收完整 Chunk 来源投影（含空事实），仅替换给出的来源。Neo4j 默认每批 64 来源/显式事务，写入结果消费并等待提交；前置异常回滚当前批，前批保留。提交网络异常可能结果未知，传播后幂等重跑，不报告成功或加重试。schema 显式初始化，没有 ACL 投影、状态字段或跨库事务。
 
-共享实体与有向关系图元只存身份，来源关联各自保存事实 JSON、平面 metadata；同 ID 可返回多个来源，描述不合并。一跳支持 outgoing/incoming/both、谓词和默认 100 逻辑关系预算，选中关系匹配来源完整返回。允许跨可见文档连接，但当前只有 Storage 候选原语，尚未实现应用层授权查询。
+共享实体与有向关系图元只存身份，来源关联各自保存事实 JSON、平面 metadata；同 ID 可返回多个来源，描述不合并。一跳支持 outgoing/incoming/both、谓词和默认 100 逻辑关系预算，选中关系匹配来源完整返回。允许跨可见文档连接，应用层已通过同一 SnapshotReader 回查当前 Mongo 事实组装证据，见 25。
 
 repair --with-graph 才构造 Neo4j driver，事实保存后写全部图投影；抽取缓存不证明上次图写成功。事实成功、图失败保留事实，资源级继续并非零退出；重跑复用合法缓存并重写图。维护窗口同资源写任务串行，不回收未传入的历史 revision 或重分块旧 Chunk。
 
-下一片：Common Pipeline 的授权准备、一跳扩展和实际图查询用例；GraphRetriever 已支持实体/关系/融合种子，完整图查询尚未装配。来源 Chunk 必须经 ResourceSnapshotReader 的 selected revision 与 ACL 回查，再从 Mongo 权威事实组装材料；图 JSON/聚合描述不能替代授权或正文。多跳接口按实际查询消费者确定，mix 是否排期待定；若接入仍归 application。
+GraphRetrieval 已装配三种模式与 Common Pipeline，授权后再按逻辑种子组装一跳证据。GraphTraversal 接收逻辑实体 ID，只读一跳、不提供 depth；调用方看到关系提示和事实后选择下一跳。global 的端点描述只来自支持该关系的同一 Chunk，不额外收集其他端点来源。来源必须经 ResourceSnapshotReader 的 selected revision 与 ACL 回查；图 JSON/聚合描述不能替代授权或正文。mix 是否排期待定。
 
 确定性 Producer 不排期，PluginRegistry 按实际消费者再确定。父块、效果基线、在线调度、完整生产装配及物理清理留后。来源级 delete_sources 已有存储原语，不代表完整资源生命周期已实现。
 
 ### 5.3 图向量与种子组件（本片最新合同）
 
-GraphIndexer 显式注入两种 writer：拓扑 writer 可选，向量阶段需 embedding client、实体 writer、关系 writer 完整组；至少启用一种投影。默认来源批 64/embedding 批 32，当前批全部 embedding 成功后删旧写新，空事实清旧，两集合不补偿。Qdrant 图集合 dense-only，默认 graph_entity_source_vectors_v4/graph_relation_source_vectors_v4；text_sha256 供后续当前语义核对，只有普通 payload 字段，无 Mongo 新字段。
+GraphIndexer 显式注入两种 writer：拓扑 writer 可选，向量阶段需 embedding client、实体 writer、关系 writer 完整组；至少启用一种投影。默认来源批 64/embedding 批 32，当前批全部 embedding 成功后删旧写新，空事实清旧，两集合不补偿。Qdrant 图集合 dense-only，默认 graph_entity_source_vectors_v4/graph_relation_source_vectors_v4；text_sha256 记录实际索引文本；fact_sha256 与 graph_version 供不绑定本体的查询核对当前事实输入，均为普通向量 payload 字段。
 
 Ontology.create_node/create_edge 绑定事实构造，parse_chunk_facts 为索引和缓存共享入口，strict=True 用于成功缓存的完整合法性。Node/Edge 不携带运行时本体对象，仍以 asdict 持久化普通字典。来源、第三方结构、当前本体与 ACL 是不同检查边界，不能用一次构造替代外部回查。
 
-GraphRetriever.from_storage 固定 local/global/hybrid 种子配置，默认 hybrid 每路 30/总 60/Common RoundRobin，可注入 RRF。直接 embedding query 一次，两路并发 VectorReader；不持有 GraphReader 或 application 依赖。Candidate[GraphMatch] 包含种类和 VectorMatch，种类+来源记录为融合 ID，不合并不同来源。可直接接 Common RetrievalPipeline，prepare_candidates 授权后才扩展一跳。具体授权材料结果模型尚未冻结，不恢复本片已放弃的 LocalGraphRetrieval/GraphContext。
+GraphRetriever.from_storage 固定 local/global/hybrid 种子配置，默认 hybrid 每路 30/总 60/Common RoundRobin，可注入 RRF。直接 embedding query 一次，两路并发 VectorReader；不持有 GraphReader 或 application 依赖。Candidate[GraphMatch] 包含种类和 VectorMatch，种类+来源记录为融合 ID，不合并不同来源。可直接接 Common RetrievalPipeline，prepare_candidates 授权后才扩展一跳。实际结果已为 GraphHit / GraphEvidence / GraphSourceChunk；不恢复旧 LocalGraphRetrieval/GraphContext。
 
 repair --with-graph-vectors 独立选择向量组；--projection-only 至少启用一种投影，不创建抽取客户端、不写 Chunk，仍复核完整状态，向量阶段需要 embedding。RAG 不裁剪输出或管理结果缓存/懒读取，预算归 Chat。mix 排期待定。详情见 24 与 demo/graph.md。
+
+### 5.4 本轮用户修正与实体关系提示
+
+Ontology 只约束事实写入；GraphRetrieval、GraphTraversal 和 HybridRetrieval 均不注入 Ontology。core.schema.parse_graph_facts 负责结构/来源/合法端点解析，Ontology.parse_chunk_facts 只为写入与成功缓存添加本体规则。查询允许多个本体事实，不使用当前本体注册表筛掉历史合法事实，也不限制谓词必须属于某个查询本体。
+
+Ontology.create_node 从类别和 RelationSpec 整理 GraphNode.relations，每项 GraphRelationOption 包含 relation_type/direction；空端点限制表示适用于该侧任意类别，两侧都允许时为 BOTH。提示随事实持久化，不表示当前可见关系存在。GraphNodeReference 只含 id/relations；GraphEvidence 的 GraphEntity 再含 source_id/description，移除重复的 name/ontology_name/category。模型选提示中的关系后，显式 traversal 查不到可见事实就返回空 relationships。
+
+EvidenceBuilder / GraphEvidenceLoader 是公开共用类。删除重复的 filter 结构/类型、投影结构和单一来源检查，依赖底层 adapter；只保留业务范围约束、来源授权与事实过期核对。事实输入摘要不再依赖查询侧本体重渲染索引文本，旧向量缺少 fact_sha256 会被丢弃，可用 projection-only 重建。旧实体缺少关系提示时为 []；抽取策略版本已升级，正常 repair 会重算旧缓存以补齐提示，仅投影不能为旧 Mongo 事实补提示。
 
 ### 5.5 已冻结的向量与检索合同，图切片不要顺带改变
 
@@ -339,4 +348,4 @@ Common 回归入口为 tests/markdown、tests/ai_clients、tests/retrieval；Cha
 
 ## 7. 可以直接发给新会话的开场指令
 
-> 请先读 16 和 24。P4 普通能力、P5 图事实/拓扑/图向量与 GraphRetriever 种子组件已完成。GraphIndexer 直接负责拓扑和向量，不增加独立向量 Indexer；Ontology 统一构造与事实解析，Node/Edge 保持轻量 dataclass。GraphRetriever.from_storage 只做 local/global/hybrid 种子召回，复用 Common Pipeline；下一步讨论授权准备与一跳扩展用例，不重复实现已完成组件，不把三个模式当作完整图查询。调用方共享 SnapshotReader 授权和 selected revision，回查 Mongo 当前事实及索引文本摘要后才扩展。RAG 不裁剪输出，不管理结果缓存/懒读取，Chat 负责预算；mix 排期待定。repair 支持仅投影且缓存命中仍重写启用投影。最新基线见第 1 节，无真实后端/模型联调或业务 repair；先核对 git status，保留两个既有子模块状态。确定性 Producer 不排期。
+> 请先读 16 和 25。P4 普通能力、P5 图事实/拓扑/图向量、三种图检索与显式一跳 traversal 已完成。GraphIndexer 同时写拓扑和向量，Ontology 只约束写入和缓存，查询侧不绑定本体。ChunkHit.seed_entities 和 GraphEntity 视图暴露逻辑 ID 与类别允许的 relations；关系提示不是可见事实，模型选择后调用 traversal，查不到返回空关系。GraphRetriever 只负责种子召回，GraphRetrieval 用 Common Pipeline 授权、核对当前 Mongo 事实与 fact_sha256/graph_version 后才扩展。global 端点只取关系同来源，traversal 不提供 depth。共用 Loader/Builder 为公开类，不重复底层结构校验。RAG 不裁剪输出或管理缓存/懒读取，mix 排期待定。生产装配、生命周期回收与真实后端/模型联调留后，先核对 git status，保留既有子模块状态。

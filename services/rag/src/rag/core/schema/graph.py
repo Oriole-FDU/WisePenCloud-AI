@@ -3,6 +3,7 @@
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 import yaml
@@ -10,6 +11,20 @@ from common.logger import warning
 from pydantic import TypeAdapter
 
 from .content import Chunk
+
+
+class GraphDirection(StrEnum):
+    OUTGOING = "outgoing"
+    INCOMING = "incoming"
+    BOTH = "both"
+
+
+@dataclass(slots=True)
+class GraphRelationOption:
+    """类别允许的谓词与方向提示，不表示当前可见事实存在该关系。"""
+
+    relation_type: str
+    direction: GraphDirection
 
 
 @dataclass(slots=True)
@@ -21,6 +36,9 @@ class GraphNode:
     ontology_name: str | None = None  # 本体 domain，参与实体身份。
     category: str | None = None  # 实体类别；本体抽取必须提供合法类别。
     description: str | None = None  # 正文支持的描述，不影响身份。
+    relations: list[GraphRelationOption] = field(
+        default_factory=list
+    )  # 写入时的类别关系提示。
 
     @property
     def id(self) -> str:
@@ -50,8 +68,8 @@ class GraphEdge:
         return f"{self.source_id}::{self.relation_type}::{self.target_id}"
 
 
-_node_adapter = TypeAdapter(GraphNode)
-_edge_adapter = TypeAdapter(GraphEdge)
+_nodes_adapter = TypeAdapter(list[GraphNode])
+_edges_adapter = TypeAdapter(list[GraphEdge])
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +174,20 @@ class Ontology:
         """在本体内构造实体，namespace 由本体绑定，不由模型指定。"""
         node = GraphNode(name, source_id, self.domain, category, description)
         self.validate_node(node)
+        for spec in self.relation_specs.values():
+            outgoing = not spec.allowed_sources or category in spec.allowed_sources
+            incoming = not spec.allowed_targets or category in spec.allowed_targets
+            if outgoing or incoming:
+                direction = (
+                    GraphDirection.BOTH
+                    if outgoing and incoming
+                    else GraphDirection.OUTGOING
+                    if outgoing
+                    else GraphDirection.INCOMING
+                )
+                node.relations.append(
+                    GraphRelationOption(spec.relation_type, direction)
+                )
         return node
 
     def create_edge(
@@ -184,30 +216,36 @@ class Ontology:
     def parse_chunk_facts(
         self, chunk: Chunk, *, strict: bool = False
     ) -> tuple[dict[str, GraphNode], dict[str, GraphEdge]]:
-        """读取普通字典事实；结构/来源损坏报错，本体非法项按事实丢弃。
+        """写入与成功缓存按当前本体约束读取；普通查询使用 parse_graph_facts。"""
+        return parse_graph_facts(chunk, ontology=self, strict=strict)
 
-        strict=True 用于成功缓存：非法项和重复 ID 均拒绝，不能丢弃后当作
-        已完整成功。普通读取保留首次合法事实，不修改输入，不决定授权。
-        """
-        entities = chunk.metadata.get("entities")
-        relationships = chunk.metadata.get("relationships")
 
-        # 事实字段必须是列表
-        if not isinstance(entities, list) or not isinstance(relationships, list):
-            raise TypeError("graph facts must contain entity and relationship lists")
+def parse_graph_facts(
+    chunk: Chunk, *, ontology: Ontology | None = None, strict: bool = False
+) -> tuple[dict[str, GraphNode], dict[str, GraphEdge]]:
+    """解析来源事实；Ontology 仅由写入/缓存调用方提供，读取不反向套用本体约束。
 
-        nodes: dict[str, GraphNode] = {}
-        edges: dict[str, GraphEdge] = {}
+    strict=True 用于成功缓存：非法项和重复 ID 均拒绝，不能丢弃后当作
+    已完整成功。普通读取保留首次合法事实，不修改输入，不决定授权。
+    """
+    # 外部 metadata 一次解析结构；不手写重复的列表/字典/字段类型检查。
+    entities = _nodes_adapter.validate_python(
+        chunk.metadata.get("entities"), extra="forbid"
+    )
+    relationships = _edges_adapter.validate_python(
+        chunk.metadata.get("relationships"), extra="forbid"
+    )
 
-        # 实体：结构错误报错；本体非法项按 strict 决定丢弃或抛错
-        for value in entities:
-            if not isinstance(value, dict):
-                raise TypeError("graph facts must be ordinary dictionaries")
-            node = _node_adapter.validate_python(value, extra="forbid")
-            if node.source_id != chunk.chunk_id:
-                raise ValueError("graph entity source does not match its chunk")
+    nodes: dict[str, GraphNode] = {}
+    edges: dict[str, GraphEdge] = {}
+
+    # 实体：结构错误报错；本体非法项按 strict 决定丢弃或抛错
+    for node in entities:
+        if node.source_id != chunk.chunk_id:
+            raise ValueError("graph entity source does not match its chunk")
+        if ontology is not None:
             try:
-                self.validate_node(node)
+                ontology.validate_node(node)
             except ValueError as exc:
                 if strict:
                     raise
@@ -215,19 +253,17 @@ class Ontology:
                     "graph_entity_rejected", chunk_id=chunk.chunk_id, error=str(exc)
                 )
                 continue
-            if strict and node.id in nodes:
-                raise ValueError("duplicate cached entity")
-            nodes.setdefault(node.id, node)  # 同 ID 去重，保留首个
+        if strict and node.id in nodes:
+            raise ValueError("duplicate cached entity")
+        nodes.setdefault(node.id, node)  # 同 ID 去重，保留首个
 
-        # 关系：同上，端点必须已在 nodes 中
-        for value in relationships:
-            if not isinstance(value, dict):
-                raise TypeError("graph facts must be ordinary dictionaries")
-            edge = _edge_adapter.validate_python(value, extra="forbid")
-            if edge.source_ids != [chunk.chunk_id]:
-                raise ValueError("graph relationship sources do not match its chunk")
+    # 关系：同上，端点必须已在 nodes 中
+    for edge in relationships:
+        if edge.source_ids != [chunk.chunk_id]:
+            raise ValueError("graph relationship sources do not match its chunk")
+        if ontology is not None:
             try:
-                self.validate_edge(edge, nodes)
+                ontology.validate_edge(edge, nodes)
             except ValueError as exc:
                 if strict:
                     raise
@@ -237,8 +273,15 @@ class Ontology:
                     error=str(exc),
                 )
                 continue
-            if strict and edge.id in edges:
-                raise ValueError("duplicate cached relationship")
-            edges.setdefault(edge.id, edge)  # 同 ID 去重，保留首个
+        elif edge.source_id not in nodes or edge.target_id not in nodes:
+            warning(
+                "graph_relationship_rejected",
+                chunk_id=chunk.chunk_id,
+                error="relation endpoint is missing",
+            )
+            continue
+        if strict and edge.id in edges:
+            raise ValueError("duplicate cached relationship")
+        edges.setdefault(edge.id, edge)  # 同 ID 去重，保留首个
 
-        return nodes, edges
+    return nodes, edges

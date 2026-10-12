@@ -4,7 +4,7 @@
 
 本文是 RAG V4 的实现设计合同，整合 00–10 方案中已经确认的边界。它描述核心模型、写入管线、存储端口、普通检索、图谱能力、权限和版本语义。
 
-2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。图事实首片已完成（见 22），多来源拓扑投影已完成（见 23），图向量和三种种子召回组件已完成（见 24），下一切片讨论授权准备与一跳扩展用例；父块暂缓，不做检索效果基线；在线重构建、生产配置和生命周期装配继续留后。
+2026-10-12 已落地共享向量模型、通用过滤、Qdrant 后端及普通向量发布闭环，见 [17](17-vector-publication-implementation.md)；请求内资源快照与内容读取见 [18](18-application-snapshot-implementation.md)，Common 泛型 Pipeline、VectorRetriever 与 HybridRetrieval 见 [19](19-hybrid-retrieval-implementation.md)，统一章节身份与结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀与维护窗口离线 repair 已完成，见 [21](21-contextualizer-implementation.md)。图事实首片已完成（见 22），多来源拓扑投影已完成（见 23），图向量和三种种子召回组件已完成（见 24），授权图检索、一跳 traversal 与 Chunk 实体候选已实现（见 25）；父块暂缓，不做检索效果基线；在线重构建、生产配置和生命周期装配继续留后。
 
 2026-10-12 P5 首片已完成 Ontology、GraphExtractor、增量复用、可选补漏、Chunk 图事实落库与离线图 repair，见 [22](22-graph-extraction-implementation.md)。图事实/本体统一为 core.schema.graph 中的 dataclass，只有 Instructor 输出 DTO 使用 Pydantic。GraphStorage/GraphIndexer、Neo4j 多来源投影与可选 repair 已完成（见 23）；当前排期不做确定性 Producer。
 
@@ -211,7 +211,7 @@ ContentRevision 是 `core.schema` 的不可变内容身份；摘要基于完整 
 
 DocumentRevision、Chunk 和各类向量/图投影都必须携带 `resource_id/content_revision`。一次能力调用中，资源第一次确定 applied revision 后，后续正文、Chunk 和投影回查都固定使用该 revision。active 期间变化不触发重试或切换。
 
-`application/snapshot.py` 是多个读取／检索用例共享的入口。`ResourceSnapshot(scope)` 只保存本次调用逐资源确定的 `ContentRevision | None`；`ResourceSnapshotReader(store, resource_acls, reader)` 内部批量解析状态和 ACL，公开读取 Document／Chunk 及按章节 ID 定位的可见 Document，不保留请求状态。普通混合检索、目录/邻域与章节读取已使用 Reader，后续图谱用例复用同一入口，不再单独装配 resolver。
+`application/snapshot.py` 是多个读取／检索用例共享的入口。`ResourceSnapshot(scope)` 只保存本次调用逐资源确定的 `ContentRevision | None`；`ResourceSnapshotReader(store, resource_acls, reader)` 内部批量解析状态和 ACL，公开读取 Document／Chunk 及按章节 ID 定位的可见 Document，不保留请求状态。普通混合检索、目录/邻域与章节读取已使用 Reader，图谱用例已复用同一入口，不再单独装配 resolver。
 
 每次独立调用创建新 ResourceSnapshot，同一次编排显式共享它。首次不可见也缓存；调用期间 applied、ACL 或 destroyed 变化均沿用首次完成的决定，不增加输出前回查。已选事实缺失或身份不符则省略，不切换新版或回退其他 revision。Document 回查重新计算完整正文身份；Chunk 继承资源级判权并匹配 selected revision。批量去重保序、空输入无 I/O，连接／查询／解码异常直接传播。这个请求内资源快照不提供跨后端原子观察点，也不保存正文。
 
@@ -348,7 +348,7 @@ GraphStorage 已实现在 storage/graph.py，按 Chunk 完整来源输入 GraphS
 
 Neo4jGraphStorage 绑定 driver/database/graph_name，默认 neo4j/rag_v4 和每批 64 来源。共享实体/有向关系图元只存身份，来源关联各自保存 JSON 事实与原生平面 metadata 属性。ensure_schema 显式创建独立标签约束，CRUD 不初始化。每批显式事务移除旧贡献、写新事实并清理受影响孤儿；前置异常回滚当前批，前批提交保留；提交网络异常可能结果未知，传播后幂等重跑，不自动重试。
 
-Mongo Chunk metadata 仍是权威重建输入；没有 Mongo 图事实新集合。Storage 不判 ACL、选择 applied 或调用模型。后续 application 必须用 ResourceSnapshotReader 回查 selected revision 和授权来源，从事实组装材料，不能把图 JSON 或跨来源描述作为正文权威。允许跨可见文档形成路径；图向量与种子检索已实现，授权材料用例和全面回收留后。
+Mongo Chunk metadata 仍是权威重建输入；没有 Mongo 图事实新集合。Storage 不判 ACL、选择 applied 或调用模型。后续 application 必须用 ResourceSnapshotReader 回查 selected revision 和授权来源，从事实组装材料，不能把图 JSON 或跨来源描述作为正文权威。允许跨可见文档形成路径；图向量、种子检索与授权材料用例已实现（见 25），全面回收留后。
 
 ### 6.4 MetadataFilters
 
@@ -390,7 +390,7 @@ HybridRetrieval 显式注入 ResourceSnapshotReader、VectorReader、已配置�
 
 授权过滤后不补召回、不重查 publication/ACL，结果允许少于 top_k。召回或准备为空时跳过排序；准备失败不调用外部模型。重排失败记录日志并保留重排前顺序与分数，召回、准备与多样化异常直接传播。
 
-ChunkHit 仅包含 chunk_id、resource_id、content_revision、section_id、section_path、text（raw_text）、rank、score；score 属于最终排序阶段，不限定为 0–1，不命名为 rerank_score。内部 metadata 和向量不进入结果。Pipeline 截取 top_k 并连续编号，application 组装后直接返回命中；命中后处理接口已移除。
+ChunkHit 包含 chunk_id、resource_id、content_revision、section_id、section_path、text（raw_text）、rank、score 和默认空列表 seed_entities；score 属于最终排序阶段，不限定为 0–1，不命名为 rerank_score。内部 metadata 和向量不进入结果。Pipeline 截取 top_k 并连续编号，application 组装后直接返回命中；命中后处理接口已移除。
 
 Common BM25Retriever 使用调用方提供的 payload 文本提取函数在内存建索引，不等同于 Qdrant sparse 查询。Chat 缓存输出搜索已迁移到类型化 payload，保留原文定位与会话隔离行为。图谱不可用或未启用时普通检索独立工作。
 
@@ -398,7 +398,7 @@ Common BM25Retriever 使用调用方提供的 payload 文本提取函数在内�
 
 GraphRetriever.from_storage 已实现 local/global/hybrid 三种种子路线：实体来源向量、关系来源向量、两路融合。只读取 VectorReader，不持有 GraphReader、Mongo、ACL 或请求快照。每次直接 embedding 查询一次，两路共用向量并发读取；默认 hybrid、各 30 条、总 60、Common RoundRobin，可注入 RRF，单路使用总预算且保留 provider 分数。
 
-返回 Candidate[GraphMatch]，GraphMatch 包含 GraphVectorKind 与原始 VectorMatch；融合身份按 kind:record_id，不按逻辑图 ID 提前合并不同来源。候选不是业务响应，三个模式不表示完整授权图查询已经实现。application 多个图用例复用 Common RetrievalPipeline，prepare_candidates 负责同一 ResourceSnapshot 下授权、selected revision、向量身份/text_sha256 和 Mongo 当前事实检查，之后才扩展一跳并核对其全部来源。具体用例尚未装配。
+返回 Candidate[GraphMatch]，GraphMatch 包含 GraphVectorKind 与原始 VectorMatch；融合身份按 kind:record_id，不按逻辑图 ID 提前合并不同来源。候选不是业务响应。GraphRetrieval 已装配 Common RetrievalPipeline，prepare_candidates 负责同一 ResourceSnapshot 下授权、selected revision、向量身份/fact_sha256/graph_version 和 Mongo 当前事实检查，之后才扩展一跳并核对其全部来源。local 读取实体自身来源与一跳；global 读取选中关系及其同来源端点；hybrid 按逻辑种子形成独立证据组，共享读取不能扩大关系组范围。top_k 限制证据组，首个合法候选决定顺序、分数与 MMR 向量。
 
 实体/关系向量按来源分别保存，文本加入本体/类别/谓词业务说明与当前来源描述；Ontology 统一事实构造和持久化解析，不把本体对象放进 Node/Edge 持久化字段。Qdrant 图集合是 dense-only，普通 Chunk 双向量不变。repair 支持 --with-graph-vectors 与免抽取/免事实写入的 --projection-only。详情与失败语义见 24。
 
@@ -406,15 +406,17 @@ RAG 不裁剪输出原文/描述，不管理结果缓存或懒读取，预算归
 
 ### 7.3 Chunk 种子
 
-ChunkHit 可以附带可选的 Entity `GraphNodeReference` 列表。它们只是候选，不是已选择的 seed。模型选择 node ID 后，必须重新校验：
+ChunkHit.seed_entities 是默认空列表，元素 GraphNodeReference 只含 id/relations。HybridRetrieval 不依赖 Ontology，从最终已授权 Chunk 当前 metadata 生成引用；逻辑 ID 沿用本体、类别和规范化名称的身份，不解析 ID 字符串。它们只是候选，普通检索不会自动遍历。没有事实时为空，补充解析失败记录日志并保留正文命中。
 
-- resource_id；
-- content_revision；
-- Chunk metadata 中的 node/relationship ID 与来源 Chunk 关联；
-- active revision；
-- PermissionScope/ACL。
+GraphTraversal 接收调用方选择的逻辑 node_ids，先从当前任意合法可见来源确认节点，再按可选方向和谓词读取一跳。来源不必绑定原 ChunkHit，但必须经同一 ResourceSnapshotReader 的资源授权和 selected revision 回查，并在当前 Mongo metadata 中存在合法事实。None 方向为 BOTH，None 谓词不限制，[] 不读关系；不暴露 depth，模型看到结果后再选择下一跳。
 
-只有校验通过的 node ID 才能进入 bounded traversal。未被模型选择的候选不能自动遍历。候选补充失败时返回普通 ChunkHit，候选列表为空。
+GraphEvidence 包含 kind/fact_id/entities/relationships/sources，实体视图 GraphEntity 为 id/source_id/description/relations，一个逻辑种子一组；GraphHit 再附最终 rank/score。关系端点来自支持该关系的同一 Chunk，各来源描述独立返回，所有事实均可定位到组内完整原文。一跳默认批量上限 100 个逻辑关系候选，已选合法来源不截取；过滤后不补读取。实体/关系/来源去重保序。来源对象不携带 contextual_context 或任意 metadata。
+
+GraphRetrieval / GraphTraversal / HybridRetrieval 不依赖 Ontology。Ontology.create_node 在写入时根据 category 整理 relations（谓词与允许方向），随 GraphNode 普通字典保存；空端点类别限制适用该侧任意类别。它是类别允许的关系提示，不声明当前可见事实存在；查询侧不反向限制遍历，指定无事实的谓词返回空关系。
+
+text_sha256 继续记录实际索引文本；查询使用 fact_sha256 与 graph_version 核对当前事实输入，无需加载本体重新渲染文本。GraphNode 仍保留生产与索引需要的名称和类别，应用实体视图只保留 ID 及来源材料，不解析 ID 字符串。
+
+两个用例共享公开 GraphEvidenceLoader / EvidenceBuilder，调用内合并来源读取和事实解析；底层 adapter 已保证的投影结构和身份不再重复检查。两个图列表均缺失作为无图事实，部分缺失、结构或来源损坏异常传播，读取不套用单一本体规则，缺失合法端点的关系逐条丢弃。filters 仅支持 resource_id/content_revision 的 EQ/IN 与 AND/OR/NOT；表达式形状与类型由底层 adapter 检查，同时约束向量、拓扑和当前来源。实现与实际验证见 [25](25-graph-application-implementation.md)。
 
 ### 7.4 父块
 
@@ -468,7 +470,7 @@ src/rag/
     publication/  # models.py、store.py、publish.py；后者包含事件、消费者及完整发布
     snapshot.py   # ResourceSnapshot 与 ResourceSnapshotReader，共享版本／权限决定和内容读取
     retrieval.py  # HybridRetrieval、PreparedChunk、ChunkHit 与固定读取/模型依赖装配
-                   # 目录/邻域与章节读取已实现；图谱及种子校验后续实现
+                   # 目录/邻域与章节读取已实现；图谱检索与显式一跳已实现，MCP transport 留后
   ingestion/       # Chunker, Transformer, Indexer, IngestionPipeline
   storage/         # ContentStorage, VectorStorage, GraphStorage
   retrieval/       # vector.py: 配置式 VectorRetriever；graph 抽象留到图切片

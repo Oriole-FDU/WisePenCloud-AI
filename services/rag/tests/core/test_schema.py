@@ -92,6 +92,7 @@ def test_graph_node_id_normalizes_only_name(name, ontology_name, category, expec
         "ontology_name",
         "category",
         "description",
+        "relations",
         "source_id",
     }
     # 来源不同不改变实体的语义身份，provenance 仍留在事实中。
