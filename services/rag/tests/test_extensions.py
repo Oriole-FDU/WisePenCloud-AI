@@ -4,6 +4,7 @@ import ast
 import re
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import unquote
 
 import pytest
 import yaml
@@ -13,8 +14,10 @@ from rag.container import Container
 from rag.extensions import register_extensions
 from rag.storage.vector import IndexableField, IndexKind, VectorCollection
 
-DEMO = Path(__file__).resolve().parents[1] / "demo"
-GUIDE = Path(__file__).resolve().parents[1] / "src/rag/extensions/extensions.md"
+DOCS = Path(__file__).resolve().parents[1] / "docs"
+GUIDE = DOCS / "extensions.md"
+# 文稿已迁入 docs，业务样例仍由源码包拥有，不能相对文稿查找 JSON/JSONL。
+EMPLOYMENT = Path(__file__).resolve().parents[1] / "src/rag/extensions/employment"
 
 
 def examples():
@@ -62,26 +65,34 @@ def test_extension_accepts_real_platform_factories(platform_settings, graph_onto
     assert platform.pipeline().transformers == []
 
 
-def test_all_extension_examples_compile_and_settings_sample_valid(platform_settings):
-    for name, snippet in examples().items():
-        compile(snippet, name, "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
+def test_current_document_examples_compile_and_settings_sample_valid(platform_settings):
+    # 编译现行文档的全部 Python 片段；组合/维护示例另以真实 DI 或替身执行。
+    for guide in DOCS.glob("*.md"):
+        for snippet in re.findall(
+            r"```python\n(.*?)```", guide.read_text(encoding="utf-8"), re.DOTALL
+        ):
+            compile(snippet, guide.name, "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT)
     values = yaml.safe_load(
-        (DEMO / "platform-settings.yaml").read_text(encoding="utf-8")
+        (DOCS / "platform-settings.yaml").read_text(encoding="utf-8")
     )
     settings = type(platform_settings)(**values)
     assert not settings.KAFKA_ENABLED and not settings.ENABLE_GRAPH_STORAGE
 
 
-def test_typed_index_example_and_local_guide_links():
+def test_typed_index_example_and_current_document_links():
     namespace = {}
     exec(examples()["dedicated-indexes"], namespace)  # noqa: S102 - 仓库固定示例
     binding = namespace["contract_collection"](object(), 2)
     assert binding.storage.collection == "employment_contract_vectors_v4"
     assert IndexableField("year", IndexKind.INTEGER) in binding.metadata_index_fields
-    for guide in (GUIDE, GUIDE.parent / "employment/README.md"):
+    # 现行文档的源码/导航链接必须有效；历史原稿保留旧路径，只检查归档入口。
+    for guide in [*DOCS.glob("*.md"), DOCS / "archive/README.md"]:
         for target in re.findall(r"\]\(([^)]+)\)", guide.read_text(encoding="utf-8")):
             if "://" not in target and not target.startswith("#"):
-                assert (guide.parent / target.split("#")[0]).is_file(), target
+                assert (guide.parent / unquote(target.split("#")[0])).is_file(), (
+                    guide.name,
+                    target,
+                )
 
 
 def test_register_manifest_and_reject_collection_collision(
@@ -122,7 +133,7 @@ def test_register_extensions_rejects_unknown_name(platform_settings):
         register_extensions(platform)
 
 
-async def test_employment_readme_load_and_projection_rebuild_example(
+async def test_employment_document_load_and_projection_rebuild_example(
     platform_settings, monkeypatch
 ):
     import json
@@ -130,7 +141,7 @@ async def test_employment_readme_load_and_projection_rebuild_example(
 
     from rag.application.publication import DocumentReadyEvent
 
-    readme = GUIDE.parent / "employment/README.md"
+    readme = DOCS / "employment.md"
     snippets = {
         name: code
         for name, code in re.findall(
@@ -144,10 +155,10 @@ async def test_employment_readme_load_and_projection_rebuild_example(
         exec(snippet, namespace)  # noqa: S102 - 仓库固定示例
     publication = SimpleNamespace(publish=AsyncMock())
     platform = SimpleNamespace(publication=lambda: publication)
-    await namespace["load_contracts"](platform, readme.with_name("contracts.jsonl"))
+    await namespace["load_contracts"](platform, EMPLOYMENT / "contracts.jsonl")
     assert publication.publish.await_count == 4
     document = DocumentReadyEvent.model_validate(
-        json.loads(readme.with_name("document-ready.json").read_text(encoding="utf-8"))
+        json.loads((EMPLOYMENT / "document-ready.json").read_text(encoding="utf-8"))
     ).to_document()
     from rag.core.schema import Chunk, ContentRevision
 
