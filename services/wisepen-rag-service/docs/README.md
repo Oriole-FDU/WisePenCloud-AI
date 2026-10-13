@@ -22,6 +22,7 @@ RAG V4 将完整 Markdown 发布为可检索的当前内容事实，通过请求
 | 正文候选和命中 | [向量检索](usecases-vector.md) |
 | 目录与完整章节原文 | [结构化阅读](usecases-reading.md) |
 | 图种子、证据与一跳探索 | [图用例](usecases-graph.md) |
+| 结果的轻量化消费（投影/热度/延迟读取） | [结果消费模式](usecases-consumption.md) |
 | 永久销毁后的物理清理 | [GC 用例](usecases-gc.md) |
 | 业务开发与专用索引/API | [扩展指南](extensions.md)、[Employment 示例](employment.md) |
 | 启动、配置及常见问题 | [运行说明](deployment.md)、[Nacos 配置样例](platform-settings.yaml) |

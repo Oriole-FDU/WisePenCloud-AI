@@ -47,7 +47,7 @@ async def search_chunks(retrieval, snapshot):
 
 ChunkHit 字段：chunk_id、resource_id、content_revision、section_id、section_path、text、rank、score、seed_entities、metadata。text 是完整 raw_text，metadata 是当前授权 Chunk 的完整字典，不从 payload 拼装、不使用字段白名单、不解析垂类 schema。rank 从 1 开始，score 沿用最终排序阶段。
 
-seed_entities 为 GraphNodeReference(id、relations)。relations 是允许谓词/方向提示，不证明可见关系存在；可以据此显式调用[图 traversal](usecases-graph.md)。向量、PreparedChunk 和生成上下文拼接文本不进入正文结果。
+seed_entities 为 GraphNodeReference(id、relations)。relations 是允许谓词/方向提示，不证明可见关系存在；可以据此显式调用[图 traversal](usecases-graph.md)，或按[结果消费模式](usecases-consumption.md)只保留遍历/定位信号。向量、PreparedChunk 和生成上下文拼接文本不进入正文结果。
 
 ## 4. 过滤与失败合同
 

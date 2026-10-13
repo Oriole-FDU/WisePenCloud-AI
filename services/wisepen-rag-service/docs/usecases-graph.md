@@ -86,7 +86,7 @@ async def search_and_follow(retrieval, traversal, snapshot):
 | GraphSourceChunk | chunk/resource/revision、section_id/path、完整 raw_text；不携带任意业务 metadata |
 | relationships | GraphEdge；保持原方向、来源列表、谓词和同来源端点 |
 
-向量候选核对 record_id、来源资源/revision、当前事实存在、fact_sha256 和 graph_version。来源经 SnapshotReader 授权，拓扑投影也回查当前事实，投影 JSON/聚合描述不能代替正文权威。EvidenceBuilder/GraphEvidenceLoader 在单次调用中共用来源读取，但组内范围独立。
+向量候选核对 record_id、来源资源/revision、当前事实存在、fact_sha256 和 graph_version。来源经 SnapshotReader 授权，拓扑投影也回查当前事实，投影 JSON/聚合描述不能代替正文权威。EvidenceBuilder/GraphEvidenceLoader 在单次调用中共用来源读取，但组内范围独立。返回同时包含描述、热度（来源数）与遍历提示，字段偏重；按需投影见[结果消费模式](usecases-consumption.md)。
 
 ## 6. 失败与维护
 

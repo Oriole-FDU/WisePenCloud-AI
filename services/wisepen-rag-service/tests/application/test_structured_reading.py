@@ -126,6 +126,89 @@ async def test_section_text_is_exact_complete_original_span(reading_setup, scope
     assert ("### 数据" in first_chapter.text) == (scope is SectionReadScope.SUBTREE)
 
 
+async def test_chunk_text_is_exact_original_and_location_with_fixed_fields(
+    reading_setup, storage
+):
+    document, usecase, snapshot = (
+        reading_setup.document,
+        reading_setup.usecase,
+        reading_setup.snapshot,
+    )
+    chunks = await RagMarkdownChunker().split(document)
+    await storage.upsert_chunks(chunks)
+    result = await usecase.read_chunks(
+        [chunk.chunk_id for chunk in chunks], snapshot=snapshot
+    )
+    assert [item.chunk_id for item in result] == [chunk.chunk_id for chunk in chunks]
+    for item, chunk in zip(result, chunks, strict=True):
+        assert item.text == chunk.raw_text
+        assert item.resource_id == chunk.resource_id
+        assert item.content_revision == chunk.content_revision
+        assert item.section_id == chunk.section_id
+        assert item.section_path == chunk.section_path
+    assert {field.name for field in fields(result[0])} == {
+        "resource_id",
+        "content_revision",
+        "chunk_id",
+        "section_id",
+        "section_path",
+        "text",
+    }
+
+
+async def test_chunk_reads_deduplicate_preserving_order_and_fetch_once(
+    reading_setup, storage, make_read_chunk
+):
+    document, usecase, snapshot = (
+        reading_setup.document,
+        reading_setup.usecase,
+        reading_setup.snapshot,
+    )
+    first, second = make_read_chunk(document, 0), make_read_chunk(document, 1)
+    await storage.upsert_chunks([first, second])
+    storage.get_chunks = AsyncMock(wraps=storage.get_chunks)
+    requested = [second.chunk_id, first.chunk_id, second.chunk_id, first.chunk_id]
+    result = await usecase.read_chunks(requested, snapshot=snapshot)
+    assert [item.chunk_id for item in result] == [second.chunk_id, first.chunk_id]
+    assert [item.text for item in result] == [second.raw_text, first.raw_text]
+    storage.get_chunks.assert_awaited_once_with([second.chunk_id, first.chunk_id])
+
+
+async def test_chunk_reads_omit_invisible_stale_and_missing(
+    reading_setup,
+    storage,
+    read_acls,
+    make_read_document,
+    make_read_chunk,
+    publish_read_document,
+):
+    document, usecase, snapshot = (
+        reading_setup.document,
+        reading_setup.usecase,
+        reading_setup.snapshot,
+    )
+    current = make_read_chunk(document)
+    stale = replace(current, chunk_id="stale-chunk", content_revision="old-revision")
+    await storage.upsert_chunks([current, stale])
+    denied_document = make_read_document("denied")
+    await publish_read_document(denied_document)
+    read_acls["denied"] = ResourceAcl("denied", 1, "other")
+    hidden = make_read_chunk(denied_document)
+    await storage.upsert_chunks([hidden])
+    result = await usecase.read_chunks(
+        [
+            stale.chunk_id,
+            hidden.chunk_id,
+            "missing",
+            current.chunk_id,
+            current.chunk_id,
+        ],
+        snapshot=snapshot,
+    )
+    assert [item.chunk_id for item in result] == [current.chunk_id]
+    assert [item.text for item in result] == [current.raw_text]
+
+
 @pytest.mark.parametrize("text", ["", "# 只有标题\n"])
 async def test_visible_document_without_sections_has_empty_outline(
     text, make_read_document, publish_read_document, read_acls, snapshot_reader
@@ -385,6 +468,7 @@ async def test_empty_input_has_no_io(
     snapshot = ResourceSnapshot(PermissionScope("reader"))
     assert await usecase.read_sections([], snapshot=snapshot) == []
     assert await usecase.neighborhood([], snapshot=snapshot) == []
+    assert await usecase.read_chunks([], snapshot=snapshot) == []
     for collection in collections:
         collection.find.assert_not_called()
     publication_store.get_states.assert_not_called()

@@ -47,6 +47,18 @@ class SectionText:
     text: str
 
 
+@dataclass(frozen=True, slots=True)
+class ChunkText:
+    """按 Chunk ID 精确读取的原文；不重建标题、不拼接派生上下文。"""
+
+    resource_id: str
+    content_revision: str
+    chunk_id: str
+    section_id: str | None
+    section_path: list[str]
+    text: str
+
+
 class DocumentReading:
     """只保存共享 Reader；本次定位、章节索引与 formatter 均为局部变量。"""
 
@@ -150,6 +162,27 @@ class DocumentReading:
                 )
             )
         return result
+
+    async def read_chunks(
+        self, chunk_ids: list[str], *, snapshot: ResourceSnapshot
+    ) -> list[ChunkText]:
+        """按 Chunk ID 原样读取正文，供已持有定位的下游延迟取原文。"""
+        chunks = await self._reader.read_chunks(
+            list(dict.fromkeys(chunk_ids)), snapshot=snapshot
+        )
+        by_id = {chunk.chunk_id: chunk for chunk in chunks}
+        return [
+            ChunkText(
+                chunk.resource_id,
+                chunk.content_revision,
+                chunk.chunk_id,
+                chunk.section_id,
+                chunk.section_path,
+                chunk.raw_text,
+            )
+            for chunk_id in dict.fromkeys(chunk_ids)
+            if (chunk := by_id.get(chunk_id)) is not None
+        ]
 
 
 def _section_locations(
