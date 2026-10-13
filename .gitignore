@@ -41,6 +41,10 @@ ENV/
 .mypy_cache/
 .ruff_cache/
 
+# pytest
+.pytest_cache/
+.pytest_tmp/
+
 # 操作系统
 .DS_Store
 Thumbs.db

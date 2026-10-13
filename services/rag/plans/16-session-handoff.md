@@ -1,15 +1,19 @@
 # RAG V4 会话接手文档
 
-记录日期：2026-10-13。本文是新会话的首读入口，描述已完成实现、已查清事实、用户确认的设计约束和继续顺序。向量闭环见 [17](17-vector-publication-implementation.md)，资源快照读取见 [18](18-application-snapshot-implementation.md)，泛型 Pipeline 与混合检索见 [19](19-hybrid-retrieval-implementation.md)，结构化读取见 [20](20-structured-reading-implementation.md)。Contextualizer、标题路径前缀及离线 repair 见 [21](21-contextualizer-implementation.md)。P5 图事实与多来源 Neo4j 投影已完成，见 [22](22-graph-extraction-implementation.md)、[23](23-graph-projection-implementation.md)；图向量与三种 GraphRetriever 种子组件已完成（见 [24](24-graph-vector-retriever-implementation.md)），授权图检索、一跳 traversal 与 Chunk 实体候选已完成（见 [25](25-graph-application-implementation.md)），P8 首片通用 Container、服务定时 GC 与垂类开发指南已完成，见 [26](26-platform-gc-implementation.md)；P8 第二片 Document.type 路由与 metadata 透传已完成，见 [27](27-document-type-routing-implementation.md)；Employment 高级扩展示例与存储/API 生命周期接入已完成，见 [28](28-employment-extension-implementation.md)；索引协议与通用正文工具收敛见 [29](29-vector-index-contract-implementation.md)；父块、效果基线、在线重构建及历史贡献回收留后。
+记录日期：2026-10-13。本文是下一会话的首读入口，记录当前实现、已确认合同、验证范围与文档整合任务。当前代码基线为 `13d096b4`；下一会话先完成文档整合，任务和可直接粘贴的开场指令见第 7 节。
+
+实现记录按能力查阅：普通发布/向量/授权读取/检索/章节能力见 17–20，上下文增强与 repair 见 21；图事实、拓扑、向量种子与授权用例见 22–25；平台装配/GC 与类型路由见 26–27。扩展示例初版见 [28](28-employment-extension-implementation.md)，统一向量协议见 [29](29-vector-index-contract-implementation.md)，本体条件筛选见 [30](30-graph-ontology-filter-implementation.md)，当前公司内部合同与 metadata 增量合同以 [31](31-employment-department-metadata-implementation.md) 为准。
 
 ## 0. 接手先读这些结论
 
+**下一会话的明确任务是文档整合。** 核心组件、通用生命周期与 Employment 完整示例已实现；先把设计、排期、demo 和扩展指南整理为当前合同，保留实施记录的历史语境。父块、在线重构建、历史贡献回收、通用 transport、真实后端/模型联调仍是后续独立工作；mix 排期待定，确定性 Producer 不排期。
+
 Employment 当前场景见 [31](31-employment-department-metadata-implementation.md)：某公司内部合同，上游 metadata 仅 employee/start_date，原样入 Document、逐 Chunk 深拷贝；业务 Transformer 只读校验，不再 model_dump 回写。图为 Person/Department/in_department。专用 factory 只返回 employee/year 增量，通用 VectorIndexer 合并不可被覆盖的 Chunk resource_id/content_revision；revision 留在 payload 核验，示例不创建其字段索引，三个索引是 resource_id/year/employee。合同 API 也用 employee，返回平面业务 metadata。用户去掉的员工名称规范化保留；大小写/内部空白不归一化。
 
-最新补充见 [30](30-graph-ontology-filter-implementation.md)：通用图 filters 已支持 resource_id/content_revision/ontology_name 的字符串 EQ、字符串列表 IN 及 AND/OR/NOT。GraphIndexer 来源 metadata 保存绑定 domain；查询从当前实体事实核对本体，不从业务字段或 ID 字符串推断。Employment 图工具只传本体条件和通用参数，不再有二次回查、DTO 校验或证据转换；共享本体来源允许参与，无关系实体保留。旧 Neo4j 来源属性通过 projection-only --with-graph 重建，不自动迁移。
+通用图筛选合同见 [30](30-graph-ontology-filter-implementation.md)：通用图 filters 已支持 resource_id/content_revision/ontology_name 的字符串 EQ、字符串列表 IN 及 AND/OR/NOT。GraphIndexer 来源 metadata 保存绑定 domain；查询从当前实体事实核对本体，不从业务字段或 ID 字符串推断。Employment 图工具只传本体条件和通用参数，不再有二次回查、DTO 校验或证据转换；共享本体来源允许参与，无关系实体保留。旧 Neo4j 来源属性通过 projection-only --with-graph 重建，不自动迁移。
 
 1. **P4 普通内容能力已经完成。** 普通摄入/发布、dense/sparse/hybrid 召回、授权正文回查与重排、目录/邻域/章节原文读取、Contextualizer 和离线上下文 repair 都有实现和测试。下一会话不应再次提出实现这些能力的计划。
-2. **通用平台装配与定时 GC 已完成。** Container/main 已装配默认发布/查询、可选上下文和 Neo4j、共享客户端、固定 Qwen 重排及始终运行的 GC。Kafka 关闭不影响 GC/查询。settings/main 沿用项目默认 Nacos/单个 lifespan 习惯，没有 models/runtime 拆分；真实后端/模型联调仍未执行。见 26/27 与 demo/platform.md、src/rag/extensions/extensions.md。源码示例位于 src/rag/extensions/employment，已取代旧 demo；main lifespan 在共享客户端登记后调用 register_extensions，按 EXTENSIONS 与源码表构造 extension() 的 Pipeline/额外存储/API 产物，默认空列表不启用扩展。平台保存 app.state.extensions、初始化额外 Qdrant 集合并纳入共享 GC、挂载 /rag/extensions/{name} 子 API。Employment 展示 原样 metadata 的入职年份/员工索引与部门图关系、授权查询、通用图工具及可信网关身份；默认/扩展集合用 VectorCollection(storage, list[IndexableField]) 声明，启动统一调用 VectorStorage.ensure_collection，数据库类型只在后端翻译。合同查询仅映射 filters 后调用通用 VectorRetrieval(mode=DENSE)，直接返回带完整授权 metadata 的 ChunkHit，不再有专用 prepare 或业务/文本摘要保护；FROM_SOURCE_SECRET 只在启用 API 时要求。平台 publication 按 Document.type 选择完整注册链，垂类只向 pipeline_routes 字典赋值，不覆盖 publisher 或接触 Kafka；默认分块深复制业务 metadata。影响摄入的 type/metadata 变化要求提高 version，路由变更不自动重建。
+2. **通用平台装配与定时 GC 已完成。** Container/main 已装配默认发布/查询、可选上下文和 Neo4j、共享客户端、固定 Qwen 重排及始终运行的 GC。Kafka 关闭不影响 GC/查询。settings/main 沿用项目默认 Nacos/单个 lifespan 习惯，没有 models/runtime 拆分；真实后端/模型联调仍未执行。见 26/27 与 demo/platform.md、src/rag/extensions/extensions.md。源码示例位于 src/rag/extensions/employment，已取代旧 demo；main lifespan 在共享客户端登记后调用 register_extensions，按 EXTENSIONS 与源码表构造 extension() 的 Pipeline/额外存储/API 产物，默认空列表不启用扩展。平台保存 app.state.extensions、初始化额外 Qdrant 集合并纳入共享 GC、挂载 /rag/extensions/{name} 子 API。Employment 展示原样 metadata 的入职年份/员工索引与部门图关系、授权查询、通用图工具及可信网关身份；默认/扩展集合用 VectorCollection(storage, list[IndexableField]) 声明，启动统一调用 VectorStorage.ensure_collection，数据库类型只在后端翻译。合同查询仅映射 filters 后调用通用 VectorRetrieval(mode=DENSE)，直接返回带完整授权 metadata 的 ChunkHit，不再有专用 prepare 或业务/文本摘要保护；FROM_SOURCE_SECRET 只在启用 API 时要求。平台 publication 按 Document.type 选择完整注册链，垂类只向 pipeline_routes 字典赋值，不覆盖 publisher 或接触 Kafka；默认分块深复制业务 metadata。影响摄入的 type/metadata 变化要求提高 version，路由变更不自动重建。
 3. **请求快照归 application，Retriever 只接收查询内容。** ResourceSnapshot 与 ResourceSnapshotReader 两对象已经冻结；不要恢复独立 resolver、retriever_factory、VectorRetrievalQuery、Retriever 请求缓存或隐式全局 context。
 4. **原文和检索派生文本分开。** raw_text 不变，retrieval_text 为路径/上下文/原文；向量投影不能成为正文权威，未经版本/ACL/投影身份检查的正文不能进入响应或外部模型。
 5. **P5 图事实与 Neo4j 多来源投影已完成。** GraphStorage/GraphIndexer、来源批次事务、一跳读回与 repair --with-graph 已实现，向量值对象并入 storage/vector.py。图向量已由 GraphIndexer 统一写入，GraphRetriever.from_storage 支持三种种子路线；授权扩展在 Common Pipeline 准备阶段，GraphRetrieval / GraphTraversal 已装配，查询不绑定单一本体。mix 排期待定，确定性 Producer 不排期。见第 5 节与 22/23/24/25。
@@ -18,7 +22,7 @@ Employment 当前场景见 [31](31-employment-department-metadata-implementation
 ## 1. 快速定位与当前基线
 
 - 工作区：`D:\WisePenCloud-AI\wisepen_common\WisePenCloud-AI`，PowerShell。
-- 本次交接更新核对到：分支 `dev/common`，HEAD **`e5bc145d`**，提交标题 `feat(rag-v4): 完成生命周期装配与拓展pipeline路由机制`。P8 与用户 retrievers 调整已提交；当前未提交改动含 Employment 高级扩展示例、统一向量索引协议、三模式 VectorRetrieval 与 ChunkHit.metadata，以及验证/文档补充。下次仅需重新核对 git status/HEAD。
+- 本次交接核对到：分支 `dev/common`，HEAD **`13d096b4`**，提交标题 `feat(rag-v4): 完成rag扩展包`。Employment、统一索引协议、VectorRetrieval、ChunkHit.metadata、图本体筛选及 28–31 记录均已提交。本次文档更新前仅有 `WisePenView` 和 `services/rag/references/LightRAG` 的既有子模块状态；本次仅修改本接手文档，不创建提交。下次重新核对 git status/HEAD，保留用户后续提交与子模块状态。
 - 新实现只在 `services/rag/src/rag`，测试在 `services/rag/tests`。旧 `services/wisepen-rag-service/src/rag` 与 `services/rag/references` 只作源码参考。
 - 本片开始时只有 WisePenView 和 services/rag/references/LightRAG 既有子模块状态，均保留。Common decision 改动已在 HEAD；本片不修改 Common/Chat 源码。neo4j 直接依赖在此前切片已落地，本片不修改依赖/锁文件或 Common/Chat 源码。
 - **最近实际验证**见 [31](31-employment-department-metadata-implementation.md)：定向 59 passed / 1 skipped，RAG **937 passed / 29 skipped**，Common retrieval/ai_clients/markdown **125 passed**。修改文件静态检查通过。真实后端 fixture 因无显式配置跳过；未调用真实模型、业务消费者或业务 repair。Chat 本片未重跑。
@@ -28,7 +32,7 @@ Employment 当前场景见 [31](31-employment-department-metadata-implementation
 
 普通上下文 Pipeline 与离线 repair 的配置/运行方式读 [demo/contextual.md](../demo/contextual.md)。最新材料选择与离线恢复合同以 21 和当前实现为准，不再使用字符预算或 section 内窗口限制。
 
-**下一会话最短阅读顺序**：本文第 0、2、3、4、5 节 → 31/30/29/28/27/26 与 demo/platform.md、src/rag/extensions/extensions.md、src/rag/extensions/employment/README.md → 25 → application/graph 两个用例、application/retrieval.py 与 demo/graph.md → 24 回顾组件 → 23 回顾拓扑 → 10/11 的查询段落。需要旧 ontology 规则时，只读第 4.5 节列出的旧 ontology 文件；需要回顾上一切片算法时再读 21。19/20 与两个 demo 用于具体检索/章节/摄入装配，不是讨论下一图谱切片前必须通读的材料。
+**文档整合的最短阅读顺序**：本文第 0、1、5、6、7 节 → 31/30/29（当前修正）→ 10/11（主要整合对象）→ demo/platform.md、src/rag/extensions/extensions.md 与 Employment README。需要核实某个合同，再定向读对应源码/测试及 17–28 记录；无需先通读旧 Java 项目、全库 references 或全部历史文档。
 
 文档与决策优先级：用户后续明确决策 > 已确认合同及当前实现 > 10／11 整合计划 > 00–09 历史背景。12–15、17–31 是实施记录，提交状态和验收数字可能是当时的历史值。`架构图.md` 仍含旧目录和未来组件，不能据其判断当前文件存在。当前 GraphWriter.replace_sources/delete_sources 返回 None，无 Receipt。当前结果为 GraphHit(evidence/rank/score)、GraphEvidence 和 ChunkHit.seed_entities；GraphRetrieveRequest / ChunkHit.graph_nodes 属于旧方案，不存在于当前接口。发现真实矛盾要指出并讨论，不能把历史示例自动升级为当前要求。
 
@@ -47,20 +51,21 @@ Employment 当前场景见 [31](31-employment-department-metadata-implementation
 | 离线上下文修复 | `scripts/repair_context.py` | 显式资源范围、当前 applied 身份与写前状态复核、增量生成及全部向量重写；不 stage/apply，不加载 Nacos |
 | 内容事实存储 | `storage/content.py`、`backends/mongo/content.py` | Document／Chunk 完整对象读写、物理删除、显式唯一索引 |
 | Chunk 事实 Indexer | `ingestion/indexers/chunk.py` | 仅调用 ContentWriter.upsert_chunks，保存最终 Chunk |
-| 向量存储合同与通用过滤 | `storage/vector.py`、`core/schema/filters.py` | VectorRecord/Query/Match 与端口合并；通用 metadata 条件供向量/图共用 |
+| 向量存储合同与通用过滤 | `storage/vector.py`、`core/schema/filters.py` | VectorRecord/Query/Match 与端口；IndexKind/IndexableField/VectorCollection；必填字段列表初始化 |
 | 向量存储与 Qdrant | `storage/vector.py`、`backends/qdrant/` | collection-bound 双向量 upsert/query/delete，显式初始化，completed 确认；真实后端未验证 |
-| 普通 VectorIndexer | `ingestion/indexers/vector.py` | retrieval_text → 分批 embedding → 双向量投影输入，只读 Chunk，全部成功才返回 |
+| 普通 VectorIndexer | `ingestion/indexers/vector.py` | retrieval_text → 分批 embedding → 投影；factory 为业务增量，资源/revision 始终取自 Chunk |
 | 发布完整用例 | `application/publication/publish.py` | 输入事件、消费者、publish 内部摄入与回查、条件发布、永久销毁 |
 | 通用平台装配/GC | `container.py`、`main.py`、`application/gc.py` | 共享依赖、显式初始化、消费者握手、固定 Qwen 重排、周期销毁回收与完整清理 |
 | 发布状态后端 | `backends/mongo/publication.py` | Mongo 条件 stage／apply、永久 destroyed 标记 |
 | 请求内资源快照与内容读取 | `application/snapshot.py` | ResourceSnapshot 保存版本／资源授权决定；ResourceSnapshotReader 批量读取 Document／Chunk，身份回查、首次决定复用、部分结果与请求隔离 |
 | 普通向量召回 | `retrievers/vector.py` | VectorRetriever.from_storage 初始化预算/filters/向量返回；retrieve 只接收字符串；Common 并发 dense/sparse 与显式融合 |
 | 授权图谱检索与 traversal | `application/graph/retrieval.py`、`traversal.py` | 三种模式证据组、任意本体事实的授权回查、显式一跳；实体视图暴露 ID 与允许的关系提示 |
-| 普通混合检索 | `application/retrieval.py` | 直接 from_storage 按调用配置装配、快照授权回查、投影身份核对、重排/MMR、ChunkHit，组装后直接返回 |
+| 通用正文检索 | `application/retrieval.py` | VectorRetrieval 三模式、授权回查、身份核验、重排/MMR，返回 ChunkHit 与完整 metadata/seed_entities |
 | 结构化读取 | `application/reading.py`、`application/snapshot.py` | DocumentReading.global_outline/neighborhood/read_sections；全局目录、邻域与 own/subtree 精确原文；批量章节定位复用同一资源快照 |
 | Common 泛型检索与 Chat 消费方 | Common `utils/retrieval`、Chat 缓存 BM25 工具 | Candidate[T]、异步准备、payload 提取器；已移除 RankedCandidate，缓存定位行为保持 |
 | 通用 Kafka | `backends/kafka/consumer.py`、`retry.py` | 有限快速重试、延迟回投、DLQ、精确 offset 提交及资源清理 |
-| 服务生命周期 | `container.py`、`main.py`、`api/router.py` | 目前装配 ACL；等待连接后就绪，消费异常撤销健康状态 |
+| 服务生命周期 | `container.py`、`main.py`、`api/router.py` | 存储显式初始化、扩展登记/API 挂载、ACL/publication 消费握手、始终运行 GC、就绪与关闭 |
+| 扩展装配与公司内部合同示例 | `extensions/__init__.py`、`base.py`、`employment/` | 声明 Pipeline/集合/API，平台统一初始化/GC；员工/年份索引、部门关系与授权工具 |
 
 Contextualizer 与离线 repair 已实现并用替身验收；标题树、邻域、章节 own/subtree、资源快照与普通混合检索已完成。GraphStorage／GraphIndexer 与 Neo4j adapter 已实现；GraphRetriever 种子组件已完成；授权图查询与一跳 traversal 已完成；当前**没有**父块；命中后处理接口已移除。普通发布、可选上下文降级和必要向量写入合同通过测试，真实 Mongo/Kafka/Qdrant 尚未验证。离线脚本不是生产在线重构建或生命周期装配。
 
@@ -74,8 +79,8 @@ publication/ACL 消费者已装配到 Container/main，存储显式初始化后�
   → MarkdownChunker → 可选 Contextualizer → ChunkFactsIndexer → VectorIndexer
   → 回查 Document 与本次预期 Chunk ID 集合 → 条件 apply
 
-普通检索：VectorRetrieval.retrieve(query, snapshot=...)
-  → 本次 VectorRetriever.from_storage(mode=hybrid) → Candidate[VectorMatch]
+普通检索：VectorRetrieval.retrieve(query, snapshot=..., mode=...)
+  → 本次 VectorRetriever.from_storage(mode=dense/sparse/hybrid) → Candidate[VectorMatch]
   → SnapshotReader 授权回查 + 投影身份检查 → Candidate[PreparedChunk]
   → Common rerank/MMR → ChunkHit（正文）
   → 调用方可用 section_id 与同一 snapshot 继续邻域/own/subtree 阅读
@@ -215,7 +220,7 @@ destroy_resources 永久置 destroyed=True，清空 staged/applied；未摄入�
 
 当前 ACL 从上游 `wispen_resource_items`（代码中实际拼写）读 ownerId、updateTime、用户 action masks、computedGroupAcls；VIEW 为 bit 1。本地 ResourceAcl **实际已有 acl_revision**，来自 updateTime 的 UTC 毫秒时间戳，不是新增的上游完成版本、Fence 或内容 revision。旧计划中“不增加 ACL revision”应理解为不虚构新的跨服务一致性版本，不能据此删掉已有字段或另造保证。
 
-VIEW 顺序与已有 ACL 测试已冻结：所有者、全局白名单、全局排除、群组规则；身份 scope 来自可信入口，公开业务参数不能让调用者自填身份或 ACL 覆盖字段。未来检索与读取消费它，不在 Storage 或 publication 内重复实现规则。
+VIEW 顺序与已有 ACL 测试已冻结：所有者、全局白名单、全局排除、群组规则；身份 scope 来自可信入口，公开业务参数不能让调用者自填身份或 ACL 覆盖字段。现有检索与读取经 SnapshotReader 消费它，不在 Storage 或 publication 内重复实现规则。
 
 `container.py` 的旧错误 Mongo import 已修正，RAG 已声明 dependency-injector，uv.lock 已同步。`main.py` 通过 TaskGroup 管理 ACL，producer 与主 consumer 连接后再就绪，异常退出清理 Mongo／Nacos；健康检查未就绪或退出后为 503。
 
@@ -253,11 +258,11 @@ Ontology、GraphExtractor、增量复用、可选补漏及 scripts/repair_graph.
 - Instructor 校验响应形状并使用自身重试；未知类别/关系、空白名称及非法端点按事实粒度丢弃。同块基础 ID 去重保留首次合法事实。
 - 补漏可选、默认关闭、最多一次；提示词及合并都禁止修改首轮合法事实，无增量允许空返回，新关系可引用首轮实体。首轮超预算失败，补漏历史超预算记录并接受首轮结果。
 - 成功替换 entities/relationships/graph_version，其余 metadata 保留。指纹覆盖策略、模型、tokenizer、完整本体、schema、生成配置和实际消息，不含并发数、来源 ID 或无关 metadata。缓存整体合法且来源匹配才复用，空成功可复用。
-- 所有块成功后才替换图 metadata；模型/解析异常取消并等待其他任务并传播，不执行事实 Indexer。图失败不撤销普通 publication，数据库旧图事实保留。
+- 所有块成功后才替换图 metadata；模型/解析异常取消并等待其他任务并传播，不执行事实 Indexer，数据库旧图事实保留。注册 Pipeline 中的图阶段失败阻止本次 apply；独立 repair 的图失败不撤销已有 applied，也不回滚先前完成的事实/投影。默认 Pipeline 不包含图阶段。
 - repair 显式资源范围，只读当前 applied 未 destroyed Document/既有 Chunk，完整身份检查，写前复核完整发布状态，再保存全部块。force 禁用缓存；资源错误继续其他资源，有错误非零退出，部分数据库写入保留。维护窗口同资源无其他 Chunk 写任务。
 - repair 不重新分块、不 stage/apply、不重写普通向量、不加载 Nacos。不是生产在线重建或调度入口。
 
-### 5.2 已实现的多来源投影与下一片
+### 5.2 多来源投影与 repair
 
 GraphIndexer 只读图事实，Ontology.parse_chunk_facts 统一解析，本体非法事实逐条丢弃；结构/来源损坏写前报错。一次解析后依次写拓扑与来源向量，没有独立向量 Indexer。Writer.replace_sources 接收完整 Chunk 来源投影（含空事实），仅替换给出的来源。Neo4j 默认每批 64 来源/显式事务，写入结果消费并等待提交；前置异常回滚当前批，前批保留。提交网络异常可能结果未知，传播后幂等重跑，不报告成功或加重试。schema 显式初始化，没有 ACL 投影、状态字段或跨库事务。
 
@@ -269,7 +274,7 @@ GraphRetrieval 已装配三种模式与 Common Pipeline，授权后再按逻辑�
 
 确定性 Producer 不排期，PluginRegistry 按实际消费者再确定。P8 首片已完成通用生产装配、消费者握手、资源物理 GC 与扩展包开发指南。父块、效果基线、在线重构建、非销毁历史贡献回收及 transport 留后；GC 只扫描永久 destroyed 资源，不能代替旧 revision 回收。
 
-### 5.3 图向量与种子组件（本片最新合同）
+### 5.3 图向量与种子组件
 
 GraphIndexer 显式注入两种 writer：拓扑 writer 可选，向量阶段需 embedding client、实体 writer、关系 writer 完整组；至少启用一种投影。默认来源批 64/embedding 批 32，当前批全部 embedding 成功后删旧写新，空事实清旧，两集合不补偿。Qdrant 图集合 dense-only，默认 graph_entity_source_vectors_v4/graph_relation_source_vectors_v4；text_sha256 记录实际索引文本；fact_sha256 与 graph_version 供不绑定本体的查询核对当前事实输入，均为普通向量 payload 字段。
 
@@ -287,24 +292,35 @@ Ontology.create_node 从类别和 RelationSpec 整理 GraphNode.relations，每�
 
 EvidenceBuilder / GraphEvidenceLoader 是公开共用类。删除重复的 filter 结构/类型、投影结构和单一来源检查，依赖底层 adapter；只保留业务范围约束、来源授权与事实过期核对。事实输入摘要不再依赖查询侧本体重渲染索引文本，旧向量缺少 fact_sha256 会被丢弃，可用 projection-only 重建。旧实体缺少关系提示时为 []；抽取策略版本已升级，正常 repair 会重算旧缓存以补齐提示，仅投影不能为旧 Mongo 事实补提示。
 
-### 5.5 已冻结的向量与检索合同，图切片不要顺带改变
+### 5.5 当前向量与检索合同
 
 向量发布闭环与普通混合检索已按确认计划完成；VectorRecord/Query/Match 按用户最新要求并入 storage/vector.py，与端口共同归属向量存储；旧 schema 模块/导出移除，无兼容别名。其他已确认选择：
 
 - 普通发布要求 dense 与 sparse 全部成功；sparse 固定服务端 qdrant/bm25 multilingual，client 使用 cloud_inference=True，失败不降级 dense-only。
-- 沿用 EMBEDDING_MODEL/DIMENSIONS 与旧连接配置键，集合独立 V4，后续默认 document_chunk_vectors_v4，named vectors 为 dense/sparse。模型与维度目前显式注入，生产实际值仍待确认；embedding batch 默认 32，Qdrant upsert batch 默认 256，可注入。
-- Adapter 内使用 uuid5(NAMESPACE_URL, "wisepen-rag-v4:vector:" + record_id)，核心 Chunk ID 不变；payload 保存原 record_id 与 metadata 中资源/revision，不保存 text、ACL 或未来图字段。
+- 沿用 EMBEDDING_MODEL/DIMENSIONS 与旧连接配置键，集合独立 V4，默认 document_chunk_vectors_v4，named vectors 为 dense/sparse。模型与维度目前显式注入，生产实际值仍待确认；embedding batch 默认 32，Qdrant upsert batch 默认 256，可注入。
+- Adapter 内使用 uuid5(NAMESPACE_URL, "wisepen-rag-v4:vector:" + record_id)，核心 Chunk ID 不变；payload 保存原 record_id 与 metadata 中资源/revision，以及索引器显式提供的当前投影字段；不保存 text 或 ACL。图集合与扩展集合独立声明所需字段。
 - VectorWriter upsert/delete 返回 None，无 Receipt；每批 wait=True 且 completed 才算成功，不做向量完整性回查。
 - 同 revision 换分块/embedding 配置及旧投影删除仍是后续重建用例，本轮只保证当前配置下身份重放。
 - VectorRetriever.retrieve(query: str) 返回 Candidate[VectorMatch]；不保留 VectorRetrievalQuery。from_storage 固定默认预算 dense=30、sparse=30、融合上限=60，filters=None、include_embedding=False；默认显式 RoundRobin，可注入 RRF。FusionRetriever 不增加调用时预算覆盖。
 - VectorRetriever 初始化 mode 为 dense/sparse/hybrid（默认 hybrid）；sparse 只依赖 VectorReader、不需要 embedding 客户端，单路保留 provider score，hybrid 才执行 Common 并发融合。单路只用 candidate_limit 作为仓储 top_k，拒绝 dense_top_k/sparse_top_k；hybrid 两路未配置预算时各为 30，candidate_limit 限制融合输出。
-- VectorRetrieval 绑定固定 VectorReader 与已配置的 EmbeddingClient，直接调用 from_storage 显式选择 hybrid，按本次配置构造 Retriever，最终 top_k 默认 5；focus 空白回退 query，diversity 为 off/moderate/high。off 不取向量，MMR 使用已存 dense 向量，不对正文重新 embedding。
+- VectorRetrieval 绑定固定 VectorReader 与已配置的 EmbeddingClient，直接调用 from_storage 按本次 mode 选择 dense/sparse/hybrid（默认 hybrid），构造 Retriever，最终 top_k 默认 5；focus 空白回退 query，diversity 为 off/moderate/high。off 不取向量，MMR 使用已存 dense 向量，不对正文重新 embedding。
 - Pipeline 的授权准备先于模型：批量 ResourceSnapshotReader.read_chunks，再核对向量 metadata 的 resource/revision 与实际 Chunk。不可见、旧候选、错误身份和缺失事实省略，不补召回、不重查 ACL/publication。重排失败降级，其他阶段异常传播。
-- ChunkHit 只有 chunk/resource/revision、section_id/section_path、raw text、rank、score；向量与内部 metadata 不进入结果。排序后直接返回；命中后处理接口已移除。父块暂缓，ParentBuilder 与 graph 抽象不预建。
+- ChunkHit 包含 chunk/resource/revision、section_id/section_path、完整 raw text、rank、score、seed_entities 与完整当前 Chunk.metadata。metadata 来自授权回查后的 Mongo Chunk，不从向量 payload 拼装；没有白名单或查询侧业务 schema。向量和内部准备对象不进入结果。排序后直接返回，命中后处理接口已移除；父块暂缓。
 - 章节身份：Document 构造与 Chunker 共用 rag_section_id，使用旧服务 rsec_ + SHA-256 前 24 个十六进制字符规则；Document 章节及父章节 ID、Chunk.section_id 和 ChunkHit 一致，Chunk.chunk_id 保持原格式。调用方只传 section_id，服务内部通过 Mongo 章节索引定位，ResourceSnapshotReader 核对版本、授权与完整正文身份。DocumentReading 复用 OutlineFormatter，own/subtree 完整切原文，无窗口/续读/递归深度。新摄入与测试采用新 ID，不做兼容或自动存量迁移。
 - 生产配置值、Qdrant 服务端版本/BM25 支持与生命周期时序在装配切片再确认。
 
 用户偏好：有真实矛盾或重要业务取舍直接指出并讨论，不在错误方案上补丁；不要擅自补一套“生产级”状态或策略。已确认的内部合同无需重复征求意见，普通命名、测试适配和可逆实现按当前风格推进。
+
+### 5.6 平台、扩展与索引声明的最终约定
+
+- 配置集中在 core/config/app_settings.py；服务生命周期在 main.py，沿用正常 Nacos 配置入口。不要恢复 models/app_settings 或 runtime/main 拆分。默认 Container 可实例化和显式覆盖；业务组件通过注入使用平台依赖，不导入全局容器。
+- 默认 Pipeline 为 MarkdownChunker → 可选 Contextualizer → ChunkFactsIndexer → 普通 VectorIndexer；ENABLE_CONTEXTUALIZE 默认 False。GC 和 Qwen rerank 始终装配，没有 ENABLE_GC/ENABLE_RERANK。KAFKA_ENABLED 只控制 Kafka 消费；ENABLE_GRAPH_STORAGE 默认 False。
+- Document.type 精确匹配 pipeline_routes 普通字典，None 走默认链；未知 type 在 stage/事实写入前报错。所选完整链全部成功才 apply，包含图 Indexer 时图失败也阻止发布。type/metadata/Pipeline 配置不进入 ContentRevision；影响摄入的业务字段变化要求上游提高 version。
+- extensions/_BUILDERS + AppSettings.EXTENSIONS 是显式源码登记机制。Extension 声明 pipeline/vector_collections/api；register_extensions 注入共享路由、集合配置与 GC writer 列表，main 负责初始化与 API 挂载。没有动态 tag 路由、在线注册入口、自动发现或独立插件 Runtime。
+- VectorStorage 要求 collection 和 ensure_collection(metadata_index_fields: list[IndexableField])；参数必填，[] 仍核对集合。IndexKind 为 KEYWORD/INTEGER/FLOAT/BOOLEAN，没有 DATETIME。数据库 SDK 类型只在后端转换。普通集合声明 resource_id，图集合声明 resource_id/chunk_id/ontology_name，Employment 声明 resource_id/year/employee；content_revision 均保留在 payload 核验。
+- GraphRetrieval/GraphTraversal 可通过 filters 限定 resource_id/content_revision/ontology_name 的字符串 EQ、字符串列表 IN 与 AND/OR/NOT；条件一致传给向量、拓扑和当前事实核对。GraphIndexer 来源 metadata 保存 ontology_name，Mongo 回查以当前实体声明为准。无筛选时读取自由性保持，无关系的合法实体证据不丢弃。
+- Employment 是公司内部合同示例：事件 metadata 仅 employee/start_date，Document 原样保存、Chunker 深拷贝；业务校验 Transformer 不回写。year 只在专用向量投影中派生，factory 返回 employee/year 增量，资源身份由 VectorIndexer 合并并保护。员工筛选按精确值，不恢复用户删掉的大小写/内部空白规范化函数。图是 Person/Department/in_department，部门来自正文。工具只编排通用用例，没有专用 prepare、二次证据转换或额外 SnapshotReader 依赖。
+- 来源属性和旧投影维护仍是显式维护行为。旧 Neo4j 来源缺 ontology_name 用 projection-only --with-graph 重建；更改索引声明不自动物理删除既有字段索引，不自动重建已发布文档。GC 只清理永久 destroyed 资源，历史 revision/重新分块残留另行处理。
 
 ## 6. 验证入口与交接要求
 
@@ -337,7 +353,7 @@ Common 回归入口为 tests/markdown、tests/ai_clients、tests/retrieval；Cha
 | 请求内版本／权限决定、不可见缓存与请求隔离 | `tests/application/test_snapshot_selection.py` |
 | Document／Chunk 授权读取、身份回查、缺失及异常合同 | `tests/application/test_snapshot_reading.py` |
 | 向量 Retriever 配置、融合、响应校验、并发隔离 | `tests/retrievers/test_vector_retriever.py` |
-| 普通混合检索授权、准备、排序与结果 | `tests/application/test_retrieval.py` |
+| 通用正文三模式、授权、排序、metadata 与实体候选 | `tests/application/test_retrieval.py` |
 | 全局目录、标题邻域、章节范围/身份/授权 | `tests/application/test_structured_reading.py` |
 | Mongo 批量章节定位、文档去重顺序与异常 | `tests/backends/mongo/test_section_lookup.py` |
 | 实际仓储到混合检索及章节读取的完整装配示例 | `tests/backends/qdrant/test_hybrid_composition.py`（显式调用 from_storage，off/high 两种组合） |
@@ -349,12 +365,50 @@ Common 回归入口为 tests/markdown、tests/ai_clients、tests/retrieval；Cha
 | 连接握手、清理及健康状态 | `tests/application/test_lifespan.py` |
 | GC 游标、重复删除、失败与迟到写入 | `tests/application/test_gc.py` |
 | 类型路由、metadata/版本与注册链失败 | `tests/application/publication/test_type_routing.py` |
-| 扩展包真实接口示例 | `tests/test_extensions.py` |
+| 扩展包真实接口与文档示例 | `tests/test_extensions.py` |
+| 公司内部合同、原样 metadata、员工/年份索引、部门/API/GC | `tests/application/test_employment_extension.py` |
+| 普通向量增量 factory 与身份保护 | `tests/ingestion/test_vector_indexer.py` |
+| 图三模式与本体筛选、授权及证据范围 | `tests/application/graph/test_graph_retrieval.py`、`test_traversal.py` |
 
-真实 Mongo 用 `RAG_TEST_MONGODB_URI`，真实 Kafka 用 `RAG_TEST_KAFKA_BOOTSTRAP_SERVERS`，真实 Qdrant 用 `RAG_TEST_QDRANT_URL` 与可选 `RAG_TEST_QDRANT_API_KEY`。fixture 只创建和清理随机隔离数据库／topic／collection；未配置跳过，配置后连接失败报错。Kafka 集成仅缩短测试延迟，生产仍为 1 分钟／10 分钟。不要启动真实业务消费者或操作业务集合来替代这些隔离测试。
+真实 Neo4j 用 `RAG_TEST_NEO4J_URI` 与对应 username/password/database，随机 graph_name 隔离标签和约束。真实 Mongo 用 `RAG_TEST_MONGODB_URI`，真实 Kafka 用 `RAG_TEST_KAFKA_BOOTSTRAP_SERVERS`，真实 Qdrant 用 `RAG_TEST_QDRANT_URL` 与可选 `RAG_TEST_QDRANT_API_KEY`。fixture 只创建和清理随机隔离数据库／topic／collection；未配置跳过，配置后连接失败报错。Kafka 集成仅缩短测试延迟，生产仍为 1 分钟／10 分钟。不要启动真实业务消费者或操作业务集合来替代这些隔离测试。
 
 每一切片完成后同步 10／11 的相关现状和对应实施记录，说明实际验证、未验证外部行为和下一步；不以 fake 通过宣称真实部署完成，不把后续能力一起预建为空壳。
 
-## 7. 可以直接发给新会话的开场指令
+## 7. 下一会话：文档整合任务与开场指令
 
-> 请先读 16、27/26 和 src/rag/extensions/extensions.md，再按实际任务读 25。P4 普通能力、P5 图事实/拓扑/图向量、三种图检索与显式一跳 traversal 已完成。GraphIndexer 同时写拓扑和向量，Ontology 只约束写入和缓存，查询侧不绑定本体。ChunkHit.seed_entities 和 GraphEntity 视图暴露逻辑 ID 与类别允许的 relations；关系提示不是可见事实，模型选择后调用 traversal，查不到返回空关系。GraphRetriever 只负责种子召回，GraphRetrieval 用 Common Pipeline 授权、核对当前 Mongo 事实与 fact_sha256/graph_version 后才扩展。global 端点只取关系同来源，traversal 不提供 depth。共用 Loader/Builder 为公开类，不重复底层结构校验。RAG 不裁剪输出或管理缓存/懒读取，mix 排期待定。通用装配/资源 GC 已完成（26），settings/main 沿用项目习惯，GC/rerank 始终装配；在线重构建、历史贡献回收、真实后端/模型联调留后，先核对 git status，保留既有子模块状态。
+### 7.1 整合范围与产物
+
+先核对 git status/HEAD，再以当前源码、测试和 29–31 的修正整理说明文档。主工作是去掉重复进度追加、消除旧合同、明确每份文档的用途；保持接口与已确认边界。发现源码与文档的真实矛盾时定向核对并记录，不据旧规划擅自实现新能力。
+
+| 整合对象 | 应达到的结果 |
+| --- | --- |
+| [10 实施排期与验收门槛](10-实施排期与验收门槛.md) | 区分已完成、后续独立工作与待定项；历史测试数字链接到对应记录，避免把已完成能力仍写成下一片 |
+| [11 设计文稿](11-RAG-V4设计文稿.md) | 按最终模型、存储、Pipeline、发布/授权、图用例、生命周期与扩展合同组织，示例接口与源码一致 |
+| [platform demo](../demo/platform.md)、[配置样例](../demo/platform-settings.yaml) | 展示实际 Container/main、Nacos/配置、消费者握手、始终运行的 GC/rerank、扩展登记与关闭顺序 |
+| [正文检索 demo](../demo/hybrid.md)、[图 demo](../demo/graph.md)、[上下文 demo](../demo/contextual.md) | 类名、三模式、字段、集合初始化签名与 repair 参数一致；区分候选、授权证据、完整原文和模型内部材料 |
+| [扩展指南](../src/rag/extensions/extensions.md)、[Employment README](../src/rag/extensions/employment/README.md) | 保留基础文件入库与高级专用索引/工具/API 的独立章节；当前公司内部合同是实际代码示例 |
+| [本接手文档](16-session-handoff.md) | 最后同步文档入口、最终基线、实际验证和后续边界，让新会话无需重读全部历史 |
+| 00–09 与 [架构图](架构图.md) | 定位为历史决策材料；标清与最终实现不同的地方，是否需要更新图由实际整合范围决定 |
+
+12–15、17–31 是历史实施记录。保留当时行为、测试数字与适配理由，必要时加后续修正链接；不要批量用最新结果覆盖历史验收，也不要未经要求删除或移动这些材料。旧 demo/extensions.md 已删除，指南位于 src/rag/extensions/extensions.md，旧 extensions/demo 已由 employment 取代。
+
+### 7.2 最容易把旧方案写回来的地方
+
+- HybridRetrieval 的当前公开名是 VectorRetrieval，无旧名别名；普通检索和 GraphRetrieval/GraphTraversal 都不注入 Ontology。读取本体筛选使用可选 filters，不恢复本体 Registry 或从 ID 字符串解析类别。
+- 没有独立 GraphVectorIndexer/graph_vector.py；GraphIndexer 统一写拓扑和来源向量。图与本体是 dataclass，向量值对象和索引声明在 storage/vector.py，不在 core/schema/vector.py。
+- 不恢复私有共用 EvidenceLoader、重复底层结构/过滤器校验或第二套权威事实。当前结果为 GraphHit/GraphEvidence/GraphEntity/GraphSourceChunk 与 ChunkHit；实体候选为 id/relations，ChunkHit 返回完整当前 metadata。
+- GraphRetriever 只召回种子；授权和扩展归 Common Pipeline 的准备阶段。local 仅一跳，global 只带选中关系同来源端点，hybrid 共享读取不能扩大单组范围。traversal 没有 depth；relations 是类别允许的提示，不承诺可见关系存在。RAG 不裁剪材料或管理结果缓存/懒读取。
+- VectorStorage 初始化参数是必填 list[IndexableField]，不恢复 metadata_indexes 构造参数、字符串列表或无参接口。业务 metadata_factory 是增量，不让扩展重复来源身份。payload 的 content_revision 用于核验，不等同于必须创建数据库字段索引。
+- Employment 不再是多雇佣机构示例：没有 employer 或 metadata.employment，业务字段是平面 employee/start_date，部门关系来自正文，索引为 resource_id/year/employee。Transformer 不再逐块 model_dump；工具不再重复加载和转换证据。
+- 平台拥有唯一 publication/Kafka，垂类注册 Pipeline。完整注册链失败阻止 apply；独立 repair 部分成功保留，不能笼统写成“图失败不影响发布”。默认服务用 Nacos，离线 repair 不加载 Nacos；这两个实际入口并存，不拆分正常生命周期。
+- GC/rerank 始终运行，没有启用开关。GC 清理永久 destroyed 的全部已配置来源，保留标记，不负责活跃资源旧 revision；不得将实现完成写成真实业务环境已验证。
+
+### 7.3 文档验证与后续边界
+
+纯文本整合检查本地链接、源码路径、旧名字、接口签名和 git diff --check。修改带可执行示例的指南/README 时运行 tests/test_extensions.py，涉及示例装配时再运行相应定向测试；只有改到代码或出现新疑点才扩展业务回归。最近完整验证仍以第 1 节和 31 的记录为准，不把旧测试结果写成本轮重新执行。
+
+本次交接只更新本文并检查链接/差异，没有重新运行业务测试。文档整合也不启动 Nacos/业务消费者、连接业务数据库、执行 GC/repair、部署服务或创建新底层能力。真实后端/模型联调、效果基线、在线重构建、历史贡献回收、通用 HTTP/MCP transport 后续单独计划；mix 待定，确定性 Producer 不排期。
+
+### 7.4 可以直接发给新会话的开场指令
+
+> 请先读 services/rag/plans/16-session-handoff.md 第 0、1、5、6、7 节，以及 29–31 实施记录，核对 git status/HEAD。本次任务是 RAG 文档整合：以当前源码和测试为准，整理 10/11、demo、扩展指南与 Employment README，最后更新接手入口。核心组件、Container/main、定时 GC、type 路由、三模式正文/图检索与一跳 traversal 已实现，勿再次规划实现它们。当前 Employment 是公司内部合同，metadata 仅 employee/start_date 原样保存与深拷贝，图为 Person/Department/in_department，VectorIndexer factory 合并业务增量和不可覆盖的来源身份；content_revision 保留核验但本示例不声明字段索引。查询不绑定 Ontology，图通过 ontology_name 条件筛选，ChunkHit 返回完整 metadata，工具只编排通用用例。保留 12–15、17–31 历史记录及当时验证数字，清理当前说明中的旧合同；未决项保持未决，不引入新能力或连接业务环境。验证按改动范围执行并如实记录，保留两个既有子模块状态。

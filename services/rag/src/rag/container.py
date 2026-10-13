@@ -64,17 +64,9 @@ def _require_graph(storage: Neo4jGraphStorage | None) -> Neo4jGraphStorage:
     return storage
 
 
-def _default_pipeline(
-    settings, chunker, contextualizer_provider, facts, vectors
-) -> IngestionPipeline:
-    # 上下文关掉时不解析其客户端依赖；必需事实与普通向量始终保留。
-    return IngestionPipeline(
-        chunker=chunker,
-        transformers=[contextualizer_provider()]
-        if settings.ENABLE_CONTEXTUALIZE
-        else [],
-        indexers=[facts, vectors],
-    )
+def _contextualize_branch(enabled: bool) -> str:
+    """Selector 只接受字符串键；把开关映射到带/不带 Contextualizer 的默认链。"""
+    return "with_context" if enabled else "without_context"
 
 
 def _garbage_collector(
@@ -263,13 +255,26 @@ class Container(containers.DeclarativeContainer):
     vector_indexer = providers.Singleton(
         VectorIndexer, embedding_client=embedding_client, writer=vector_storage
     )
-    pipeline = providers.Singleton(
-        _default_pipeline,
-        settings=settings,
+    # 两条默认链：只有 with_context 引用 contextualizer，未选中时不会被求值。
+    pipeline_without_context = providers.Singleton(
+        IngestionPipeline,
         chunker=chunker,
-        contextualizer_provider=contextualizer.provider,
-        facts=facts_indexer,
-        vectors=vector_indexer,
+        transformers=[],
+        indexers=providers.List(facts_indexer, vector_indexer),
+    )
+    pipeline_with_context = providers.Singleton(
+        IngestionPipeline,
+        chunker=chunker,
+        transformers=providers.List(contextualizer),
+        indexers=providers.List(facts_indexer, vector_indexer),
+    )
+    # 平台按配置二选一；Selector 只解析选中的分支，另一条的 instruction_client 不会被解析。
+    pipeline = providers.Selector(
+        providers.Callable(
+            _contextualize_branch, settings.provided.ENABLE_CONTEXTUALIZE
+        ),
+        with_context=pipeline_with_context,
+        without_context=pipeline_without_context,
     )
     # 每个容器实例独立持有路由；垂类在启动消费前注册，不接触 Kafka。
     pipeline_routes = providers.Singleton(dict)

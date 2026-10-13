@@ -38,6 +38,10 @@ packages = ["src/rag"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# 固定测试临时目录到项目内：Windows 上 %TEMP%\pytest-of-<user> 可能被历史运行写成当前用户
+# 无权限访问的 ACL，导致 tmp_path 全部报 PermissionError；此目录每次运行前由 pytest 重建。
+addopts = "--basetemp=.pytest_tmp"
+tmp_path_retention_policy = "none"
 
 [tool.ruff]
 target-version = "py311"

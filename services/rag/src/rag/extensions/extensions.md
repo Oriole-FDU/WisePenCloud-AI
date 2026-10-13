@@ -30,7 +30,7 @@ Nacos 配置 `EXTENSIONS: [employment]` 启用实际示例，默认 `[]` 不接�
 
 ### 2.1 普通文件入库
 
-默认链是 MarkdownChunker → [Contextualizer] → ChunkFactsIndexer → 普通 VectorIndexer。无专用索引或工具时，扩展只返回 `Extension(pipeline=...)`，其余两项保持默认值即可。
+默认链是 MarkdownChunker → [Contextualizer] → ChunkFactsIndexer → 普通 VectorIndexer。无专用索引或工具时，扩展只返回 `Extension(pipeline=...)`，其余两项保持默认值即可。平台声明两条默认链 `platform.pipeline_with_context()` 与 `platform.pipeline_without_context()`，`platform.pipeline()` 则由平台按 `ENABLE_CONTEXTUALIZE` 惰性二选一（未选中的链不会解析 instruction 客户端）。扩展要带平台的 Contextualizer 就用 `pipeline_with_context()`，不带就用 `pipeline_without_context()`；选中的链带的是平台统一持有的实例，不能替换它的构造方式，需要自定义行为时自行 `from rag.ingestion.transformers import Contextualizer` 构造。
 
 ```python
 # example: basic-extension

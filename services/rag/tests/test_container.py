@@ -179,6 +179,40 @@ def test_capability_configuration_fails_before_connections(platform_settings, ch
         AppSettings(**(platform_settings.model_dump() | change))
 
 
+def test_two_default_pipelines_and_contextualizer_choice(platform_settings):
+    AppSettings = type(platform_settings)
+    instruction = {
+        "INSTRUCTION_BASE_URL": "http://localhost:8000/v1",
+        "INSTRUCTION_API_KEY": "key",
+        "INSTRUCTION_MODEL": "test-instruction",
+    }
+
+    def build(enable_contextualize, configure_instruction=True):
+        values = platform_settings.model_dump() | {
+            "ENABLE_CONTEXTUALIZE": enable_contextualize
+        }
+        if configure_instruction:
+            values |= instruction
+        container = Container(settings=AppSettings(**values))
+        for name in ("content_storage", "embedding_client", "vector_storage"):
+            getattr(container, name).override(providers.Object(object()))
+        if configure_instruction:
+            container.instruction_client.override(providers.Object(object()))
+        return container
+
+    # 平台按 settings 二选一；未选中的链不解析 instruction_client，无 INSTRUCTION 配置也能装配。
+    off = build(False, configure_instruction=False)
+    assert off.pipeline().transformers == []
+    assert off.pipeline_without_context().transformers == []
+    with pytest.raises(RuntimeError, match="INSTRUCTION"):
+        off.pipeline_with_context()
+    # 平台开启时默认带平台统一持有的 Contextualizer；垂类可显式改选不带的那条。
+    on = build(True)
+    assert on.pipeline().transformers == [on.contextualizer()]
+    assert on.pipeline_with_context().transformers == [on.contextualizer()]
+    assert on.pipeline_without_context().transformers == []
+
+
 def test_no_gc_or_rerank_switch(platform_settings):
     AppSettings = type(platform_settings)
     assert "ENABLE_GC" not in AppSettings.model_fields

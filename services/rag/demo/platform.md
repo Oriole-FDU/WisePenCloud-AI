@@ -2,7 +2,7 @@
 
 默认入口为 `rag.main:app`，配置沿用 `app_settings.settings` 从 Nacos 加载、`container.py` 声明 provider/默认实例、`main.lifespan` 启停的项目习惯。运行配置样例见 [platform-settings.yaml](platform-settings.yaml)，引导环境沿用 bootstrap_settings 中的 Nacos 地址、服务身份等字段。新运行配置要求 Mongo、Qdrant、embedding 模型/维度和 Qwen rerank 完整，旧的仅 ACL 配置不再足够。
 
-默认链路 `MarkdownChunker → [Contextualizer] → ChunkFactsIndexer → VectorIndexer`。`ENABLE_CONTEXTUALIZE=false` 默认不增强；事实保存和普通向量写入始终执行。默认不抽取图事实，扩展包显式给工厂传 Ontology。垂类通过 `platform.pipeline_routes()["history"] = history_pipeline` 注册摄入链，平台 publication 按 Document.type 精确选择，Kafka 消费者不变；未提供 type 走默认链，未知 type 在 stage 前失败。注册链内全部阶段成功才 apply。普通检索、章节读取共享 SnapshotReader，图检索与 traversal 只在 Neo4j 启用时可用，不绑定读取本体。
+默认链路 `MarkdownChunker → [Contextualizer] → ChunkFactsIndexer → VectorIndexer`。`ENABLE_CONTEXTUALIZE=false` 默认不增强；事实保存和普通向量写入始终执行。垂类复用默认链时用 `platform.pipeline_with_context()` 或 `platform.pipeline_without_context()` 显式选择是否带平台的 Contextualizer（`platform.pipeline()` 为平台按开关惰性二选一的默认链）；要自定义构造需自行实例化 Contextualizer。默认不抽取图事实，扩展包显式给工厂传 Ontology。垂类通过 `platform.pipeline_routes()["history"] = history_pipeline` 注册摄入链，平台 publication 按 Document.type 精确选择，Kafka 消费者不变；未提供 type 走默认链，未知 type 在 stage 前失败。注册链内全部阶段成功才 apply。普通检索、章节读取共享 SnapshotReader，图检索与 traversal 只在 Neo4j 启用时可用，不绑定读取本体。
 
 三个 Qdrant 集合使用同一个 embedding 模型与维度；普通 dense/sparse，实体和关系 dense-only。启动显式创建/核对集合和 metadata 索引，配置冲突直接失败，不删除或重建已有集合。图集合索引 resource_id/chunk_id/ontology_name；普通集合默认只索引 resource_id。content_revision 仍保存在 payload 并用于权威回查，默认不额外建索引。扩展通过 IndexableField/IndexKind 声明类型；VectorCollection 绑定 storage 和字段列表，所有已装配集合都调用 VectorStorage.ensure_collection。Mongo 初始化内容、发布与本地 ACL 索引，Neo4j 开启时初始化 schema。
 

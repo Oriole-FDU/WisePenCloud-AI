@@ -18,7 +18,9 @@ from .tools import EmploymentTools
 
 
 def build_pipeline(platform, ontology, contract_indexer) -> IngestionPipeline:
-    default = platform.pipeline()
+    # 垂类显式选择平台默认链：本链不取平台的 Contextualizer，防止额外模型调用；
+    # 需要平台统一的上下文增强时改用 platform.pipeline_with_context()。
+    default = platform.pipeline_without_context()
     # 业务字段先校验；完整事实保存后写普通、图及专用投影，任一失败都阻止 apply。
     return IngestionPipeline(
         chunker=default.chunker,
