@@ -137,6 +137,7 @@ class Container(containers.DeclarativeContainer):
         url=settings.provided.QDRANT_URL,
         api_key=settings.provided.QDRANT_API_KEY,
         cloud_inference=True,
+        timeout=30.0,
     )
     vector_storage = providers.Singleton(
         QdrantVectorStorage,
