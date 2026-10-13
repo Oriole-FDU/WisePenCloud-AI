@@ -1,118 +1,143 @@
-"""查询前批量定位 active Document，并建立一次 ACL 快照。"""
+"""一次调用内的资源版本与权限快照，以及供 application 用例共享的内容读取入口。"""
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from common.utils.markdown import Section
-
-from rag.application.document.models import Document
-from rag.domain.acl import PermissionScope
-from rag.domain.repositories.acl import ResourceAclRepository
-from rag.domain.repositories.documents import DocumentRepository
-from rag.domain.repositories.index_state import ResourceIndexStateRepository
+from rag.application.acl.models import PermissionScope
+from rag.application.acl.store import ResourceAclRepository
+from rag.application.publication.store import PublicationStore
+from rag.core.schema import Chunk, ContentRevision, Document
+from rag.storage.content import ContentReader
 
 
 @dataclass(frozen=True, slots=True)
-class ResolvedSection:
-    """定位到的文档与所属 section 组合。"""
-    document: Document
-    section: Section
+class ResourceSnapshot:
+    """逐资源保存本次调用首次确定的版本与可见性，不表示跨后端原子观察点。"""
+
+    scope: PermissionScope  # 来自可信入口，同一快照不更换用户身份。
+    _revisions: dict[str, ContentRevision | None] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )  # None 缓存不可见决定；不保存正文或额外拒绝原因。
 
 
-# --- Active 文档与 ACL 快照加载器 ---
-
-class ActiveDocumentSnapshotLoader:
-    """为读取、标题树和其他查询用例提供最小 active+ACL 前置。"""
+class ResourceSnapshotReader:
+    """共享读取服务只保存固定依赖；请求决定显式传入并保存在 snapshot。"""
 
     def __init__(
         self,
         *,
-        documents: DocumentRepository,
-        index_states: ResourceIndexStateRepository,
+        store: PublicationStore,
         resource_acls: ResourceAclRepository,
+        reader: ContentReader,
     ) -> None:
-        self._documents = documents
-        self._index_states = index_states
+        self._store = store
         self._resource_acls = resource_acls
+        self._reader = reader
 
-    async def load_documents(
-        self,
-        resource_ids: Sequence[str],
-        *,
-        scope: PermissionScope,
-    ) -> Mapping[str, Document]:
-        """根据资源 ID 批量加载当前 active 且用户可读的文档。"""
-        unique_resource_ids = list(dict.fromkeys(resource_ids))
-        if not unique_resource_ids:
-            return {}
+    async def read_documents(
+        self, resource_ids: list[str], *, snapshot: ResourceSnapshot
+    ) -> list[Document]:
+        """先授权并固定版本，再批量读取；身份不符或缺失只影响该对象。"""
+        revisions = await self._resolve(resource_ids, snapshot=snapshot)
+        if not revisions:
+            return []
+        documents = await self._reader.get_documents(
+            [
+                (resource_id, revision.content_revision)
+                for resource_id, revision in revisions.items()
+            ]
+        )
+        return _visible_documents(documents, revisions)
 
-        # 获取各资源的发布状态
-        states = await self._index_states.get_states(unique_resource_ids)
+    async def read_documents_by_section_ids(
+        self, section_ids: list[str], *, snapshot: ResourceSnapshot
+    ) -> list[Document]:
+        """先批量定位，再按首次版本与资源授权过滤；内部正文不提前交给用例。"""
+        unique_ids = list(dict.fromkeys(section_ids))
+        if not unique_ids:
+            return []
+        documents = await self._reader.get_documents_by_section_ids(unique_ids)
+        revisions = await self._resolve(
+            [document.resource_id for document in documents], snapshot=snapshot
+        )
+        # 只核对定位到的事实，不换读新版；旧章节 ID 不能成为新版正文入口。
+        return _visible_documents(documents, revisions)
 
-        # 收集已发布的有效 revision
-        active_revisions = [
-            (resource_id, state.applied_content_revision)
-            for resource_id, state in states.items()
-            if state.applied_content_revision is not None
+    async def read_chunks(
+        self, chunk_ids: list[str], *, snapshot: ResourceSnapshot
+    ) -> list[Chunk]:
+        """批量定位所属资源，Chunk 继承 Document 级授权并匹配已选 revision。"""
+        if not chunk_ids:
+            return []
+        chunks = await self._reader.get_chunks(chunk_ids)
+        revisions = await self._resolve(
+            [chunk.resource_id for chunk in chunks], snapshot=snapshot
+        )
+        # 定位取得的正文只在此内部流转；通过资源授权与版本检查后才能交给调用方。
+        return [
+            chunk
+            for chunk in chunks
+            if chunk.resource_id in revisions
+            and chunk.content_revision == revisions[chunk.resource_id].content_revision
         ]
 
-        # 并行获取文档内容和 ACL
-        documents = await self._documents.get_revisions(active_revisions)
-        resource_acls = await self._resource_acls.get_resource_acls(
-            [resource_id for resource_id, _ in active_revisions]
+    async def _resolve(
+        self, resource_ids: list[str], *, snapshot: ResourceSnapshot
+    ) -> dict[str, ContentRevision]:
+        """只解析尚未观察的资源；不可见也缓存，I/O 失败不写入决定。"""
+        unique_ids = list(dict.fromkeys(resource_ids))
+        pending = [
+            resource_id
+            for resource_id in unique_ids
+            if resource_id not in snapshot._revisions
+        ]
+        if pending:
+            states = await self._store.get_states(pending)
+            applied = {
+                state.resource_id: state.applied_revision
+                for state in states
+                if not state.destroyed and state.applied_revision is not None
+            }
+            acls = (
+                await self._resource_acls.get_resource_acls(list(applied))
+                if applied
+                else {}
+            )
+            # 两次 I/O 完成后才缓存决定，基础设施失败不能变成“已观察不可见”。
+            for resource_id in pending:
+                revision = applied.get(resource_id)
+                acl = acls.get(resource_id)
+                # 子操作交错解析时也保留已完成的首次决定，不覆盖已有 revision。
+                snapshot._revisions.setdefault(
+                    resource_id,
+                    revision
+                    if revision is not None
+                    and acl is not None
+                    and acl.can_read(snapshot.scope)
+                    else None,
+                )
+
+        return {
+            resource_id: snapshot._revisions[resource_id]
+            for resource_id in unique_ids
+            if snapshot._revisions[resource_id] is not None
+        }
+
+
+def _visible_documents(
+    documents: list[Document], revisions: dict[str, ContentRevision]
+) -> list[Document]:
+    """所有 Document 读取路径共用完整正文身份检查。"""
+    visible = []
+    for document in documents:
+        selected = revisions.get(document.resource_id)
+        if selected is None or document.content_revision != selected.content_revision:
+            continue
+        # 不能仅凭持久化的 revision 标签信任正文。
+        actual = ContentRevision.create(
+            resource_id=document.resource_id,
+            document_version=document.document_version,
+            text=document.text,
         )
-
-        # 逐个校验 ACL 权限和文档存在性
-        result: dict[str, Document] = {}
-        for resource_id in unique_resource_ids:
-            state = states.get(resource_id)
-            if state is None or state.applied_content_revision is None:
-                continue
-            acl = resource_acls.get(resource_id)
-            if acl is None or not acl.can_read(scope):
-                continue
-            document = documents.get((resource_id, state.applied_content_revision))
-            if document is not None:
-                result[resource_id] = document
-        return result
-
-    async def locate_sections(
-        self,
-        section_ids: Sequence[str],
-        *,
-        scope: PermissionScope,
-    ) -> Mapping[str, ResolvedSection]:
-        """根据 section ID 定位到对应的文档和 section 对象，并校验 active + 权限。"""
-        unique_section_ids = list(dict.fromkeys(section_ids))
-        if not unique_section_ids:
-            return {}
-
-        # 先通过 section ID 反查可能所属的文档
-        candidates = await self._documents.find_by_section_ids(unique_section_ids)
-        resource_ids = list(dict.fromkeys(doc.resource_id for doc in candidates))
-
-        # 获取发布状态和 ACL
-        states = await self._index_states.get_states(resource_ids)
-        acls = await self._resource_acls.get_resource_acls(resource_ids)
-
-        locations: dict[str, ResolvedSection] = {}
-        requested = set(unique_section_ids)
-
-        for document in candidates:
-            state = states.get(document.resource_id)
-            acl = acls.get(document.resource_id)
-            # 检查文档是否已发布、revision 一致、且用户可读
-            if (
-                state is None
-                or state.applied_content_revision != document.revision.content_revision
-                or acl is None
-                or not acl.can_read(scope)
-            ):
-                continue
-
-            # 遍历文档的 section，匹配请求的 section_id
-            for section in document.structure.sections:
-                if section.section_id in requested:
-                    locations[section.section_id] = ResolvedSection(document, section)
-
-        return locations
+        if actual == selected:
+            visible.append(document)
+    return visible

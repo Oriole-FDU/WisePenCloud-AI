@@ -1,4 +1,4 @@
-"""RAG V3 的 Nacos 客户端。"""
+"""RAG 服务 Nacos 客户端。"""
 
 from common.cloud.nacos_client import NacosClientManager
 

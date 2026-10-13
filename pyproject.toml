@@ -8,6 +8,7 @@ dependencies = [
     "wisepen-chat-service",
     "wisepen-mcp-service",
     "wisepen-common",
+    "wisepen-rag-service",
     "wisepen-sandbox-service",
     "mcp>=1.27,<2",
 ]

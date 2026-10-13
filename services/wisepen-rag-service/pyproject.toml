@@ -1,23 +1,19 @@
 [project]
 name = "wisepen-rag-service"
 version = "0.1.0"
-description = "WisePen RAG service"
+description = "WisePen RAG V4"
 requires-python = ">=3.11"
 dependencies = [
-    "beanie>=2,<3",
     "aiokafka>=0.12,<1",
     "dependency-injector>=4.49,<5",
     "fastapi>=0.136,<1",
-    "instructor>=1,<2",
     "neo4j>=6,<7",
     "pydantic>=2,<3",
     "pydantic-settings>=2,<3",
     "pymongo>=4.17,<5",
-    "openai>=2,<3",
+    "pyyaml>=6,<7",
     "qdrant-client>=1.18,<2",
-    "zeroentropy",
-    "pyyaml",
-    "uvicorn",
+    "uvicorn>=0.34,<1",
     "wisepen-common",
 ]
 
@@ -42,6 +38,12 @@ asyncio_mode = "auto"
 # 无权限访问的 ACL，导致 tmp_path 全部报 PermissionError；此目录每次运行前由 pytest 重建。
 addopts = "--basetemp=.pytest_tmp"
 tmp_path_retention_policy = "none"
+markers = [
+    "mongo_integration: requires an explicit RAG_TEST_MONGODB_URI and uses an isolated test database",
+    "neo4j_integration: requires RAG_TEST_NEO4J_URI and uses a random isolated graph_name",
+    "kafka_integration: requires RAG_TEST_KAFKA_BOOTSTRAP_SERVERS and uses isolated random test topics",
+    "qdrant_integration: requires RAG_TEST_QDRANT_URL and uses isolated random test collections",
+]
 
 [tool.ruff]
 target-version = "py311"

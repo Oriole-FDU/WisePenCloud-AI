@@ -1,18 +1,16 @@
-"""RAG V3 HTTP 路由聚合。"""
+"""平台健康检查；服务身份由实际组合入口提供。"""
 
-from fastapi import APIRouter
-
-from rag.api.endpoints import graph, reading, retrieval
-from rag.core.config.bootstrap_settings import bootstrap_settings
+from fastapi import APIRouter, Request, Response
 
 api_router = APIRouter()
 
 
 @api_router.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "service": bootstrap_settings.SERVICE_NAME}
-
-
-api_router.include_router(retrieval.router, prefix="/retrieval", tags=["retrieval"])
-api_router.include_router(graph.router, prefix="/retrieval", tags=["retrieval"])
-api_router.include_router(reading.router, prefix="/reading", tags=["reading"])
+async def health(request: Request, response: Response) -> dict[str, str]:
+    ready = getattr(request.app.state, "ready", False)
+    if not ready:
+        response.status_code = 503
+    return {
+        "status": "ok" if ready else "not_ready",
+        "service": request.app.state.service_name,
+    }

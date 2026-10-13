@@ -1,321 +1,370 @@
-"""依赖装配"""
+"""平台默认装配；显式配置与 provider 覆盖支持外层垂类组合，不加载 Nacos。"""
 
-import asyncio
+from collections.abc import Callable
+from operator import attrgetter, getitem
+from typing import TYPE_CHECKING
 
-from common.utils.ranking import RankingPipeline
-from common.utils.ranking.rank_gates import (
-    HighLowRelevanceGate,
-    HighLowRelevanceGateConfig,
-)
-from common.utils.ranking.rerankers import (
-    ZeroEntropyReranker,
-    ZeroEntropyRerankerConfig,
-)
+from common.utils.ai_clients import EmbeddingClient, InstructionClient, RerankClient
+from common.utils.retrieval import ModelReranker
 from dependency_injector import containers, providers
-from neo4j import AsyncGraphDatabase
+from neo4j import AsyncDriver, AsyncGraphDatabase
 from openai import AsyncOpenAI
 from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient
-from zeroentropy import AsyncZeroEntropy
 
-from rag.application.document.indexing import DocumentIndexBuilder
-from rag.application.document.preparation import DocumentPreparer
-from rag.application.events import (
-    AclRecalculateHandler,
-    DocumentReadyHandler,
-    ResourceDestroyHandler,
-)
-from rag.application.graph.graph_fact_builder import GraphFactBuilder
-from rag.application.graph.graph_indexing import GraphIndexBuilder
-from rag.application.outline import OutlineBuilder
-from rag.application.plugins.core import RagPluginRegistry
-from rag.application.publication import AclSynchronizer, DocumentPublication
-from rag.application.reading import DocumentReader
-from rag.application.retrieval.graph_retriever import GraphRetriever
-from rag.application.retrieval.hybrid_retriever import HybridRetriever
-from rag.application.snapshot import ActiveDocumentSnapshotLoader
-from rag.core.config.app_settings import settings
-from rag.core.persistence.mongo import (
-    MongoAuthoritativeAclReader,
-    MongoDocChunkRepository,
-    MongoDocumentRepository,
-    MongoGraphFactRepository,
-    MongoResourceAclRepository,
-    MongoResourceIndexStateRepository,
-)
-from rag.core.persistence.neo4j import Neo4jGraphTopologyRepository
-from rag.core.persistence.qdrant import (
-    QdrantDocumentVectorRepository,
-    QdrantGraphEdgeVectorRepository,
-    QdrantGraphNodeVectorRepository,
-)
-from rag.utils import ChatClient, EmbeddingClient
+from rag.application.acl.synchronizer import AclEventConsumer, AclSynchronizer
+from rag.application.gc import ResourceGarbageCollector
+from rag.application.graph import GraphRetrieval, GraphTraversal, PreparedGraphEvidence
+from rag.application.publication import DocumentPublication, PublicationEventConsumer
+from rag.application.reading import DocumentReading
+from rag.application.retrieval import VectorRetrieval
+from rag.application.snapshot import ResourceSnapshotReader
+from rag.backends.mongo.acl import MongoResourceAclRepository
+from rag.backends.mongo.content import MongoContentStorage
+from rag.backends.mongo.publication import MongoPublicationStore
+from rag.backends.neo4j import Neo4jGraphStorage
+from rag.backends.qdrant import QdrantVectorStorage
+from rag.core.schema import Ontology
+from rag.ingestion import IngestionPipeline
+from rag.ingestion.chunkers.markdown import MarkdownChunker
+from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer, VectorIndexer
+from rag.ingestion.transformers import Contextualizer, GraphExtractor
+from rag.storage.vector import IndexableField, IndexKind, VectorCollection
+
+if TYPE_CHECKING:
+    from rag.core.config.app_settings import AppSettings
 
 
-def _resource_items_collection(client: AsyncMongoClient):
-    return client[settings.resource_mongodb_db_name]["wispen_resource_items"]
+def _instruction_client(
+    settings: "AppSettings", openai_provider: Callable[[], AsyncOpenAI]
+) -> InstructionClient:
+    """构造指令模型客户端；未配置模型时报错，避免半装配。"""
+    if settings.INSTRUCTION_MODEL is None:
+        raise RuntimeError("configure INSTRUCTION_* or inject an instruction client")
+    return InstructionClient(openai_provider(), model=settings.INSTRUCTION_MODEL)
 
 
-def _build_ranking_pipeline(
-    zero_entropy_client: AsyncZeroEntropy,
-) -> RankingPipeline:
-    """V3 只保留精排和相关性门控；两路 Qdrant 结果不在此处融合。"""
-    return RankingPipeline(
-        reranker=ZeroEntropyReranker(
-            client=zero_entropy_client,
-            config=ZeroEntropyRerankerConfig(model=settings.RERANKER_MODEL),
-        ),
-        gate=HighLowRelevanceGate(
-            HighLowRelevanceGateConfig(
-                low_watermark=settings.RAG_RERANK_RELEVANCE_LOW_WATERMARK,
-                high_watermark=settings.RAG_RERANK_RELEVANCE_HIGH_WATERMARK,
-                uncertain_limit=settings.RAG_RERANK_UNCERTAIN_LIMIT,
-            )
-        ),
+def _graph_storage(
+    settings: "AppSettings", driver_provider: Callable[[], AsyncDriver]
+) -> Neo4jGraphStorage | None:
+    """图存储未启用时返回 None，让上层显式选择走图或不走图。"""
+    if not settings.ENABLE_GRAPH_STORAGE:
+        return None
+    return Neo4jGraphStorage(
+        driver=driver_provider(),
+        database=settings.NEO4J_DATABASE,
+        graph_name=settings.NEO4J_GRAPH_NAME,
     )
+
+
+def _require_graph(storage: Neo4jGraphStorage | None) -> Neo4jGraphStorage:
+    """需要图的用例入口；未启用图存储时直接报错。"""
+    if storage is None:
+        raise RuntimeError("graph application requires ENABLE_GRAPH_STORAGE")
+    return storage
+
+
+def _contextualize_branch(enabled: bool) -> str:
+    """Selector 只接受字符串键；把开关映射到带/不带 Contextualizer 的默认链。"""
+    return "with_context" if enabled else "without_context"
+
+
+def _garbage_collector(
+    settings, store, content, acls, vectors, graph
+) -> ResourceGarbageCollector:
+    # 清理目标来自平台存储，不取决于本次文档或垂类是否启用图算法。
+    return ResourceGarbageCollector(
+        store=store,
+        content_writer=content,
+        resource_acls=acls,
+        vector_writers=vectors,
+        graph_writers=[graph] if graph is not None else [],
+        batch_size=settings.GC_BATCH_SIZE,
+        interval_seconds=settings.GC_INTERVAL_SECONDS,
+    )
+
+
+def graph_rerank_text(payload: PreparedGraphEvidence) -> str:
+    """完整图事实作为精排材料，来源描述分别保留，不生成摘要或裁剪文本。"""
+    evidence = payload.evidence
+    parts = [f"seed: {evidence.kind} {evidence.fact_id}"]
+    for node in evidence.entities:
+        parts.append(f"entity: {node.id}\ndescription: {node.description or ''}")
+    for edge in evidence.relationships:
+        parts.append(
+            f"relationship: {edge.id}\ndescription: {edge.description or ''}\nkeywords: {', '.join(edge.keywords or [])}"
+        )
+    return "\n".join(parts)
 
 
 class Container(containers.DeclarativeContainer):
-    """集中管理当前已落地的 Mongo 生命周期和 application 用例。"""
+    """共享平台资源与通用用例；实例化时传 settings，不保存请求 scope/snapshot。"""
 
-    # --------------------------------------------------------------------------
-    # 存储与外部客户端
-    # --------------------------------------------------------------------------
-    mongo_client = providers.Singleton(AsyncMongoClient, settings.MONGODB_URL)
-    resource_items_collection = providers.Factory(
-        _resource_items_collection,
-        client=mongo_client,
-    )
+    settings = providers.Dependency()
 
-    # 默认不注册垂类插件；部署时由 composition 显式提供完整插件。
-    graph_plugins = providers.List()
-    graph_plugin_registry = providers.Singleton(
-        RagPluginRegistry,
-        plugins=graph_plugins,
+    # ------------------------------------------------------------------
+    # MongoDB：客户端与三个集合
+    # ------------------------------------------------------------------
+    mongo_client = providers.Singleton(AsyncMongoClient, settings.provided.MONGODB_URL)
+    database = providers.Callable(
+        getitem, mongo_client, settings.provided.MONGODB_DB_NAME
     )
-
-    documents = providers.Singleton(
-        MongoDocumentRepository,
-        metadata_codec=graph_plugin_registry.provided.document_metadata_codec,
+    resource_database = providers.Callable(
+        getitem, mongo_client, settings.provided.resource_mongodb_db_name
     )
-    doc_chunks = providers.Singleton(
-        MongoDocChunkRepository,
-        metadata_codec=graph_plugin_registry.provided.doc_chunk_metadata_codec,
+    resource_items_collection = providers.Callable(
+        getitem, resource_database, "wispen_resource_items"
     )
-    index_states = providers.Singleton(MongoResourceIndexStateRepository)
-    resource_acls = providers.Singleton(MongoResourceAclRepository)
-    authoritative_acls = providers.Singleton(
-        MongoAuthoritativeAclReader,
-        collection=resource_items_collection,
+    acl_collection = providers.Callable(getitem, database, "resource_acls")
+    acl_repository = providers.Singleton(
+        MongoResourceAclRepository, collection=acl_collection
+    )
+    content_storage = providers.Singleton(
+        MongoContentStorage,
+        documents=providers.Callable(getitem, database, "document_revisions"),
+        chunks=providers.Callable(getitem, database, "doc_chunks"),
+    )
+    publication_store = providers.Singleton(
+        MongoPublicationStore,
+        collection=providers.Callable(getitem, database, "resource_publications"),
     )
 
-    openai_client = providers.Singleton(
-        AsyncOpenAI,
-        base_url=settings.LLM_BASE_URL,
-        api_key=settings.LLM_API_KEY,
-    )
-    openai_chat_client = providers.Singleton(ChatClient, client=openai_client)
-    openai_embedding_client = providers.Singleton(
-        EmbeddingClient,
-        client=openai_client,
-    )
-    # 同一进程内的所有调用用例共享 provider 并发预算。
-    llm_request_semaphore = providers.Singleton(
-        asyncio.Semaphore,
-        settings.DOCUMENT_ENHANCEMENT_MAX_CONCURRENCY,
-    )
-    embedding_request_semaphore = providers.Singleton(
-        asyncio.Semaphore,
-        settings.RAG_EMBEDDING_MAX_CONCURRENCY,
-    )
-
-    zero_entropy_client = providers.Singleton(
-        AsyncZeroEntropy,
-        api_key=settings.ZERO_ENTROPY_API_KEY,
-    )
-    hybrid_ranking_pipeline = providers.Singleton(
-        _build_ranking_pipeline,
-        zero_entropy_client=zero_entropy_client,
-    )
-
+    # ------------------------------------------------------------------
+    # Qdrant：客户端与三套向量集合
+    # ------------------------------------------------------------------
     qdrant_client = providers.Singleton(
         AsyncQdrantClient,
-        host=settings.QDRANT_HOST,
-        port=settings.QDRANT_PORT,
-        api_key=settings.QDRANT_PASSWORD or None,
+        url=settings.provided.QDRANT_URL,
+        api_key=settings.provided.QDRANT_API_KEY,
+        cloud_inference=True,
     )
-    document_vectors = providers.Singleton(
-        QdrantDocumentVectorRepository,
+    vector_storage = providers.Singleton(
+        QdrantVectorStorage,
         client=qdrant_client,
-        collection_name=settings.QDRANT_DOCUMENT_CHUNK_COLLECTION_NAME,
-        dense_vector_size=settings.EMBEDDING_DIMENSIONS,
-        dense_vector_name=settings.QDRANT_DOCUMENT_DENSE_VECTOR_NAME,
-        sparse_vector_name=settings.QDRANT_DOCUMENT_SPARSE_VECTOR_NAME,
+        collection=settings.provided.VECTOR_COLLECTION,
+        dense_vector_size=settings.provided.EMBEDDING_DIMENSIONS,
     )
-    graph_node_vectors = providers.Singleton(
-        QdrantGraphNodeVectorRepository,
+    entity_vector_storage = providers.Singleton(
+        QdrantVectorStorage,
         client=qdrant_client,
-        collection_name=settings.QDRANT_GRAPH_NODE_COLLECTION_NAME,
-        dense_vector_size=settings.EMBEDDING_DIMENSIONS,
-        dense_vector_name=settings.QDRANT_GRAPH_NODE_DENSE_VECTOR_NAME,
+        collection=settings.provided.GRAPH_ENTITY_VECTOR_COLLECTION,
+        dense_vector_size=settings.provided.EMBEDDING_DIMENSIONS,
+        sparse_vector_name=None,
     )
-    graph_edge_vectors = providers.Singleton(
-        QdrantGraphEdgeVectorRepository,
+    relationship_vector_storage = providers.Singleton(
+        QdrantVectorStorage,
         client=qdrant_client,
-        collection_name=settings.QDRANT_GRAPH_EDGE_COLLECTION_NAME,
-        dense_vector_size=settings.EMBEDDING_DIMENSIONS,
-        dense_vector_name=settings.QDRANT_GRAPH_EDGE_DENSE_VECTOR_NAME,
-        sparse_vector_name=settings.QDRANT_GRAPH_EDGE_SPARSE_VECTOR_NAME,
+        collection=settings.provided.GRAPH_RELATION_VECTOR_COLLECTION,
+        dense_vector_size=settings.provided.EMBEDDING_DIMENSIONS,
+        sparse_vector_name=None,
+    )
+    vector_collections = providers.Singleton(
+        list,
+        providers.List(
+            providers.Singleton(
+                VectorCollection,
+                storage=vector_storage,
+                metadata_index_fields=[
+                    IndexableField("resource_id", IndexKind.KEYWORD)
+                ],
+            ),
+            providers.Singleton(
+                VectorCollection,
+                storage=entity_vector_storage,
+                metadata_index_fields=[
+                    IndexableField(name, IndexKind.KEYWORD)
+                    for name in ("resource_id", "chunk_id", "ontology_name")
+                ],
+            ),
+            providers.Singleton(
+                VectorCollection,
+                storage=relationship_vector_storage,
+                metadata_index_fields=[
+                    IndexableField(name, IndexKind.KEYWORD)
+                    for name in ("resource_id", "chunk_id", "ontology_name")
+                ],
+            ),
+        ),
+    )
+    # GC 保留共享 writer 列表；登记扩展时追加 storage，不让清理用例解释索引配置。
+    vector_storages = providers.Singleton(
+        lambda collections: [item.storage for item in collections],
+        vector_collections,
     )
 
-    if settings.GRAPH_ENABLED:
-        neo4j_driver = providers.Singleton(
-            AsyncGraphDatabase.driver,
-            settings.NEO4J_URI,
-            auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
-        )
-        graph_topology = providers.Singleton(
-            Neo4jGraphTopologyRepository,
-            driver=neo4j_driver,
-        )
-    else:
-        neo4j_driver = providers.Object(None)
-        graph_topology = providers.Object(None)
+    # ------------------------------------------------------------------
+    # Neo4j：驱动、存储与需要图存储的读取入口
+    # ------------------------------------------------------------------
+    neo4j_driver = providers.Singleton(
+        AsyncGraphDatabase.driver,
+        settings.provided.NEO4J_URI,
+        auth=providers.Callable(
+            lambda user, password: (user, password),
+            settings.provided.NEO4J_USERNAME,
+            settings.provided.NEO4J_PASSWORD,
+        ),
+    )
+    graph_storage = providers.Singleton(
+        _graph_storage, settings=settings, driver_provider=neo4j_driver.provider
+    )
+    graph_reader = providers.Callable(_require_graph, graph_storage)
 
-    graph_facts = providers.Singleton(MongoGraphFactRepository)
+    # ------------------------------------------------------------------
+    # AI 客户端：embedding / instruction / rerank
+    # ------------------------------------------------------------------
+    embedding_openai = providers.Singleton(
+        AsyncOpenAI,
+        api_key=settings.provided.EMBEDDING_API_KEY,
+        base_url=settings.provided.EMBEDDING_BASE_URL,
+    )
+    embedding_client = providers.Singleton(
+        EmbeddingClient,
+        embedding_openai,
+        model=settings.provided.EMBEDDING_MODEL,
+        dimensions=settings.provided.EMBEDDING_DIMENSIONS,
+    )
+    instruction_openai = providers.Singleton(
+        AsyncOpenAI,
+        api_key=settings.provided.INSTRUCTION_API_KEY,
+        base_url=settings.provided.INSTRUCTION_BASE_URL,
+    )
+    instruction_client = providers.Singleton(
+        _instruction_client,
+        settings=settings,
+        openai_provider=instruction_openai.provider,
+    )
+    rerank_client = providers.Singleton(
+        RerankClient,
+        api_key=settings.provided.QWEN_API_KEY,
+        model=settings.provided.QWEN_RERANKER_MODEL,
+    )
+    # Chunk 精排取正文；图精排取整组事实文本
+    chunk_reranker = providers.Singleton(
+        ModelReranker, client=rerank_client, text_getter=attrgetter("chunk.raw_text")
+    )
+    graph_reranker = providers.Singleton(
+        ModelReranker, client=rerank_client, text_getter=graph_rerank_text
+    )
 
-    # --------------------------------------------------------------------------
-    # 应用服务 / 用例
-    # --------------------------------------------------------------------------
-    document_publication = providers.Factory(
+    # ------------------------------------------------------------------
+    # 摄取流水线：chunker / transformers / indexers
+    # ------------------------------------------------------------------
+    chunker = providers.Singleton(MarkdownChunker)
+    contextualizer = providers.Singleton(Contextualizer, client=instruction_client)
+    facts_indexer = providers.Singleton(ChunkFactsIndexer, writer=content_storage)
+    vector_indexer = providers.Singleton(
+        VectorIndexer, embedding_client=embedding_client, writer=vector_storage
+    )
+    # 两条默认链：只有 with_context 引用 contextualizer，未选中时不会被求值。
+    pipeline_without_context = providers.Singleton(
+        IngestionPipeline,
+        chunker=chunker,
+        transformers=[],
+        indexers=providers.List(facts_indexer, vector_indexer),
+    )
+    pipeline_with_context = providers.Singleton(
+        IngestionPipeline,
+        chunker=chunker,
+        transformers=providers.List(contextualizer),
+        indexers=providers.List(facts_indexer, vector_indexer),
+    )
+    # 平台按配置二选一；Selector 只解析选中的分支，另一条的 instruction_client 不会被解析。
+    pipeline = providers.Selector(
+        providers.Callable(
+            _contextualize_branch, settings.provided.ENABLE_CONTEXTUALIZE
+        ),
+        with_context=pipeline_with_context,
+        without_context=pipeline_without_context,
+    )
+    # 每个容器实例独立持有路由；垂类在启动消费前注册，不接触 Kafka。
+    pipeline_routes = providers.Singleton(dict)
+
+    # 本体是实际工厂调用参数，没有通用默认本体或全局注册表。
+    graph_extractor = providers.Factory(
+        GraphExtractor,
+        ontology=providers.Dependency(instance_of=Ontology),
+        client=instruction_client,
+    )
+    graph_indexer = providers.Factory(
+        GraphIndexer,
+        ontology=providers.Dependency(instance_of=Ontology),
+        writer=graph_storage,
+        embedding_client=embedding_client,
+        entity_writer=entity_vector_storage,
+        relationship_writer=relationship_vector_storage,
+    )
+
+    # ------------------------------------------------------------------
+    # 应用用例：发布、检索、读取、图遍历、GC
+    # ------------------------------------------------------------------
+    snapshot_reader = providers.Singleton(
+        ResourceSnapshotReader,
+        store=publication_store,
+        resource_acls=acl_repository,
+        reader=content_storage,
+    )
+    publication = providers.Singleton(
         DocumentPublication,
-        documents=documents,
-        doc_chunks=doc_chunks,
-        document_vectors=document_vectors,
-        index_states=index_states,
+        store=publication_store,
+        reader=content_storage,
+        writer=content_storage,
+        pipeline=pipeline,
+        pipelines=pipeline_routes,
     )
-    document_preparer = providers.Factory(
-        DocumentPreparer,
-        publication=document_publication,
-        doc_chunks=doc_chunks,
-        chunk_metadata_builder=graph_plugin_registry.provided.chunk_metadata_builder,
+    vector_retrieval = providers.Singleton(
+        VectorRetrieval,
+        snapshot_reader=snapshot_reader,
+        vector_reader=vector_storage,
+        embedding_client=embedding_client,
+        reranker=chunk_reranker,
     )
-    document_index_builder = providers.Factory(
-        DocumentIndexBuilder,
-        documents=documents,
-        doc_chunks=doc_chunks,
-        resource_acls=resource_acls,
-        index_states=index_states,
-        publication=document_publication,
-        document_vectors=document_vectors,
-        chat_client=openai_chat_client,
-        embedding_client=openai_embedding_client,
-        query_model=settings.QUERY_MODEL,
-        embedding_model=settings.EMBEDDING_MODEL,
-        embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
-        llm_semaphore=llm_request_semaphore,
-        embedding_semaphore=embedding_request_semaphore,
-        enhancement_enabled=settings.DOCUMENT_ENHANCEMENT_ENABLED,
-        plugin_registry=graph_plugin_registry,
+    document_reading = providers.Singleton(DocumentReading, reader=snapshot_reader)
+    graph_retrieval = providers.Singleton(
+        GraphRetrieval,
+        snapshot_reader=snapshot_reader,
+        graph_reader=graph_reader,
+        embedding_client=embedding_client,
+        entity_reader=entity_vector_storage,
+        relationship_reader=relationship_vector_storage,
+        reranker=graph_reranker,
     )
-    document_ready_handler = providers.Factory(
-        DocumentReadyHandler,
-        preparer=document_preparer,
-        index_builder=document_index_builder,
+    graph_traversal = providers.Singleton(
+        GraphTraversal, snapshot_reader=snapshot_reader, graph_reader=graph_reader
     )
-    acl_synchronizer = providers.Factory(
-        AclSynchronizer,
-        authoritative_reader=authoritative_acls,
-        local_repository=resource_acls,
+    garbage_collector = providers.Singleton(
+        _garbage_collector,
+        settings=settings,
+        store=publication_store,
+        content=content_storage,
+        acls=acl_repository,
+        vectors=vector_storages,
+        graph=graph_storage,
     )
-    acl_recalculate_handler = providers.Factory(
-        AclRecalculateHandler,
-        synchronizer=acl_synchronizer,
+
+    # ------------------------------------------------------------------
+    # Kafka 消费者：ACL 同步与发布事件
+    # ------------------------------------------------------------------
+    acl_synchronizer = providers.Singleton(
+        AclSynchronizer, collection=resource_items_collection, repository=acl_repository
     )
-    resource_destroy_handler = providers.Factory(
-        ResourceDestroyHandler,
-        publication=document_publication,
-        document_vectors=document_vectors,
-        node_vectors=graph_node_vectors,
-        edge_vectors=graph_edge_vectors,
-        topology=graph_topology,
-        graph_enabled=settings.GRAPH_ENABLED,
+    acl_consumer = providers.Factory(
+        AclEventConsumer,
+        projection=acl_synchronizer,
+        bootstrap_servers=settings.provided.KAFKA_BOOTSTRAP_SERVERS,
+        topic=settings.provided.KAFKA_RESOURCE_ACL_RECALC_TOPIC,
+        group_id=settings.provided.KAFKA_RAG_ACL_RECALC_GROUP_ID,
+        max_poll_interval_ms=settings.provided.KAFKA_MAX_POLL_INTERVAL_MS,
     )
-    active_document_snapshots = providers.Factory(
-        ActiveDocumentSnapshotLoader,
-        documents=documents,
-        index_states=index_states,
-        resource_acls=resource_acls,
-    )
-    document_reader = providers.Factory(
-        DocumentReader,
-        snapshots=active_document_snapshots,
-    )
-    outline_builder = providers.Factory(
-        OutlineBuilder,
-        snapshots=active_document_snapshots,
-    )
-    graph_fact_builder = providers.Factory(
-        GraphFactBuilder,
-        enabled=settings.GRAPH_ENABLED,
-        documents=documents,
-        doc_chunks=doc_chunks,
-        graph_facts=graph_facts,
-        index_states=index_states,
-        plugin_registry=graph_plugin_registry,
-        openai_client=openai_client,
-        query_model=settings.QUERY_MODEL,
-        llm_semaphore=llm_request_semaphore,
-    )
-    graph_index_builder = providers.Factory(
-        GraphIndexBuilder,
-        enabled=settings.GRAPH_ENABLED,
-        documents=documents,
-        doc_chunks=doc_chunks,
-        graph_facts=graph_facts,
-        resource_acls=resource_acls,
-        index_states=index_states,
-        topology=graph_topology,
-        node_vectors=graph_node_vectors,
-        edge_vectors=graph_edge_vectors,
-        embedding_client=openai_embedding_client,
-        embedding_model=settings.EMBEDDING_MODEL,
-        embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
-        embedding_semaphore=embedding_request_semaphore,
-    )
-    hybrid_retriever = providers.Factory(
-        HybridRetriever,
-        documents=documents,
-        doc_chunks=doc_chunks,
-        document_vectors=document_vectors,
-        index_states=index_states,
-        resource_acls=resource_acls,
-        ranking_pipeline=hybrid_ranking_pipeline,
-        embedding_client=openai_embedding_client,
-        embedding_model=settings.EMBEDDING_MODEL,
-        embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
-        embedding_semaphore=embedding_request_semaphore,
-        plugin_registry=graph_plugin_registry,
-        graph_facts=graph_facts,
-    )
-    graph_retriever = providers.Factory(
-        GraphRetriever,
-        enabled=settings.GRAPH_ENABLED,
-        topology=graph_topology,
-        node_vectors=graph_node_vectors,
-        edge_vectors=graph_edge_vectors,
-        graph_facts=graph_facts,
-        doc_chunks=doc_chunks,
-        documents=documents,
-        index_states=index_states,
-        resource_acls=resource_acls,
-        ranking_pipeline=hybrid_ranking_pipeline,
-        plugin_registry=graph_plugin_registry,
-        embedding_client=openai_embedding_client,
-        embedding_model=settings.EMBEDDING_MODEL,
-        embedding_dimensions=settings.EMBEDDING_DIMENSIONS,
-        embedding_semaphore=embedding_request_semaphore,
+    publication_consumer = providers.Factory(
+        PublicationEventConsumer,
+        publisher=publication,
+        bootstrap_servers=settings.provided.KAFKA_BOOTSTRAP_SERVERS,
+        group_id=settings.provided.KAFKA_RAG_PUBLICATION_GROUP_ID,
+        document_ready_topic=settings.provided.KAFKA_DOCUMENT_READY_TOPIC,
+        physical_destroy_topic=settings.provided.KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC,
+        max_poll_interval_ms=settings.provided.KAFKA_MAX_POLL_INTERVAL_MS,
     )
 
 
+# 默认实例由 main 注入 settings；外层入口也可建立自己的 Container。
 container = Container()

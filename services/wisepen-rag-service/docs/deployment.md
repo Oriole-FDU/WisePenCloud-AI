@@ -4,15 +4,13 @@
 
 ## 1. 环境与入口
 
-新包为 `wisepen-rag`，Python ≥3.11，依赖定义见 [pyproject.toml](../pyproject.toml)。当前工作区使用根目录 .venv。准备新环境时安装 Common 与新 RAG 包，避免导入旧服务的同名 rag：
+服务目录和发行包名为 `wisepen-rag-service`，Python ≥3.11，依赖定义见 [pyproject.toml](../pyproject.toml)。根项目 dependencies 和 tool.uv.sources 已纳入此 workspace 成员，普通根项目同步会安装它；只准备 RAG 环境时，从仓库根目录执行：
 
 ```powershell
-uv venv --python 3.11 .venv
-uv pip install --python .venv/Scripts/python.exe `
-    -e services/wisepen-common -e services/rag
+uv sync --locked --package wisepen-rag-service
 ```
 
-已有环境无需重复创建。不要用旧 services/wisepen-rag-service 的入口代替新包；在多包工作区确认 `rag.__file__` 指向 services/rag/src/rag。
+Python 模块名保持 rag，确认 `rag.__file__` 指向 services/wisepen-rag-service/src/rag。目录迁移后重新同步 editable 安装；若环境残留旧发行包 wisepen-rag，先用 `uv pip uninstall wisepen-rag` 移除其旧路径登记，再同步新服务。
 
 ## 2. bootstrap 环境
 
@@ -115,8 +113,8 @@ Invoke-RestMethod http://127.0.0.1:19906/rag/health
 文档/组合测试可用替身，不启动 Nacos/main。工作区验证命令：
 
 ```powershell
-.venv/Scripts/python.exe -m pytest -c services/rag/pyproject.toml `
-    services/rag/tests/test_extensions.py services/rag/tests/test_container.py `
+.venv/Scripts/python.exe -m pytest -c services/wisepen-rag-service/pyproject.toml `
+    services/wisepen-rag-service/tests/test_extensions.py services/wisepen-rag-service/tests/test_container.py `
     --basetemp=.pytest_cache/rag-docs -q
 git diff --check
 ```

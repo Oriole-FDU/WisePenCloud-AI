@@ -27,8 +27,8 @@
 两脚本都支持重复 `--resource-id ID`，或 `--resource-file PATH`（UTF-8/UTF-8 BOM，每行一个 ID），也可组合。首尾空白和空行去掉，去重保留顺序；不要写注释行，脚本会将其当作 ID。缺有效资源列表是参数错误。
 
 ```powershell
-.venv/Scripts/python.exe services/rag/scripts/repair_context.py --help
-.venv/Scripts/python.exe services/rag/scripts/repair_graph.py --help
+.venv/Scripts/python.exe services/wisepen-rag-service/scripts/repair_context.py --help
+.venv/Scripts/python.exe services/wisepen-rag-service/scripts/repair_graph.py --help
 ```
 
 这两条仅展示帮助，不创建客户端或执行修复。以下实际执行示例需在上述维护窗口运行。凭据用专用环境变量提供；CLI 同名选项覆盖环境变量。
@@ -67,7 +67,7 @@ $env:RAG_REPAIR_EMBEDDING_BASE_URL = 'https://your-embedding-gateway/v1'
 $env:RAG_REPAIR_EMBEDDING_API_KEY = '<embedding-key>'
 $env:RAG_REPAIR_EMBEDDING_MODEL = '<embedding-model>'
 $env:RAG_REPAIR_EMBEDDING_DIMENSIONS = '1024'
-.venv/Scripts/python.exe services/rag/scripts/repair_context.py `
+.venv/Scripts/python.exe services/wisepen-rag-service/scripts/repair_context.py `
     --resource-file .maintenance/resource-ids.txt `
     --vector-collection document_chunk_vectors_v4
 $LASTEXITCODE
@@ -115,9 +115,9 @@ $env:RAG_GRAPH_REPAIR_MONGO_DATABASE = 'rag_v4'
 $env:RAG_GRAPH_REPAIR_INSTRUCTION_BASE_URL = 'https://your-instruction-gateway/v1'
 $env:RAG_GRAPH_REPAIR_INSTRUCTION_API_KEY = '<instruction-key>'
 $env:RAG_GRAPH_REPAIR_INSTRUCTION_MODEL = '<instruction-model>'
-.venv/Scripts/python.exe services/rag/scripts/repair_graph.py `
+.venv/Scripts/python.exe services/wisepen-rag-service/scripts/repair_graph.py `
     --resource-file .maintenance/resource-ids.txt `
-    --ontology-file services/rag/src/rag/extensions/employment/ontology.yaml
+    --ontology-file services/wisepen-rag-service/src/rag/extensions/employment/ontology.yaml
 ```
 
 此命令不写拓扑/图向量。需要同步投影时追加相应 with 参数并配齐对应连接/模型；不要误以为默认会更新所有查询投影。
@@ -130,9 +130,9 @@ $env:RAG_GRAPH_REPAIR_INSTRUCTION_MODEL = '<instruction-model>'
 $env:RAG_GRAPH_REPAIR_NEO4J_URI = 'neo4j://localhost:7687'
 $env:RAG_GRAPH_REPAIR_NEO4J_USERNAME = 'neo4j'
 $env:RAG_GRAPH_REPAIR_NEO4J_PASSWORD = '<neo4j-password>'
-.venv/Scripts/python.exe services/rag/scripts/repair_graph.py `
+.venv/Scripts/python.exe services/wisepen-rag-service/scripts/repair_graph.py `
     --resource-file .maintenance/resource-ids.txt `
-    --ontology-file services/rag/src/rag/extensions/employment/ontology.yaml `
+    --ontology-file services/wisepen-rag-service/src/rag/extensions/employment/ontology.yaml `
     --projection-only --with-graph
 ```
 
@@ -148,9 +148,9 @@ $env:RAG_GRAPH_REPAIR_EMBEDDING_BASE_URL = 'https://your-embedding-gateway/v1'
 $env:RAG_GRAPH_REPAIR_EMBEDDING_API_KEY = '<embedding-key>'
 $env:RAG_GRAPH_REPAIR_EMBEDDING_MODEL = '<embedding-model>'
 $env:RAG_GRAPH_REPAIR_EMBEDDING_DIMENSIONS = '1024'
-.venv/Scripts/python.exe services/rag/scripts/repair_graph.py `
+.venv/Scripts/python.exe services/wisepen-rag-service/scripts/repair_graph.py `
     --resource-file .maintenance/resource-ids.txt `
-    --ontology-file services/rag/src/rag/extensions/employment/ontology.yaml `
+    --ontology-file services/wisepen-rag-service/src/rag/extensions/employment/ontology.yaml `
     --projection-only --with-graph-vectors
 ```
 

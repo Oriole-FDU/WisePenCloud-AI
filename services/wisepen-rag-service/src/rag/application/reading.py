@@ -1,112 +1,163 @@
-"""从 active Document 提供 Section 的确定性读取。"""
+"""从已授权 Document 结构提供目录、标题邻域与精确章节原文读取。"""
 
 from dataclasses import dataclass
 from enum import StrEnum
 
-from common.utils.markdown import Section
+from common.utils.markdown import OutlineFormatter, Section
 
-from rag.application.snapshot import ActiveDocumentSnapshotLoader
-from rag.domain.acl import PermissionScope
+from rag.application.snapshot import ResourceSnapshot, ResourceSnapshotReader
+from rag.core.schema import Document
 
 
-class SectionReadMode(StrEnum):
-    DIRECT = "direct"
-    RECURSIVE = "recursive"
+class SectionReadScope(StrEnum):
+    """原文范围选择；资源权限由显式 snapshot 决定。"""
+
+    OWN = "own"
+    SUBTREE = "subtree"
 
 
 @dataclass(frozen=True, slots=True)
-class ReadSectionItem:
+class DocumentOutline:
+    """可见版本的全局目录；目录行中的 ID 可直接用于章节读取。"""
+
     resource_id: str
+    content_revision: str
+    outline: str
+
+
+@dataclass(frozen=True, slots=True)
+class SectionOutline:
+    """可见章节的标题邻域，保留 Common 的格式与定位信息。"""
+
+    resource_id: str
+    content_revision: str
     section_id: str
-    section_path: str
-    content: str
+    section_path: list[str]
+    outline: str
 
 
-class DocumentReadError(LookupError):
-    """请求目标不可见或结构中不存在时使用的统一读取错误。"""
+@dataclass(frozen=True, slots=True)
+class SectionText:
+    """完整章节范围内的原文，不重建标题或截取窗口。"""
+
+    resource_id: str
+    content_revision: str
+    section_id: str
+    section_path: list[str]
+    text: str
 
 
-class DocumentReader:
-    """通过一次 active+ACL 快照完成 Section 读取。"""
+class DocumentReading:
+    """只保存共享 Reader；本次定位、章节索引与 formatter 均为局部变量。"""
 
-    def __init__(self, *, snapshots: ActiveDocumentSnapshotLoader) -> None:
-        self._snapshots = snapshots
+    def __init__(self, *, reader: ResourceSnapshotReader) -> None:
+        self._reader = reader
+
+    async def global_outline(
+        self,
+        resource_id: str,
+        *,
+        snapshot: ResourceSnapshot,
+        max_level: int = 0,
+    ) -> DocumentOutline | None:
+        if max_level < 0:
+            raise ValueError("max_level must not be negative")
+        documents = await self._reader.read_documents([resource_id], snapshot=snapshot)
+        if not documents:
+            return None
+        document = documents[0]
+        return DocumentOutline(
+            document.resource_id,
+            document.content_revision,
+            OutlineFormatter(
+                sections=document.structure.sections,
+                anchors=document.structure.anchors,
+            ).global_outline(max_level=max_level),
+        )
+
+    async def neighborhood(
+        self,
+        section_ids: list[str],
+        *,
+        snapshot: ResourceSnapshot,
+        sibling_steps: int = 1,
+    ) -> list[SectionOutline]:
+        if sibling_steps < 0:
+            raise ValueError("sibling_steps must not be negative")
+        documents = await self._reader.read_documents_by_section_ids(
+            section_ids, snapshot=snapshot
+        )
+        # 一份文档只建一个 formatter；同次批量操作中复用，调用结束即释放。
+        formatters = {
+            document.content_revision: OutlineFormatter(
+                sections=document.structure.sections,
+                anchors=document.structure.anchors,
+            )
+            for document in documents
+        }
+        sections = _section_locations(documents)
+        result = []
+        for section_id in dict.fromkeys(section_ids):
+            if (location := sections.get(section_id)) is None:
+                continue
+            document, section = location
+            result.append(
+                SectionOutline(
+                    document.resource_id,
+                    document.content_revision,
+                    section.section_id,
+                    section.section_path,
+                    formatters[document.content_revision].neighborhood(
+                        section_id, sibling_steps=sibling_steps
+                    ),
+                )
+            )
+        return result
 
     async def read_sections(
         self,
         section_ids: list[str],
         *,
-        mode: SectionReadMode = SectionReadMode.DIRECT,
-        max_depth: int = 1,
-        scope: PermissionScope,
-    ) -> list[ReadSectionItem]:
-        """读取指定 section 的内容，支持直接或递归展开子 section。"""
-        locations = await self._snapshots.locate_sections(section_ids, scope=scope)
-
-        items: list[ReadSectionItem] = []
-        for section_id in section_ids:
-            location = locations.get(section_id)
-            if location is None:
-                raise DocumentReadError("section is not visible")
-
-            if mode is SectionReadMode.RECURSIVE:
-                content = _recursive_content(
-                    location.document.raw_content,
-                    location.section,
-                    location.document.structure.sections,
-                    max_depth,
-                )
-            else:
-                content = _direct_content(location.document.raw_content, location.section)
-
-            items.append(
-                ReadSectionItem(
-                    resource_id=location.document.resource_id,
-                    section_id=section_id,
-                    section_path=" > ".join(location.section.section_path),
-                    content=content,
+        snapshot: ResourceSnapshot,
+        scope: SectionReadScope = SectionReadScope.OWN,
+    ) -> list[SectionText]:
+        """按 own/subtree 半开字符区间原样读取，旧版本与不可见项省略。"""
+        scope = SectionReadScope(scope)
+        documents = await self._reader.read_documents_by_section_ids(
+            section_ids, snapshot=snapshot
+        )
+        sections = _section_locations(documents)
+        result = []
+        for section_id in dict.fromkeys(section_ids):
+            if (location := sections.get(section_id)) is None:
+                continue
+            document, section = location
+            span = (
+                section.own_span
+                if scope is SectionReadScope.OWN
+                else section.subtree_span
+            )
+            # Python 切片会静默截断越界范围；数据库事实损坏必须明确失败。
+            if not 0 <= span.start_offset <= span.end_offset <= len(document.text):
+                raise RuntimeError("invalid section source span")
+            result.append(
+                SectionText(
+                    document.resource_id,
+                    document.content_revision,
+                    section.section_id,
+                    section.section_path,
+                    document.text[span.start_offset : span.end_offset],
                 )
             )
-        return items
+        return result
 
 
-def _direct_content(raw_content: str, section: Section) -> str:
-    """直接拼接 section 的 content_spans 内容，去除每段前后空白。"""
-    parts = [
-        raw_content[span.start_offset : span.end_offset].strip()
-        for span in section.content_spans
-    ]
-    return "\n\n".join(part for part in parts if part)
-
-
-def _recursive_content(
-    raw_content: str,
-    root: Section,
-    sections: list[Section],
-    max_depth: int,
-) -> str:
-    """递归展开 section 及其子 section，按层级用 Markdown 标题表示。"""
-    # 构建父子关系映射
-    children_by_parent: dict[str | None, list[Section]] = {}
-    for section in sections:
-        children_by_parent.setdefault(section.parent_section_id, []).append(section)
-    # 按 ordinal 排序子节点
-    for children in children_by_parent.values():
-        children.sort(key=lambda s: s.ordinal)
-
-    parts: list[str] = []
-
-    def visit(section: Section, depth: int) -> None:
-        if depth > max_depth:
-            return
-        # 标题等级至少为 1
-        level = max(1, section.level)
-        parts.append("#" * level + " " + section.title.strip())
-        body = _direct_content(raw_content, section)
-        if body:
-            parts.append(body)
-        for child in children_by_parent.get(section.section_id, []):
-            visit(child, depth + 1)
-
-    visit(root, 0)
-    return "\n\n".join(parts)
+def _section_locations(
+    documents: list[Document],
+) -> dict[str, tuple[Document, Section]]:
+    """仅为已通过共享 Reader 检查的事实建立章节索引。"""
+    return {
+        section.section_id: (document, section)
+        for document in documents
+        for section in document.structure.sections
+    }

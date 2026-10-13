@@ -2,7 +2,7 @@
 
 RAG V4 将完整 Markdown 发布为可检索的当前内容事实，通过请求级版本与权限决定返回正文和图证据，并允许业务扩展复用同一平台生命周期。
 
-本目录是现行说明与接手入口。文档依据当前 services/rag 源码及测试整合，初始核对基线为 `af2dd565`（2026-10-13）；后续维护以实际实现为准。旧计划、demo、接手与实施记录原样放在 [archive](archive/README.md)，不能用历史接口推断现状。
+本目录是现行说明与接手入口。新实现已切换到 services/wisepen-rag-service，并以同名包接入项目 workspace 依赖；Python 模块入口仍为 rag。文档初始整合基线为 `af2dd565`（2026-10-13）；后续维护以实际实现为准。旧计划、demo、接手与实施记录原样放在 [archive](archive/README.md)，其中 services/rag 路径是迁移前位置，不能用历史接口推断现状。
 
 ## 推荐阅读顺序
 

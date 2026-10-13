@@ -1,4 +1,4 @@
-"""RAG 服务在拉取 Nacos 配置前所需的最小配置。"""
+"""Nacos 配置拉取前必须存在的 RAG 服务配置。"""
 
 from common.core.config.bootstrap_settings import BootstrapSettings
 
