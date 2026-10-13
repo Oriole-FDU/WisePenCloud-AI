@@ -99,8 +99,11 @@ factory 的“增量”指向量 payload 增量，不是把业务字段补写回
 | [VectorReader/Writer](../src/rag/storage/vector.py) | query、upsert、delete | 候选投影；写/删确认后返回 None，删除要求非空条件 |
 | VectorStorage | collection、ensure_collection(metadata_index_fields) | 实例绑定集合；必填 list[IndexableField]，空列表仍初始化/核对向量配置 |
 | [GraphReader/Writer](../src/rag/storage/graph.py) | get_nodes、get_relations、get_neighbors、replace_sources、delete_sources | 来源描述独立；replace_sources 只替换传入来源，含空事实；写入返回 None |
+| GraphStorage | ensure_schema() | 组合图读写端口；必须实现显式 schema 初始化，可重复调用，失败传播 |
 
 Mongo、Qdrant、Neo4j 的 SDK 转换在 [backends](../src/rag/backends/__init__.py)。业务扩展使用 IndexKind，不导入数据库 SDK 索引类型。Qdrant 普通集合 named vectors 为 dense/sparse，sparse 使用服务端 qdrant/bm25 与 cloud_inference；全部必需向量成功才返回，不降级 dense-only。
+
+GraphStorage.ensure_schema 是存储协议的一部分，由 main 在启用图存储时、图 repair 在启用拓扑投影时显式调用。后端负责所需约束/索引的具体初始化；只读或只写消费方仍依赖 GraphReader/GraphWriter。
 
 Qdrant 每批 wait=True 并核对 completed；Neo4j 来源批使用显式事务并等待提交，前批成功保留。提交异常可能结果未知，传播后幂等重跑，不假定回滚成功。没有跨库事务、Receipt 或完整性完成清单。
 
