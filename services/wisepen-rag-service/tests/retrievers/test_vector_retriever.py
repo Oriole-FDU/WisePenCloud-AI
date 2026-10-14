@@ -195,37 +195,16 @@ async def test_provider_default_dimensions_need_no_separate_retriever_configurat
     assert dense.embedding == [1.0, 0.0, 0.5]
 
 
-@pytest.mark.parametrize(
-    "response",
-    [
-        [],
-        [[1.0, 0.0], [0.0, 1.0]],
-        [[1.0]],
-        [[float("nan"), 0.0]],
-        [[float("inf"), 0.0]],
-        [[True, 0.0]],
-        [["1", 0.0]],
-    ],
-)
-async def test_invalid_embedding_response_is_a_backend_failure(deps, response):
-    deps[1].embed.return_value = response
-    if len(response) != 1:
-        deps[1].embed.side_effect = ValueError(
-            "embedding response count does not match texts"
-        )
-    with pytest.raises(RuntimeError, match="embedding response"):
-        await build(deps).retrieve("query")
-    assert not any(
-        call.args[0].embedding is not None for call in deps[0].query.call_args_list
-    )
-
-
-async def test_embedding_client_value_error_uses_indexer_failure_contract(deps):
-    error = ValueError("wrong response count")
+async def test_embedding_response_value_error_becomes_retryable_without_reader_io(deps):
+    error = ValueError("embedding response count, dimensions or values are invalid")
     deps[1].embed.side_effect = error
     with pytest.raises(RuntimeError, match="embedding response") as caught:
         await build(deps).retrieve("query")
     assert caught.value.__cause__ is error
+    # hybrid 的 sparse 路不需要向量，但 dense 路不得发出任何查询。
+    assert not any(
+        call.args[0].embedding is not None for call in deps[0].query.call_args_list
+    )
 
 
 @pytest.mark.parametrize("route", ["embedding", "dense", "sparse"])

@@ -177,17 +177,12 @@ async def test_empty_query_before_io(deps):
     deps.embedding_client.embed.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    "response", [[], [[1.0]], [[float("nan"), 0.0]], [[True, 0.0]]]
-)
-async def test_embedding_boundary_errors_prevent_reader_io(deps, response):
-    deps.embedding_client.embed.return_value = response
-    if len(response) != 1:
-        deps.embedding_client.embed.side_effect = ValueError(
-            "embedding response count does not match texts"
-        )
-    with pytest.raises(RuntimeError, match="embedding"):
+async def test_embedding_response_value_error_prevents_reader_io(deps):
+    error = ValueError("embedding response count, dimensions or values are invalid")
+    deps.embedding_client.embed.side_effect = error
+    with pytest.raises(RuntimeError, match="embedding response") as caught:
         await build(deps).retrieve("查询")
+    assert caught.value.__cause__ is error
     deps.entity_reader.query.assert_not_awaited()
     deps.relationship_reader.query.assert_not_awaited()
 

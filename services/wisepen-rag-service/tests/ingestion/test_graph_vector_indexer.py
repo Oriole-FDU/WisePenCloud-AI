@@ -134,23 +134,17 @@ async def test_ontology_invalid_and_duplicate_facts(
     )
 
 
-@pytest.mark.parametrize(
-    "vectors", [[], [[1.0]], [[float("nan"), 0.0]], [[True, 0.0]], [[]]]
-)
 async def test_bad_embedding_does_not_delete_current_batch(
-    indexer, chunk, make_graph_facts, graph_vector_writers, vectors
+    indexer, chunk, make_graph_facts, graph_vector_writers
 ):
     make_graph_facts(chunk)
     usecase, embedding = indexer
+    original = ValueError("embedding response count, dimensions or values are invalid")
+    embedding.embed.side_effect = original
 
-    async def embed(*, texts):
-        if not vectors:
-            raise ValueError("embedding response count does not match texts")
-        return [vectors[0] for _ in texts]
-
-    embedding.embed.side_effect = embed
-    with pytest.raises(RuntimeError, match="embedding"):
+    with pytest.raises(RuntimeError, match="embedding") as caught:
         await usecase.index([chunk])
+    assert caught.value.__cause__ is original
     for writer in graph_vector_writers:
         writer.delete.assert_not_awaited()
 

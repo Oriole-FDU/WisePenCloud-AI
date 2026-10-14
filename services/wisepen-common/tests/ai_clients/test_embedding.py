@@ -81,11 +81,37 @@ async def test_embed_omits_dimensions_when_unspecified():
 
 
 @pytest.mark.asyncio
-async def test_embed_rejects_empty_input_and_mismatched_response():
+async def test_embed_rejects_empty_input():
     with pytest.raises(ValueError, match="must not be empty"):
         await EmbeddingClient(SimpleNamespace(), model="m").embed(texts=[])
 
-    create = AsyncMock(return_value=SimpleNamespace(data=[]))
+
+@pytest.mark.parametrize(
+    "dimensions,vectors",
+    [
+        (2, []),  # 数量不足
+        (2, [[1.0, 0.0], [0.0, 1.0]]),  # 数量超出
+        (2, [[1.0, 0.0, 0.5]]),  # 维度与固定值不符
+        (None, [[]]),  # 空向量不因 dimensions=None 而放行
+        (None, [[float("nan")]]),  # 非有限数值
+        (None, [[float("inf")]]),
+        (None, [[True]]),  # 非 int/float 类型
+        (None, [["1"]]),
+    ],
+)
+@pytest.mark.asyncio
+async def test_embed_rejects_invalid_response_contract(dimensions, vectors):
+    create = AsyncMock(
+        return_value=SimpleNamespace(
+            data=[
+                SimpleNamespace(index=index, embedding=vector)
+                for index, vector in enumerate(vectors)
+            ]
+        )
+    )
     client = SimpleNamespace(embeddings=SimpleNamespace(create=create))
-    with pytest.raises(ValueError, match="count"):
-        await EmbeddingClient(client, model="m").embed(texts=["a"])
+
+    with pytest.raises(ValueError, match="count, dimensions or values"):
+        await EmbeddingClient(
+            client, model="m", dimensions=dimensions
+        ).embed(texts=["a"])

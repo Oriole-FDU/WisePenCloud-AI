@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import isfinite
+
 from openai import AsyncOpenAI
 
 
@@ -42,7 +44,7 @@ class EmbeddingClient:
             与输入顺序严格对应的向量列表。
 
         Raises:
-            ValueError: 当 texts 为空，或返回结果数量与输入不一致时。
+            ValueError: 当 texts 为空，或返回结果数量、维度、数值不合法时。
         """
         if not texts:
             raise ValueError("embedding texts must not be empty")
@@ -60,7 +62,16 @@ class EmbeddingClient:
         sorted_data = sorted(response.data, key=lambda item: item.index)
         vectors = [list(item.embedding) for item in sorted_data]
 
-        if len(vectors) != len(texts):
-            raise ValueError("embedding response count does not match texts")
+        # 数量、固定维度与有限数值同属响应合同，消费方不必重复核对。
+        if len(vectors) != len(texts) or any(
+            not vector
+            or (self._dimensions is not None and len(vector) != self._dimensions)
+            or any(
+                type(value) not in (int, float) or not isfinite(value)
+                for value in vector
+            )
+            for vector in vectors
+        ):
+            raise ValueError("embedding response count, dimensions or values are invalid")
 
         return vectors

@@ -150,40 +150,12 @@ async def test_later_batch_failure_stops_without_compensating_completed_writes(
     assert vector_writer.upsert.await_count == (1 if failure == "embedding" else 2)
 
 
-@pytest.mark.parametrize(
-    "response",
-    [
-        [],
-        [[1.0]],
-        [[float("nan"), 0.0]],
-        [[float("inf"), 0.0]],
-        [[True, 0.0]],
-        [["1", 0.0]],
-        [[1.0, 0.0], [0.0, 1.0]],
-    ],
-)
-async def test_invalid_embedding_response_is_retryable_and_never_written(
-    indexer, embedding_client, vector_writer, chunk, response
-):
-    embedding_client.embed.side_effect = None
-    embedding_client.embed.return_value = response
-    if len(response) != 1:
-        embedding_client.embed.side_effect = ValueError(
-            "embedding response count does not match texts"
-        )
-    with pytest.raises(RuntimeError) as caught:
-        await indexer.index([chunk])
-    assert isinstance(caught.value, RuntimeError)
-    vector_writer.upsert.assert_not_awaited()
-
-
-async def test_common_response_value_error_becomes_retryable(
+async def test_embedding_response_value_error_is_retryable_and_never_written(
     indexer, embedding_client, vector_writer, chunk
 ):
-    original = ValueError("embedding response count does not match texts")
+    original = ValueError("embedding response count, dimensions or values are invalid")
     embedding_client.embed.side_effect = original
     with pytest.raises(RuntimeError) as caught:
         await indexer.index([chunk])
     assert caught.value.__cause__ is original
-    assert isinstance(caught.value, RuntimeError)
     vector_writer.upsert.assert_not_awaited()

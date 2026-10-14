@@ -2,7 +2,6 @@
 
 from dataclasses import replace
 from hashlib import sha256
-from math import isfinite
 
 from common.utils.ai_clients.embedding import EmbeddingClient
 
@@ -139,7 +138,7 @@ class GraphIndexer(Indexer):
             records = entity_records + relationship_records
             embedded = []
 
-            # 分批调用 embedding，并逐批校验返回的形状与数值
+            # 分批调用 embedding；响应合同由 Common 核对，失败转为可重试错误
             for offset in range(0, len(records), self._embedding_batch_size):
                 current = records[offset : offset + self._embedding_batch_size]
                 try:
@@ -148,23 +147,6 @@ class GraphIndexer(Indexer):
                     )
                 except ValueError as exc:
                     raise RuntimeError("invalid graph embedding response") from exc
-
-                # Common 已保证数量；删除旧投影前确认维度和有限值。
-                if any(
-                    not vector
-                    or (
-                        self._embedding_client.dimensions is not None
-                        and len(vector) != self._embedding_client.dimensions
-                    )
-                    or any(
-                        type(value) not in (int, float) or not isfinite(value)
-                        for value in vector
-                    )
-                    for vector in vectors
-                ):
-                    raise RuntimeError(
-                        "invalid graph embedding response count, dimensions or values"
-                    )
 
                 embedded.extend(
                     replace(record, embedding=vector)

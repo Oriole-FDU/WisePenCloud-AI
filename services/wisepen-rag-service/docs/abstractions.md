@@ -57,7 +57,7 @@ Chunker → 全部 Transformers → ChunkFactsIndexer → 全部必需投影 Ind
 | Contextualizer | 用完整提示词 token 预算选择全文/祖先/局部窗口；供应商及输出失败逐块清旧值并降级；metadata 序列化错误与取消传播；信任在线生成或已通过读取边界的结构 |
 | GraphExtractor | 仅以当前 raw_text 抽取，section_path 辅助消歧；本体约束事实；全部块成功后替换图 metadata，模型失败传播 |
 | ChunkFactsIndexer | 仅保存最终 Chunk，不另造持久化模型 |
-| VectorIndexer | retrieval_text → 分批 embedding → VectorWriter；缺数量、非法维度/非有限值等失败停止后批 |
+| VectorIndexer | retrieval_text → 分批 embedding → VectorWriter；数量/维度/数值合同由 Common 核对，失败转为可重试错误并停止后批 |
 | GraphIndexer | 同次解析图事实，先写可选拓扑、再写可选实体/关系来源向量；至少启用一种投影；没有独立 GraphVectorIndexer |
 
 Contextualizer 的默认值为输入 8000 token、目标 100 字、输出硬上限 150 token、before_ratio=0.5、大纲比例 0.15、实例模型并发 4。默认 TokenCounter 为 Common 离线 o200k_base。成功指纹匹配复用，failed/过期重试；全文模式不加入业务 metadata。详见 [contextualizer.py](../src/rag/ingestion/transformers/contextualizer.py) 和[运维手册](operations.md)。

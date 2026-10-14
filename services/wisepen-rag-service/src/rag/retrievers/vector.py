@@ -1,7 +1,6 @@
 """以字符串查询组合 dense/sparse 召回；存储查询合同只在组件内部构造。"""
 
 from enum import StrEnum
-from math import isfinite
 
 from common.utils.ai_clients.embedding import EmbeddingClient
 from common.utils.retrieval import (
@@ -178,20 +177,9 @@ class _SparseRetriever(Retriever[VectorMatch]):
 
 
 async def embed_query(embedding_client: EmbeddingClient, query: str) -> list[float]:
-    """核对 Common 尚未保证的查询向量维度和有限值。"""
+    """响应合同由 Common 核对；这里只把响应 ValueError 转为可重试的后端失败。"""
     try:
         vectors = await embedding_client.embed(texts=[query])
     except ValueError as exc:
         raise RuntimeError("invalid embedding response") from exc
-    if any(
-        (
-            embedding_client.dimensions is not None
-            and len(vector) != embedding_client.dimensions
-        )
-        or any(
-            type(value) not in (int, float) or not isfinite(value) for value in vector
-        )
-        for vector in vectors
-    ):
-        raise RuntimeError("invalid embedding response count, dimensions or values")
     return vectors[0]

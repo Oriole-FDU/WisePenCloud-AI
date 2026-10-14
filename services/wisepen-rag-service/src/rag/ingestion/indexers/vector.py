@@ -1,7 +1,6 @@
 """从最终 Chunk 派生 dense 与 sparse 输入，按批等待全部必需向量投影成功。"""
 
 from collections.abc import Callable
-from math import isfinite
 
 from common.utils.ai_clients.embedding import EmbeddingClient
 
@@ -36,24 +35,8 @@ class VectorIndexer(Indexer):
             try:
                 vectors = await self._embedding_client.embed(texts=texts)
             except ValueError as exc:
-                # Common 的响应数量错误是 ValueError，不是上游事件的永久输入错误
+                # 响应合同由 Common 核对；ValueError 不是上游事件的永久输入错误
                 raise RuntimeError("invalid embedding response") from exc
-
-            # Common 已保证响应数量；这里只核对尚未保证的维度和有限值。
-            if any(
-                (
-                    self._embedding_client.dimensions is not None
-                    and len(vector) != self._embedding_client.dimensions
-                )
-                or any(
-                    type(value) not in (int, float) or not isfinite(value)
-                    for value in vector
-                )
-                for vector in vectors
-            ):
-                raise RuntimeError(
-                    "invalid embedding response count, dimensions or values"
-                )
 
             records = [
                 VectorRecord(
