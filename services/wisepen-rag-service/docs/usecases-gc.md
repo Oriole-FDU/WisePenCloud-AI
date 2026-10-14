@@ -31,7 +31,7 @@ GcReport.scanned 为本轮扫描资源数，cleaned 为本轮全部步骤完成�
 
 资源某阶段失败记录 resource_id/stage，停止该资源后续阶段，继续其他资源，部分删除保留；下轮从头重新扫描。扫描错误从 collect 传播，run 记录后等待下一轮；取消传播，退出时统一等待任务再关闭共享客户端。
 
-error 日志携带异常对象并输出 traceback；`GcReport.errors` 保持资源级计数。OTel counter `rag.gc.errors` 在每次资源错误或扫描错误发生时增加 1，stage 标签为 vector/graph/acl/content/scan，不使用资源 ID 等高基数字段。复用现有 OTel 导出配置；本轮不增加告警或连续失败阈值，也不因 GC 故障撤销 ready。
+error 日志携带异常对象并输出 traceback；`GcReport.errors` 保持资源级计数。本轮不增加告警或连续失败阈值，也不因 GC 故障撤销 ready。
 
 扩展登记会把额外 storage 追加到共享 writer 列表，collector 先构造也能看到新增存储。停用扩展后未声明集合不在清理范围，停用前应完成其数据回收；无需在扩展里重复实现 GC。
 

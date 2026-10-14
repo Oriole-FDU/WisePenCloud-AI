@@ -93,26 +93,18 @@ async def test_keyset_gc_removes_all_revisions_preserves_live_resource_and_marke
     assert await env.collector.collect() == report
 
 
-async def test_gc_resource_errors_have_traceback_and_low_cardinality_metric(
-    gc_env, publication_store, monkeypatch
-):
-    counter, log = Mock(), Mock()
-    monkeypatch.setattr("rag.application.gc._GC_ERRORS", counter)
+async def test_gc_resource_errors_have_traceback(gc_env, publication_store, monkeypatch):
+    log = Mock()
     monkeypatch.setattr("rag.application.gc.error", log)
     await publication_store.destroy_resources(["resource"])
     failure = OSError("store down")
     gc_env.vectors[0].delete.side_effect = failure
     assert (await gc_env.collector.collect()).errors == 1
-    counter.add.assert_called_once_with(1, {"stage": "vector"})
     assert log.call_args.kwargs["exc"] is failure
     assert failure.__traceback__ is not None
 
 
-async def test_gc_scan_failure_is_counted_without_replacing_periodic_isolation(
-    gc_env, monkeypatch
-):
-    counter = Mock()
-    monkeypatch.setattr("rag.application.gc._GC_ERRORS", counter)
+async def test_gc_scan_failure_keeps_periodic_isolation(gc_env, monkeypatch):
     gc_env.collector.collect = AsyncMock(side_effect=OSError("scan down"))
     monkeypatch.setattr(
         "rag.application.gc.asyncio.sleep",
@@ -120,7 +112,6 @@ async def test_gc_scan_failure_is_counted_without_replacing_periodic_isolation(
     )
     with pytest.raises(asyncio.CancelledError):
         await gc_env.collector.run()
-    counter.add.assert_called_once_with(1, {"stage": "scan"})
 
 
 @pytest.mark.parametrize("stage", ["vector", "graph", "acl", "content"])
