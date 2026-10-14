@@ -31,11 +31,11 @@ GC_BATCH_SIZE: 100
 KAFKA_ENABLED: false
 KAFKA_BOOTSTRAP_SERVERS: ""
 KAFKA_MAX_POLL_INTERVAL_MS: 300000
-KAFKA_RESOURCE_ACL_RECALC_TOPIC: wispen-resource-acl-recalc-topic
-KAFKA_RAG_ACL_RECALC_GROUP_ID: wispen-rag-v4-acl-recalc-group
+KAFKA_RESOURCE_ACL_RECALC_TOPIC: wisepen-resource-acl-recalc-topic
+KAFKA_RAG_ACL_RECALC_GROUP_ID: wisepen-rag-v4-acl-recalc-group
 KAFKA_DOCUMENT_READY_TOPIC: wisepen-document-ready-topic
 KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC: wisepen-resource-physical-destroy-topic
-KAFKA_RAG_PUBLICATION_GROUP_ID: wispen-rag-v4-publication-group
+KAFKA_RAG_PUBLICATION_GROUP_ID: wisepen-rag-v4-publication-group
 EXTENSIONS: []
 # Employment 需要完整指令配置、Neo4j 和网关密钥；链显式不带上下文。
 # EXTENSIONS: [employment]

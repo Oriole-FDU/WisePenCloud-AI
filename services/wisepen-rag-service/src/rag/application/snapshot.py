@@ -112,7 +112,9 @@ class ResourceSnapshotReader:
                     revision
                     if revision is not None
                     and acl is not None
-                    and acl.can_read(snapshot.scope)
+                    and acl.can_read(
+                        snapshot.scope, document_version=revision.document_version
+                    )
                     else None,
                 )
 

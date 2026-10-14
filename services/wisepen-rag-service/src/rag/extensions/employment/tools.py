@@ -42,16 +42,7 @@ class EmploymentTools:
         top_k: int = 10,
         candidate_limit: int = 60,
     ) -> list[ChunkHit]:
-        if any(
-            year is not None and not 1 <= year <= 9999 for year in (year_from, year_to)
-        ):
-            raise ValueError("year must be between 1 and 9999")
-        if year_from is not None and year_to is not None and year_from > year_to:
-            raise ValueError("year_from must not exceed year_to")
-        if employee is not None and not employee.strip():
-            raise ValueError("employee must not be blank")
-        if candidate_limit < top_k:
-            raise ValueError("candidate_limit must not be less than top_k")
+        # HTTP 请求模型拥有业务参数校验；内部调用方遵守相同合同。
         fields = []
         if year_from is not None:
             fields.append(MetadataFilter("year", year_from, FilterOperator.GTE))

@@ -16,6 +16,7 @@ from common.utils.retrieval import (
 from rag.application.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.core.schema import Chunk, GraphRelationOption, parse_graph_facts
 from rag.core.schema.filters import MetadataFilters
+from rag.core.schema.graph import GraphFactValidationError
 from rag.retrievers.vector import VectorRetrievalMode, VectorRetriever
 from rag.storage.vector import VectorMatch, VectorReader
 
@@ -87,10 +88,6 @@ class VectorRetrieval:
         candidate_limit: int = 60,
     ) -> list[ChunkHit]:
         """一次召回、授权准备和排序；授权过滤后不补召回或重新观察发布/ACL。"""
-        if not query.strip() or top_k <= 0:
-            raise ValueError("query must be nonempty; top_k must be positive")
-        if diversity not in {"off", "moderate", "high"}:
-            raise ValueError(f"unsupported diversity mode: {diversity}")
         include_embedding = diversity != "off"
         # 已连接的仓储与客户端共享；本次只组装固定配置的召回组件，不新建连接。
         retriever = VectorRetriever.from_storage(
@@ -188,7 +185,7 @@ def chunk_seed_entities(chunk: Chunk) -> list[GraphNodeReference]:
         return []
     try:
         nodes, _ = parse_graph_facts(chunk)
-    except (TypeError, ValueError) as exc:
+    except GraphFactValidationError as exc:
         warning("chunk_seed_entities_rejected", chunk_id=chunk.chunk_id, error=str(exc))
         return []
     return [GraphNodeReference(node.id, node.relations) for node in nodes.values()]

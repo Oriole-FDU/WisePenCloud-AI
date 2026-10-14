@@ -76,10 +76,6 @@ class GraphRetriever(Retriever[GraphMatch]):
         """
         mode = GraphRetrievalMode(mode)
 
-        if type(candidate_limit) is not int or candidate_limit <= 0:
-            raise ValueError("candidate_limit must be a positive integer")
-        if embedding_client is None:
-            raise ValueError("graph retrieval requires an embedding client")
         # 单路模式下不允许单独指定某路预算
         if mode is not GraphRetrievalMode.HYBRID and (
             entity_top_k is not None or relationship_top_k is not None

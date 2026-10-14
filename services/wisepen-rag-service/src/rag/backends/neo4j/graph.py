@@ -60,10 +60,6 @@ class Neo4jGraphStorage(GraphStorage):
     async def replace_sources(self, projections: list[GraphSourceProjection]) -> None:
         if not projections:
             return
-        # chunk_id 必须唯一，否则替换语义不明确
-        if len({item.chunk_id for item in projections}) != len(projections):
-            raise ValueError("source projections must have distinct chunk IDs")
-
         rows = []
         # 全部先序列化；不可表示的事实在任何写入前报错，不用 str 掩盖类型问题。
         for projection in projections:

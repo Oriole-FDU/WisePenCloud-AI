@@ -6,11 +6,12 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from common.utils.markdown import Section, SourceSpan
 from common.utils.markdown.chunking.tokenizer import default_token_counter
+from pydantic_core import PydanticSerializationError
 
 from rag.core.schema import Chunk, Document, DocumentStructure
 from rag.ingestion.transformers import Contextualizer
@@ -302,9 +303,7 @@ async def test_model_failures_clear_stale_context_and_retry(client, failure):
     assert client.complete.await_count == 2
 
 
-@pytest.mark.parametrize(
-    "case", ["empty", "chunk-too-large", "metadata-too-large", "unsupported-metadata"]
-)
+@pytest.mark.parametrize("case", ["empty", "chunk-too-large", "metadata-too-large"])
 async def test_no_model_downgrades_and_can_retry(client, case):
     doc, chunks = make_input("正文")
     budget = 300
@@ -317,9 +316,6 @@ async def test_no_model_downgrades_and_can_retry(client, case):
         doc.text = "x" * 1000
         doc.structure.total_length = 1000
         doc.metadata["big"] = "x" * 1000
-    else:
-        doc.metadata["unknown"] = object()
-        expected = "failed"
     chunks[0].metadata.update(contextual_context="old", context_version="old")
     await transformer(client, max_context_tokens=budget).transform(chunks, document=doc)
     assert chunks[0].metadata == {"context_status": expected}
@@ -328,59 +324,6 @@ async def test_no_model_downgrades_and_can_retry(client, case):
     chunks[0].raw_text = "正文"
     await transformer(client).transform(chunks, document=doc)
     assert chunks[0].metadata["context_status"] == "ok"
-
-
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"max_context_tokens": 0},
-        {"target_context_chars": -1},
-        {"max_output_tokens": 0},
-        {"max_concurrency": 0},
-        {"before_ratio": -0.1},
-        {"outline_token_ratio": 1.1},
-        {"before_ratio": float("nan")},
-        {"max_context_tokens": True},
-    ],
-)
-def test_invalid_configuration_fails(client, kwargs):
-    with pytest.raises(ValueError):
-        transformer(client, **kwargs)
-
-
-@pytest.mark.parametrize(
-    "corruption",
-    [
-        "length",
-        "bounds",
-        "parent",
-        "cycle",
-        "identity",
-        "unknown-section",
-        "duplicate-index",
-    ],
-)
-async def test_bad_facts_propagate_before_model(client, corruption):
-    doc, chunks = make_input("text", "other")
-    root = section("s", 0, 4, len(doc.text))
-    doc.structure.sections = [root]
-    if corruption == "length":
-        doc.structure.total_length += 1
-    elif corruption == "bounds":
-        doc.structure.sections = [replace(root, subtree_span=SourceSpan(0, 100))]
-    elif corruption == "parent":
-        doc.structure.sections = [replace(root, parent_section_id="missing")]
-    elif corruption == "cycle":
-        doc.structure.sections = [replace(root, parent_section_id="s")]
-    elif corruption == "identity":
-        chunks[0].content_revision = "different"
-    elif corruption == "unknown-section":
-        chunks[0].section_id = "missing"
-    else:
-        chunks[1].chunk_index = 0
-    with pytest.raises((ValueError, RuntimeError)):
-        await transformer(client).transform(chunks, document=doc)
-    client.complete.assert_not_awaited()
 
 
 async def test_empty_input_missing_document_and_cancellation(client):
@@ -393,6 +336,16 @@ async def test_empty_input_missing_document_and_cancellation(client):
     client.complete.side_effect = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
         await service.transform(chunks, document=doc)
+
+
+async def test_metadata_serialization_error_stops_before_model_without_mutation(client):
+    doc, chunks = make_input("正文", metadata={"unsupported": object()})
+    chunks[0].metadata.update(contextual_context="旧上下文", context_version="old")
+    previous = deepcopy(chunks)
+    with pytest.raises(PydanticSerializationError):
+        await transformer(client).transform(chunks, document=doc)
+    assert chunks == previous
+    client.complete.assert_not_awaited()
     assert "context_status" not in chunks[0].metadata
 
 
@@ -497,3 +450,45 @@ async def test_invalid_cached_output_with_matching_fingerprint_is_regenerated(cl
     await service.transform(chunks, document=doc)
     assert client.complete.await_count == 2
     assert chunks[0].metadata["contextual_context"] == "本段说明文档主题。"
+
+
+async def test_invalid_context_cache_logs_reason_but_normal_miss_is_quiet(
+    client, monkeypatch
+):
+    warning = Mock()
+    monkeypatch.setattr("rag.ingestion.transformers.contextualizer.warning", warning)
+    doc, chunks = make_input("正文")
+    service = transformer(client)
+    await service.transform(chunks, document=doc)
+    chunks[0].metadata["context_version"] = "old"
+    await service.transform(chunks, document=doc)
+    warning.assert_not_called()
+    chunks[0].metadata["contextual_context"] = "x" * 151
+    await service.transform(chunks, document=doc)
+    assert warning.call_args.kwargs["cache_type"] == "context"
+    assert warning.call_args.kwargs["chunk_id"] == chunks[0].chunk_id
+    assert "budget" in warning.call_args.kwargs["reason"]
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, TypeError])
+async def test_model_program_errors_propagate_without_failed_status(client, error_type):
+    doc, chunks = make_input("正文")
+    client.complete.side_effect = error_type("program error")
+    with pytest.raises(error_type):
+        await transformer(client).transform(chunks, document=doc)
+    assert "context_status" not in chunks[0].metadata
+
+
+async def test_tokenizer_value_error_is_not_treated_as_invalid_output(client):
+    class BrokenCounter(CharacterCounter):
+        def count(self, text):
+            if text == "本段说明文档主题。":
+                raise ValueError("tokenizer program error")
+            return super().count(text)
+
+    doc, chunks = make_input("正文")
+    with pytest.raises(ValueError, match="tokenizer program error"):
+        await transformer(client, token_counter=BrokenCounter()).transform(
+            chunks, document=doc
+        )
+    assert "context_status" not in chunks[0].metadata

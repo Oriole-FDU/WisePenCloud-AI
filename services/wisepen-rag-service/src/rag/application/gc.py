@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from common.logger import error, info
+from opentelemetry import metrics
 
 from rag.application.acl.store import ResourceAclRepository
 from rag.application.publication.store import PublicationStore
@@ -12,6 +13,12 @@ from rag.core.schema.filters import MetadataFilter, MetadataFilters
 from rag.storage.content import ContentWriter
 from rag.storage.graph import GraphWriter
 from rag.storage.vector import VectorWriter
+
+_GC_ERRORS = metrics.get_meter("wisepen.rag").create_counter(
+    "rag.gc.errors",
+    unit="{error}",
+    description="GC resource deletion and scan failures",
+)
 
 
 @dataclass(slots=True)
@@ -24,6 +31,7 @@ class GcReport:
 
 
 class GcStage(StrEnum):
+    SCAN = "scan"
     VECTOR = "vector"
     GRAPH = "graph"
     ACL = "acl"
@@ -44,8 +52,6 @@ class ResourceGarbageCollector:
         batch_size: int = 100,
         interval_seconds: float = 600,
     ) -> None:
-        if batch_size <= 0 or interval_seconds <= 0:
-            raise ValueError("GC batch size and interval must be positive")
         self._store = store
         self._content_writer = content_writer
         self._resource_acls = resource_acls
@@ -86,6 +92,8 @@ class ResourceGarbageCollector:
                         stage=stage,
                     )
                     report.errors += 1
+                    # 只用有限阶段标签；资源 ID 留在 traceback 日志，避免指标高基数。
+                    _GC_ERRORS.add(1, {"stage": stage.value})
                 else:
                     report.cleaned += 1
             # 标记不可恢复，无需写前再次观察状态；迟到写入由下轮回收。
@@ -104,4 +112,5 @@ class ResourceGarbageCollector:
                 )
             except Exception as exc:  # noqa: BLE001 - 按资源/服务注册边界记录错误并继续
                 error("resource_gc_scan_failed", exc=exc)
+                _GC_ERRORS.add(1, {"stage": GcStage.SCAN.value})
             await asyncio.sleep(self._interval_seconds)

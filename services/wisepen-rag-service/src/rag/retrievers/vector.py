@@ -178,12 +178,12 @@ class _SparseRetriever(Retriever[VectorMatch]):
 
 
 async def embed_query(embedding_client: EmbeddingClient, query: str) -> list[float]:
-    """统一校验查询 embedding 的数量、配置维度和有限值。"""
+    """核对 Common 尚未保证的查询向量维度和有限值。"""
     try:
         vectors = await embedding_client.embed(texts=[query])
     except ValueError as exc:
         raise RuntimeError("invalid embedding response") from exc
-    if len(vectors) != 1 or any(
+    if any(
         (
             embedding_client.dimensions is not None
             and len(vector) != embedding_client.dimensions

@@ -142,8 +142,13 @@ async def test_bad_embedding_does_not_delete_current_batch(
 ):
     make_graph_facts(chunk)
     usecase, embedding = indexer
-    embedding.embed.side_effect = None
-    embedding.embed.return_value = vectors
+
+    async def embed(*, texts):
+        if not vectors:
+            raise ValueError("embedding response count does not match texts")
+        return [vectors[0] for _ in texts]
+
+    embedding.embed.side_effect = embed
     with pytest.raises(RuntimeError, match="embedding"):
         await usecase.index([chunk])
     for writer in graph_vector_writers:
@@ -201,20 +206,6 @@ async def test_empty_input_has_no_io(indexer, graph_vector_writers):
     indexer[1].embed.assert_not_awaited()
     for writer in graph_vector_writers:
         writer.delete.assert_not_awaited()
-
-
-@pytest.mark.parametrize(
-    "field,value", [("source_batch_size", 0), ("embedding_batch_size", True)]
-)
-def test_batch_configuration(graph_ontology, graph_vector_writers, field, value):
-    with pytest.raises(ValueError):
-        GraphIndexer(
-            ontology=graph_ontology,
-            embedding_client=None,
-            entity_writer=graph_vector_writers[0],
-            relationship_writer=graph_vector_writers[1],
-            **{field: value},
-        )
 
 
 @pytest.mark.parametrize("failure", [None, "topology", "embedding"])

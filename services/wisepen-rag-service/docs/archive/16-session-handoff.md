@@ -218,7 +218,7 @@ destroy_resources 永久置 destroyed=True，清空 staged/applied；未摄入�
 
 ### 4.4 ACL 与配置中容易误读的点
 
-当前 ACL 从上游 `wispen_resource_items`（代码中实际拼写）读 ownerId、updateTime、用户 action masks、computedGroupAcls；VIEW 为 bit 1。本地 ResourceAcl **实际已有 acl_revision**，来自 updateTime 的 UTC 毫秒时间戳，不是新增的上游完成版本、Fence 或内容 revision。旧计划中“不增加 ACL revision”应理解为不虚构新的跨服务一致性版本，不能据此删掉已有字段或另造保证。
+当前 ACL 从上游 `wisepen_resource_items`（代码中实际拼写）读 ownerId、updateTime、用户 action masks、computedGroupAcls；VIEW 为 bit 1。本地 ResourceAcl **实际已有 acl_revision**，来自 updateTime 的 UTC 毫秒时间戳，不是新增的上游完成版本、Fence 或内容 revision。旧计划中“不增加 ACL revision”应理解为不虚构新的跨服务一致性版本，不能据此删掉已有字段或另造保证。
 
 VIEW 顺序与已有 ACL 测试已冻结：所有者、全局白名单、全局排除、群组规则；身份 scope 来自可信入口，公开业务参数不能让调用者自填身份或 ACL 覆盖字段。现有检索与读取经 SnapshotReader 消费它，不在 Storage 或 publication 内重复实现规则。
 

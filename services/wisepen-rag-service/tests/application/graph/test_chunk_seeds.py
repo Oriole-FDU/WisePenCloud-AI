@@ -70,3 +70,18 @@ def test_chunkhit_default_entity_lists_are_independent():
     first = ChunkHit("a", "r", "v", None, [], "text", 1, 1)
     second = ChunkHit("b", "r", "v", None, [], "text", 2, 1)
     assert first.seed_entities == [] and first.seed_entities is not second.seed_entities
+
+
+def test_graph_seed_parser_program_errors_are_not_optional_metadata_damage(
+    monkeypatch, chunk
+):
+    from rag.application.retrieval import chunk_seed_entities
+
+    chunk.metadata.update(entities=[], relationships=[])
+
+    def broken_parser(value):
+        raise TypeError("parser program error")
+
+    monkeypatch.setattr("rag.application.retrieval.parse_graph_facts", broken_parser)
+    with pytest.raises(TypeError, match="parser program error"):
+        chunk_seed_entities(chunk)

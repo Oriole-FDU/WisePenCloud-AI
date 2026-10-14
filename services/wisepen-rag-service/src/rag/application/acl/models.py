@@ -14,6 +14,7 @@ class GroupResourceAcl:
     default_readable: bool
     readable_users: list[str] = field(default_factory=list)
     excluded_read_users: list[str] = field(default_factory=list)
+    market_offer_version: int | None = None  # 市场组普通成员只能读取上游指定售卖版本。
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,8 +63,10 @@ class ResourceAcl:
     excluded_read_users: list[str] = field(default_factory=list)
     group_acls: list[GroupResourceAcl] = field(default_factory=list)
 
-    def can_read(self, scope: PermissionScope) -> bool:
-        """按所有者、白名单、排除项和群组规则顺序判定。"""
+    def can_read(
+        self, scope: PermissionScope, *, document_version: int | None = None
+    ) -> bool:
+        """投影上游预计算 ACL 的 VIEW 判定；用户覆盖优先，群组授权按位或。"""
         user_id = scope.user_id
 
         # 所有者与全局白名单直接放行；全局排除项优先于普通群组规则
@@ -83,6 +86,12 @@ class ResourceAcl:
             if group_acl.group_id in managed_group_ids:
                 return True
             if group_acl.group_id not in joined_group_ids:
+                continue
+            # 上游管理员先于市场版本限制；普通成员的授权只适用于售卖版本。
+            if (
+                group_acl.market_offer_version is not None
+                and document_version != group_acl.market_offer_version
+            ):
                 continue
             if group_acl.default_readable:
                 # 默认可读时，仅群组级排除项能否决

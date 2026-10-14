@@ -13,6 +13,26 @@ from rag.application.snapshot import ResourceSnapshot
 from rag.core.schema import ContentRevision
 
 
+@pytest.mark.parametrize("offer_version", [1, 2])
+async def test_snapshot_authorizes_the_applied_version_against_market_offer(
+    snapshot_reader, read_acls, make_read_document, publish_read_document, offer_version
+):
+    document = await publish_read_document(make_read_document("resource"))
+    read_acls["resource"] = ResourceAcl(
+        "resource",
+        1,
+        "owner",
+        group_acls=[
+            GroupResourceAcl("market", True, market_offer_version=offer_version)
+        ],
+    )
+    snapshot = ResourceSnapshot(
+        PermissionScope("reader", {"market": GroupRoleType.MEMBER})
+    )
+    result = await snapshot_reader.read_documents(["resource"], snapshot=snapshot)
+    assert result == ([document] if offer_version == document.document_version else [])
+
+
 async def test_snapshot_reader_batches_pending_resources_and_reuses_visible_decisions(
     snapshot_reader,
     read_acls,

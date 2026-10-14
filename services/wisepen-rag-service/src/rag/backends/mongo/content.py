@@ -14,7 +14,10 @@ _BATCH_SIZE = 500  # bulk_write 批大小，过大易超服务端命令体积上
 
 
 class MongoContentStorage(ContentStorage):
-    """绑定两个内容集合，提供批量存取；实例不访问全局配置或连接。"""
+    """绑定两个内容集合，提供批量存取；实例不访问全局配置或连接。
+
+    章节树和原文范围由 Common 构建，RAG 仅重写身份；读取不重复验证内部算法。
+    """
 
     def __init__(
         self,

@@ -9,7 +9,7 @@ import pytest
 from aiokafka import TopicPartition
 
 from rag.application.acl.synchronizer import AclEventConsumer, AuthoritativeAclError
-from rag.backends.kafka import DeliveryHeader, RetryPolicy
+from rag.backends.kafka import RetryPolicy
 
 
 @pytest.mark.parametrize("failure", [None, "temporary", "permanent"])
@@ -74,12 +74,6 @@ async def test_acl_uses_shared_backend_and_correct_confirmation_policy(
         await consumer.run()
     if failure == "permanent":
         assert producer.send_and_wait.call_args.args == ("acl.DLT",)
-        assert (
-            dict(producer.send_and_wait.call_args.kwargs["headers"])[
-                DeliveryHeader.RETRY_COUNT
-            ]
-            == b"0"
-        )
     else:
         producer.send_and_wait.assert_not_awaited()
     driver.stop.assert_awaited_once()

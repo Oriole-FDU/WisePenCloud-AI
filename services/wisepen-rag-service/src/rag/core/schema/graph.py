@@ -8,9 +8,13 @@ from pathlib import Path
 
 import yaml
 from common.logger import warning
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from .content import Chunk
+
+
+class GraphFactValidationError(ValueError):
+    """外部图事实格式、来源或本体语义不合法；不表示解析器程序错误。"""
 
 
 class GraphDirection(StrEnum):
@@ -140,28 +144,30 @@ class Ontology:
     def validate_node(self, node: GraphNode) -> None:
         """校验实体属于本域、名称非空、类别已声明。"""
         if node.ontology_name != self.domain:
-            raise ValueError("entity ontology does not match")
+            raise GraphFactValidationError("entity ontology does not match")
         if not node.name.strip():
-            raise ValueError("entity name must not be blank")
+            raise GraphFactValidationError("entity name must not be blank")
         if node.category not in self.entity_specs:
-            raise ValueError(f"unknown entity category: {node.category}")
+            raise GraphFactValidationError(f"unknown entity category: {node.category}")
 
     def validate_edge(self, edge: GraphEdge, nodes: Mapping[str, GraphNode]) -> None:
         """校验谓词已声明，且端点存在、类别符合允许集合。"""
         spec = self.relation_specs.get(edge.relation_type)
         if spec is None:
-            raise ValueError(f"unknown relation type: {edge.relation_type}")
+            raise GraphFactValidationError(
+                f"unknown relation type: {edge.relation_type}"
+            )
 
         source = nodes.get(edge.source_id)
         target = nodes.get(edge.target_id)
         if source is None or target is None:
-            raise ValueError("relation endpoint is missing")
+            raise GraphFactValidationError("relation endpoint is missing")
 
         # 允许集合为空表示不限制该端
         if spec.allowed_sources and source.category not in spec.allowed_sources:
-            raise ValueError("relation source category is not allowed")
+            raise GraphFactValidationError("relation source category is not allowed")
         if spec.allowed_targets and target.category not in spec.allowed_targets:
-            raise ValueError("relation target category is not allowed")
+            raise GraphFactValidationError("relation target category is not allowed")
 
     def create_node(
         self,
@@ -229,12 +235,15 @@ def parse_graph_facts(
     已完整成功。普通读取保留首次合法事实，不修改输入，不决定授权。
     """
     # 外部 metadata 一次解析结构；不手写重复的列表/字典/字段类型检查。
-    entities = _nodes_adapter.validate_python(
-        chunk.metadata.get("entities"), extra="forbid"
-    )
-    relationships = _edges_adapter.validate_python(
-        chunk.metadata.get("relationships"), extra="forbid"
-    )
+    try:
+        entities = _nodes_adapter.validate_python(
+            chunk.metadata.get("entities"), extra="forbid"
+        )
+        relationships = _edges_adapter.validate_python(
+            chunk.metadata.get("relationships"), extra="forbid"
+        )
+    except ValidationError as exc:
+        raise GraphFactValidationError(str(exc)) from exc
 
     nodes: dict[str, GraphNode] = {}
     edges: dict[str, GraphEdge] = {}
@@ -242,11 +251,13 @@ def parse_graph_facts(
     # 实体：结构错误报错；本体非法项按 strict 决定丢弃或抛错
     for node in entities:
         if node.source_id != chunk.chunk_id:
-            raise ValueError("graph entity source does not match its chunk")
+            raise GraphFactValidationError(
+                "graph entity source does not match its chunk"
+            )
         if ontology is not None:
             try:
                 ontology.validate_node(node)
-            except ValueError as exc:
+            except GraphFactValidationError as exc:
                 if strict:
                     raise
                 warning(
@@ -254,17 +265,19 @@ def parse_graph_facts(
                 )
                 continue
         if strict and node.id in nodes:
-            raise ValueError("duplicate cached entity")
+            raise GraphFactValidationError("duplicate cached entity")
         nodes.setdefault(node.id, node)  # 同 ID 去重，保留首个
 
     # 关系：同上，端点必须已在 nodes 中
     for edge in relationships:
         if edge.source_ids != [chunk.chunk_id]:
-            raise ValueError("graph relationship sources do not match its chunk")
+            raise GraphFactValidationError(
+                "graph relationship sources do not match its chunk"
+            )
         if ontology is not None:
             try:
                 ontology.validate_edge(edge, nodes)
-            except ValueError as exc:
+            except GraphFactValidationError as exc:
                 if strict:
                     raise
                 warning(
@@ -281,7 +294,7 @@ def parse_graph_facts(
             )
             continue
         if strict and edge.id in edges:
-            raise ValueError("duplicate cached relationship")
+            raise GraphFactValidationError("duplicate cached relationship")
         edges.setdefault(edge.id, edge)  # 同 ID 去重，保留首个
 
     return nodes, edges

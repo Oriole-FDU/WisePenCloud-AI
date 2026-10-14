@@ -54,7 +54,7 @@ Chunker → 全部 Transformers → ChunkFactsIndexer → 全部必需投影 Ind
 | 组件 | 处理方式与注意事项 |
 |---|---|
 | MarkdownChunker | 适配 Common 分块，目标 800 token、拆分阈值 1200 token；逐 Chunk 深复制 Document.metadata，嵌套对象互不共享 |
-| Contextualizer | 用完整提示词 token 预算选择全文/祖先/局部窗口；供应商及输出失败逐块清旧值并降级；身份、结构、程序错误与取消传播 |
+| Contextualizer | 用完整提示词 token 预算选择全文/祖先/局部窗口；供应商及输出失败逐块清旧值并降级；metadata 序列化错误与取消传播；信任在线生成或已通过读取边界的结构 |
 | GraphExtractor | 仅以当前 raw_text 抽取，section_path 辅助消歧；本体约束事实；全部块成功后替换图 metadata，模型失败传播 |
 | ChunkFactsIndexer | 仅保存最终 Chunk，不另造持久化模型 |
 | VectorIndexer | retrieval_text → 分批 embedding → VectorWriter；缺数量、非法维度/非有限值等失败停止后批 |

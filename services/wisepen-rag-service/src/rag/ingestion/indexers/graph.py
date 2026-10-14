@@ -39,13 +39,6 @@ class GraphIndexer(Indexer):
         source_batch_size: int = 64,
         embedding_batch_size: int = 32,
     ) -> None:
-        # 批大小必须是正整数
-        if any(
-            type(value) is not int or value <= 0
-            for value in (source_batch_size, embedding_batch_size)
-        ):
-            raise ValueError("graph vector batch sizes must be positive integers")
-
         # 向量投影三件套必须同时配置或同时缺省
         configured = (embedding_client, entity_writer, relationship_writer)
         if any(value is not None for value in configured) and any(
@@ -68,10 +61,6 @@ class GraphIndexer(Indexer):
         self._embedding_batch_size = embedding_batch_size
 
     async def index(self, chunks: list[Chunk]) -> None:
-        # chunk_id 必须唯一，否则来源替换语义不明确
-        if len({chunk.chunk_id for chunk in chunks}) != len(chunks):
-            raise ValueError("graph sources must have distinct chunk IDs")
-
         # 两种投影共用一次事实解析；后面的结构错误不能发生在首笔写入之后。
         facts = [self._ontology.parse_chunk_facts(chunk) for chunk in chunks]
 
@@ -160,8 +149,8 @@ class GraphIndexer(Indexer):
                 except ValueError as exc:
                     raise RuntimeError("invalid graph embedding response") from exc
 
-                # 校验数量、维度与每个分量是否为有限数字
-                if len(vectors) != len(current) or any(
+                # Common 已保证数量；删除旧投影前确认维度和有限值。
+                if any(
                     not vector
                     or (
                         self._embedding_client.dimensions is not None

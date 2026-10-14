@@ -53,7 +53,7 @@ ENABLE_GRAPH_STORAGE 只装配图后端，不把 GraphExtractor 加进默认链�
 |---|---|
 | Mongo document_revisions / doc_chunks | 完整文档与 Chunk 事实 |
 | Mongo resource_publications / resource_acls | 发布状态与本地权限 |
-| 上游资源库 wispen_resource_items | ACL 权威读取，注意实际拼写 |
+| 上游资源库 wisepen_resource_items | ACL 权威读取，注意实际拼写 |
 | VECTOR_COLLECTION=document_chunk_vectors_v4 | 普通 dense/sparse 命名向量 |
 | GRAPH_ENTITY_VECTOR_COLLECTION=graph_entity_source_vectors_v4 | dense-only 实体来源向量 |
 | GRAPH_RELATION_VECTOR_COLLECTION=graph_relation_source_vectors_v4 | dense-only 关系来源向量 |
@@ -65,13 +65,13 @@ Qdrant 普通 sparse 固定服务端 qdrant/bm25 multilingual，使用 cloud_inf
 
 | 项目 | 默认值 |
 |---|---|
-| ACL topic | wispen-resource-acl-recalc-topic |
-| ACL group | wispen-rag-v4-acl-recalc-group |
+| ACL topic | wisepen-resource-acl-recalc-topic |
+| ACL group | wisepen-rag-v4-acl-recalc-group |
 | 内容 topic | wisepen-document-ready-topic |
 | 物理销毁 topic | wisepen-resource-physical-destroy-topic |
-| publication group | wispen-rag-v4-publication-group |
+| publication group | wisepen-rag-v4-publication-group |
 
-ACL/publication group 必须不同。为每个主 topic 配置重试 topic `<main>-retry-1m`、`<main>-retry-10m` 和 `<main>.DLT` 的创建、权限与保留期。内容 key 使用 resourceId，同资源发布串行；重试/确认语义见[发布文档](usecases-publication.md)。
+ACL/publication group 必须不同。为每个主 topic 配置 `<main>.DLT` 的创建、权限与保留期；只有进程内 1/2/4 秒快速重试，不创建延迟重试 topic。内容 key 使用 resourceId，同资源发布串行；重试/确认语义见[发布文档](usecases-publication.md)。
 
 ## 4. 启动、健康检查与关闭
 

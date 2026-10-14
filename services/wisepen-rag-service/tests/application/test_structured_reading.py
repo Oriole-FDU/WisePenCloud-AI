@@ -349,7 +349,11 @@ async def test_denied_snapshot_remains_denied_after_acl_grant(reading_setup, rea
 
 @pytest.mark.parametrize(
     "field,value",
-    [("text", "错误正文"), ("document_version", 99), ("content_revision", "wrong")],
+    [
+        ("text", "错" * len(SOURCE)),
+        ("document_version", 99),
+        ("content_revision", "wrong"),
+    ],
 )
 async def test_wrong_document_identity_is_omitted_without_fallback(
     reading_setup, storage, field, value
@@ -379,7 +383,7 @@ async def test_invalid_stored_range_is_a_fact_error(
         section, **{span_name: SourceSpan(start, end)}
     )
     await storage.upsert_documents([document])
-    with pytest.raises(RuntimeError, match="source span"):
+    with pytest.raises(RuntimeError, match="span"):
         await reading_setup.usecase.read_sections(
             [section.section_id], snapshot=reading_setup.snapshot, scope=scope
         )
@@ -407,7 +411,12 @@ async def test_malformed_span_decode_exception_propagates(
 async def test_zero_length_range_returns_empty_text(reading_setup, storage):
     document = reading_setup.document
     section = document.structure.sections[1]
-    document.structure.sections[1] = replace(section, own_span=SourceSpan(3, 3))
+    document.structure.sections[1] = replace(
+        section,
+        own_span=SourceSpan(
+            section.own_span.start_offset, section.own_span.start_offset
+        ),
+    )
     await storage.upsert_documents([document])
     result = await reading_setup.usecase.read_sections(
         [section.section_id], snapshot=reading_setup.snapshot

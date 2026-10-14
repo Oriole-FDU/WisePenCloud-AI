@@ -5,12 +5,13 @@ import json
 from dataclasses import asdict
 from hashlib import sha256
 
-from common.logger import warning
+from common.logger import error, warning
 from common.utils.ai_clients.instruction import InstructionClient
 from common.utils.markdown.chunking.tokenizer import TokenCounter, default_token_counter
 from pydantic import BaseModel, ConfigDict, Field
 
 from rag.core.schema import Chunk, Document, GraphEdge, GraphNode, Ontology
+from rag.core.schema.graph import GraphFactValidationError
 
 _STRATEGY_VERSION = "graph-extractor-v2-relation-options"
 _SYSTEM_PROMPT = """从当前块正文抽取本体允许的实体和有向关系，输出符合 schema 的 JSON。
@@ -146,7 +147,13 @@ def _valid_cached_facts(chunk: Chunk, ontology: Ontology) -> bool:
     """数据库缓存必须完整合法且归属当前块；损坏时重算整块。"""
     try:
         ontology.parse_chunk_facts(chunk, strict=True)
-    except (ValueError, TypeError):
+    except GraphFactValidationError as exc:
+        warning(
+            "invalid_cached_content",
+            chunk_id=chunk.chunk_id,
+            cache_type="graph",
+            reason=str(exc),
+        )
         return False
     return True
 
@@ -170,12 +177,6 @@ class GraphExtractor:
         gleaning: bool = False,
         reuse_existing: bool = True,
     ) -> None:
-        if any(
-            type(value) is not int or value <= 0
-            for value in (max_input_tokens, max_output_tokens, max_concurrency)
-        ):
-            raise ValueError("token and concurrency limits must be positive integers")
-
         self._ontology = ontology
         self._client = client
         self._counter = token_counter or default_token_counter()
@@ -264,8 +265,7 @@ class GraphExtractor:
                     response_model=GraphExtraction,
                     max_tokens=self._max_output_tokens,
                 )
-            # 真实 client 已经解析模型；同时明确替身或边界返回必须满足同一 DTO。
-            result = GraphExtraction.model_validate(result)
+            # response_model 的结构解析由 InstructionClient / Instructor 保证。
 
             nodes: dict[str, GraphNode] = {}
             edges: dict[str, GraphEdge] = {}
@@ -317,7 +317,7 @@ class GraphExtractor:
                             max_tokens=self._max_output_tokens,
                         )
                     _merge_facts(
-                        GraphExtraction.model_validate(gleaned),
+                        gleaned,
                         chunk,
                         self._ontology,
                         nodes,
@@ -337,7 +337,14 @@ class GraphExtractor:
             # gather 默认不会取消兄弟任务；显式收尾，避免失败返回后仍在调用模型。
             for task in tasks:
                 task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for chunk, result in zip(chunks, results, strict=True):
+                if isinstance(result, BaseException) and not isinstance(
+                    result, asyncio.CancelledError
+                ):
+                    error(
+                        "graph_task_cleanup_failed", exc=result, chunk_id=chunk.chunk_id
+                    )
             raise
 
         for chunk, result in zip(chunks, results, strict=True):

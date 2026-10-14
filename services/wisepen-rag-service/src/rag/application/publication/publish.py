@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import replace
 from typing import Annotated
 
+from common.logger import error
 from common.utils.markdown import MarkdownChunker
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -209,7 +210,6 @@ class PublicationEventConsumer:
             handler=self._handle_document_ready,
             max_poll_interval_ms=max_poll_interval_ms,
             retry_policy=content_retry_policy,
-            is_retryable=_is_retryable,
         )
         self._destroy_consumer = KafkaConsumerClient(
             bootstrap_servers=bootstrap_servers,
@@ -218,7 +218,6 @@ class PublicationEventConsumer:
             handler=self._handle_resource_destroyed,
             max_poll_interval_ms=max_poll_interval_ms,
             retry_policy=destroy_retry_policy,
-            is_retryable=_is_retryable,
         )
 
     async def run(self, *, started: asyncio.Event | None = None) -> None:
@@ -259,7 +258,16 @@ class PublicationEventConsumer:
             # 任一循环退出后取消另一个并取走其异常，避免遗留后台消费任务
             for task in tasks:
                 task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for task, result in zip(tasks, results, strict=True):
+                if isinstance(result, BaseException) and not isinstance(
+                    result, asyncio.CancelledError
+                ):
+                    error(
+                        "publication_task_cleanup_failed",
+                        exc=result,
+                        task=task.get_name(),
+                    )
 
     async def _handle_document_ready(self, payload: dict[str, object]) -> None:
         event = DocumentReadyEvent.model_validate(payload)
@@ -269,10 +277,3 @@ class PublicationEventConsumer:
     async def _handle_resource_destroyed(self, payload: dict[str, object]) -> None:
         event = ResourceDestroyedEvent.model_validate(payload)
         await self._publisher.destroy_resources(event.resource_ids)
-
-
-def _is_retryable(error: Exception) -> bool:
-    """事实不完整可重试；身份冲突与输入错误属永久失败。"""
-    return isinstance(error, ContentIncompleteError) or not isinstance(
-        error, ValueError
-    )

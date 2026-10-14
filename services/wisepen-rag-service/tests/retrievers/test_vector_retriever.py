@@ -209,6 +209,10 @@ async def test_provider_default_dimensions_need_no_separate_retriever_configurat
 )
 async def test_invalid_embedding_response_is_a_backend_failure(deps, response):
     deps[1].embed.return_value = response
+    if len(response) != 1:
+        deps[1].embed.side_effect = ValueError(
+            "embedding response count does not match texts"
+        )
     with pytest.raises(RuntimeError, match="embedding response"):
         await build(deps).retrieve("query")
     assert not any(

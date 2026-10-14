@@ -166,8 +166,6 @@ class MongoPublicationStore(PublicationStore):
     async def list_destroyed_resource_ids(
         self, *, after_resource_id: str | None = None, limit: int = 100
     ) -> list[str]:
-        if limit <= 0:
-            raise ValueError("destroyed resource page size must be positive")
         query = {"destroyed": True}
         if after_resource_id is not None:
             query["resource_id"] = {"$gt": after_resource_id}

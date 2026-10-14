@@ -26,8 +26,9 @@ RAG V4 将完整 Markdown 发布为可检索的当前内容事实，通过请求
 | 永久销毁后的物理清理 | [GC 用例](usecases-gc.md) |
 | 业务开发与专用索引/API | [扩展指南](extensions.md)、[Employment 示例](employment.md) |
 | 启动、配置及常见问题 | [运行说明](deployment.md)、[Nacos 配置样例](platform-settings.yaml) |
-| 明确资源范围的离线修复 | [两脚本运维手册](operations.md) |
+| 明确资源范围的离线修复 | [修复与 DLQ 重放手册](operations.md) |
 | 历史变化与项目脉络 | [关键决策](decisions.md)、[一页回顾](retrospective.md)、[归档](archive/README.md) |
+| 失败策略的设计意图与待评估取舍 | [失败策略 Review](review-failure-strategies.md) |
 
 ## 当前能力与注意事项
 

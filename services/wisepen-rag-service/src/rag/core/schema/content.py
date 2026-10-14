@@ -75,7 +75,7 @@ class Chunk:
 
     @property
     def retrieval_text(self) -> str:
-        context = str(self.metadata.get("contextual_context") or "").strip()
+        context = self.metadata.get("contextual_context", "").strip()
         # 路径与生成上下文只服务索引；原文、offset 和正文计数保持不变。
         prefixes = [part for part in (">".join(self.section_path), context) if part]
         return "\n\n".join([*prefixes, self.raw_text])

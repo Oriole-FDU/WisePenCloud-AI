@@ -113,7 +113,7 @@ class Container(containers.DeclarativeContainer):
         getitem, mongo_client, settings.provided.resource_mongodb_db_name
     )
     resource_items_collection = providers.Callable(
-        getitem, resource_database, "wispen_resource_items"
+        getitem, resource_database, "wisepen_resource_items"
     )
     acl_collection = providers.Callable(getitem, database, "resource_acls")
     acl_repository = providers.Singleton(

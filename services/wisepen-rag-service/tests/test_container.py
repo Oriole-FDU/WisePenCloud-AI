@@ -170,7 +170,7 @@ def test_explicit_ontology_factories_and_context_toggle(
         {"GC_INTERVAL_SECONDS": float("inf")},
         {"EMBEDDING_DIMENSIONS": 0},
         {"VECTOR_COLLECTION": "graph_entity_source_vectors_v4"},
-        {"KAFKA_RAG_PUBLICATION_GROUP_ID": "wispen-rag-v4-acl-recalc-group"},
+        {"KAFKA_RAG_PUBLICATION_GROUP_ID": "wisepen-rag-v4-acl-recalc-group"},
     ],
 )
 def test_capability_configuration_fails_before_connections(platform_settings, change):

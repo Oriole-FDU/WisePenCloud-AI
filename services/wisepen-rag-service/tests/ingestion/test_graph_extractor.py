@@ -5,7 +5,7 @@ import copy
 import json
 from dataclasses import asdict, replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -429,10 +429,14 @@ async def test_gleaning_exception_propagates_without_replacing_old_metadata(
 
 
 async def test_response_shape_errors_fail_fast(graph_ontology, client, chunk):
-    client.structured_complete.return_value = {
+    payload = {
         "entities": [{"name": "张三"}],
         "relationships": [],
     }
+    # 替身履行 InstructionClient 的 response_model 解析合同。
+    client.structured_complete.side_effect = lambda **kwargs: (
+        GraphExtraction.model_validate(payload)
+    )
     with pytest.raises(ValidationError):
         await GraphExtractor(ontology=graph_ontology, client=client).transform([chunk])
     assert "graph_version" not in chunk.metadata
@@ -558,10 +562,53 @@ async def test_caller_cancellation_waits_for_model_cleanup(
     assert cleaned.is_set() and chunk == before
 
 
-@pytest.mark.parametrize(
-    "settings",
-    [{"max_input_tokens": 0}, {"max_output_tokens": -1}, {"max_concurrency": True}],
-)
-def test_invalid_constructor_limits(graph_ontology, client, settings):
-    with pytest.raises(ValueError):
-        GraphExtractor(ontology=graph_ontology, client=client, **settings)
+async def test_graph_cache_damage_logs_reason_and_program_errors_propagate(
+    graph_ontology, client, chunk, monkeypatch
+):
+    warning = Mock()
+    monkeypatch.setattr("rag.ingestion.transformers.graph.warning", warning)
+    extractor = GraphExtractor(ontology=graph_ontology, client=client)
+    await extractor.transform([chunk])
+    chunk.metadata.pop("relationships")
+    await extractor.transform([chunk])
+    assert warning.call_args.kwargs["cache_type"] == "graph"
+    assert warning.call_args.kwargs["reason"]
+
+    def broken_parser(*args, **kwargs):
+        raise TypeError("parser bug")
+
+    monkeypatch.setattr(type(graph_ontology), "parse_chunk_facts", broken_parser)
+    with pytest.raises(TypeError, match="parser bug"):
+        await extractor.transform([chunk])
+
+
+async def test_graph_cleanup_logs_sibling_failure_without_overwriting_primary(
+    graph_ontology, client, chunk, monkeypatch
+):
+    log = Mock()
+    monkeypatch.setattr("rag.ingestion.transformers.graph.error", log)
+    sibling_entered = asyncio.Event()
+    primary = RuntimeError("primary model failure")
+    cleanup = OSError("sibling cleanup failed")
+
+    async def generate(**kwargs):
+        if "sibling" in kwargs["messages"][1]["content"]:
+            sibling_entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                raise cleanup
+        await sibling_entered.wait()
+        raise primary
+
+    client.structured_complete.side_effect = generate
+    sibling = replace(chunk, chunk_id="sibling", raw_text="sibling", metadata={})
+    with pytest.raises(RuntimeError) as caught:
+        await GraphExtractor(ontology=graph_ontology, client=client).transform(
+            [chunk, sibling]
+        )
+    assert caught.value is primary
+    assert any(
+        call.kwargs["exc"] is cleanup and cleanup.__traceback__ is not None
+        for call in log.call_args_list
+    )

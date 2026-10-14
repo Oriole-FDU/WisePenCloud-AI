@@ -44,6 +44,8 @@ class MarkdownChunker:
                 content_token_count=chunk.content_token_count,
                 anchor_labels=chunk.anchor_labels,
                 # 业务字段逐块透传，嵌套值不能与 Document 或其他 Chunk 共享。
+                # contextual_context 由 Contextualizer 正常生成覆盖或清除，
+                # 不额外校验上游 metadata 与该派生字段碰巧重名的情况。
                 metadata=deepcopy(document.metadata),
                 # source_spans、node_ids 等内部事实留在 Common，不注入 metadata。
             )

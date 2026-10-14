@@ -1,4 +1,4 @@
-"""事件合同、发布闭环、DLQ 与消息确认；延迟预算由 Kafka 后端测试独立验证。"""
+"""事件合同、发布闭环、DLQ 与消息确认；快速重试预算由 Kafka 后端测试独立验证。"""
 
 import asyncio
 import json
@@ -74,7 +74,7 @@ def kafka(monkeypatch):
 @pytest.fixture
 def consumer(publication):
     # 应用测试关闭等待阶段，集中验证业务与确认时序；生产默认仍为五次重试。
-    policy = RetryPolicy(backoff_seconds=[], delayed_retries=[])
+    policy = RetryPolicy(backoff_seconds=[])
     return PublicationEventConsumer(
         publisher=publication,
         bootstrap_servers="localhost:9092",
@@ -162,24 +162,49 @@ async def test_unknown_type_uses_existing_permanent_error_dlq_contract(
     collections,
     publication_collection,
 ):
-    client, factory = kafka
+    client, _ = kafka
     client.getone.side_effect = [
         record(content() | {"type": "unregistered"}),
         asyncio.CancelledError(),
     ]
     with pytest.raises(asyncio.CancelledError):
         await consumer.run()
-    assert (
-        dict(factory.producer.send_and_wait.call_args.kwargs["headers"])[
-            DeliveryHeader.RETRY_COUNT
-        ]
-        == b"0"
-    )
     client.commit.assert_awaited_once()
     publication_collection.find_one.assert_not_awaited()
     publication_collection.update_one.assert_not_awaited()
     for collection in collections:
         collection.bulk_write.assert_not_awaited()
+
+
+async def test_cleanup_logs_extra_failure_without_changing_primary_error(
+    consumer, monkeypatch
+):
+    log = Mock()
+    monkeypatch.setattr("rag.application.publication.publish.error", log)
+    entered = asyncio.Event()
+    primary = RuntimeError("content failed")
+    cleanup = OSError("destroy cleanup failed")
+
+    async def content_run(**kwargs):
+        await entered.wait()
+        raise primary
+
+    async def destroy_run(**kwargs):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            raise cleanup
+
+    consumer._content_consumer.run = content_run
+    consumer._destroy_consumer.run = destroy_run
+    with pytest.raises(RuntimeError) as caught:
+        await consumer.run()
+    assert caught.value is primary
+    assert any(
+        call.kwargs["exc"] is cleanup and cleanup.__traceback__ is not None
+        for call in log.call_args_list
+    )
 
 
 @pytest.mark.parametrize("skip", ["duplicate", "stale", "destroyed"])
@@ -224,7 +249,6 @@ async def test_bad_payload_goes_to_dlq_before_commit_without_business_io(
 
     async def send(topic, **kwargs):
         assert topic == f"{DOCUMENT_TOPIC}.DLT" and kwargs["value"] == bad
-        assert dict(kwargs["headers"])[DeliveryHeader.RETRY_COUNT] == b"0"
         client.commit.assert_not_awaited()
 
     factory.producer.send_and_wait.side_effect = send
@@ -251,7 +275,6 @@ async def test_same_version_conflict_goes_directly_to_dlq_without_rebuild(
     with pytest.raises(asyncio.CancelledError):
         await consumer.run()
     headers = dict(factory.producer.send_and_wait.call_args.kwargs["headers"])
-    assert headers[DeliveryHeader.RETRY_COUNT] == b"0"
     assert headers[DeliveryHeader.EXCEPTION_TYPE].endswith(b"ContentConflictError")
     projection.index.assert_not_awaited()
 
@@ -382,7 +405,7 @@ async def test_cancel_during_projection_keeps_uncommitted_staged_facts(
     assert state.staged_revision is not None and state.applied_revision is None
 
 
-async def test_temporarily_incomplete_facts_are_retried_until_real_apply(
+async def test_incomplete_facts_follow_value_error_dlq_policy_without_apply(
     kafka, publication, storage, projection, publication_store
 ):
     original_read = storage.get_documents
@@ -407,10 +430,11 @@ async def test_temporarily_incomplete_facts_are_retried_until_real_apply(
     client.getone.side_effect = [record(content()), asyncio.CancelledError()]
     with pytest.raises(asyncio.CancelledError):
         await consumer.run()
-    assert projection.index.await_count == 2
+    assert projection.index.await_count == 1
     state = (await publication_store.get_states(["resource"]))[0]
-    assert state.applied_revision is not None and state.staged_revision is None
-    factory.producer.send_and_wait.assert_not_awaited()
+    assert state.applied_revision is None and state.staged_revision is not None
+    factory.producer.send_and_wait.assert_awaited_once()
+    assert factory.producer.send_and_wait.call_args.args == (f"{DOCUMENT_TOPIC}.DLT",)
     client.commit.assert_awaited_once()
 
 

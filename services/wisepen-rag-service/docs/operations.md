@@ -1,6 +1,8 @@
-# 离线修复脚本使用手册
+# 离线修复与 DLQ 手动重放手册
 
 维护入口是 [repair_context.py](../scripts/repair_context.py) 和 [repair_graph.py](../scripts/repair_graph.py)。本文说明真实参数与写入范围，模型/缓存原理见[核心抽象](abstractions.md)，正常服务配置见[运行说明](deployment.md)。
+
+Kafka 失败消息使用 [replay_dlq.py](../scripts/replay_dlq.py) 按位置手动重放，详见第 6 节；不自动回投。
 
 ## 1. 操作前提与模式选择
 
@@ -173,3 +175,32 @@ $env:RAG_GRAPH_REPAIR_EMBEDDING_DIMENSIONS = '1024'
 正常完成查看 JSON 与日志中的资源 ID，区分复用、降级、跳过和已完成写入；只凭退出 0 不能断言所有目标都已修复。确认目标仍是预期 applied 身份，并从可信查询入口抽查可见正文/图证据。脚本没有 dry-run、在线调度或全历史回收功能。
 
 参数/状态复核/部分失败的替身测试见 [context repair tests](../tests/scripts/test_repair_context.py) 和 [graph repair tests](../tests/scripts/test_repair_graph.py)。示例不代表已经在业务环境执行。
+
+## 6. Kafka DLQ 手动重放
+
+主消费者仅做进程内 1/2/4 秒快速重试，然后进入 `<main>.DLT`；ValueError 直接进入 DLQ。没有延迟 topic 或自动回投。未知程序错误也只有三次等待，实际处理时间还包含业务调用耗时。发送 DLQ 确认后才提交原分区 offset。
+
+处理前用 Kafka 自带工具查看 `<main>.DLT` 各分区记录位置与错误 headers：rag-exception-type、rag-exception-message、rag-exception-traceback，定位并修复原因。最低运维要求是有人查看失败消息的积累；没有常驻 DLQ consumer group 时没有可直接使用的 consumer lag，需将 log end offset/消息量与人工已处理位置对照，不能把“topic 已创建”当监控已接入。
+
+脚本只重放明确的 DLQ 分区和起始 offset，count 默认 1。以下示例从仓库根目录执行，broker/topic/位置换成已确认目标：
+
+```powershell
+.\.venv\Scripts\python.exe .\services\wisepen-rag-service\scripts\replay_dlq.py `
+  --bootstrap-servers broker:9092 `
+  --topic wisepen-document-ready-topic `
+  --partition 0 --offset 42 --count 1
+```
+
+| 参数 | 语义 |
+|---|---|
+| --bootstrap-servers | 显式 broker 地址，不读取 Nacos |
+| --topic | 原主 topic；读取来源为 `<topic>.DLT` |
+| --partition、--offset | DLQ 分区与起始 offset，不是原主消息位置 |
+| --count | 最多重放条数，必须为正数；默认 1 |
+| --timeout-seconds | 单次读取/发送等待上限，默认 30 秒 |
+
+启动时固定 DLQ end offset，超过该位置的新记录不纳入本次操作。按照 DLQ headers 的原主 topic/partition 回投，保留原始 bytes、key 与业务 headers，移除 rag- 诊断 headers。目标 topic 必须匹配 --topic；缺少位置 header 或发送失败直接退出。脚本不修改消息正文，因此坏 JSON/错误字段应由上游修复并重新生成，原样重放不会修复坏数据。
+
+每条发送确认后打印 dlq_record_replayed，包含成功重放的 DLQ offset；完成打印 dlq_replay_completed。来源记录不删除，也不提交 DLQ offset。保存日志中的成功位置，失败后从未确认位置继续；发送超时可能实际已送达，重复由现有应用幂等承接。回投确认只代表进入主 topic，业务是否恢复应再检查主消费者结果、publication/ACL 或新 DLQ 记录。
+
+旧延迟 topic 不再被运行时消费；升级前若有遗留消息，应人工查看、归档并按原始位置处理，本轮没有执行线上 topic 删除或清空。对应脚本测试见 [replay tests](../tests/scripts/test_replay_dlq.py)。

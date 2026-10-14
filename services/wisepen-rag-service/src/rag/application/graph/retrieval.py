@@ -58,10 +58,10 @@ class GraphRetrieval:
         self._snapshot_reader = snapshot_reader
         self._graph_reader = graph_reader
         self._embedding_client = embedding_client
-        self._entity_reader = entity_reader          # 实体向量读取器
+        self._entity_reader = entity_reader  # 实体向量读取器
         self._relationship_reader = relationship_reader  # 关系向量读取器
-        self._fusion = fusion                        # 多路融合器
-        self._reranker = reranker                    # 排序阶段精排器
+        self._fusion = fusion  # 多路融合器
+        self._reranker = reranker  # 排序阶段精排器
 
     async def retrieve(
         self,
@@ -82,15 +82,9 @@ class GraphRetrieval:
     ) -> list[GraphHit]:
         """一次召回与证据组排序；授权或过期过滤后不补召回。"""
 
-        # 入参边界校验
-        if not query.strip():
-            raise ValueError("query must be nonempty")
-        if top_k <= 0:
-            raise ValueError("top_k must be a positive integer")
+        # 通用 query/top_k/diversity 检查由 Common Pipeline 在召回前执行。
         if candidate_limit < top_k:
             raise ValueError("candidate_limit must be at least top_k")
-        if diversity not in ("off", "moderate", "high"):
-            raise ValueError(f"unsupported diversity mode: {diversity}")
 
         # 归一化并校验邻居扩展参数
         direction = validate_graph_options(

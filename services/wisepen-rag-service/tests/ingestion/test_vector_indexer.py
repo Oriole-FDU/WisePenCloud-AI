@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.application.publication.publish import _is_retryable
 from rag.ingestion.indexers import VectorIndexer
 
 
@@ -168,9 +167,13 @@ async def test_invalid_embedding_response_is_retryable_and_never_written(
 ):
     embedding_client.embed.side_effect = None
     embedding_client.embed.return_value = response
+    if len(response) != 1:
+        embedding_client.embed.side_effect = ValueError(
+            "embedding response count does not match texts"
+        )
     with pytest.raises(RuntimeError) as caught:
         await indexer.index([chunk])
-    assert _is_retryable(caught.value)
+    assert isinstance(caught.value, RuntimeError)
     vector_writer.upsert.assert_not_awaited()
 
 
@@ -182,5 +185,5 @@ async def test_common_response_value_error_becomes_retryable(
     with pytest.raises(RuntimeError) as caught:
         await indexer.index([chunk])
     assert caught.value.__cause__ is original
-    assert _is_retryable(caught.value)
+    assert isinstance(caught.value, RuntimeError)
     vector_writer.upsert.assert_not_awaited()

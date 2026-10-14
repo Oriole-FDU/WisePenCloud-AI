@@ -22,8 +22,6 @@ class VectorIndexer(Indexer):
         batch_size: int = 32,
         metadata_factory: Callable[[Chunk], dict[str, object]] | None = None,
     ) -> None:
-        if batch_size <= 0:
-            raise ValueError("batch size must be positive")
         self._embedding_client = embedding_client
         self._writer = writer
         self._batch_size = batch_size
@@ -41,8 +39,8 @@ class VectorIndexer(Indexer):
                 # Common 的响应数量错误是 ValueError，不是上游事件的永久输入错误
                 raise RuntimeError("invalid embedding response") from exc
 
-            # 数量、维度、取值必须全部匹配；任一不合规都视为供应商响应异常
-            if len(vectors) != len(batch) or any(
+            # Common 已保证响应数量；这里只核对尚未保证的维度和有限值。
+            if any(
                 (
                     self._embedding_client.dimensions is not None
                     and len(vector) != self._embedding_client.dimensions

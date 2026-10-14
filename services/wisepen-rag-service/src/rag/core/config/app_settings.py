@@ -55,13 +55,13 @@ class AppSettings(BaseModel):
     KAFKA_ENABLED: bool = False
     KAFKA_BOOTSTRAP_SERVERS: str = ""
     KAFKA_MAX_POLL_INTERVAL_MS: int = 300_000
-    KAFKA_RESOURCE_ACL_RECALC_TOPIC: str = "wispen-resource-acl-recalc-topic"
-    KAFKA_RAG_ACL_RECALC_GROUP_ID: str = "wispen-rag-v4-acl-recalc-group"
+    KAFKA_RESOURCE_ACL_RECALC_TOPIC: str = "wisepen-resource-acl-recalc-topic"
+    KAFKA_RAG_ACL_RECALC_GROUP_ID: str = "wisepen-rag-v4-acl-recalc-group"
     KAFKA_DOCUMENT_READY_TOPIC: str = "wisepen-document-ready-topic"
     KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC: str = (
         "wisepen-resource-physical-destroy-topic"
     )
-    KAFKA_RAG_PUBLICATION_GROUP_ID: str = "wispen-rag-v4-publication-group"
+    KAFKA_RAG_PUBLICATION_GROUP_ID: str = "wisepen-rag-v4-publication-group"
 
     # 垂类扩展（可选）；列出允许启用的扩展名称，未列出的一律不注册
     EXTENSIONS: list[str] = Field(default_factory=list)

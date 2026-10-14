@@ -11,7 +11,9 @@ async def refresh_acl(synchronizer, resource_id):
     return await synchronizer.handle_event({"resourceId": resource_id})
 ```
 
-当前上游集合拼写为 `wispen_resource_items`，resource_id 必须可转 ObjectId。投影读取 ownerId、updateTime、用户 action masks 和 computedGroupAcls；VIEW 为 `1 << 1`。ResourceAcl.acl_revision 来自 updateTime 的 UTC 毫秒时间戳，用于本地更新准入，不是跨服务一致性 Fence。
+上游资源集合为 `wisepen_resource_items`，resource_id 必须可转 ObjectId，入口统一为规范小写身份。投影读取 ownerId、updateTime、用户 action masks 和 computedGroupAcls；VIEW 为 `1 << 1`。ResourceAcl.acl_revision 来自 updateTime 的 UTC 毫秒时间戳，用于本地更新准入，不是跨服务一致性 Fence。
+
+上游允许 specifiedUsersGrantedActionsMask、computedGroupAcls 顶层缺失或 null，分别表示没有指定用户权限、尚无群组投影。空对象同样合法。错误类型、非法用户/群组条目以及已有群组内的 baseMask/userMasks 缺项会抛 AuthoritativeAclError，不静默丢弃。RAG 自己保存的本地 ACL 始终包含全部列表字段，读取时严格解析，不用 str/int/bool 转换或空列表补齐掩盖损坏。上游核对证据及尚未修改的失败策略见[失败策略 Review](review-failure-strategies.md)。
 
 返回 repository 接受保存的资源 ID；权威记录不存在则删除本地 ACL，不计入成功列表。Mongo 接受不小于已有值的 acl_revision（包括相同 revision），旧 revision 不覆盖现值。必需字段损坏抛 AuthoritativeAclError，I/O 传播。默认 ACL topic/group 和消费者连接行为见[运行说明](deployment.md)。
 
@@ -27,6 +29,12 @@ async def refresh_acl(synchronizer, resource_id):
 | 6 | 无任何允许则拒绝 |
 
 判权按资源/Document，Chunk 与章节继承，不存在单块 ACL。PermissionScope 保存可信 user_id 和群组角色；公开业务参数不能让调用者自填用户或覆盖 ACL。Employment 可信 Header 入口见[示例](employment.md)。
+
+投影忠实保留上游 `userMasks` 对 `baseMask` 的覆盖：默认可读群组内的用户 mask=0 仍进入排除名单；该组拒绝不否决另一个组的有效授权。资源级指定用户 mask 则覆盖所有群组，包括群组管理员。仅投影 VIEW（bit 1），MARKET_VIEW（bit 9）不自动获得 RAG 正文读取权限。
+
+市场组的 `market_offer_version` 来自权威 `groupBinds.marketSaleInfo.offerVersion`，普通成员必须匹配当前 applied 文档版本；OWNER/ADMIN 和资源所有者的优先级与上游预计算快速判权一致。快照在选定版本后传入该版本判权，不引入另一份“当前版本”查询。
+
+旧本地群组 ACL 缺少 `market_offer_version` 时会在严格读取边界失败；需通过 ACL 同步重新生成完整投影，不能把未知的旧市场组投影默认为普通组放行。该字段由 Mongo ACL writer 保存，不属于 Document/Chunk metadata。
 
 ## 3. ResourceSnapshot 与 Reader
 

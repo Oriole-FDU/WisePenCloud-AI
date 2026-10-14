@@ -1,7 +1,6 @@
-"""用队列驱动真实传输编排，验证重试链、回投时序、DLQ 和基础设施失败边界。"""
+"""用队列驱动真实传输编排，验证快速重试、DLQ 和基础设施失败边界。"""
 
 import asyncio
-import json
 import time
 from collections import defaultdict
 from types import SimpleNamespace
@@ -10,24 +9,15 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from aiokafka import TopicPartition
 
-from rag.application.publication import (
-    DocumentPublication,
-    DocumentReadyEvent,
-    PublicationEventConsumer,
-)
 from rag.backends.kafka import (
     DeliveryHeader,
     KafkaConsumerClient,
     RetryPolicy,
-    RetryTopic,
 )
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer
-from rag.ingestion.pipeline import IngestionPipeline
 
 
 class Broker:
-    """仅替代 aiokafka I/O；消费者、重试和回投均执行生产代码。"""
+    """仅替代 aiokafka I/O；消费者与快速重试均执行生产代码。"""
 
     def __init__(self):
         self.queues = defaultdict(asyncio.Queue)
@@ -114,14 +104,13 @@ def broker(monkeypatch):
     return broker
 
 
-def client(handler, policy=None, is_retryable=None):
+def client(handler, policy=None):
     return KafkaConsumerClient(
         bootstrap_servers="localhost:9092",
         topic="main",
         group_id="group",
         handler=handler,
         retry_policy=policy,
-        is_retryable=is_retryable,
     )
 
 
@@ -146,9 +135,9 @@ async def test_success_decodes_wire_format_then_commits_exact_partition(broker, 
     broker.producer_factory.assert_called_once_with(
         bootstrap_servers="localhost:9092", acks="all", request_timeout_ms=30_000
     )
-    assert set(broker.clients) == {"main", "main-retry-1m", "main-retry-10m"}
+    assert set(broker.clients) == {"main"}
     kwargs = broker.factory.call_args_list[-1].kwargs
-    assert kwargs["max_poll_interval_ms"] >= 630_000
+    assert kwargs["max_poll_interval_ms"] == 300_000
     for consumer in broker.clients.values():
         consumer.stop.assert_awaited_once()
     broker.producer.stop.assert_awaited_once()
@@ -172,57 +161,27 @@ async def test_quick_retry_backoff_is_one_two_four_seconds_then_dlq(
     )
     assert waits == [1, 2, 4] and handler.await_count == 4
     assert broker.sent[0].topic == "main.DLT"
-    assert dict(broker.sent[0].headers)[DeliveryHeader.RETRY_COUNT] == b"3"
+    headers = dict(broker.sent[0].headers)
+    assert headers[DeliveryHeader.ORIGINAL_OFFSET] == b"10"
+    assert headers[DeliveryHeader.EXCEPTION_TYPE] == b"builtins.OSError"
+    assert b"Traceback" in headers[DeliveryHeader.EXCEPTION_TRACEBACK]
 
 
-async def test_five_retries_run_only_on_main_and_preserve_origin_key_and_bytes(broker):
-    stages = [RetryTopic("retry-1", 0.01), RetryTopic("retry-2", 0.01)]
-    policy = RetryPolicy(backoff_seconds=[0, 0, 0], delayed_retries=stages)
-    handler = AsyncMock(side_effect=OSError("中文错误"))
-    message = broker.record(headers=[("upstream", b"original")])
-    broker.put(message)
-    await run_until(client(handler, policy), broker, lambda: len(broker.commits) == 5)
-    assert handler.await_count == 6
-    assert [item.topic for item in broker.sent] == [
-        "retry-1",
-        "main",
-        "retry-2",
-        "main",
-        "main.DLT",
-    ]
-    for sent in broker.sent:
-        assert sent.value == message.value and sent.key == message.key
-        headers = dict(sent.headers)
-        assert headers[DeliveryHeader.ORIGINAL_TOPIC] == b"main"
-        assert headers[DeliveryHeader.ORIGINAL_PARTITION] == b"2"
-        assert headers[DeliveryHeader.ORIGINAL_OFFSET] == b"10"
-        assert headers["upstream"] == b"original"
-        if sent.topic == "main":
-            assert sent.partition == 2
-    terminal = dict(broker.sent[-1].headers)
-    assert terminal[DeliveryHeader.RETRY_COUNT] == b"5"
-    assert terminal[DeliveryHeader.EXCEPTION_TYPE] == b"builtins.OSError"
-    assert terminal[DeliveryHeader.EXCEPTION_MESSAGE].decode() == "中文错误"
-    assert b"OSError" in terminal[DeliveryHeader.EXCEPTION_TRACEBACK]
-    assert DeliveryHeader.AVAILABLE_AT not in terminal
-
-
-async def test_delayed_failure_does_not_block_later_main_message(broker):
-    calls = []
-    policy = RetryPolicy(
-        backoff_seconds=[], delayed_retries=[RetryTopic("retry", 0.05)]
+async def test_unknown_program_error_has_only_process_local_retry_budget(broker):
+    handler = AsyncMock(side_effect=KeyError("unexpected contract"))
+    broker.put(broker.record(headers=[("upstream", b"original")]))
+    await run_until(
+        client(handler, RetryPolicy(backoff_seconds=[0, 0, 0])),
+        broker,
+        lambda: len(broker.commits) == 1,
     )
-
-    async def handle(payload):
-        calls.append(payload["n"])
-        if payload["n"] == 1:
-            raise OSError("temporary failure")
-
-    broker.put(broker.record())
-    broker.put(broker.record(value=b'{"n":2}', offset=11))
-    await run_until(client(handle, policy), broker, lambda: len(broker.commits) == 4)
-    assert calls == [1, 2, 1]
-    assert broker.commits[1] == {TopicPartition("main", 2): 12}
+    assert handler.await_count == 4
+    assert set(broker.clients) == {"main"}
+    assert dict(broker.sent[0].headers)["upstream"] == b"original"
+    assert (
+        dict(broker.sent[0].headers)[DeliveryHeader.EXCEPTION_TYPE]
+        == b"builtins.KeyError"
+    )
 
 
 async def test_quick_retry_can_recover_without_forwarding(broker):
@@ -245,95 +204,24 @@ async def test_bad_message_is_forwarded_once_before_offset_commit(broker, value)
     handler.assert_not_awaited()
     assert len(broker.sent) == 1 and broker.sent[0].topic == "main.DLT"
     assert broker.sent[0].value == value and broker.sent[0].key is None
-    assert dict(broker.sent[0].headers)[DeliveryHeader.RETRY_COUNT] == b"0"
 
 
 async def test_permanent_handler_failure_goes_directly_to_dlq(broker):
     handler = AsyncMock(side_effect=ValueError("permanent conflict"))
     broker.put(broker.record())
     await run_until(
-        client(handler, is_retryable=lambda error: not isinstance(error, ValueError)),
+        client(handler),
         broker,
         lambda: len(broker.commits) == 1,
     )
     assert handler.await_count == 1
-    assert dict(broker.sent[0].headers)[DeliveryHeader.RETRY_COUNT] == b"0"
 
 
-def retry_headers(*, count=4, available_at=None):
-    headers = [
-        (DeliveryHeader.ORIGINAL_TOPIC, b"main"),
-        (DeliveryHeader.ORIGINAL_PARTITION, b"2"),
-        (DeliveryHeader.ORIGINAL_OFFSET, b"10"),
-        (DeliveryHeader.RETRY_COUNT, str(count).encode()),
-    ]
-    if available_at is not None:
-        headers.append((DeliveryHeader.AVAILABLE_AT, str(available_at).encode()))
-    return headers
-
-
-@pytest.mark.parametrize(
-    "change", ["count", "topic", "partition", "missing", "null", "partial"]
-)
-async def test_invalid_delivery_headers_are_dead_lettered_without_handler(
-    broker, change
-):
-    headers = dict(retry_headers())
-    if change == "count":
-        headers[DeliveryHeader.RETRY_COUNT] = b"99"
-    elif change == "topic":
-        headers[DeliveryHeader.ORIGINAL_TOPIC] = b"foreign-topic"
-    elif change == "partition":
-        headers[DeliveryHeader.ORIGINAL_PARTITION] = b"-1"
-    elif change == "null":
-        headers[DeliveryHeader.ORIGINAL_TOPIC] = None
-    elif change == "partial":
-        del headers[DeliveryHeader.RETRY_COUNT]
-    else:
-        del headers[DeliveryHeader.ORIGINAL_OFFSET]
-    handler = AsyncMock()
-    broker.put(broker.record(headers=list(headers.items())))
-    await run_until(client(handler), broker, lambda: len(broker.commits) == 1)
-    handler.assert_not_awaited()
-    assert broker.sent[0].topic == "main.DLT"
-
-
-@pytest.mark.parametrize(
-    "invalid", ["missing-deadline", "wrong-count", "unbounded-deadline"]
-)
-async def test_invalid_delayed_message_goes_to_dlq_without_business_handler(
-    broker, invalid
-):
-    policy = RetryPolicy(
-        backoff_seconds=[0, 0, 0], delayed_retries=[RetryTopic("retry", 0.01)]
-    )
-    available = (
-        None
-        if invalid == "missing-deadline"
-        else int(time.time() * 1000)
-        + (100_000 if invalid == "unbounded-deadline" else 1)
-    )
-    count = 3 if invalid == "wrong-count" else 4
-    handler = AsyncMock()
-    broker.put(
-        broker.record(
-            topic="retry", headers=retry_headers(count=count, available_at=available)
-        )
-    )
-    await run_until(client(handler, policy), broker, lambda: len(broker.commits) == 1)
-    handler.assert_not_awaited()
-    assert broker.sent[0].topic == "main.DLT"
-
-
-@pytest.mark.parametrize("target", ["retry", "dlq"])
-async def test_forward_failure_propagates_without_committing_source(broker, target):
+async def test_forward_failure_propagates_without_committing_source(broker):
     error = RuntimeError("broker publish failed")
     broker.producer.send_and_wait.side_effect = error
     handler = AsyncMock(side_effect=OSError("downstream failure"))
-    policy = RetryPolicy(
-        backoff_seconds=[],
-        delayed_retries=[RetryTopic("retry", 1)] if target == "retry" else [],
-    )
+    policy = RetryPolicy(backoff_seconds=[])
     broker.put(broker.record())
     with pytest.raises(RuntimeError) as caught:
         await client(handler, policy).run()
@@ -343,17 +231,17 @@ async def test_forward_failure_propagates_without_committing_source(broker, targ
     broker.producer.stop.assert_awaited_once()
 
 
-async def test_commit_failure_after_successful_forward_preserves_published_retry(
+async def test_commit_failure_after_successful_forward_preserves_published_dlq(
     broker,
 ):
     error = RuntimeError("commit failed")
     broker.commit_error = error
-    policy = RetryPolicy(backoff_seconds=[], delayed_retries=[RetryTopic("retry", 60)])
+    policy = RetryPolicy(backoff_seconds=[])
     broker.put(broker.record())
     with pytest.raises(RuntimeError) as caught:
         await client(AsyncMock(side_effect=OSError("downstream")), policy).run()
     assert caught.value is error and broker.commits == []
-    assert len(broker.sent) == 1 and broker.sent[0].topic == "retry"
+    assert len(broker.sent) == 1 and broker.sent[0].topic == "main.DLT"
 
 
 @pytest.mark.parametrize("stage", ["producer-start", "consumer-start", "getone"])
@@ -387,13 +275,6 @@ async def test_infrastructure_failure_closes_all_resources_and_propagates(
 def test_invalid_wait_budget_is_rejected_before_kafka_io(delay):
     with pytest.raises(ValueError):
         client(AsyncMock(), RetryPolicy(backoff_seconds=[delay]))
-    with pytest.raises(ValueError):
-        client(AsyncMock(), RetryPolicy(delayed_retries=[RetryTopic("retry", delay)]))
-
-
-def test_topic_collisions_are_rejected_before_kafka_io():
-    with pytest.raises(ValueError):
-        client(AsyncMock(), RetryPolicy(delayed_retries=[RetryTopic("main", 1)]))
 
 
 async def test_startup_signal_waits_for_producer_and_main_connection(broker):
@@ -443,54 +324,3 @@ async def test_send_deadline_stops_without_ack_and_closes_resources(broker):
     broker.producer.stop.assert_awaited_once()
     for connection in broker.clients.values():
         connection.stop.assert_awaited_once()
-
-
-async def test_delayed_old_revision_is_skipped_after_newer_main_revision_applies(
-    broker, storage, publication_store
-):
-    projection = SimpleNamespace(
-        index=AsyncMock(side_effect=[OSError("temporary failure"), None])
-    )
-    publisher = DocumentPublication(
-        store=publication_store,
-        reader=storage,
-        writer=storage,
-        pipeline=IngestionPipeline(
-            chunker=MarkdownChunker(),
-            transformers=[],
-            indexers=[ChunkFactsIndexer(writer=storage), projection],
-        ),
-    )
-    consumer = PublicationEventConsumer(
-        publisher=publisher,
-        bootstrap_servers="localhost:9092",
-        group_id="group",
-        document_ready_topic="main",
-        physical_destroy_topic="destroy",
-        content_retry_policy=RetryPolicy(
-            backoff_seconds=[], delayed_retries=[RetryTopic("retry", 0.05)]
-        ),
-        destroy_retry_policy=RetryPolicy(backoff_seconds=[]),
-    )
-    for version in [1, 2]:
-        payload = {"resourceId": "resource", "version": version, "content": "正文"}
-        broker.put(
-            broker.record(value=json.dumps(payload).encode(), offset=9 + version)
-        )
-    await run_until(consumer, broker, lambda: len(broker.commits) == 4)
-    assert projection.index.await_count == 2
-    state = (await publication_store.get_states(["resource"]))[0]
-    assert (
-        state.applied_revision.document_version == 2 and state.staged_revision is None
-    )
-    assert [item.topic for item in broker.sent] == ["retry", "main"]
-    old_revision = (
-        DocumentReadyEvent.model_validate(
-            {"resourceId": "resource", "version": 1, "content": "正文"}
-        )
-        .to_document()
-        .content_revision
-    )
-    assert await storage.get_revision_chunks(
-        resource_id="resource", content_revision=old_revision
-    )

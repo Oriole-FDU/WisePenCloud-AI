@@ -153,7 +153,6 @@ async def test_explicit_budgets_rrf_and_kind_namespace_preserve_sources(deps):
     [
         {"mode": "mix"},
         {"candidate_limit": 0},
-        {"candidate_limit": True},
         {"entity_top_k": 0},
         {"relationship_top_k": True},
         {"mode": "local", "entity_top_k": 2},
@@ -167,16 +166,9 @@ def test_invalid_configuration_before_io(deps, options):
 
 
 @pytest.mark.parametrize("mode", list(GraphRetrievalMode))
-def test_selected_routes_and_embedding_required(deps, mode):
+def test_selected_routes_require_their_reader(deps, mode):
     with pytest.raises(ValueError):
         GraphRetriever.from_storage(mode=mode, embedding_client=deps.embedding_client)
-    with pytest.raises(ValueError):
-        GraphRetriever.from_storage(
-            mode=mode,
-            embedding_client=None,
-            entity_reader=deps.entity_reader,
-            relationship_reader=deps.relationship_reader,
-        )
 
 
 async def test_empty_query_before_io(deps):
@@ -190,6 +182,10 @@ async def test_empty_query_before_io(deps):
 )
 async def test_embedding_boundary_errors_prevent_reader_io(deps, response):
     deps.embedding_client.embed.return_value = response
+    if len(response) != 1:
+        deps.embedding_client.embed.side_effect = ValueError(
+            "embedding response count does not match texts"
+        )
     with pytest.raises(RuntimeError, match="embedding"):
         await build(deps).retrieve("查询")
     deps.entity_reader.query.assert_not_awaited()

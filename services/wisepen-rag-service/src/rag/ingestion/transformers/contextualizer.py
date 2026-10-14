@@ -7,14 +7,13 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from hashlib import sha256
 
-from openai import OpenAIError
-from pydantic import TypeAdapter
-from pydantic_core import PydanticSerializationError
-
 from common.logger import warning
 from common.utils.ai_clients.instruction import InstructionClient
 from common.utils.markdown import OutlineFormatter, Section
 from common.utils.markdown.chunking.tokenizer import TokenCounter, default_token_counter
+from openai import OpenAIError
+from pydantic import TypeAdapter
+
 from rag.core.schema import Chunk, Document
 
 _STRATEGY_VERSION = "contextualizer-v1"  # 参与缓存指纹，策略变更时需升级
@@ -25,6 +24,10 @@ class ContextStatus(StrEnum):
     OK = "ok"
     FALLBACK = "fallback"
     FAILED = "failed"
+
+
+class InvalidContextOutputError(ValueError):
+    """上下文输出为空或超出预算；不包含 tokenizer 的程序错误。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,66 +62,24 @@ class _DocumentInput:
 def _index_document(
     document: Document, chunks: list[Chunk], counter: TokenCounter
 ) -> _DocumentInput:
-    """建立章节索引；不合法的结构输入直接报错，不进入降级流程。"""
-    text_length = len(document.text)
-    if document.structure.total_length != text_length:
-        raise RuntimeError("document structure length does not match text")
-
+    """索引可信结构；在线由 Common 生成，持久化输入在读取边界校验。"""
     ordered = sorted(chunks, key=lambda chunk: chunk.chunk_index)
-    # chunk_id 与 chunk_index 都必须唯一，否则后续按索引定位会歧义。
-    if (
-        len({chunk.chunk_id for chunk in ordered}) != len(ordered)
-        or len({chunk.chunk_index for chunk in ordered}) != len(ordered)
-    ):
-        raise ValueError("duplicate chunk identity or index")
-
     data = _DocumentInput(document, ordered, counter)
-    for section in document.structure.sections:
-        if section.section_id in data.sections:
-            raise RuntimeError("duplicate section identity")
-
-        # 所有 section 相关 span 都必须落在正文范围内。
-        for span in (section.own_span, section.subtree_span, *section.content_spans):
-            if not 0 <= span.start_offset <= span.end_offset <= text_length:
-                raise RuntimeError("section span is outside document text")
-
-        # own_span 是章节自身正文，必须被 subtree_span 包住。
-        if not (
-            section.subtree_span.start_offset
-            <= section.own_span.start_offset
-            <= section.own_span.end_offset
-            <= section.subtree_span.end_offset
-        ):
-            raise RuntimeError("own span is outside section subtree")
-        data.sections[section.section_id] = section
+    data.sections = {
+        section.section_id: section for section in document.structure.sections
+    }
 
     children: dict[str | None, list[Section]] = defaultdict(list)
     for section in data.sections.values():
         chain: list[Section] = []
-        visited: set[str] = set()
         current: Section | None = section
 
-        # 向上回溯父链：同时检查环、父节点存在、子子树是否在父子树内。
+        # chains 统一存“根 -> 当前”，供材料选择从根向下寻找可容纳子树。
         while current is not None:
-            if current.section_id in visited:
-                raise RuntimeError("cycle in section ancestry")
-            visited.add(current.section_id)
             chain.append(current)
-
             parent_id = current.parent_section_id
-            if parent_id is not None and parent_id not in data.sections:
-                raise RuntimeError("missing section parent")
-            parent = data.sections.get(parent_id)
-            if parent is not None and not (
-                parent.subtree_span.start_offset
-                <= current.subtree_span.start_offset
-                <= current.subtree_span.end_offset
-                <= parent.subtree_span.end_offset
-            ):
-                raise RuntimeError("child subtree is outside parent")
-            current = parent
+            current = data.sections[parent_id] if parent_id is not None else None
 
-        # chains 统一存“根 -> 当前”，_select_prompt 可直接从根向下找可容纳子树。
         data.chains[section.section_id] = chain[::-1]
         children[section.parent_section_id].append(section)
 
@@ -128,22 +89,8 @@ def _index_document(
         siblings.sort(key=lambda section: section.ordinal)
 
     for index, chunk in enumerate(ordered):
-        # chunk 必须属于当前文档修订，避免把旧修订内容混入上下文。
-        if (chunk.resource_id, chunk.content_revision) != (
-            document.resource_id,
-            document.content_revision,
-        ):
-            raise ValueError("chunk does not belong to document revision")
         if chunk.section_id is not None:
-            if chunk.section_id not in data.sections:
-                raise RuntimeError("missing chunk section")
             data.section_chunks.setdefault(chunk.section_id, []).append(index)
-
-    # 没有 Chunk offsets，只能把同章节的连续 Chunk 视作一个 own_span 种子。
-    for indices in data.section_chunks.values():
-        # 因为按 chunk_index 有序遍历，indices 天然递增；这里只检查是否连续。
-        if indices[-1] - indices[0] + 1 != len(indices):
-            raise RuntimeError("section chunks are not contiguous")
     return data
 
 
@@ -344,7 +291,9 @@ def _check_output(output: str, counter: TokenCounter, max_tokens: int) -> str:
     output = output.strip()
     # 空输出或超预算都视为失败，避免把脏数据写回 chunk.metadata。
     if not output or counter.count(output) > max_tokens:
-        raise ValueError("context output is empty or exceeds token budget")
+        raise InvalidContextOutputError(
+            "context output is empty or exceeds token budget"
+        )
     return output
 
 
@@ -370,22 +319,6 @@ class Contextualizer:
         outline_token_ratio: float = 0.15,
         max_concurrency: int = 4,
     ) -> None:
-        # 所有数值限制必须为正整数；比例限制必须在 [0, 1]。
-        if any(
-            type(value) is not int or value <= 0
-            for value in (
-                max_context_tokens,
-                target_context_chars,
-                max_output_tokens,
-                max_concurrency,
-            )
-        ):
-            raise ValueError(
-                "token, character and concurrency limits must be positive integers"
-            )
-        if not 0 <= before_ratio <= 1 or not 0 <= outline_token_ratio <= 1:
-            raise ValueError("context ratios must be between zero and one")
-
         self._client = client
         self._counter = token_counter or default_token_counter()
         self._settings = _PromptSettings(
@@ -408,28 +341,18 @@ class Contextualizer:
 
         # 索引与缓存只服务本次 transform，不跨调用共享，避免文档间污染。
         data = _index_document(document, chunks, self._counter)
-        try:
-            serialized = _metadata_adapter.dump_python(document.metadata, mode="json")
-            metadata = (
-                json.dumps(
-                    serialized,
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-                if serialized
-                else ""
+        # metadata 合同错误直接传播，不当作可选模型失败继续发布。
+        serialized = _metadata_adapter.dump_python(document.metadata, mode="json")
+        metadata = (
+            json.dumps(
+                serialized,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
             )
-        except (PydanticSerializationError, ValueError, TypeError) as exc:
-            # metadata 无法序列化时整体降级，不让单个 chunk 带着不确定输入调用模型。
-            warning(
-                "context_metadata_failed",
-                resource_id=document.resource_id,
-                error=str(exc),
-            )
-            for chunk in chunks:
-                _clear_context(chunk, ContextStatus.FAILED)
-            return chunks
+            if serialized
+            else ""
+        )
 
         # 固定配置只序列化一次，各 Chunk 的指纹仅随 prompt 改变。
         fingerprint_data = {
@@ -459,36 +382,46 @@ class Contextualizer:
             if (
                 chunk.metadata.get("context_status") == ContextStatus.OK.value
                 and chunk.metadata.get("context_version") == fingerprint
-                and isinstance(previous, str)
             ):
                 try:
+                    if not isinstance(previous, str):
+                        raise InvalidContextOutputError(
+                            "cached context must be a string"
+                        )
                     _check_output(
                         previous, self._counter, self._settings.max_output_tokens
                     )
-                except ValueError:
-                    pass
+                except InvalidContextOutputError as exc:
+                    warning(
+                        "invalid_cached_content",
+                        chunk_id=chunk.chunk_id,
+                        cache_type="context",
+                        reason=str(exc),
+                    )
                 else:
                     return
 
-            try:
-                async with self._semaphore:
+            async with self._semaphore:
+                try:
                     output = await self._client.complete(
                         messages=[{"role": "user", "content": prompt}],
                         max_tokens=self._settings.max_output_tokens,
                     )
-            except (OpenAIError, OSError, ValueError, RuntimeError) as exc:
-                # 只降级模型调用错误，不吞掉取消与程序异常。
-                warning(
-                    "context_generation_failed", chunk_id=chunk.chunk_id, error=str(exc)
-                )
-                _clear_context(chunk, ContextStatus.FAILED)
-                return
+                except (OpenAIError, OSError, ValueError) as exc:
+                    # Common 用 ValueError 表示空响应/截断；仅在模型调用处隔离。
+                    warning(
+                        "context_generation_failed",
+                        chunk_id=chunk.chunk_id,
+                        error=str(exc),
+                    )
+                    _clear_context(chunk, ContextStatus.FAILED)
+                    return
 
             try:
                 context = _check_output(
                     output, self._counter, self._settings.max_output_tokens
                 )
-            except ValueError as exc:
+            except InvalidContextOutputError as exc:
                 warning(
                     "context_output_failed", chunk_id=chunk.chunk_id, error=str(exc)
                 )

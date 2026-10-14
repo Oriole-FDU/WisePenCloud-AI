@@ -28,11 +28,11 @@ GC_BATCH_SIZE: 100
 # 本地调试不连 broker；GC 和检索组件仍正常工作。
 KAFKA_ENABLED: false
 # KAFKA_BOOTSTRAP_SERVERS: localhost:9092
-KAFKA_RESOURCE_ACL_RECALC_TOPIC: wispen-resource-acl-recalc-topic
-KAFKA_RAG_ACL_RECALC_GROUP_ID: wispen-rag-v4-acl-recalc-group
+KAFKA_RESOURCE_ACL_RECALC_TOPIC: wisepen-resource-acl-recalc-topic
+KAFKA_RAG_ACL_RECALC_GROUP_ID: wisepen-rag-v4-acl-recalc-group
 KAFKA_DOCUMENT_READY_TOPIC: wisepen-document-ready-topic
 KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC: wisepen-resource-physical-destroy-topic
-KAFKA_RAG_PUBLICATION_GROUP_ID: wispen-rag-v4-publication-group
+KAFKA_RAG_PUBLICATION_GROUP_ID: wisepen-rag-v4-publication-group
 
 # 按 extensions/__init__.py 的登记名称启用；图抽取示例还需完整 INSTRUCTION_*。
 EXTENSIONS: []

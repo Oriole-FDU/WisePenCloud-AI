@@ -1,4 +1,4 @@
-"""显式测试 broker 上验证真实消费、延迟回投、DLQ 与 offset 确认。"""
+"""显式测试 broker 上验证真实消费、快速重试、DLQ 与 offset 确认。"""
 
 import asyncio
 import json
@@ -11,7 +11,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 
 from rag.application.publication import PublicationEventConsumer
-from rag.backends.kafka import DeliveryHeader, RetryPolicy, RetryTopic
+from rag.backends.kafka import DeliveryHeader, RetryPolicy
 
 pytestmark = pytest.mark.kafka_integration
 
@@ -23,21 +23,8 @@ async def kafka_broker():
         pytest.skip("未配置 RAG_TEST_KAFKA_BOOTSTRAP_SERVERS，跳过真实 Kafka 测试")
     identity = uuid4().hex
     topics = [f"codex-rag-content-{identity}", f"codex-rag-destroy-{identity}"]
-    policies = [
-        RetryPolicy(
-            backoff_seconds=[0, 0, 0],
-            delayed_retries=[
-                RetryTopic(f"{topic}-retry-a", 0.05),
-                RetryTopic(f"{topic}-retry-b", 0.05),
-            ],
-        )
-        for topic in topics
-    ]
-    all_topics = [
-        *topics,
-        *[stage.topic for policy in policies for stage in policy.delayed_retries],
-        *[f"{topic}.DLT" for topic in topics],
-    ]
+    policies = [RetryPolicy(backoff_seconds=[0, 0, 0]) for _ in topics]
+    all_topics = [*topics, *[f"{topic}.DLT" for topic in topics]]
     group_id = f"codex-rag-publication-{identity}"
     admin = AIOKafkaAdminClient(bootstrap_servers=servers, request_timeout_ms=5000)
     producer = AIOKafkaProducer(bootstrap_servers=servers, request_timeout_ms=5000)
@@ -68,7 +55,7 @@ async def kafka_broker():
         await producer.stop()
         try:
             if created:
-                # 仅删除本 fixture 的随机主、重试与 DLQ topic，不触及业务 topic。
+                # 仅删除本 fixture 的随机主与 DLQ topic，不触及业务 topic。
                 await admin.delete_topics(all_topics)
         finally:
             await admin.close()
@@ -176,7 +163,7 @@ async def test_real_kafka_destroy_before_content_is_permanent_and_both_are_ackno
             await task
 
 
-async def test_real_kafka_retry_topics_return_to_main_then_dlq_keeps_original_record(
+async def test_real_kafka_quick_retry_then_dlq_keeps_original_record(
     kafka_broker, publication, publication_store, projection
 ):
     servers, topics, group_id, producer, observer, policies = kafka_broker
@@ -213,15 +200,14 @@ async def test_real_kafka_retry_topics_return_to_main_then_dlq_keeps_original_re
             == str(original.partition).encode()
         )
         assert headers[DeliveryHeader.ORIGINAL_OFFSET] == str(original.offset).encode()
-        assert headers[DeliveryHeader.RETRY_COUNT] == b"5"
         assert headers[DeliveryHeader.EXCEPTION_TYPE] == b"builtins.OSError"
-        assert projection.index.await_count == 6
+        assert projection.index.await_count == 4
         state = (await publication_store.get_states(["resource"]))[0]
         assert state.applied_revision is None and state.staged_revision is not None
-        # DLQ 发送与源确认分开，等候主分区确认最后一次回投记录。
+        # DLQ 发送与源确认分开，等候主分区确认原记录。
         partition = TopicPartition(original.topic, original.partition)
         await asyncio.wait_for(
-            wait_for_commit(observer, partition, original.offset + 3), timeout=45
+            wait_for_commit(observer, partition, original.offset + 1), timeout=45
         )
     finally:
         task.cancel()

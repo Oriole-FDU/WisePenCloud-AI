@@ -59,7 +59,7 @@ stage 优先检查销毁，再比较 staged/applied 最高版本；低版本跳�
 | 身份错误、未知 type | stage/事实写入前失败 |
 | 同最高版本内容冲突 | ContentConflictError；不能通过重试把冲突变成合法版本 |
 | Transformer/必需 Indexer 失败 | 停止后续阶段，不 apply；保留旧 applied、staged 及已完成写入 |
-| 回查事实不完整 | ContentIncompleteError；暂时不完整可重试 |
+| 回查事实不完整 | ContentIncompleteError；作为 ValueError 直接 DLQ，处理原因后人工重放 |
 | 条件 apply 期间状态被取代 | Store 重读分类；不能确定终态时抛 PublicationStateChangedError |
 
 Contextualizer 可以按组件合同降级后成功返回；注册链内 GraphExtractor/GraphIndexer 未处理异常仍阻止发布。独立图 repair 失败不撤销已有 applied，这与在线发布不同。
@@ -68,11 +68,11 @@ Contextualizer 可以按组件合同降级后成功返回；注册链内 GraphEx
 
 ## 5. Kafka 消费合同
 
-默认内容 topic 为 `wisepen-document-ready-topic`，物理销毁 topic 为 `wisepen-resource-physical-destroy-topic`；默认 publication group 为 `wispen-rag-v4-publication-group`。内容事件以 resourceId 作 Kafka key，由调用链保证同资源串行；销毁独立消费，不依赖跨 topic 顺序。
+默认内容 topic 为 `wisepen-document-ready-topic`，物理销毁 topic 为 `wisepen-resource-physical-destroy-topic`；默认 publication group 为 `wisepen-rag-v4-publication-group`。内容事件以 resourceId 作 Kafka key，由调用链保证同资源串行；销毁独立消费，不依赖跨 topic 顺序。
 
-RAG 使用自身 [Kafka 后端](../src/rag/backends/kafka/consumer.py)：快速重试 3 次，等待 1/2/4 秒，随后 `<main>-retry-1m` 和 `<main>-retry-10m` 各一次，再进入 `<main>.DLT`。正常链最多 6 次业务执行；崩溃/重复投递时不能承诺总次数或 exactly-once。
+RAG 使用自身 [Kafka 后端](../src/rag/backends/kafka/consumer.py)：进程内快速重试 3 次，等待 1/2/4 秒，仍失败进入 `<main>.DLT`。正常处理最多 4 次业务执行；崩溃/重复投递时不能承诺总次数或 exactly-once。
 
-坏 JSON/字段、身份错误、版本冲突直接 DLQ，事实暂时不完整和 I/O 走重试。延迟 relay 到期后回投主 topic 原分区，不直接执行业务。发送 retry/DLQ 确认后才提交输入 offset+1；发送或提交失败退出，由入口重启。保留 key、headers 和原始 payload，无 Kafka 事务，无自动 DLQ 重放。
+坏 JSON/字段、身份错误、版本冲突和其他 ValueError（包括 ContentIncompleteError）直接 DLQ；其他 handler 异常只快速重试，不加异常白名单。发送 DLQ 确认后才提交输入 offset+1；发送或提交失败退出，由入口重启。保留 key、业务 headers 和原始 payload，附带原位置与错误类型/消息/traceback，不写重试计数。无 Kafka 事务，无延迟层或自动 DLQ 回投；人工重放见[运维手册](operations.md)。
 
 消费 run 必须 await 并观察异常，主消费者真正连接后才 ready。topic 创建、权限及保留期由部署配置负责，详见[运行说明](deployment.md)。
 

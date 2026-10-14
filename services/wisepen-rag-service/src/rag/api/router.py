@@ -7,7 +7,7 @@ api_router = APIRouter()
 
 @api_router.get("/health")
 async def health(request: Request, response: Response) -> dict[str, str]:
-    ready = getattr(request.app.state, "ready", False)
+    ready = request.app.state.ready
     if not ready:
         response.status_code = 503
     return {

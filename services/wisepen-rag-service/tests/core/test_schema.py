@@ -133,7 +133,6 @@ def test_graph_edge_id_preserves_direction_relation_and_provenance():
 @pytest.mark.parametrize(
     ("context", "expected"),
     [
-        (None, " 原始正文\n"),
         ("", " 原始正文\n"),
         (" \t\n", " 原始正文\n"),
         ("  文档上下文\n ", "文档上下文\n\n 原始正文\n"),

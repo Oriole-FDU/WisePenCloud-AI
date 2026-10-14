@@ -20,6 +20,7 @@ from rag.container import Container
 from rag.core.schema.filters import FilterOperator
 from rag.extensions import register_extensions
 from rag.extensions.employment import EmploymentContainer
+from rag.extensions.employment.api import ContractSearch
 from rag.extensions.employment.metadata import (
     EmploymentMetadataTransformer,
     employment_projection,
@@ -533,9 +534,7 @@ async def test_invalid_business_query_has_no_io(employment_env, arguments):
     env.dedicated.query.reset_mock()
     env.embedding.embed.reset_mock()
     with pytest.raises(ValueError):
-        await env.extension.tools().search_contracts(
-            snapshot=env.snapshot(), **arguments
-        )
+        ContractSearch(**arguments)
     env.dedicated.query.assert_not_awaited()
     env.embedding.embed.assert_not_awaited()
 

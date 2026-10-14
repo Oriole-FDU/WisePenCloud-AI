@@ -43,6 +43,7 @@ class MongoResourceAclRepository(ResourceAclRepository):
                     "default_readable": group_acl.default_readable,
                     "readable_users": list(group_acl.readable_users),
                     "excluded_read_users": list(group_acl.excluded_read_users),
+                    "market_offer_version": group_acl.market_offer_version,
                 }
                 for group_acl in resource_acl.group_acls
             ],
@@ -90,20 +91,22 @@ class MongoResourceAclRepository(ResourceAclRepository):
 
 
 def _to_domain(record: Mapping[str, Any]) -> ResourceAcl:
-    """将 Mongo 文档转换为领域模型，缺失字段使用默认值。"""
+    """还原内部完整投影；类型由权威解析和本仓储 writer 保证，不再逐字段验证。"""
     return ResourceAcl(
-        resource_id=str(record["resource_id"]),
-        acl_revision=int(record["acl_revision"]),
-        owner_id=str(record["owner_id"]),
-        readable_users=list(record.get("readable_users", [])),
-        excluded_read_users=list(record.get("excluded_read_users", [])),
+        resource_id=record["resource_id"],
+        acl_revision=record["acl_revision"],
+        owner_id=record["owner_id"],
+        readable_users=record["readable_users"],
+        excluded_read_users=record["excluded_read_users"],
         group_acls=[
             GroupResourceAcl(
-                group_id=str(group["group_id"]),
-                default_readable=bool(group["default_readable"]),
-                readable_users=list(group.get("readable_users", [])),
-                excluded_read_users=list(group.get("excluded_read_users", [])),
+                group_id=group["group_id"],
+                default_readable=group["default_readable"],
+                readable_users=group["readable_users"],
+                excluded_read_users=group["excluded_read_users"],
+                # 新字段依赖旧投影重同步补齐，缺项不推断为普通群组权限。
+                market_offer_version=group["market_offer_version"],
             )
-            for group in record.get("group_acls", [])
+            for group in record["group_acls"]
         ],
     )
