@@ -10,13 +10,26 @@ from typing import Annotated, Any, ClassVar
 
 from common.core.exceptions import ServiceException
 from mcp.server.fastmcp import Context, FastMCP
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from wisepen_mcp.capabilities.core.tool_metadata import get_tool_config_value
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
 DEFAULT_SEARCH_RESULTS = 10
 MAX_SEARCH_RESULTS = 20
+
+# 公共域名只表达 hostname；不允许将 URL、路径或查询操作符带入供应商域名条件。
+SearchDomain = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        to_lower=True,
+        pattern=(
+            r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+            r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$"
+        ),
+    ),
+]
 
 
 class SearchMode(StrEnum):
@@ -53,6 +66,8 @@ class ProviderSearchRequest(BaseModel):
     mode: SearchMode = SearchMode.WEB
     focus: str | None = None
     recency: SearchRecency | None = None
+    include_domains: list[SearchDomain] | None = None
+    exclude_domains: list[SearchDomain] | None = None
     max_results: int = Field(
         default=DEFAULT_SEARCH_RESULTS,
         ge=1,
@@ -168,6 +183,7 @@ class BaseSearchTool(ABC):
     def register(self, mcp: FastMCP) -> None:
         hidden_parameters: set[str] = set()
         description = self.description
+        web_parameters = _keyword_parameters(self.search_web)
 
         if self._has_academic_search():
             description += (
@@ -178,7 +194,7 @@ class BaseSearchTool(ABC):
         else:
             hidden_parameters.add("mode")
 
-        if "focus" in _keyword_parameters(self.search_web):
+        if "focus" in web_parameters:
             description += (
                 "\n### Focused Extraction\n"
                 "Use `focus` for the specific fact, metric, comparison, or passage to "
@@ -189,7 +205,7 @@ class BaseSearchTool(ABC):
             hidden_parameters.add("focus")
 
         # 整个工具的实际搜索路径都接收四档 recency 才暴露，不生成按 mode 分支的 Schema。
-        if "recency" in _keyword_parameters(self.search_web) and (
+        if "recency" in web_parameters and (
             not self._has_academic_search()
             or "recency" in _keyword_parameters(self.search_academic)
         ):
@@ -201,6 +217,16 @@ class BaseSearchTool(ABC):
             )
         else:
             hidden_parameters.add("recency")
+
+        # 域名能力允许按模式不同；暴露网页能力，并明确说明学术路径不接收的参数。
+        for name in ["include_domains", "exclude_domains"]:
+            if name not in web_parameters:
+                hidden_parameters.add(name)
+            elif self._has_academic_search() and name not in _keyword_parameters(self.search_academic):
+                description += (
+                    f"\n`{name}` is supported only with mode='web'; "
+                    "do not use it with mode='academic'.\n"
+                )
 
         @wraps(self.execute)
         async def execute(**kwargs: Any) -> WebSearchToolResult:
@@ -261,6 +287,21 @@ class BaseSearchTool(ABC):
             SearchRecency | None,
             Field(description="Soft freshness preference: day, week, month, or year. Omit for no time restriction."),
         ] = None,
+        include_domains: Annotated[
+            list[SearchDomain] | None,
+            Field(description=(
+                "Restrict sources to these hostnames and their subdomains, "
+                "e.g. ['python.org', 'github.com']. No URLs, paths, ports, or wildcards. "
+                "Omit or use [] for no restriction."
+            )),
+        ] = None,
+        exclude_domains: Annotated[
+            list[SearchDomain] | None,
+            Field(description=(
+                "Exclude these hostnames and their subdomains. "
+                "No URLs, paths, ports, or wildcards. Omit or use [] for no exclusions."
+            )),
+        ] = None,
         max_results: Annotated[
             int,
             Field(
@@ -283,6 +324,8 @@ class BaseSearchTool(ABC):
             mode=mode if self._has_academic_search() else SearchMode.WEB,
             focus=focus.strip() if focus and focus.strip() else None,
             recency=recency,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
             max_results=max_results,
         )
 
@@ -303,6 +346,18 @@ class BaseSearchTool(ABC):
             if request.mode is SearchMode.ACADEMIC
             else self.search_web
         )
+        domain_filters = {
+            "include_domains": request.include_domains,
+            "exclude_domains": request.exclude_domains,
+        }
+        handler_parameters = _keyword_parameters(handler)
+        for name, domains in domain_filters.items():
+            # 不能让通用 kwargs 裁剪静默放宽调用方明确要求的来源约束。
+            if domains and name not in handler_parameters:
+                raise ServiceException(
+                    McpErrorCode.WEB_SEARCH_INVALID,
+                    f"{self.tool_name} does not support {name} with mode='{request.mode.value}'.",
+                )
         kwargs = _filter_search_kwargs(
             handler,
             query=request.query,
@@ -310,6 +365,7 @@ class BaseSearchTool(ABC):
             recency=request.recency,
             max_results=request.max_results,
             api_key=api_key,
+            **domain_filters,
         )
         response = await handler(**kwargs)
 

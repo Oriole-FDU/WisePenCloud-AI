@@ -19,15 +19,51 @@ from ..search_tools import (
 class FirecrawlSearchTool(BaseSearchTool):
     tool_name = "firecrawl_search"
     provider_name = "firecrawl"
+    description = BaseSearchTool.description + (
+        "\nFor this tool, include_domains and exclude_domains are mutually exclusive.\n"
+    )
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None, recency: SearchRecency | None = None) -> SearchResponse:
-        return await self._search(query=query, api_key=api_key, max_results=max_results, academic=False, recency=recency)
+    async def search_web(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        api_key: str | None,
+        recency: SearchRecency | None = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+    ) -> SearchResponse:
+        # 此限制来自供应商网页接口，不能把调用参数错误归为远端服务不可用。
+        if include_domains and exclude_domains:
+            raise ServiceException(
+                McpErrorCode.WEB_SEARCH_INVALID,
+                "Firecrawl include_domains and exclude_domains are mutually exclusive.",
+            )
+        return await self._search(
+            query=query,
+            api_key=api_key,
+            max_results=max_results,
+            academic=False,
+            recency=recency,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+        )
 
     async def search_academic(self, *, query: str, max_results: int, api_key: str | None, recency: SearchRecency | None = None) -> SearchResponse:
         return await self._search(query=query, api_key=api_key, max_results=max_results, academic=True, recency=recency)
 
 
-    async def _search(self, *, query: str, max_results: int, api_key: str | None, academic: bool, recency: SearchRecency | None) -> SearchResponse:
+    async def _search(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        api_key: str | None,
+        academic: bool,
+        recency: SearchRecency | None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+    ) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "Firecrawl API key is required.")
 
@@ -51,6 +87,10 @@ class FirecrawlSearchTool(BaseSearchTool):
                 data = await client.search_papers(query, k=max_results, **search_options)
             else:
                 search_options = {}
+                if include_domains:
+                    search_options["include_domains"] = include_domains
+                if exclude_domains:
+                    search_options["exclude_domains"] = exclude_domains
                 if recency is not None:
                     search_options["tbs"] = {
                         SearchRecency.DAY: "qdr:d",

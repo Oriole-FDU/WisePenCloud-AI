@@ -19,12 +19,25 @@ class TavilySearchTool(BaseSearchTool):
     tool_name = "tavily_search"
     provider_name = "tavily"
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None, recency: SearchRecency | None = None) -> SearchResponse:
+    async def search_web(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        api_key: str | None,
+        recency: SearchRecency | None = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+    ) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "Tavily API key is required.")
 
         # Tavily 按发表或更新时间过滤；未指定时不改变原请求参数。
         search_options = {"time_range": recency.value} if recency is not None else {}
+        if include_domains:
+            search_options["include_domains"] = include_domains
+        if exclude_domains:
+            search_options["exclude_domains"] = exclude_domains
 
         # 固定基础档与切片数，Search 不请求全文正文。
         try:

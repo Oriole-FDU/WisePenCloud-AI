@@ -25,7 +25,15 @@ class BaiduQianfanSearchTool(BaseSearchTool):
     def __init__(self, *, http_client: httpx.AsyncClient) -> None:
         self._http_client = http_client
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None, recency: SearchRecency | None = None) -> SearchResponse:
+    async def search_web(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        api_key: str | None,
+        recency: SearchRecency | None = None,
+        include_domains: list[str] | None = None,
+    ) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "Baidu Qianfan API key is required.")
 
@@ -35,9 +43,12 @@ class BaiduQianfanSearchTool(BaseSearchTool):
             "search_source": "baidu_search_v2",
             "resource_type_filter": [{"type": "web", "top_k": max_results}],
         }
+        if include_domains:
+            payload["search_filter"] = {"match": {"site": include_domains}}
         if recency is SearchRecency.DAY:
             today = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
-            payload["search_filter"] = {"range": {"page_time": {"gte": today, "lte": today}}}
+            # 日期范围与站点条件同属 search_filter，追加时不能覆盖已有的 match。
+            payload.setdefault("search_filter", {})["range"] = {"page_time": {"gte": today, "lte": today}}
         elif recency is not None:
             payload["search_recency_filter"] = recency.value
 

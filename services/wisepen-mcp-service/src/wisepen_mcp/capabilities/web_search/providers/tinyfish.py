@@ -22,17 +22,62 @@ class TinyFishSearchTool(BaseSearchTool):
     def __init__(self, *, http_client: httpx.AsyncClient) -> None:
         self._http_client = http_client
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None, focus: str | None = None) -> SearchResponse:
-        return await self._search(query=query, focus=focus, api_key=api_key, academic=False)
+    async def search_web(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        api_key: str | None,
+        focus: str | None = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+    ) -> SearchResponse:
+        return await self._search(
+            query=query,
+            focus=focus,
+            api_key=api_key,
+            academic=False,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+        )
 
-    async def search_academic(self, *, query: str, max_results: int, api_key: str | None, focus: str | None = None) -> SearchResponse:
-        return await self._search(query=query, focus=focus, api_key=api_key, academic=True)
+    async def search_academic(
+        self,
+        *,
+        query: str,
+        max_results: int,
+        api_key: str | None,
+        focus: str | None = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+    ) -> SearchResponse:
+        return await self._search(
+            query=query,
+            focus=focus,
+            api_key=api_key,
+            academic=True,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+        )
 
-    async def _search(self, *, query: str, focus: str | None, api_key: str | None, academic: bool) -> SearchResponse:
+    async def _search(
+        self,
+        *,
+        query: str,
+        focus: str | None,
+        api_key: str | None,
+        academic: bool,
+        include_domains: list[str] | None,
+        exclude_domains: list[str] | None,
+    ) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "TinyFish API key is required.")
 
         params: dict[str, object] = {"query": query, "purpose": focus} if focus else {"query": query}
+        if include_domains:
+            params["include_domains"] = ",".join(include_domains)
+        if exclude_domains:
+            params["exclude_domains"] = ",".join(exclude_domains)
         if academic:
             params["domain_type"] = "research_paper"
 

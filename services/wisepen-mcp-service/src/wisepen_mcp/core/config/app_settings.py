@@ -19,8 +19,8 @@ class AppSettings(BaseModel):
     RPC_DEFAULT_RETRIES: int = 2
     SERVICE_DISCOVERY_CACHE_TTL_SECONDS: float = 30.0
 
-    WEB_SEARCH_API_KEY: str = ""  # 平台默认搜索的 GLM 托管密钥，不接受请求侧覆盖。
-    WEB_SEARCH_GLM_BASE_URL: str = "https://open.bigmodel.cn/api/paas/v4"
+    WEB_SEARCH_API_KEY: str = ""  # 平台默认搜索的 DeepSeek 托管密钥，不接受请求侧覆盖。
+    WEB_SEARCH_DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     WEB_SEARCH_EXA_BASE_URL: str = "https://api.exa.ai"
     WEB_SEARCH_TAVILY_BASE_URL: str = "https://api.tavily.com"
     WEB_SEARCH_ANYSEARCH_BASE_URL: str = "https://api.anysearch.com"
@@ -28,7 +28,6 @@ class AppSettings(BaseModel):
     WEB_SEARCH_TINYFISH_BASE_URL: str = "https://api.search.tinyfish.ai"
     WEB_SEARCH_FIRECRAWL_BASE_URL: str = "https://api.firecrawl.dev"
     WEB_SEARCH_HTTP_TIMEOUT_SECONDS: float = 15.0
-    ZERO_ENTROPY_API_KEY: str = ""
     RERANKER_MODEL: str = "zerank-2"
 
 def _run_async(coro):
