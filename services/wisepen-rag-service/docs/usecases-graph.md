@@ -88,10 +88,10 @@ GraphRetrieval 返回 GraphRetrievalResult，三个并列列表：
 | 字段 | 内容 |
 |---|---|
 | entities | list[GraphEntity]；每个逻辑实体仅有 id、sources，不返回名称、本体、类别和本体允许提示 |
-| relationships | list[GraphRelationship]；id、source_id、target_id、relation_type、sources，保持有向谓词身份 |
+| relationships | list[GraphRelationship]；仅 id、sources，完整 ID 保持有向谓词身份 |
 | chunks | list[ChunkHit]；最终精排来源原文、定位、rank/score、seed_entities，以及排除内部 entities/relationships 后的 metadata |
 
-GraphEntity.sources 的每项为 chunk_id、description；GraphRelationship.sources 的每项为 chunk_id、description、keywords、metadata。后两项仍属于各自来源，不做跨来源并集或覆盖。description 可以为 null，相同描述来自不同 Chunk 时仍保留不同来源。关系外层 source_id/target_id 是实体端点，来源定位统一使用 sources[].chunk_id。逻辑对象及其来源均按首次出现保序，同逻辑 ID＋同 Chunk 只保留首份；不同谓词、反向边和自环保持原身份。
+GraphEntity.sources 的每项为 chunk_id、description；GraphRelationship.sources 的每项为 chunk_id、description、keywords、metadata。后两项仍属于各自来源，不做跨来源并集或覆盖。description 可以为 null，相同描述来自不同 Chunk 时仍保留不同来源。实体与关系结果的外层都只有 id/sources，来源定位统一使用 sources[].chunk_id。逻辑对象及其来源均按首次出现保序，同逻辑 ID＋同 Chunk 只保留首份；不同谓词、反向边和自环保持原身份。内部图运算仍使用核心 GraphEdge 的端点与谓词，不从应用结果 ID 反向解析字段。
 
 GraphTraversal 返回 GraphTraversalResult，仅有相同的 entities 和 relationships 应用模型。所有输入种子共享一份拓扑，不按种子包装，也不返回 kind、fact_id 或 Chunk 原文。种子实体先按请求顺序保留各可见来源，再加入实际选中关系两端的同来源实体，最后按逻辑 ID 收拢；不额外读取邻居在其他 Chunk 中的描述，不自动读取下一跳。多种子共享的关系只返回一次，各来源描述放在该关系的 sources 中。
 

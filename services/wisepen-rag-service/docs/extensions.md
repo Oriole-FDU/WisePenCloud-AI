@@ -122,7 +122,7 @@ async def follow_employment(traversal, node_ids, snapshot, direction=None):
     )
 ```
 
-本体条件允许共享命名空间的其他可见来源参与；限定具体资料时组合资源条件，不把业务年份塞进图过滤。每次显式一跳；图实体只返回 id/sources，图关系保留端点与谓词，来源描述独立保存在 sources 中。核心实体关系字段仍是本体提示，不进入图实体结果；ChunkHit.seed_entities 则提供授权后确认的连接。
+本体条件允许共享命名空间的其他可见来源参与；限定具体资料时组合资源条件，不把业务年份塞进图过滤。每次显式一跳；图实体与关系都只返回 id/sources，来源描述独立保存在 sources 中。核心实体关系字段仍是本体提示，不进入图实体结果；ChunkHit.seed_entities 则提供授权后确认的连接。
 
 Extension.api 是已注入用例的子应用，不创建/关闭客户端、不声明后台 lifespan。宿主同步 ready，关闭前撤销 ready。可信网关 Header 经 Common SecurityHeaderMiddleware 校验，再创建每请求 PermissionScope/ResourceSnapshot；公开 DTO 不允许声明身份。Employment 需要 FROM_SOURCE_SECRET，接口及错误码见[示例](employment.md)。
 

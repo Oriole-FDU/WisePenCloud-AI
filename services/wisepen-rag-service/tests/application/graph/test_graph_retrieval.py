@@ -75,7 +75,7 @@ async def test_grouped_sources_keep_descriptions_keywords_and_metadata_authorize
     # dataclass 与对外 JSON 都显式包含逻辑 ID，且不再暴露完整核心实体字段。
     serialized = TypeAdapter(type(result)).dump_python(result, mode="json")
     assert set(serialized["entities"][0]) == {"id", "sources"}
-    assert all("sources" in edge for edge in serialized["relationships"])
+    assert all(set(edge) == {"id", "sources"} for edge in serialized["relationships"])
     assert second.metadata["relationships"][0]["metadata"] == {
         "audit": {"extractor": "second"}
     }
@@ -149,7 +149,7 @@ async def test_shared_context_adds_global_endpoint_sources_without_their_relatio
     assert "d-无关公司描述" in {
         source.description for node in result.entities for source in node.sources
     }
-    assert {edge.relation_type for edge in result.relationships} == {"works_at"}
+    assert {edge.id for edge in result.relationships} == {env.facts[0][1][0].id}
     assert all(
         call.kwargs["limit"] is None for call in env.graph.get_neighbors.call_args_list
     )
@@ -533,9 +533,9 @@ async def test_local_expansion_options_do_not_change_global_relation_scope(graph
         neighbor_relation_types=["supplies"],
         neighbor_limit=1,
     )
-    assert {edge.relation_type for edge in result.relationships} == {
-        "supplies",
-        "works_at",
+    assert {edge.id for edge in result.relationships} == {
+        env.facts[1][1][0].id,
+        env.facts[0][1][0].id,
     }
     assert env.graph.get_neighbors.call_args_list[0].kwargs["limit"] == 1
 
@@ -603,9 +603,9 @@ async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ont
     groups = await env.traversal.traverse(
         [env.facts[0][0][0].id, nodes[0].id], snapshot=env.snapshot()
     )
-    assert {edge.relation_type for edge in groups.relationships} == {
-        "works_at",
-        "references",
+    assert {item.id for item in groups.relationships} == {
+        env.facts[0][1][0].id,
+        edge.id,
     }
     relation_record = next(iter(relation_writer.records.values()))
     env.relations[:] = [
@@ -621,7 +621,7 @@ async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ont
         assert {source.resource_id for source in hits.chunks} == (
             {"a", "c"} if mode is GraphRetrievalMode.LOCAL else {"a", "b", "c"}
         )
-        assert all(edge.relation_type == "works_at" for edge in hits.relationships)
+        assert {item.id for item in hits.relationships} == {env.facts[0][1][0].id}
         reader = (
             env.relation_reader
             if mode is GraphRetrievalMode.GLOBAL

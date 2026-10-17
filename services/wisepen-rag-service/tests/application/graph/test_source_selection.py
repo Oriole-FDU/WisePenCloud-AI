@@ -46,7 +46,7 @@ async def test_local_does_not_promote_neighbor_or_read_its_second_hop(graph_env)
         "query", snapshot=env.snapshot(), mode="local"
     )
     assert {node.id for node in result.entities} == {env.facts[0][0][0].id}
-    assert {edge.relation_type for edge in result.relationships} == {"works_at"}
+    assert {edge.id for edge in result.relationships} == {env.facts[0][1][0].id}
     limited = [
         call
         for call in env.graph.get_neighbors.call_args_list

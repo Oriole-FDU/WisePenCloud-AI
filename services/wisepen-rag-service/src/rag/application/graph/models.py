@@ -34,12 +34,9 @@ class GraphRelationshipSource:
 
 @dataclass(frozen=True, slots=True)
 class GraphRelationship:
-    """保留有向谓词拓扑，调用方不需要拆解关系 ID。"""
+    """以完整关系 ID 标识有向谓词事实，来源字段独立保留。"""
 
     id: str
-    source_id: str  # 起点实体 ID；来源 Chunk 在 sources 中。
-    target_id: str
-    relation_type: str
     sources: list[GraphRelationshipSource] = field(default_factory=list)
 
 
@@ -66,21 +63,15 @@ def group_relationships(edges: Iterable[GraphEdge]) -> list[GraphRelationship]:
     for edge in edges:
         grouped.setdefault(edge.id, {}).setdefault(edge.source_ids[0], edge)
 
-    relationships = []
-    for id, sources in grouped.items():
-        first = next(iter(sources.values()))
-        relationships.append(
-            GraphRelationship(
-                id,
-                first.source_id,
-                first.target_id,
-                first.relation_type,
-                [
-                    GraphRelationshipSource(
-                        chunk_id, edge.description, edge.keywords, edge.metadata
-                    )
-                    for chunk_id, edge in sources.items()
-                ],
-            )
+    return [
+        GraphRelationship(
+            id,
+            [
+                GraphRelationshipSource(
+                    chunk_id, edge.description, edge.keywords, edge.metadata
+                )
+                for chunk_id, edge in sources.items()
+            ],
         )
-    return relationships
+        for id, sources in grouped.items()
+    ]

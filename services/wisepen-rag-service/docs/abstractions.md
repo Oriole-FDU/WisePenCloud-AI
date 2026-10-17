@@ -115,4 +115,4 @@ Common [Candidate/检索 Pipeline](../../wisepen-common/src/common/utils/retriev
 
 prepare 在重排/MMR 前完成来源授权和当前事实核验。普通和图候选最终都转成 PreparedChunk；图上下文与 Chunk 精排结果并列返回，内部 payload 不进入结果。Common 重排失败保持召回顺序降级，其他阶段异常传播；授权过滤后不补召回。MMR 仅用于普通向量检索并使用已存向量；图检索移除 MMR，采用来源名额预选。文本预算和响应缓存属于上层调用者。
 
-图检索与 traversal 共用 [GraphEntity/GraphRelationship](../src/rag/application/graph/models.py) 应用模型：一个逻辑对象只返回一次，逐来源字段放入 sources。实体只保留 id/sources；关系保留有向端点和谓词，关键词及 metadata 归各来源。收拢发生在授权之后，不改写核心事实、不拼接描述，不改变 Chunk 来源池和精排单位。
+图检索与 traversal 共用 [GraphEntity/GraphRelationship](../src/rag/application/graph/models.py) 应用模型：一个逻辑对象只返回一次，实体与关系都只保留 id/sources，逐来源字段放入 sources；关系关键词及 metadata 归各来源。收拢发生在授权之后，不改写核心事实、不拼接描述，不改变 Chunk 来源池和精排单位。内部图运算仍使用核心 GraphEdge 的结构化端点与谓词，不解析返回 ID。

@@ -418,7 +418,7 @@ async def main() -> None:
         "",
         "向量 dense/sparse/hybrid 的候选替身刻意返回同一组记录，用于对照输出结构；不能据此推断真实检索模式的召回结果相同。vector_graph_disabled 演示 relations 为 null；其他向量案例启用全图连接查询。",
         "",
-        "图用例按逻辑 ID 收拢：实体只返回 id/sources，关系返回 id/起点/终点/谓词/sources，各来源描述独立保留。核心 GraphNode.id、GraphEdge.id 是计算属性，仅输入事实的序列化不包含它们；输入文件 computed_entity_ids 供核对。不要将核心 GraphNode.source_id（Chunk）与关系结果 source_id（起点实体）混淆。",
+        "图用例按逻辑 ID 收拢：实体与关系都只返回 id/sources，各来源描述独立保留。内部图运算使用核心模型的结构化端点与谓词，不解析返回 ID。核心 GraphNode.id、GraphEdge.id 是计算属性，仅输入事实的序列化不包含它们；输入文件 computed_entity_ids 供核对。核心 GraphNode.source_id 是来源 Chunk，GraphEdge.source_id 是起点实体，两者含义不同。",
         "",
         "## 固定数据",
         "",
@@ -427,6 +427,13 @@ async def main() -> None:
     for name, request, result, result_type in cases:
         adapter = TypeAdapter(result_type)
         data = adapter.dump_python(result, mode="json")
+        if not isinstance(result, list):
+            # 图结果只暴露逻辑 ID 与来源，核心端点和谓词不能重新混入响应。
+            assert all(
+                set(item) == {"id", "sources"}
+                for key in ("entities", "relationships")
+                for item in data[key]
+            )
         restored = adapter.validate_python(data)
         assert adapter.dump_python(restored, mode="json") == data
         encoded = json.dumps(data, ensure_ascii=False, indent=2)

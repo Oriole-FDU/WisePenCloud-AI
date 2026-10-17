@@ -17,9 +17,6 @@
   "relationships": [
     {
       "id": "work:Person:张三::works_at::work:Company:甲公司",
-      "source_id": "work:Person:张三",
-      "target_id": "work:Company:甲公司",
-      "relation_type": "works_at",
       "sources": [
         {
           "chunk_id": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14:chunk:0",

@@ -783,13 +783,7 @@ async def test_api_openapi_exposes_tool_result_contracts(employment_env):
         "chunk_id",
         "description",
     }
-    assert set(schemas["GraphRelationship"]["properties"]) == {
-        "id",
-        "source_id",
-        "target_id",
-        "relation_type",
-        "sources",
-    }
+    assert set(schemas["GraphRelationship"]["properties"]) == {"id", "sources"}
     assert set(schemas["GraphRelationshipSource"]["properties"]) == {
         "chunk_id",
         "description",

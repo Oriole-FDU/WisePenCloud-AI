@@ -175,22 +175,10 @@
       "type": "object"
     },
     "GraphRelationship": {
-      "description": "保留有向谓词拓扑，调用方不需要拆解关系 ID。",
+      "description": "以完整关系 ID 标识有向谓词事实，来源字段独立保留。",
       "properties": {
         "id": {
           "title": "Id",
-          "type": "string"
-        },
-        "source_id": {
-          "title": "Source Id",
-          "type": "string"
-        },
-        "target_id": {
-          "title": "Target Id",
-          "type": "string"
-        },
-        "relation_type": {
-          "title": "Relation Type",
           "type": "string"
         },
         "sources": {
@@ -202,10 +190,7 @@
         }
       },
       "required": [
-        "id",
-        "source_id",
-        "target_id",
-        "relation_type"
+        "id"
       ],
       "title": "GraphRelationship",
       "type": "object"

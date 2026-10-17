@@ -102,4 +102,4 @@ GraphEdge.id 为 `source_id::relation_type::target_id`，方向影响身份。�
 
 ResourcePublicationState/PublicationAction 属于[发布用例](usecases-publication.md)；ResourceAcl/PermissionScope 和 ResourceSnapshot 属于[授权用例](usecases-access.md)。它们不嵌入 Document/Chunk。
 
-ChunkHit、GraphRetrievalResult/GraphTraversalResult、DocumentOutline/SectionOutline/SectionText 和 GcReport 是各用例结果，不是数据库镜像模型。图结果的 GraphEntity 只包含 id 和 sources；GraphRelationship 包含 id、source_id、target_id、relation_type 和 sources，每个逻辑对象只出现一次。实体来源为 chunk_id/description，关系来源额外保留各自的 keywords/metadata；不拼接描述、不生成摘要、不合并不同来源的关键词。核心模型及持久化不变，应用实体不再暴露名称、本体、类别或本体允许提示。应用响应中的 score 表示最终排序阶段，不能一概解释成相似度或重排分数。
+ChunkHit、GraphRetrievalResult/GraphTraversalResult、DocumentOutline/SectionOutline/SectionText 和 GcReport 是各用例结果，不是数据库镜像模型。图结果的 GraphEntity 和 GraphRelationship 都只包含 id 和 sources，每个逻辑对象只出现一次。实体来源为 chunk_id/description，关系来源额外保留各自的 keywords/metadata；不拼接描述、不生成摘要、不合并不同来源的关键词。核心模型及持久化不变，应用实体不再暴露名称、本体、类别或本体允许提示，应用关系不再重复返回端点与谓词。内部运算使用核心模型的结构化字段，不解析返回 ID。应用响应中的 score 表示最终排序阶段，不能一概解释成相似度或重排分数。

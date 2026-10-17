@@ -8,7 +8,7 @@ ChunkHit.metadata 在响应组装时排除 entities、relationships；输入文�
 
 向量 dense/sparse/hybrid 的候选替身刻意返回同一组记录，用于对照输出结构；不能据此推断真实检索模式的召回结果相同。vector_graph_disabled 演示 relations 为 null；其他向量案例启用全图连接查询。
 
-图用例按逻辑 ID 收拢：实体只返回 id/sources，关系返回 id/起点/终点/谓词/sources，各来源描述独立保留。核心 GraphNode.id、GraphEdge.id 是计算属性，仅输入事实的序列化不包含它们；输入文件 computed_entity_ids 供核对。不要将核心 GraphNode.source_id（Chunk）与关系结果 source_id（起点实体）混淆。
+图用例按逻辑 ID 收拢：实体与关系都只返回 id/sources，各来源描述独立保留。内部图运算使用核心模型的结构化端点与谓词，不解析返回 ID。核心 GraphNode.id、GraphEdge.id 是计算属性，仅输入事实的序列化不包含它们；输入文件 computed_entity_ids 供核对。核心 GraphNode.source_id 是来源 Chunk，GraphEdge.source_id 是起点实体，两者含义不同。
 
 ## 固定数据
 
@@ -48,9 +48,6 @@ employment-a、employment-b 都记录张三任职于甲公司；supply-c 记录�
   "relationships": [
     {
       "id": "work:Person:张三::works_at::work:Company:甲公司",
-      "source_id": "work:Person:张三",
-      "target_id": "work:Company:甲公司",
-      "relation_type": "works_at",
       "sources": [
         {
           "chunk_id": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14:chunk:0",
@@ -213,9 +210,6 @@ employment-a、employment-b 都记录张三任职于甲公司；supply-c 记录�
   "relationships": [
     {
       "id": "work:Person:张三::works_at::work:Company:甲公司",
-      "source_id": "work:Person:张三",
-      "target_id": "work:Company:甲公司",
-      "relation_type": "works_at",
       "sources": [
         {
           "chunk_id": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14:chunk:0",
@@ -421,9 +415,6 @@ employment-a、employment-b 都记录张三任职于甲公司；supply-c 记录�
   "relationships": [
     {
       "id": "work:Person:张三::works_at::work:Company:甲公司",
-      "source_id": "work:Person:张三",
-      "target_id": "work:Company:甲公司",
-      "relation_type": "works_at",
       "sources": [
         {
           "chunk_id": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14:chunk:0",
@@ -1020,9 +1011,6 @@ employment-a、employment-b 都记录张三任职于甲公司；supply-c 记录�
   "relationships": [
     {
       "id": "work:Person:张三::works_at::work:Company:甲公司",
-      "source_id": "work:Person:张三",
-      "target_id": "work:Company:甲公司",
-      "relation_type": "works_at",
       "sources": [
         {
           "chunk_id": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14:chunk:0",
@@ -1108,9 +1096,6 @@ employment-a、employment-b 都记录张三任职于甲公司；supply-c 记录�
   "relationships": [
     {
       "id": "work:Company:甲公司::supplies::work:Company:乙公司",
-      "source_id": "work:Company:甲公司",
-      "target_id": "work:Company:乙公司",
-      "relation_type": "supplies",
       "sources": [
         {
           "chunk_id": "supply-c@1#d71cc9c5cdfea76f673f099e75472b3e7b3d5da57a12fb5abb8f79b7af96926a:chunk:0",
@@ -1124,9 +1109,6 @@ employment-a、employment-b 都记录张三任职于甲公司；supply-c 记录�
     },
     {
       "id": "work:Person:张三::works_at::work:Company:甲公司",
-      "source_id": "work:Person:张三",
-      "target_id": "work:Company:甲公司",
-      "relation_type": "works_at",
       "sources": [
         {
           "chunk_id": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14:chunk:0",
@@ -1213,9 +1195,6 @@ employment-a、employment-b 都记录张三任职于甲公司；supply-c 记录�
   "relationships": [
     {
       "id": "work:Company:甲公司::supplies::work:Company:乙公司",
-      "source_id": "work:Company:甲公司",
-      "target_id": "work:Company:乙公司",
-      "relation_type": "supplies",
       "sources": [
         {
           "chunk_id": "supply-c@1#d71cc9c5cdfea76f673f099e75472b3e7b3d5da57a12fb5abb8f79b7af96926a:chunk:0",
@@ -1229,9 +1208,6 @@ employment-a、employment-b 都记录张三任职于甲公司；supply-c 记录�
     },
     {
       "id": "work:Person:张三::works_at::work:Company:甲公司",
-      "source_id": "work:Person:张三",
-      "target_id": "work:Company:甲公司",
-      "relation_type": "works_at",
       "sources": [
         {
           "chunk_id": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14:chunk:0",

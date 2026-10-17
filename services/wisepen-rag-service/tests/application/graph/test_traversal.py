@@ -35,12 +35,14 @@ async def test_one_hop_direction_types_and_original_edge_direction(
         [company], snapshot=env.snapshot(), direction=direction, relation_types=types
     )
     assert result.entities[0].id == company
-    assert {edge.relation_type for edge in result.relationships} == expected
-    assert all(
-        edge.target_id == company
-        for edge in result.relationships
-        if edge.relation_type == "works_at"
-    )
+    # 以核心事实的完整 ID 核对方向与谓词，不反向拆解应用结果 ID。
+    expected_edges = {
+        edge.id: edge
+        for _, edges in env.facts
+        for edge in edges
+        if edge.relation_type in expected
+    }
+    assert {edge.id for edge in result.relationships} == set(expected_edges)
     assert {source.chunk_id for node in result.entities for source in node.sources} == {
         chunk.chunk_id for chunk in env.chunks
     }
@@ -53,7 +55,10 @@ async def test_one_hop_direction_types_and_original_edge_direction(
                 for node in result.entities
                 for source in node.sources
             }
-            for key in (edge.source_id, edge.target_id)
+            for key in (
+                expected_edges[edge.id].source_id,
+                expected_edges[edge.id].target_id,
+            )
             for source in edge.sources
         )
         for edge in result.relationships
@@ -93,7 +98,7 @@ async def test_neighbor_descriptions_only_come_from_selected_relationship_source
     }
     assert company_sources == {env.chunks[0].chunk_id, env.chunks[2].chunk_id}
     env.graph.get_nodes.assert_awaited_once_with([person], filters=None)
-    assert {edge.relation_type for edge in result.relationships} == {"works_at"}
+    assert {edge.id for edge in result.relationships} == {env.facts[0][1][0].id}
 
 
 async def test_two_explicit_calls_cross_visible_documents_without_automatic_second_hop(
@@ -105,7 +110,7 @@ async def test_two_explicit_calls_cross_visible_documents_without_automatic_seco
     first = await env.traversal.traverse(
         [person], snapshot=snapshot, direction="outgoing", relation_types=["works_at"]
     )
-    assert {edge.relation_type for edge in first.relationships} == {"works_at"}
+    assert {edge.id for edge in first.relationships} == {env.facts[0][1][0].id}
     assert {source.chunk_id for node in first.entities for source in node.sources} == {
         env.chunks[0].chunk_id,
         env.chunks[2].chunk_id,
@@ -114,7 +119,7 @@ async def test_two_explicit_calls_cross_visible_documents_without_automatic_seco
     second = await env.traversal.traverse(
         [company], snapshot=snapshot, direction="outgoing", relation_types=["supplies"]
     )
-    assert {edge.target_id for edge in second.relationships} == {env.facts[1][0][1].id}
+    assert {edge.id for edge in second.relationships} == {env.facts[1][1][0].id}
     assert env.graph.get_neighbors.await_count == 2
 
 
@@ -188,11 +193,13 @@ async def test_self_loop_reverse_and_different_predicates_keep_identity(
     await storage.upsert_chunks([chunk])
     env.graph.edges.extend([reverse, loop])
     result = await env.traversal.traverse([nodes[0].id], snapshot=env.snapshot())
-    selected = [
-        edge for edge in result.relationships if edge.relation_type == "supplies"
-    ]
-    assert {edge.id for edge in selected} == {edges[0].id, reverse.id, loop.id}
-    assert len(selected) == 3
+    assert {edge.id for edge in result.relationships} == {
+        env.facts[0][1][0].id,
+        edges[0].id,
+        reverse.id,
+        loop.id,
+    }
+    assert len(result.relationships) == 4
 
 
 async def test_stale_projection_cannot_expand_deleted_root_or_deleted_endpoint(
@@ -212,7 +219,7 @@ async def test_stale_projection_cannot_expand_deleted_root_or_deleted_endpoint(
     env.graph.get_neighbors.assert_not_awaited()
     company = env.facts[0][0][1].id
     result = await env.traversal.traverse([company], snapshot=env.snapshot())
-    assert {edge.relation_type for edge in result.relationships} == {"supplies"}
+    assert {edge.id for edge in result.relationships} == {env.facts[1][1][0].id}
 
 
 async def test_empty_ids_no_io_and_depth_is_not_an_available_parameter(
@@ -303,9 +310,7 @@ async def test_ontology_filter_uses_current_facts_and_keeps_source_scope(
         if item.id == env.facts[0][0][0].id
         for source in item.sources
     } == {env.chunks[2].chunk_id}
-    assert all(
-        node.id not in (edge.source_id, edge.target_id) for edge in result.relationships
-    )
+    assert {edge.id for edge in result.relationships} == {env.facts[0][1][0].id}
 
 
 async def test_stale_ontology_projection_cannot_confirm_a_seed(graph_env, storage):
