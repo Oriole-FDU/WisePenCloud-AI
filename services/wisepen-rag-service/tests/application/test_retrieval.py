@@ -9,8 +9,8 @@ import pytest
 from common.utils.retrieval import ModelReranker, RrfFusion
 
 from rag.application.acl.models import PermissionScope, ResourceAcl
+from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.retrieval import VectorRetrieval
-from rag.application.snapshot import ResourceSnapshot
 from rag.core.schema import ContentRevision
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
 from rag.storage.vector import VectorMatch

@@ -107,7 +107,7 @@ extra storage 登记后由平台初始化并共享 GC；业务 adapter 不管理
 
 业务工具保留参数约束，将员工/年份等翻译为 MetadataFilters，再调用绑定专用集合的通用 [VectorRetrieval](usecases-vector.md)。不重复实现 Retriever/prepare、授权回查或排序，不在授权后再次解析业务 DTO。写入时业务 DTO 可校验，读取直接返回通用 ChunkHit。
 
-图工具只传通用参数与[允许的图筛选](usecases-graph.md)，返回 GraphHit/GraphEvidence，不二次加载转换。示例：
+图工具只传通用参数与[允许的图筛选](usecases-graph.md)，分别返回 GraphRetrievalResult/GraphTraversalResult，不二次加载转换。示例：
 
 ```python
 # example: ontology-scoped-graph
@@ -122,7 +122,7 @@ async def follow_employment(traversal, node_ids, snapshot, direction=None):
     )
 ```
 
-本体条件允许共享命名空间的其他可见来源参与；限定具体资料时组合资源条件，不把业务年份塞进图过滤。每次一跳，提示不承诺当前关系存在。
+本体条件允许共享命名空间的其他可见来源参与；限定具体资料时组合资源条件，不把业务年份塞进图过滤。每次显式一跳；图实体只返回 id/sources，图关系保留端点与谓词，来源描述独立保存在 sources 中。核心实体关系字段仍是本体提示，不进入图实体结果；ChunkHit.seed_entities 则提供授权后确认的连接。
 
 Extension.api 是已注入用例的子应用，不创建/关闭客户端、不声明后台 lifespan。宿主同步 ready，关闭前撤销 ready。可信网关 Header 经 Common SecurityHeaderMiddleware 校验，再创建每请求 PermissionScope/ResourceSnapshot；公开 DTO 不允许声明身份。Employment 需要 FROM_SOURCE_SECRET，接口及错误码见[示例](employment.md)。
 

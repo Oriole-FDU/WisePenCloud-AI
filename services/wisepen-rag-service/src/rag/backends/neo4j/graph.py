@@ -310,10 +310,10 @@ class Neo4jGraphStorage(GraphStorage):
         direction: GraphDirection = GraphDirection.OUTGOING,
         relation_types: list[str] | None = None,
         filters: MetadataFilters | None = None,
-        limit: int = 100,
+        limit: int | None = 100,
     ) -> list[GraphEdge]:
         direction = GraphDirection(direction)
-        if type(limit) is not int or limit <= 0:
+        if limit is not None and (type(limit) is not int or limit <= 0):
             raise ValueError("neighbor limit must be a positive integer")
         expression, parameters = (
             compile_filters(filters) if filters is not None else ("true", {})
@@ -329,6 +329,8 @@ class Neo4jGraphStorage(GraphStorage):
             GraphDirection.BOTH: "(source.node_id IN $ids OR target.node_id IN $ids)",
         }[direction]
 
+        # 完整连接发现不截断；检索和 traversal 仍使用原有数字预算。
+        limit_clause = "" if limit is None else "LIMIT $limit"
         records = await self._read(
             f"""// graph:get_neighbors
             MATCH (r:{self._relation})-[:RAG_FROM]->(source:{self._entity}),
@@ -336,7 +338,7 @@ class Neo4jGraphStorage(GraphStorage):
                 (s:{self._source})-[:RAG_EDGE_FACT]->(r)
             WHERE {endpoint} AND ($relation_types IS NULL OR r.relation_type IN $relation_types)
             AND {expression}
-            WITH DISTINCT r ORDER BY r.edge_id LIMIT $limit
+            WITH DISTINCT r ORDER BY r.edge_id {limit_clause}
             MATCH (s:{self._source})-[fact:RAG_EDGE_FACT]->(r)
             WHERE {expression}
             RETURN r.edge_id AS id, s.chunk_id AS chunk_id, fact.payload AS payload

@@ -56,6 +56,32 @@ def resource_filter(resource):
     return MetadataFilters([MetadataFilter("resource_id", resource)])
 
 
+async def test_unlimited_neighbors_omit_cypher_limit_and_keep_all_sources(driver):
+    storage = Neo4jGraphStorage(driver=driver)
+    first = projection("first")
+    first = replace(
+        first,
+        edges=[
+            replace(first.edges[0], relation_type=f"r_{index:03}")
+            for index in range(105)
+        ],
+    )
+    second = projection("second")
+    second = replace(
+        second, edges=[replace(edge, source_ids=["second"]) for edge in first.edges]
+    )
+    await storage.replace_sources([first, second])
+    assert len(await storage.get_neighbors([first.nodes[0].id])) == 200
+    edges = await storage.get_neighbors([first.nodes[0].id], limit=None)
+    assert len(edges) == 210 and len({edge.id for edge in edges}) == 105
+    query = next(
+        query
+        for operation, query, _ in reversed(driver.calls)
+        if operation == "get_neighbors"
+    )
+    assert "LIMIT $limit" not in query
+
+
 async def test_shared_entities_relationships_keep_all_source_facts_and_request_order(
     driver,
 ):

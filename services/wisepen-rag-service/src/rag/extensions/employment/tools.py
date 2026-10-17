@@ -1,14 +1,14 @@
 """把通用图检索、traversal、章节读取组合成任职工具，仍以来源为授权单位。"""
 
+from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.graph import (
-    GraphEvidence,
-    GraphHit,
     GraphRetrieval,
+    GraphRetrievalResult,
     GraphTraversal,
+    GraphTraversalResult,
 )
 from rag.application.reading import DocumentReading
 from rag.application.retrieval import ChunkHit, VectorRetrieval
-from rag.application.snapshot import ResourceSnapshot
 from rag.core.schema.filters import FilterOperator, MetadataFilter, MetadataFilters
 from rag.retrievers.graph import GraphRetrievalMode
 from rag.retrievers.vector import VectorRetrievalMode
@@ -67,7 +67,7 @@ class EmploymentTools:
         snapshot: ResourceSnapshot,
         mode: GraphRetrievalMode = GraphRetrievalMode.HYBRID,
         top_k: int = 10,
-    ) -> list[GraphHit]:
+    ) -> GraphRetrievalResult:
         return await self._graph_retrieval.retrieve(
             query,
             snapshot=snapshot,
@@ -82,8 +82,8 @@ class EmploymentTools:
         node_ids: list[str],
         *,
         snapshot: ResourceSnapshot,
-        direction: GraphDirection | None = GraphDirection.OUTGOING,
-    ) -> list[GraphEvidence]:
+        direction: GraphDirection = GraphDirection.OUTGOING,
+    ) -> GraphTraversalResult:
         return await self._graph_traversal.traverse(
             node_ids,
             snapshot=snapshot,

@@ -56,7 +56,7 @@
 
 代码：[chunk_seed_entities](../src/rag/application/retrieval.py)。测试：[Chunk seeds](../tests/application/graph/test_chunk_seeds.py)。
 
-**当前选择与设计意图**：正文优先于附加图信息。图字段完全缺失是正常空种子；图事实解析抛 GraphFactValidationError 时 warning 并返回空种子。try 只包解析调用；程序 TypeError、其他 ValueError 和结果组装异常传播，不新增结果字段。
+**当前选择与设计意图**：正文优先于附加图信息。图字段完全缺失是正常空种子；图事实解析抛 GraphFactValidationError 时 warning 并返回空种子。try 只包解析调用；程序 TypeError、其他 ValueError 和结果组装异常传播。全图连接提示另有明确语义：未启用图为 null，无确认到的连接为 []；启用后的图 I/O 和关系来源解析失败传播。
 
 **合理性**：图种子是后续探索的附加能力，不能撤销已授权的正文命中。与 A13 的区别：上下文是 Chunk 自身参与索引的字段，图种子是附加能力；前者不允许强制字符串化掩盖错误类型，后者可以在已知解析失败时隔离。
 

@@ -20,7 +20,7 @@
 
 - 原计划：历史方案有独立图向量阶段和旧结果对象，见 [09](archive/09-VectorStorage%20与%20GraphStorage%20最小存储合同.md)、[24](archive/24-graph-vector-retriever-implementation.md)。
 - 变更原因：两种投影消费同一来源事实，需要共用解析和来源身份。
-- 现状：GraphIndexer 先拓扑再实体/关系来源向量，结果为 GraphHit/GraphEvidence，见[抽象](abstractions.md)及[图用例](usecases-graph.md)。
+- 现状：GraphIndexer 先拓扑再实体/关系来源向量，图搜索结果为 GraphRetrievalResult，显式探索结果为 GraphTraversalResult，见[抽象](abstractions.md)及[图用例](usecases-graph.md)。
 - 注意：没有 GraphVectorIndexer/graph_vector.py 或 Receipt；成功缓存不证明投影已写成功。旧名在 archive 出现不表示要恢复接口。
 
 ## 4. 本体约束写入，图读取不绑定本体（实施记录 25、30）
@@ -28,7 +28,7 @@
 - 原计划：早期图查询资料按单一本体组织，见 [06](archive/06-Chunk%20模型与%20LightRAG%20图谱查询合同.md)、[25](archive/25-graph-application-implementation.md)。
 - 变更原因：通用查询要允许共存本体并从当前来源事实验证证据，而不是用查询侧本体配置筛掉历史事实。
 - 现状：写入绑定 Ontology，查询使用通用事实解析与三个来源/本体筛选字段，见 [30](archive/30-graph-ontology-filter-implementation.md)和[图用例](usecases-graph.md)。
-- 注意：GraphNode.relations 只是允许关系提示，不是可见关系。旧拓扑缺 ontology_name、旧向量缺 fact_sha256 需要显式投影维护。
+- 注意：GraphNode.relations 只是允许关系提示；应用 ChunkHit.seed_entities.relations 则按全图当前授权事实确认，未启用图时为 null。旧拓扑缺 ontology_name、旧向量缺 fact_sha256 需要显式投影维护。
 
 ## 5. 向量初始化从后端配置收敛为显式声明（2026-10-13）
 

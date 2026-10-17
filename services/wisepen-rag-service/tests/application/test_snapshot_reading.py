@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from rag.application.acl.models import PermissionScope, ResourceAcl
-from rag.application.snapshot import ResourceSnapshot
+from rag.application.common.snapshot import ResourceSnapshot
 
 
 async def test_documents_omit_invisible_and_missing_facts_preserving_order(

@@ -5,7 +5,7 @@ from enum import StrEnum
 
 from common.utils.markdown import OutlineFormatter, Section
 
-from rag.application.snapshot import ResourceSnapshot, ResourceSnapshotReader
+from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.core.schema import Document
 
 
@@ -72,8 +72,6 @@ class DocumentReading:
         snapshot: ResourceSnapshot,
         max_level: int = 0,
     ) -> DocumentOutline | None:
-        if max_level < 0:
-            raise ValueError("max_level must not be negative")
         documents = await self._reader.read_documents([resource_id], snapshot=snapshot)
         if not documents:
             return None
@@ -94,8 +92,6 @@ class DocumentReading:
         snapshot: ResourceSnapshot,
         sibling_steps: int = 1,
     ) -> list[SectionOutline]:
-        if sibling_steps < 0:
-            raise ValueError("sibling_steps must not be negative")
         documents = await self._reader.read_documents_by_section_ids(
             section_ids, snapshot=snapshot
         )

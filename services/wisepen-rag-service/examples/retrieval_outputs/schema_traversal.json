@@ -1,0 +1,152 @@
+{
+  "$defs": {
+    "GraphEntity": {
+      "description": "一个逻辑实体只返回一次；不重复名称、本体、类别和本体允许提示。",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/GraphEntitySource"
+          },
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "GraphEntity",
+      "type": "object"
+    },
+    "GraphEntitySource": {
+      "description": "一个已授权 Chunk 对实体的描述，不拼接或摘要其他来源。",
+      "properties": {
+        "chunk_id": {
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        }
+      },
+      "required": [
+        "chunk_id"
+      ],
+      "title": "GraphEntitySource",
+      "type": "object"
+    },
+    "GraphRelationship": {
+      "description": "保留有向谓词拓扑，调用方不需要拆解关系 ID。",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "target_id": {
+          "title": "Target Id",
+          "type": "string"
+        },
+        "relation_type": {
+          "title": "Relation Type",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/GraphRelationshipSource"
+          },
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "source_id",
+        "target_id",
+        "relation_type"
+      ],
+      "title": "GraphRelationship",
+      "type": "object"
+    },
+    "GraphRelationshipSource": {
+      "description": "关系的来源相关字段，关键词和 metadata 不跨来源合并。",
+      "properties": {
+        "chunk_id": {
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "keywords": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keywords"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "chunk_id"
+      ],
+      "title": "GraphRelationshipSource",
+      "type": "object"
+    }
+  },
+  "description": "一次一跳调用的共享拓扑；每个逻辑对象下保留各来源，不附带 Chunk 原文。",
+  "properties": {
+    "entities": {
+      "items": {
+        "$ref": "#/$defs/GraphEntity"
+      },
+      "title": "Entities",
+      "type": "array"
+    },
+    "relationships": {
+      "items": {
+        "$ref": "#/$defs/GraphRelationship"
+      },
+      "title": "Relationships",
+      "type": "array"
+    }
+  },
+  "title": "GraphTraversalResult",
+  "type": "object"
+}

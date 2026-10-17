@@ -1,24 +1,21 @@
 """图谱检索与显式一跳拓扑读取；来源事实在 application 层授权回查。"""
 
-from .evidence import (
-    EvidenceBuilder,
+from .models import (
     GraphEntity,
-    GraphEvidence,
-    GraphEvidenceLoader,
-    GraphHit,
-    GraphSourceChunk,
+    GraphEntitySource,
+    GraphRelationship,
+    GraphRelationshipSource,
 )
-from .retrieval import GraphRetrieval, PreparedGraphEvidence
-from .traversal import GraphTraversal
+from .retrieval import GraphRetrieval, GraphRetrievalResult
+from .traversal import GraphTraversal, GraphTraversalResult
 
 __all__ = [
-    "EvidenceBuilder",
     "GraphEntity",
-    "GraphEvidence",
-    "GraphEvidenceLoader",
-    "GraphHit",
+    "GraphEntitySource",
+    "GraphRelationship",
+    "GraphRelationshipSource",
     "GraphRetrieval",
-    "GraphSourceChunk",
+    "GraphRetrievalResult",
     "GraphTraversal",
-    "PreparedGraphEvidence",
+    "GraphTraversalResult",
 ]

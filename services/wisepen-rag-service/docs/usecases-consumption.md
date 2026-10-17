@@ -1,21 +1,23 @@
 # 用例结果的轻量消费：投影与延迟读取
 
-检索用例的返回面向“完整证据 + 授权原文”，所以字段偏重（[ChunkHit](usecases-vector.md)、[GraphHit](usecases-graph.md)）。但消费方（模型工具、上层编排）通常只用到其中一部分信号。本页给出几种正交的轻量化模式，它们都在**已授权结果之上做纯投影**，不改变快照、不绕过正文回查、不产生新事实。
+检索用例的返回面向“完整证据 + 授权原文”，所以字段偏重（[ChunkHit](usecases-vector.md)、[GraphRetrievalResult](usecases-graph.md)）。但消费方（模型工具、上层编排）通常只用到其中一部分信号。本页给出几种正交的轻量化模式，它们都在**已授权结果之上做纯投影**，不改变快照、不绕过正文回查、不产生新事实。
+
+GraphTraversal 返回共享的 GraphTraversalResult(entities、relationships)，与图检索共用 GraphEntity/GraphRelationship 应用模型，不附带原文。逻辑对象已经收拢，各来源描述仍独立保存在 sources 中。下面按实体进行的投影也可以用于 traversal 结果；需要原文时沿 sources[].chunk_id 显式授权读取。
 
 ## 1. 四类可分离的消费信号
 
 | 信号 | 图证据来源 | 正文命中来源 | 典型用途 |
 |---|---|---|---|
-| 展示 | GraphEntity.description | ChunkHit.text | 直接喂给模型或前端 |
-| 热度 | len(GraphEvidence.sources) | — | 多来源支撑度、排序/置信 |
-| 遍历 | GraphEntity.relations、GraphEvidence.relationships | ChunkHit.seed_entities | 选择下一跳、显式图遍历 |
-| 定位 | GraphEntity.source_id | ChunkHit.chunk_id | 延迟读取原文 |
+| 展示 | GraphRetrievalResult.entities 中各 sources[].description | ChunkHit.text | 直接喂给模型或前端 |
+| 来源数 | len(entity.sources) | — | 多来源支撑度、排序/置信 |
+| 遍历 | GraphRetrievalResult.relationships；实体以 id 作为下一跳种子 | ChunkHit.seed_entities | 选择下一跳、显式图遍历 |
+| 定位 | sources[].chunk_id | ChunkHit.chunk_id | 延迟读取原文 |
 
 一个用例返回里同时包含这四类信息，因此“重”。按需只保留其中一两类，就能把返回降到模型工具真正需要的体积。
 
 ## 2. 模式 A：实体优先（热度 + 遍历，不要原文）
 
-真实业务若只想“找到实体，再显式 traversal”，可以只暴露 id、描述、来源数、可遍历关系，丢弃 sources 原文。source_count 在分组时天然得到，作为**热度信号**（被越多可见来源支撑越可信）。
+真实业务若只想“找到实体，再显式 traversal”，可以只暴露 id、描述、当前上下文中的来源数，不消费 chunks 原文。source_count 只统计返回事实的独立来源，不表示全量关系数或模型置信度。
 
 ```python
 from dataclasses import dataclass
@@ -26,37 +28,28 @@ class EntityOption:
     id: str
     descriptions: list[str]
     source_count: int  # 热度信号：当前可见来源数
-    relations: list[tuple[str, str]]  # 遍历信号：(relation_type, direction)
 
 
-def project_entities(hits) -> list[EntityOption]:
-    grouped: dict[str, dict] = {}
-    for hit in hits:
-        for entity in hit.evidence.entities:
-            acc = grouped.setdefault(
-                entity.id, {"descriptions": [], "sources": set(), "relations": set()}
-            )
-            if entity.description:
-                acc["descriptions"].append(entity.description)
-            acc["sources"].add(entity.source_id)
-            acc["relations"].update(
-                (option.relation_type, option.direction) for option in entity.relations
-            )
+def project_entities(result) -> list[EntityOption]:
     return [
-        EntityOption(id, acc["descriptions"], len(acc["sources"]), sorted(acc["relations"]))
-        for id, acc in grouped.items()
+        EntityOption(
+            entity.id,
+            [source.description for source in entity.sources if source.description],
+            len(entity.sources),
+        )
+        for entity in result.entities
     ]
 ```
 
-同一逻辑实体在多个来源下会产生多条 GraphEntity（一条一个 source_id），按 id 分组的条数即 source_count，描述与关系提示也在此合并。投影不需要新的授权读取，直接用合法结果。
+同一逻辑实体只返回一条 GraphEntity，直接统计 sources 的长度，描述保持独立。投影不需要新的授权读取，直接用合法结果。
 
 ## 3. 模式 B：仅遍历信号（连描述也不要）
 
-如果下一步只喂给 [GraphTraversal](usecases-graph.md)，可以进一步只保留 id；relations 仅作提示，不保证当前可见关系存在。neighbors 由 traversal 按同快照重新确认。
+如果下一步只喂给 [GraphTraversal](usecases-graph.md)，可以进一步只保留 id。图实体结果不再暴露核心模型的本体允许提示；真实连接可从返回的 relationships 或最终 ChunkHit.seed_entities.relations 获取（后者 null 为图未启用，[] 为无确认到的连接）。traversal 仍按本次快照确认来源。
 
 ```python
-seed_ids = [entity.id for hit in hits for entity in hit.evidence.entities]
-evidence = await traversal.traverse(seed_ids, snapshot=snapshot, direction=GraphDirection.OUTGOING)
+seed_ids = [entity.id for entity in result.entities]
+topology = await traversal.traverse(seed_ids, snapshot=snapshot, direction=GraphDirection.OUTGOING)
 ```
 
 正文命中一侧同理：ChunkHit.seed_entities 只携带 `GraphNodeReference(id, relations)`，可据此显式调用图 traversal，无需消费 text。
@@ -67,7 +60,9 @@ evidence = await traversal.traverse(seed_ids, snapshot=snapshot, direction=Graph
 
 ```python
 texts = await reading.read_chunks(
-    [entity.source_id for hit in hits for entity in hit.evidence.entities],
+    list(dict.fromkeys(
+        source.chunk_id for entity in result.entities for source in entity.sources
+    )),
     snapshot=snapshot,
 )
 ```

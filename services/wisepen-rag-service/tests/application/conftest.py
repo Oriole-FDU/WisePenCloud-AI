@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from rag.application.common.snapshot import ResourceSnapshotReader
 from rag.application.publication.publish import DocumentReadyEvent
-from rag.application.snapshot import ResourceSnapshotReader
 from rag.core.schema import Chunk, ContentRevision
 
 

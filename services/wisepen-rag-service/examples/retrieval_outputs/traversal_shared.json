@@ -1,0 +1,85 @@
+{
+  "entities": [
+    {
+      "id": "work:Person:张三",
+      "sources": [
+        {
+          "chunk_id": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14:chunk:0",
+          "description": "软件研发人员"
+        },
+        {
+          "chunk_id": "employment-b@1#41c6aa8b354baba6646d0394be19591f7398bf24d1d526fdfca28d1112e2f3fd:chunk:0",
+          "description": "项目负责人"
+        }
+      ]
+    },
+    {
+      "id": "work:Company:甲公司",
+      "sources": [
+        {
+          "chunk_id": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14:chunk:0",
+          "description": "软件公司"
+        },
+        {
+          "chunk_id": "employment-b@1#41c6aa8b354baba6646d0394be19591f7398bf24d1d526fdfca28d1112e2f3fd:chunk:0",
+          "description": "项目交付单位"
+        },
+        {
+          "chunk_id": "supply-c@1#d71cc9c5cdfea76f673f099e75472b3e7b3d5da57a12fb5abb8f79b7af96926a:chunk:0",
+          "description": "软件供应商"
+        }
+      ]
+    },
+    {
+      "id": "work:Company:乙公司",
+      "sources": [
+        {
+          "chunk_id": "supply-c@1#d71cc9c5cdfea76f673f099e75472b3e7b3d5da57a12fb5abb8f79b7af96926a:chunk:0",
+          "description": "软件采购方"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "id": "work:Company:甲公司::supplies::work:Company:乙公司",
+      "source_id": "work:Company:甲公司",
+      "target_id": "work:Company:乙公司",
+      "relation_type": "supplies",
+      "sources": [
+        {
+          "chunk_id": "supply-c@1#d71cc9c5cdfea76f673f099e75472b3e7b3d5da57a12fb5abb8f79b7af96926a:chunk:0",
+          "description": "甲公司向乙公司供应软件系统。",
+          "keywords": [
+            "供应"
+          ],
+          "metadata": {}
+        }
+      ]
+    },
+    {
+      "id": "work:Person:张三::works_at::work:Company:甲公司",
+      "source_id": "work:Person:张三",
+      "target_id": "work:Company:甲公司",
+      "relation_type": "works_at",
+      "sources": [
+        {
+          "chunk_id": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14:chunk:0",
+          "description": "张三在甲公司任职，负责软件研发。",
+          "keywords": [
+            "任职"
+          ],
+          "metadata": {}
+        },
+        {
+          "chunk_id": "employment-b@1#41c6aa8b354baba6646d0394be19591f7398bf24d1d526fdfca28d1112e2f3fd:chunk:0",
+          "description": "张三是甲公司的项目负责人，负责项目交付。",
+          "keywords": [
+            "任职"
+          ],
+          "metadata": {}
+        }
+      ]
+    }
+  ]
+}

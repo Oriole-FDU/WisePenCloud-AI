@@ -13,12 +13,12 @@ from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient
 
 from rag.application.acl.synchronizer import AclEventConsumer, AclSynchronizer
+from rag.application.common.snapshot import ResourceSnapshotReader
 from rag.application.gc import ResourceGarbageCollector
-from rag.application.graph import GraphRetrieval, GraphTraversal, PreparedGraphEvidence
+from rag.application.graph import GraphRetrieval, GraphTraversal
 from rag.application.publication import DocumentPublication, PublicationEventConsumer
 from rag.application.reading import DocumentReading
 from rag.application.retrieval import VectorRetrieval
-from rag.application.snapshot import ResourceSnapshotReader
 from rag.backends.mongo.acl import MongoResourceAclRepository
 from rag.backends.mongo.content import MongoContentStorage
 from rag.backends.mongo.publication import MongoPublicationStore
@@ -82,19 +82,6 @@ def _garbage_collector(
         batch_size=settings.GC_BATCH_SIZE,
         interval_seconds=settings.GC_INTERVAL_SECONDS,
     )
-
-
-def graph_rerank_text(payload: PreparedGraphEvidence) -> str:
-    """完整图事实作为精排材料，来源描述分别保留，不生成摘要或裁剪文本。"""
-    evidence = payload.evidence
-    parts = [f"seed: {evidence.kind} {evidence.fact_id}"]
-    for node in evidence.entities:
-        parts.append(f"entity: {node.id}\ndescription: {node.description or ''}")
-    for edge in evidence.relationships:
-        parts.append(
-            f"relationship: {edge.id}\ndescription: {edge.description or ''}\nkeywords: {', '.join(edge.keywords or [])}"
-        )
-    return "\n".join(parts)
 
 
 class Container(containers.DeclarativeContainer):
@@ -239,12 +226,9 @@ class Container(containers.DeclarativeContainer):
         api_key=settings.provided.QWEN_API_KEY,
         model=settings.provided.QWEN_RERANKER_MODEL,
     )
-    # Chunk 精排取正文；图精排取整组事实文本
+    # 普通与图检索都以完整 Chunk 正文精排。
     chunk_reranker = providers.Singleton(
         ModelReranker, client=rerank_client, text_getter=attrgetter("chunk.raw_text")
-    )
-    graph_reranker = providers.Singleton(
-        ModelReranker, client=rerank_client, text_getter=graph_rerank_text
     )
 
     # ------------------------------------------------------------------
@@ -316,6 +300,7 @@ class Container(containers.DeclarativeContainer):
         VectorRetrieval,
         snapshot_reader=snapshot_reader,
         vector_reader=vector_storage,
+        graph_reader=graph_storage,
         embedding_client=embedding_client,
         reranker=chunk_reranker,
     )
@@ -327,7 +312,7 @@ class Container(containers.DeclarativeContainer):
         embedding_client=embedding_client,
         entity_reader=entity_vector_storage,
         relationship_reader=relationship_vector_storage,
-        reranker=graph_reranker,
+        reranker=chunk_reranker,
     )
     graph_traversal = providers.Singleton(
         GraphTraversal, snapshot_reader=snapshot_reader, graph_reader=graph_reader

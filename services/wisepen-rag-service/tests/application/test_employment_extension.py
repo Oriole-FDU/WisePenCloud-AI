@@ -14,13 +14,18 @@ from fastapi import FastAPI
 from pydantic import ValidationError
 
 from rag.application.acl.models import PermissionScope, ResourceAcl
+from rag.application.common.snapshot import ResourceSnapshot
+from rag.application.graph import GraphTraversalResult
 from rag.application.publication import DocumentReadyEvent, PublicationAction
-from rag.application.snapshot import ResourceSnapshot
 from rag.container import Container
 from rag.core.schema.filters import FilterOperator
 from rag.extensions import register_extensions
 from rag.extensions.employment import EmploymentContainer
-from rag.extensions.employment.api import ContractSearch
+from rag.extensions.employment.api import (
+    ContractSearch,
+    EmploymentTraversal,
+    GraphSearch,
+)
 from rag.extensions.employment.metadata import (
     EmploymentMetadataTransformer,
     employment_projection,
@@ -130,7 +135,9 @@ class MemoryGraph:
             key=lambda edge: (ids.index(edge.id), edge.source_ids),
         )
 
-    async def _neighbors(self, ids, *, direction, relation_types, limit, filters=None):
+    async def _neighbors(
+        self, ids, *, direction, relation_types=None, limit=100, filters=None
+    ):
         edges = [
             edge
             for source in self.sources.values()
@@ -203,7 +210,6 @@ async def employment_env(
         "entity_vector_storage": entities,
         "relationship_vector_storage": relations,
         "chunk_reranker": None,
-        "graph_reranker": None,
     }.items():
         getattr(platform, name).override(providers.Object(dependency))
     extension = EmploymentContainer(platform=platform)
@@ -458,25 +464,37 @@ async def test_generic_graph_wrapping_and_explicit_two_hops(employment_env, mode
     tools = env.extension.tools()
     env.embedding.embed.reset_mock()
     hits = await tools.search_graph("任职", snapshot=env.snapshot(), mode=mode)
-    assert hits and all(hit.evidence.relationships for hit in hits)
+    assert hits.chunks and hits.relationships
     env.embedding.embed.assert_awaited_once()
     first = await tools.follow(["employment:Person:李明"], snapshot=env.snapshot())
-    assert len(first) == 1 and len(first[0].relationships) == 2
+    assert len(first.relationships) == 2
     second = await tools.follow(
         ["employment:Department:研发部"],
         snapshot=env.snapshot(),
         direction=GraphDirection.INCOMING,
     )
-    assert len(second[0].relationships) == 3
+    assert len(second.relationships) == 3
     env.acls.pop("employment-contract-003")
     second = await tools.follow(
-        ["employment:Department:研发部"], snapshot=env.snapshot(), direction=None
+        ["employment:Department:研发部"],
+        snapshot=env.snapshot(),
+        direction=GraphDirection.BOTH,
     )
-    assert len(second[0].relationships) == 2
+    assert len(second.relationships) == 2
     assert all(
-        source.resource_id != "employment-contract-003" for source in second[0].sources
+        source.chunk_id
+        not in {
+            chunk.chunk_id
+            for chunk in env.chunks
+            if chunk.resource_id == "employment-contract-003"
+        }
+        for node in second.entities
+        for source in node.sources
     )
-    assert await tools.follow(["employment:Person:陈晨"], snapshot=env.snapshot()) == []
+    assert (
+        await tools.follow(["employment:Person:陈晨"], snapshot=env.snapshot())
+        == GraphTraversalResult()
+    )
 
 
 async def test_registered_extra_collection_is_cleaned_with_shared_gc(employment_env):
@@ -566,6 +584,16 @@ async def test_api_mount_trusted_identity_and_full_sources(employment_env):
             hit["metadata"]["start_date"][:4] for hit in response.json()
         ] == ["2024", "2025"]
         assert response.json()[0]["seed_entities"]
+        graph_response = await client.post(
+            "/rag/extensions/employment/graph/search",
+            json={"query": "合同", "mode": "local", "top_k": 1},
+            headers=headers,
+        )
+        assert graph_response.status_code == 200
+        graph_result = graph_response.json()
+        assert set(graph_result) == {"entities", "relationships", "chunks"}
+        assert len(graph_result["chunks"]) == 1
+        assert graph_result["chunks"][0]["seed_entities"][0]["relations"]
         employee = await client.post(
             path,
             json={"query": "合同", "employee": " 陈晨 "},
@@ -588,8 +616,7 @@ async def test_api_mount_trusted_identity_and_full_sources(employment_env):
             headers=headers,
         )
         assert (
-            traversal.status_code == 200
-            and len(traversal.json()[0]["relationships"]) == 2
+            traversal.status_code == 200 and len(traversal.json()["relationships"]) == 2
         )
         outline = await client.get(
             "/rag/extensions/employment/contracts/employment-contract-001/outline",
@@ -648,13 +675,18 @@ async def test_graph_tools_select_ontology_without_requiring_business_metadata(
     chunk.metadata.pop("start_date")
     await env.storage.upsert_chunks([chunk])
     groups = await env.extension.tools().follow(
-        ["employment:Department:研发部"], snapshot=env.snapshot(), direction=None
+        ["employment:Department:研发部"],
+        snapshot=env.snapshot(),
+        direction=GraphDirection.BOTH,
     )
-    assert len(groups[0].relationships) == 3
-    assert chunk.resource_id in {source.resource_id for source in groups[0].sources}
-    assert await env.extension.tools().follow(
+    assert len(groups.relationships) == 3
+    assert chunk.chunk_id in {
+        source.chunk_id for node in groups.entities for source in node.sources
+    }
+    person_topology = await env.extension.tools().follow(
         ["employment:Person:陈晨"], snapshot=env.snapshot()
     )
+    assert person_topology.entities
 
 
 async def test_graph_tools_keep_orphan_seed_and_do_not_reload_evidence(employment_env):
@@ -667,13 +699,13 @@ async def test_graph_tools_keep_orphan_seed_and_do_not_reload_evidence(employmen
     groups = await env.extension.tools().follow(
         ["employment:Person:陈晨"], snapshot=env.snapshot()
     )
-    assert len(groups) == 1 and groups[0].relationships == []
-    assert [node.id for node in groups[0].entities] == ["employment:Person:陈晨"]
+    assert groups.entities and groups.relationships == []
+    assert [node.id for node in groups.entities] == ["employment:Person:陈晨"]
     reader.read_chunks.assert_awaited_once()
     hits = await env.extension.tools().search_graph(
         "任职", snapshot=env.snapshot(), mode="local"
     )
-    assert hits and all(hit.evidence.relationships == [] for hit in hits)
+    assert hits.chunks and hits.relationships == []
     request = env.entities.query.call_args.args[0]
     assert [(field.key, field.value) for field in request.filters.filters] == [
         ("ontology_name", "employment")
@@ -708,12 +740,28 @@ async def test_tools_select_namespace_from_facts_without_parsing_id(employment_e
     await env.storage.upsert_chunks([chunk])
     await GraphIndexer(ontology=ontology, writer=env.graph).index([chunk])
     # 通用 traversal 允许其他本体，业务工具才对自己的证据命名空间做选择。
-    assert await env.platform.graph_traversal().traverse(
+    foreign_topology = await env.platform.graph_traversal().traverse(
         [person.id], snapshot=env.snapshot()
     )
+    assert foreign_topology.entities
     assert (
-        await env.extension.tools().follow([person.id], snapshot=env.snapshot()) == []
+        await env.extension.tools().follow([person.id], snapshot=env.snapshot())
+        == GraphTraversalResult()
     )
+
+
+@pytest.mark.parametrize(
+    "model,payload",
+    [
+        (GraphSearch, {"query": "query", "top_k": 0}),
+        (GraphSearch, {"query": " "}),
+        (EmploymentTraversal, {"node_ids": [" "]}),
+    ],
+)
+def test_graph_input_constraints_belong_to_api_models(model, payload):
+    # 公开输入由 Pydantic 拒绝，应用内部不重复实现种子与预算校验。
+    with pytest.raises(ValidationError):
+        model.model_validate(payload)
 
 
 async def test_api_openapi_exposes_tool_result_contracts(employment_env):
@@ -725,13 +773,53 @@ async def test_api_openapi_exposes_tool_result_contracts(employment_env):
     assert "employee" in schemas["ContractSearch"]["properties"]
     assert "employer" not in schemas["ContractSearch"]["properties"]
     assert set(schemas["GraphNodeReference"]["properties"]) == {"id", "relations"}
-    assert set(schemas["GraphSourceChunk"]["properties"]) == {
-        "chunk_id",
-        "resource_id",
-        "content_revision",
-        "section_id",
-        "section_path",
-        "raw_text",
+    assert set(schemas["GraphTraversalResult"]["properties"]) == {
+        "entities",
+        "relationships",
     }
-    assert "embedding" not in schemas["GraphHit"]["properties"]
+    assert "GraphEvidence" not in schemas and "GraphSourceChunk" not in schemas
+    assert set(schemas["GraphEntity"]["properties"]) == {"id", "sources"}
+    assert set(schemas["GraphEntitySource"]["properties"]) == {
+        "chunk_id",
+        "description",
+    }
+    assert set(schemas["GraphRelationship"]["properties"]) == {
+        "id",
+        "source_id",
+        "target_id",
+        "relation_type",
+        "sources",
+    }
+    assert set(schemas["GraphRelationshipSource"]["properties"]) == {
+        "chunk_id",
+        "description",
+        "keywords",
+        "metadata",
+    }
+    assert "GraphNode" not in schemas and "GraphEdge" not in schemas
+    assert "embedding" not in schemas["GraphRetrievalResult"]["properties"]
+    assert set(schemas["GraphRetrievalResult"]["properties"]) == {
+        "entities",
+        "relationships",
+        "chunks",
+    }
+    assert {
+        item.get("type")
+        for item in schemas["GraphNodeReference"]["properties"]["relations"]["anyOf"]
+    } == {"array", "null"}
     assert "ResourceSnapshot" not in schemas
+
+
+async def test_contract_search_without_graph_reports_unknown_connections(
+    employment_env,
+):
+    env = employment_env
+    env.platform.graph_storage.override(providers.Object(None))
+    # 注册夹具已构造过单例，重装配合同检索以验证无图库的注入路径。
+    env.extension.contracts.reset()
+    contracts = env.extension.contracts()
+    assert contracts._graph_reader is None
+    hits = await contracts.retrieve("合同", snapshot=env.snapshot(), mode="dense")
+    assert hits
+    assert all(seed.relations is None for hit in hits for seed in hit.seed_entities)
+    env.graph.get_neighbors.assert_not_awaited()

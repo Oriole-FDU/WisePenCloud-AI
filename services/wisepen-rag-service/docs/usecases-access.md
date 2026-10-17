@@ -1,6 +1,6 @@
 # ACL、请求快照与授权读取
 
-权限事实见 [ACL models](../src/rag/application/acl/models.py)，刷新见 [synchronizer](../src/rag/application/acl/synchronizer.py)，共享读取见 [snapshot.py](../src/rag/application/snapshot.py)。这些对象属于 application，不嵌入[内容模型](models.md)。
+权限事实见 [ACL models](../src/rag/application/acl/models.py)，刷新见 [synchronizer](../src/rag/application/acl/synchronizer.py)，共享读取见 [snapshot.py](../src/rag/application/common/snapshot.py)。这些对象属于 application，不嵌入[内容模型](models.md)。
 
 ## 1. ACL 刷新
 
@@ -42,7 +42,7 @@ ResourceSnapshot 绑定 PermissionScope，仅缓存 `resource_id → ContentRevi
 
 ```python
 from rag.application.acl.models import PermissionScope
-from rag.application.snapshot import ResourceSnapshot
+from rag.application.common.snapshot import ResourceSnapshot
 
 
 async def read_visible(reader, trusted_user_id, resource_ids, chunk_ids):

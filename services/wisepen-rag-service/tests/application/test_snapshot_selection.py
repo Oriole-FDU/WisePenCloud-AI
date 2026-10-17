@@ -9,7 +9,7 @@ import pytest
 from common.core.domain import GroupRoleType
 
 from rag.application.acl.models import GroupResourceAcl, PermissionScope, ResourceAcl
-from rag.application.snapshot import ResourceSnapshot
+from rag.application.common.snapshot import ResourceSnapshot
 from rag.core.schema import ContentRevision
 
 
@@ -371,7 +371,7 @@ async def test_interleaved_resolutions_do_not_overwrite_completed_selection(
 def test_snapshot_module_does_not_import_retrieval_use_cases_or_runtime_config():
     code = """
 import sys
-from rag.application.snapshot import ResourceSnapshot, ResourceSnapshotReader
+from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
 assert not any(name.startswith(('rag.reading', 'rag.retrievers', 'rag.application.retrieval',
     'rag.core.config')) for name in sys.modules)
 """

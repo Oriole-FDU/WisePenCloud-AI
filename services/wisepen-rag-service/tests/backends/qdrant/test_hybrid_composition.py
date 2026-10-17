@@ -8,10 +8,10 @@ from common.utils.ai_clients import EmbeddingClient
 from common.utils.retrieval import ModelReranker
 
 from rag.application.acl.models import PermissionScope, ResourceAcl
+from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.application.publication import DocumentReadyEvent
 from rag.application.reading import DocumentReading, SectionReadScope
 from rag.application.retrieval import VectorRetrieval
-from rag.application.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.core.schema import ContentRevision
 from rag.ingestion.chunkers import MarkdownChunker
 

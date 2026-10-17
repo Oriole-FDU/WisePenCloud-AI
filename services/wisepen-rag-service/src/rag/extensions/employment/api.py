@@ -8,10 +8,10 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from rag.application.acl.models import PermissionScope
-from rag.application.graph import GraphEvidence, GraphHit
+from rag.application.common.snapshot import ResourceSnapshot
+from rag.application.graph import GraphRetrievalResult, GraphTraversalResult
 from rag.application.reading import DocumentOutline, SectionReadScope, SectionText
 from rag.application.retrieval import ChunkHit
-from rag.application.snapshot import ResourceSnapshot
 from rag.retrievers.graph import GraphRetrievalMode
 from rag.storage.graph import GraphDirection
 
@@ -52,11 +52,11 @@ class GraphSearch(BaseModel):
 
 
 class EmploymentTraversal(BaseModel):
-    """逻辑种子 ID 保持原值；固定 in_department，None 同时读取两侧。"""
+    """逻辑种子 ID 保持原值；固定 in_department，BOTH 同时读取两侧。"""
 
     model_config = ConfigDict(extra="forbid")
     node_ids: list[str]
-    direction: GraphDirection | None = GraphDirection.OUTGOING
+    direction: GraphDirection = GraphDirection.OUTGOING
 
     @model_validator(mode="after")
     def nonblank_ids(self):
@@ -99,13 +99,13 @@ def build_api(tools: EmploymentTools, *, from_source_secret: str) -> FastAPI:
         return await tools.search_contracts(snapshot=snapshot, **body.model_dump())
 
     @api.post("/graph/search")
-    async def graph(body: GraphSearch, snapshot: Snapshot) -> list[GraphHit]:
+    async def graph(body: GraphSearch, snapshot: Snapshot) -> GraphRetrievalResult:
         return await tools.search_graph(snapshot=snapshot, **body.model_dump())
 
     @api.post("/graph/traverse")
     async def traverse(
         body: EmploymentTraversal, snapshot: Snapshot
-    ) -> list[GraphEvidence]:
+    ) -> GraphTraversalResult:
         return await tools.follow(snapshot=snapshot, **body.model_dump())
 
     @api.get("/contracts/{resource_id}/outline")

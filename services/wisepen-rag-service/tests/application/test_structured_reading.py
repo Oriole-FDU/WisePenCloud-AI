@@ -11,8 +11,8 @@ from common.utils.markdown import MarkdownChunker, OutlineFormatter, SourceSpan
 from pydantic import ValidationError
 
 from rag.application.acl.models import PermissionScope, ResourceAcl
+from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.reading import DocumentReading, SectionReadScope
-from rag.application.snapshot import ResourceSnapshot
 from rag.core.schema import ContentRevision
 from rag.core.schema.content import rag_section_id
 from rag.ingestion.chunkers import MarkdownChunker as RagMarkdownChunker

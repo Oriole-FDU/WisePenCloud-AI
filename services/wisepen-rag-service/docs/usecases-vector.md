@@ -4,7 +4,7 @@
 
 ## 1. 依赖与最小调用
 
-用例注入 ResourceSnapshotReader、固定集合 VectorReader、EmbeddingClient，以及可选 Fusion/Reranker。平台提供固定 Qwen 重排；手工组合可以不注入 reranker。每次调用创建本次 Retriever/Pipeline，连接共享，快照由调用方显式传入。
+用例注入 ResourceSnapshotReader、固定集合 VectorReader、EmbeddingClient，以及可选 Fusion/Reranker/GraphReader。平台提供固定 Qwen 重排；手工组合可以不注入 reranker。每次调用创建本次 Retriever/Pipeline，连接共享，快照由调用方显式传入。
 
 ```python
 from rag.retrievers.vector import VectorRetrievalMode
@@ -45,9 +45,9 @@ async def search_chunks(retrieval, snapshot):
 
 候选只有定位和 provider 分数。用例先筛掉无有效 resource_id/content_revision 的投影，再批量 read_chunks，核对 record_id 定位的 Chunk 与候选资源/revision；当前授权 raw_text 才进入重排和响应。
 
-ChunkHit 字段：chunk_id、resource_id、content_revision、section_id、section_path、text、rank、score、seed_entities、metadata。text 是完整 raw_text，metadata 是当前授权 Chunk 的完整字典，不从 payload 拼装、不使用字段白名单、不解析垂类 schema。rank 从 1 开始，score 沿用最终排序阶段。
+ChunkHit 字段：chunk_id、resource_id、content_revision、section_id、section_path、text、rank、score、seed_entities、metadata。text 是完整 raw_text，metadata 来自当前授权 Chunk，响应组装时排除模块常量 `_CHUNK_HIT_EXCLUDED_METADATA_KEYS` 中的内部字段（当前为 entities、relationships），其余字段原样保留；不从 payload 拼装，不解析垂类 schema。此投影不修改内部 Chunk，不影响种子解析与连接查询。rank 从 1 开始，score 沿用最终排序阶段。
 
-seed_entities 为 GraphNodeReference(id、relations)。relations 是允许谓词/方向提示，不证明可见关系存在；可以据此显式调用[图 traversal](usecases-graph.md)，或按[结果消费模式](usecases-consumption.md)只保留遍历/定位信号。向量、PreparedChunk 和生成上下文拼接文本不进入正文结果。
+seed_entities 为 GraphNodeReference(id、relations)。只对最终返回 Chunk 中的实体批量补充全图真实可见连接；relations 为 null 表示未配置图库，[] 表示没有确认到连接，非空列表包含当前已授权关系支持的谓词/方向，同类型入/出兼有及自环为 both。不继承正文业务 filters，不修改核心 GraphNode.relations 或 metadata 中的本体提示。完整定位使用 get_neighbors(limit=None)，关系来源分批授权；不承诺发现尚未投影的 Mongo 关系。可以据此显式调用[图 traversal](usecases-graph.md)。向量、PreparedChunk 和生成上下文拼接文本不进入正文结果。
 
 ## 4. 过滤与失败合同
 
@@ -55,6 +55,6 @@ seed_entities 为 GraphNodeReference(id、relations)。relations 是允许谓词
 
 隐藏、destroyed、旧 revision、缺失 Chunk 和错误定位省略，过滤后不补召回。空候选不调用重排。重排异常保持原顺序降级，召回、embedding、授权读取或 MMR 缺向量等异常传播。
 
-Chunk 图事实损坏会记录警告并返回空 seed_entities，不撤销正文命中；这与图用例的事实解析错误传播不同。MMR 使用已存向量，不重新 embedding 正文。结果不裁剪 token，不做父块扩张或结果缓存；调用方根据 section_id 继续[目录与章节阅读](usecases-reading.md)。
+Chunk 图事实损坏会记录警告并返回空 seed_entities，不撤销正文命中；已启用的全图连接读取或关系来源解析错误直接传播，不能当作空连接；图用例自身的事实解析错误也传播。MMR 使用已存向量，不重新 embedding 正文。结果不裁剪 token，不做父块扩张或结果缓存；调用方根据 section_id 继续[目录与章节阅读](usecases-reading.md)。
 
 验证入口：[test_retrieval.py](../tests/application/test_retrieval.py)。

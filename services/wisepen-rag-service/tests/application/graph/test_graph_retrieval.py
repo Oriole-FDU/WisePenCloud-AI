@@ -1,4 +1,4 @@
-"""图召回必须先授权，再组装分种子的完整来源材料。"""
+"""图召回先授权，再收拢共享拓扑与来源；只有完整 Chunk 原文参与精排。"""
 
 import asyncio
 from dataclasses import asdict, replace
@@ -7,9 +7,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 from common.utils.retrieval import ModelReranker
+from pydantic import TypeAdapter
 
 from rag.application.acl.models import ResourceAcl
-from rag.application.graph import GraphRetrieval
+from rag.application.graph import (
+    GraphRetrieval,
+    GraphRetrievalResult,
+    GraphTraversalResult,
+)
 from rag.application.retrieval import VectorRetrieval
 from rag.core.schema import EntitySpec, Ontology, RelationSpec
 from rag.core.schema.filters import (
@@ -24,42 +29,99 @@ from rag.storage.graph import GraphDirection, GraphVectorKind
 from rag.storage.vector import VectorMatch
 
 
+@pytest.mark.parametrize("mode", ["local", "global", "hybrid", "traversal"])
+async def test_grouped_sources_keep_descriptions_keywords_and_metadata_authorized(
+    graph_env, storage, read_acls, mode
+):
+    env = graph_env
+    first, second = env.chunks[0], env.chunks[2]
+    second.metadata["entities"][0]["description"] = None
+    second.metadata["relationships"][0].update(
+        # 相同描述仍是两个来源；其他来源字段不能被首份事实覆盖。
+        description=first.metadata["relationships"][0]["description"],
+        keywords=["项目管理"],
+        metadata={"audit": {"extractor": "second"}},
+    )
+    await storage.upsert_chunks([second])
+    env.entities[:] = [env.match(), env.match()]
+    env.relations[:] = [env.match(kind=GraphVectorKind.RELATIONSHIP)]
+    person_id = env.facts[0][0][0].id
+
+    async def retrieve():
+        if mode == "traversal":
+            return await env.traversal.traverse(
+                [person_id, person_id], snapshot=env.snapshot()
+            )
+        return await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode=mode)
+
+    result = await retrieve()
+    person = next(node for node in result.entities if node.id == person_id)
+    assert [source.chunk_id for source in person.sources] == [
+        first.chunk_id,
+        second.chunk_id,
+    ]
+    assert [source.description for source in person.sources] == ["a-张三", None]
+    assert len(result.relationships) == 1
+    relationship = result.relationships[0]
+    assert [source.chunk_id for source in relationship.sources] == [
+        first.chunk_id,
+        second.chunk_id,
+    ]
+    assert [source.description for source in relationship.sources] == ["a-任职"] * 2
+    assert relationship.sources[0].keywords == env.facts[0][1][0].keywords
+    assert relationship.sources[0].metadata == {}
+    assert relationship.sources[1].keywords == ["项目管理"]
+    assert relationship.sources[1].metadata == {"audit": {"extractor": "second"}}
+    # dataclass 与对外 JSON 都显式包含逻辑 ID，且不再暴露完整核心实体字段。
+    serialized = TypeAdapter(type(result)).dump_python(result, mode="json")
+    assert set(serialized["entities"][0]) == {"id", "sources"}
+    assert all("sources" in edge for edge in serialized["relationships"])
+    assert second.metadata["relationships"][0]["metadata"] == {
+        "audit": {"extractor": "second"}
+    }
+
+    # 同一个逻辑对象仍可见时，隐藏的描述、关键词和 metadata 都必须退出来源列表。
+    read_acls["c"] = ResourceAcl("c", 1, "other")
+    visible = await retrieve()
+    assert len(visible.relationships) == 1
+    assert [source.chunk_id for source in visible.relationships[0].sources] == [
+        first.chunk_id
+    ]
+    assert all(
+        source.chunk_id != second.chunk_id
+        for node in visible.entities
+        for source in node.sources
+    )
+
+
 @pytest.mark.parametrize("mode", list(GraphRetrievalMode))
 async def test_modes_group_sources_once_and_keep_full_material(graph_env, mode):
     env = graph_env
     env.entities[:] = [env.match(0, score=0.9), env.match(2, score=0.8)]
     env.relations[:] = [env.match(0, kind=GraphVectorKind.RELATIONSHIP)]
-    hits = await env.retrieval.retrieve(" query ", snapshot=env.snapshot(), mode=mode)
-    assert len(hits) == (2 if mode is GraphRetrievalMode.HYBRID else 1)
-    assert [hit.rank for hit in hits] == list(range(1, len(hits) + 1))
-    for hit in hits:
-        evidence = hit.evidence
-        assert {source.resource_id for source in evidence.sources} == {"a", "c"}
-        assert {edge.description for edge in evidence.relationships} == {
-            "a-任职",
-            "c-任职",
-        }
-        assert {node.description for node in evidence.entities} == {
-            "a-张三",
-            "a-甲公司",
-            "c-张三",
-            "c-甲公司",
-        }
-        assert len(evidence.entities) == 4 and len(evidence.relationships) == 2
-        assert all(
-            source.raw_text
-            == env.chunks[0 if source.resource_id == "a" else 2].raw_text
-            for source in evidence.sources
-        )
-        assert set(asdict(evidence.sources[0])) == {
-            "chunk_id",
-            "resource_id",
-            "content_revision",
-            "section_id",
-            "section_path",
-            "raw_text",
-        }
-        assert "embedding" not in asdict(hit)
+    result = await env.retrieval.retrieve(" query ", snapshot=env.snapshot(), mode=mode)
+    assert {chunk.resource_id for chunk in result.chunks} == (
+        {"a", "c"} if mode is GraphRetrievalMode.LOCAL else {"a", "b", "c", "d"}
+    )
+    assert {
+        source.description for edge in result.relationships for source in edge.sources
+    } == {"a-任职", "c-任职"}
+    assert {
+        source.description for node in result.entities for source in node.sources
+    } == (
+        {"a-张三", "c-张三"}
+        if mode is GraphRetrievalMode.LOCAL
+        else {"a-张三", "c-张三", "a-甲公司", "b-甲公司", "c-甲公司", "d-无关公司描述"}
+    )
+    assert [hit.rank for hit in result.chunks] == list(range(1, len(result.chunks) + 1))
+    assert len({node.id for node in result.entities}) == len(result.entities)
+    assert len(result.relationships) == 1
+    assert len(result.relationships[0].sources) == 2
+    assert set(asdict(result)) == {"entities", "relationships", "chunks"}
+    assert all(
+        "entities" not in hit.metadata and "relationships" not in hit.metadata
+        for hit in result.chunks
+    )
     env.embedding.embed.assert_awaited_once_with(texts=["query"])
     assert env.entity_reader.query.await_count == (
         mode is not GraphRetrievalMode.GLOBAL
@@ -67,28 +129,30 @@ async def test_modes_group_sources_once_and_keep_full_material(graph_env, mode):
     assert env.relation_reader.query.await_count == (
         mode is not GraphRetrievalMode.LOCAL
     )
-    assert env.graph.get_neighbors.await_count == (
-        mode is not GraphRetrievalMode.GLOBAL
-    )
-    if mode is GraphRetrievalMode.LOCAL:
-        assert hits[0].score == 0.9
-
-
-async def test_shared_reads_do_not_broaden_global_endpoint_sources(graph_env, storage):
-    env = graph_env
-    storage.get_chunks = AsyncMock(wraps=storage.get_chunks)
-    env.entities[:] = [env.match(3)]  # 公司实体组可以消费 b/d 的来源。
-    env.relations[:] = [env.match(kind=GraphVectorKind.RELATIONSHIP)]
-    hits = await env.retrieval.retrieve("query", snapshot=env.snapshot())
-    entity, relation = [hit.evidence for hit in hits]
-    assert {source.resource_id for source in entity.sources} == {"a", "b", "c", "d"}
-    assert {source.resource_id for source in relation.sources} == {"a", "c"}
-    assert all(node.description != "d-无关公司描述" for node in relation.entities)
-    assert all(edge.relation_type == "works_at" for edge in relation.relationships)
-    fetched = [
-        key for call in storage.get_chunks.call_args_list for key in call.args[0]
+    limited_calls = [
+        call
+        for call in env.graph.get_neighbors.call_args_list
+        if call.kwargs["limit"] is not None
     ]
-    assert len(fetched) == len(set(fetched))  # 调用内一次读取与解析，不改变各组范围。
+    assert len(limited_calls) == (mode is not GraphRetrievalMode.GLOBAL)
+
+
+async def test_shared_context_adds_global_endpoint_sources_without_their_relations(
+    graph_env,
+):
+    env = graph_env
+    env.relations[:] = [env.match(kind=GraphVectorKind.RELATIONSHIP)]
+    result = await env.retrieval.retrieve(
+        "query", snapshot=env.snapshot(), mode="global"
+    )
+    assert {hit.resource_id for hit in result.chunks} == {"a", "b", "c", "d"}
+    assert "d-无关公司描述" in {
+        source.description for node in result.entities for source in node.sources
+    }
+    assert {edge.relation_type for edge in result.relationships} == {"works_at"}
+    assert all(
+        call.kwargs["limit"] is None for call in env.graph.get_neighbors.call_args_list
+    )
 
 
 @pytest.mark.parametrize("hidden", ["denied", "destroyed", "missing-acl"])
@@ -104,16 +168,18 @@ async def test_hidden_sources_cannot_supply_candidates_or_neighborhood(
         del read_acls["a"]
     env.entities[:] = [env.match(0), env.match(2)]
     hits = await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-    assert {source.resource_id for source in hits[0].evidence.sources} == {"c"}
+    assert {source.resource_id for source in hits.chunks} == {"c"}
     assert all(
-        node.source_id == env.chunks[2].chunk_id for node in hits[0].evidence.entities
+        source.chunk_id == env.chunks[2].chunk_id
+        for node in hits.entities
+        for source in node.sources
     )
     # 只有不可见候选时，即使同逻辑 ID 在其他来源可见，也不能反向扩成种子。
     env.entities[:] = [env.match(0)]
     env.graph.get_neighbors.reset_mock()
     assert (
         await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == []
+        == GraphRetrievalResult()
     )
     env.graph.get_neighbors.assert_not_awaited()
 
@@ -134,7 +200,7 @@ async def test_bad_vector_identity_is_not_repaired_from_mongo(graph_env, field, 
     env.entities[:] = [replace(match, metadata={**match.metadata, field: value})]
     assert (
         await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == []
+        == GraphRetrievalResult()
     )
     env.graph.get_nodes.assert_not_awaited()
     env.graph.get_neighbors.assert_not_awaited()
@@ -149,7 +215,7 @@ async def test_wrong_record_id_and_missing_metadata_skip_content_io(graph_env, s
     ]
     assert (
         await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == []
+        == GraphRetrievalResult()
     )
     storage.get_chunks.assert_not_awaited()
 
@@ -163,15 +229,16 @@ async def test_changed_description_invalidates_vector_but_projection_uses_curren
     await storage.upsert_chunks([env.chunks[0]])
     assert (
         await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == []
+        == GraphRetrievalResult()
     )
     # 通过未变化的公司种子验证拓扑材料始终采用当前来源事实。
-    env.entities[:] = [env.match(0, position=1)]
-    hits = await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-    assert "更新后的人员描述" in {
-        node.description for node in hits[0].evidence.entities
+    env.relations[:] = [env.match(kind=GraphVectorKind.RELATIONSHIP)]
+    hits = await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="global")
+    descriptions = {
+        source.description for node in hits.entities for source in node.sources
     }
-    assert "a-张三" not in {node.description for node in hits[0].evidence.entities}
+    assert "更新后的人员描述" in descriptions
+    assert "a-张三" not in descriptions
 
 
 @pytest.mark.parametrize("state", ["absent", "empty", "partial", "structure", "source"])
@@ -195,7 +262,7 @@ async def test_missing_facts_skip_but_damaged_current_facts_raise(
     if state in ("absent", "empty"):
         assert (
             await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-            == []
+            == GraphRetrievalResult()
         )
     else:
         with pytest.raises((TypeError, ValueError)):
@@ -214,11 +281,11 @@ async def test_illegal_facts_and_missing_relation_are_dropped_individually(
     env.chunks[0].metadata["relationships"] = []
     await storage.upsert_chunks([env.chunks[0]])
     hits = await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-    assert {edge.source_ids[0] for edge in hits[0].evidence.relationships} == {
-        env.chunks[2].chunk_id
-    }
+    assert {
+        source.chunk_id for edge in hits.relationships for source in edge.sources
+    } == {env.chunks[2].chunk_id}
     assert env.chunks[0].chunk_id in {
-        node.source_id for node in hits[0].evidence.entities
+        source.chunk_id for node in hits.entities for source in node.sources
     }
 
 
@@ -228,43 +295,45 @@ async def test_missing_topology_preserves_authorized_vector_seed(graph_env):
     env.graph.nodes = []
     env.graph.edges = []
     hits = await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-    assert [node.id for node in hits[0].evidence.entities] == [env.facts[0][0][0].id]
-    assert hits[0].evidence.relationships == []
+    assert [node.id for node in hits.entities] == [env.facts[0][0][0].id]
+    assert hits.relationships == []
 
 
-@pytest.mark.parametrize("diversity", ["off", "moderate", "high"])
-async def test_reranking_focus_mmr_and_first_source_embedding(graph_env, diversity):
+async def test_reranking_uses_unique_full_chunks_and_top_k_only_limits_chunks(
+    graph_env,
+):
     env = graph_env
-    env.entities[:] = [
-        env.match(0, score=1, embedding=[1.0, 0.0]),
-        env.match(2, score=0.99, embedding=[0.0, 1.0]),  # 同 ID 不替换首个向量。
-        env.match(0, position=1, score=0.9, embedding=[1.0, 0.0]),
-        env.match(1, position=1, score=0.8, embedding=[0.0, 1.0]),
-    ]
+    env.entities[:] = [env.match(0), env.match(2), env.match(0, position=1)]
     client = SimpleNamespace(
-        model="rerank", rerank=AsyncMock(return_value=[1, 0.9, 0.8])
+        model="rerank",
+        rerank=AsyncMock(
+            return_value=[
+                {"index": 3, "relevance_score": 0.95},
+                {"index": 1, "relevance_score": 0.8},
+                {"index": 0, "relevance_score": 0.7},
+                {"index": 2, "relevance_score": 0.6},
+            ]
+        ),
     )
-    reranker = ModelReranker(
-        client=client, text_getter=lambda payload: payload.evidence.fact_id
+    usecase = GraphRetrieval(
+        **env.dependencies,
+        reranker=ModelReranker(
+            client=client, text_getter=lambda payload: payload.chunk.raw_text
+        ),
     )
-    usecase = GraphRetrieval(**env.dependencies, reranker=reranker)
-    hits = await usecase.retrieve(
-        "query",
-        snapshot=env.snapshot(),
-        mode="local",
-        top_k=2,
-        focus=" focus ",
-        diversity=diversity,
+    result = await usecase.retrieve(
+        "query", snapshot=env.snapshot(), mode="local", top_k=2, focus=" focus "
     )
-    assert [hit.evidence.fact_id for hit in hits] == [
-        env.facts[0][0][0].id,
-        env.facts[1 if diversity == "high" else 0][0][1].id,
-    ]
+    documents = client.rerank.call_args.kwargs["documents"]
+    assert len(documents) == len(set(documents)) == 4
+    assert set(documents) == {chunk.raw_text for chunk in env.chunks}
     assert client.rerank.call_args.kwargs["query"] == "focus"
-    assert len(client.rerank.call_args.kwargs["documents"]) == 3
-    assert env.entity_reader.query.call_args.args[0].include_embedding == (
-        diversity != "off"
-    )
+    assert [hit.text for hit in result.chunks] == [documents[3], documents[1]]
+    assert [hit.score for hit in result.chunks] == [0.95, 0.8]
+    assert len(result.entities) == 2 and len(result.relationships) == 2
+    assert sum(len(node.sources) for node in result.entities) == 6
+    assert sum(len(edge.sources) for edge in result.relationships) == 3
+    assert env.entity_reader.query.call_args.args[0].include_embedding is False
 
 
 @pytest.mark.parametrize(
@@ -292,8 +361,14 @@ async def test_failures_and_cancel_propagate_except_common_reranker_fallback(
     usecase = GraphRetrieval(**env.dependencies, reranker=reranker)
     if failure == "rerank":
         assert (
-            len(await usecase.retrieve("query", snapshot=env.snapshot(), mode="local"))
-            == 1
+            len(
+                (
+                    await usecase.retrieve(
+                        "query", snapshot=env.snapshot(), mode="local"
+                    )
+                ).chunks
+            )
+            == 2
         )
     else:
         with pytest.raises(type(error)) as caught:
@@ -316,7 +391,7 @@ async def test_same_snapshot_keeps_first_revision_and_visibility(
     )
     assert (
         await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == []
+        == GraphRetrievalResult()
     )
 
 
@@ -327,8 +402,8 @@ async def test_concurrent_calls_keep_request_state_separate(graph_env):
         env.retrieval.retrieve("allow", snapshot=env.snapshot(), mode="local"),
         env.retrieval.retrieve("deny", snapshot=env.snapshot("other"), mode="local"),
     )
-    assert len(allowed) == 1 and denied == []
-    assert env.graph.get_neighbors.await_count == 1
+    assert len(allowed.chunks) == 2 and denied == GraphRetrievalResult()
+    assert env.graph.get_neighbors.await_count == 2
 
 
 async def test_source_filters_match_vector_graph_and_authoritative_chunk(graph_env):
@@ -347,10 +422,10 @@ async def test_source_filters_match_vector_graph_and_authoritative_chunk(graph_e
     hits = await env.retrieval.retrieve(
         "query", snapshot=env.snapshot(), mode="local", filters=filters
     )
-    assert {source.resource_id for source in hits[0].evidence.sources} == {"c"}
+    assert {source.resource_id for source in hits.chunks} == {"c"}
     assert env.entity_reader.query.call_args.args[0].filters is filters
     assert env.graph.get_nodes.call_args.kwargs["filters"] is filters
-    assert env.graph.get_neighbors.call_args.kwargs["filters"] is filters
+    assert env.graph.get_neighbors.call_args_list[0].kwargs["filters"] is filters
 
 
 @pytest.mark.parametrize(
@@ -358,17 +433,16 @@ async def test_source_filters_match_vector_graph_and_authoritative_chunk(graph_e
     [
         {"query": " "},
         {"top_k": 0},
-        {"candidate_limit": 1},
+        {"candidate_limit": 0},
         {"mode": "mix"},
         {"entity_top_k": 0},
         {"relationship_top_k": 0},
         {"mode": "local", "entity_top_k": 3},
-        {"diversity": "bad"},
-        {"neighbor_limit": 0},
         {"neighbor_direction": "bad"},
     ],
 )
-async def test_invalid_input_fails_before_io(graph_env, kwargs):
+async def test_common_and_enum_validation_fails_before_io(graph_env, kwargs):
+    # 只验证 Common 与枚举的现有边界；应用预算的取值约束由调用方负责。
     env = graph_env
     with pytest.raises(ValueError):
         await env.retrieval.retrieve(
@@ -386,7 +460,10 @@ async def test_single_route_only_requires_selected_reader_and_empty_recall_skips
     dependencies = {**env.dependencies, "relationship_reader": None}
     usecase = GraphRetrieval(**dependencies)
     storage.get_chunks = AsyncMock(wraps=storage.get_chunks)
-    assert await usecase.retrieve("query", snapshot=env.snapshot(), mode="local") == []
+    assert (
+        await usecase.retrieve("query", snapshot=env.snapshot(), mode="local")
+        == GraphRetrievalResult()
+    )
     storage.get_chunks.assert_not_awaited()
     env.graph.get_nodes.assert_not_awaited()
     with pytest.raises(ValueError):
@@ -409,8 +486,8 @@ async def test_indexed_source_vectors_reach_authorized_evidence_without_mutating
     record = next(iter(entities.records.values()))
     env.entities[:] = [VectorMatch(record.record_id, 1.0, record.metadata)]
     hits = await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-    assert hits[0].evidence.fact_id == record.metadata["fact_id"]
-    assert {source.resource_id for source in hits[0].evidence.sources} == {"a", "c"}
+    assert hits.entities[0].id == record.metadata["fact_id"]
+    assert {source.resource_id for source in hits.chunks} == {"a", "c"}
     assert [asdict(chunk) for chunk in env.chunks] == before
 
 
@@ -426,7 +503,7 @@ async def test_global_current_fact_digest_includes_relationship_material(
     await storage.upsert_chunks([env.chunks[0]])
     assert (
         await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="global")
-        == []
+        == GraphRetrievalResult()
     )
     env.graph.get_relations.assert_not_awaited()
 
@@ -441,7 +518,7 @@ async def test_global_endpoint_source_description_is_current_without_affecting_r
     await storage.upsert_chunks([env.chunks[0]])
     hits = await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="global")
     assert "新的端点来源描述" in {
-        node.description for node in hits[0].evidence.entities
+        source.description for node in hits.entities for source in node.sources
     }
 
 
@@ -449,20 +526,18 @@ async def test_local_expansion_options_do_not_change_global_relation_scope(graph
     env = graph_env
     env.entities[:] = [env.match(position=1)]
     env.relations[:] = [env.match(kind=GraphVectorKind.RELATIONSHIP)]
-    hits = await env.retrieval.retrieve(
+    result = await env.retrieval.retrieve(
         "query",
         snapshot=env.snapshot(),
         neighbor_direction=GraphDirection.OUTGOING,
         neighbor_relation_types=["supplies"],
         neighbor_limit=1,
     )
-    assert {edge.relation_type for edge in hits[0].evidence.relationships} == {
-        "supplies"
+    assert {edge.relation_type for edge in result.relationships} == {
+        "supplies",
+        "works_at",
     }
-    assert {edge.relation_type for edge in hits[1].evidence.relationships} == {
-        "works_at"
-    }
-    assert env.graph.get_neighbors.call_args.kwargs["limit"] == 1
+    assert env.graph.get_neighbors.call_args_list[0].kwargs["limit"] == 1
 
 
 async def test_old_revision_vector_does_not_fall_back_to_other_source(
@@ -473,7 +548,7 @@ async def test_old_revision_vector_does_not_fall_back_to_other_source(
     await publish_read_document(make_read_document("a", version=2))
     assert (
         await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == []
+        == GraphRetrievalResult()
     )
     env.graph.get_neighbors.assert_not_awaited()
 
@@ -518,25 +593,20 @@ async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ont
     record = next(iter(entity_writer.records.values()))
     env.entities[:] = [env.match(), VectorMatch(record.record_id, 0.9, record.metadata)]
     hits = await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-    assert [hit.evidence.fact_id for hit in hits] == [
+    assert list(dict.fromkeys(node.id for node in hits.entities)) == [
         env.facts[0][0][0].id,
         nodes[0].id,
     ]
-    assert set(asdict(hits[1].evidence.entities[0])) == {
-        "id",
-        "source_id",
-        "description",
-        "relations",
-    }
-    assert {
-        option.relation_type for option in hits[1].evidence.entities[0].relations
-    } == {"references"}
+    foreign_node = next(node for node in hits.entities if node.id == nodes[0].id)
+    assert set(asdict(foreign_node)) == {"id", "sources"}
+    assert [source.chunk_id for source in foreign_node.sources] == [chunk.chunk_id]
     groups = await env.traversal.traverse(
         [env.facts[0][0][0].id, nodes[0].id], snapshot=env.snapshot()
     )
-    assert [
-        {edge.relation_type for edge in group.relationships} for group in groups
-    ] == [{"works_at"}, {"references"}]
+    assert {edge.relation_type for edge in groups.relationships} == {
+        "works_at",
+        "references",
+    }
     relation_record = next(iter(relation_writer.records.values()))
     env.relations[:] = [
         env.match(kind=GraphVectorKind.RELATIONSHIP),
@@ -548,16 +618,10 @@ async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ont
         hits = await env.retrieval.retrieve(
             "query", snapshot=env.snapshot(), mode=mode, filters=filters
         )
-        assert len(hits) == (2 if mode is GraphRetrievalMode.HYBRID else 1)
-        assert all(
-            {source.resource_id for source in hit.evidence.sources} == {"a", "c"}
-            for hit in hits
+        assert {source.resource_id for source in hits.chunks} == (
+            {"a", "c"} if mode is GraphRetrievalMode.LOCAL else {"a", "b", "c"}
         )
-        assert all(
-            edge.relation_type == "works_at"
-            for hit in hits
-            for edge in hit.evidence.relationships
-        )
+        assert all(edge.relation_type == "works_at" for edge in hits.relationships)
         reader = (
             env.relation_reader
             if mode is GraphRetrievalMode.GLOBAL
@@ -567,7 +631,7 @@ async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ont
     groups = await env.traversal.traverse(
         [nodes[0].id], snapshot=env.snapshot(), filters=filters
     )
-    assert groups == []
+    assert groups == GraphTraversalResult()
     chunk_reader = SimpleNamespace(
         query=AsyncMock(
             return_value=[
@@ -605,5 +669,5 @@ async def test_changed_extraction_version_invalidates_old_vector_without_query_o
     await storage.upsert_chunks([env.chunks[0]])
     assert (
         await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == []
+        == GraphRetrievalResult()
     )

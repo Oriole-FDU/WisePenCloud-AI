@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from rag.application.acl.models import PermissionScope, ResourceAcl
+from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.graph import GraphRetrieval, GraphTraversal
-from rag.application.snapshot import ResourceSnapshot
 from rag.core.schema import RelationSpec
 from rag.storage.graph import (
     GraphDirection,
@@ -45,7 +45,9 @@ class MemoryGraph:
             key=lambda edge: (ids.index(edge.id), edge.source_ids),
         )
 
-    async def _neighbors(self, ids, *, direction, relation_types, limit, **kwargs):
+    async def _neighbors(
+        self, ids, *, direction, relation_types=None, limit=100, **kwargs
+    ):
         edges = [
             edge
             for edge in self.edges
@@ -57,7 +59,9 @@ class MemoryGraph:
             )
             and (relation_types is None or edge.relation_type in relation_types)
         ]
-        selected = sorted({edge.id for edge in edges})[:limit]
+        selected = sorted({edge.id for edge in edges})
+        if limit is not None:
+            selected = selected[:limit]
         return sorted(
             (edge for edge in edges if edge.id in selected),
             key=lambda edge: (edge.id, edge.source_ids),

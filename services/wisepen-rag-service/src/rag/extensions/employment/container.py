@@ -89,6 +89,7 @@ class EmploymentContainer(containers.DeclarativeContainer):
         VectorRetrieval,
         snapshot_reader=platform.snapshot_reader,
         vector_reader=storage,
+        graph_reader=platform.graph_storage,
         embedding_client=platform.embedding_client,
         reranker=platform.chunk_reranker,
     )

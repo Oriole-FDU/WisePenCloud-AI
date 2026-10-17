@@ -41,9 +41,9 @@ class GraphReader(Protocol):
         direction: GraphDirection = GraphDirection.OUTGOING,
         relation_types: list[str] | None = None,
         filters: MetadataFilters | None = None,
-        limit: int = 100,
+        limit: int | None = 100,
     ) -> list[GraphEdge]:
-        """一跳读取；limit 限制逻辑关系数，选中关系的匹配来源完整返回。"""
+        """limit 限制逻辑关系数；None 完整定位连接，匹配来源始终完整返回。"""
         ...
 
 

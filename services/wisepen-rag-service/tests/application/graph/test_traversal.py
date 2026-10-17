@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from rag.application.acl.models import ResourceAcl
+from rag.application.graph import GraphEntity, GraphRelationship, GraphTraversalResult
 from rag.core.schema.filters import (
     FilterCondition,
     FilterOperator,
@@ -18,12 +19,11 @@ from rag.storage.graph import GraphDirection
 @pytest.mark.parametrize(
     "direction,types,expected",
     [
-        (None, None, {"works_at", "supplies"}),
         (GraphDirection.BOTH, None, {"works_at", "supplies"}),
         (GraphDirection.OUTGOING, None, {"supplies"}),
         (GraphDirection.INCOMING, None, {"works_at"}),
-        (None, ["works_at"], {"works_at"}),
-        (None, [], set()),
+        (GraphDirection.BOTH, ["works_at"], {"works_at"}),
+        (GraphDirection.BOTH, [], set()),
     ],
 )
 async def test_one_hop_direction_types_and_original_edge_direction(
@@ -31,26 +31,69 @@ async def test_one_hop_direction_types_and_original_edge_direction(
 ):
     env = graph_env
     company = env.facts[0][0][1].id
-    groups = await env.traversal.traverse(
+    result = await env.traversal.traverse(
         [company], snapshot=env.snapshot(), direction=direction, relation_types=types
     )
-    assert len(groups) == 1 and groups[0].fact_id == company
-    assert {edge.relation_type for edge in groups[0].relationships} == expected
+    assert result.entities[0].id == company
+    assert {edge.relation_type for edge in result.relationships} == expected
     assert all(
         edge.target_id == company
-        for edge in groups[0].relationships
+        for edge in result.relationships
         if edge.relation_type == "works_at"
     )
-    assert {source.resource_id for source in groups[0].sources} == {"a", "b", "c", "d"}
-    assert len(groups[0].entities) == len(
-        {(node.id, node.source_id) for node in groups[0].entities}
-    )
+    assert {source.chunk_id for node in result.entities for source in node.sources} == {
+        chunk.chunk_id for chunk in env.chunks
+    }
+    assert len(result.entities) == len({node.id for node in result.entities})
     assert all(
-        edge.source_ids[0] in {source.chunk_id for source in groups[0].sources}
-        for edge in groups[0].relationships
+        all(
+            (key, source.chunk_id)
+            in {
+                (node.id, source.chunk_id)
+                for node in result.entities
+                for source in node.sources
+            }
+            for key in (edge.source_id, edge.target_id)
+            for source in edge.sources
+        )
+        for edge in result.relationships
     )
     if types == []:
         env.graph.get_neighbors.assert_not_awaited()
+
+
+async def test_shared_topology_groups_sources_and_deduplicates_two_seed_edge(
+    graph_env,
+):
+    env = graph_env
+    person, company = [node.id for node in env.facts[0][0]]
+    result = await env.traversal.traverse(
+        [person, company, person], snapshot=env.snapshot(), relation_types=["works_at"]
+    )
+    assert set(asdict(result)) == {"entities", "relationships"}
+    assert all(isinstance(node, GraphEntity) for node in result.entities)
+    assert all(isinstance(edge, GraphRelationship) for edge in result.relationships)
+    # 两个种子共享一条逻辑边；保留两份来源，不能按种子重复返回。
+    assert len(result.relationships) == 1
+    assert len(result.relationships[0].sources) == 2
+    assert len(result.entities) == len({node.id for node in result.entities})
+
+
+async def test_neighbor_descriptions_only_come_from_selected_relationship_sources(
+    graph_env,
+):
+    env = graph_env
+    person, company = [node.id for node in env.facts[0][0]]
+    result = await env.traversal.traverse([person], snapshot=env.snapshot())
+    company_sources = {
+        source.chunk_id
+        for node in result.entities
+        if node.id == company
+        for source in node.sources
+    }
+    assert company_sources == {env.chunks[0].chunk_id, env.chunks[2].chunk_id}
+    env.graph.get_nodes.assert_awaited_once_with([person], filters=None)
+    assert {edge.relation_type for edge in result.relationships} == {"works_at"}
 
 
 async def test_two_explicit_calls_cross_visible_documents_without_automatic_second_hop(
@@ -62,15 +105,16 @@ async def test_two_explicit_calls_cross_visible_documents_without_automatic_seco
     first = await env.traversal.traverse(
         [person], snapshot=snapshot, direction="outgoing", relation_types=["works_at"]
     )
-    assert {edge.relation_type for edge in first[0].relationships} == {"works_at"}
-    assert {source.resource_id for source in first[0].sources} == {"a", "c"}
-    assert company in {node.id for node in first[0].entities}
+    assert {edge.relation_type for edge in first.relationships} == {"works_at"}
+    assert {source.chunk_id for node in first.entities for source in node.sources} == {
+        env.chunks[0].chunk_id,
+        env.chunks[2].chunk_id,
+    }
+    assert company in {node.id for node in first.entities}
     second = await env.traversal.traverse(
         [company], snapshot=snapshot, direction="outgoing", relation_types=["supplies"]
     )
-    assert {edge.target_id for edge in second[0].relationships} == {
-        env.facts[1][0][1].id
-    }
+    assert {edge.target_id for edge in second.relationships} == {env.facts[1][0][1].id}
     assert env.graph.get_neighbors.await_count == 2
 
 
@@ -81,31 +125,42 @@ async def test_hidden_bridge_never_supplies_returned_endpoint_or_expandable_seed
     read_acls["b"] = ResourceAcl("b", 1, "other")
     company, other = [node.id for node in env.facts[1][0]]
     first = await env.traversal.traverse([company], snapshot=env.snapshot())
-    assert all(node.id != other for node in first[0].entities)
-    assert all(source.resource_id != "b" for source in first[0].sources)
+    assert all(node.id != other for node in first.entities)
+    assert all(
+        source.chunk_id != env.chunks[1].chunk_id
+        for node in first.entities
+        for source in node.sources
+    )
     env.graph.get_neighbors.reset_mock()
-    assert await env.traversal.traverse([other], snapshot=env.snapshot()) == []
+    assert (
+        await env.traversal.traverse([other], snapshot=env.snapshot())
+        == GraphTraversalResult()
+    )
     env.graph.get_neighbors.assert_not_awaited()
 
 
 async def test_batch_seed_order_dedup_unknown_and_logical_relation_limit(graph_env):
     env = graph_env
     person, company = [node.id for node in env.facts[0][0]]
-    groups = await env.traversal.traverse(
+    result = await env.traversal.traverse(
         [company, person, company, "unknown"], snapshot=env.snapshot(), relation_limit=1
     )
-    assert [group.fact_id for group in groups] == [company, person]
+    assert list(dict.fromkeys(node.id for node in result.entities))[:2] == [
+        company,
+        person,
+    ]
     env.graph.get_nodes.assert_awaited_once()
     assert env.graph.get_nodes.call_args.args[0] == [company, person, "unknown"]
     env.graph.get_neighbors.assert_awaited_once()
     assert env.graph.get_neighbors.call_args.kwargs["limit"] == 1
     # 字典序先选中公司供应关系，不会按种子顺序或 degree 重新排序。
-    assert groups[1].relationships == []
-    assert len({edge.id for group in groups for edge in group.relationships}) == 1
+    assert len({edge.id for edge in result.relationships}) == 1
+    assert len(result.relationships) == 1
     selected = await env.traversal.traverse(
         [person], snapshot=env.snapshot(), relation_types=["works_at"], relation_limit=1
     )
-    assert len(selected[0].relationships) == 2  # 一个逻辑关系的两个来源完整返回。
+    assert len(selected.relationships) == 1
+    assert len(selected.relationships[0].sources) == 2  # 两个来源归属同一逻辑关系。
 
 
 async def test_self_loop_reverse_and_different_predicates_keep_identity(
@@ -132,9 +187,9 @@ async def test_self_loop_reverse_and_different_predicates_keep_identity(
     chunk.metadata["relationships"].extend([asdict(reverse), asdict(loop)])
     await storage.upsert_chunks([chunk])
     env.graph.edges.extend([reverse, loop])
-    groups = await env.traversal.traverse([nodes[0].id], snapshot=env.snapshot())
+    result = await env.traversal.traverse([nodes[0].id], snapshot=env.snapshot())
     selected = [
-        edge for edge in groups[0].relationships if edge.relation_type == "supplies"
+        edge for edge in result.relationships if edge.relation_type == "supplies"
     ]
     assert {edge.id for edge in selected} == {edges[0].id, reverse.id, loop.id}
     assert len(selected) == 3
@@ -150,11 +205,14 @@ async def test_stale_projection_cannot_expand_deleted_root_or_deleted_endpoint(
             1:
         ]
     await storage.upsert_chunks([env.chunks[0], env.chunks[2]])
-    assert await env.traversal.traverse([person], snapshot=env.snapshot()) == []
+    assert (
+        await env.traversal.traverse([person], snapshot=env.snapshot())
+        == GraphTraversalResult()
+    )
     env.graph.get_neighbors.assert_not_awaited()
     company = env.facts[0][0][1].id
-    groups = await env.traversal.traverse([company], snapshot=env.snapshot())
-    assert {edge.relation_type for edge in groups[0].relationships} == {"supplies"}
+    result = await env.traversal.traverse([company], snapshot=env.snapshot())
+    assert {edge.relation_type for edge in result.relationships} == {"supplies"}
 
 
 async def test_empty_ids_no_io_and_depth_is_not_an_available_parameter(
@@ -162,7 +220,10 @@ async def test_empty_ids_no_io_and_depth_is_not_an_available_parameter(
 ):
     env = graph_env
     storage.get_chunks = AsyncMock(wraps=storage.get_chunks)
-    assert await env.traversal.traverse([], snapshot=env.snapshot()) == []
+    assert (
+        await env.traversal.traverse([], snapshot=env.snapshot())
+        == GraphTraversalResult()
+    )
     with pytest.raises(TypeError):
         await env.traversal.traverse([], snapshot=env.snapshot(), depth=2)
     storage.get_chunks.assert_not_awaited()
@@ -175,8 +236,10 @@ async def test_graph_filters_apply_to_root_and_relationship_sources(graph_env):
     result = await env.traversal.traverse(
         [env.facts[0][0][0].id], snapshot=env.snapshot(), filters=filters
     )
-    assert {source.resource_id for source in result[0].sources} == {"a"}
-    assert len(result[0].relationships) == 1
+    assert {source.chunk_id for node in result.entities for source in node.sources} == {
+        env.chunks[0].chunk_id
+    }
+    assert len(result.relationships) == 1
     assert env.graph.get_nodes.call_args.kwargs["filters"] is filters
     assert env.graph.get_neighbors.call_args.kwargs["filters"] is filters
 
@@ -208,14 +271,16 @@ async def test_ontology_filter_uses_current_facts_and_keeps_source_scope(
             MetadataFilters([MetadataFilter("resource_id", "c")], FilterCondition.NOT),
         ]
     )
-    groups = await env.traversal.traverse(
+    result = await env.traversal.traverse(
         [env.facts[0][0][0].id, node.id], snapshot=env.snapshot(), filters=filters
     )
-    assert [group.fact_id for group in groups] == [env.facts[0][0][0].id]
-    assert {source.resource_id for source in groups[0].sources} == {"a"}
-    assert len(groups[0].relationships) == 1
-    assert all(item.id != node.id for item in groups[0].entities)
-    assert env.graph.get_neighbors.call_args.args[0] == [groups[0].fact_id]
+    assert result.entities[0].id == env.facts[0][0][0].id
+    assert {source.chunk_id for node in result.entities for source in node.sources} == {
+        env.chunks[0].chunk_id
+    }
+    assert len(result.relationships) == 1
+    assert all(item.id != node.id for item in result.entities)
+    assert env.graph.get_neighbors.call_args.args[0] == [env.facts[0][0][0].id]
 
     # OR 不把查询绑定到单一本体；任意一条来源条件匹配即可。
     combined = MetadataFilters(
@@ -225,12 +290,22 @@ async def test_ontology_filter_uses_current_facts_and_keeps_source_scope(
         ],
         FilterCondition.OR,
     )
-    groups = await env.traversal.traverse(
+    result = await env.traversal.traverse(
         [node.id, env.facts[0][0][0].id], snapshot=env.snapshot(), filters=combined
     )
-    assert [group.fact_id for group in groups] == [node.id, env.facts[0][0][0].id]
-    assert {source.resource_id for source in groups[1].sources} == {"c"}
-    assert groups[0].relationships == []
+    assert list(dict.fromkeys(item.id for item in result.entities))[:2] == [
+        node.id,
+        env.facts[0][0][0].id,
+    ]
+    assert {
+        source.chunk_id
+        for item in result.entities
+        if item.id == env.facts[0][0][0].id
+        for source in item.sources
+    } == {env.chunks[2].chunk_id}
+    assert all(
+        node.id not in (edge.source_id, edge.target_id) for edge in result.relationships
+    )
 
 
 async def test_stale_ontology_projection_cannot_confirm_a_seed(graph_env, storage):
@@ -244,23 +319,16 @@ async def test_stale_ontology_projection_cannot_confirm_a_seed(graph_env, storag
         snapshot=env.snapshot(),
         filters=MetadataFilters([MetadataFilter("ontology_name", env.ontology.domain)]),
     )
-    assert result == []
+    assert result == GraphTraversalResult()
     env.graph.get_neighbors.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"node_ids": [""]},
-        {"relation_limit": 0},
-        {"direction": "random"},
-    ],
-)
-async def test_invalid_traversal_fails_before_io(graph_env, kwargs):
+async def test_invalid_direction_fails_before_io(graph_env):
+    # 种子与预算由调用方校验；这里只验证枚举转换仍拒绝未知方向。
     env = graph_env
     with pytest.raises(ValueError):
         await env.traversal.traverse(
-            snapshot=env.snapshot(), **{"node_ids": [env.facts[0][0][0].id], **kwargs}
+            [env.facts[0][0][0].id], snapshot=env.snapshot(), direction="random"
         )
     env.graph.get_nodes.assert_not_awaited()
     env.graph.get_neighbors.assert_not_awaited()
@@ -274,15 +342,16 @@ async def test_category_hint_can_be_selected_when_visible_relation_does_not_exis
     assert ("supplies", "both") in [
         (option.relation_type, option.direction) for option in other.relations
     ]
-    groups = await env.traversal.traverse(
+    result = await env.traversal.traverse(
         [other.id],
         snapshot=env.snapshot(),
         direction="outgoing",
         relation_types=["supplies"],
     )
-    assert groups[0].relationships == []  # 类别允许，但该实体没有可见的 outgoing 事实。
-    assert groups[0].entities[0].relations == other.relations
+    assert result.relationships == []  # 类别允许，但该实体没有可见的 outgoing 事实。
+    assert result.entities[0].id == other.id
+    assert set(asdict(result.entities[0])) == {"id", "sources"}
     unknown = await env.traversal.traverse(
         [other.id], snapshot=env.snapshot(), relation_types=["undeclared_here"]
     )
-    assert unknown[0].relationships == []  # 读取不套用写入本体的谓词白名单。
+    assert unknown.relationships == []  # 读取不套用写入本体的谓词白名单。

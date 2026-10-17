@@ -78,8 +78,8 @@ API 挂载在 `/rag/extensions/employment`：
 | 方法/相对路径 | 输入与返回 |
 |---|---|
 | POST /contracts/search | query、year_from/year_to、employee、top_k=10、candidate_limit=60 → list[ChunkHit] |
-| POST /graph/search | query、mode=hybrid、top_k=10（1–60）→ list[GraphHit] |
-| POST /graph/traverse | node_ids、direction=outgoing（可 incoming/both/null）→ list[GraphEvidence]；固定 in_department |
+| POST /graph/search | query、mode=hybrid、top_k=10（1–60）→ GraphRetrievalResult（entities、relationships、chunks） |
+| POST /graph/traverse | node_ids、direction=outgoing（可 incoming/both/null）→ GraphTraversalResult；固定 in_department |
 | GET /contracts/{resource_id}/outline | 可见目录 → DocumentOutline，不可见 404 |
 | POST /contracts/sections | section_ids、scope=own/subtree（默认 own）→ list[SectionText] |
 
@@ -110,7 +110,7 @@ FROM_SOURCE_SECRET 必须保密，部署限制后端访问，身份由网关注�
 {"node_ids":["employment:Department:研发部"],"direction":"incoming"}
 ```
 
-可返回李明、陈晨、王小雨的独立合同贡献；隐藏来源不会贡献事实。两个 HTTP 请求各自新快照；Python 同次编排可显式共享。无自动多跳，关系提示不证明存在关系，合法孤立实体仍保留。
+可返回李明、陈晨、王小雨的独立合同贡献；隐藏来源不会贡献事实。两个 HTTP 请求各自新快照；Python 同次编排可显式共享。无自动多跳，合法孤立实体仍保留。图检索与 traversal 都按逻辑 ID 收拢，实体只返回 id/sources，关系保留有向端点与谓词，各合同描述放入对应对象的 sources，沿 sources[].chunk_id 读取原文。ChunkHit.seed_entities.relations 来自全图真实可见连接，不受合同年份/员工过滤约束；图搜索的 top_k 只限制来源 chunks 数。核心 GraphNode.relations 仍是写入时的本体允许提示，不再进入图实体结果。
 
 本体条件也允许共享本体的其他可见资料，不要求其 metadata 带 employee/start_date。year/employee 只用于合同检索，不是图条件。旧拓扑本体属性重建见[运维手册](operations.md)。
 

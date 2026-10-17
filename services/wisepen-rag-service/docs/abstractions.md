@@ -73,7 +73,7 @@ GraphExtractor 默认输入 8000 token、输出 4096 token、并发 4；补漏�
 | Transformer | 按组件合同保留其他字段；Contextualizer 管理自己的 context 字段，GraphExtractor 管理自己的图字段 |
 | ContentWriter upsert | 完整对象替换，不自动合并 metadata，也不删除批次外的 Chunk |
 | VectorIndexer | factory 只返回业务增量，通用身份最后合并；不自动投影所有 Chunk.metadata |
-| 查询结果 | ChunkHit.metadata 来自当前授权 Chunk 的完整字典，不从向量 payload 拼装 |
+| 查询结果 | ChunkHit.metadata 来自当前授权 Chunk，排除 `_CHUNK_HIT_EXCLUDED_METADATA_KEYS` 指定的内部字段（当前为 entities、relationships）；不从向量 payload 拼装，不修改存储事实 |
 
 ### metadata_factory 的增量合并
 
@@ -113,4 +113,6 @@ Common [Candidate/检索 Pipeline](../../wisepen-common/src/common/utils/retriev
 
 `from_storage(...)` 固定本次 mode、预算、filters、include_embedding 和共享依赖；`retrieve(query: str)` 只接收字符串。application 每次直接构造组件，把 ResourceSnapshot 留在异步 prepare_candidates 中；不使用 retriever_factory、请求缓存或全局 context。
 
-prepare 在重排/MMR 前完成来源授权和当前事实核验。普通候选转成 PreparedChunk，图候选转成 PreparedGraphEvidence；这些内部 payload 不进入结果。Common 重排失败保持召回顺序降级，其他阶段异常传播；授权过滤后不补召回。MMR 使用已存向量，材料预算和响应缓存属于上层调用者。
+prepare 在重排/MMR 前完成来源授权和当前事实核验。普通和图候选最终都转成 PreparedChunk；图上下文与 Chunk 精排结果并列返回，内部 payload 不进入结果。Common 重排失败保持召回顺序降级，其他阶段异常传播；授权过滤后不补召回。MMR 仅用于普通向量检索并使用已存向量；图检索移除 MMR，采用来源名额预选。文本预算和响应缓存属于上层调用者。
+
+图检索与 traversal 共用 [GraphEntity/GraphRelationship](../src/rag/application/graph/models.py) 应用模型：一个逻辑对象只返回一次，逐来源字段放入 sources。实体只保留 id/sources；关系保留有向端点和谓词，关键词及 metadata 归各来源。收拢发生在授权之后，不改写核心事实、不拼接描述，不改变 Chunk 来源池和精排单位。

@@ -8,12 +8,9 @@ from common.utils.retrieval import Candidate, RetrievalPipeline
 from dependency_injector import providers
 from pydantic import ValidationError
 
-from rag.application.graph import GraphEntity, GraphEvidence, PreparedGraphEvidence
 from rag.application.publication import DocumentReadyEvent, PublicationAction
 from rag.application.retrieval import PreparedChunk
-from rag.container import Container, graph_rerank_text
-from rag.core.schema import GraphEdge
-from rag.storage.graph import GraphVectorKind
+from rag.container import Container
 from rag.storage.vector import IndexableField, IndexKind
 
 
@@ -152,7 +149,7 @@ def test_explicit_ontology_factories_and_context_toggle(
     graph = object()
     container.graph_storage.override(providers.Object(graph))
     assert container.graph_retrieval()._graph_reader is graph
-    assert container.graph_retrieval()._reranker is container.graph_reranker()
+    assert container.graph_retrieval()._reranker is container.chunk_reranker()
     assert container.graph_traversal()._graph_reader is graph
     assert container.garbage_collector()._graph_writers == [graph]
 
@@ -232,20 +229,8 @@ async def test_platform_rerank_materials_empty_and_failure_fallback(platform_set
     chunk = SimpleNamespace(
         raw_text="完整正文" * 500, metadata={"contextual_context": "上下文"}
     )
-    evidence = GraphEvidence(
-        GraphVectorKind.ENTITY,
-        "work:Person:张三",
-        [GraphEntity("work:Person:张三", "chunk", "独立描述", [])],
-        [GraphEdge("p", "c", "works_at", "任职描述", ["任职"], ["chunk"])],
-        [],
-    )
-    assert "work:Person:张三" in graph_rerank_text(
-        PreparedGraphEvidence(evidence, None)
-    )
-    assert "任职描述" in graph_rerank_text(PreparedGraphEvidence(evidence, None))
     for payload, reranker in [
         (PreparedChunk(chunk, None), container.chunk_reranker()),
-        (PreparedGraphEvidence(evidence, None), container.graph_reranker()),
     ]:
         candidates = [
             Candidate("first", payload, 1, 0.9),
@@ -259,9 +244,5 @@ async def test_platform_rerank_materials_empty_and_failure_fallback(platform_set
         result = await pipeline.run(query="q", top_k=2)
         assert [item.candidate_id for item in result] == ["first", "second"]
         material = model.rerank.call_args.kwargs["documents"][0]
-        assert material == (
-            chunk.raw_text
-            if isinstance(payload, PreparedChunk)
-            else graph_rerank_text(payload)
-        )
+        assert material == chunk.raw_text
         model.rerank.reset_mock()

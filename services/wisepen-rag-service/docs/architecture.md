@@ -77,8 +77,12 @@ flowchart TD
     Graph --> N[(Neo4j 来源拓扑)]
     N --> Reader
     Verify --> Rank[Common 重排 / MMR]
-    Graph --> Rank
-    Rank --> Result[ChunkHit / GraphHit]
+    Graph --> Sources[共享图上下文及来源预选]
+    Sources --> Rank
+    Rank --> Connections[最终 Chunk 实体的可见连接]
+    Connections --> Reader
+    Connections --> N
+    Connections --> Result[ChunkHit / GraphRetrievalResult]
     Snapshot --> Reading[DocumentReading / GraphTraversal]
     Reading --> Reader
     Reading --> N
