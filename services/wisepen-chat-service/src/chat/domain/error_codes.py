@@ -50,3 +50,4 @@ class ChatErrorCode(IErrorCode):
     # --- 记忆相关 ---
     MEMORY_NOT_FOUND = (40001, "目标记忆不存在")
     MEMORY_OPERATION_FAILED = (50021, "记忆操作失败")
+    MEMORY_RESPONSE_INVALID = (50022, "长期记忆返回格式错误")

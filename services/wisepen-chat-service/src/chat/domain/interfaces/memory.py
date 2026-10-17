@@ -13,7 +13,7 @@ class MemoryProvider(ABC):
         limit: int = 5,
         score_threshold: Optional[float] = None,
     ) -> List[str]:
-        """根据语义相似度检索相关事实。score_threshold 不为 None 时按分数过滤，忽略 limit"""
+        """按语义相似度门槛筛选，最多返回 limit 条；None 不设门槛，limit 为 0 时不搜索。"""
         pass
 
     @abstractmethod
@@ -22,8 +22,8 @@ class MemoryProvider(ABC):
         pass
 
     @abstractmethod
-    async def get_all(self, user_id: str) -> List[Dict[str, Any]]:
-        """返回指定用户的全部记忆条目（包含 id、memory、metadata 等字段）"""
+    async def get_all(self, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """返回指定用户最多 limit 条记忆（包含 id、memory、metadata 等字段），不提供总数。"""
         pass
 
     @abstractmethod
