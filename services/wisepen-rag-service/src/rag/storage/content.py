@@ -49,4 +49,3 @@ class ContentWriter(Protocol):
 
 class ContentStorage(ContentReader, ContentWriter, Protocol):
     """同一内容后端组合读写接口，不合并 Document 与 Chunk 模型。"""
-    async def ensure_indexes(self) -> None: ...

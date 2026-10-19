@@ -59,11 +59,7 @@ class GraphWriter(Protocol):
 
 class GraphStorage(GraphReader, GraphWriter, Protocol):
     """一个实例绑定一个物理图，核心 ID 不包含后端图命名空间。"""
-
-    async def ensure_schema(self) -> None:
-        """显式初始化图存储所需的 schema；可重复调用，失败传播。"""
-        ...
-
+    
 
 class GraphVectorKind(StrEnum):
     ENTITY = "entity"

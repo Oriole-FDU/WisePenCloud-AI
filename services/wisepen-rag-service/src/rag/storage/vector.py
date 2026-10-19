@@ -74,15 +74,6 @@ class VectorWriter(Protocol):
 class VectorStorage(VectorReader, VectorWriter, Protocol):
     """同一 adapter 组合读写能力，collection 绑定实例而非每条记录。"""
 
-    @property
-    def collection(self) -> str: ...
-
-    async def ensure_collection(
-        self, metadata_index_fields: list[IndexableField]
-    ) -> None:
-        """显式初始化并核对集合；空字段列表仍核对向量配置，失败传播。"""
-        ...
-
 
 @dataclass(frozen=True, slots=True)
 class VectorCollection:
