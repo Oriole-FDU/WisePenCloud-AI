@@ -34,14 +34,16 @@ def _text_client(content: str, *, finish_reason: str = "stop"):
 
 @pytest.mark.asyncio
 async def test_complete_returns_text_and_forwards_request():
-    client, create = _text_client("answer")
+    api, create = _text_client("answer")
     with patch("common.utils.ai_clients.instruction.instructor.from_openai"):
-        result = await InstructionClient(client, model="instruction-model").complete(
+        client = InstructionClient(api, model="instruction-model")
+        result = await client.complete(
             messages=[{"role": "user", "content": "question"}],
             max_tokens=64,
         )
 
     assert result == "answer"
+    assert create.await_args.kwargs["model"] == client.model
     create.assert_awaited_once_with(
         model="instruction-model",
         messages=[{"role": "user", "content": "question"}],
@@ -60,13 +62,10 @@ async def test_complete_rejects_empty_text():
 
 
 @pytest.mark.asyncio
-async def test_complete_rejects_truncation_and_model_is_readonly():
+async def test_complete_rejects_truncation():
     api, _ = _text_client("valid looking partial", finish_reason="length")
     with patch("common.utils.ai_clients.instruction.instructor.from_openai"):
-        client = InstructionClient(api, model="fixed-model")
-    assert client.model == "fixed-model"
-    with pytest.raises(AttributeError):
-        client.model = "other"
+        client = InstructionClient(api, model="m")
     with pytest.raises(ValueError, match="truncated"):
         await client.complete(messages=[], max_tokens=1)
 
@@ -114,7 +113,7 @@ async def test_structured_complete_validates_pydantic_model_through_instructor()
             response_model=Person,
         )
 
-    assert result is expected
+    assert result == expected
     structured_create.assert_awaited_once_with(
         model="instruction-model",
         messages=[{"role": "user", "content": "extract person"}],

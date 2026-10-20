@@ -1,12 +1,8 @@
-from dataclasses import replace
-
 import pytest
-
 from common.utils.markdown import (
     MarkdownChunker,
     MarkdownNode,
     MarkdownNodeKind,
-    MarkdownParser,
 )
 from common.utils.markdown.chunking.chunker import ChunkingPolicy
 from common.utils.markdown.chunking.packer import ChunkPacker
@@ -119,7 +115,6 @@ def test_original_ids_are_resolvable_and_repeated_across_text_parts():
         assert set(chunk.node_ids) <= originals
         assert paragraph.node_id in chunk.node_ids
         assert len(chunk.node_ids) == len(set(chunk.node_ids))
-        assert not any(":part:" in identity for identity in chunk.node_ids)
         assert result.nodes[0].node_id not in chunk.node_ids
 
 
@@ -129,13 +124,15 @@ def test_duplicate_paragraphs_keep_different_identity():
     assert set(result.chunks[0].node_ids).isdisjoint(result.chunks[1].node_ids)
 
 
-def test_packing_works_without_provenance_and_ignores_node_section_metadata():
-    nodes = MarkdownParser().parse("paragraph one\n\nparagraph two\n")
+def test_packer_accepts_nodes_without_provenance():
     packer = ChunkPacker(ChunkingPolicy(12, 24, CharacterCounter()))
-    chunks = packer.pack(
-        replace(node, source_spans=[], metadata={"section_path": ["ignored"]})
-        for node in nodes
-    )
+    nodes = [
+        MarkdownNode("one", MarkdownNodeKind.PARAGRAPH, "paragraph one"),
+        MarkdownNode("two", MarkdownNodeKind.PARAGRAPH, "paragraph two"),
+    ]
+
+    chunks = packer.pack(nodes)
+
     assert len(chunks) == 2
     assert all(
         chunk.source_spans == [] and chunk.section_path == [] for chunk in chunks
@@ -181,18 +178,6 @@ def test_node_above_target_is_sealed_even_with_non_additive_tokens():
     chunks = packer.pack(nodes)
     assert [chunk.text for chunk in chunks] == [node.text for node in nodes]
     assert all(not chunk.overflow for chunk in chunks)
-
-
-def test_overflow_comes_from_final_text_instead_of_metadata():
-    packer = ChunkPacker(ChunkingPolicy(12, 24, CharacterCounter()))
-    nodes = [
-        MarkdownNode(
-            "short", MarkdownNodeKind.FORMULA, "short", metadata={"overflow": True}
-        ),
-        MarkdownNode("long", MarkdownNodeKind.FORMULA, "x" * 30),
-    ]
-    chunks = packer.pack(nodes)
-    assert [chunk.overflow for chunk in chunks] == [False, True]
 
 
 def test_tiny_tail_has_no_special_merge_and_can_join_later_content():

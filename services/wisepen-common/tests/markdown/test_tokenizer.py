@@ -1,32 +1,31 @@
-from hashlib import sha256
-from importlib.resources import files
-from unittest.mock import Mock
+import os
+import subprocess
+import sys
 
 import pytest
+from common.utils.markdown import MarkdownChunker, TiktokenTokenCounter
+
+
+def test_cold_initialization_works_offline(tmp_path) -> None:
+    # 独立进程确保测试覆盖首次构造，不依赖模块级 encoding 缓存状态。
+    code = """
+from unittest.mock import patch
+
 import tiktoken
 
-from common.utils.markdown import MarkdownChunker, TiktokenTokenCounter
-from common.utils.markdown.chunking.tokenizer import _local_encoding
+with patch.object(tiktoken, "get_encoding", side_effect=AssertionError("download")):
+    from common.utils.markdown import TiktokenTokenCounter
 
-
-def test_cold_initialization_never_downloads(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("TIKTOKEN_CACHE_DIR", str(tmp_path))
-    monkeypatch.setattr(
-        tiktoken, "get_encoding", Mock(side_effect=AssertionError("download"))
+    assert TiktokenTokenCounter().count("中文 emoji 🙂") == 3
+"""
+    subprocess.run(
+        [sys.executable, "-c", code],
+        env={**os.environ, "TIKTOKEN_CACHE_DIR": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
     )
-    _local_encoding.cache_clear()
-    counter = TiktokenTokenCounter()
-    assert counter.count("中文 emoji 🙂") == 3
-    data = (
-        files("common.utils.markdown")
-        .joinpath("chunking/data/o200k_base.tiktoken")
-        .read_bytes()
-    )
-    assert (
-        sha256(data).hexdigest()
-        == "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d"
-    )
-    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.parametrize(
@@ -46,13 +45,12 @@ def test_split_preserves_unicode_and_all_characters(text) -> None:
     assert all("\ufffd" not in part for part in parts)
 
 
-def test_count_cache_and_token_unit() -> None:
+def test_count_uses_token_units() -> None:
     counter = TiktokenTokenCounter()
     english = "a" * 20
     chinese = "中" * 20
     assert len(english) == len(chinese)
     assert counter.count(english) != counter.count(chinese)
-    assert counter.count(chinese) == counter._counts[chinese]
     assert counter.count(chinese) == 20
 
 

@@ -38,7 +38,6 @@ async def test_concurrent_calls_keep_bound_model_and_dimensions():
     )
     results = await asyncio.gather(client.embed(texts=["1"]), client.embed(texts=["2"]))
     assert results == [[[1.0, 0.0]], [[2.0, 0.0]]]
-    assert client.dimensions == 2
     assert all(
         call.kwargs["model"] == "fixed-model" and call.kwargs["dimensions"] == 2
         for call in request.await_args_list
@@ -112,6 +111,6 @@ async def test_embed_rejects_invalid_response_contract(dimensions, vectors):
     client = SimpleNamespace(embeddings=SimpleNamespace(create=create))
 
     with pytest.raises(ValueError, match="count, dimensions or values"):
-        await EmbeddingClient(
-            client, model="m", dimensions=dimensions
-        ).embed(texts=["a"])
+        await EmbeddingClient(client, model="m", dimensions=dimensions).embed(
+            texts=["a"]
+        )

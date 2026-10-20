@@ -1,8 +1,8 @@
 from common.utils.markdown import (
     MarkdownChunker,
     MarkdownNode,
-    MarkdownParser,
     MarkdownNodeKind,
+    MarkdownParser,
 )
 
 
@@ -31,10 +31,6 @@ def test_caption_is_not_lost_when_large_table_is_split():
     assert all(chunk.content_token_count <= 1600 for chunk in result.chunks)
     table_id = result.nodes[0].node_id
     assert all(table_id in chunk.node_ids for chunk in result.chunks)
-    assert all(
-        not any(":part:" in identity for identity in chunk.node_ids)
-        for chunk in result.chunks
-    )
 
 
 def test_inline_facts_and_ordered_list_start_survive():

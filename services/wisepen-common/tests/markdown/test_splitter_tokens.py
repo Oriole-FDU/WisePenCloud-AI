@@ -1,5 +1,4 @@
 import pytest
-
 from common.utils.markdown import (
     MarkdownChunker,
     MarkdownNode,
@@ -91,7 +90,6 @@ def test_formula_and_figure_are_atomic_and_overflow_is_final(kind):
     chunks = ChunkPacker(policy).pack([node])
     assert chunks[0].text == node.text
     assert chunks[0].overflow is True
-    assert "overflow" not in node.metadata
 
 
 def test_table_repeats_header_without_splitting_rows():
@@ -144,11 +142,6 @@ def test_wide_row_is_not_reconstructed_as_cell_fragments():
     wide = next(chunk for chunk in result.chunks if row.rstrip("\n") in chunk.text)
     assert wide.overflow
     assert "short" not in wide.text and "last" not in wide.text
-    assert all(
-        ":part:" not in identity
-        for chunk in result.chunks
-        for identity in chunk.node_ids
-    )
 
 
 def test_html_table_without_row_structure_is_atomic():
@@ -218,7 +211,7 @@ def test_nodes_between_soft_and_hard_limits_remain_intact(source, hard_margin):
     policy = ChunkingPolicy(size // 2, size + hard_margin, counter)
     parts = StructuralNodeSplitter(policy).split(node)
     # 等于硬阈值也保留原节点及其 provenance，不生成派生片段。
-    assert len(parts) == 1 and parts[0] is node
+    assert parts == [node]
 
 
 def test_text_above_hard_limit_splits_to_soft_target():

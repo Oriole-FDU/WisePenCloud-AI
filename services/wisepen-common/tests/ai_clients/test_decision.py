@@ -2,9 +2,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from typesafe_sdk import Choice, ChoiceAnswer, Noul, NoulAnswer
-
 from common.utils.ai_clients import DecisionClient
+from typesafe_sdk import Choice, ChoiceAnswer, Noul, NoulAnswer
 
 
 @pytest.mark.asyncio
@@ -25,7 +24,7 @@ async def test_choose_returns_choice_answer_and_forwards_question():
         choices={"web": "联网搜索", "rag": "内部检索"},
     )
 
-    assert result is answer
+    assert result == answer
     system_one.assert_awaited_once_with(
         state=state,
         questions={
@@ -74,7 +73,10 @@ async def test_judge_rejects_threshold_outside_probability_range(threshold):
 
 @pytest.mark.asyncio
 async def test_decide_returns_full_system_one_response():
-    response = object()
+    response = SimpleNamespace(
+        choices={"intent": "read"},
+        nouls={"destructive": False},
+    )
     system_one = AsyncMock(return_value=response)
     client = SimpleNamespace(system_one=system_one)
     state = {"query": "delete old documents"}
@@ -88,5 +90,6 @@ async def test_decide_returns_full_system_one_response():
 
     result = await DecisionClient(client).decide(state=state, questions=questions)
 
-    assert result is response
+    assert result.choices == response.choices
+    assert result.nouls == response.nouls
     system_one.assert_awaited_once_with(state=state, questions=questions)

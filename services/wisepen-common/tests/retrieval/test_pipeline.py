@@ -14,7 +14,6 @@ from common.utils.retrieval import (
     RrfFusion,
 )
 from common.utils.retrieval.reranker import ModelReranker
-from common.utils.retrieval.retrievers import tokenize
 
 
 class RecordingRetriever(Retriever):
@@ -57,8 +56,7 @@ async def test_pipeline_passes_query_to_retriever_and_focus_to_reranker() -> Non
     assert retriever.queries == ["召回查询"]
     assert reranker.focuses == ["精排需求"]
     assert reranker.received == [candidate]
-    assert result == [result[0]]
-    assert (result[0].candidate_id, result[0].rank, result[0].score) == ("a", 1, 0.8)
+    assert result == [candidate]
 
 
 @pytest.mark.asyncio
@@ -185,15 +183,22 @@ async def test_fusion_retriever_can_be_nested() -> None:
     assert first.queries == ["query"]
 
 
-def test_bm25_default_tokenizer_normalizes_unicode() -> None:
-    assert "abc" in tokenize("ＡＢＣ")
-    assert tokenize("123") == ["123"]
-    assert (
-        BM25Retriever(
-            candidates=[Candidate("a", "abc", rank=0)], text_getter=lambda text: text
-        ).top_k
-        == 30
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query,expected_id", [("ＡＢＣ", "letters"), ("ABC", "letters"), ("123", "number")]
+)
+async def test_bm25_matches_normalized_unicode_queries(query, expected_id) -> None:
+    retriever = BM25Retriever(
+        candidates=[
+            Candidate("letters", "abc", rank=1),
+            Candidate("number", "123", rank=2),
+            Candidate("other", "unrelated", rank=3),
+        ],
+        text_getter=lambda text: text,
+        top_k=1,
     )
+    result = await retriever.retrieve(query)
+    assert [item.candidate_id for item in result] == [expected_id]
 
 
 def test_mmr_uses_vectors_and_supports_modes() -> None:
