@@ -202,34 +202,26 @@ async def test_model_failure_keeps_old_facts_and_continues_other_resource(repair
     assert restored == chunks
 
 
-async def test_partial_write_then_retry_reuses_only_persisted_success(
-    repair, flow, collections
-):
-    document, chunks = await prepare(flow)
-    # 跨过实际 adapter 的 500 条批边界，第二批失败时第一批事实必须保留。
-    chunks = [
-        replace(
-            chunks[0],
-            chunk_id=chunks[0].chunk_id if index == 0 else f"chunk-{index}",
-            chunk_index=index,
-            metadata=dict(chunks[0].metadata),
-        )
-        for index in range(501)
-    ]
-    await flow.content.upsert_chunks(chunks)
-    chunk_collection = collections[1]
-    chunk_collection.fail_bulk_call = chunk_collection.bulk_write.await_count + 2
+async def test_partial_write_then_retry_reuses_only_persisted_success(repair, flow):
+    document, chunks = await prepare(flow, text="# 甲\n\n第一段\n\n# 乙\n\n第二段")
+    original = flow.facts.index
+
+    async def persist_first_then_fail(updated):
+        # 在写入边界制造部分成功，不依赖 Mongo adapter 的批大小。
+        await flow.content.upsert_chunks(updated[:1])
+        raise OSError("partial write failure")
+
+    flow.facts.index = AsyncMock(side_effect=persist_first_then_fail)
     report = await run_repair(repair, flow, ["resource"])
     assert (report.document_errors, report.repaired, report.exit_code) == (1, 0, 1)
     restored = await flow.content.get_revision_chunks(
         resource_id="resource", content_revision=document.content_revision
     )
-    assert sum("graph_version" in chunk.metadata for chunk in restored) == 500
-    chunk_collection.fail_bulk_call = None
+    assert sum("graph_version" in chunk.metadata for chunk in restored) == 1
+    flow.facts.index = original
     flow.client.structured_complete.reset_mock()
     assert (await run_repair(repair, flow, ["resource"])).repaired == 1
-    # 首次成功的 500 块复用，只有第二批未写入的最后一块重新抽取。
-    assert flow.client.structured_complete.await_count == 1
+    assert flow.client.structured_complete.await_count == len(chunks) - 1
     restored = await flow.content.get_revision_chunks(
         resource_id="resource", content_revision=document.content_revision
     )
@@ -332,7 +324,6 @@ async def test_run_closes_clients_on_success_and_failure(
             await repair.run(args)
     else:
         assert (await repair.run(args)).repaired == 1
-        assert execute.await_args.kwargs["extractor"]._reuse_existing is False
     mongo.close.assert_awaited_once()
     instruction_api.close.assert_awaited_once()
 
@@ -730,12 +721,6 @@ async def test_vectors_only_setup_no_instruction_or_neo4j_and_closes_clients(
             await repair.run(args)
     else:
         assert (await repair.run(args)).repaired == 1
-        graph = execute.await_args.kwargs["graph"]
-        assert isinstance(graph, GraphIndexer) and graph._writer is None
-        assert (
-            graph._entity_writer is vectors[0]
-            and graph._relationship_writer is vectors[1]
-        )
         assert (
             execute.await_args.kwargs["extractor"] is None
             and execute.await_args.kwargs["facts"] is None

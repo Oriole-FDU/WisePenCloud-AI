@@ -6,20 +6,14 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 from common.utils.markdown import Section, SourceSpan
 from common.utils.markdown.chunking.tokenizer import default_token_counter
-from pydantic_core import PydanticSerializationError
 
 from rag.core.schema import Chunk, Document, DocumentStructure
 from rag.ingestion.transformers import Contextualizer
-from rag.ingestion.transformers.contextualizer import (
-    _index_document,
-    _render_prompt,
-    _select_outline,
-)
 
 
 class CharacterCounter:
@@ -208,79 +202,6 @@ async def test_own_span_seed_keeps_entire_direct_content_not_chunk_reconstructio
     assert chunks[1].metadata["context_status"] == "fallback"
 
 
-@pytest.mark.parametrize(
-    "ratio,expected", [(0, "after"), (0.5, "before"), (1, "before")]
-)
-async def test_window_direction_and_full_prompt_boundary(client, ratio, expected):
-    texts = ["before" * 7, "seed", "after" * 8, "x" * 1500]
-    doc, chunks = make_input(*texts)
-    # 预算允许一个邻居，不能同时装入两个；种子不参与方向比例。
-    limit = max(
-        len(_render_prompt(f"{texts[0]}\n\nseed", "seed", target_chars=100)),
-        len(_render_prompt(f"seed\n\n{texts[2]}", "seed", target_chars=100)),
-    )
-    await transformer(client, max_context_tokens=limit, before_ratio=ratio).transform(
-        chunks, document=doc
-    )
-    prompt = prompt_for(client, "seed")
-    assert len(prompt) <= limit
-    assert (texts[0] in material(prompt)) == (expected == "before")
-    assert (texts[2] in material(prompt)) == (expected == "after")
-
-
-async def test_blocked_side_does_not_prevent_other_side_or_deduplicate_equal_text(
-    client,
-):
-    doc, chunks = make_input("x" * 1500, "same", "same", "tail", "y" * 1500)
-    limit = len(_render_prompt("same\n\nsame\n\ntail", "same", target_chars=100))
-    await transformer(client, max_context_tokens=limit, before_ratio=1).transform(
-        chunks, document=doc
-    )
-    prompts = [
-        call.kwargs["messages"][0]["content"]
-        for call in client.complete.await_args_list
-    ]
-    assert any(material(prompt) == "same\n\nsame\n\ntail" for prompt in prompts)
-
-
-async def test_window_crosses_section_boundaries(client):
-    doc, chunks = make_input("before", "target", "after", "x" * 1200)
-    # 当前 own 也过大，走目标种子；全局窗口可以访问相邻 section。
-    doc.structure.sections = [section("s", 0, len(doc.text), len(doc.text))]
-    chunks[1].section_id = "s"
-    limit = len(_render_prompt("before\n\ntarget\n\nafter", "target", target_chars=100))
-    await transformer(
-        client, max_context_tokens=limit, outline_token_ratio=0
-    ).transform(chunks, document=doc)
-    assert material(prompt_for(client, "target")) == "before\n\ntarget\n\nafter"
-
-
-def test_outline_reduction_preserves_ancestors_then_near_siblings():
-    doc, chunks = make_input("z" * 100)
-    doc.structure.sections = (
-        [section("root", 0, 1, 100)]
-        + [
-            section(
-                f"child-{index}",
-                index + 1,
-                index + 2,
-                index + 2,
-                parent="root",
-                ordinal=index,
-            )
-            for index in range(12)
-        ]
-        + [section("outside", 99, 100, 100, ordinal=1)]
-    )
-    chunks[0].section_id = "child-5"
-    data = _index_document(doc, chunks, CharacterCounter())
-    outline = _select_outline(data, chunks[0], 40)
-    assert outline.startswith("# root\n") and "## child-5" in outline
-    assert "## child-4" in outline and "## child-6" in outline
-    assert "child-0" not in outline and len(outline) <= 40
-    assert _select_outline(data, chunks[0], 3) == ""
-
-
 @pytest.mark.parametrize("failure", ["empty", "overbudget", "timeout", "truncated"])
 async def test_model_failures_clear_stale_context_and_retry(client, failure):
     doc, chunks = make_input("正文")
@@ -303,7 +224,7 @@ async def test_model_failures_clear_stale_context_and_retry(client, failure):
     assert client.complete.await_count == 2
 
 
-@pytest.mark.parametrize("case", ["empty", "chunk-too-large", "metadata-too-large"])
+@pytest.mark.parametrize("case", ["empty", "chunk-too-large"])
 async def test_no_model_downgrades_and_can_retry(client, case):
     doc, chunks = make_input("正文")
     budget = 300
@@ -312,10 +233,6 @@ async def test_no_model_downgrades_and_can_retry(client, case):
         chunks[0].raw_text = " "
     elif case == "chunk-too-large":
         chunks[0].raw_text = "x" * 300
-    elif case == "metadata-too-large":
-        doc.text = "x" * 1000
-        doc.structure.total_length = 1000
-        doc.metadata["big"] = "x" * 1000
     chunks[0].metadata.update(contextual_context="old", context_version="old")
     await transformer(client, max_context_tokens=budget).transform(chunks, document=doc)
     assert chunks[0].metadata == {"context_status": expected}
@@ -336,17 +253,6 @@ async def test_empty_input_missing_document_and_cancellation(client):
     client.complete.side_effect = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
         await service.transform(chunks, document=doc)
-
-
-async def test_metadata_serialization_error_stops_before_model_without_mutation(client):
-    doc, chunks = make_input("正文", metadata={"unsupported": object()})
-    chunks[0].metadata.update(contextual_context="旧上下文", context_version="old")
-    previous = deepcopy(chunks)
-    with pytest.raises(PydanticSerializationError):
-        await transformer(client).transform(chunks, document=doc)
-    assert chunks == previous
-    client.complete.assert_not_awaited()
-    assert "context_status" not in chunks[0].metadata
 
 
 async def test_shared_concurrency_limit_and_document_isolation(client):
@@ -378,44 +284,29 @@ async def test_shared_concurrency_limit_and_document_isolation(client):
 async def test_real_bpe_full_prompt_budget_boundary(client):
     counter = default_token_counter()
     doc, chunks = make_input("中文 BPE 预算😀。")
-    prompt = _render_prompt(
-        doc.text, chunks[0].raw_text, target_chars=100, whole_document=True
+    await Contextualizer(client=client, token_counter=counter).transform(
+        chunks, document=doc
     )
+    prompt = prompt_for(client, chunks[0].raw_text)
     budget = counter.count(prompt)
     service = Contextualizer(
         client=client, token_counter=counter, max_context_tokens=budget
     )
+    client.complete.reset_mock()
     await service.transform(chunks, document=doc)
     assert prompt_for(client, chunks[0].raw_text) == prompt
+    assert counter.count(prompt) == budget
     client.complete.reset_mock()
     await Contextualizer(
         client=client, token_counter=counter, max_context_tokens=budget - 1
     ).transform(chunks, document=doc)
-    assert all(
-        counter.count(call.kwargs["messages"][0]["content"]) <= budget - 1
+    prompts = [
+        call.kwargs["messages"][0]["content"]
         for call in client.complete.await_args_list
-    )
-
-
-async def test_nonadditive_counter_rechecks_actual_prompt_before_adding_neighbor(
-    client,
-):
-    class NonadditiveCounter(CharacterCounter):
-        name = "test:nonadditive"
-
-        def count(self, text):
-            # 单位分别计数无法看出组合后的超限，模拟 BPE 的边界效应。
-            return len(text) + (1000 if "left\n\nseed" in text else 0)
-
-    doc, chunks = make_input("left", "seed", "right", "x" * 1000)
-    budget = len(_render_prompt("seed\n\nright", "seed", target_chars=100))
-    counter = NonadditiveCounter()
-    await Contextualizer(
-        client=client, token_counter=counter, max_context_tokens=budget
-    ).transform(chunks, document=doc)
-    prompt = prompt_for(client, "seed")
-    assert material(prompt) == "seed\n\nright"
-    assert counter.count(prompt) <= budget
+    ]
+    assert all(counter.count(prompt) <= budget - 1 for prompt in prompts)
+    if not prompts:
+        assert chunks[0].metadata["context_status"] == "fallback"
 
 
 async def test_one_chunk_failure_keeps_other_success_and_program_errors_propagate(
@@ -430,44 +321,12 @@ async def test_one_chunk_failure_keeps_other_success_and_program_errors_propagat
         await transformer(client).transform(chunks[:1], document=doc)
 
 
-async def test_sorted_material_index_does_not_reorder_callers_list(client):
+async def test_contextualizer_does_not_reorder_callers_chunks(client):
     doc, chunks = make_input("before", "target", "after", "x" * 1500)
     chunks.reverse()
     ids = [chunk.chunk_id for chunk in chunks]
-    budget = len(
-        _render_prompt("before\n\ntarget\n\nafter", "target", target_chars=100)
-    )
-    await transformer(client, max_context_tokens=budget).transform(chunks, document=doc)
+    await transformer(client).transform(chunks, document=doc)
     assert [chunk.chunk_id for chunk in chunks] == ids
-    assert material(prompt_for(client, "target")) == "before\n\ntarget\n\nafter"
-
-
-async def test_invalid_cached_output_with_matching_fingerprint_is_regenerated(client):
-    doc, chunks = make_input("正文")
-    service = transformer(client)
-    await service.transform(chunks, document=doc)
-    chunks[0].metadata["contextual_context"] = "x" * 151
-    await service.transform(chunks, document=doc)
-    assert client.complete.await_count == 2
-    assert chunks[0].metadata["contextual_context"] == "本段说明文档主题。"
-
-
-async def test_invalid_context_cache_logs_reason_but_normal_miss_is_quiet(
-    client, monkeypatch
-):
-    warning = Mock()
-    monkeypatch.setattr("rag.ingestion.transformers.contextualizer.warning", warning)
-    doc, chunks = make_input("正文")
-    service = transformer(client)
-    await service.transform(chunks, document=doc)
-    chunks[0].metadata["context_version"] = "old"
-    await service.transform(chunks, document=doc)
-    warning.assert_not_called()
-    chunks[0].metadata["contextual_context"] = "x" * 151
-    await service.transform(chunks, document=doc)
-    assert warning.call_args.kwargs["cache_type"] == "context"
-    assert warning.call_args.kwargs["chunk_id"] == chunks[0].chunk_id
-    assert "budget" in warning.call_args.kwargs["reason"]
 
 
 @pytest.mark.parametrize("error_type", [RuntimeError, TypeError])

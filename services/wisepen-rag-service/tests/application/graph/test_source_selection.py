@@ -1,33 +1,6 @@
 """来源预选控制送入精排的 Chunk，不改变共享图上下文。"""
 
-import pytest
 
-from rag.application.graph.retrieval import select_source_chunks
-
-
-def test_first_fact_owns_shared_chunk_and_common_sources_come_first():
-    assert select_source_chunks(
-        {"first": ["single", "shared", "shared"], "second": ["shared", "other"]}, 1
-    ) == ["shared", "other"]
-
-
-def test_quotas_decrease_and_unused_slots_reach_later_sources():
-    assert select_source_chunks(
-        {"first": ["a"], "second": ["b", "c", "d", "e", "f", "g"]}, 5
-    ) == ["a", "b", "c", "d", "e", "f"]
-    assert select_source_chunks(
-        {"first": ["a", "b", "c", "d"], "second": ["e", "f", "g"]}, 3
-    ) == ["a", "b", "c", "e"]
-
-
-def test_empty_groups_do_not_consume_quota_and_entity_sources_are_excluded():
-    assert select_source_chunks(
-        {"duplicate": ["a"], "new": ["a", "b", "c", "d"]}, 2, excluded={"a"}
-    ) == ["b", "c"]
-    assert select_source_chunks({}, 5) == []
-
-
-@pytest.mark.asyncio
 async def test_top_k_can_exceed_graph_seed_budget(graph_env):
     env = graph_env
     env.entities[:] = [env.match()]

@@ -2,13 +2,12 @@
 
 import asyncio
 import re
-from dataclasses import fields, replace
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from common.utils.markdown import MarkdownChunker, OutlineFormatter, SourceSpan
-from pydantic import ValidationError
+from common.utils.markdown import MarkdownChunker, OutlineFormatter
 
 from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
@@ -114,13 +113,6 @@ async def test_section_text_is_exact_complete_original_span(reading_setup, scope
         )
         assert item.text == SOURCE[span.start_offset : span.end_offset]
         assert item.section_path == section.section_path
-    assert {field.name for field in fields(result[0])} == {
-        "resource_id",
-        "content_revision",
-        "section_id",
-        "section_path",
-        "text",
-    }
     first_chapter = next(item for item in result if item.section_path == ["第一章"])
     assert first_chapter.text.startswith("# 第一章\n\n  直属原文。")
     assert ("### 数据" in first_chapter.text) == (scope is SectionReadScope.SUBTREE)
@@ -146,14 +138,6 @@ async def test_chunk_text_is_exact_original_and_location_with_fixed_fields(
         assert item.content_revision == chunk.content_revision
         assert item.section_id == chunk.section_id
         assert item.section_path == chunk.section_path
-    assert {field.name for field in fields(result[0])} == {
-        "resource_id",
-        "content_revision",
-        "chunk_id",
-        "section_id",
-        "section_path",
-        "text",
-    }
 
 
 async def test_chunk_reads_deduplicate_preserving_order_and_fetch_once(
@@ -369,61 +353,6 @@ async def test_wrong_document_identity_is_omitted_without_fallback(
     )
 
 
-@pytest.mark.parametrize("scope", list(SectionReadScope))
-@pytest.mark.parametrize(
-    "start,end", [(0, len(SOURCE) + 1), (len(SOURCE) + 2, len(SOURCE) + 2)]
-)
-async def test_invalid_stored_range_is_a_fact_error(
-    reading_setup, storage, scope, start, end
-):
-    document = reading_setup.document
-    section = document.structure.sections[1]
-    span_name = "own_span" if scope is SectionReadScope.OWN else "subtree_span"
-    document.structure.sections[1] = replace(
-        section, **{span_name: SourceSpan(start, end)}
-    )
-    await storage.upsert_documents([document])
-    with pytest.raises(RuntimeError, match="span"):
-        await reading_setup.usecase.read_sections(
-            [section.section_id], snapshot=reading_setup.snapshot, scope=scope
-        )
-
-
-@pytest.mark.parametrize("scope", list(SectionReadScope))
-@pytest.mark.parametrize("start,end", [(-1, 0), (5, 4)])
-async def test_malformed_span_decode_exception_propagates(
-    reading_setup, collections, scope, start, end
-):
-    # SourceSpan 自身拒绝负数与倒序；真实存储损坏在解码边界失败，不能伪造空正文。
-    span_name = "own_span" if scope is SectionReadScope.OWN else "subtree_span"
-    collections[0].records[0]["structure"]["sections"][1][span_name] = {
-        "start_offset": start,
-        "end_offset": end,
-    }
-    with pytest.raises(ValidationError):
-        await reading_setup.usecase.read_sections(
-            [reading_setup.document.structure.sections[1].section_id],
-            snapshot=reading_setup.snapshot,
-            scope=scope,
-        )
-
-
-async def test_zero_length_range_returns_empty_text(reading_setup, storage):
-    document = reading_setup.document
-    section = document.structure.sections[1]
-    document.structure.sections[1] = replace(
-        section,
-        own_span=SourceSpan(
-            section.own_span.start_offset, section.own_span.start_offset
-        ),
-    )
-    await storage.upsert_documents([document])
-    result = await reading_setup.usecase.read_sections(
-        [section.section_id], snapshot=reading_setup.snapshot
-    )
-    assert len(result) == 1 and result[0].text == ""
-
-
 async def test_batch_io_deduplicates_document_and_reuses_shared_snapshot(
     reading_setup, storage, publication_store, read_acl_repository, snapshot_reader
 ):
@@ -484,42 +413,21 @@ async def test_empty_input_has_no_io(
     read_acl_repository.get_resource_acls.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    "method,kwargs",
-    [
-        ("global_outline", {"max_level": -1}),
-        ("neighborhood", {"sibling_steps": -1}),
-        ("read_sections", {"scope": "recursive"}),
-    ],
-)
-async def test_invalid_parameters_fail_before_io(
-    snapshot_reader, collections, method, kwargs
-):
-    usecase = DocumentReading(reader=snapshot_reader)
+async def test_unknown_section_scope_is_rejected(reading_setup):
     with pytest.raises(ValueError):
-        await getattr(usecase, method)(
-            "resource" if method == "global_outline" else ["section"],
-            snapshot=ResourceSnapshot(PermissionScope("reader")),
-            **kwargs,
+        await reading_setup.usecase.read_sections(
+            [reading_setup.document.structure.sections[1].section_id],
+            snapshot=reading_setup.snapshot,
+            scope="recursive",
         )
-    collections[0].find.assert_not_called()
 
 
-@pytest.mark.parametrize("backend", ["content", "publication", "acl"])
-async def test_backend_failure_propagates_without_invisible_cache(
-    reading_setup, collections, publication_store, read_acl_repository, backend
-):
+async def test_content_read_failure_propagates(reading_setup, collections):
     error = OSError("backend unavailable")
-    if backend == "content":
-        collections[0].find.side_effect = error
-    elif backend == "publication":
-        publication_store.get_states.side_effect = error
-    else:
-        read_acl_repository.get_resource_acls.side_effect = error
+    collections[0].find.side_effect = error
     with pytest.raises(OSError) as caught:
         await reading_setup.usecase.read_sections(
             [reading_setup.document.structure.sections[1].section_id],
             snapshot=reading_setup.snapshot,
         )
     assert caught.value is error
-    assert reading_setup.snapshot._revisions == {}

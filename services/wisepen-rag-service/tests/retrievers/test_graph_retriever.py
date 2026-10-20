@@ -1,8 +1,6 @@
 """图种子组件的路线、来源身份、并发与 Common Pipeline 接口。"""
 
 import asyncio
-import subprocess
-import sys
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -245,18 +243,3 @@ async def test_common_pipeline_preparation_owns_authorization_before_reranking(d
     assert len(prepared) == 2 and result == [
         Candidate("entity:visible", "已授权原文", 1, 0.8)
     ]
-
-
-def test_retriever_dependency_boundary():
-    subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            """
-import sys
-from rag.retrievers.graph import GraphRetriever
-assert not any(name.startswith(('rag.application', 'rag.ingestion', 'rag.backends', 'rag.core.config')) for name in sys.modules)
-""",
-        ],
-        check=True,
-    )

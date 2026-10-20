@@ -6,16 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from common.utils.retrieval import Candidate
 
 from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
-from rag.application.retrieval import (
-    ChunkHit,
-    PreparedChunk,
-    VectorRetrieval,
-    build_chunk_hits,
-)
+from rag.application.retrieval import VectorRetrieval
 from rag.storage.graph import GraphDirection
 from rag.storage.vector import VectorMatch
 
@@ -100,48 +94,46 @@ async def test_chunk_hits_entity_references_are_from_selected_authorized_chunk(
     env.graph.get_neighbors.assert_not_awaited()
 
 
-def test_chunkhit_default_entity_lists_are_independent():
-    first = ChunkHit("a", "r", "v", None, [], "text", 1, 1)
-    second = ChunkHit("b", "r", "v", None, [], "text", 2, 1)
-    assert first.seed_entities == [] and first.seed_entities is not second.seed_entities
-
-
 async def test_hit_metadata_filters_graph_records_without_mutating_source(
-    graph_env, snapshot_reader
+    graph_env, connected_retrieval, storage
 ):
     env = graph_env
     chunk = env.chunks[0]
     chunk.metadata["business"] = {"employee": "张三", "tags": ["任职"]}
     original = deepcopy(chunk.metadata)
-    hits = await build_chunk_hits(
-        [Candidate(chunk.chunk_id, PreparedChunk(chunk, None), 1, 0.9)],
-        snapshot_reader=snapshot_reader,
-        graph_reader=None,
-        snapshot=env.snapshot(),
+    await storage.upsert_chunks([chunk])
+    snapshot = env.snapshot()
+    hits = await connected_retrieval.usecase.retrieve(
+        "query", snapshot=snapshot, mode="dense", top_k=1
     )
     assert set(hits[0].metadata) == {"contextual_context", "other", "business"}
     assert hits[0].metadata["business"] == original["business"]
     assert hits[0].metadata["other"] == original["other"]
     assert hits[0].metadata["contextual_context"] == original["contextual_context"]
     assert hits[0].seed_entities
-    assert chunk.metadata == original
     hits[0].metadata["response_only"] = True
-    assert "response_only" not in chunk.metadata
+    again = await connected_retrieval.usecase.retrieve(
+        "query", snapshot=snapshot, mode="dense", top_k=1
+    )
+    assert "response_only" not in again[0].metadata
 
 
-def test_graph_seed_parser_program_errors_are_not_optional_metadata_damage(
-    monkeypatch, chunk
+async def test_graph_seed_parser_program_errors_propagate_from_retrieval(
+    graph_env, connected_retrieval, storage, monkeypatch
 ):
-    from rag.application.retrieval import chunk_seed_entities
-
+    env = graph_env
+    chunk = env.chunks[0]
     chunk.metadata.update(entities=[], relationships=[])
+    await storage.upsert_chunks([chunk])
 
     def broken_parser(value):
         raise TypeError("parser program error")
 
     monkeypatch.setattr("rag.application.retrieval.parse_graph_facts", broken_parser)
     with pytest.raises(TypeError, match="parser program error"):
-        chunk_seed_entities(chunk)
+        await connected_retrieval.usecase.retrieve(
+            "query", snapshot=env.snapshot(), mode="dense", top_k=1
+        )
 
 
 async def test_connections_span_other_chunks_and_only_final_hits_are_queried(

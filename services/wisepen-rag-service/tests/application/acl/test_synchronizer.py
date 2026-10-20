@@ -1,4 +1,3 @@
-from dataclasses import asdict
 from datetime import UTC, datetime
 from itertools import product
 
@@ -9,9 +8,9 @@ from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.acl.synchronizer import (
     AclSynchronizer,
     AuthoritativeAclError,
-    _project,
 )
-from rag.backends.mongo.acl import _to_domain
+
+RESOURCE_ID = "507f1f77bcf86cd799439011"
 
 
 class _Cursor:
@@ -41,6 +40,21 @@ class _Repository:
 
     async def delete(self, resource_id):
         self.deleted.append(resource_id)
+
+
+@pytest.fixture
+def synchronize_acl():
+    """从权威记录走公开同步入口，返回交给仓储保存的权限对象。"""
+
+    async def synchronize(source):
+        repository = _Repository()
+        synchronizer = AclSynchronizer(
+            collection=_Collection([source]), repository=repository
+        )
+        await synchronizer.synchronize([source["_id"]])
+        return repository.saved[0]
+
+    return synchronize
 
 
 @pytest.mark.asyncio
@@ -148,7 +162,9 @@ async def test_malformed_authoritative_acl_is_not_saved_or_deleted(fields):
     assert repository.saved == [] and repository.deleted == []
 
 
-def test_group_projection_preserves_upstream_user_override_and_role_priority():
+async def test_group_projection_preserves_upstream_user_override_and_role_priority(
+    synchronize_acl,
+):
     # 参照 Java userMasks.getOrDefault(user, baseMask)；MARKET_VIEW 不等于 VIEW。
     for base_mask, user_mask, role in product(
         [0, 1, 2, 512],
@@ -156,6 +172,7 @@ def test_group_projection_preserves_upstream_user_override_and_role_priority():
         [GroupRoleType.MEMBER, GroupRoleType.ADMIN, GroupRoleType.OWNER],
     ):
         source = {
+            "_id": RESOURCE_ID,
             "ownerId": "owner",
             "updateTime": datetime(2026, 1, 1, tzinfo=UTC),
             "computedGroupAcls": {
@@ -165,35 +182,41 @@ def test_group_projection_preserves_upstream_user_override_and_role_priority():
                 }
             },
         }
-        acl = _to_domain(asdict(_project(source, "resource")))
+        acl = await synchronize_acl(source)
         expected = role in (GroupRoleType.ADMIN, GroupRoleType.OWNER) or (
             (base_mask if user_mask is None else user_mask) & 2 != 0
         )
         assert acl.can_read(PermissionScope("reader", {"group": role})) is expected
 
 
-def test_resource_user_override_precedes_group_admin_but_owner_still_wins():
+async def test_resource_user_override_precedes_group_admin_but_owner_still_wins(
+    synchronize_acl,
+):
     source = {
+        "_id": RESOURCE_ID,
         "ownerId": "owner",
         "updateTime": datetime(2026, 1, 1, tzinfo=UTC),
         "specifiedUsersGrantedActionsMask": {"owner": 0, "blocked": 0, "reader": 2},
         "computedGroupAcls": {"group": {"baseMask": 2, "userMasks": {}}},
     }
-    acl = _to_domain(asdict(_project(source, "resource")))
+    acl = await synchronize_acl(source)
     assert acl.can_read(PermissionScope("owner"))
     assert acl.can_read(PermissionScope("reader"))
     assert not acl.can_read(PermissionScope("blocked", {"group": GroupRoleType.ADMIN}))
 
 
 @pytest.mark.parametrize("version", [None, 1, 2, 3])
-def test_market_projection_requires_offer_version_for_members_only(version):
+async def test_market_projection_requires_offer_version_for_members_only(
+    synchronize_acl, version
+):
     source = {
+        "_id": RESOURCE_ID,
         "ownerId": "owner",
         "updateTime": datetime(2026, 1, 1, tzinfo=UTC),
         "groupBinds": [{"groupId": "market", "marketSaleInfo": {"offerVersion": 2}}],
         "computedGroupAcls": {"market": {"baseMask": 2, "userMasks": {"blocked": 0}}},
     }
-    acl = _to_domain(asdict(_project(source, "resource")))
+    acl = await synchronize_acl(source)
     assert acl.can_read(
         PermissionScope("reader", {"market": GroupRoleType.MEMBER}),
         document_version=version,
@@ -208,8 +231,11 @@ def test_market_projection_requires_offer_version_for_members_only(version):
     )
 
 
-def test_another_group_can_grant_view_when_one_group_excludes_user():
+async def test_another_group_can_grant_view_when_one_group_excludes_user(
+    synchronize_acl,
+):
     source = {
+        "_id": RESOURCE_ID,
         "ownerId": "owner",
         "updateTime": datetime(2026, 1, 1, tzinfo=UTC),
         "computedGroupAcls": {
@@ -217,7 +243,7 @@ def test_another_group_can_grant_view_when_one_group_excludes_user():
             "second": {"baseMask": 0, "userMasks": {"reader": 2}},
         },
     }
-    acl = _project(source, "resource")
+    acl = await synchronize_acl(source)
     assert acl.can_read(
         PermissionScope(
             "reader", {"first": GroupRoleType.MEMBER, "second": GroupRoleType.MEMBER}

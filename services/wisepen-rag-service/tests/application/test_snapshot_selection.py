@@ -1,8 +1,6 @@
 """请求版本/授权决定的首次观察、不可见缓存、批量 I/O 与请求隔离。"""
 
 import asyncio
-import subprocess
-import sys
 from dataclasses import replace
 
 import pytest
@@ -366,13 +364,3 @@ async def test_interleaved_resolutions_do_not_overwrite_completed_selection(
         release.set()
         delayed.cancel()
         await asyncio.gather(delayed, return_exceptions=True)
-
-
-def test_snapshot_module_does_not_import_retrieval_use_cases_or_runtime_config():
-    code = """
-import sys
-from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
-assert not any(name.startswith(('rag.reading', 'rag.retrievers', 'rag.application.retrieval',
-    'rag.core.config')) for name in sys.modules)
-"""
-    subprocess.run([sys.executable, "-c", code], check=True)

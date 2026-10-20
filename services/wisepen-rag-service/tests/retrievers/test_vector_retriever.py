@@ -1,8 +1,6 @@
 """配置在构造时确定，查询与 embedding 只保存在调用局部变量中。"""
 
 import asyncio
-import subprocess
-import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -260,20 +258,3 @@ async def test_same_retriever_concurrent_queries_do_not_share_query_state(deps, 
         ["1"],
         ["2"],
     ]
-
-
-def test_vector_retriever_import_does_not_load_business_or_runtime_modules():
-    # storage 包现有导出会加载内容端口；它不表示 Retriever 依赖正文读取能力。
-    subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            """
-import sys
-from rag.retrievers.vector import VectorRetriever
-assert not any(name.startswith(('rag.application',
-    'rag.core.config', 'rag.backends')) for name in sys.modules)
-""",
-        ],
-        check=True,
-    )

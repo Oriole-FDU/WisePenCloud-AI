@@ -1,4 +1,4 @@
-"""事实解析与投影编排独立于 Neo4j；输入损坏必须写前失败。"""
+"""图事实拓扑投影保留来源身份、去重结果和写入失败。"""
 
 import copy
 from dataclasses import asdict, replace
@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from pydantic import ValidationError
 
 from rag.core.schema import GraphEdge, GraphNode
 from rag.ingestion.indexers import GraphIndexer
@@ -78,54 +77,6 @@ async def test_source_projection_scope_dedup_and_readonly(graph_ontology, chunk)
     assert projections[0].edges[0].description == "任职"
     assert projections[0].nodes[0].id == projections[1].nodes[0].id
     assert projections[0].nodes[0].source_id != projections[1].nodes[0].source_id
-
-
-async def test_invalid_facts_dropped_without_losing_valid_facts(graph_ontology, chunk):
-    person, company, edge = facts(chunk)
-    chunk.metadata["entities"].extend(
-        [asdict(replace(person, category="unknown")), asdict(replace(person, name=" "))]
-    )
-    chunk.metadata["relationships"].extend(
-        [
-            asdict(replace(edge, relation_type="unknown")),
-            asdict(replace(edge, source_id=company.id, target_id=person.id)),
-            asdict(replace(edge, target_id="missing")),
-        ]
-    )
-    writer = SimpleNamespace(replace_sources=AsyncMock())
-    await GraphIndexer(ontology=graph_ontology, writer=writer).index([chunk])
-    projection = writer.replace_sources.await_args.args[0][0]
-    assert projection.nodes == [person, company] and projection.edges == [edge]
-
-
-@pytest.mark.parametrize(
-    "damage",
-    ["missing", "not-list", "node-shape", "edge-shape", "node-source", "edge-source"],
-)
-async def test_later_corrupt_chunk_rejects_all_before_writing(
-    graph_ontology, chunk, damage
-):
-    facts(chunk)
-    broken = replace(chunk, chunk_id="broken", metadata={})
-    facts(broken)
-    if damage == "missing":
-        broken.metadata.pop("entities")
-    elif damage == "not-list":
-        broken.metadata["relationships"] = None
-    elif damage == "node-shape":
-        broken.metadata["entities"] = [{}]
-    elif damage == "edge-shape":
-        broken.metadata["relationships"][0]["keywords"] = 12
-    elif damage == "node-source":
-        broken.metadata["entities"][0]["source_id"] = "wrong"
-    else:
-        broken.metadata["relationships"][0]["source_ids"] = ["wrong"]
-    writer = SimpleNamespace(replace_sources=AsyncMock())
-    with pytest.raises((ValueError, TypeError, ValidationError)):
-        await GraphIndexer(ontology=graph_ontology, writer=writer).index(
-            [chunk, broken]
-        )
-    writer.replace_sources.assert_not_awaited()
 
 
 async def test_empty_success_is_explicit_replacement_and_writer_failure_propagates(

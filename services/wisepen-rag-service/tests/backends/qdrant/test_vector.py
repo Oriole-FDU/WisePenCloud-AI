@@ -281,6 +281,7 @@ async def test_query_preserves_original_ids_scores_and_order(
         VectorQuery(),
         VectorQuery(embedding=[1.0], text="both"),
         VectorQuery(text="中文", top_k=0),
+        VectorQuery(embedding=[1.0, 0.0], filters=MetadataFilters()),
     ],
 )
 async def test_invalid_query_has_no_io(vectors, qdrant_client, query):

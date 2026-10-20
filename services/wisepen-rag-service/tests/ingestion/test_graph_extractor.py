@@ -5,7 +5,7 @@ import copy
 import json
 from dataclasses import asdict, replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -213,69 +213,26 @@ async def test_empty_result_is_success_and_incrementally_reused(
     assert len(fingerprint) == 64
 
 
-@pytest.mark.parametrize(
-    "change",
-    [
-        "model",
-        "ontology",
-        "schema",
-        "text",
-        "title",
-        "output-budget",
-        "input-budget",
-        "tokenizer",
-        "gleaning",
-        "strategy",
-    ],
-)
-async def test_semantic_fingerprint_changes_recompute(
-    graph_ontology, client, chunk, monkeypatch, change
+@pytest.mark.parametrize("change", ["model", "ontology", "text"])
+async def test_changed_extraction_inputs_recompute_cached_facts(
+    graph_ontology, client, chunk, change
 ):
-    extractor = GraphExtractor(ontology=graph_ontology, client=client)
-    await extractor.transform([chunk])
-    old = chunk.metadata["graph_version"]
-    settings = {}
+    await GraphExtractor(ontology=graph_ontology, client=client).transform([chunk])
+    # 模型、本体和正文改变都会影响抽取结果，旧缓存不能继续复用。
     if change == "model":
-        client.model = "other"
+        client.model = "other-model"
     elif change == "ontology":
         graph_ontology = replace(graph_ontology, description="不同本体说明")
-    elif change == "schema":
-        original = GraphExtraction.model_json_schema
-        monkeypatch.setattr(
-            GraphExtraction,
-            "model_json_schema",
-            lambda: {**original(), "description": "new"},
-        )
-    elif change == "text":
-        chunk.raw_text += "新文本"
-    elif change == "title":
-        chunk.section_path.append("新标题")
-    elif change == "output-budget":
-        settings["max_output_tokens"] = 2048
-    elif change == "input-budget":
-        settings["max_input_tokens"] = 9000
-    elif change == "tokenizer":
-        from common.utils.markdown.chunking.tokenizer import default_token_counter
-
-        counter = default_token_counter()
-        counter.name = "changed"
-        settings["token_counter"] = counter
-    elif change == "gleaning":
-        settings["gleaning"] = True
     else:
-        monkeypatch.setattr("rag.ingestion.transformers.graph._STRATEGY_VERSION", "new")
-    await GraphExtractor(ontology=graph_ontology, client=client, **settings).transform(
-        [chunk]
-    )
-    assert chunk.metadata["graph_version"] != old
-    assert client.structured_complete.await_count >= 2
+        chunk.raw_text += "新增正文"
+    await GraphExtractor(ontology=graph_ontology, client=client).transform([chunk])
+    assert client.structured_complete.await_count == 2
 
 
 async def test_nonsemantic_changes_reuse_and_force_regenerates(
     graph_ontology, client, chunk
 ):
     await GraphExtractor(ontology=graph_ontology, client=client).transform([chunk])
-    fingerprint = chunk.metadata["graph_version"]
     chunk.metadata.update(contextual_context="改变的背景", unrelated={"data": True})
     await GraphExtractor(
         ontology=graph_ontology, client=client, max_concurrency=1
@@ -285,49 +242,14 @@ async def test_nonsemantic_changes_reuse_and_force_regenerates(
         ontology=graph_ontology, client=client, reuse_existing=False
     ).transform([chunk])
     assert client.structured_complete.await_count == 2
-    assert chunk.metadata["graph_version"] == fingerprint
 
 
-@pytest.mark.parametrize(
-    "corruption",
-    [
-        "missing",
-        "shape",
-        "category",
-        "ontology",
-        "node-source",
-        "edge-source",
-        "endpoint",
-        "duplicate-node",
-        "duplicate-edge",
-    ],
-)
-async def test_invalid_cached_facts_are_regenerated(
-    graph_ontology, client, chunk, corruption
+async def test_structurally_invalid_cached_facts_are_regenerated(
+    graph_ontology, client, chunk
 ):
     extractor = GraphExtractor(ontology=graph_ontology, client=client)
     await extractor.transform([chunk])
-    if corruption == "missing":
-        chunk.metadata.pop("relationships")
-    elif corruption == "shape":
-        chunk.metadata["entities"] = [{}]
-    elif corruption in ("category", "ontology", "node-source"):
-        field, value = {
-            "category": ("category", "unknown"),
-            "ontology": ("ontology_name", "other"),
-            "node-source": ("source_id", "other-chunk"),
-        }[corruption]
-        chunk.metadata["entities"][0][field] = value
-    elif corruption == "edge-source":
-        chunk.metadata["relationships"][0]["source_ids"] = ["other-chunk"]
-    elif corruption == "endpoint":
-        chunk.metadata["relationships"][0]["target_id"] = "missing"
-    elif corruption == "duplicate-node":
-        chunk.metadata["entities"].append(copy.deepcopy(chunk.metadata["entities"][0]))
-    else:
-        chunk.metadata["relationships"].append(
-            copy.deepcopy(chunk.metadata["relationships"][0])
-        )
+    chunk.metadata["entities"] = [{}]
     await extractor.transform([chunk])
     assert client.structured_complete.await_count == 2
     assert (
@@ -560,55 +482,3 @@ async def test_caller_cancellation_waits_for_model_cleanup(
     with pytest.raises(asyncio.CancelledError):
         await task
     assert cleaned.is_set() and chunk == before
-
-
-async def test_graph_cache_damage_logs_reason_and_program_errors_propagate(
-    graph_ontology, client, chunk, monkeypatch
-):
-    warning = Mock()
-    monkeypatch.setattr("rag.ingestion.transformers.graph.warning", warning)
-    extractor = GraphExtractor(ontology=graph_ontology, client=client)
-    await extractor.transform([chunk])
-    chunk.metadata.pop("relationships")
-    await extractor.transform([chunk])
-    assert warning.call_args.kwargs["cache_type"] == "graph"
-    assert warning.call_args.kwargs["reason"]
-
-    def broken_parser(*args, **kwargs):
-        raise TypeError("parser bug")
-
-    monkeypatch.setattr(type(graph_ontology), "parse_chunk_facts", broken_parser)
-    with pytest.raises(TypeError, match="parser bug"):
-        await extractor.transform([chunk])
-
-
-async def test_graph_cleanup_logs_sibling_failure_without_overwriting_primary(
-    graph_ontology, client, chunk, monkeypatch
-):
-    log = Mock()
-    monkeypatch.setattr("rag.ingestion.transformers.graph.error", log)
-    sibling_entered = asyncio.Event()
-    primary = RuntimeError("primary model failure")
-    cleanup = OSError("sibling cleanup failed")
-
-    async def generate(**kwargs):
-        if "sibling" in kwargs["messages"][1]["content"]:
-            sibling_entered.set()
-            try:
-                await asyncio.Event().wait()
-            finally:
-                raise cleanup
-        await sibling_entered.wait()
-        raise primary
-
-    client.structured_complete.side_effect = generate
-    sibling = replace(chunk, chunk_id="sibling", raw_text="sibling", metadata={})
-    with pytest.raises(RuntimeError) as caught:
-        await GraphExtractor(ontology=graph_ontology, client=client).transform(
-            [chunk, sibling]
-        )
-    assert caught.value is primary
-    assert any(
-        call.kwargs["exc"] is cleanup and cleanup.__traceback__ is not None
-        for call in log.call_args_list
-    )

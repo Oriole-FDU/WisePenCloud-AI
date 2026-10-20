@@ -12,7 +12,7 @@ from rag.storage.graph import (
 )
 
 
-def test_ontology_bound_fact_construction_keeps_plain_dataclass(graph_ontology, chunk):
+def test_ontology_checks_node_category_and_relation_direction(graph_ontology, chunk):
     node = graph_ontology.create_node(
         name="张三", category="Person", source_id=chunk.chunk_id
     )
@@ -27,7 +27,6 @@ def test_ontology_bound_fact_construction_keeps_plain_dataclass(graph_ontology, 
         chunk_id=chunk.chunk_id,
     )
     assert node.ontology_name == "work" and edge.source_ids == [chunk.chunk_id]
-    assert "ontology" not in asdict(node) and "ontology" not in asdict(edge)
     with pytest.raises(ValueError):
         graph_ontology.create_node(
             name="张三", category="unknown", source_id=chunk.chunk_id

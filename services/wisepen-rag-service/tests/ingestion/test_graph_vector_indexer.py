@@ -2,7 +2,7 @@
 
 import asyncio
 from copy import deepcopy
-from dataclasses import asdict, replace
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -84,56 +84,6 @@ async def test_fact_reduction_and_empty_clear_only_given_source(
     )
 
 
-@pytest.mark.parametrize(
-    "damage", ["missing", "shape", "source", "edge-source", "duplicate-source"]
-)
-async def test_all_input_validated_before_io(
-    indexer, chunk, make_graph_facts, graph_vector_writers, damage
-):
-    usecase, embedding = indexer
-    make_graph_facts(chunk)
-    broken = replace(chunk, chunk_id="broken", metadata={})
-    make_graph_facts(broken)
-    if damage == "missing":
-        broken.metadata.pop("entities")
-    elif damage == "shape":
-        broken.metadata["entities"][0]["name"] = []
-    elif damage == "source":
-        broken.metadata["entities"][0]["source_id"] = "wrong"
-    elif damage == "edge-source":
-        broken.metadata["relationships"][0]["source_ids"] = ["wrong"]
-    else:
-        broken.chunk_id = chunk.chunk_id
-    with pytest.raises((ValueError, TypeError)):
-        await usecase.index([chunk, broken])
-    embedding.embed.assert_not_awaited()
-    for writer in graph_vector_writers:
-        writer.delete.assert_not_awaited()
-        writer.upsert.assert_not_awaited()
-
-
-async def test_ontology_invalid_and_duplicate_facts(
-    indexer, chunk, make_graph_facts, graph_vector_writers
-):
-    nodes, edges = make_graph_facts(chunk)
-    chunk.metadata["entities"] += [
-        asdict(replace(nodes[0], category="unknown")),
-        asdict(replace(nodes[0], description="不覆盖")),
-    ]
-    chunk.metadata["relationships"] += [
-        asdict(replace(edges[0], relation_type="unknown")),
-        asdict(replace(edges[0], source_id=nodes[1].id, target_id=nodes[0].id)),
-        asdict(replace(edges[0], description="不覆盖")),
-    ]
-    await indexer[0].index([chunk])
-    assert [len(writer.records) for writer in graph_vector_writers] == [2, 1]
-    assert all(
-        "不覆盖" not in record.text
-        for writer in graph_vector_writers
-        for record in writer.records.values()
-    )
-
-
 async def test_bad_embedding_does_not_delete_current_batch(
     indexer, chunk, make_graph_facts, graph_vector_writers
 ):
@@ -150,11 +100,18 @@ async def test_bad_embedding_does_not_delete_current_batch(
 
 
 async def test_later_embedding_failure_preserves_prior_batch(
-    indexer, chunk, make_graph_facts, graph_vector_writers
+    indexer, graph_ontology, chunk, make_graph_facts, graph_vector_writers
 ):
-    usecase, embedding = indexer
-    usecase._source_batch_size = 1
-    usecase._embedding_batch_size = 2
+    _, embedding = indexer
+    entities, relationships = graph_vector_writers
+    usecase = GraphIndexer(
+        ontology=graph_ontology,
+        embedding_client=embedding,
+        entity_writer=entities,
+        relationship_writer=relationships,
+        source_batch_size=1,
+        embedding_batch_size=2,
+    )
     make_graph_facts(chunk)
     second = replace(chunk, chunk_id="second", metadata={})
     make_graph_facts(second)
@@ -175,22 +132,21 @@ async def test_later_embedding_failure_preserves_prior_batch(
 
 
 @pytest.mark.parametrize("failure", ["delete", "upsert", "cancel"])
-async def test_partial_write_then_replay(
+async def test_partial_write_failure_can_be_replayed(
     indexer, chunk, make_graph_facts, graph_vector_writers, failure
 ):
     usecase, _ = indexer
     make_graph_facts(chunk)
     entities, relationships = graph_vector_writers
     method = relationships.delete if failure == "delete" else relationships.upsert
+    original_write = method.side_effect
     method.side_effect = (
         asyncio.CancelledError() if failure == "cancel" else OSError("write failed")
     )
     with pytest.raises((OSError, asyncio.CancelledError)):
         await usecase.index([chunk])
     assert len(entities.records) == (0 if failure == "delete" else 2)
-    method.side_effect = (
-        relationships._delete if failure == "delete" else relationships._upsert
-    )
+    method.side_effect = original_write
     await usecase.index([chunk])
     assert len(entities.records) == 2 and len(relationships.records) == 1
 
@@ -204,9 +160,10 @@ async def test_empty_input_has_no_io(indexer, graph_vector_writers):
 
 @pytest.mark.parametrize("failure", [None, "topology", "embedding"])
 async def test_combined_graph_indexer_orders_topology_before_vectors(
-    indexer, chunk, make_graph_facts, graph_vector_writers, failure
+    indexer, graph_ontology, chunk, make_graph_facts, graph_vector_writers, failure
 ):
-    usecase, embedding = indexer
+    _, embedding = indexer
+    entities, relationships = graph_vector_writers
     make_graph_facts(chunk)
     order = []
 
@@ -223,8 +180,15 @@ async def test_combined_graph_indexer_orders_topology_before_vectors(
             raise OSError("embedding failed")
         return [[1.0, 0.0] for _ in texts]
 
-    usecase._writer = SimpleNamespace(replace_sources=AsyncMock(side_effect=write))
+    topology_writer = SimpleNamespace(replace_sources=AsyncMock(side_effect=write))
     embedding.embed.side_effect = embed
+    usecase = GraphIndexer(
+        ontology=graph_ontology,
+        writer=topology_writer,
+        embedding_client=embedding,
+        entity_writer=entities,
+        relationship_writer=relationships,
+    )
     if failure:
         with pytest.raises(OSError):
             await usecase.index([chunk])

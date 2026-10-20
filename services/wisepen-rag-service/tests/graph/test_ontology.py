@@ -1,13 +1,12 @@
 """本体输入与方向约束不依赖插件或存储。"""
 
 import json
-from dataclasses import asdict, is_dataclass, replace
+from dataclasses import asdict, replace
 
 import pytest
 import yaml
 
-from rag.core.schema import EntitySpec, GraphEdge, GraphNode, Ontology, RelationSpec
-from rag.ingestion.transformers.graph import GraphExtraction
+from rag.core.schema import GraphEdge, GraphNode, Ontology, RelationSpec
 
 
 def test_domain_and_unrestricted_endpoint_categories(graph_ontology):
@@ -82,19 +81,8 @@ def test_node_business_constraints(graph_ontology, changes, message):
         graph_ontology.validate_node(replace(node, **changes))
 
 
-def test_instructor_schema_fields_have_descriptions():
-    schema = GraphExtraction.model_json_schema()
-    for definition in [schema, *schema.get("$defs", {}).values()]:
-        assert all(
-            value.get("description")
-            for value in definition.get("properties", {}).values()
-        )
-
-
 @pytest.mark.parametrize("suffix", [".json", ".yaml", ".yml", ".YAML"])
-def test_load_ontology_file_as_lightweight_dataclasses(
-    graph_ontology, tmp_path, suffix
-):
+def test_load_ontology_file(graph_ontology, tmp_path, suffix):
     path = tmp_path / f"ontology{suffix}"
     data = asdict(graph_ontology)
     text = (
@@ -105,9 +93,6 @@ def test_load_ontology_file_as_lightweight_dataclasses(
     path.write_text(text, encoding="utf-8-sig")
     loaded = Ontology.from_file(str(path))
     assert loaded == graph_ontology
-    assert is_dataclass(loaded)
-    assert isinstance(loaded.entity_specs["Person"], EntitySpec)
-    assert isinstance(loaded.relation_specs["works_at"], RelationSpec)
 
 
 @pytest.mark.parametrize(

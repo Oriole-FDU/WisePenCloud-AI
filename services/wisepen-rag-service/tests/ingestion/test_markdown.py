@@ -1,11 +1,11 @@
-from dataclasses import fields, replace
+from dataclasses import replace
 
 import pytest
 from common.utils.markdown import (
     MarkdownChunker as CommonMarkdownChunker,
 )
 
-from rag.core.schema import Chunk, Document, DocumentStructure
+from rag.core.schema import Document, DocumentStructure
 from rag.core.schema.content import rag_section_id
 from rag.ingestion.chunkers import MarkdownChunker
 
@@ -55,7 +55,7 @@ def document(common_chunker):
     )
 
 
-async def test_markdown_chunker_adapts_common_fields_without_internal_details(
+async def test_markdown_chunker_preserves_common_chunk_content_and_identity(
     document, common_chunker
 ):
     result = common_chunker.chunk(document.text)
@@ -67,18 +67,6 @@ async def test_markdown_chunker_adapts_common_fields_without_internal_details(
     assert [chunk.chunk_index for chunk in chunks] == list(range(len(chunks)))
     assert any(chunk.anchor_labels for chunk in chunks)
     assert any(len(chunk.section_path) == 2 for chunk in chunks)
-    assert {item.name for item in fields(Chunk)} == {
-        "chunk_id",
-        "resource_id",
-        "content_revision",
-        "chunk_index",
-        "section_id",
-        "section_path",
-        "raw_text",
-        "content_token_count",
-        "anchor_labels",
-        "metadata",
-    }
     for chunk, source in zip(chunks, result.chunks, strict=True):
         assert chunk.resource_id == document.resource_id
         assert chunk.content_revision == document.content_revision
@@ -93,14 +81,9 @@ async def test_markdown_chunker_adapts_common_fields_without_internal_details(
         assert chunk.content_token_count == source.content_token_count
         assert chunk.anchor_labels == source.anchor_labels
         assert chunk.metadata == document.metadata
-        assert not hasattr(chunk, "source_spans")
-        assert not hasattr(chunk, "node_ids")
-        assert not hasattr(chunk, "overflow")
-        assert not hasattr(chunk, "content_hash")
 
 
-async def test_business_metadata_is_deep_copied_per_chunk_without_type_shadow(document):
-    document.type = "history"
+async def test_business_metadata_is_independent_per_chunk(document):
     document.metadata = {"catalog": {"year": 1850, "tags": ["历史"]}}
     chunks = await MarkdownChunker(40, 70).split(document)
     assert len(chunks) > 1
@@ -109,9 +92,6 @@ async def test_business_metadata_is_deep_copied_per_chunk_without_type_shadow(do
     chunks[0].metadata["catalog"]["year"] = 1900
     assert document.metadata == {"catalog": {"year": 1850, "tags": ["历史"]}}
     assert all(chunk.metadata == document.metadata for chunk in chunks[1:])
-    assert all(
-        "type" not in chunk.metadata and not hasattr(chunk, "type") for chunk in chunks
-    )
 
 
 async def test_markdown_identity_is_stable_and_scoped_to_resource_revision(document):

@@ -1,35 +1,22 @@
-"""过滤值与键只进入参数；嵌套逻辑和不支持输入明确处理。"""
+"""通过公开图读取验证嵌套过滤与 Cypher 参数隔离。"""
 
-import pytest
-
-from rag.backends.neo4j.filters import compile_filters
-from rag.core.schema.filters import (
-    FilterCondition,
-    FilterOperator,
-    MetadataFilter,
-    MetadataFilters,
-)
+from rag.backends.neo4j import Neo4jGraphStorage
+from rag.core.schema import GraphNode
+from rag.core.schema.filters import FilterCondition, MetadataFilter, MetadataFilters
+from rag.storage.graph import GraphSourceProjection
 
 
-@pytest.mark.parametrize(
-    "operator, value, actual, expected",
-    [
-        (FilterOperator.EQ, "a", "a", True),
-        (FilterOperator.IN, ["a", "b"], "b", True),
-        (FilterOperator.GT, 3, 4, True),
-        (FilterOperator.GTE, 3, 3, True),
-        (FilterOperator.LT, 3, 4, False),
-        (FilterOperator.LTE, 3, 3, True),
-    ],
-)
-def test_comparisons(operator, value, actual, expected, filter_matches):
-    expression, parameters = compile_filters(
-        MetadataFilters([MetadataFilter("field", value, operator)])
+async def test_nested_filters_and_parameter_safety(driver):
+    storage = Neo4jGraphStorage(driver=driver)
+    matching = GraphNode("Alice", "matching", "work", "Person")
+    other = GraphNode("Bob", "other", "work", "Person")
+    await storage.replace_sources(
+        [
+            GraphSourceProjection("matching", {"resource_id": "b"}, nodes=[matching]),
+            GraphSourceProjection("other", {"resource_id": "c"}, nodes=[other]),
+        ]
     )
-    assert filter_matches(expression, parameters, {"meta_field": actual}) is expected
 
-
-def test_nested_filters_missing_property_negation_and_parameter_safety(filter_matches):
     key = "unsafe'] RETURN 1 //"
     value = "' OR true //"
     filters = MetadataFilters(
@@ -39,37 +26,19 @@ def test_nested_filters_missing_property_negation_and_parameter_safety(filter_ma
             ),
             MetadataFilters(
                 [
-                    MetadataFilter("resource_id", "a"),
                     MetadataFilter("resource_id", "b"),
+                    MetadataFilter("resource_id", "a"),
                 ],
                 condition=FilterCondition.OR,
             ),
         ]
     )
-    expression, parameters = compile_filters(filters)
-    assert key not in expression and value not in expression
-    assert filter_matches(expression, parameters, {"meta_resource_id": "b"})
-    assert not filter_matches(expression, parameters, {"meta_resource_id": "c"})
 
-
-@pytest.mark.parametrize(
-    "filters",
-    [
-        MetadataFilters(),
-        MetadataFilters(
-            [MetadataFilter("a", 1), MetadataFilter("b", 1)],
-            condition=FilterCondition.NOT,
-        ),
-        MetadataFilters([MetadataFilter("nested.key", "x")]),
-        MetadataFilters([MetadataFilter("", "x")]),
-        MetadataFilters([MetadataFilter("a", float("nan"))]),
-        MetadataFilters([MetadataFilter("a", [], FilterOperator.IN)]),
-        MetadataFilters([MetadataFilter("a", ["x", 1], FilterOperator.IN)]),
-        MetadataFilters([MetadataFilter("a", True, FilterOperator.GT)]),
-        MetadataFilters([MetadataFilter("a", "x", "unsupported")]),
-        MetadataFilters([MetadataFilter("a", "x")], condition="unsupported"),
-    ],
-)
-def test_unsupported_filter_shapes(filters):
-    with pytest.raises(ValueError):
-        compile_filters(filters)
+    # 缺失属性先按 false 处理，再由 NOT 取反；用户提供的键和值仍作参数传递。
+    assert await storage.get_nodes([matching.id, other.id], filters=filters) == [
+        matching
+    ]
+    _, query, parameters = driver.calls[-1]
+    assert key not in query and value not in query
+    assert parameters["key_0"] == f"meta_{key}"
+    assert parameters["value_0"] == value

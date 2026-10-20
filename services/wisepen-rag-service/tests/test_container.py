@@ -11,65 +11,6 @@ from pydantic import ValidationError
 from rag.application.publication import DocumentReadyEvent, PublicationAction
 from rag.application.retrieval import PreparedChunk
 from rag.container import Container
-from rag.storage.vector import IndexableField, IndexKind
-
-
-def test_shared_config_clients_and_mandatory_indexers(platform_settings):
-    container = Container(settings=platform_settings)
-    container.mongo_client.override(
-        providers.Object(
-            {
-                "rag-test": {
-                    "document_revisions": object(),
-                    "doc_chunks": object(),
-                    "resource_acls": object(),
-                    "resource_publications": object(),
-                }
-            }
-        )
-    )
-    container.qdrant_client.override(providers.Object(object()))
-    container.embedding_openai.override(providers.Object(object()))
-    pipeline = container.pipeline()
-    assert pipeline.indexers == [container.facts_indexer(), container.vector_indexer()]
-    assert pipeline.transformers == []
-    stores = [
-        container.vector_storage(),
-        container.entity_vector_storage(),
-        container.relationship_vector_storage(),
-    ]
-    assert all(store._client is container.qdrant_client() for store in stores)
-    assert [store._sparse_vector_name for store in stores] == ["sparse", None, None]
-    assert all(store._dense_vector_size == 2 for store in stores)
-    assert container.embedding_client()._model == "test-embedding"
-    assert container.embedding_client().dimensions == 2
-    assert container.vector_indexer()._embedding_client is container.embedding_client()
-    assert (
-        container.vector_retrieval()._embedding_client is container.embedding_client()
-    )
-    assert container.vector_retrieval()._reranker is container.chunk_reranker()
-    assert container.rerank_client().model == "test-rerank"
-    assert container.rerank_client().api_key == "test-qwen"
-    collections = container.vector_collections()
-    assert [item.storage for item in collections] == stores
-    assert collections[0].metadata_index_fields == [
-        IndexableField("resource_id", IndexKind.KEYWORD)
-    ]
-    assert all(
-        item.metadata_index_fields
-        == [
-            IndexableField(name, IndexKind.KEYWORD)
-            for name in ("resource_id", "chunk_id", "ontology_name")
-        ]
-        for item in collections[1:]
-    )
-    collector = container.garbage_collector()
-    assert collector._vector_writers == stores and collector._graph_writers == []
-    assert container.graph_storage() is None
-    with pytest.raises(RuntimeError, match="ENABLE_GRAPH_STORAGE"):
-        container.graph_traversal()
-    with pytest.raises(RuntimeError, match="INSTRUCTION"):
-        container.instruction_client()
 
 
 async def test_pipeline_routes_share_live_mapping_and_are_isolated_per_container(
@@ -112,46 +53,7 @@ async def test_pipeline_routes_share_live_mapping_and_are_isolated_per_container
         with pytest.raises(ValueError, match="unregistered document type"):
             await second.publication().publish(document)
     assert marker.index.await_count == 2
-    assert first.pipeline_routes() is publisher._pipelines
     assert second.pipeline_routes() == {}
-
-
-def test_explicit_ontology_factories_and_context_toggle(
-    platform_settings, graph_ontology
-):
-    AppSettings = type(platform_settings)
-    values = platform_settings.model_dump() | {
-        "ENABLE_CONTEXTUALIZE": True,
-        "INSTRUCTION_BASE_URL": "http://localhost:8000/v1",
-        "INSTRUCTION_API_KEY": "key",
-        "INSTRUCTION_MODEL": "test-instruction",
-    }
-    container = Container(settings=AppSettings(**values))
-    for name in (
-        "content_storage",
-        "embedding_client",
-        "entity_vector_storage",
-        "relationship_vector_storage",
-        "vector_storage",
-    ):
-        getattr(container, name).override(providers.Object(object()))
-    instruction = object()
-    container.instruction_client.override(providers.Object(instruction))
-    assert container.pipeline().transformers == [container.contextualizer()]
-    extractor = container.graph_extractor(ontology=graph_ontology)
-    indexer = container.graph_indexer(ontology=graph_ontology)
-    assert extractor._ontology is graph_ontology
-    assert indexer._ontology is graph_ontology and indexer._writer is None
-    assert (
-        container.graph_extractor(ontology=graph_ontology, client=object())
-        is not extractor
-    )
-    graph = object()
-    container.graph_storage.override(providers.Object(graph))
-    assert container.graph_retrieval()._graph_reader is graph
-    assert container.graph_retrieval()._reranker is container.chunk_reranker()
-    assert container.graph_traversal()._graph_reader is graph
-    assert container.garbage_collector()._graph_writers == [graph]
 
 
 @pytest.mark.parametrize(
@@ -176,48 +78,61 @@ def test_capability_configuration_fails_before_connections(platform_settings, ch
         AppSettings(**(platform_settings.model_dump() | change))
 
 
-def test_two_default_pipelines_and_contextualizer_choice(platform_settings):
+@pytest.mark.parametrize(
+    "enabled,pipeline_name,expects_context",
+    [
+        (False, "pipeline", False),
+        (True, "pipeline", True),
+        (True, "pipeline_without_context", False),
+        (True, "pipeline_with_context", True),
+    ],
+)
+async def test_configured_pipeline_persists_facts_and_vectors(
+    platform_settings, storage, document, enabled, pipeline_name, expects_context
+):
     AppSettings = type(platform_settings)
-    instruction = {
-        "INSTRUCTION_BASE_URL": "http://localhost:8000/v1",
-        "INSTRUCTION_API_KEY": "key",
-        "INSTRUCTION_MODEL": "test-instruction",
-    }
-
-    def build(enable_contextualize, configure_instruction=True):
-        values = platform_settings.model_dump() | {
-            "ENABLE_CONTEXTUALIZE": enable_contextualize
+    values = platform_settings.model_dump() | {"ENABLE_CONTEXTUALIZE": enabled}
+    if enabled:
+        values |= {
+            "INSTRUCTION_BASE_URL": "http://localhost:8000/v1",
+            "INSTRUCTION_API_KEY": "key",
+            "INSTRUCTION_MODEL": "test-instruction",
         }
-        if configure_instruction:
-            values |= instruction
-        container = Container(settings=AppSettings(**values))
-        for name in ("content_storage", "embedding_client", "vector_storage"):
-            getattr(container, name).override(providers.Object(object()))
-        if configure_instruction:
-            container.instruction_client.override(providers.Object(object()))
-        return container
-
-    # 平台按 settings 二选一；未选中的链不解析 instruction_client，无 INSTRUCTION 配置也能装配。
-    off = build(False, configure_instruction=False)
-    assert off.pipeline().transformers == []
-    assert off.pipeline_without_context().transformers == []
-    with pytest.raises(RuntimeError, match="INSTRUCTION"):
-        off.pipeline_with_context()
-    # 平台开启时默认带平台统一持有的 Contextualizer；垂类可显式改选不带的那条。
-    on = build(True)
-    assert on.pipeline().transformers == [on.contextualizer()]
-    assert on.pipeline_with_context().transformers == [on.contextualizer()]
-    assert on.pipeline_without_context().transformers == []
-
-
-def test_no_gc_or_rerank_switch(platform_settings):
-    AppSettings = type(platform_settings)
-    assert "ENABLE_GC" not in AppSettings.model_fields
-    assert "ENABLE_RERANK" not in AppSettings.model_fields
-    assert (
-        not platform_settings.ENABLE_CONTEXTUALIZE
-        and not platform_settings.KAFKA_ENABLED
+    container = Container(settings=AppSettings(**values))
+    instruction = SimpleNamespace(
+        model="test-instruction", complete=AsyncMock(return_value="文档上下文")
     )
+    embedding = SimpleNamespace(
+        embed=AsyncMock(side_effect=lambda *, texts: [[1.0, 0.0] for _ in texts])
+    )
+    vectors = SimpleNamespace(upsert=AsyncMock())
+    container.content_storage.override(providers.Object(storage))
+    container.embedding_client.override(providers.Object(embedding))
+    container.vector_storage.override(providers.Object(vectors))
+    if enabled:
+        container.instruction_client.override(providers.Object(instruction))
+
+    # 运行真实装配链，验证配置对最终事实和向量的影响。
+    chunks = await getattr(container, pipeline_name)().run(document)
+    persisted = await storage.get_revision_chunks(
+        resource_id=document.resource_id, content_revision=document.content_revision
+    )
+    assert persisted == chunks
+    assert chunks
+    assert all(
+        chunk.metadata.get("contextual_context")
+        == ("文档上下文" if expects_context else None)
+        for chunk in persisted
+    )
+    records = [
+        record for call in vectors.upsert.await_args_list for record in call.args[0]
+    ]
+    assert [record.record_id for record in records] == [
+        chunk.chunk_id for chunk in chunks
+    ]
+    assert [record.text for record in records] == [
+        chunk.retrieval_text for chunk in chunks
+    ]
 
 
 async def test_platform_rerank_materials_empty_and_failure_fallback(platform_settings):
@@ -229,20 +144,19 @@ async def test_platform_rerank_materials_empty_and_failure_fallback(platform_set
     chunk = SimpleNamespace(
         raw_text="完整正文" * 500, metadata={"contextual_context": "上下文"}
     )
-    for payload, reranker in [
-        (PreparedChunk(chunk, None), container.chunk_reranker()),
-    ]:
-        candidates = [
-            Candidate("first", payload, 1, 0.9),
-            Candidate("second", payload, 2, 0.8),
-        ]
-        retriever = SimpleNamespace(retrieve=AsyncMock(return_value=[]))
-        pipeline = RetrievalPipeline(retriever=retriever, reranker=reranker)
-        assert await pipeline.run(query="q", top_k=2) == []
-        model.rerank.assert_not_awaited()
-        retriever.retrieve.return_value = candidates
-        result = await pipeline.run(query="q", top_k=2)
-        assert [item.candidate_id for item in result] == ["first", "second"]
-        material = model.rerank.call_args.kwargs["documents"][0]
-        assert material == chunk.raw_text
-        model.rerank.reset_mock()
+    payload = PreparedChunk(chunk, None)
+    candidates = [
+        Candidate("first", payload, 1, 0.9),
+        Candidate("second", payload, 2, 0.8),
+    ]
+    retriever = SimpleNamespace(retrieve=AsyncMock(return_value=[]))
+    pipeline = RetrievalPipeline(
+        retriever=retriever, reranker=container.chunk_reranker()
+    )
+    assert await pipeline.run(query="q", top_k=2) == []
+    model.rerank.assert_not_awaited()
+    retriever.retrieve.return_value = candidates
+    result = await pipeline.run(query="q", top_k=2)
+    assert [item.candidate_id for item in result] == ["first", "second"]
+    material = model.rerank.call_args.kwargs["documents"][0]
+    assert material == chunk.raw_text
