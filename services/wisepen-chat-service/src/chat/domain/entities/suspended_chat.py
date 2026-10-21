@@ -28,6 +28,8 @@ class SuspendedTurnContext:
     chat_record_messages: List[ChatMessage]
     token_usage: Any
     turn_suspension: TurnSuspension
+    root_execution_id: str | None = None
+    subagent_state: dict | None = None
 
 
 # 运行时用 Any，避免 Pydantic 解析 SuspendedTurnContext 内的 TYPE_CHECKING 前向引用。

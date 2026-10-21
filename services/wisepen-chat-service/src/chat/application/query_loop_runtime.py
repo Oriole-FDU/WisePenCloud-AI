@@ -1,10 +1,11 @@
 import asyncio
 import json
 import uuid
-from typing import AsyncIterator, Awaitable, Callable, Iterator, List, Optional, Union
+from typing import AsyncIterator, Iterator, List, Optional, Union
 
 from jsonschema import Draft202012Validator, SchemaError, ValidationError
 
+from chat.application.execution_bindings import ExecutionBindings
 from chat.application.events import (
     ReasoningDeltaEvent,
     ReasoningEndEvent,
@@ -153,6 +154,17 @@ class QueryLoopRuntime:
         self._token_counter = token_counter
         self._tool_dispatcher = tool_dispatcher
 
+    def prepare_model(self, model_info):
+        provider = self._llm_provider_resolver.resolve(model_info)
+        manifest = provider.runtime_options_manifest()
+        options = _merge_runtime_options(manifest.get("defaults") or {}, model_info.runtime_options or {})
+        try:
+            Draft202012Validator.check_schema(manifest["json_schema"])
+            Draft202012Validator(manifest["json_schema"]).validate(options)
+        except (SchemaError, ValidationError) as exc:
+            raise ServiceException(ChatErrorCode.MODEL_RUNTIME_OPTIONS_INVALID, custom_msg=str(exc))
+        return model_info.with_runtime_options(options)
+
     """
     ReAct 循环主入口 (QueryLoop)
     """
@@ -167,21 +179,14 @@ class QueryLoopRuntime:
         start_iteration: int = 0,
         client_tool_results: list[ClientToolResult] = None,
         tool_approval_status: List[ToolApprovalStatus] = None,
-        cancel_requested: Callable[[], Awaitable[bool]] | None = None,
+        bindings: ExecutionBindings | None = None,
     ) -> AsyncIterator[StreamEvent]:
+        bindings = bindings or ExecutionBindings()
         # 解析获取当前模型的 LLMProvider
         llm_provider = self._llm_provider_resolver.resolve(model_info)
 
         # 检查模型参数是否正确
-        manifest = llm_provider.runtime_options_manifest()
-        # 合并默认参数
-        runtime_options = _merge_runtime_options(manifest.get("defaults") or {}, model_info.runtime_options or {})
-        try:
-            Draft202012Validator.check_schema(manifest["json_schema"])
-            Draft202012Validator(manifest["json_schema"]).validate(runtime_options)
-        except (SchemaError, ValidationError) as e:
-            raise ServiceException(ChatErrorCode.MODEL_RUNTIME_OPTIONS_INVALID, custom_msg=str(e))
-        model_info = model_info.with_runtime_options(runtime_options)
+        model_info = self.prepare_model(model_info)
 
         # 进入多轮循环
         _client_tool_results = client_tool_results
@@ -189,8 +194,10 @@ class QueryLoopRuntime:
 
         max_iterations = agent_max_iterations or settings.AGENT_MAX_ITERATIONS
         for iteration in range(start_iteration, max_iterations):
+            if bindings.before_step is not None:
+                await bindings.before_step()
             # 请求取消检查点
-            if cancel_requested is not None and await cancel_requested():
+            if await bindings.is_cancel_requested():
                 yield StepFinishEvent(is_finished=False, token_usage=TokenUsage(), aborted=True)
                 return
 
@@ -200,23 +207,45 @@ class QueryLoopRuntime:
             )
 
             step_finish_event: Optional[StepFinishEvent] = None
+            deferred_text = []
             # 把当前 messages、模型参数 和 tool_scope 委派给 _run_single_step()
             # 然后异步消费它的产出
-            async for item in self._run_single_step(
-                messages=messages,
-                session_id=session_id,
-                model_info=model_info,
-                llm_provider=llm_provider,
-                iteration=iteration,
-                tool_scope=tool_scope,
-                client_tool_results=_client_tool_results,
-                tool_approval_status=_tool_approval_status,
-                cancel_requested=cancel_requested,
-            ):
-                # 如果拿到的是 StepFinishEvent 就存到 step_finish_event；否则直接 yield
-                if isinstance(item, StepFinishEvent):
-                    step_finish_event = item
-                yield item
+            try:
+                async for item in self._run_single_step(
+                    messages=messages,
+                    session_id=session_id,
+                    model_info=model_info,
+                    llm_provider=llm_provider,
+                    iteration=iteration,
+                    tool_scope=tool_scope,
+                    client_tool_results=_client_tool_results,
+                    tool_approval_status=_tool_approval_status,
+                    bindings=bindings,
+                ):
+                    # 如果拿到的是 StepFinishEvent 就存到 step_finish_event；否则直接 yield
+                    if isinstance(item, StepFinishEvent):
+                        if item.is_finished and bindings.join_children is not None:
+                            results = await bindings.join_children()
+                            if await bindings.is_cancel_requested():
+                                deferred_text.clear()
+                                item = StepFinishEvent(is_finished=False, token_usage=item.token_usage, aborted=True)
+                            elif results:
+                                item = StepFinishEvent(is_finished=False, intermediate_messages=results, token_usage=item.token_usage)
+                                deferred_text.clear()
+                        if (item.suspension is not None or item.aborted) and bindings.close_children is not None:
+                            await bindings.close_children()
+                        step_finish_event = item
+                        for text_event in deferred_text:
+                            yield text_event
+                        deferred_text.clear()
+                    elif bindings.join_children is not None and isinstance(item, (TextStartEvent, TextDeltaEvent, TextEndEvent)):
+                        deferred_text.append(item)
+                        continue
+                    yield item
+            except (Exception, asyncio.CancelledError):
+                for text_event in deferred_text:
+                    yield text_event
+                raise
 
             # 清空客户端工具调用结果和工具批准状态，以推进正常循环
             _client_tool_results = None
@@ -236,8 +265,13 @@ class QueryLoopRuntime:
                 # 统一追加消息并决定是否继续下一轮
                 messages.extend(step_finish_event.intermediate_messages)
         else:
+            if bindings.join_children is not None:
+                await bindings.join_children()
+            if await bindings.is_cancel_requested():
+                yield StepFinishEvent(is_finished=False, token_usage=TokenUsage(), aborted=True)
+                return
             # 超出最大迭代次数时兜底
-            async for event in self._emit_exhausted_warning(session_id):
+            async for event in self._emit_exhausted_warning(session_id, max_iterations):
                 yield event
 
     """
@@ -254,12 +288,14 @@ class QueryLoopRuntime:
         tool_scope: ToolScope,
         client_tool_results: list[ClientToolResult] | None = None,
         tool_approval_status: List[ToolApprovalStatus] | None = None,
-        cancel_requested: Callable[[], Awaitable[bool]] | None = None,
+        bindings: ExecutionBindings | None = None,
     ) -> AsyncIterator[Union[StreamEvent, StepFinishEvent]]:
+        bindings = bindings or ExecutionBindings()
         # 发 step 开始事件
         yield StepStartEvent()
 
         token_usage = TokenUsage()
+        usage_observed = False
         is_resumed_tool_step = client_tool_results is not None or tool_approval_status is not None
         if is_resumed_tool_step:
             # 挂起前的 assistant 工具调用已在 messages 末尾，恢复时由它重建本轮工具阶段。
@@ -269,6 +305,13 @@ class QueryLoopRuntime:
             # 正常 step 由 Provider 事件解释器构造 assistant 和工具调用。
             # 创建本轮推理的事件解释器
             event_interpreter = _StepEventInterpreter()
+            request_id = f"request_{uuid.uuid4().hex}"
+
+            async def report_usage(provenance, tokens):
+                if bindings.record_usage is not None:
+                    await bindings.record_usage(
+                        request_id=request_id, model_info=model_info, provenance=provenance, token_usage=tokens,
+                    )
             # schema 已由 ToolScope 在构造期固化；仅在模型和 LLM Provider 均声明支持工具时传给 LLM
             tool_schemas = tool_scope.schemas() \
                 if model_info.support_tools and llm_provider.supports_tools() else []
@@ -280,17 +323,20 @@ class QueryLoopRuntime:
                     tools=tool_schemas or None,
                 ):
                     # 请求取消检查点
-                    if cancel_requested is not None and await cancel_requested():
+                    if await bindings.is_cancel_requested():
                         raise asyncio.CancelledError
                     if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
+                        usage_observed = True
                         token_usage.add(llm_provider_event.usage)
 
                     # 把 LLMStreamEvent 事件交给解释器，产出 StreamEvent
                     for event in event_interpreter.consume(llm_provider_event):
                         yield event
             except ServiceException:
+                await report_usage("observed" if usage_observed else "unknown", token_usage if usage_observed else None)
                 raise  # 已经是业务异常，直接向上传播
             except asyncio.CancelledError: # 补全取消消息
+                await report_usage("observed" if usage_observed else "unknown", token_usage if usage_observed else None)
                 for event in event_interpreter.close():
                     yield event
                 assistant_msg = ChatMessage(
@@ -340,6 +386,7 @@ class QueryLoopRuntime:
                 )
                 return
             except Exception as e:
+                await report_usage("observed" if usage_observed else "unknown", token_usage if usage_observed else None)
                 raise ServiceException(
                     ChatErrorCode.LLM_GENERATION_FAILED,
                     custom_msg=f"流式推理失败 (iter={iteration}): {e}",
@@ -359,18 +406,21 @@ class QueryLoopRuntime:
                 tool_calls=event_interpreter.tool_calls
             )
 
-            token_usage = await self._resolve_usage_with_fallback(
-                usage=token_usage,
-                messages=messages,
-                assistant_msg=assistant_msg,
-                model_info=model_info,
-                tools=tool_schemas or None,
-            )
+            if not (usage_observed and token_usage.total_tokens == 0 and bindings.record_usage is not None):
+                token_usage = await self._resolve_usage_with_fallback(
+                    usage=token_usage,
+                    messages=messages,
+                    assistant_msg=assistant_msg,
+                    model_info=model_info,
+                    tools=tool_schemas or None,
+                )
 
             assistant_msg.input_tokens = token_usage.input_tokens
             assistant_msg.cached_input_tokens = token_usage.cached_input_tokens
             assistant_msg.output_tokens = token_usage.output_tokens
             assistant_msg.usage_source = token_usage.usage_source
+            provenance = "observed" if token_usage.usage_source == TokenUsageSource.PROVIDER else "estimated"
+            await report_usage(provenance, token_usage)
 
             # 如果没有工具调用，则结束这一轮（也结束整个循环）
             if not event_interpreter.tool_calls:
@@ -397,7 +447,7 @@ class QueryLoopRuntime:
         try:
             if not is_resumed_tool_step:
                 # 请求取消检查点
-                if cancel_requested is not None and await cancel_requested():
+                if await bindings.is_cancel_requested():
                     raise asyncio.CancelledError
 
                 for invocation in invocations:
@@ -416,6 +466,10 @@ class QueryLoopRuntime:
                 classified_tool_invocations = classify_tools(invocations, tool_scope)
                 # 如果有工具需要在客户端执行或需要审批
                 if classified_tool_invocations.approval_required_tools or classified_tool_invocations.client_tools:
+                    if bindings.close_children is not None:
+                        await bindings.close_children()
+                    if await bindings.is_cancel_requested():
+                        raise asyncio.CancelledError
                     # 对所有在执行前需要审批的工具发送 ToolApprovalRequiredEvent
                     for invocation in classified_tool_invocations.approval_required_tools:
                         tool = tool_scope.get(invocation.tool_name)
@@ -438,10 +492,10 @@ class QueryLoopRuntime:
                     return
 
                 # 请求取消检查点
-                if cancel_requested is not None and await cancel_requested():
+                if await bindings.is_cancel_requested():
                     raise asyncio.CancelledError
                 # 通过工具 core 并发执行并归约结果
-                output = await self._tool_dispatcher.dispatch(classified_tool_invocations.server_tools, tool_scope)
+                output = await self._tool_dispatcher.dispatch(classified_tool_invocations.server_tools, tool_scope, bindings=bindings)
                 tool_outputs.extend(output)
             else: # 当前有客户端工具的调用结果和工具批准状态
                 # 无需再为每个 parsed tool_call 产生两阶段 input 事件（历史上已经产生了）
@@ -451,11 +505,12 @@ class QueryLoopRuntime:
 
                 # 首次 step 只要包含客户端或审批工具就会整体挂起，server tools 也在此处补执行。
                 if classified_tool_invocations.server_tools:
-                    if cancel_requested is not None and await cancel_requested():
+                    if await bindings.is_cancel_requested():
                         raise asyncio.CancelledError
                     output = await self._tool_dispatcher.dispatch(
                         classified_tool_invocations.server_tools,
                         tool_scope,
+                        bindings=bindings,
                     )
                     tool_outputs.extend(output)
 
@@ -467,11 +522,11 @@ class QueryLoopRuntime:
                         invocation.is_approved = next((item.approved for item in tool_approval_status if item.tool_call_id == invocation.tool_call_id), False)
 
                     # 请求取消检查点
-                    if cancel_requested is not None and await cancel_requested():
+                    if await bindings.is_cancel_requested():
                         raise asyncio.CancelledError
 
                     # 通过工具 core 并发执行并归约结果
-                    output = await self._tool_dispatcher.dispatch(classified_tool_invocations.approval_required_tools, tool_scope)
+                    output = await self._tool_dispatcher.dispatch(classified_tool_invocations.approval_required_tools, tool_scope, bindings=bindings)
                     tool_outputs.extend(output)
                 # 如果有客户端工具
                 if classified_tool_invocations.client_tools:
@@ -479,7 +534,7 @@ class QueryLoopRuntime:
                     if client_tool_results is None: client_tool_results = []
 
                     # 请求取消检查点
-                    if cancel_requested is not None and await cancel_requested():
+                    if await bindings.is_cancel_requested():
                         raise asyncio.CancelledError
                     output = await self._tool_dispatcher.client_dispatch(classified_tool_invocations.client_tools, client_tool_results, tool_scope)
                     tool_outputs.extend(output)
@@ -576,10 +631,10 @@ class QueryLoopRuntime:
         return usage
 
     async def _emit_exhausted_warning(
-        self, session_id: str
+        self, session_id: str, max_iterations: int
     ) -> AsyncIterator[StreamEvent]:
         """Agent 循环超出最大迭代次数时的兜底文本输出"""
-        warning_text = f"Agent 推理超出最大迭代次数{settings.AGENT_MAX_ITERATIONS}，未能生成最终答案"
+        warning_text = f"Agent 推理超出最大迭代次数{max_iterations}，未能生成最终答案"
         warn("tool calling loop exhausted.", session_id=session_id)
         text_id = f"txt_{uuid.uuid4().hex}"
         yield StepStartEvent()
@@ -590,6 +645,7 @@ class QueryLoopRuntime:
             session_id=session_id,
             role=Role.ASSISTANT,
             content=warning_text,
+            metadata={"incomplete": True},
         )
         yield StepFinishEvent(
             is_finished=True,

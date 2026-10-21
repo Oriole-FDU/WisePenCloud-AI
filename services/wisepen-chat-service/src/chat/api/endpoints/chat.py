@@ -9,6 +9,7 @@ from common.core.domain import R
 from common.security import require_login
 from common.logger import info
 from chat.api.schemas.chat import ActiveChatTurnResponse, ChatCancelRequest, ChatRequest, ChatRecoverRequest
+from chat.api.schemas.chat import SubagentControlRequest, SubagentInputRequest
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
 from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
@@ -20,6 +21,55 @@ from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 
 router = APIRouter()
+
+@router.get("/subagents", summary="查询当前会话的子代理执行树")
+@inject
+async def subagent_list(
+    session_id: str,
+    root_execution_id: str | None = None,
+    user_id: str = Depends(require_login),
+    coordinator: ChatTurnCoordinator = Depends(Provide[Container.chat_turn_coordinator]),
+):
+    return R.success(data=await coordinator.list_subagents(
+        user_id=user_id, session_id=session_id, root_execution_id=root_execution_id,
+    ))
+
+
+@router.get("/subagents/{child_id}/runs/{run_id}", summary="查询可保存的子代理历史")
+@inject
+async def subagent_detail(
+    child_id: str,
+    run_id: str,
+    session_id: str,
+    user_id: str = Depends(require_login),
+    coordinator: ChatTurnCoordinator = Depends(Provide[Container.chat_turn_coordinator]),
+):
+    return R.success(data=await coordinator.subagent_detail(
+        user_id=user_id, session_id=session_id, child_id=child_id, run_id=run_id,
+    ))
+
+@router.post("/subagents/{child_id}/input", summary="向运行中的子代理追加指令")
+@inject
+async def subagent_input(
+    child_id: str, req: SubagentInputRequest,
+    user_id: str = Depends(require_login),
+    coordinator: ChatTurnCoordinator = Depends(Provide[Container.chat_turn_coordinator]),
+):
+    return R.success(data=await coordinator.control_subagent(
+        user_id=user_id, child_id=child_id, request=req, kind="input",
+    ))
+
+
+@router.post("/subagents/{child_id}/cancel", summary="取消运行中的子代理")
+@inject
+async def subagent_cancel(
+    child_id: str, req: SubagentControlRequest,
+    user_id: str = Depends(require_login),
+    coordinator: ChatTurnCoordinator = Depends(Provide[Container.chat_turn_coordinator]),
+):
+    return R.success(data=await coordinator.control_subagent(
+        user_id=user_id, child_id=child_id, request=req, kind="cancel",
+    ))
 
 _SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -80,6 +130,8 @@ async def chat_completions(
             model_id=resolved_model_id,
             provider_id=resolved_provider_id,
             runtime_options=req.runtime_options,
+            subagents=req.subagents,
+            turn_id=turn_id,
             frontend_states=req.frontend_states,
             user_defined_attachment_ids=req.user_defined_attachment_ids,
             tool_selection_default_enabled=req.tool_selection_default_enabled,
@@ -94,6 +146,7 @@ async def chat_completions(
                 for item in req.client_tool_capabilities
             ],
             cancel_requested=lambda: turn_stream_manager.is_turn_cancel_requested(turn_id),
+            lease_lost=lambda: turn_stream_manager.is_turn_lease_lost(turn_id),
         ),
     )
 
@@ -175,6 +228,8 @@ async def chat_recover(
             ],
             background_tasks=background_tasks,
             cancel_requested=lambda: turn_stream_manager.is_turn_cancel_requested(turn_id),
+            turn_id=turn_id,
+            lease_lost=lambda: turn_stream_manager.is_turn_lease_lost(turn_id),
         ),
     )
 

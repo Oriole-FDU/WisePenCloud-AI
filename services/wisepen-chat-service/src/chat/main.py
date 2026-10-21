@@ -37,6 +37,7 @@ from chat.api.endpoints import model as model_endpoints
 from chat.api.endpoints import speech as speech_endpoints
 from chat.api.endpoints import tool as tool_endpoints
 from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig, UserMcpServerConfig, SuspendedChat
+from chat.domain.entities.subagent import SubagentRun, SubagentRoot
 
 
 # 避免 HTTP 代理拦截内部中间件请求。
@@ -58,7 +59,7 @@ async def lifespan(app: FastAPI):
     mongo_client = AsyncMongoClient(settings.MONGODB_URL)
     await init_beanie(
         database=mongo_client[settings.MONGODB_DB_NAME],
-        document_models=[ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig, UserMcpServerConfig, SuspendedChat],
+        document_models=[ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig, UserMcpServerConfig, SuspendedChat, SubagentRun, SubagentRoot],
     )
     info("beanie initialized.", db=settings.MONGODB_DB_NAME)
 

@@ -144,9 +144,14 @@ def _build_assistant_ui_message(
         return None
 
     # 使用最后一条 assistant 消息的 id 作为 UIMessage id
-    return {
+    result = {
         "id": last_id,
         "role": "assistant",
         "parts": parts,
         "createdAt": group[0].created_at.isoformat(),
     }
+    root = next((msg.metadata.get("root_execution_id") for msg in group
+                 if msg.metadata.get("root_execution_id")), None)
+    if root:
+        result["metadata"] = {"root_execution_id": root}
+    return result
