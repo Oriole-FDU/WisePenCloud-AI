@@ -17,17 +17,10 @@ class ToolExecutionError(Exception):
         super().__init__(self.detail_reason or self.reason)
 
 @dataclass(frozen=True)
-class CacheableText:
-    content: str
-    is_markdown: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
 class ToolOutput:
     content: str
     images: list[VisionImage] = field(default_factory=list)
-    cacheable_texts: tuple[CacheableText, ...] = ()
+
 
 @dataclass(frozen=True)
 class ToolExecutionResult:

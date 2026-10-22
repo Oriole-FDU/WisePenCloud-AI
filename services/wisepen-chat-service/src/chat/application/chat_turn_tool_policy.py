@@ -12,13 +12,12 @@ from chat.domain.entities.skill import SkillMeta
 _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
 _SESSION_TOOL_NAMES = frozenset({"get_historical_chat_messages"})
 _IMAGE_ATTACHMENT_TOOL_NAMES = frozenset({"load_image_attachment"})
-_CACHED_TOOL_OUTPUT_TOOL_NAMES = frozenset({
-    "inspect_cached_tool_output_structure",
-    "read_cached_tool_output_by_page",
-    "read_cached_tool_output_by_range",
-    "read_cached_tool_output_by_section",
-    "search_cached_tool_output_by_regex",
-    "search_cached_tool_output_by_semantics",
+_TOOL_OUTPUT_TOOL_NAMES = frozenset({
+    "inspect_tool_output_structure",
+    "read_tool_output_range",
+    "read_tool_output_section",
+    "search_tool_output_regex",
+    "search_tool_output_bm25",
 })
 
 
@@ -90,7 +89,7 @@ class ChatTurnToolPolicyBuilder:
 
         if tool_and_skill_policy.enable_use_tool:
             # 只要开启了工具，工具输出缓存系列工具就始终加载
-            expose_tool_name_set.update(_CACHED_TOOL_OUTPUT_TOOL_NAMES)
+            expose_tool_name_set.update(_TOOL_OUTPUT_TOOL_NAMES)
 
         return ChatTurnToolPolicyResult(
             available_skills=available_skills,
