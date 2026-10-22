@@ -41,6 +41,13 @@ ENV/
 .mypy_cache/
 .ruff_cache/
 
+# pytest
+.pytest_cache/
+.pytest_tmp/
+
+# 前端仓库独立维护，不纳入本仓库提交。
+/WisePenView/
+
 # 操作系统
 .DS_Store
 Thumbs.db

@@ -1,0 +1,1158 @@
+{
+  "source": "../sample.md",
+  "config": {
+    "target_chunk_tokens": 80,
+    "split_threshold_tokens": 160
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk:0:98b9bb319695b231",
+      "text": "这是一份演示用的研究笔记。标题前的正文会归入“文档开头”，不会重复展开后面的章节。\n",
+      "chunk_index": 0,
+      "node_ids": ["node-0", "node-0:0", "node-0:0:0"],
+      "section_path": ["文档开头"],
+      "content_token_count": 31,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 0,
+          "end_offset": 42
+        }
+      ],
+      "section_id": "sec_fb80a8bbf30eeae0",
+      "anchor_labels": [],
+      "content_hash": "98b9bb319695b2319b3433be0c4b698a7763e28a24476aac7e1747b2bd6551fc"
+    },
+    {
+      "chunk_id": "chunk:1:12a3be2e5fd6326b",
+      "text": "解析器保留列表和引用的嵌套关系；分块器根据 token 预算选择保留完整结构或按结构边界拆分。\n",
+      "chunk_index": 1,
+      "node_ids": ["node-3", "node-3:0", "node-3:0:0"],
+      "section_path": ["Markdown 结构演示", "嵌套列表与引用"],
+      "content_token_count": 34,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 72,
+          "end_offset": 120
+        }
+      ],
+      "section_id": "sec_c00a38613685f5f7",
+      "anchor_labels": [],
+      "content_hash": "12a3be2e5fd6326bbb80316fa2204f64854eec8383045020c1213c6f8eff1b42"
+    },
+    {
+      "chunk_id": "chunk:2:3ea6a66b3703d972",
+      "text": "3. 准备研究材料：整理原始文本、表格、公式和插图，保留它们在文档中的出现顺序。\n\n4. 分析文档结构：识别标题层级、正文节点及其来源范围，为后续分块提供结构事实。\n   - 核对原文：字符范围使用 Python 字符偏移，中文与 emoji 🙂 不按字节计算。\n   - 核对章节：直属正文与章节子树分别记录范围，目录长度依据章节子树计算。\n",
+      "chunk_index": 2,
+      "node_ids": [
+        "node-4",
+        "node-4:0",
+        "node-4:0:0",
+        "node-4:0:0:0",
+        "node-4:0:0:0:0",
+        "node-4:1",
+        "node-4:1:0",
+        "node-4:1:0:0",
+        "node-4:1:0:0:0",
+        "node-4:1:1",
+        "node-4:1:1:0",
+        "node-4:1:1:0:0",
+        "node-4:1:1:0:0:0",
+        "node-4:1:1:0:0:0:0",
+        "node-4:1:1:1",
+        "node-4:1:1:1:0",
+        "node-4:1:1:1:0:0",
+        "node-4:1:1:1:0:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "嵌套列表与引用"],
+      "content_token_count": 114,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 121,
+          "end_offset": 162
+        },
+        {
+          "start_offset": 162,
+          "end_offset": 292
+        }
+      ],
+      "section_id": "sec_c00a38613685f5f7",
+      "anchor_labels": [],
+      "content_hash": "3ea6a66b3703d97253674ff728d23d8d3e8a8f9e02b5694c3163939c660ab9b7"
+    },
+    {
+      "chunk_id": "chunk:3:5f43b28714cf7f1f",
+      "text": "5. 生成检索片段：小段正文可以合并，较长结构优先沿列表项、表格行或代码行拆开。\n\n6. 检查输出质量：查看 token 数、overflow、section_path、node_ids 和 source_spans。\n\n7. 对照结构边界：逐项检查来源节点、章节路径、锚点标签和字符范围。\n",
+      "chunk_index": 3,
+      "node_ids": [
+        "node-4",
+        "node-4:2",
+        "node-4:2:0",
+        "node-4:2:0:0",
+        "node-4:2:0:0:0",
+        "node-4:3",
+        "node-4:3:0",
+        "node-4:3:0:0",
+        "node-4:3:0:0:0",
+        "node-4:4",
+        "node-4:4:0",
+        "node-4:4:0:0",
+        "node-4:4:0:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "嵌套列表与引用"],
+      "content_token_count": 83,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 292,
+          "end_offset": 333
+        },
+        {
+          "start_offset": 333,
+          "end_offset": 401
+        },
+        {
+          "start_offset": 401,
+          "end_offset": 436
+        }
+      ],
+      "section_id": "sec_c00a38613685f5f7",
+      "anchor_labels": [],
+      "content_hash": "5f43b28714cf7f1fba22dab329ccd5ddfde43aed867dfe9dea0b07e2829cc200"
+    },
+    {
+      "chunk_id": "chunk:4:a871fa68208a9d71",
+      "text": "8. 记录异常情况：保存输入摘要、预算配置、输出序号和需要人工检查的片段。\n\n9. 验证列表分组：观察相邻项何时进入同一 chunk，何时开始新的列表片段。\n\n10. 检查项内结构：长列表项保持完整，项内嵌套内容跟随所属列表项。\n",
+      "chunk_index": 4,
+      "node_ids": [
+        "node-4",
+        "node-4:5",
+        "node-4:5:0",
+        "node-4:5:0:0",
+        "node-4:5:0:0:0",
+        "node-4:6",
+        "node-4:6:0",
+        "node-4:6:0:0",
+        "node-4:6:0:0:0",
+        "node-4:7",
+        "node-4:7:0",
+        "node-4:7:0:0",
+        "node-4:7:0:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "嵌套列表与引用"],
+      "content_token_count": 81,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 436,
+          "end_offset": 474
+        },
+        {
+          "start_offset": 474,
+          "end_offset": 514
+        },
+        {
+          "start_offset": 514,
+          "end_offset": 549
+        }
+      ],
+      "section_id": "sec_c00a38613685f5f7",
+      "anchor_labels": [],
+      "content_hash": "a871fa68208a9d71784d302e1d53cce43fb3371fc8b26b42d54ae4dc3d40dbf8"
+    },
+    {
+      "chunk_id": "chunk:5:caea65723aceec46",
+      "text": "11. 检查来源身份：列表被拆分后各片段仍关联原始列表及对应原始项。\n\n12. 复核 token 预算：目标尺寸用于组合决策，阈值用于触发节点拆分。\n\n13. 检查超长节点：不能安全拆分的结构完整保留，并通过 overflow 暴露超限状态。\n",
+      "chunk_index": 5,
+      "node_ids": [
+        "node-4",
+        "node-4:8",
+        "node-4:8:0",
+        "node-4:8:0:0",
+        "node-4:8:0:0:0",
+        "node-4:9",
+        "node-4:9:0",
+        "node-4:9:0:0",
+        "node-4:9:0:0:0",
+        "node-4:10",
+        "node-4:10:0",
+        "node-4:10:0:0",
+        "node-4:10:0:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "嵌套列表与引用"],
+      "content_token_count": 81,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 549,
+          "end_offset": 584
+        },
+        {
+          "start_offset": 584,
+          "end_offset": 623
+        },
+        {
+          "start_offset": 623,
+          "end_offset": 669
+        }
+      ],
+      "section_id": "sec_c00a38613685f5f7",
+      "anchor_labels": [],
+      "content_hash": "caea65723aceec46ddd3c24925046975f6224bef350fd20fbc361dc3d81acd78"
+    },
+    {
+      "chunk_id": "chunk:6:2c35bef547910626",
+      "text": "14. 保留审计信息：分别查看 source_spans、node_ids、section_id 和 content_hash。\n\n15. 比较输出顺序：分块按源文次序排列，chunk_index 从零开始连续编号。\n\n16. 核实标题归属：不同章节之间不会被装入同一个 chunk。\n",
+      "chunk_index": 6,
+      "node_ids": [
+        "node-4",
+        "node-4:11",
+        "node-4:11:0",
+        "node-4:11:0:0",
+        "node-4:11:0:0:0",
+        "node-4:12",
+        "node-4:12:0",
+        "node-4:12:0:0",
+        "node-4:12:0:0:0",
+        "node-4:13",
+        "node-4:13:0",
+        "node-4:13:0:0",
+        "node-4:13:0:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "嵌套列表与引用"],
+      "content_token_count": 68,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 669,
+          "end_offset": 734
+        },
+        {
+          "start_offset": 734,
+          "end_offset": 777
+        },
+        {
+          "start_offset": 777,
+          "end_offset": 810
+        }
+      ],
+      "section_id": "sec_c00a38613685f5f7",
+      "anchor_labels": [],
+      "content_hash": "2c35bef547910626ee5d75883df2c15d80b907ff31324c8e96ed8931c34bb711"
+    },
+    {
+      "chunk_id": "chunk:7:9b77de486f6ba842",
+      "text": "17. 核实嵌套层级：缩进列表仍作为对应列表项的子节点保存。\n\n18. 重跑同一输入：在预算和 tokenizer 固定时比较输出与 hash。\n\n\n> 引用内容也保留结构。\n>\n> - 第一条引用内的列表项。\n> - 第二条引用内的列表项，包含 **强调** 和 [链接](https://example.com)。\n",
+      "chunk_index": 7,
+      "node_ids": [
+        "node-4",
+        "node-4:14",
+        "node-4:14:0",
+        "node-4:14:0:0",
+        "node-4:14:0:0:0",
+        "node-4:15",
+        "node-4:15:0",
+        "node-4:15:0:0",
+        "node-4:15:0:0:0",
+        "node-5",
+        "node-5:0",
+        "node-5:0:0",
+        "node-5:0:0:0",
+        "node-5:1",
+        "node-5:1:0",
+        "node-5:1:0:0",
+        "node-5:1:0:0:0",
+        "node-5:1:0:0:0:0",
+        "node-5:1:1",
+        "node-5:1:1:0",
+        "node-5:1:1:0:0",
+        "node-5:1:1:0:0:0",
+        "node-5:1:1:0:0:1",
+        "node-5:1:1:0:0:2",
+        "node-5:1:1:0:0:3",
+        "node-5:1:1:0:0:4",
+        "node-5:1:1:0:0:5",
+        "node-5:1:1:0:0:6",
+        "node-5:1:1:0:0:7",
+        "node-5:1:1:0:0:8"
+      ],
+      "section_path": ["Markdown 结构演示", "嵌套列表与引用"],
+      "content_token_count": 89,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 810,
+          "end_offset": 841
+        },
+        {
+          "start_offset": 841,
+          "end_offset": 883
+        },
+        {
+          "start_offset": 883,
+          "end_offset": 968
+        }
+      ],
+      "section_id": "sec_c00a38613685f5f7",
+      "anchor_labels": [],
+      "content_hash": "9b77de486f6ba842431985fef2cb04bd92946c9631b4778d4abf24388bba339e"
+    },
+    {
+      "chunk_id": "chunk:8:d1762549eb1e9d70",
+      "text": "Table 1: 示例实验记录\n| 阶段 | 输入 | 观察 |\n| --- | --- | --- |\n| 解析 | 中文段落与标题 | 节点保存结构和字符范围 |\n| 解析 | 有序与嵌套列表 | 列表项保留层级关系 |\n| 解析 | 引用中的列表 | 引用和列表都保留为节点 |",
+      "chunk_index": 8,
+      "node_ids": [
+        "node-7",
+        "node-7:18",
+        "node-7:18:0",
+        "node-7:18:0:0",
+        "node-7:0",
+        "node-7:0:0",
+        "node-7:0:0:0",
+        "node-7:0:0:0:0",
+        "node-7:0:0:0:0:0",
+        "node-7:0:0:1",
+        "node-7:0:0:1:0",
+        "node-7:0:0:1:0:0",
+        "node-7:0:0:2",
+        "node-7:0:0:2:0",
+        "node-7:0:0:2:0:0",
+        "node-7:1",
+        "node-7:1:0",
+        "node-7:1:0:0",
+        "node-7:1:0:0:0",
+        "node-7:1:1",
+        "node-7:1:1:0",
+        "node-7:1:1:0:0",
+        "node-7:1:2",
+        "node-7:1:2:0",
+        "node-7:1:2:0:0",
+        "node-7:2",
+        "node-7:2:0",
+        "node-7:2:0:0",
+        "node-7:2:0:0:0",
+        "node-7:2:1",
+        "node-7:2:1:0",
+        "node-7:2:1:0:0",
+        "node-7:2:2",
+        "node-7:2:2:0",
+        "node-7:2:2:0:0",
+        "node-7:3",
+        "node-7:3:0",
+        "node-7:3:0:0",
+        "node-7:3:0:0:0",
+        "node-7:3:1",
+        "node-7:3:1:0",
+        "node-7:3:1:0:0",
+        "node-7:3:2",
+        "node-7:3:2:0",
+        "node-7:3:2:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "表格与图片"],
+      "content_token_count": 86,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 979,
+          "end_offset": 995
+        },
+        {
+          "start_offset": 996,
+          "end_offset": 1013
+        },
+        {
+          "start_offset": 1033,
+          "end_offset": 1064
+        },
+        {
+          "start_offset": 1064,
+          "end_offset": 1093
+        },
+        {
+          "start_offset": 1093,
+          "end_offset": 1123
+        }
+      ],
+      "section_id": "sec_08181aa4f8584d5d",
+      "anchor_labels": ["Table 1"],
+      "content_hash": "d1762549eb1e9d70b5465ca06acd4861c19d30bfd1113be3cefe6dd7b1a7e1d8"
+    },
+    {
+      "chunk_id": "chunk:9:f67474c88919b0ae",
+      "text": "| 阶段 | 输入 | 观察 |\n| --- | --- | --- |\n| 分块 | 连续短段落 | 依据目标预算尝试合并 |\n| 分块 | 长有序列表 | 以列表项作为拆分边界 |\n| 分块 | 多行 Markdown 表格 | 按行拆分并重复表头 |",
+      "chunk_index": 9,
+      "node_ids": [
+        "node-7",
+        "node-7:0",
+        "node-7:0:0",
+        "node-7:0:0:0",
+        "node-7:0:0:0:0",
+        "node-7:0:0:0:0:0",
+        "node-7:0:0:1",
+        "node-7:0:0:1:0",
+        "node-7:0:0:1:0:0",
+        "node-7:0:0:2",
+        "node-7:0:0:2:0",
+        "node-7:0:0:2:0:0",
+        "node-7:4",
+        "node-7:4:0",
+        "node-7:4:0:0",
+        "node-7:4:0:0:0",
+        "node-7:4:1",
+        "node-7:4:1:0",
+        "node-7:4:1:0:0",
+        "node-7:4:2",
+        "node-7:4:2:0",
+        "node-7:4:2:0:0",
+        "node-7:5",
+        "node-7:5:0",
+        "node-7:5:0:0",
+        "node-7:5:0:0:0",
+        "node-7:5:1",
+        "node-7:5:1:0",
+        "node-7:5:1:0:0",
+        "node-7:5:2",
+        "node-7:5:2:0",
+        "node-7:5:2:0:0",
+        "node-7:6",
+        "node-7:6:0",
+        "node-7:6:0:0",
+        "node-7:6:0:0:0",
+        "node-7:6:1",
+        "node-7:6:1:0",
+        "node-7:6:1:0:0",
+        "node-7:6:2",
+        "node-7:6:2:0",
+        "node-7:6:2:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "表格与图片"],
+      "content_token_count": 75,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 996,
+          "end_offset": 1013
+        },
+        {
+          "start_offset": 1123,
+          "end_offset": 1151
+        },
+        {
+          "start_offset": 1151,
+          "end_offset": 1179
+        },
+        {
+          "start_offset": 1179,
+          "end_offset": 1215
+        }
+      ],
+      "section_id": "sec_08181aa4f8584d5d",
+      "anchor_labels": ["Table 1"],
+      "content_hash": "f67474c88919b0ae513f6e2ab193f97564e5277c55005b7b4417ce3564be6d33"
+    },
+    {
+      "chunk_id": "chunk:10:95dfa071507bcfcd",
+      "text": "| 阶段 | 输入 | 观察 |\n| --- | --- | --- |\n| 分块 | 一行很宽的表格 | 保留完整行并标记超限 |\n| 分块 | 多行代码块 | 以完整代码行为优先边界 |\n| 分块 | 超阈值长列表 | 按列表项分组并保留原节点身份 |",
+      "chunk_index": 10,
+      "node_ids": [
+        "node-7",
+        "node-7:0",
+        "node-7:0:0",
+        "node-7:0:0:0",
+        "node-7:0:0:0:0",
+        "node-7:0:0:0:0:0",
+        "node-7:0:0:1",
+        "node-7:0:0:1:0",
+        "node-7:0:0:1:0:0",
+        "node-7:0:0:2",
+        "node-7:0:0:2:0",
+        "node-7:0:0:2:0:0",
+        "node-7:7",
+        "node-7:7:0",
+        "node-7:7:0:0",
+        "node-7:7:0:0:0",
+        "node-7:7:1",
+        "node-7:7:1:0",
+        "node-7:7:1:0:0",
+        "node-7:7:2",
+        "node-7:7:2:0",
+        "node-7:7:2:0:0",
+        "node-7:8",
+        "node-7:8:0",
+        "node-7:8:0:0",
+        "node-7:8:0:0:0",
+        "node-7:8:1",
+        "node-7:8:1:0",
+        "node-7:8:1:0:0",
+        "node-7:8:2",
+        "node-7:8:2:0",
+        "node-7:8:2:0:0",
+        "node-7:9",
+        "node-7:9:0",
+        "node-7:9:0:0",
+        "node-7:9:0:0:0",
+        "node-7:9:1",
+        "node-7:9:1:0",
+        "node-7:9:1:0:0",
+        "node-7:9:2",
+        "node-7:9:2:0",
+        "node-7:9:2:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "表格与图片"],
+      "content_token_count": 82,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 996,
+          "end_offset": 1013
+        },
+        {
+          "start_offset": 1215,
+          "end_offset": 1245
+        },
+        {
+          "start_offset": 1245,
+          "end_offset": 1274
+        },
+        {
+          "start_offset": 1274,
+          "end_offset": 1307
+        }
+      ],
+      "section_id": "sec_08181aa4f8584d5d",
+      "anchor_labels": ["Table 1"],
+      "content_hash": "95dfa071507bcfcdad9d4b7a04c68e97225f4a4197e341b3d511f96b0af326e7"
+    },
+    {
+      "chunk_id": "chunk:11:092d9993c3c29dad",
+      "text": "| 阶段 | 输入 | 观察 |\n| --- | --- | --- |\n| 分块 | 超阈值 fenced 代码块 | 按完整代码行分段并重建围栏 |\n| 分块 | 无法安全拆开的公式 | 保留公式并标记超限 |\n| 目录 | 多层 Markdown 标题 | 按父子关系组织章节 |",
+      "chunk_index": 11,
+      "node_ids": [
+        "node-7",
+        "node-7:0",
+        "node-7:0:0",
+        "node-7:0:0:0",
+        "node-7:0:0:0:0",
+        "node-7:0:0:0:0:0",
+        "node-7:0:0:1",
+        "node-7:0:0:1:0",
+        "node-7:0:0:1:0:0",
+        "node-7:0:0:2",
+        "node-7:0:0:2:0",
+        "node-7:0:0:2:0:0",
+        "node-7:10",
+        "node-7:10:0",
+        "node-7:10:0:0",
+        "node-7:10:0:0:0",
+        "node-7:10:1",
+        "node-7:10:1:0",
+        "node-7:10:1:0:0",
+        "node-7:10:2",
+        "node-7:10:2:0",
+        "node-7:10:2:0:0",
+        "node-7:11",
+        "node-7:11:0",
+        "node-7:11:0:0",
+        "node-7:11:0:0:0",
+        "node-7:11:1",
+        "node-7:11:1:0",
+        "node-7:11:1:0:0",
+        "node-7:11:2",
+        "node-7:11:2:0",
+        "node-7:11:2:0:0",
+        "node-7:12",
+        "node-7:12:0",
+        "node-7:12:0:0",
+        "node-7:12:0:0:0",
+        "node-7:12:1",
+        "node-7:12:1:0",
+        "node-7:12:1:0:0",
+        "node-7:12:2",
+        "node-7:12:2:0",
+        "node-7:12:2:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "表格与图片"],
+      "content_token_count": 81,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 996,
+          "end_offset": 1013
+        },
+        {
+          "start_offset": 1307,
+          "end_offset": 1347
+        },
+        {
+          "start_offset": 1347,
+          "end_offset": 1378
+        },
+        {
+          "start_offset": 1378,
+          "end_offset": 1414
+        }
+      ],
+      "section_id": "sec_08181aa4f8584d5d",
+      "anchor_labels": ["Table 1"],
+      "content_hash": "092d9993c3c29dad7d06010e9f720780b091fe0a914e74dfab481cb55e966129"
+    },
+    {
+      "chunk_id": "chunk:12:38a2dd188d667be5",
+      "text": "| 阶段 | 输入 | 观察 |\n| --- | --- | --- |\n| 目录 | 带编号的表格 | 锚点归入直属章节 |\n| 目录 | 带编号的图片 | 锚点归入直属章节 |\n| 目录 | 标题之前的正文 | 投影为文档开头 |",
+      "chunk_index": 12,
+      "node_ids": [
+        "node-7",
+        "node-7:0",
+        "node-7:0:0",
+        "node-7:0:0:0",
+        "node-7:0:0:0:0",
+        "node-7:0:0:0:0:0",
+        "node-7:0:0:1",
+        "node-7:0:0:1:0",
+        "node-7:0:0:1:0:0",
+        "node-7:0:0:2",
+        "node-7:0:0:2:0",
+        "node-7:0:0:2:0:0",
+        "node-7:13",
+        "node-7:13:0",
+        "node-7:13:0:0",
+        "node-7:13:0:0:0",
+        "node-7:13:1",
+        "node-7:13:1:0",
+        "node-7:13:1:0:0",
+        "node-7:13:2",
+        "node-7:13:2:0",
+        "node-7:13:2:0:0",
+        "node-7:14",
+        "node-7:14:0",
+        "node-7:14:0:0",
+        "node-7:14:0:0:0",
+        "node-7:14:1",
+        "node-7:14:1:0",
+        "node-7:14:1:0:0",
+        "node-7:14:2",
+        "node-7:14:2:0",
+        "node-7:14:2:0:0",
+        "node-7:15",
+        "node-7:15:0",
+        "node-7:15:0:0",
+        "node-7:15:0:0:0",
+        "node-7:15:1",
+        "node-7:15:1:0",
+        "node-7:15:1:0:0",
+        "node-7:15:2",
+        "node-7:15:2:0",
+        "node-7:15:2:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "表格与图片"],
+      "content_token_count": 72,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 996,
+          "end_offset": 1013
+        },
+        {
+          "start_offset": 1414,
+          "end_offset": 1441
+        },
+        {
+          "start_offset": 1441,
+          "end_offset": 1468
+        },
+        {
+          "start_offset": 1468,
+          "end_offset": 1495
+        }
+      ],
+      "section_id": "sec_08181aa4f8584d5d",
+      "anchor_labels": ["Table 1"],
+      "content_hash": "38a2dd188d667be5833d25ad9ed34870c34ba1ffb984a30adfe6a7585a6e8f8c"
+    },
+    {
+      "chunk_id": "chunk:13:b6ee4109744a4b8a",
+      "text": "| 阶段 | 输入 | 观察 |\n| --- | --- | --- |\n| 范围 | 中文与 emoji 🙂 | 使用字符半开区间 |\n| 范围 | 源节点被拆分 | 片段仍引用原始节点身份 |",
+      "chunk_index": 13,
+      "node_ids": [
+        "node-7",
+        "node-7:0",
+        "node-7:0:0",
+        "node-7:0:0:0",
+        "node-7:0:0:0:0",
+        "node-7:0:0:0:0:0",
+        "node-7:0:0:1",
+        "node-7:0:0:1:0",
+        "node-7:0:0:1:0:0",
+        "node-7:0:0:2",
+        "node-7:0:0:2:0",
+        "node-7:0:0:2:0:0",
+        "node-7:16",
+        "node-7:16:0",
+        "node-7:16:0:0",
+        "node-7:16:0:0:0",
+        "node-7:16:1",
+        "node-7:16:1:0",
+        "node-7:16:1:0:0",
+        "node-7:16:2",
+        "node-7:16:2:0",
+        "node-7:16:2:0:0",
+        "node-7:17",
+        "node-7:17:0",
+        "node-7:17:0:0",
+        "node-7:17:0:0:0",
+        "node-7:17:1",
+        "node-7:17:1:0",
+        "node-7:17:1:0:0",
+        "node-7:17:2",
+        "node-7:17:2:0",
+        "node-7:17:2:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "表格与图片"],
+      "content_token_count": 56,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 996,
+          "end_offset": 1013
+        },
+        {
+          "start_offset": 1495,
+          "end_offset": 1527
+        },
+        {
+          "start_offset": 1527,
+          "end_offset": 1557
+        }
+      ],
+      "section_id": "sec_08181aa4f8584d5d",
+      "anchor_labels": ["Table 1"],
+      "content_hash": "b6ee4109744a4b8abcbef94c3f8f589cc18c57cbc366ab4c9a6e4c904d17a22f"
+    },
+    {
+      "chunk_id": "chunk:14:18595e267efea370",
+      "text": "Table 2: 单行超宽示例\n| value |\n| --- |\n| oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversized-cell oversizedcell oversizedcell oversizedcell oversizedcell oversizedcell oversizedcell oversizedcell oversizedcell oversizedcell oversizedcell |",
+      "chunk_index": 14,
+      "node_ids": [
+        "node-8",
+        "node-8:2",
+        "node-8:2:0",
+        "node-8:2:0:0",
+        "node-8:0",
+        "node-8:0:0",
+        "node-8:0:0:0",
+        "node-8:0:0:0:0",
+        "node-8:0:0:0:0:0",
+        "node-8:1",
+        "node-8:1:0",
+        "node-8:1:0:0",
+        "node-8:1:0:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "表格与图片"],
+      "content_token_count": 425,
+      "overflow": true,
+      "source_spans": [
+        {
+          "start_offset": 1558,
+          "end_offset": 1574
+        },
+        {
+          "start_offset": 1575,
+          "end_offset": 1585
+        },
+        {
+          "start_offset": 1593,
+          "end_offset": 4632
+        }
+      ],
+      "section_id": "sec_08181aa4f8584d5d",
+      "anchor_labels": ["Table 2"],
+      "content_hash": "18595e267efea370c3e4121647d304783cc185065f250354bcd980a1a20fa878"
+    },
+    {
+      "chunk_id": "chunk:15:c77348b7279b5761",
+      "text": "Figure 1: 文档处理流程示意图\n\n![文档经过解析、分块和目录投影](./pipeline.png)\n",
+      "chunk_index": 15,
+      "node_ids": [
+        "node-9",
+        "node-9:0",
+        "node-9:0:0",
+        "node-9:1",
+        "node-9:1:0",
+        "node-9:1:0:0"
+      ],
+      "section_path": ["Markdown 结构演示", "表格与图片"],
+      "content_token_count": 29,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 4633,
+          "end_offset": 4688
+        }
+      ],
+      "section_id": "sec_08181aa4f8584d5d",
+      "anchor_labels": ["Figure 1"],
+      "content_hash": "c77348b7279b5761222db6be0ff5179afac05fe001107cdc313f8d8f5b61b98c"
+    },
+    {
+      "chunk_id": "chunk:16:ee8ba104a1f2d658",
+      "text": "下面的长公式用于观察不可拆单元的 overflow。演示公式只表达一组项的求和。\n",
+      "chunk_index": 16,
+      "node_ids": ["node-11", "node-11:0", "node-11:0:0"],
+      "section_path": ["Markdown 结构演示", "表格与图片", "公式原子性"],
+      "content_token_count": 25,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 4700,
+          "end_offset": 4741
+        }
+      ],
+      "section_id": "sec_e6353d70d1f5cda9",
+      "anchor_labels": [],
+      "content_hash": "ee8ba104a1f2d65830a51756a0635c083d5fca5b4cee0ac0474ebcf1b174c033"
+    },
+    {
+      "chunk_id": "chunk:17:fe6f068748c41819",
+      "text": "$$\nS = x_{1} + x_{2} + x_{3} + x_{4} + x_{5} + x_{6} + x_{7} + x_{8} + x_{9} + x_{10} + x_{11} + x_{12} + x_{13} + x_{14} + x_{15} + x_{16} + x_{17} + x_{18} + x_{19} + x_{20} + x_{21} + x_{22} + x_{23} + x_{24} + x_{25} + x_{26} + x_{27} + x_{28} + x_{29} + x_{30} + x_{31} + x_{32} + x_{33} + x_{34} + x_{35} + x_{36} + x_{37} + x_{38} + x_{39} + x_{40}\n$$\n",
+      "chunk_index": 17,
+      "node_ids": ["node-12"],
+      "section_path": ["Markdown 结构演示", "表格与图片", "公式原子性"],
+      "content_token_count": 205,
+      "overflow": true,
+      "source_spans": [
+        {
+          "start_offset": 4742,
+          "end_offset": 5101
+        }
+      ],
+      "section_id": "sec_e6353d70d1f5cda9",
+      "anchor_labels": [],
+      "content_hash": "fe6f068748c41819e4a9f3e68498c2cffc1ececa6051ab78ae0678a6fae14b82"
+    },
+    {
+      "chunk_id": "chunk:18:3980bf4a5546db6d",
+      "text": "代码片段可以观察围栏在拆分后的输出中如何保留。\n\n```python\ndef prepare_document(text):\n    lines = text.splitlines()\n    cleaned = []\n    for line in lines:\n        if line.strip():\n            cleaned.append(line)\n    return \"\\n\".join(cleaned)\n\n\ndef describe_chunks(chunks):\n    records = []\n    for chunk in chunks:\n        records.append(\n            {\n                \"index\": chunk.chunk_index,\n```\n",
+      "chunk_index": 18,
+      "node_ids": ["node-14", "node-14:0", "node-14:0:0", "node-15"],
+      "section_path": ["Markdown 结构演示", "代码与长正文"],
+      "content_token_count": 93,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 5113,
+          "end_offset": 5137
+        }
+      ],
+      "section_id": "sec_a75bdb4e99183f28",
+      "anchor_labels": [],
+      "content_hash": "3980bf4a5546db6de8399559dd744973b48642ab313240d0b42ae50d22503647"
+    },
+    {
+      "chunk_id": "chunk:19:584230ac6eba8f84",
+      "text": "```python\n                \"tokens\": chunk.content_token_count,\n                \"overflow\": chunk.overflow,\n                \"section\": chunk.section_path,\n            }\n        )\n    return records\n\n\ndef display_records(records):\n    for record in records:\n        print(record[\"index\"], record[\"tokens\"])\n        print(record[\"section\"], record[\"overflow\"])\n    print(\"inspection complete\")\n    print(\"all source records retained\")\n```\n",
+      "chunk_index": 19,
+      "node_ids": ["node-15"],
+      "section_path": ["Markdown 结构演示", "代码与长正文"],
+      "content_token_count": 83,
+      "overflow": false,
+      "source_spans": [],
+      "section_id": "sec_a75bdb4e99183f28",
+      "anchor_labels": [],
+      "content_hash": "584230ac6eba8f8400dc081caa07c8aa5c2ad63268f74243f7770585bb2d0950"
+    },
+    {
+      "chunk_id": "chunk:20:68002eb6e4e37f67",
+      "text": "```python\n    print(\"section grouping verified\")\n    print(\"chunk order verified\")\n    print(\"token counts recorded\")\n    print(\"anchor labels recorded\")\n    print(\"source spans recorded\")\n    print(\"overflow flags recorded\")\n    print(\"fenced blocks reconstructed\")\n    print(\"list items retain structure\")\n    print(\"table rows retain structure\")\n    print(\"this block is deliberately long\")\n```\n",
+      "chunk_index": 20,
+      "node_ids": ["node-15"],
+      "section_path": ["Markdown 结构演示", "代码与长正文"],
+      "content_token_count": 80,
+      "overflow": false,
+      "source_spans": [],
+      "section_id": "sec_a75bdb4e99183f28",
+      "anchor_labels": [],
+      "content_hash": "68002eb6e4e37f670f5aeed95764e97a061c63ad2dc36745d0bd8c499c600184"
+    },
+    {
+      "chunk_id": "chunk:21:88a4477fb09aec3c",
+      "text": "```python\n    print(\"so the code splitter divides it\")\n    print(\"between complete physical lines\")\n    print(\"and preserves every code line\")\n    print(\"inside a reconstructed fence\")\n    print(\"with language metadata retained\")\n    print(\"for downstream readers and tools\")\n    print(\"all resulting chunks stay visible\")\n    print(\"in the generated Markdown report\")\n```\n",
+      "chunk_index": 21,
+      "node_ids": ["node-15"],
+      "section_path": ["Markdown 结构演示", "代码与长正文"],
+      "content_token_count": 75,
+      "overflow": false,
+      "source_spans": [],
+      "section_id": "sec_a75bdb4e99183f28",
+      "anchor_labels": [],
+      "content_hash": "88a4477fb09aec3c12839f3ff435968f14c6b2de922b0eb852163ffac6b62412"
+    },
+    {
+      "chunk_id": "chunk:22:05abd1cb53046469",
+      "text": "代码样例包含多行代码，长度超过拆分阈值；结果会按完整代码行分段，并为每段重建完整围栏。长正文用于观察普通段落超过拆分阈值后的处理。分块器依据文本内容和结构进行拆分，目标 token",
+      "chunk_index": 22,
+      "node_ids": ["node-16", "node-16:0", "node-16:0:0"],
+      "section_path": ["Markdown 结构演示", "代码与长正文"],
+      "content_token_count": 64,
+      "overflow": false,
+      "source_spans": [],
+      "section_id": "sec_a75bdb4e99183f28",
+      "anchor_labels": [],
+      "content_hash": "05abd1cb5304646986b40adba126540cab9eedd52828eeec77a2c8aa31099835"
+    },
+    {
+      "chunk_id": "chunk:23:2a62c00b1f1472b6",
+      "text": "数是组合时的理想尺寸，拆分阈值决定什么时候需要进一步处理较大的节点。结果中每个 chunk 都有自己的索引、文本、token 数和章节归属。读取这些结果时，需要区分原始节点身份与精确字符覆盖：同一个原始节点可以被拆成多个片段，因此多个 chunk 可以引用相同的",
+      "chunk_index": 23,
+      "node_ids": ["node-16", "node-16:0", "node-16:0:0"],
+      "section_path": ["Markdown 结构演示", "代码与长正文"],
+      "content_token_count": 80,
+      "overflow": false,
+      "source_spans": [],
+      "section_id": "sec_a75bdb4e99183f28",
+      "anchor_labels": [],
+      "content_hash": "2a62c00b1f1472b675bfe2350d2647fe1ff805e03d2d538c2207a80366e639d7"
+    },
+    {
+      "chunk_id": "chunk:24:a99e67379c4ae0b0",
+      "text": "node_id，这并不意味着它们含有相同文本。字符范围只是来源信息，不作为分块尺寸的计量单位。与此同时，表格、公式和图片等结构需要保留自身的语义边界；超宽表格行、无法安全拆分的公式等结构会完整保留，并用 overflow\n告诉消费方该片段超过阈值。",
+      "chunk_index": 24,
+      "node_ids": ["node-16", "node-16:0", "node-16:0:0"],
+      "section_path": ["Markdown 结构演示", "代码与长正文"],
+      "content_token_count": 82,
+      "overflow": false,
+      "source_spans": [],
+      "section_id": "sec_a75bdb4e99183f28",
+      "anchor_labels": [],
+      "content_hash": "a99e67379c4ae0b0c40d01426398381717fd7735ab6b8485626c738239cb875e"
+    },
+    {
+      "chunk_id": "chunk:25:f259f673d523dc0a",
+      "text": "Parser 输出结构事实，Chunking 组织章节并产生检索片段，Outline 把章节和锚点投影成简洁目录。三个 demo 使用同一份输入，便于对照不同阶段的结果。\n",
+      "chunk_index": 25,
+      "node_ids": ["node-18", "node-18:0", "node-18:0:0"],
+      "section_path": ["总结"],
+      "content_token_count": 49,
+      "overflow": false,
+      "source_spans": [
+        {
+          "start_offset": 7014,
+          "end_offset": 7100
+        }
+      ],
+      "section_id": "sec_976dd32327e04c55",
+      "anchor_labels": [],
+      "content_hash": "f259f673d523dc0aefc570ca0ca8afe3a7aba62a4b9b8d94742d4ab73f8eb0f5"
+    }
+  ],
+  "sections": [
+    {
+      "section_id": "sec_fb80a8bbf30eeae0",
+      "title": "文档开头",
+      "level": 0,
+      "parent_section_id": null,
+      "ordinal": 0,
+      "section_path": ["文档开头"],
+      "own_span": {
+        "start_offset": 0,
+        "end_offset": 43
+      },
+      "subtree_span": {
+        "start_offset": 0,
+        "end_offset": 7100
+      },
+      "content_spans": [
+        {
+          "start_offset": 0,
+          "end_offset": 42
+        }
+      ],
+      "summary": ""
+    },
+    {
+      "section_id": "sec_6299c4c41cf5afaa",
+      "title": "Markdown 结构演示",
+      "level": 1,
+      "parent_section_id": "sec_fb80a8bbf30eeae0",
+      "ordinal": 0,
+      "section_path": ["Markdown 结构演示"],
+      "own_span": {
+        "start_offset": 43,
+        "end_offset": 60
+      },
+      "subtree_span": {
+        "start_offset": 43,
+        "end_offset": 7008
+      },
+      "content_spans": [],
+      "summary": ""
+    },
+    {
+      "section_id": "sec_c00a38613685f5f7",
+      "title": "嵌套列表与引用",
+      "level": 2,
+      "parent_section_id": "sec_6299c4c41cf5afaa",
+      "ordinal": 0,
+      "section_path": ["Markdown 结构演示", "嵌套列表与引用"],
+      "own_span": {
+        "start_offset": 60,
+        "end_offset": 969
+      },
+      "subtree_span": {
+        "start_offset": 60,
+        "end_offset": 969
+      },
+      "content_spans": [
+        {
+          "start_offset": 72,
+          "end_offset": 120
+        },
+        {
+          "start_offset": 121,
+          "end_offset": 883
+        },
+        {
+          "start_offset": 883,
+          "end_offset": 968
+        }
+      ],
+      "summary": ""
+    },
+    {
+      "section_id": "sec_08181aa4f8584d5d",
+      "title": "表格与图片",
+      "level": 2,
+      "parent_section_id": "sec_6299c4c41cf5afaa",
+      "ordinal": 1,
+      "section_path": ["Markdown 结构演示", "表格与图片"],
+      "own_span": {
+        "start_offset": 969,
+        "end_offset": 4689
+      },
+      "subtree_span": {
+        "start_offset": 969,
+        "end_offset": 5102
+      },
+      "content_spans": [
+        {
+          "start_offset": 979,
+          "end_offset": 1557
+        },
+        {
+          "start_offset": 1558,
+          "end_offset": 4632
+        },
+        {
+          "start_offset": 4633,
+          "end_offset": 4688
+        }
+      ],
+      "summary": ""
+    },
+    {
+      "section_id": "sec_e6353d70d1f5cda9",
+      "title": "公式原子性",
+      "level": 3,
+      "parent_section_id": "sec_08181aa4f8584d5d",
+      "ordinal": 0,
+      "section_path": ["Markdown 结构演示", "表格与图片", "公式原子性"],
+      "own_span": {
+        "start_offset": 4689,
+        "end_offset": 5102
+      },
+      "subtree_span": {
+        "start_offset": 4689,
+        "end_offset": 5102
+      },
+      "content_spans": [
+        {
+          "start_offset": 4700,
+          "end_offset": 4741
+        },
+        {
+          "start_offset": 4742,
+          "end_offset": 5101
+        }
+      ],
+      "summary": ""
+    },
+    {
+      "section_id": "sec_a75bdb4e99183f28",
+      "title": "代码与长正文",
+      "level": 2,
+      "parent_section_id": "sec_6299c4c41cf5afaa",
+      "ordinal": 2,
+      "section_path": ["Markdown 结构演示", "代码与长正文"],
+      "own_span": {
+        "start_offset": 5102,
+        "end_offset": 7008
+      },
+      "subtree_span": {
+        "start_offset": 5102,
+        "end_offset": 7008
+      },
+      "content_spans": [
+        {
+          "start_offset": 5113,
+          "end_offset": 5137
+        },
+        {
+          "start_offset": 5138,
+          "end_offset": 6658
+        },
+        {
+          "start_offset": 6659,
+          "end_offset": 7007
+        }
+      ],
+      "summary": ""
+    },
+    {
+      "section_id": "sec_976dd32327e04c55",
+      "title": "总结",
+      "level": 1,
+      "parent_section_id": "sec_fb80a8bbf30eeae0",
+      "ordinal": 1,
+      "section_path": ["总结"],
+      "own_span": {
+        "start_offset": 7008,
+        "end_offset": 7100
+      },
+      "subtree_span": {
+        "start_offset": 7008,
+        "end_offset": 7100
+      },
+      "content_spans": [
+        {
+          "start_offset": 7014,
+          "end_offset": 7100
+        }
+      ],
+      "summary": ""
+    }
+  ],
+  "anchors": [
+    {
+      "label": "Table 1",
+      "source_span": {
+        "start_offset": 979,
+        "end_offset": 1557
+      }
+    },
+    {
+      "label": "Table 2",
+      "source_span": {
+        "start_offset": 1558,
+        "end_offset": 4632
+      }
+    },
+    {
+      "label": "Figure 1",
+      "source_span": {
+        "start_offset": 4633,
+        "end_offset": 4688
+      }
+    }
+  ]
+}

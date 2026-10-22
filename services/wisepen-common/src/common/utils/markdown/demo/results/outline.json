@@ -1,0 +1,11 @@
+{
+  "source": "../sample.md",
+  "format_contract": "按标题树深度输出 #；行尾依次为 [C]、锚点、原始 section id 和原文起始字符偏移",
+  "global_max_level_2": "研究笔记<文档开头> id=sec_fb80a8bbf30eeae0 @0\n# Markdown 结构演示 id=sec_6299c4c41cf5afaa @43\n# 总结 id=sec_976dd32327e04c55 @7008",
+  "global_all_levels": "研究笔记<文档开头> id=sec_fb80a8bbf30eeae0 @0\n# Markdown 结构演示 id=sec_6299c4c41cf5afaa @43\n## 嵌套列表与引用 id=sec_c00a38613685f5f7 @60\n## 表格与图片 [Table 1] [Table 2] [Figure 1] id=sec_08181aa4f8584d5d @969\n### 公式原子性 id=sec_e6353d70d1f5cda9 @4689\n## 代码与长正文 id=sec_a75bdb4e99183f28 @5102\n# 总结 id=sec_976dd32327e04c55 @7008",
+  "neighborhood": {
+    "current_section_id": "sec_08181aa4f8584d5d",
+    "sibling_steps": 1,
+    "markdown": "研究笔记<文档开头> id=sec_fb80a8bbf30eeae0 @0\n# Markdown 结构演示 id=sec_6299c4c41cf5afaa @43\n## 嵌套列表与引用 id=sec_c00a38613685f5f7 @60\n## 表格与图片 [C] [Table 1] [Table 2] [Figure 1] id=sec_08181aa4f8584d5d @969\n### 公式原子性 id=sec_e6353d70d1f5cda9 @4689\n## 代码与长正文 id=sec_a75bdb4e99183f28 @5102"
+  }
+}
