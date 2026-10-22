@@ -1,11 +1,11 @@
 ---
-name: current-note-editor
-description: Use when the user asks to read, rewrite, polish, organize, summarize, insert, or delete content in the currently open WisePen note. Provides the exact schemas and disciplined workflow for read_current_note_for_edit and apply_current_note_edits, plus expert guidance for making precise, minimally destructive note edits.
+name: note-editor
+description: Use when the user asks to create, read, rewrite, polish, organize, summarize, insert, or delete content in a WisePen note, including notes that are not currently open. Provides the exact workflow and schemas for create_note, read_current_note_for_edit, and apply_current_note_edits.
 ---
 
-# Current Note Editor
+# WisePen Note Editor
 
-Use this skill whenever the task requires understanding or modifying the currently open WisePen note. Work like a careful note editor: understand the user's intent, inspect the current note, design the smallest correct block-level change, apply it with the current version, and verify the result.
+Use this skill whenever the task requires creating, understanding, or modifying a WisePen note. Work like a careful note editor: identify the intended note, inspect its latest structured snapshot, design the smallest correct block-level change, apply it with the returned version, and verify the result. A note does not need to be open in the frontend, but it must be visible to the current user.
 
 ## Core Editing Principles
 
@@ -31,13 +31,30 @@ Classify the request before touching the note:
 
 If the request names a heading, paragraph, list item, table, or phrase, locate that exact content in the current note XML and use its public block id. Do not infer ids from position, array order, or text.
 
-### 2. Read the current note
+### 2. Identify or create the target note
 
-Call `read_current_note_for_edit` before every new edit. Use the active note resource id from:
+Use a Note `resource_id` from one of these trusted sources:
 
-`application_context.workspace_open_resource.resource_id`
+- `application_context.workspace_open_resource.resource_id` when the intended note is open;
+- a Note result returned by `search_user_resources`;
+- the result of `create_note` when the user asks to create a new note;
+- an explicit Note selection supplied by the user or application.
 
-Do not use `session_id`, a skill id, a user id, a guessed id, or an id copied from an unrelated context.
+Do not use `session_id`, a skill id, a user id, a guessed id, or an id copied from an unrelated context. If several notes match and the user's intended target is unclear, ask a focused clarification question.
+
+To create an empty note, call `create_note` with this schema:
+
+```json
+{
+  "title": "non-blank display title, required"
+}
+```
+
+Keep the returned `resource_id`. Creating the resource does not write generated document content. To populate the new note, read it first and then apply one or more `appendRootBlock` operations using the returned version.
+
+### 3. Read the target note
+
+Call `read_current_note_for_edit` before every new edit, including the first edit of a newly created note.
 
 The exact top-level call schema is:
 
@@ -76,13 +93,14 @@ Read the returned `xml` to identify:
 
 The XML is the source of truth for the next edit. Do not use shorthand ids or create ids yourself.
 
-### 3. Design a precise block-level diff
+### 4. Design a precise block-level diff
 
 Choose the operation that matches the user's intent:
 
 - Use `replaceContent` for rewriting text or inline/table content in an existing block.
 - Use `deleteBlock` only for a whole-block deletion the user requested or clearly authorized.
 - Use `insertBlock` for a genuinely new block relative to an existing block.
+- Use `appendRootBlock` for a top-level block when an empty or newly created note has no suitable anchor.
 
 For a polish request, preserve the original information and structure. Fix wording, grammar, clarity, and flow without adding unsupported facts. For an organizational request, keep existing headings and section boundaries unless the user asks for a new structure. For a summary, state whether the source remains and place the summary where it is useful.
 
@@ -92,13 +110,13 @@ Use `replaceContent` rather than delete-and-insert when:
 - the block type or attributes should remain unchanged;
 - the block contains inline marks, links, or other formatting that should be preserved.
 
-Use `insertBlock` only when the new block's full content and type are known. Use the nearest stable existing block as `anchorBlockId`, and choose `position` as exactly `"before"` or `"after"`.
+Use `insertBlock` only when the new block's full content and type are known. Use the nearest stable existing block as `anchorBlockId`, and choose `position` as exactly `"before"` or `"after"`. Use `appendRootBlock` only when no suitable existing anchor is available; it appends one top-level suggestion block.
 
-Do not use a made-up operation such as `move`, `update`, `append`, or `replaceText`. Do not send `block_id`, `op`, `content` as a string, or any other shorthand.
+Do not use a made-up operation such as `move`, `update`, `append`, or `replaceText`. `appendRootBlock` is the only supported append operation. Do not send `block_id`, `op`, `content` as a string, or any other shorthand.
 
 ## Exact `apply_current_note_edits` Schema
 
-Call this tool only after a successful `read_current_note_for_edit` for the same active note and only after constructing operations from that result.
+Call this tool only after a successful `read_current_note_for_edit` for the same target note and only after constructing operations from that result.
 
 The exact top-level call schema is:
 
@@ -113,7 +131,7 @@ The exact top-level call schema is:
 
 Top-level field rules:
 
-- `resource_id` must be the same active note resource id used for the read.
+- `resource_id` must be the same target note resource id used for the read.
 - `patch_id` must identify this particular edit attempt. Reuse the same `patch_id` only when retrying the exact same operations; use a new id for a newly planned edit.
 - `version` must be copied exactly from the latest `read_current_note_for_edit` result and must start with `yjs-v1:`.
 - `operations` must contain at least one and at most 200 objects.
@@ -177,6 +195,29 @@ Top-level field rules:
 ```
 
 `position` must be exactly `"before"` or `"after"`. `attrs` is optional; omit it when no block attributes are needed. `block.type` must be a non-empty string and must match the note's existing block conventions.
+
+### Operation: appendRootBlock
+
+```json
+{
+  "opId": "unique operation id within this patch",
+  "kind": "appendRootBlock",
+  "block": {
+    "type": "paragraph",
+    "content": {
+      "kind": "inline",
+      "items": [
+        {
+          "type": "text",
+          "text": "first top-level block text"
+        }
+      ]
+    }
+  }
+}
+```
+
+`appendRootBlock` has no `blockId`, `anchorBlockId`, or `position`. Use it for an empty or newly created note, or when the structured snapshot has no suitable anchor. Multiple top-level blocks require multiple operations with distinct `opId` values.
 
 ## Exact Structured Content Schema
 
@@ -244,11 +285,11 @@ Table nesting is exact: `rows` -> cells -> inline items. `headerRows` and `heade
 
 Use this sequence:
 
-1. Extract `resource_id` from application context.
-2. Call `read_current_note_for_edit`.
-3. Interpret the returned note XML and map the user's request to exact public block ids.
+1. Identify the target Note from application context, search results, or an explicit user selection; if the user requested a new Note, call `create_note` and use its returned `resource_id`.
+2. Call `read_current_note_for_edit` for that `resource_id`.
+3. Interpret the returned note XML and map the user's request to exact block ids. For an empty note with no suitable anchor, plan `appendRootBlock` operations instead.
 4. Build a minimal, schema-valid operations array.
-5. Call `apply_current_note_edits` with the read version.
+5. Call `apply_current_note_edits` with the same `resource_id` and the read version.
 6. Inspect the result. Report only the changes confirmed by the tool.
 
 If the apply call fails because the version is stale or the note changed:
@@ -260,14 +301,14 @@ If the apply call fails because the version is stale or the note changed:
 
 If the apply call fails with a schema or validation error, inspect the call against this document. Correct field names, casing, operation discriminators, structured content, and ids. Do not guess an alternative schema or silently fall back to editing text outside the note tools.
 
-If there is no active note resource id, or the note cannot be read, do not call the apply tool. Explain that the current note must be opened or made available first.
+If there is no unambiguous target Note resource id, search for the requested Note or ask the user to select one. If the note cannot be read, do not call the apply tool. Do not require the Note to be opened in the frontend.
 
 ## Quality Bar
 
 Before applying, verify:
 
 - The operation matches the user's requested scope.
-- Every `blockId` and `anchorBlockId` came from the latest read.
+- Every `blockId` and `anchorBlockId` came from the latest read; `appendRootBlock` is used only when no suitable anchor exists.
 - Every `opId` is unique within the patch.
 - The version starts with `yjs-v1:` and came from the latest read.
 - All content is structured with the exact `kind` and item `type` fields.

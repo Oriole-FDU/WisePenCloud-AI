@@ -14,17 +14,17 @@ def register_read_current_note_for_edit_tool(mcp: FastMCP, note_collab_client: N
     @mcp.tool(
         name="read_current_note_for_edit",
         description=(
-            "Read the currently open Wisepen note as an XML editing snapshot. Use the current note resource_id "
-            "from application_context.workspace_open_resource.resource_id. The returned version and public block ids "
-            "must be reused when applying edits. For quick text-only loading of any visible note resource, use "
-            "read_note_resource_text instead."
+            "Read any visible Wisepen note as an XML editing snapshot, whether or not it is currently open. Obtain "
+            "resource_id from application_context.workspace_open_resource, search_user_resources, create_note, or an "
+            "explicit user selection. Reuse the returned version and block ids when applying suggestions. For quick "
+            "text-only loading that does not support editing, use read_note_resource_text instead."
         ),
     )
     async def read_current_note_for_edit(
-        resource_id: Annotated[str, Field(description="Current open note resource id from workspace_open_resource.")],
+        resource_id: Annotated[str, Field(description="Visible Note resource id selected, searched, created, or currently open.")],
         scope: Annotated[dict[str, Any] | None, Field(description="Optional note read scope; omit unless narrowing to known blocks or ranges.")] = None,
         include_ai_content: Annotated[bool | None, Field(description="Whether to include existing AI-authored note content when relevant.")] = None,
-        version: Annotated[str | None, Field(description="Version returned by a previous read of the same current note.")] = None,
+        version: Annotated[str | None, Field(description="Version returned by a previous structured read of the same note.")] = None,
     ) -> dict[str, str]:
         if not SecurityContextHolder.get_user_id():
             raise PermissionException(PermissionErrorCode.NOT_LOGIN)

@@ -28,12 +28,14 @@ class McpServiceClient:
         *,
         from_source_secret: str,
         service_name: str = _DEFAULT_SERVICE_NAME,
+        mcp_path: str = _MCP_PATH,
         timeout: float = 30.0,
         default_strategy: Optional[LoadBalancingStrategy] = None,
     ) -> None:
         self._discovery = discovery
         self._from_source_secret = from_source_secret
         self._service_name = service_name
+        self._mcp_path = mcp_path
         self._timeout = timeout
         self._strategy = default_strategy
 
@@ -99,7 +101,7 @@ class McpServiceClient:
 
     async def _resolve_url(self) -> str:
         instance = await self._discovery.pick(self._service_name, strategy=self._strategy)
-        return f"http://{instance.ip}:{instance.port}{_MCP_PATH}"
+        return f"http://{instance.ip}:{instance.port}{self._mcp_path}"
 
     def _build_headers(self) -> dict[str, str]:
         headers: dict[str, str] = {}

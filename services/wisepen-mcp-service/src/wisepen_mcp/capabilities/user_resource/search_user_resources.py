@@ -20,7 +20,8 @@ def register_search_user_resources_tool(mcp: FastMCP, resource_client: ResourceC
         description=(
             "Search the current user's visible Wisepen Note and document resources. This tool excludes AIAsset "
             "resources such as Skill and Agent. Results include resource_id values that can be passed to "
-            "read_note_resource_text for Note resources or read_document_resource_text for document resources."
+            "read_note_resource_text or read_current_note_for_edit for Note resources, and "
+            "read_document_resource_text for document resources."
         ),
     )
     async def search_user_resources(

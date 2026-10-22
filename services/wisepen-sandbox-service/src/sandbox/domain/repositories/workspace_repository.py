@@ -2,11 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from sandbox.domain.entities import (
-    SessionWorkspaceDocument,
-    WorkspaceExportBundleRef,
-    WorkspaceState,
-)
+from sandbox.domain.entities import SessionWorkspaceDocument
 
 
 class WorkspaceRepository(Protocol):
@@ -45,28 +41,12 @@ class WorkspaceRepository(Protocol):
         sandbox_id: str,
         workspace_path: str,
     ) -> SessionWorkspaceDocument | None:
-        """写入运行时沙箱关联和容器内工作区路径。"""
+        """写入运行时关联，不更新 session 实际使用时间。"""
         ...
 
-    async def clear_runtime_binding(
+    async def list_by_sandbox(
         self,
-        workspace_id: str,
-    ) -> SessionWorkspaceDocument | None:
-        """清空当前沙箱关联和容器内工作区路径。"""
-        ...
-
-    async def set_export_bundle(
-        self,
-        workspace_id: str,
-        export_bundle: WorkspaceExportBundleRef | None,
-    ) -> SessionWorkspaceDocument | None:
-        """更新 export_bundle，并返回更新后的记录"""
-        ...
-
-    async def change_state(
-        self,
-        workspace_id: str,
-        state: WorkspaceState,
-    ) -> SessionWorkspaceDocument | None:
-        """更新 workspace 生命周期状态，并返回更新后的记录"""
+        sandbox_id: str,
+    ) -> list[SessionWorkspaceDocument]:
+        """读取沙箱中有运行时目录的 session 工作区"""
         ...

@@ -26,10 +26,11 @@ from common.web.middleware import SecurityHeaderMiddleware
 from fastapi import FastAPI
 
 from sandbox.api import create_app
+from sandbox.api.mcp_server import create_sandbox_mcp_server
 from sandbox.container import container
 from sandbox.core.config.app_settings import settings
 from sandbox.core.config.nacos import nacos_client_manager
-from sandbox.domain.entities import SandboxDocument, SessionWorkspaceDocument
+from sandbox.domain.entities import CommandTaskDocument, SandboxDocument, SessionWorkspaceDocument
 
 
 # 将应用配置注入 dependency_injector 容器。
@@ -58,7 +59,7 @@ async def lifespan(app: FastAPI):
         # 初始化 Beanie 文档模型。
         await init_beanie(
             database=mongo_client[settings.MONGODB_DB_NAME],
-            document_models=[SandboxDocument, SessionWorkspaceDocument],
+            document_models=[SandboxDocument, SessionWorkspaceDocument, CommandTaskDocument],
         )
         info("beanie initialized.", db=settings.MONGODB_DB_NAME)
 
@@ -68,6 +69,9 @@ async def lifespan(app: FastAPI):
             nacos_registered = True
         except Exception as exc:
             error("nacos instance register failed.", exc=exc)
+
+        # 单实例启动：遗留任务记为 LOST，确认命令结束或硬超时后才解除回收保护。
+        await container.command_task_service().reconcile_interrupted_tasks()
 
         # 启动沙箱状态 watcher，并保存任务引用供应用运行期间访问。
         watcher = container.watcher()
@@ -104,6 +108,19 @@ async def lifespan(app: FastAPI):
             except Exception as exc:
                 error("nacos instance deregister failed.", exc=exc)
 
+        # 先停止命令跟踪任务，避免数据库关闭后仍有后台写入。
+        await container.command_task_service().close()
+
+        # 释放内部 RPC 和服务发现资源。
+        try:
+            await container.rpc_client().aclose()
+        except Exception as exc:
+            error("rpc client close failed.", exc=exc)
+        try:
+            await container.service_discovery().close()
+        except Exception as exc:
+            error("service discovery close failed.", exc=exc)
+
         # 最后关闭 MongoClient，释放数据库连接池。
         try:
             await _close_mongo_client()
@@ -112,7 +129,20 @@ async def lifespan(app: FastAPI):
 
 
 # 创建应用并挂载业务路由。
-app = create_app(lifespan=lifespan)
+mcp_server = create_sandbox_mcp_server(
+    container.command_task_service(),
+    container.file_service(),
+)
+mcp_app = mcp_server.streamable_http_app()
+
+@asynccontextmanager
+async def app_lifespan(app: FastAPI):
+    async with mcp_server.session_manager.run():
+        async with lifespan(app):
+            yield
+
+
+app = create_app(lifespan=app_lifespan, mcp_app=mcp_app)
 instrument_fastapi_app(app)
 
 # 注册安全中间件：校验 X-From-Source，解析 X-User-Id 等网关透传 Headers。

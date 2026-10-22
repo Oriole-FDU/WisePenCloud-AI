@@ -215,7 +215,17 @@ class Container(containers.DeclarativeContainer):
         McpServiceClient,
         discovery=service_discovery,
         from_source_secret=settings.FROM_SOURCE_SECRET,
+        service_name="wisepen-mcp-service",
         timeout=settings.RPC_DEFAULT_TIMEOUT,
+        default_strategy=settings.RPC_LB_STRATEGY,
+    )
+    sandbox_mcp_service_client = providers.Singleton(
+        McpServiceClient,
+        discovery=service_discovery,
+        from_source_secret=settings.FROM_SOURCE_SECRET,
+        service_name="wisepen-sandbox-service",
+        mcp_path="/mcp/",
+        timeout=settings.MCP_DEFAULT_TIMEOUT_SECONDS,
         default_strategy=settings.RPC_LB_STRATEGY,
     )
     mcp_client = providers.Singleton(
@@ -231,6 +241,7 @@ class Container(containers.DeclarativeContainer):
     system_mcp_tool_catalog = providers.Singleton(
         SystemMcpToolCatalog,
         mcp_service_client=mcp_service_client,
+        sandbox_mcp_service_client=sandbox_mcp_service_client,
     )
 
     # OssFileLoader

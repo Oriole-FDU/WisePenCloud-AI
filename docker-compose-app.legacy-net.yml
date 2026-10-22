@@ -18,6 +18,11 @@ services:
       cloud-infra_cloud-net:
         aliases:
           - mcp-service
+  sandbox-service:
+    networks:
+      cloud-infra_cloud-net:
+        aliases:
+          - sandbox-service
 
 networks:
   cloud-infra_cloud-net:

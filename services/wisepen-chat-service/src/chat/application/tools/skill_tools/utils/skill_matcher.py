@@ -9,7 +9,10 @@ from chat.service_client import AIAssetClient
 from chat.application.tools.skill_tools.utils.builtin_skills import get_builtin_skill_meta, is_builtin_skill_id
 
 
-ALWAYS_AVAILABLE_BUILTIN_SKILL_IDS = {"builtin:skill-creator"}
+ALWAYS_AVAILABLE_BUILTIN_SKILL_IDS = {
+    "builtin:note-editor",
+    "builtin:skill-creator",
+}
 
 
 class SkillMatcher(ABC):

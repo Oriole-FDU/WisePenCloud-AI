@@ -251,7 +251,9 @@ class ToolRegistry:
             if config_spec is None:
                 continue  # 无需配置的跳过
 
-            entity = configs.get(name)
+            # 兼容已保存的用户配置
+            legacy_config_name = name.removeprefix("system_").removeprefix("sandbox_")
+            entity = configs.get(name) or configs.get(legacy_config_name)
             # 检查用户是否有配置、是否启用、必填项是否完整
             if entity is None or not entity.enabled: continue # 不满足的跳过
             missing: list[str] = []

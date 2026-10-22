@@ -20,6 +20,7 @@ from chat.domain.error_codes import ChatErrorCode
 from chat.domain.entities.skill import SkillMeta
 from chat.core.providers import OssFileLoader
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
+from chat.application.frontend_state_resolver import find_opened_note_resource
 
 
 _IMAGE_MEDIA_TYPES = {
@@ -30,6 +31,13 @@ _IMAGE_MEDIA_TYPES = {
 }
 
 _IMAGE_PLACEHOLDER_TEMPLATE = "[Image attachment: {name}, attachment_id={attachment_id}]"
+
+_CURRENT_NOTE_CITATION_PROMPT = (
+    "Only when the user explicitly requests citations to the currently open WisePen note, use "
+    "`[verbatim excerpt](wisepen://note/<resource_id>#p_<public_block_id>)`; "
+    "if included, keep the excerpt within 30 characters; copy both IDs exactly from "
+    "`read_current_note_for_edit`, and omit the link if no exact block ID is available."
+)
 
 
 @dataclass
@@ -324,6 +332,10 @@ class ChatContextAssembler:
             support_vision=support_vision,
             lenient_load=False,
         )]
+
+        # 当前笔记的引用协议是应用级规则，对默认和自定义 Agent 统一生效。
+        if find_opened_note_resource(frontend_states) is not None:
+            system_prompt = f"{system_prompt.rstrip()}\n\n{_CURRENT_NOTE_CITATION_PROMPT}"
 
         # Message 列表初始化并加入 System Prompt
         messages: List[ChatMessage] = [

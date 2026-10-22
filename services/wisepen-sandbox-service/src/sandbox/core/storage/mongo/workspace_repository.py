@@ -4,11 +4,7 @@ from datetime import datetime, timezone
 
 from beanie import UpdateResponse
 
-from sandbox.domain.entities import (
-    SessionWorkspaceDocument,
-    WorkspaceExportBundleRef,
-    WorkspaceState,
-)
+from sandbox.domain.entities import SessionWorkspaceDocument
 from sandbox.domain.repositories import WorkspaceRepository
 
 
@@ -68,61 +64,16 @@ class MongoWorkspaceRepository(WorkspaceRepository):
                 "$set": {
                     "sandbox_id": sandbox_id,
                     "workspace_path": workspace_path,
-                    "state": WorkspaceState.ATTACHED,
                     "updated_at": now,
-                    "last_accessed_at": now,
                 }
             },
             response_type=UpdateResponse.NEW_DOCUMENT,
         )
 
-    async def clear_runtime_binding(
+    async def list_by_sandbox(
         self,
-        workspace_id: str,
-    ) -> SessionWorkspaceDocument | None:
-        return await SessionWorkspaceDocument.find_one(
-            SessionWorkspaceDocument.id == workspace_id,
-        ).update(
-            {
-                "$set": {
-                    "sandbox_id": None,
-                    "workspace_path": None,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
-            response_type=UpdateResponse.NEW_DOCUMENT,
-        )
-
-    async def set_export_bundle(
-        self,
-        workspace_id: str,
-        export_bundle: WorkspaceExportBundleRef | None,
-    ) -> SessionWorkspaceDocument | None:
-        return await SessionWorkspaceDocument.find_one(
-            SessionWorkspaceDocument.id == workspace_id,
-        ).update(
-            {
-                "$set": {
-                    "export_bundle": export_bundle,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
-            response_type=UpdateResponse.NEW_DOCUMENT,
-        )
-
-    async def change_state(
-        self,
-        workspace_id: str,
-        state: WorkspaceState,
-    ) -> SessionWorkspaceDocument | None:
-        return await SessionWorkspaceDocument.find_one(
-            SessionWorkspaceDocument.id == workspace_id,
-        ).update(
-            {
-                "$set": {
-                    "state": state,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
-            response_type=UpdateResponse.NEW_DOCUMENT,
-        )
+        sandbox_id: str,
+    ) -> list[SessionWorkspaceDocument]:
+        return await SessionWorkspaceDocument.find(
+            {"sandbox_id": sandbox_id, "workspace_path": {"$ne": None}},
+        ).to_list()

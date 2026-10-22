@@ -5,6 +5,7 @@ from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 from fastapi import FastAPI
+from starlette.types import ASGIApp
 
 from sandbox.api.endpoints import health
 
@@ -12,6 +13,7 @@ from sandbox.api.endpoints import health
 def create_app(
     *,
     lifespan: Callable[[FastAPI], AbstractAsyncContextManager[Any]] | None = None,
+    mcp_app: ASGIApp | None = None,
 ) -> FastAPI:
 
     app = FastAPI(
@@ -26,4 +28,6 @@ def create_app(
     )
 
     app.include_router(health.router)
+    if mcp_app is not None:
+        app.mount("/mcp", mcp_app)
     return app

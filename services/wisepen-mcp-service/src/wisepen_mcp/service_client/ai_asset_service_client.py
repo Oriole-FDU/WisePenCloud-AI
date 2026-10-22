@@ -16,7 +16,6 @@ _CREATE_SKILL_PATH = "/skill/createSkill"
 _CHANGE_SKILL_INFO_PATH = "/skill/changeSkillInfo"
 _GET_SKILL_INFO_PATH = "/skill/getSkillInfo"
 _INIT_UPLOAD_SKILL_ASSETS_PATH = "/skill/initUploadSkillAssets"
-_OSS_UPLOAD_PATH = "/skillAssetUpload"
 _OSS_CALLBACK_HEADER = "x-oss-callback"
 
 
@@ -123,14 +122,14 @@ class AIAssetClient:
         if callback_header and response.status_code != 200:
             raise RpcError(
                 service_name="oss",
-                path=_OSS_UPLOAD_PATH,
+                path=put_url,
                 status=response.status_code,
                 msg=_format_upload_error(response, "OSS callback upload failed"),
             )
         if response.status_code < 200 or response.status_code >= 300:
             raise RpcError(
                 service_name="oss",
-                path=_OSS_UPLOAD_PATH,
+                path=put_url,
                 status=response.status_code,
                 msg=_format_upload_error(response, "OSS upload failed"),
             )

@@ -11,9 +11,8 @@ def setup_global_exception_handlers(app: FastAPI, is_dev: bool = False):
     @app.exception_handler(ServiceException)
     async def service_exception_handler(request: Request, e: ServiceException):
         warn("business exception handled.", code=e.code, path=request.url.path, custom_msg=e.msg)
-        status_code = 500 if e.code >= 50000 else 200
         return JSONResponse(
-            status_code=status_code,
+            status_code=200,
             content=R.fail(error_code=ResultCode.SYSTEM_ERROR, custom_msg=e.msg).model_dump()
         )
 

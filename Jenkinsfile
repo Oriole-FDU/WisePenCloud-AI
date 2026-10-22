@@ -11,6 +11,9 @@ pipeline {
     parameters {
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: '选择需要构建的 Git 分支')
         string(name: 'PYPI_INDEX_URL', defaultValue: 'https://mirrors.aliyun.com/pypi/simple/', description: 'Python 包索引地址，默认使用中国大陆镜像')
+        booleanParam(name: 'DEPLOY_CHAT_SERVICE', defaultValue: true, description: '构建并部署 chat-service')
+        booleanParam(name: 'DEPLOY_MCP_SERVICE', defaultValue: true, description: '构建并部署 mcp-service')
+        booleanParam(name: 'DEPLOY_SANDBOX_SERVICE', defaultValue: true, description: '构建并部署 sandbox-service')
     }
 
     stages {
@@ -22,11 +25,36 @@ pipeline {
             }
         }
 
+        stage('1.5 确认部署服务 (Select Services)') {
+            steps {
+                script {
+                    def selectedServices = []
+                    if (params.DEPLOY_CHAT_SERVICE) {
+                        selectedServices << 'chat-service'
+                    }
+                    if (params.DEPLOY_MCP_SERVICE) {
+                        selectedServices << 'mcp-service'
+                    }
+                    if (params.DEPLOY_SANDBOX_SERVICE) {
+                        selectedServices << 'sandbox-service'
+                    }
+                    if (selectedServices.isEmpty()) {
+                        error '至少需要选择一个要构建并部署的服务。'
+                    }
+                    env.SELECTED_COMPOSE_SERVICES = selectedServices.join(' ')
+                    echo "本次选择构建并部署的服务: ${env.SELECTED_COMPOSE_SERVICES}"
+                }
+            }
+        }
+
         stage('2. 构建 Docker 镜像') {
             failFast true
 
             parallel {
                 stage('Chat Service') {
+                    when {
+                        expression { return params.DEPLOY_CHAT_SERVICE }
+                    }
                     steps {
                         script {
                             sh """
@@ -43,6 +71,9 @@ pipeline {
                     }
                 }
                 stage('MCP Service') {
+                    when {
+                        expression { return params.DEPLOY_MCP_SERVICE }
+                    }
                     steps {
                         script {
                             sh """
@@ -58,6 +89,26 @@ pipeline {
                         }
                     }
                 }
+                stage('Sandbox Service') {
+                    when {
+                        expression { return params.DEPLOY_SANDBOX_SERVICE }
+                    }
+                    steps {
+                        script {
+                            sh """
+                                docker build \\
+                                    -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-sandbox:${IMAGE_TAG} \\
+                                    --build-arg SERVICE_DIR=wisepen-sandbox-service \\
+                                    --build-arg SERVICE_PKG=sandbox \\
+                                    --build-arg SERVICE_PORT=19915 \\
+                                    --build-arg SERVICE_PROJECT=wisepen-sandbox-service \\
+                                    --build-arg PYPI_INDEX_URL="\${PYPI_INDEX_URL}" \\
+                                    -f Dockerfile .
+                            """
+                        }
+                    }
+                }
+
             }
         }
 
@@ -68,7 +119,7 @@ pipeline {
             }
             steps {
                 script {
-                    echo "开始部署最新版本: ${IMAGE_TAG} ..."
+                    echo "开始部署最新版本: ${IMAGE_TAG}，服务: ${env.SELECTED_COMPOSE_SERVICES} ..."
                     sh """
                     if ! command -v docker-compose &> /dev/null; then
                         echo "容器内缺失 docker-compose，正在自动下载..."
@@ -91,7 +142,7 @@ pipeline {
                         COMPOSE_FILES="\$COMPOSE_FILES -f docker-compose-app.legacy-net.yml"
                     fi
 
-                    docker-compose \$COMPOSE_FILES up -d --no-build --remove-orphans
+                    docker-compose \$COMPOSE_FILES up -d --no-build --remove-orphans ${env.SELECTED_COMPOSE_SERVICES}
                     """
                 }
             }

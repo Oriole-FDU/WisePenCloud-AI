@@ -82,8 +82,8 @@ class ReplaceContentOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     opId: Annotated[str, Field(min_length=1, description="Unique id for this operation within the patch.")]
-    kind: Literal["replaceContent"] = Field(description="Replace content of an existing public block id.")
-    blockId: Annotated[str, Field(min_length=1, description="Public block id returned by read_current_note_for_edit.")]
+    kind: Literal["replaceContent"] = Field(description="Replace content of an existing block id.")
+    blockId: Annotated[str, Field(min_length=1, description="Block id returned by read_current_note_for_edit.")]
     content: PatchContent = Field(description="Replacement content.")
 
 
@@ -91,22 +91,32 @@ class DeleteBlockOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     opId: Annotated[str, Field(min_length=1, description="Unique id for this operation within the patch.")]
-    kind: Literal["deleteBlock"] = Field(description="Delete an existing public block id.")
-    blockId: Annotated[str, Field(min_length=1, description="Public block id returned by read_current_note_for_edit.")]
+    kind: Literal["deleteBlock"] = Field(description="Delete an existing block id.")
+    blockId: Annotated[str, Field(min_length=1, description="Block id returned by read_current_note_for_edit.")]
 
 
 class InsertBlockOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     opId: Annotated[str, Field(min_length=1, description="Unique id for this operation within the patch.")]
-    kind: Literal["insertBlock"] = Field(description="Insert a block relative to an existing public block id.")
-    anchorBlockId: Annotated[str, Field(min_length=1, description="Public anchor block id returned by read_current_note_for_edit.")]
+    kind: Literal["insertBlock"] = Field(description="Insert a block relative to an existing block id.")
+    anchorBlockId: Annotated[str, Field(min_length=1, description="Anchor block id returned by read_current_note_for_edit.")]
     position: Literal["before", "after"] = Field(description="Insert before or after anchorBlockId.")
     block: InsertBlockCandidate = Field(description="Block to insert.")
 
 
+class AppendRootBlockOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    opId: Annotated[str, Field(min_length=1, description="Unique id for this operation within the patch.")]
+    kind: Literal["appendRootBlock"] = Field(
+        description="Append a top-level suggestion block to a note that has no suitable anchor."
+    )
+    block: InsertBlockCandidate = Field(description="Top-level block to append.")
+
+
 PatchOperation = Annotated[
-    ReplaceContentOperation | DeleteBlockOperation | InsertBlockOperation,
+    ReplaceContentOperation | DeleteBlockOperation | InsertBlockOperation | AppendRootBlockOperation,
     Field(discriminator="kind"),
 ]
 
@@ -115,13 +125,14 @@ def register_apply_current_note_edits_tool(mcp: FastMCP, note_collab_client: Not
     @mcp.tool(
         name="apply_current_note_edits",
         description=(
-            "Apply structured edit suggestions to the currently open Wisepen note. Use the yjs-v1 version and "
-            "public block ids returned by read_current_note_for_edit. Operations must use exact fields: opId, kind, "
-            "blockId or anchorBlockId, and structured content."
+            "Apply structured edit suggestions to any editable Wisepen note, whether or not it is currently open. "
+            "Use the resource_id, yjs-v1 version, and block ids returned by read_current_note_for_edit. Existing-block "
+            "operations use blockId or anchorBlockId. For an empty or newly created note with no anchor, use "
+            "appendRootBlock. Suggestions remain subject to user acceptance or rejection."
         ),
     )
     async def apply_current_note_edits(
-        resource_id: Annotated[str, Field(description="Current open note resource id used for the latest read.")],
+        resource_id: Annotated[str, Field(description="Note resource id used for the latest structured read.")],
         patch_id: Annotated[str, Field(description="Stable idempotency id for this exact edit attempt.")],
         version: Annotated[str, Field(pattern=r"^yjs-v1:", description="yjs-v1 version from read_current_note_for_edit.")],
         operations: Annotated[

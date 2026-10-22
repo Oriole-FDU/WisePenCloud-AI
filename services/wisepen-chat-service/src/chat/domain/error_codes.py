@@ -43,10 +43,10 @@ class ChatErrorCode(IErrorCode):
     SPEECH_PROVIDER_UNSUPPORTED = (40042, "语音识别 Provider 不支持")
 
     # --- 模型相关 ---
-    LLM_GENERATION_FAILED = (50011, "大模型生成失败")
-    CHAT_TURN_LOCK_FAILED = (50012, "Session 处理锁获取失败")
-    CHAT_MESSAGE_PERSIST_FAILED = (50013, "聊天消息持久化失败")
+    LLM_GENERATION_FAILED = (40051, "大模型生成失败")
+    CHAT_TURN_LOCK_FAILED = (40052, "Session 处理锁获取失败")
+    CHAT_MESSAGE_PERSIST_FAILED = (40053, "聊天消息持久化失败")
 
     # --- 记忆相关 ---
-    MEMORY_NOT_FOUND = (40001, "目标记忆不存在")
-    MEMORY_OPERATION_FAILED = (50021, "记忆操作失败")
+    MEMORY_NOT_FOUND = (40061, "目标记忆不存在")
+    MEMORY_OPERATION_FAILED = (40062, "记忆操作失败")

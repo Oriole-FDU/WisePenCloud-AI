@@ -46,11 +46,13 @@ class McpRemoteTool(Tool):
         **kwargs: Any,
     ) -> ToolOutput:
         try:
-            tool_context = {
-                key: context[key]
-                for key in self._definition.policy.required_context_keys
-                if key in context
-            }
+            tool_context = normalize_json_value(
+                {
+                    key: context[key]
+                    for key in self._definition.policy.required_context_keys
+                    if key in context
+                }
+            )
 
             if self._server is None: # 内部 MCP
                 result = await self._mcp_client.call_tool(

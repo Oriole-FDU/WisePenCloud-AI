@@ -39,6 +39,12 @@ RUN uv sync --frozen --no-dev --package ${SERVICE_PROJECT} \
 # ---- 运行阶段：仅包含运行时，不含 uv / 编译工具链 ----
 FROM python:3.11-slim-bookworm
 
+ARG SERVICE_PROJECT
+RUN if [ "$SERVICE_PROJECT" = "wisepen-sandbox-service" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends docker.io && \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
+
 WORKDIR /app
 
 COPY --from=builder /app/.venv /app/.venv

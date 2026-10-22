@@ -8,13 +8,10 @@ from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.skill import SkillMeta
 
-_CURRENT_NOTE_EDITOR_SKILL_ID = "builtin:current-note-editor"
-
 # Skill / Session / 附件工具默认不暴露，只在本轮上下文确实需要时解禁
 _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
 _SESSION_TOOL_NAMES = frozenset({"get_historical_chat_messages"})
 _IMAGE_ATTACHMENT_TOOL_NAMES = frozenset({"load_image_attachment"})
-_CURRENT_NOTE_EDIT_TOOL_NAMES = frozenset({"read_current_note_for_edit", "apply_current_note_edits"})
 _TOOL_OUTPUT_TOOL_NAMES = frozenset({
     "inspect_tool_output_structure",
     "read_tool_output_range",
@@ -67,8 +64,6 @@ class ChatTurnToolPolicyBuilder:
                 skill_match_top_k=tool_and_skill_policy.skill_match_top_k,
             )
 
-        current_note_edit_enabled = find_opened_note_resource(frontend_states) is not None
-
         tool_context: dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
@@ -77,8 +72,6 @@ class ChatTurnToolPolicyBuilder:
 
         # allowed_skill_ids 表示本轮展示给 LLM 的 Skill 白名单
         allowed_skill_ids = {skill.skill_id for skill in available_skills}
-        if current_note_edit_enabled:
-            allowed_skill_ids.add(_CURRENT_NOTE_EDITOR_SKILL_ID)
         if allowed_skill_ids:
             tool_context["allowed_skill_ids"] = sorted(allowed_skill_ids)
 
@@ -87,8 +80,6 @@ class ChatTurnToolPolicyBuilder:
         expose_tool_name_set: set[str] = set()
         if available_skills:
             expose_tool_name_set.update(_SKILL_TOOL_NAMES)
-        if current_note_edit_enabled:
-            expose_tool_name_set.update(_CURRENT_NOTE_EDIT_TOOL_NAMES)
         if has_session_summary:
             # 如有压缩摘要，则暴露会话工具，用于召回被压缩的上下文
             expose_tool_name_set.update(_SESSION_TOOL_NAMES)
@@ -115,20 +106,6 @@ class ChatTurnToolPolicyBuilder:
                 else dict(tool_and_skill_policy.tool_selection_overrides)
             ),
         )
-
-
-def find_opened_note_resource(frontend_states: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    for state in frontend_states or []:
-        if state.get("disabled", False) or state.get("key") != "workspace_open_resource":
-            continue
-        value = state.get("value")
-        if not isinstance(value, dict):
-            continue
-        resource_type = str(value.get("resource_type") or "").lower()
-        viewer = str(value.get("viewer") or "").lower()
-        if resource_type == "note" or viewer == "note":
-            return value
-    return None
 
 
 def has_history_image_record(chat_history_record_messages: list[ChatMessage]) -> bool:
