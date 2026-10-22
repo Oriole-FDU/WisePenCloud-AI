@@ -1,0 +1,16 @@
+domain: employment
+description: 某公司内部合同正文中的雇员、部门及有向隶属关系。
+
+entity_specs:
+  Person:
+    category: Person
+    description: 合同正文中明确提到的雇员。
+  Department:
+    category: Department
+    description: 合同正文中明确提到的隶属部门。
+relation_specs:
+  in_department:
+    relation_type: in_department
+    description: 起点雇员隶属于终点部门，必须有正文依据。
+    allowed_sources: [Person]
+    allowed_targets: [Department]

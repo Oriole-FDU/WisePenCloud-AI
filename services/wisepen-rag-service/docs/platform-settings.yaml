@@ -1,0 +1,42 @@
+# Nacos AppSettings 样例。地址、凭据和模型须替换；维度 1024 是示例而非默认值。
+# bootstrap 的 NACOS_* / PROFILE / SERVICE_PORT 放环境或 .env，见 deployment.md。
+MONGODB_URL: mongodb://localhost:27017
+MONGODB_DB_NAME: rag_v4
+# RESOURCE_MONGODB_DB_NAME: resources
+QDRANT_URL: http://localhost:6333
+# QDRANT_API_KEY: replace-me
+EMBEDDING_BASE_URL: https://your-embedding-gateway/v1
+EMBEDDING_API_KEY: replace-me
+EMBEDDING_MODEL: your-embedding-model
+EMBEDDING_DIMENSIONS: 1024
+QWEN_API_KEY: replace-me
+QWEN_RERANKER_MODEL: your-qwen-reranker-model
+VECTOR_COLLECTION: document_chunk_vectors_v4
+GRAPH_ENTITY_VECTOR_COLLECTION: graph_entity_source_vectors_v4
+GRAPH_RELATION_VECTOR_COLLECTION: graph_relation_source_vectors_v4
+ENABLE_CONTEXTUALIZE: false
+# 启用上下文、使用图抽取或配置任一 instruction 项时要求三项完整。
+# INSTRUCTION_BASE_URL: https://your-instruction-gateway/v1
+# INSTRUCTION_API_KEY: replace-me
+# INSTRUCTION_MODEL: your-instruction-model
+ENABLE_GRAPH_STORAGE: false
+# NEO4J_URI: neo4j://localhost:7687
+# NEO4J_USERNAME: neo4j
+# NEO4J_PASSWORD: replace-me
+NEO4J_DATABASE: neo4j
+NEO4J_GRAPH_NAME: rag_v4
+GC_INTERVAL_SECONDS: 600
+GC_BATCH_SIZE: 100
+# Kafka 关闭仍会启动 GC、装配查询；无 GC/rerank 开关。
+KAFKA_ENABLED: false
+KAFKA_BOOTSTRAP_SERVERS: ""
+KAFKA_MAX_POLL_INTERVAL_MS: 300000
+KAFKA_RESOURCE_ACL_RECALC_TOPIC: wisepen-resource-acl-recalc-topic
+KAFKA_RAG_ACL_RECALC_GROUP_ID: wisepen-rag-v4-acl-recalc-group
+KAFKA_DOCUMENT_READY_TOPIC: wisepen-document-ready-topic
+KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC: wisepen-resource-physical-destroy-topic
+KAFKA_RAG_PUBLICATION_GROUP_ID: wisepen-rag-v4-publication-group
+EXTENSIONS: []
+# Employment 需要完整指令配置、Neo4j 和网关密钥；链显式不带上下文。
+# EXTENSIONS: [employment]
+# FROM_SOURCE_SECRET: replace-with-private-gateway-secret

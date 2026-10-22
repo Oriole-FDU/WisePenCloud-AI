@@ -1,0 +1,88 @@
+[
+  {
+    "chunk_id": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14:chunk:0",
+    "resource_id": "employment-a",
+    "content_revision": "employment-a@1#baf82b6a375291f5f8aeadb7a5e2ddfbb6409699408f02406df9790c35b9ca14",
+    "section_id": "demo-section-employment-a",
+    "section_path": [
+      "任职登记"
+    ],
+    "text": "# 任职登记\n张三在甲公司任职，负责软件研发。\n",
+    "rank": 1,
+    "score": 0.97,
+    "seed_entities": [
+      {
+        "id": "work:Person:张三",
+        "relations": [
+          {
+            "relation_type": "works_at",
+            "direction": "outgoing"
+          }
+        ]
+      },
+      {
+        "id": "work:Company:甲公司",
+        "relations": [
+          {
+            "relation_type": "supplies",
+            "direction": "outgoing"
+          },
+          {
+            "relation_type": "works_at",
+            "direction": "incoming"
+          }
+        ]
+      }
+    ],
+    "metadata": {
+      "graph_version": "demo-v1",
+      "contextual_context": "固定示例上下文",
+      "business": {
+        "record": "employment-a"
+      }
+    }
+  },
+  {
+    "chunk_id": "supply-c@1#d71cc9c5cdfea76f673f099e75472b3e7b3d5da57a12fb5abb8f79b7af96926a:chunk:0",
+    "resource_id": "supply-c",
+    "content_revision": "supply-c@1#d71cc9c5cdfea76f673f099e75472b3e7b3d5da57a12fb5abb8f79b7af96926a",
+    "section_id": "demo-section-supply-c",
+    "section_path": [
+      "供应记录"
+    ],
+    "text": "# 供应记录\n甲公司向乙公司供应软件系统。\n",
+    "rank": 2,
+    "score": 0.76,
+    "seed_entities": [
+      {
+        "id": "work:Company:甲公司",
+        "relations": [
+          {
+            "relation_type": "supplies",
+            "direction": "outgoing"
+          },
+          {
+            "relation_type": "works_at",
+            "direction": "incoming"
+          }
+        ]
+      },
+      {
+        "id": "work:Company:乙公司",
+        "relations": [
+          {
+            "relation_type": "supplies",
+            "direction": "incoming"
+          }
+        ]
+      }
+    ],
+    "metadata": {
+      "graph_version": "demo-v1",
+      "contextual_context": "固定示例上下文",
+      "business": {
+        "record": "supply-c"
+      }
+    }
+  }
+]
