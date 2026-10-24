@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, List, Literal
+from typing import Any, Literal
+
+from common.logger import error
 
 from chat.application.tools.core import (
     ToolConfigSpec,
@@ -18,7 +20,6 @@ from chat.application.tools.core.mcp.remote_tool import McpRemoteTool
 from chat.core.config.app_settings import settings
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.service_client import McpServiceClient
-from common.logger import error
 
 ToolSource = Literal["system", "sandbox"]
 
@@ -42,12 +43,12 @@ _WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
 _WEB_SEARCH_POLICY = ToolPolicy(
     expose_by_default=True,
     risk_level=ToolRiskLevel.LOW,
-    timeout_seconds=100.0,
+    timeout_seconds=30.0,
     persist_output=True,
     max_output_chars=None,
 )
 
-_SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
+_SYSTEM_TOOL_CONFIGS: list[dict[str, Any]] = [{
         "tool_name": "create_skill_info",
         "ui_spec": ToolUISpec(display_name="创建 Skill 信息", description="创建新的 Skill 草稿信息。"),
         "policy": ToolPolicy(
