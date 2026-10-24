@@ -1,0 +1,41 @@
+# Nacos 运行配置示例；替换地址、凭据和模型名称后使用。
+MONGODB_URL: mongodb://localhost:27017
+MONGODB_DB_NAME: rag_v4
+QDRANT_URL: http://localhost:6333
+# QDRANT_API_KEY: your-qdrant-key
+EMBEDDING_BASE_URL: https://your-embedding-gateway/v1
+EMBEDDING_API_KEY: your-embedding-key
+EMBEDDING_MODEL: your-embedding-model
+EMBEDDING_DIMENSIONS: 1024
+QWEN_API_KEY: your-qwen-key
+QWEN_RERANKER_MODEL: your-qwen-reranker-model
+VECTOR_COLLECTION: document_chunk_vectors_v4
+GRAPH_ENTITY_VECTOR_COLLECTION: graph_entity_source_vectors_v4
+GRAPH_RELATION_VECTOR_COLLECTION: graph_relation_source_vectors_v4
+ENABLE_CONTEXTUALIZE: false
+# 上下文开启或使用图抽取工厂时需要完整配置：
+# INSTRUCTION_BASE_URL: https://your-instruction-gateway/v1
+# INSTRUCTION_API_KEY: your-instruction-key
+# INSTRUCTION_MODEL: your-instruction-model
+ENABLE_GRAPH_STORAGE: false
+# NEO4J_URI: neo4j://localhost:7687
+# NEO4J_USERNAME: neo4j
+# NEO4J_PASSWORD: your-neo4j-password
+NEO4J_DATABASE: neo4j
+NEO4J_GRAPH_NAME: rag_v4
+GC_INTERVAL_SECONDS: 600
+GC_BATCH_SIZE: 100
+# 本地调试不连 broker；GC 和检索组件仍正常工作。
+KAFKA_ENABLED: false
+# KAFKA_BOOTSTRAP_SERVERS: localhost:9092
+KAFKA_RESOURCE_ACL_RECALC_TOPIC: wisepen-resource-acl-recalc-topic
+KAFKA_RAG_ACL_RECALC_GROUP_ID: wisepen-rag-v4-acl-recalc-group
+KAFKA_DOCUMENT_READY_TOPIC: wisepen-document-ready-topic
+KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC: wisepen-resource-physical-destroy-topic
+KAFKA_RAG_PUBLICATION_GROUP_ID: wisepen-rag-v4-publication-group
+
+# 按 extensions/__init__.py 的登记名称启用；图抽取示例还需完整 INSTRUCTION_*。
+EXTENSIONS: []
+# EXTENSIONS: [employment]
+# Employment 同时提供图工具/API，还须启用 Neo4j 并配置可信网关密钥：
+# FROM_SOURCE_SECRET: your-private-gateway-secret
