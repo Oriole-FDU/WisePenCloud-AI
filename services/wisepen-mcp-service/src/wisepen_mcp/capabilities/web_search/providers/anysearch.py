@@ -3,9 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-
 from common.core.exceptions import ServiceException
-from common.utils.ranking import RankingPipeline
+
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
@@ -20,16 +19,24 @@ class AnySearchTool(BaseSearchTool):
     tool_name = "anysearch_search"
     provider_name = "anysearch"
 
-    def __init__(self, *, http_client: httpx.AsyncClient, ranking_pipeline: RankingPipeline) -> None:
-        super().__init__(ranking_pipeline=ranking_pipeline)
+    def __init__(self, *, http_client: httpx.AsyncClient) -> None:
         self._http_client = http_client
 
     async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+        return await self._search(query=query, max_results=max_results, api_key=api_key, tag=None)
+
+    async def search_academic(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
+        # 以免费 sub-domains 发现接口的当前枚举为准；academic.paper 已被服务端废弃。
+        return await self._search(query=query, max_results=max_results, api_key=api_key, tag="academic.search")
+
+    async def _search(self, *, query: str, max_results: int, api_key: str | None, tag: str | None) -> SearchResponse:
         if not api_key:
             raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, "AnySearch API key is required.")
 
         url = f"{settings.WEB_SEARCH_ANYSEARCH_BASE_URL.rstrip('/')}/v1/search"
-        payload = {"query": query, "max_results": max_results, "content_types": ["webpage"]}
+        payload = {"query": query, "max_results": min(max_results, 10), "content_types": ["webpage"]}
+        if tag:
+            payload["tag"] = tag
 
         try:
             response = await self._http_client.post(url, headers={"Authorization": f"Bearer {api_key}"}, json=payload)
@@ -60,7 +67,7 @@ class AnySearchTool(BaseSearchTool):
     def map_response(data: dict[str, Any]) -> SearchResponse:
         return SearchResponse(
             results=[
-                SearchResult(title=item.get("title"), url=item.get("url"), snippet=item.get("snippet"))
+                SearchResult(title=item.get("title"), url=item.get("url"), evidences=[item["snippet"]] if item.get("snippet") else [], metadata={"source": item["source"]} if item.get("source") else {})
                 for item in data["data"]["results"]
             ]
         )
