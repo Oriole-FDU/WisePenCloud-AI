@@ -23,12 +23,30 @@ dependencies = [
     "aiokafka",
     "httpx",
     "nacos-sdk-python",
-    "zeroentropy",
-    "jieba>=0.42.1",
-    "thulac>=0.2.2",
-    "bm25s>=0.3.9",
-    "numpy>=2.4.6",
     "langchain-text-splitters>=1.0,<2",
+    "semchunk>=3,<4",
+    "tiktoken>=0.9,<0.13",
     "markdown-it-py>=4,<5",
     "mdit-py-plugins>=0.5,<1",
+    "bm25s>=0.3.9",
+    "jieba>=0.42.1",
+    "blingfire>=0.1.8",
+    "numpy>=2.4.6",
+    "openai>=2,<3",
+    "instructor>=1,<2",
+    "dashscope>=1.25,<2",
+    "typesafe-sdk>=0.7,<1",
 ]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+"common.utils.markdown.chunking" = ["data/*.tiktoken", "data/README.md"]
+
+[tool.pytest.ini_options]
+# 固定测试临时目录到项目内：Windows 上 %TEMP%\pytest-of-<user> 可能被历史运行写成当前用户
+# 无权限访问的 ACL，导致 tmp_path 全部报 PermissionError；此目录每次运行前由 pytest 重建。
+addopts = "--basetemp=.pytest_tmp"
+tmp_path_retention_policy = "none"

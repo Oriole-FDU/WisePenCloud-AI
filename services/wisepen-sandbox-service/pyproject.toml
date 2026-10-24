@@ -13,7 +13,7 @@ dependencies = [
     "pydantic-settings",
     "pymongo",
     "pyyaml",
-    "redis[asyncio]",
+    "redis",
     "uvicorn[standard]",
     "wisepen-common",
 ]
