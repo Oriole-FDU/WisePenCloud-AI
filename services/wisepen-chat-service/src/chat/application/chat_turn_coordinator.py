@@ -117,12 +117,13 @@ class ChatTurnCoordinator:
         if suspended_chat is None:
             raise ServiceException(ChatErrorCode.SUSPENDED_CHAT_NOT_FOUND)
         suspended_chat_id = str(suspended_chat.id)
+        model_info = await self._model_repo.refresh_suspended_model(suspended_chat.context.model_info, user_id)
         tool_scope = await self._tool_registry.recover_derived(suspended_chat.context.tool_scope_data, user_id)
 
         chat_turn_context = ChatTurnContext(
             user_id=user_id,
             session_id=session_id,
-            model_info=suspended_chat.context.model_info,
+            model_info=model_info,
             agent_spec=suspended_chat.context.agent_spec,
             session_summary=suspended_chat.context.session_summary,
             windowed_history_messages=suspended_chat.context.windowed_history_messages,

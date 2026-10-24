@@ -7,12 +7,25 @@ from beanie import PydanticObjectId
 
 from chat.domain.entities.model import Model, ModelScope, ModelProviderMapping
 from chat.domain.entities.provider import Provider, ProviderScope, ProviderType
+from chat.domain.error_codes import ChatErrorCode
+from chat.domain.model_configuration import supports_model_family
+from common.core.exceptions import ServiceException
 
 
 @dataclass(frozen=True)
 class ModelInfo:
     model: Model
     mappings: List[ModelProviderMapping]
+
+    def available_mappings(self, providers: dict[str, Provider]) -> List[ModelProviderMapping]:
+        return [
+            mapping for mapping in self.mappings
+            if mapping.is_active and (provider := providers.get(str(mapping.provider_id)))
+            and provider.is_active and provider.api_key
+            and provider.owner_user_id == mapping.owner_user_id
+            and provider.scope == (ProviderScope.SYSTEM if mapping.owner_user_id is None else ProviderScope.USER)
+            and supports_model_family(provider.type, self.model.model_family)
+        ]
 
 
 @dataclass(frozen=True)
@@ -112,6 +125,23 @@ class ModelRequestInfo:
         return replace(self, runtime_options=runtime_options)
 
 class ModelRepository(ABC):
+
+    async def refresh_suspended_model(self, snapshot: ModelRequestInfo, user_id: str) -> ModelRequestInfo:
+        current = await self.resolve_model_for_chat(
+            snapshot.model_id, user_id, snapshot.provider_id, snapshot.runtime_options,
+        )
+        model_fields = (
+            "model_family", "support_thinking", "support_vision", "support_tools",
+            "context_window_tokens", "max_output_tokens",
+        )
+        if (
+            current.mapping.id != snapshot.mapping.id or current.model_name != snapshot.model_name
+            or current.provider_type != snapshot.provider_type or current.base_url != snapshot.base_url
+            or any(getattr(current.model, field) != getattr(snapshot.model, field) for field in model_fields)
+        ):
+            raise ServiceException(ChatErrorCode.MODEL_CONFIGURATION_CHANGED)
+        # 本轮计费倍率等继续使用挂起前快照，仅刷新当前凭证。
+        return replace(snapshot, provider=current.provider)
 
     @abstractmethod
     async def get_model(self, model_id: PydanticObjectId, user_id: Optional[str] = None) -> Model: pass

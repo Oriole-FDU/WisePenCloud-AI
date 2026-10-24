@@ -7,6 +7,7 @@ from pymongo.errors import DuplicateKeyError
 from chat.domain.entities.model import ModelProviderMapping
 from chat.domain.entities.provider import Provider, ProviderScope
 from chat.domain.error_codes import ChatErrorCode
+from chat.domain.model_configuration import mask_api_key
 from chat.domain.repositories.provider_repo import ProviderRepository
 from common.core.exceptions import ServiceException
 
@@ -54,6 +55,7 @@ class MongoProviderRepository(ProviderRepository):
         provider.api_key_fingerprint = self._mask_api_key(provider.api_key)
         provider.created_at = provider.created_at or now
         provider.updated_at = now
+        provider.config_updated_at = now
 
         try:
             await provider.insert()
@@ -149,4 +151,4 @@ class MongoProviderRepository(ProviderRepository):
         if len(api_key) <= 8:
             return "*" * len(api_key)
 
-        return f"{api_key[:4]}***{api_key[-4:]}"
+        return mask_api_key(api_key)

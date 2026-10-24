@@ -13,11 +13,17 @@ class MongoSuspendedChatRepository(SuspendedChatRepository):
         return await suspended_chat.insert()
 
     async def find_suspended_by_session(self, session_id: str, user_id: str) -> SuspendedChat | None:
-        suspended_chat = await SuspendedChat.find(
-            SuspendedChat.session_id == session_id,
-            SuspendedChat.user_id == user_id,
-        ).sort("-updated_at").first_or_none()
-
+        collection = SuspendedChat.get_pymongo_collection()
+        raw = await collection.find_one({"session_id": session_id, "user_id": user_id}, sort=[("updated_at", -1)])
+        suspended_chat = self._from_raw(raw)
+        if suspended_chat is not None and suspended_chat.context.model_info.api_key:
+            # 读取旧记录时去掉历史凭证；CAS 避免覆盖同时更新的挂起状态。
+            encoded = suspended_chat.model_dump(include={"context"})["context"]
+            await collection.update_one(
+                {"_id": raw["_id"], "context": raw["context"]},
+                {"$set": {"context": encoded}},
+            )
+            suspended_chat = self._from_raw({**raw, "context": encoded})
         return suspended_chat
 
     async def delete_by_id(self, suspended_chat_id: str) -> None:

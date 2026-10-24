@@ -1,6 +1,7 @@
 from chat.domain.entities.model import ModelFamily, Model
 from chat.domain.entities.provider import ProviderType
 from chat.domain.error_codes import ChatErrorCode
+from chat.domain.model_configuration import supports_model_family
 from chat.domain.interfaces import LLMProvider
 from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.core.exceptions import ServiceException
@@ -28,6 +29,8 @@ class LLMProviderResolver:
     def resolve(self, model_request: ModelRequestInfo) -> LLMProvider:
         provider_type = model_request.provider.type
         family = model_request.model.model_family
+        if not supports_model_family(provider_type, family):
+            raise ServiceException(ChatErrorCode.MODEL_PROVIDER_TYPE_UNSUPPORTED)
         if provider_type == ProviderType.ALIBABA and family == ModelFamily.QWEN:
             return self._qwen_adapter
         if provider_type == ProviderType.OPENAI and family == ModelFamily.GPT:

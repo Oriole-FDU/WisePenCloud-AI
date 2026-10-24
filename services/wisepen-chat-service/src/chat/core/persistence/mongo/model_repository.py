@@ -9,6 +9,7 @@ from pymongo.errors import DuplicateKeyError
 from chat.domain.entities.model import Model, ModelProviderMapping, ModelScope
 from chat.domain.entities.provider import Provider, ProviderScope, ProviderType
 from chat.domain.error_codes import ChatErrorCode
+from chat.domain.model_configuration import supports_model_family
 from chat.domain.repositories.model_repo import ModelInfo, ModelRepository, ModelRequestInfo
 from common.core.exceptions import ServiceException
 
@@ -38,7 +39,8 @@ class MongoModelRepository(ModelRepository):
     ) -> List[ModelInfo]:
         if model_scope == ModelScope.SYSTEM:
             models = await Model.find(
-                Model.scope == ModelScope.SYSTEM
+                Model.scope == ModelScope.SYSTEM,
+                Model.owner_user_id == None,
             ).sort("-is_active", "-updated_at").to_list()
         else:
             models = await Model.find(
@@ -93,7 +95,6 @@ class MongoModelRepository(ModelRepository):
 
         model.scope = self._scope_for(user_id)
         model.owner_user_id = user_id
-        model.is_active = True
         model.created_at = model.created_at or now
         model.updated_at = now
 
@@ -301,45 +302,33 @@ class MongoModelRepository(ModelRepository):
         if model is None:
             raise ServiceException(ChatErrorCode.MODEL_NOT_FOUND)
 
-        mapping: ModelProviderMapping | None = None
+        owners = [user_id]
+        if model.scope == ModelScope.SYSTEM and user_id is not None:
+            owners.append(None)
+        query = {"model_id": model.id, "owner_user_id": {"$in": owners}, "is_active": True}
         if provider_id is not None:
-            mapping = await ModelProviderMapping.find_one(
-                ModelProviderMapping.model_id == model.id,
-                ModelProviderMapping.provider_id == provider_id,
-                ModelProviderMapping.is_active == True,
-            ) # 检索指定的 provider-model 映射
-            if mapping is None: # 未找到 provider_id 对应的提供者，报错
-                raise ServiceException(ChatErrorCode.MODEL_MAPPING_NOT_FOUND)
-            if mapping.owner_user_id is not None and mapping.owner_user_id != user_id: # 不是系统提供者也不是该用户的提供者
-                raise ServiceException(ChatErrorCode.MODEL_MAPPING_NOT_FOUND)
-        else:
-            mappings = await ModelProviderMapping.find(
-                ModelProviderMapping.model_id == model.id,
-                ModelProviderMapping.owner_user_id == user_id,
-                ModelProviderMapping.is_active == True,
-            ).sort("-is_preferred", "+priority", "+created_at").limit(1).to_list() # 检索该用户最优先的可用 provider-model 映射
-            if mappings: mapping = mappings[0]
-            else:# 未能找到
-                # 模型是用户自定义模型，不可能有系统提供者，报错
-                if model.scope is not ModelScope.SYSTEM: raise ServiceException(ChatErrorCode.MODEL_MAPPING_NOT_FOUND)
-                else: # 降级尝试使用系统提供者
-                    mappings = await ModelProviderMapping.find(
-                        ModelProviderMapping.model_id == model.id,
-                        ModelProviderMapping.owner_user_id == None, # 系统映射没有 owner_user_id
-                        ModelProviderMapping.is_active == True,
-                    ).sort("-is_preferred", "+priority", "+created_at").limit(1).to_list()
-                    # 仍然没有，报错
-                    if mappings: mapping = mappings[0]
-                    else: raise ServiceException(ChatErrorCode.MODEL_MAPPING_NOT_FOUND)
-
-        provider = await Provider.find_one(
-            Provider.id == mapping.provider_id,
-            Provider.owner_user_id == mapping.owner_user_id,
-            Provider.is_active == True,
-        )
-        if provider is None: raise ServiceException(ChatErrorCode.PROVIDER_NOT_FOUND)
-
-        return ModelRequestInfo(model=model, mapping=mapping, provider=provider, runtime_options=runtime_options)
+            query["provider_id"] = provider_id
+        mappings = await ModelProviderMapping.find(query).sort(
+            "-is_preferred", "+priority", "+created_at", "+_id",
+        ).to_list()
+        # 稳定排序保持同一 owner 内优先级，个人映射优先于系统映射。
+        mappings.sort(key=lambda mapping: mapping.owner_user_id != user_id)
+        providers = {provider.id: provider for provider in await Provider.find({
+            "_id": {"$in": [m.provider_id for m in mappings]}, "is_active": True,
+            "owner_user_id": {"$in": owners},
+        }).to_list()}
+        for mapping in mappings:
+            provider = providers.get(mapping.provider_id)
+            if (provider is None or provider.owner_user_id != mapping.owner_user_id
+                    or provider.scope != (ProviderScope.SYSTEM if mapping.owner_user_id is None else ProviderScope.USER)
+                    or not provider.api_key):
+                continue
+            if not supports_model_family(provider.type, model.model_family):
+                if provider_id is not None:
+                    raise ServiceException(ChatErrorCode.MODEL_PROVIDER_TYPE_UNSUPPORTED)
+                continue
+            return ModelRequestInfo(model=model, mapping=mapping, provider=provider, runtime_options=runtime_options)
+        raise ServiceException(ChatErrorCode.PROVIDER_NOT_FOUND if mappings else ChatErrorCode.MODEL_MAPPING_NOT_FOUND)
 
     async def _find_accessible_model(
         self,
@@ -360,7 +349,8 @@ class MongoModelRepository(ModelRepository):
 
         system_filters = [
             Model.id == model_id,
-            Model.scope == ModelScope.SYSTEM
+            Model.scope == ModelScope.SYSTEM,
+            Model.owner_user_id == None,
         ]
         if active_only: system_filters.append(Model.is_active == True)
         return await Model.find_one(*system_filters)

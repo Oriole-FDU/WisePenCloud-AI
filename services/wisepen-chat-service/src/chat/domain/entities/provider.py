@@ -25,7 +25,7 @@ class Provider(Document):
     name: str = Field(..., description="供应商显示名称")
 
     base_url: Optional[str] = Field(default=None, description="API 网关地址")
-    api_key: str = Field(..., description="鉴权密钥")
+    api_key: str = Field(..., description="鉴权密钥", repr=False)
     api_key_fingerprint: Optional[str] = Field(default=None, description="鉴权密钥指纹")
 
     scope: ProviderScope = Field(default=ProviderScope.SYSTEM, description="供应商作用域")
@@ -34,6 +34,8 @@ class Provider(Document):
     type: ProviderType = Field(default=ProviderType.LITELLM_OPENAI_COMPATIBLE, description="供应商类型")
 
     is_active: bool = Field(default=True, description="是否启用")
+    config_version: int = Field(default=1, ge=1, description="配置并发版本，不随用量增长")
+    config_updated_at: Optional[datetime] = Field(default=None, description="最近配置修改时间；历史数据可能为空")
     input_tokens: int = Field(default=0, description="累计输入 token 用量")
     cached_input_tokens: int = Field(default=0, description="累计缓存命中输入 token 用量")
     output_tokens: int = Field(default=0, description="累计输出 token 用量")

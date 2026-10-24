@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from beanie import Document, PydanticObjectId
-from pydantic import Field
+from bson import Decimal128
+from pydantic import Field, field_validator
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
 class ModelScope(str, Enum):
@@ -38,6 +39,7 @@ class Model(Document):
     max_output_tokens: Optional[int] = Field(default=None, description="最大输出 token 数")
 
     is_active: bool = Field(default=True, description="是否启用")
+    config_version: int = Field(default=1, ge=1, description="模型及系统映射共用的配置版本")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -76,6 +78,12 @@ class ModelProviderMapping(Document):
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("input_billing_ratio", "cached_input_billing_ratio", "output_billing_ratio", mode="before")
+    @classmethod
+    def decode_billing_ratio(cls, value: Any) -> Any:
+        # Beanie 将 Decimal 写为 BSON Decimal128；Pydantic Decimal 不直接接受该类型。
+        return value.to_decimal() if isinstance(value, Decimal128) else value
 
     class Settings:
         name = "wisepen_model_provider_mappings"

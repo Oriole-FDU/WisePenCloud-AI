@@ -50,3 +50,10 @@ class ChatErrorCode(IErrorCode):
     # --- 记忆相关 ---
     MEMORY_NOT_FOUND = (40061, "目标记忆不存在")
     MEMORY_OPERATION_FAILED = (40062, "记忆操作失败")
+
+    # --- 管理员配置 ---
+    CONFIG_VERSION_CONFLICT = (40071, "配置已被修改，请刷新后重试")
+    DEFAULT_MODEL_UNAVAILABLE = (40072, "操作会使默认模型不可用，请先调整默认模型配置")
+    MODEL_CONFIGURATION_INVALID = (40073, "模型配置不合法或没有可用供应商")
+    MODEL_CONFIGURATION_CHANGED = (40074, "模型调用配置已变更，请开始新一轮对话")
+    ADMIN_STORAGE_UNAVAILABLE = (40075, "管理员配置写入需要支持事务的 MongoDB")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, List, Optional
 
@@ -38,6 +38,9 @@ else:
 
 
 def _encode_context(value: SuspendedTurnContext) -> str:
+    # 不改变正在运行的一轮；只在持久化副本中去掉凭证。旧格式仍可读取。
+    model_info = replace(value.model_info, provider=value.model_info.provider.model_copy(update={"api_key": ""}))
+    value = replace(value, model_info=model_info)
     return base64.b64encode(
         pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
     ).decode("ascii")
