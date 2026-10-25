@@ -34,15 +34,15 @@ class KafkaConsumerClient:
     """管理消息确认；ValueError 永久失败，其他业务异常只在当前进程有限重试。"""
 
     def __init__(
-        self,
-        *,
-        bootstrap_servers: str,
-        topic: str,
-        group_id: str,
-        handler: Callable[[dict[str, object]], Awaitable[object]],
-        max_poll_interval_ms: int = 300_000,
-        retry_policy: RetryPolicy | None = None,
-        delivery_timeout_ms: int = 30_000,
+            self,
+            *,
+            bootstrap_servers: str,
+            topic: str,
+            group_id: str,
+            handler: Callable[[dict[str, object]], Awaitable[object]],
+            max_poll_interval_ms: int = 300_000,
+            retry_policy: RetryPolicy | None = None,
+            delivery_timeout_ms: int = 30_000,
     ) -> None:
         self._bootstrap_servers = bootstrap_servers
         self._topic = topic
@@ -78,7 +78,7 @@ class KafkaConsumerClient:
             await producer.stop()
 
     async def _consume(
-        self, producer: AIOKafkaProducer, *, started: asyncio.Event | None = None
+            self, producer: AIOKafkaProducer, *, started: asyncio.Event | None = None
     ) -> None:
         consumer = AIOKafkaConsumer(
             self._topic,
@@ -99,14 +99,14 @@ class KafkaConsumerClient:
                 await consumer.commit(
                     {
                         TopicPartition(message.topic, message.partition): message.offset
-                        + 1
+                                                                          + 1
                     }
                 )
         finally:
             await consumer.stop()
 
     async def _handle_main(
-        self, message: ConsumerRecord, producer: AIOKafkaProducer
+            self, message: ConsumerRecord, producer: AIOKafkaProducer
     ) -> None:
         try:
             payload = _decode_message(message.value)
@@ -127,7 +127,7 @@ class KafkaConsumerClient:
             await asyncio.sleep(delays[attempt])
 
     async def _forward(
-        self, message: ConsumerRecord, producer: AIOKafkaProducer, error: Exception
+            self, message: ConsumerRecord, producer: AIOKafkaProducer, error: Exception
     ) -> None:
         headers = [
             (key, value)

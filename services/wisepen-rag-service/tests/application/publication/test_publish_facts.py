@@ -53,7 +53,7 @@ async def test_document_identity_mismatch_blocks_apply(make_document, corruption
 
 @pytest.mark.parametrize("collection", ["missing", "extra", "reordered", "complete"])
 async def test_expected_chunk_collection_is_exact_and_revision_scoped(
-    publication_store, storage, make_document, chunk, collection
+        publication_store, storage, make_document, chunk, collection
 ):
     document = make_document()
     revision = ContentRevision.create(
@@ -100,13 +100,13 @@ async def test_expected_chunk_collection_is_exact_and_revision_scoped(
         with pytest.raises(ContentIncompleteError):
             await publication.publish(document)
         assert (await publication_store.get_states(["resource"]))[
-            0
-        ].applied_revision is None
+                   0
+               ].applied_revision is None
 
 
 @pytest.mark.parametrize("failed_read", ["get_documents", "get_revision_chunks"])
 async def test_content_read_failures_propagate_without_apply(
-    publication, publication_store, storage, make_document, failed_read
+        publication, publication_store, storage, make_document, failed_read
 ):
     error = RuntimeError("read failed")
     setattr(storage, failed_read, AsyncMock(side_effect=error))

@@ -2,8 +2,8 @@ from datetime import UTC, datetime
 from itertools import product
 
 import pytest
-from common.core.domain import GroupRoleType
 
+from common.core.domain import GroupRoleType
 from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.acl.synchronizer import (
     AclSynchronizer,
@@ -163,13 +163,13 @@ async def test_malformed_authoritative_acl_is_not_saved_or_deleted(fields):
 
 
 async def test_group_projection_preserves_upstream_user_override_and_role_priority(
-    synchronize_acl,
+        synchronize_acl,
 ):
     # 参照 Java userMasks.getOrDefault(user, baseMask)；MARKET_VIEW 不等于 VIEW。
     for base_mask, user_mask, role in product(
-        [0, 1, 2, 512],
-        [None, 0, 1, 2, 512],
-        [GroupRoleType.MEMBER, GroupRoleType.ADMIN, GroupRoleType.OWNER],
+            [0, 1, 2, 512],
+            [None, 0, 1, 2, 512],
+            [GroupRoleType.MEMBER, GroupRoleType.ADMIN, GroupRoleType.OWNER],
     ):
         source = {
             "_id": RESOURCE_ID,
@@ -184,13 +184,13 @@ async def test_group_projection_preserves_upstream_user_override_and_role_priori
         }
         acl = await synchronize_acl(source)
         expected = role in (GroupRoleType.ADMIN, GroupRoleType.OWNER) or (
-            (base_mask if user_mask is None else user_mask) & 2 != 0
+                (base_mask if user_mask is None else user_mask) & 2 != 0
         )
         assert acl.can_read(PermissionScope("reader", {"group": role})) is expected
 
 
 async def test_resource_user_override_precedes_group_admin_but_owner_still_wins(
-    synchronize_acl,
+        synchronize_acl,
 ):
     source = {
         "_id": RESOURCE_ID,
@@ -207,7 +207,7 @@ async def test_resource_user_override_precedes_group_admin_but_owner_still_wins(
 
 @pytest.mark.parametrize("version", [None, 1, 2, 3])
 async def test_market_projection_requires_offer_version_for_members_only(
-    synchronize_acl, version
+        synchronize_acl, version
 ):
     source = {
         "_id": RESOURCE_ID,
@@ -232,7 +232,7 @@ async def test_market_projection_requires_offer_version_for_members_only(
 
 
 async def test_another_group_can_grant_view_when_one_group_excludes_user(
-    synchronize_acl,
+        synchronize_acl,
 ):
     source = {
         "_id": RESOURCE_ID,

@@ -8,12 +8,12 @@ from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from common.logger import error
-from common.utils.ai_clients import EmbeddingClient, InstructionClient
 from openai import AsyncOpenAI
 from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient
 
+from common.logger import error
+from common.utils.ai_clients import EmbeddingClient, InstructionClient
 from rag.application.publication.store import PublicationStore
 from rag.backends.mongo.content import MongoContentStorage
 from rag.backends.mongo.publication import MongoPublicationStore
@@ -43,13 +43,13 @@ class RepairReport:
 
 
 async def repair_resources(
-    resource_ids: list[str],
-    *,
-    publication: PublicationStore,
-    content: ContentReader,
-    contextualizer: Contextualizer,
-    facts: ChunkFactsIndexer,
-    vectors: VectorIndexer,
+        resource_ids: list[str],
+        *,
+        publication: PublicationStore,
+        content: ContentReader,
+        contextualizer: Contextualizer,
+        facts: ChunkFactsIndexer,
+        vectors: VectorIndexer,
 ) -> RepairReport:
     """复用当前 applied 事实；模型降级可落库，必要写入失败不能计为修复完成。"""
     report = RepairReport()
@@ -75,8 +75,8 @@ async def repair_resources(
                 text=document.text,
             )
             if (
-                actual != revision
-                or document.content_revision != revision.content_revision
+                    actual != revision
+                    or document.content_revision != revision.content_revision
             ):
                 raise RuntimeError(
                     "selected document identity does not match publication"
@@ -137,15 +137,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--resource-file", type=Path)
     # 所有配置显式来自 CLI 或专用环境变量；不加载应用配置和 Nacos。
     for name in (
-        "mongo-url",
-        "mongo-database",
-        "qdrant-url",
-        "instruction-base-url",
-        "instruction-api-key",
-        "instruction-model",
-        "embedding-base-url",
-        "embedding-api-key",
-        "embedding-model",
+            "mongo-url",
+            "mongo-database",
+            "qdrant-url",
+            "instruction-base-url",
+            "instruction-api-key",
+            "instruction-model",
+            "embedding-base-url",
+            "embedding-api-key",
+            "embedding-model",
     ):
         parser.add_argument(
             f"--{name}",
@@ -186,32 +186,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if not args.resource_ids:
         parser.error("provide --resource-id or a nonempty --resource-file")
     for name in (
-        "mongo_url",
-        "mongo_database",
-        "qdrant_url",
-        "instruction_base_url",
-        "instruction_api_key",
-        "instruction_model",
-        "embedding_base_url",
-        "embedding_api_key",
-        "embedding_model",
-        "embedding_dimensions",
+            "mongo_url",
+            "mongo_database",
+            "qdrant_url",
+            "instruction_base_url",
+            "instruction_api_key",
+            "instruction_model",
+            "embedding_base_url",
+            "embedding_api_key",
+            "embedding_model",
+            "embedding_dimensions",
     ):
         if not getattr(args, name):
             parser.error(f"missing --{name.replace('_', '-')}")
     if (
-        any(
-            value <= 0
-            for value in (
-                args.embedding_dimensions,
-                args.max_context_tokens,
-                args.target_context_chars,
-                args.max_output_tokens,
-                args.max_concurrency,
+            any(
+                value <= 0
+                for value in (
+                        args.embedding_dimensions,
+                        args.max_context_tokens,
+                        args.target_context_chars,
+                        args.max_output_tokens,
+                        args.max_concurrency,
+                )
             )
-        )
-        or not 0 <= args.before_ratio <= 1
-        or not 0 <= args.outline_token_ratio <= 1
+            or not 0 <= args.before_ratio <= 1
+            or not 0 <= args.outline_token_ratio <= 1
     ):
         parser.error("invalid context limits, ratios or embedding dimensions")
     return args

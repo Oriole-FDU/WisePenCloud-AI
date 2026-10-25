@@ -9,13 +9,13 @@ from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from common.logger import error
-from common.utils.ai_clients import EmbeddingClient, InstructionClient
 from neo4j import AsyncGraphDatabase
 from openai import AsyncOpenAI
 from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient
 
+from common.logger import error
+from common.utils.ai_clients import EmbeddingClient, InstructionClient
 from rag.application.publication.store import PublicationStore
 from rag.backends.mongo.content import MongoContentStorage
 from rag.backends.mongo.publication import MongoPublicationStore
@@ -42,14 +42,14 @@ class RepairReport:
 
 
 async def repair_resources(
-    resource_ids: list[str],
-    *,
-    publication: PublicationStore,
-    content: ContentReader,
-    extractor: GraphExtractor | None = None,
-    facts: ChunkFactsIndexer | None = None,
-    graph: GraphIndexer | None = None,
-    projection_only: bool = False,
+        resource_ids: list[str],
+        *,
+        publication: PublicationStore,
+        content: ContentReader,
+        extractor: GraphExtractor | None = None,
+        facts: ChunkFactsIndexer | None = None,
+        graph: GraphIndexer | None = None,
+        projection_only: bool = False,
 ) -> RepairReport:
     """当前 applied 事实逐资源修复；同资源不得存在其他 Chunk 写任务。
 
@@ -84,8 +84,8 @@ async def repair_resources(
                 text=document.text,
             )
             if (
-                actual != revision
-                or document.content_revision != revision.content_revision
+                    actual != revision
+                    or document.content_revision != revision.content_revision
             ):
                 raise RuntimeError(
                     "selected document identity does not match publication"
@@ -95,9 +95,9 @@ async def repair_resources(
             )
             # 查询返回是外部事实边界；不把其他资源/版本的材料交给模型或替换写入。
             if any(
-                chunk.resource_id != resource_id
-                or chunk.content_revision != revision.content_revision
-                for chunk in chunks
+                    chunk.resource_id != resource_id
+                    or chunk.content_revision != revision.content_revision
+                    for chunk in chunks
             ):
                 raise RuntimeError("selected chunks do not match publication")
             if not projection_only:
@@ -129,11 +129,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--resource-file", type=Path)
     parser.add_argument("--ontology-file", type=Path, required=True)
     for name in (
-        "mongo-url",
-        "mongo-database",
-        "instruction-base-url",
-        "instruction-api-key",
-        "instruction-model",
+            "mongo-url",
+            "mongo-database",
+            "instruction-base-url",
+            "instruction-api-key",
+            "instruction-model",
     ):
         parser.add_argument(
             f"--{name}",
@@ -148,13 +148,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--with-graph-vectors", action="store_true")
     parser.add_argument("--projection-only", action="store_true")
     for name, default in (
-        ("qdrant-url", None),
-        ("qdrant-api-key", None),
-        ("embedding-base-url", None),
-        ("embedding-api-key", None),
-        ("embedding-model", None),
-        ("entity-vector-collection", "graph_entity_source_vectors_v4"),
-        ("relation-vector-collection", "graph_relation_source_vectors_v4"),
+            ("qdrant-url", None),
+            ("qdrant-api-key", None),
+            ("embedding-base-url", None),
+            ("embedding-api-key", None),
+            ("embedding-model", None),
+            ("entity-vector-collection", "graph_entity_source_vectors_v4"),
+            ("relation-vector-collection", "graph_relation_source_vectors_v4"),
     ):
         parser.add_argument(
             f"--{name}",
@@ -168,11 +168,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=os.getenv("RAG_GRAPH_REPAIR_EMBEDDING_DIMENSIONS"),
     )
     for name, default in (
-        ("uri", None),
-        ("username", None),
-        ("password", None),
-        ("database", "neo4j"),
-        ("graph-name", "rag_v4"),
+            ("uri", None),
+            ("username", None),
+            ("password", None),
+            ("database", "neo4j"),
+            ("graph-name", "rag_v4"),
     ):
         parser.add_argument(
             f"--neo4j-{name}",
@@ -223,12 +223,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         if not getattr(args, name) or not getattr(args, name).strip():
             parser.error(f"missing --{name.replace('_', '-')}")
     if any(
-        value <= 0
-        for value in (
-            args.max_input_tokens,
-            args.max_output_tokens,
-            args.max_concurrency,
-        )
+            value <= 0
+            for value in (
+                    args.max_input_tokens,
+                    args.max_output_tokens,
+                    args.max_concurrency,
+            )
     ):
         parser.error("token and concurrency limits must be positive")
     if args.with_graph:

@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.core.schema.filters import MetadataFilters
 from rag.storage.graph import GraphDirection, GraphReader
-
 from .graph_facts import GraphFactLoader
 from .models import GraphEntity, GraphRelationship, group_entities, group_relationships
 
@@ -22,23 +21,23 @@ class GraphTraversal:
     """固定读取依赖，不调用模型，也不信任未回查的逻辑 ID 或投影事实。"""
 
     def __init__(
-        self,
-        *,
-        snapshot_reader: ResourceSnapshotReader,
-        graph_reader: GraphReader,
+            self,
+            *,
+            snapshot_reader: ResourceSnapshotReader,
+            graph_reader: GraphReader,
     ) -> None:
         self._snapshot_reader = snapshot_reader  # 回查来源授权与当前事实。
         self._graph_reader = graph_reader  # 定位种子和一跳关系。
 
     async def traverse(
-        self,
-        node_ids: list[str],
-        *,
-        snapshot: ResourceSnapshot,
-        direction: GraphDirection = GraphDirection.BOTH,
-        relation_types: list[str] | None = None,
-        relation_limit: int = 100,
-        filters: MetadataFilters | None = None,
+            self,
+            node_ids: list[str],
+            *,
+            snapshot: ResourceSnapshot,
+            direction: GraphDirection = GraphDirection.BOTH,
+            relation_types: list[str] | None = None,
+            relation_limit: int = 100,
+            filters: MetadataFilters | None = None,
     ) -> GraphTraversalResult:
         """至少一个可见来源确认种子后才读一跳；不暴露任意多跳入口。"""
         # 种子和预算由调用方保证；这里只把方向归一为枚举。

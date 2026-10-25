@@ -56,7 +56,7 @@ class RetrievalPipeline(Generic[PayloadT, PreparedT]):
         candidates = (
             await self.prepare_candidates(recalled)
             if self.prepare_candidates is not None
-            else cast(list[Candidate[PreparedT]], recalled)
+            else recalled
         )
         if not candidates:
             return []

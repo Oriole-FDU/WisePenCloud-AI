@@ -39,7 +39,7 @@ def compile_filters(filters: MetadataFilters) -> tuple[str, dict[str, object]]:
         if item.operator is FilterOperator.EQ:
             # EQ 仅接受字符串、布尔或有限数字
             if type(value) not in (str, int, float, bool) or (
-                type(value) is float and not isfinite(value)
+                    type(value) is float and not isfinite(value)
             ):
                 raise ValueError("EQ requires a string, boolean or finite number")
             operator = "="
@@ -47,12 +47,12 @@ def compile_filters(filters: MetadataFilters) -> tuple[str, dict[str, object]]:
         elif item.operator is FilterOperator.IN:
             # IN 要求非空且同质的字符串或整数列表
             if (
-                not isinstance(value, list)
-                or not value
-                or not (
+                    not isinstance(value, list)
+                    or not value
+                    or not (
                     all(type(entry) is str for entry in value)
                     or all(type(entry) is int for entry in value)
-                )
+            )
             ):
                 raise ValueError(
                     "IN requires a nonempty homogeneous string or integer list"
@@ -60,10 +60,10 @@ def compile_filters(filters: MetadataFilters) -> tuple[str, dict[str, object]]:
             operator = "IN"
 
         elif item.operator in (
-            FilterOperator.GT,
-            FilterOperator.GTE,
-            FilterOperator.LT,
-            FilterOperator.LTE,
+                FilterOperator.GT,
+                FilterOperator.GTE,
+                FilterOperator.LT,
+                FilterOperator.LTE,
         ):
             # 范围比较仅接受有限数字
             if type(value) not in (int, float) or not isfinite(value):

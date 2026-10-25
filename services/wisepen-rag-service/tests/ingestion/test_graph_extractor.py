@@ -9,10 +9,10 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from common.utils.ai_clients import InstructionClient
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
+from common.utils.ai_clients import InstructionClient
 from rag.core.schema import GraphNode
 from rag.ingestion import IngestionPipeline
 from rag.ingestion.indexers import ChunkFactsIndexer
@@ -51,7 +51,7 @@ def client():
 
 
 async def test_sources_material_metadata_and_bson_round_trip(
-    graph_ontology, client, chunk, storage
+        graph_ontology, client, chunk, storage
 ):
     chunk.section_path = ["工作档案"]
     chunk.raw_text = "张三就职于甲公司"
@@ -61,8 +61,8 @@ async def test_sources_material_metadata_and_bson_round_trip(
     chunks = [chunk]
     assert await extractor.transform(chunks) is chunks
     assert {
-        key: value for key, value in asdict(chunk).items() if key != "metadata"
-    } == {key: value for key, value in before.items() if key != "metadata"}
+               key: value for key, value in asdict(chunk).items() if key != "metadata"
+           } == {key: value for key, value in before.items() if key != "metadata"}
     assert chunk.metadata["custom"] == "保留"
     assert chunk.metadata["contextual_context"] == "不应抽取的背景"
     messages = client.structured_complete.await_args.kwargs["messages"]
@@ -72,15 +72,15 @@ async def test_sources_material_metadata_and_bson_round_trip(
     }
     assert "不应抽取的背景" not in json.dumps(messages, ensure_ascii=False)
     assert (
-        client.structured_complete.await_args.kwargs["response_model"]
-        is GraphExtraction
+            client.structured_complete.await_args.kwargs["response_model"]
+            is GraphExtraction
     )
     assert client.structured_complete.await_args.kwargs["max_tokens"] == 4096
     assert chunk.metadata["entities"][0]["source_id"] == chunk.chunk_id
     edge = chunk.metadata["relationships"][0]
     assert (
-        edge["source_id"] == "work:Person:张三"
-        and edge["target_id"] == "work:Company:甲公司"
+            edge["source_id"] == "work:Person:张三"
+            and edge["target_id"] == "work:Company:甲公司"
     )
     assert edge["source_ids"] == [chunk.chunk_id]
     await ChunkFactsIndexer(storage).index(chunks)
@@ -90,7 +90,7 @@ async def test_sources_material_metadata_and_bson_round_trip(
 
 
 async def test_invalid_facts_are_dropped_and_first_valid_id_wins(
-    graph_ontology, client, chunk
+        graph_ontology, client, chunk
 ):
     client.structured_complete.return_value = extraction(
         entities=[
@@ -142,7 +142,7 @@ async def test_invalid_facts_are_dropped_and_first_valid_id_wins(
 
 
 async def test_gleaning_adds_only_and_can_reference_initial_entities(
-    graph_ontology, client, chunk
+        graph_ontology, client, chunk
 ):
     client.structured_complete.side_effect = [
         extraction(),
@@ -195,13 +195,13 @@ async def test_empty_gleaning_preserves_initial_result(graph_ontology, client, c
         ontology=graph_ontology, client=client, gleaning=True
     ).transform([chunk])
     assert (
-        len(chunk.metadata["entities"]) == 2
-        and len(chunk.metadata["relationships"]) == 1
+            len(chunk.metadata["entities"]) == 2
+            and len(chunk.metadata["relationships"]) == 1
     )
 
 
 async def test_empty_result_is_success_and_incrementally_reused(
-    graph_ontology, client, chunk
+        graph_ontology, client, chunk
 ):
     client.structured_complete.return_value = extraction(entities=[], relationships=[])
     extractor = GraphExtractor(ontology=graph_ontology, client=client)
@@ -215,7 +215,7 @@ async def test_empty_result_is_success_and_incrementally_reused(
 
 @pytest.mark.parametrize("change", ["model", "ontology", "text"])
 async def test_changed_extraction_inputs_recompute_cached_facts(
-    graph_ontology, client, chunk, change
+        graph_ontology, client, chunk, change
 ):
     await GraphExtractor(ontology=graph_ontology, client=client).transform([chunk])
     # 模型、本体和正文改变都会影响抽取结果，旧缓存不能继续复用。
@@ -230,7 +230,7 @@ async def test_changed_extraction_inputs_recompute_cached_facts(
 
 
 async def test_nonsemantic_changes_reuse_and_force_regenerates(
-    graph_ontology, client, chunk
+        graph_ontology, client, chunk
 ):
     await GraphExtractor(ontology=graph_ontology, client=client).transform([chunk])
     chunk.metadata.update(contextual_context="改变的背景", unrelated={"data": True})
@@ -245,7 +245,7 @@ async def test_nonsemantic_changes_reuse_and_force_regenerates(
 
 
 async def test_structurally_invalid_cached_facts_are_regenerated(
-    graph_ontology, client, chunk
+        graph_ontology, client, chunk
 ):
     extractor = GraphExtractor(ontology=graph_ontology, client=client)
     await extractor.transform([chunk])
@@ -253,8 +253,8 @@ async def test_structurally_invalid_cached_facts_are_regenerated(
     await extractor.transform([chunk])
     assert client.structured_complete.await_count == 2
     assert (
-        len(chunk.metadata["entities"]) == 2
-        and len(chunk.metadata["relationships"]) == 1
+            len(chunk.metadata["entities"]) == 2
+            and len(chunk.metadata["relationships"]) == 1
     )
 
 
@@ -274,7 +274,7 @@ class BudgetCounter:
 
 
 async def test_schema_counts_toward_first_budget_no_truncation(
-    graph_ontology, client, chunk
+        graph_ontology, client, chunk
 ):
     before = copy.deepcopy(chunk)
     with pytest.raises(ValueError, match="budget"):
@@ -301,7 +301,7 @@ async def test_over_budget_gleaning_keeps_first_facts(graph_ontology, client, ch
 
 
 async def test_failure_cancels_and_waits_other_tasks_without_metadata_changes(
-    graph_ontology, client, chunk
+        graph_ontology, client, chunk
 ):
     started = asyncio.Event()
     cleaned = asyncio.Event()
@@ -335,7 +335,7 @@ async def test_failure_cancels_and_waits_other_tasks_without_metadata_changes(
 
 
 async def test_gleaning_exception_propagates_without_replacing_old_metadata(
-    graph_ontology, client, chunk
+        graph_ontology, client, chunk
 ):
     chunk.metadata.update(entities=[{"old": True}], graph_version="old")
     before = copy.deepcopy(chunk)
@@ -365,7 +365,7 @@ async def test_response_shape_errors_fail_fast(graph_ontology, client, chunk):
 
 
 async def test_shared_instance_limits_model_calls_across_transforms(
-    graph_ontology, client, chunk
+        graph_ontology, client, chunk
 ):
     active = peak = 0
 
@@ -392,15 +392,15 @@ async def test_shared_instance_limits_model_calls_across_transforms(
 async def test_zero_chunks_no_calls(graph_ontology, client):
     chunks = []
     assert (
-        await GraphExtractor(ontology=graph_ontology, client=client).transform(chunks)
-        is chunks
+            await GraphExtractor(ontology=graph_ontology, client=client).transform(chunks)
+            is chunks
     )
     client.structured_complete.assert_not_awaited()
 
 
 @pytest.mark.parametrize("gleaning", [False, True])
 async def test_real_instruction_client_schema_retry_and_incremental_reuse(
-    graph_ontology, chunk, gleaning
+        graph_ontology, chunk, gleaning
 ):
     requests = []
 
@@ -439,10 +439,10 @@ async def test_real_instruction_client_schema_retry_and_incremental_reuse(
         )
 
     async with AsyncOpenAI(
-        api_key="test",
-        base_url="http://isolated/v1",
-        max_retries=0,
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+            api_key="test",
+            base_url="http://isolated/v1",
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
     ) as api:
         extractor = GraphExtractor(
             ontology=graph_ontology,
@@ -460,7 +460,7 @@ async def test_real_instruction_client_schema_retry_and_incremental_reuse(
 
 
 async def test_caller_cancellation_waits_for_model_cleanup(
-    graph_ontology, client, chunk
+        graph_ontology, client, chunk
 ):
     started = asyncio.Event()
     cleaned = asyncio.Event()

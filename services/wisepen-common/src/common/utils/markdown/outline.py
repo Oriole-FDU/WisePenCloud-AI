@@ -38,7 +38,7 @@ class OutlineFormatter:
 
         def visit(section: Section, indent: int, depth: int) -> None:
             # 深度取决于 parent_section_id 树，而不是 Markdown 标题级别
-            if max_level > 0 and depth > max_level:
+            if 0 < max_level < depth:
                 return
             lines.append(self._node_line(section, indent=indent))
             for child in self._children_by_parent.get(section.section_id, []):

@@ -27,7 +27,7 @@ from rag.storage.graph import GraphDirection
     ],
 )
 async def test_one_hop_direction_types_and_original_edge_direction(
-    graph_env, direction, types, expected
+        graph_env, direction, types, expected
 ):
     env = graph_env
     company = env.facts[0][0][1].id
@@ -68,7 +68,7 @@ async def test_one_hop_direction_types_and_original_edge_direction(
 
 
 async def test_shared_topology_groups_sources_and_deduplicates_two_seed_edge(
-    graph_env,
+        graph_env,
 ):
     env = graph_env
     person, company = [node.id for node in env.facts[0][0]]
@@ -85,7 +85,7 @@ async def test_shared_topology_groups_sources_and_deduplicates_two_seed_edge(
 
 
 async def test_neighbor_descriptions_only_come_from_selected_relationship_sources(
-    graph_env,
+        graph_env,
 ):
     env = graph_env
     person, company = [node.id for node in env.facts[0][0]]
@@ -102,7 +102,7 @@ async def test_neighbor_descriptions_only_come_from_selected_relationship_source
 
 
 async def test_two_explicit_calls_cross_visible_documents_without_automatic_second_hop(
-    graph_env,
+        graph_env,
 ):
     env = graph_env
     person, company = [node.id for node in env.facts[0][0]]
@@ -124,7 +124,7 @@ async def test_two_explicit_calls_cross_visible_documents_without_automatic_seco
 
 
 async def test_hidden_bridge_never_supplies_returned_endpoint_or_expandable_seed(
-    graph_env, read_acls
+        graph_env, read_acls
 ):
     env = graph_env
     read_acls["b"] = ResourceAcl("b", 1, "other")
@@ -138,8 +138,8 @@ async def test_hidden_bridge_never_supplies_returned_endpoint_or_expandable_seed
     )
     env.graph.get_neighbors.reset_mock()
     assert (
-        await env.traversal.traverse([other], snapshot=env.snapshot())
-        == GraphTraversalResult()
+            await env.traversal.traverse([other], snapshot=env.snapshot())
+            == GraphTraversalResult()
     )
     env.graph.get_neighbors.assert_not_awaited()
 
@@ -169,7 +169,7 @@ async def test_batch_seed_order_dedup_unknown_and_logical_relation_limit(graph_e
 
 
 async def test_self_loop_reverse_and_different_predicates_keep_identity(
-    graph_env, storage
+        graph_env, storage
 ):
     env = graph_env
     chunk = env.chunks[1]
@@ -203,7 +203,7 @@ async def test_self_loop_reverse_and_different_predicates_keep_identity(
 
 
 async def test_stale_projection_cannot_expand_deleted_root_or_deleted_endpoint(
-    graph_env, storage
+        graph_env, storage
 ):
     env = graph_env
     person = env.facts[0][0][0].id
@@ -213,8 +213,8 @@ async def test_stale_projection_cannot_expand_deleted_root_or_deleted_endpoint(
         ]
     await storage.upsert_chunks([env.chunks[0], env.chunks[2]])
     assert (
-        await env.traversal.traverse([person], snapshot=env.snapshot())
-        == GraphTraversalResult()
+            await env.traversal.traverse([person], snapshot=env.snapshot())
+            == GraphTraversalResult()
     )
     env.graph.get_neighbors.assert_not_awaited()
     company = env.facts[0][0][1].id
@@ -223,13 +223,13 @@ async def test_stale_projection_cannot_expand_deleted_root_or_deleted_endpoint(
 
 
 async def test_empty_ids_no_io_and_depth_is_not_an_available_parameter(
-    graph_env, storage
+        graph_env, storage
 ):
     env = graph_env
     storage.get_chunks = AsyncMock(wraps=storage.get_chunks)
     assert (
-        await env.traversal.traverse([], snapshot=env.snapshot())
-        == GraphTraversalResult()
+            await env.traversal.traverse([], snapshot=env.snapshot())
+            == GraphTraversalResult()
     )
     with pytest.raises(TypeError):
         await env.traversal.traverse([], snapshot=env.snapshot(), depth=2)
@@ -253,7 +253,7 @@ async def test_graph_filters_apply_to_root_and_relationship_sources(graph_env):
 
 @pytest.mark.parametrize("operator", [FilterOperator.EQ, FilterOperator.IN])
 async def test_ontology_filter_uses_current_facts_and_keeps_source_scope(
-    graph_env, storage, operator
+        graph_env, storage, operator
 ):
     env = graph_env
     chunk = env.chunks[0]
@@ -305,11 +305,11 @@ async def test_ontology_filter_uses_current_facts_and_keeps_source_scope(
         env.facts[0][0][0].id,
     ]
     assert {
-        source.chunk_id
-        for item in result.entities
-        if item.id == env.facts[0][0][0].id
-        for source in item.sources
-    } == {env.chunks[2].chunk_id}
+               source.chunk_id
+               for item in result.entities
+               if item.id == env.facts[0][0][0].id
+               for source in item.sources
+           } == {env.chunks[2].chunk_id}
     assert {edge.id for edge in result.relationships} == {env.facts[0][1][0].id}
 
 
@@ -340,7 +340,7 @@ async def test_invalid_direction_fails_before_io(graph_env):
 
 
 async def test_category_hint_can_be_selected_when_visible_relation_does_not_exist(
-    graph_env,
+        graph_env,
 ):
     env = graph_env
     other = env.facts[1][0][1]

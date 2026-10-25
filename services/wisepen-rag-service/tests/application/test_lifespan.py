@@ -36,10 +36,10 @@ def runtime(monkeypatch, platform_settings):
         monkeypatch.setitem(sys.modules, module.__name__, module)
     monkeypatch.setattr("rag.core.config.app_settings.settings", platform_settings)
     for name in (
-        "common.logger.setup_logging_intercept",
-        "common.observability.setup_observability",
-        "common.observability.instrument_fastapi_app",
-        "common.web.exception_handlers.setup_global_exception_handlers",
+            "common.logger.setup_logging_intercept",
+            "common.observability.setup_observability",
+            "common.observability.instrument_fastapi_app",
+            "common.web.exception_handlers.setup_global_exception_handlers",
     ):
         monkeypatch.setattr(name, Mock())
     monkeypatch.setenv("NO_PROXY", "")
@@ -53,26 +53,26 @@ def runtime(monkeypatch, platform_settings):
     clients = [mongo] + [SimpleNamespace(close=AsyncMock()) for _ in range(4)]
     clients[-1].verify_connectivity = AsyncMock()
     for name, client in zip(
-        (
-            "mongo_client",
-            "qdrant_client",
-            "embedding_openai",
-            "instruction_openai",
-            "neo4j_driver",
-        ),
-        clients,
-        strict=True,
+            (
+                    "mongo_client",
+                    "qdrant_client",
+                    "embedding_openai",
+                    "instruction_openai",
+                    "neo4j_driver",
+            ),
+            clients,
+            strict=True,
     ):
         getattr(container, name).override(providers.Object(client))
     stores = {}
     for name in (
-        "content_storage",
-        "publication_store",
-        "acl_repository",
-        "vector_storage",
-        "entity_vector_storage",
-        "relationship_vector_storage",
-        "graph_storage",
+            "content_storage",
+            "publication_store",
+            "acl_repository",
+            "vector_storage",
+            "entity_vector_storage",
+            "relationship_vector_storage",
+            "graph_storage",
     ):
         storage = SimpleNamespace(
             ensure_indexes=AsyncMock(),
@@ -98,7 +98,7 @@ def runtime(monkeypatch, platform_settings):
     container.garbage_collector.override(providers.Object(gc))
     consumers = [SimpleNamespace(run=AsyncMock()) for _ in range(2)]
     for name, consumer in zip(
-        ("acl_consumer", "publication_consumer"), consumers, strict=True
+            ("acl_consumer", "publication_consumer"), consumers, strict=True
     ):
         getattr(container, name).override(providers.Object(consumer))
     app = FastAPI(lifespan=main.lifespan)
@@ -123,7 +123,7 @@ def runtime(monkeypatch, platform_settings):
 
 async def health(app):
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         return await client.get("/rag/health")
 
@@ -143,7 +143,7 @@ def enable_kafka(env):
 
 
 async def test_kafka_off_gc_always_starts_and_ready_does_not_wait_for_first_round(
-    runtime,
+        runtime,
 ):
     env = runtime
     async with env.main.lifespan(env.app):
@@ -177,7 +177,6 @@ async def test_handshake_waits_for_both_consumers_before_ready(runtime):
     allow = [asyncio.Event(), asyncio.Event()]
     entered = [asyncio.Event(), asyncio.Event()]
     for index, consumer in enumerate(env.consumers):
-
         async def consume(*, started, index=index):
             entered[index].set()
             await allow[index].wait()
@@ -252,7 +251,7 @@ async def test_consumer_exit_revokes_ready_and_cancels_other_tasks(runtime, when
     ],
 )
 async def test_initialization_failure_cleans_created_clients_and_never_ready(
-    runtime, stage
+        runtime, stage
 ):
     env = runtime
     if stage == "mongo":
@@ -407,7 +406,7 @@ async def test_nacos_register_failure_keeps_initialized_service_ready(runtime):
 
 
 async def test_extension_initialization_mount_ready_and_shared_client_cleanup(
-    runtime, monkeypatch
+        runtime, monkeypatch
 ):
     from rag.extensions.base import Extension
     from rag.extensions.employment.api import build_api
@@ -426,7 +425,7 @@ async def test_extension_initialization_mount_ready_and_shared_client_cleanup(
         extra.ensure_collection.assert_awaited_once_with(binding.metadata_index_fields)
         assert env.app.state.extensions == {"sample": manifest} and api.state.ready
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=env.app), base_url="http://test"
+                transport=httpx.ASGITransport(app=env.app), base_url="http://test"
         ) as client:
             response = await client.post(
                 "/rag/extensions/sample/contracts/search",
@@ -441,7 +440,7 @@ async def test_extension_initialization_mount_ready_and_shared_client_cleanup(
 
 @pytest.mark.parametrize("stage", ["construct", "collection"])
 async def test_extension_failure_closes_platform_clients_before_background(
-    runtime, monkeypatch, stage
+        runtime, monkeypatch, stage
 ):
     from rag.extensions.base import Extension
 
@@ -467,7 +466,7 @@ async def test_extension_failure_closes_platform_clients_before_background(
 
 
 async def test_storage_without_initialization_method_fails_startup_and_cleans_clients(
-    runtime,
+        runtime,
 ):
     env = runtime
     # 只会 CRUD 的 writer 不符合启动存储合同；直接调用协议，不补 hasattr 防御。

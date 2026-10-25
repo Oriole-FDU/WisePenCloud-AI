@@ -40,7 +40,7 @@ def test_graph_edge_identity_keeps_direction_and_provenance():
     ],
 )
 def test_chunk_retrieval_text_uses_context_without_changing_raw_text(
-    chunk, context, expected
+        chunk, context, expected
 ):
     chunk.raw_text = " 原始正文\n"
     chunk.section_path = []

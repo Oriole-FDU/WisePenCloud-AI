@@ -19,7 +19,7 @@ pytestmark = pytest.mark.qdrant_integration
 
 
 async def test_real_gc_clears_all_vector_collections_by_resource(
-    real_vectors, real_graph_vectors
+        real_vectors, real_graph_vectors
 ):
     normal, _, _ = real_vectors
     entities, relationships, _ = real_graph_vectors
@@ -33,10 +33,10 @@ async def test_real_gc_clears_all_vector_collections_by_resource(
                     {"resource_id": resource, "content_revision": revision},
                 )
                 for resource, revision in (
-                    ("gone", "old"),
-                    ("gone", "current"),
-                    ("live", "current"),
-                )
+                ("gone", "old"),
+                ("gone", "current"),
+                ("live", "current"),
+            )
             ]
         )
     store = SimpleNamespace(
@@ -52,9 +52,9 @@ async def test_real_gc_clears_all_vector_collections_by_resource(
     assert await gc.collect() == GcReport(1, 1, 0)
     for storage in (normal, entities, relationships):
         assert [
-            match.record_id
-            for match in await storage.query(VectorQuery(embedding=[1.0, 0.0]))
-        ] == ["live-current"]
+                   match.record_id
+                   for match in await storage.query(VectorQuery(embedding=[1.0, 0.0]))
+               ] == ["live-current"]
 
 
 async def test_real_dense_bm25_revision_filters_and_delete(real_vectors):
@@ -88,18 +88,18 @@ async def test_real_dense_bm25_revision_filters_and_delete(real_vectors):
         ]
     )
     assert [
-        match.record_id
-        for match in await vectors.query(
+               match.record_id
+               for match in await vectors.query(
             VectorQuery(embedding=[1.0, 0.0], filters=filters)
         )
-    ] == ["physics-new"]
+           ] == ["physics-new"]
     assert [
-        match.record_id
-        for match in await vectors.query(VectorQuery(text="量子", filters=filters))
-    ] == ["physics-new"]
+               match.record_id
+               for match in await vectors.query(VectorQuery(text="量子", filters=filters))
+           ] == ["physics-new"]
     for request in (
-        VectorQuery(embedding=[1.0, 0.0], filters=filters, include_embedding=True),
-        VectorQuery(text="量子", filters=filters, include_embedding=True),
+            VectorQuery(embedding=[1.0, 0.0], filters=filters, include_embedding=True),
+            VectorQuery(text="量子", filters=filters, include_embedding=True),
     ):
         matches = await vectors.query(request)
         assert [match.record_id for match in matches] == ["physics-new"]
@@ -143,7 +143,7 @@ async def test_real_replay_replaces_payload_and_preserves_one_point(real_vectors
 
 
 async def test_publication_pipeline_with_real_qdrant(
-    real_vectors, storage, publication_store
+        real_vectors, storage, publication_store
 ):
     vectors, client, collection = real_vectors
     text = "# 物理\n\n量子 物理 实验\n"
@@ -187,9 +187,9 @@ async def test_publication_pipeline_with_real_qdrant(
         ]
     )
     assert {
-        match.record_id
-        for match in await vectors.query(VectorQuery(text="量子", filters=filters))
-    } == {chunk.chunk_id for chunk in chunks}
+               match.record_id
+               for match in await vectors.query(VectorQuery(text="量子", filters=filters))
+           } == {chunk.chunk_id for chunk in chunks}
     assert (await client.count(collection, exact=True)).count == len(chunks)
     assert await publisher.publish(document) is PublicationAction.ALREADY_APPLIED
     assert embedding.embed.await_count == 1

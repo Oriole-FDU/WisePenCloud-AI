@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 from bson.errors import InvalidDocument
-from common.utils.markdown import Anchor, Section
 from pydantic import ValidationError
 
+from common.utils.markdown import Anchor, Section
 from rag.core.schema import Document, DocumentStructure, GraphEdge, GraphNode
 from rag.ingestion import IngestionPipeline
 from rag.ingestion.chunkers import MarkdownChunker
@@ -14,7 +14,7 @@ from rag.ingestion.indexers import ChunkFactsIndexer
 
 
 async def test_document_and_chunk_bson_round_trip(
-    storage, collections, document, chunk
+        storage, collections, document, chunk
 ):
     assert await storage.upsert_documents([document]) is None
     assert await storage.upsert_chunks([chunk]) is None
@@ -41,15 +41,15 @@ async def test_document_and_chunk_bson_round_trip(
 
 
 async def test_document_type_round_trip_legacy_read_and_positional_metadata(
-    storage,
-    collections,
-    document,
+        storage,
+        collections,
+        document,
 ):
     document.type = "history"
     await storage.upsert_documents([document])
     assert (
-        await storage.get_documents([(document.resource_id, document.content_revision)])
-    )[0] == document
+               await storage.get_documents([(document.resource_id, document.content_revision)])
+           )[0] == document
     # 老记录无需迁移；默认值只在模型读取边界补齐。
     collections[0].records[0].pop("type")
     restored = (
@@ -120,7 +120,7 @@ async def test_empty_content_round_trip(storage, document, chunk, kind):
 
 
 async def test_upsert_is_idempotent_and_replaces_metadata(
-    storage, collections, document, chunk
+        storage, collections, document, chunk
 ):
     unrelated = replace(chunk, chunk_id="unrelated", chunk_index=1)
     await storage.upsert_documents([document])
@@ -146,7 +146,7 @@ async def test_upsert_is_idempotent_and_replaces_metadata(
 
 
 async def test_batch_reads_are_scoped_deduplicated_and_ordered(
-    storage, document, chunk
+        storage, document, chunk
 ):
     second_document = replace(document, content_revision="second")
     other_document = replace(document, resource_id="other")
@@ -167,10 +167,10 @@ async def test_batch_reads_are_scoped_deduplicated_and_ordered(
     assert await storage.get_chunks(
         ["other", "missing", "second", "other", "chunk"]
     ) == [
-        other_chunk,
-        second_chunk,
-        chunk,
-    ]
+               other_chunk,
+               second_chunk,
+               chunk,
+           ]
 
 
 async def test_revision_chunks_are_sorted_and_never_mix_revisions(storage, chunk):
@@ -184,10 +184,10 @@ async def test_revision_chunks_are_sorted_and_never_mix_revisions(storage, chunk
         resource_id="resource", content_revision="revision"
     ) == [chunk, middle, late]
     assert (
-        await storage.get_revision_chunks(
-            resource_id="missing", content_revision="revision"
-        )
-        == []
+            await storage.get_revision_chunks(
+                resource_id="missing", content_revision="revision"
+            )
+            == []
     )
 
 
@@ -209,7 +209,7 @@ async def test_empty_batches_do_not_access_mongo(storage, collections):
 
 @pytest.mark.parametrize("kind", ["documents", "chunks"])
 async def test_bulk_write_uses_ordered_batches_of_500(
-    storage, collections, document, chunk, kind
+        storage, collections, document, chunk, kind
 ):
     if kind == "documents":
         values = [
@@ -239,7 +239,7 @@ async def test_bulk_write_uses_ordered_batches_of_500(
 
 @pytest.mark.parametrize("kind", ["documents", "chunks"])
 async def test_bulk_failure_preserves_completed_batch_and_stops(
-    storage, collections, document, chunk, kind
+        storage, collections, document, chunk, kind
 ):
     if kind == "documents":
         values = [
@@ -267,7 +267,7 @@ async def test_bulk_failure_preserves_completed_batch_and_stops(
 
 @pytest.mark.parametrize("kind", ["documents", "chunks"])
 async def test_unsupported_bson_values_fail_without_stringification(
-    storage, document, chunk, kind
+        storage, document, chunk, kind
 ):
     value = document if kind == "documents" else chunk
     unsupported = object()
@@ -282,7 +282,7 @@ async def test_unsupported_bson_values_fail_without_stringification(
 
 @pytest.mark.parametrize("kind", ["documents", "chunks"])
 async def test_invalid_stored_records_fail_at_read_boundary(
-    storage, collections, document, chunk, kind
+        storage, collections, document, chunk, kind
 ):
     if kind == "documents":
         await storage.upsert_documents([document])
@@ -301,7 +301,7 @@ async def test_invalid_stored_records_fail_at_read_boundary(
 
 @pytest.mark.parametrize("operation", ["revisions", "resources"])
 async def test_delete_is_scoped_to_both_content_collections(
-    storage, collections, document, chunk, operation
+        storage, collections, document, chunk, operation
 ):
     other_revision_document = replace(document, content_revision="second")
     other_resource_document = replace(document, resource_id="other")
@@ -324,14 +324,14 @@ async def test_delete_is_scoped_to_both_content_collections(
         expected_chunks = [other_resource_chunk]
 
     assert (
-        await storage.get_documents(
-            [
-                ("resource", "revision"),
-                ("resource", "second"),
-                ("other", "revision"),
-            ]
-        )
-        == expected_documents
+            await storage.get_documents(
+                [
+                    ("resource", "revision"),
+                    ("resource", "second"),
+                    ("other", "revision"),
+                ]
+            )
+            == expected_documents
     )
     assert await storage.get_chunks(["chunk", "second", "other"]) == expected_chunks
     assert collections[0].delete_many.call_args == collections[1].delete_many.call_args
@@ -339,7 +339,7 @@ async def test_delete_is_scoped_to_both_content_collections(
 
 @pytest.mark.parametrize("operation", ["revisions", "resources"])
 async def test_partial_delete_is_preserved_and_can_be_replayed(
-    storage, collections, document, chunk, operation
+        storage, collections, document, chunk, operation
 ):
     await storage.upsert_documents([document])
     await storage.upsert_chunks([chunk])
@@ -368,7 +368,7 @@ async def test_partial_delete_is_preserved_and_can_be_replayed(
 
 
 async def test_ensure_indexes_is_explicit_and_defines_content_identity(
-    storage, collections
+        storage, collections
 ):
     await storage.ensure_indexes()
     documents, chunks = collections
@@ -414,7 +414,7 @@ async def test_pipeline_persists_real_markdown_before_projection(storage, docume
 
 
 async def test_pipeline_content_failure_stops_projection(
-    storage, collections, document
+        storage, collections, document
 ):
     collections[1].fail_bulk_call = 1
     projection = AsyncMock()

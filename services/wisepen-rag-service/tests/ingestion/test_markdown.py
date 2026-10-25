@@ -1,10 +1,10 @@
 from dataclasses import replace
 
 import pytest
+
 from common.utils.markdown import (
     MarkdownChunker as CommonMarkdownChunker,
 )
-
 from rag.core.schema import Document, DocumentStructure
 from rag.core.schema.content import rag_section_id
 from rag.ingestion.chunkers import MarkdownChunker
@@ -56,7 +56,7 @@ def document(common_chunker):
 
 
 async def test_markdown_chunker_preserves_common_chunk_content_and_identity(
-    document, common_chunker
+        document, common_chunker
 ):
     result = common_chunker.chunk(document.text)
     adapter = MarkdownChunker(40, 70)
@@ -112,7 +112,7 @@ async def test_markdown_identity_is_stable_and_scoped_to_resource_revision(docum
         chunk.chunk_id for chunk in new_version
     ]
     for original, resource, revision in zip(
-        first, new_resource, new_revision, strict=True
+            first, new_resource, new_revision, strict=True
     ):
         assert len({original.chunk_id, resource.chunk_id, revision.chunk_id}) == 3
         assert len({original.section_id, resource.section_id, revision.section_id}) == 3
@@ -122,7 +122,7 @@ async def test_markdown_identity_is_stable_and_scoped_to_resource_revision(docum
 async def test_markdown_chunker_uses_overridden_token_budgets():
     # 单个小节含超长正文：默认预算装箱为 1 个 chunk，小预算覆盖后被拆分为多个
     markdown = (
-        "# 长章节\n\n" + "这是一段足够长的正文内容，用于验证分块预算是否生效。\n\n" * 20
+            "# 长章节\n\n" + "这是一段足够长的正文内容，用于验证分块预算是否生效。\n\n" * 20
     )
     document = Document(
         "resource", 1, "revision", markdown, DocumentStructure(len(markdown))

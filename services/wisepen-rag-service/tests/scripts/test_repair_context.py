@@ -48,12 +48,12 @@ def flow(storage, publication_store):
 
 
 async def prepare(
-    flow,
-    resource_id="resource",
-    *,
-    version=1,
-    applied=True,
-    text="# 标题\n\n正文\n\n## 子标题\n\n内容",
+        flow,
+        resource_id="resource",
+        *,
+        version=1,
+        applied=True,
+        text="# 标题\n\n正文\n\n## 子标题\n\n内容",
 ):
     document = DocumentReadyEvent.model_validate(
         {"resourceId": resource_id, "version": version, "content": text}
@@ -91,12 +91,12 @@ async def test_applied_only_explicit_scope_and_all_vector_rewrites(repair, flow)
         repair, flow, ["missing", "staged", "destroyed", "resource", "resource"]
     )
     assert (
-        first.repaired,
-        first.skipped,
-        first.generated,
-        first.reused,
-        first.exit_code,
-    ) == (1, 3, len(chunks), 0, 0)
+               first.repaired,
+               first.skipped,
+               first.generated,
+               first.reused,
+               first.exit_code,
+           ) == (1, 3, len(chunks), 0, 0)
     texts = flow.embedding.embed.await_args.kwargs["texts"]
     assert all("上下文" in text and "标题" in text for text in texts)
     persisted = await flow.content.get_revision_chunks(
@@ -147,7 +147,7 @@ async def test_state_change_after_generation_skips_all_writes(repair, flow, chan
 
 @pytest.mark.parametrize("failure", ["facts", "vectors"])
 async def test_partial_write_failure_then_rerun_repairs_all_vectors(
-    repair, flow, failure
+        repair, flow, failure
 ):
     _, chunks = await prepare(flow)
     if failure == "vectors":
@@ -174,13 +174,13 @@ async def test_partial_write_failure_then_rerun_repairs_all_vectors(
 
 
 async def test_model_failed_results_are_persisted_indexed_and_report_nonzero(
-    repair, flow
+        repair, flow
 ):
     doc, chunks = await prepare(flow)
     flow.client.complete.side_effect = TimeoutError("model timeout")
     report = await run_repair(repair, flow, ["resource"])
     assert (
-        report.failed == len(chunks) and report.exit_code == 1 and report.repaired == 1
+            report.failed == len(chunks) and report.exit_code == 1 and report.repaired == 1
     )
     texts = flow.embedding.embed.await_args.kwargs["texts"]
     assert texts == [chunk.retrieval_text for chunk in chunks]
@@ -202,7 +202,7 @@ async def test_budget_fallback_is_indexed_and_reported_without_model(repair, flo
 
 @pytest.mark.parametrize("text", ["", " \n\n"])
 async def test_valid_zero_chunk_document_does_not_invent_missing_facts(
-    repair, flow, text
+        repair, flow, text
 ):
     _, chunks = await prepare(flow, text=text)
     assert chunks == []
@@ -277,9 +277,9 @@ def test_cli_explicit_resources_deduplicate_and_validate_before_io(repair, tmp_p
     assert args.resource_ids == ["a", "b", "中文资源"]
     assert args.vector_collection == "document_chunk_vectors_v4"
     for extra in (
-        [],
-        ["--resource-id", "a", "--max-context-tokens", "0"],
-        ["--resource-file", str(tmp_path / "missing")],
+            [],
+            ["--resource-id", "a", "--max-context-tokens", "0"],
+            ["--resource-file", str(tmp_path / "missing")],
     ):
         with pytest.raises(SystemExit):
             repair.parse_args([*config_arguments(), *extra])
@@ -287,7 +287,7 @@ def test_cli_explicit_resources_deduplicate_and_validate_before_io(repair, tmp_p
 
 @pytest.mark.parametrize("fail_initialization", [False, True])
 async def test_run_closes_every_client_on_success_and_initialization_failure(
-    repair, monkeypatch, fail_initialization
+        repair, monkeypatch, fail_initialization
 ):
     args = repair.parse_args([*config_arguments(), "--resource-id", "resource"])
     mongo = MagicDatabaseClient()

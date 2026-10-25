@@ -4,10 +4,10 @@ import asyncio
 from dataclasses import replace
 from typing import Annotated
 
-from common.logger import error
-from common.utils.markdown import MarkdownChunker
 from pydantic import BaseModel, ConfigDict, Field
 
+from common.logger import error
+from common.utils.markdown import MarkdownChunker
 from rag.application.publication.models import (
     ContentIdentityError,
     ContentIncompleteError,
@@ -25,13 +25,13 @@ class DocumentPublication:
     """按摄入类别选择完整 Pipeline 并发布；同资源构建由调用方串行。"""
 
     def __init__(
-        self,
-        *,
-        store: PublicationStore,
-        reader: ContentReader,
-        writer: ContentWriter,
-        pipeline: IngestionPipeline,
-        pipelines: dict[str, IngestionPipeline] | None = None,
+            self,
+            *,
+            store: PublicationStore,
+            reader: ContentReader,
+            writer: ContentWriter,
+            pipeline: IngestionPipeline,
+            pipelines: dict[str, IngestionPipeline] | None = None,
     ) -> None:
         self._store = store
         self._reader = reader
@@ -91,8 +91,8 @@ class DocumentPublication:
             text=persisted.text,
         )
         if (
-            persisted_revision != revision
-            or persisted.content_revision != revision.content_revision
+                persisted_revision != revision
+                or persisted.content_revision != revision.content_revision
         ):
             raise ContentIncompleteError(
                 f"document {revision.content_revision} identity does not match"
@@ -191,16 +191,16 @@ class PublicationEventConsumer:
     """管理事件消费；业务失败按策略重试或进 DLQ，基础设施失败交由入口重启。"""
 
     def __init__(
-        self,
-        *,
-        publisher: DocumentPublication,
-        bootstrap_servers: str,
-        group_id: str,
-        document_ready_topic: str = "wisepen-document-ready-topic",
-        physical_destroy_topic: str = "wisepen-resource-physical-destroy-topic",
-        max_poll_interval_ms: int = 300_000,
-        content_retry_policy: RetryPolicy | None = None,
-        destroy_retry_policy: RetryPolicy | None = None,
+            self,
+            *,
+            publisher: DocumentPublication,
+            bootstrap_servers: str,
+            group_id: str,
+            document_ready_topic: str = "wisepen-document-ready-topic",
+            physical_destroy_topic: str = "wisepen-resource-physical-destroy-topic",
+            max_poll_interval_ms: int = 300_000,
+            content_retry_policy: RetryPolicy | None = None,
+            destroy_retry_policy: RetryPolicy | None = None,
     ) -> None:
         self._publisher = publisher
         self._content_consumer = KafkaConsumerClient(
@@ -240,7 +240,6 @@ class PublicationEventConsumer:
             ),
         ]
         if started is not None:
-
             async def signal_started() -> None:
                 # 两个主消费者实际连接后才允许宿主宣布发布能力就绪。
                 await asyncio.gather(content_started.wait(), destroy_started.wait())
@@ -261,7 +260,7 @@ class PublicationEventConsumer:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for task, result in zip(tasks, results, strict=True):
                 if isinstance(result, BaseException) and not isinstance(
-                    result, asyncio.CancelledError
+                        result, asyncio.CancelledError
                 ):
                     error(
                         "publication_task_cleanup_failed",

@@ -76,6 +76,8 @@ services:
           - mcp-service
 
   sandbox-service:
+    # 默认实验只启动 Chat/MCP；需要沙箱时显式启用该 profile。
+    profiles: ["sandbox"]
     build:
       context: .
       dockerfile: Dockerfile

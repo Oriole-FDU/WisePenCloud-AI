@@ -7,9 +7,9 @@ from enum import StrEnum
 from pathlib import Path
 
 import yaml
-from common.logger import warning
 from pydantic import TypeAdapter, ValidationError
 
+from common.logger import warning
 from .content import Chunk
 
 
@@ -135,8 +135,8 @@ class Ontology:
                 raise ValueError("relation spec key must match its nonblank type")
             # 关系两端的类别必须在本体中声明
             if any(
-                category not in ontology.entity_specs
-                for category in [*spec.allowed_sources, *spec.allowed_targets]
+                    category not in ontology.entity_specs
+                    for category in [*spec.allowed_sources, *spec.allowed_targets]
             ):
                 raise ValueError("relation endpoint category is not declared")
         return ontology
@@ -170,12 +170,12 @@ class Ontology:
             raise GraphFactValidationError("relation target category is not allowed")
 
     def create_node(
-        self,
-        *,
-        name: str,
-        category: str,
-        source_id: str,
-        description: str | None = None,
+            self,
+            *,
+            name: str,
+            category: str,
+            source_id: str,
+            description: str | None = None,
     ) -> GraphNode:
         """在本体内构造实体，namespace 由本体绑定，不由模型指定。"""
         node = GraphNode(name, source_id, self.domain, category, description)
@@ -197,15 +197,15 @@ class Ontology:
         return node
 
     def create_edge(
-        self,
-        *,
-        nodes: Mapping[str, GraphNode],
-        source_id: str,
-        target_id: str,
-        relation_type: str,
-        chunk_id: str,
-        description: str | None = None,
-        keywords: list[str] | None = None,
+            self,
+            *,
+            nodes: Mapping[str, GraphNode],
+            source_id: str,
+            target_id: str,
+            relation_type: str,
+            chunk_id: str,
+            description: str | None = None,
+            keywords: list[str] | None = None,
     ) -> GraphEdge:
         """连接当前已接受实体，绑定单一 Chunk 来源，不自动补建端点。"""
         edge = GraphEdge(
@@ -220,14 +220,14 @@ class Ontology:
         return edge
 
     def parse_chunk_facts(
-        self, chunk: Chunk, *, strict: bool = False
+            self, chunk: Chunk, *, strict: bool = False
     ) -> tuple[dict[str, GraphNode], dict[str, GraphEdge]]:
         """写入与成功缓存按当前本体约束读取；普通查询使用 parse_graph_facts。"""
         return parse_graph_facts(chunk, ontology=self, strict=strict)
 
 
 def parse_graph_facts(
-    chunk: Chunk, *, ontology: Ontology | None = None, strict: bool = False
+        chunk: Chunk, *, ontology: Ontology | None = None, strict: bool = False
 ) -> tuple[dict[str, GraphNode], dict[str, GraphEdge]]:
     """解析来源事实；Ontology 仅由写入/缓存调用方提供，读取不反向套用本体约束。
 

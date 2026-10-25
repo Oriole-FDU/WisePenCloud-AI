@@ -6,7 +6,6 @@ from itertools import zip_longest
 
 from common.utils.ai_clients.embedding import EmbeddingClient
 from common.utils.retrieval import Candidate, Fusion, Reranker, RetrievalPipeline
-
 from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.application.retrieval import ChunkHit, PreparedChunk, build_chunk_hits
 from rag.core.schema import GraphEdge, GraphNode
@@ -20,7 +19,6 @@ from rag.storage.graph import (
     graph_vector_record_id,
 )
 from rag.storage.vector import VectorReader
-
 from .graph_facts import GraphFactLoader
 from .models import GraphEntity, GraphRelationship, group_entities, group_relationships
 
@@ -38,15 +36,15 @@ class GraphRetrieval:
     """共享连接，每次调用独立召回、授权与来源选择，不生成关键词。"""
 
     def __init__(
-        self,
-        *,
-        snapshot_reader: ResourceSnapshotReader,
-        graph_reader: GraphReader,
-        embedding_client: EmbeddingClient,
-        entity_reader: VectorReader | None = None,
-        relationship_reader: VectorReader | None = None,
-        fusion: Fusion[GraphMatch] | None = None,
-        reranker: Reranker[PreparedChunk] | None = None,
+            self,
+            *,
+            snapshot_reader: ResourceSnapshotReader,
+            graph_reader: GraphReader,
+            embedding_client: EmbeddingClient,
+            entity_reader: VectorReader | None = None,
+            relationship_reader: VectorReader | None = None,
+            fusion: Fusion[GraphMatch] | None = None,
+            reranker: Reranker[PreparedChunk] | None = None,
     ) -> None:
         self._snapshot_reader = snapshot_reader
         self._graph_reader = graph_reader
@@ -57,21 +55,21 @@ class GraphRetrieval:
         self._reranker = reranker
 
     async def retrieve(
-        self,
-        query: str,
-        *,
-        snapshot: ResourceSnapshot,
-        mode: GraphRetrievalMode = GraphRetrievalMode.HYBRID,
-        top_k: int = 10,
-        focus: str = "",
-        candidate_limit: int = 60,
-        entity_top_k: int | None = None,
-        relationship_top_k: int | None = None,
-        neighbor_direction: GraphDirection = GraphDirection.BOTH,
-        neighbor_relation_types: list[str] | None = None,
-        neighbor_limit: int = 100,
-        related_chunk_number: int = 5,
-        filters: MetadataFilters | None = None,
+            self,
+            query: str,
+            *,
+            snapshot: ResourceSnapshot,
+            mode: GraphRetrievalMode = GraphRetrievalMode.HYBRID,
+            top_k: int = 10,
+            focus: str = "",
+            candidate_limit: int = 60,
+            entity_top_k: int | None = None,
+            relationship_top_k: int | None = None,
+            neighbor_direction: GraphDirection = GraphDirection.BOTH,
+            neighbor_relation_types: list[str] | None = None,
+            neighbor_limit: int = 100,
+            related_chunk_number: int = 5,
+            filters: MetadataFilters | None = None,
     ) -> GraphRetrievalResult:
         """local 只补关系，global 只补端点；授权丢弃后不补召回。"""
         # 预算由调用方保证；这里只把方向归一为枚举。
@@ -97,7 +95,7 @@ class GraphRetrieval:
         context = GraphRetrievalResult()
 
         async def prepare(
-            candidates: list[Candidate[GraphMatch]],
+                candidates: list[Candidate[GraphMatch]],
         ) -> list[Candidate[PreparedChunk]]:
             nonlocal context
 
@@ -155,13 +153,13 @@ class GraphRetrieval:
         return replace(context, chunks=chunks)
 
     async def _prepare(
-        self,
-        candidates: list[Candidate[GraphMatch]],
-        *,
-        loader: GraphFactLoader,
-        direction: GraphDirection,
-        relation_types: list[str] | None,
-        relation_limit: int,
+            self,
+            candidates: list[Candidate[GraphMatch]],
+            *,
+            loader: GraphFactLoader,
+            direction: GraphDirection,
+            relation_types: list[str] | None,
+            relation_limit: int,
     ) -> GraphRetrievalResult:
         """先核验来源向量，再按两种路线分别读取拓扑；投影不是权威事实。"""
         located = []
@@ -170,14 +168,14 @@ class GraphRetrieval:
 
             # 来源元数据必须完整，且记录 ID 与 kind/chunk/fact 一致。
             if all(
-                isinstance(metadata.get(key), str) and metadata[key].strip()
-                for key in (
-                    "chunk_id",
-                    "resource_id",
-                    "content_revision",
-                    "fact_id",
-                    "fact_sha256",
-                )
+                    isinstance(metadata.get(key), str) and metadata[key].strip()
+                    for key in (
+                            "chunk_id",
+                            "resource_id",
+                            "content_revision",
+                            "fact_id",
+                            "fact_sha256",
+                    )
             ) and item.payload.vector.record_id == graph_vector_record_id(
                 item.payload.kind,
                 metadata["chunk_id"],
@@ -198,9 +196,9 @@ class GraphRetrieval:
 
             # Chunk 必须存在，且资源与内容版本一致。
             if (
-                chunk is None
-                or chunk.resource_id != metadata["resource_id"]
-                or chunk.content_revision != metadata["content_revision"]
+                    chunk is None
+                    or chunk.resource_id != metadata["resource_id"]
+                    or chunk.content_revision != metadata["content_revision"]
             ):
                 continue
 
@@ -210,9 +208,9 @@ class GraphRetrieval:
 
             # 事实哈希与图版本必须匹配，防止使用过期投影。
             if (
-                fact is None
-                or graph_fact_sha256(fact, nodes) != metadata["fact_sha256"]
-                or metadata.get("graph_version") != chunk.metadata.get("graph_version")
+                    fact is None
+                    or graph_fact_sha256(fact, nodes) != metadata["fact_sha256"]
+                    or metadata.get("graph_version") != chunk.metadata.get("graph_version")
             ):
                 continue
 
@@ -279,10 +277,10 @@ class GraphRetrieval:
 
 
 def select_source_chunks(
-    sources: dict[str, list[str]],
-    maximum: int,
-    *,
-    excluded: set[str] | None = None,
+        sources: dict[str, list[str]],
+        maximum: int,
+        *,
+        excluded: set[str] | None = None,
 ) -> list[str]:
     """分配来源名额。
 

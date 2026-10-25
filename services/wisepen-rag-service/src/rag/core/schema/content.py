@@ -7,7 +7,7 @@ from common.utils.markdown import Anchor, Section
 
 
 def rag_section_id(
-    *, resource_id: str, content_revision: str, common_section_id: str
+        *, resource_id: str, content_revision: str, common_section_id: str
 ) -> str:
     """限定 Common 章节身份；目录、Chunk 与后续读取共用不透明 ID。"""
     identity = f"{resource_id}\0{content_revision}\0{common_section_id}"
@@ -24,7 +24,7 @@ class ContentRevision:
 
     @classmethod
     def create(
-        cls, *, resource_id: str, document_version: int, text: str
+            cls, *, resource_id: str, document_version: int, text: str
     ) -> "ContentRevision":
         # 原文空白和 Unicode 编码都是内容身份的一部分，不进行规范化。
         return cls(

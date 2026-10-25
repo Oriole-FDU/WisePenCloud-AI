@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from common.utils.retrieval import ModelReranker, RrfFusion
 
+from common.utils.retrieval import ModelReranker, RrfFusion
 from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.retrieval import VectorRetrieval
@@ -71,7 +71,7 @@ def retrieval_deps(snapshot_reader):
 
 @pytest.fixture
 async def visible_chunks(
-    make_read_document, publish_read_document, make_read_chunk, storage, read_acls
+        make_read_document, publish_read_document, make_read_chunk, storage, read_acls
 ):
     document = await publish_read_document(make_read_document("visible"))
     chunks = [
@@ -93,16 +93,16 @@ async def visible_chunks(
     "hidden_state", ["missing", "staged", "destroyed", "missing-acl", "denied"]
 )
 async def test_application_only_exposes_applied_authorized_chunk_text(
-    retrieval_deps,
-    visible_chunks,
-    hidden_state,
-    make_read_document,
-    make_read_chunk,
-    publish_read_document,
-    publication_store,
-    storage,
-    read_acls,
-    read_acl_repository,
+        retrieval_deps,
+        visible_chunks,
+        hidden_state,
+        make_read_document,
+        make_read_chunk,
+        publish_read_document,
+        publication_store,
+        storage,
+        read_acls,
+        read_acl_repository,
 ):
     hidden_doc = make_read_document("hidden")
     hidden = make_read_chunk(hidden_doc)
@@ -166,17 +166,17 @@ async def test_application_only_exposes_applied_authorized_chunk_text(
     ],
 )
 async def test_missing_projection_identity_is_filtered_before_content_io(
-    retrieval_deps, visible_chunks, storage, bad_metadata
+        retrieval_deps, visible_chunks, storage, bad_metadata
 ):
     storage.get_chunks = AsyncMock(wraps=storage.get_chunks)
     retrieval_deps.matches[:] = [
         VectorMatch(visible_chunks[0].chunk_id, 1, bad_metadata)
     ]
     assert (
-        await retrieval_deps.usecase.retrieve(
-            "query", snapshot=ResourceSnapshot(PermissionScope("reader"))
-        )
-        == []
+            await retrieval_deps.usecase.retrieve(
+                "query", snapshot=ResourceSnapshot(PermissionScope("reader"))
+            )
+            == []
     )
     storage.get_chunks.assert_not_awaited()
     retrieval_deps.client.rerank.assert_not_awaited()
@@ -184,12 +184,12 @@ async def test_missing_projection_identity_is_filtered_before_content_io(
 
 @pytest.mark.parametrize("bad_kind", ["resource", "revision", "missing-fact", "old"])
 async def test_projection_mismatch_old_revision_and_missing_facts_do_not_fall_back(
-    retrieval_deps,
-    visible_chunks,
-    bad_kind,
-    make_read_document,
-    make_read_chunk,
-    storage,
+        retrieval_deps,
+        visible_chunks,
+        bad_kind,
+        make_read_document,
+        make_read_chunk,
+        storage,
 ):
     visible = visible_chunks[0]
     if bad_kind == "resource":
@@ -211,16 +211,16 @@ async def test_projection_mismatch_old_revision_and_missing_facts_do_not_fall_ba
 
 
 async def test_snapshot_from_document_read_is_reused_across_version_acl_and_destroy_changes(
-    retrieval_deps,
-    visible_chunks,
-    snapshot_reader,
-    publication_store,
-    read_acl_repository,
-    make_read_document,
-    publish_read_document,
-    make_read_chunk,
-    storage,
-    read_acls,
+        retrieval_deps,
+        visible_chunks,
+        snapshot_reader,
+        publication_store,
+        read_acl_repository,
+        make_read_document,
+        publish_read_document,
+        make_read_chunk,
+        storage,
+        read_acls,
 ):
     snapshot = ResourceSnapshot(PermissionScope("reader"))
     await snapshot_reader.read_documents(["visible"], snapshot=snapshot)
@@ -237,15 +237,15 @@ async def test_snapshot_from_document_read_is_reused_across_version_acl_and_dest
     assert await retrieval_deps.usecase.retrieve("query", snapshot=snapshot) == hits
     assert publication_store.get_states.await_count == 1
     assert (
-        await retrieval_deps.usecase.retrieve(
-            "query", snapshot=ResourceSnapshot(PermissionScope("reader"))
-        )
-        == []
+            await retrieval_deps.usecase.retrieve(
+                "query", snapshot=ResourceSnapshot(PermissionScope("reader"))
+            )
+            == []
     )
 
 
 async def test_first_denial_stays_fixed_but_new_snapshot_observes_acl_change(
-    retrieval_deps, visible_chunks, read_acls
+        retrieval_deps, visible_chunks, read_acls
 ):
     retrieval_deps.matches[:] = [match(visible_chunks[0])]
     read_acls["visible"] = ResourceAcl("visible", 1, "someone-else")
@@ -254,22 +254,22 @@ async def test_first_denial_stays_fixed_but_new_snapshot_observes_acl_change(
     read_acls["visible"] = ResourceAcl("visible", 2, "reader")
     assert await retrieval_deps.usecase.retrieve("query", snapshot=snapshot) == []
     assert (
-        len(
-            await retrieval_deps.usecase.retrieve(
-                "query", snapshot=ResourceSnapshot(PermissionScope("reader"))
+            len(
+                await retrieval_deps.usecase.retrieve(
+                    "query", snapshot=ResourceSnapshot(PermissionScope("reader"))
+                )
             )
-        )
-        == 1
+            == 1
     )
 
 
 async def test_new_snapshot_observes_new_version_without_mixing_old_chunks(
-    retrieval_deps,
-    visible_chunks,
-    make_read_document,
-    publish_read_document,
-    make_read_chunk,
-    storage,
+        retrieval_deps,
+        visible_chunks,
+        make_read_document,
+        publish_read_document,
+        make_read_chunk,
+        storage,
 ):
     old_snapshot = ResourceSnapshot(PermissionScope("reader"))
     retrieval_deps.matches[:] = [match(visible_chunks[0])]
@@ -291,7 +291,7 @@ async def test_new_snapshot_observes_new_version_without_mixing_old_chunks(
 
 @pytest.mark.parametrize("diversity", ["off", "moderate", "high"])
 async def test_call_configuration_focus_and_diversity_are_explicit(
-    retrieval_deps, visible_chunks, diversity
+        retrieval_deps, visible_chunks, diversity
 ):
     retrieval_deps.matches[:] = [
         match(visible_chunks[0], embedding=[1.0, 0.0]),
@@ -331,7 +331,7 @@ async def test_call_configuration_focus_and_diversity_are_explicit(
 
 
 async def test_candidate_limit_applies_before_preparation_and_reranking(
-    retrieval_deps, visible_chunks
+        retrieval_deps, visible_chunks
 ):
     retrieval_deps.matches[:] = [match(chunk) for chunk in visible_chunks]
     hits = await retrieval_deps.usecase.retrieve(
@@ -349,7 +349,7 @@ async def test_candidate_limit_applies_before_preparation_and_reranking(
 
 @pytest.mark.parametrize("failure", ["read", "diversity"])
 async def test_usecase_failure_propagates_at_owning_stage(
-    retrieval_deps, visible_chunks, snapshot_reader, storage, failure
+        retrieval_deps, visible_chunks, snapshot_reader, storage, failure
 ):
     retrieval_deps.matches[:] = [match(visible_chunks[0])]
     error = OSError("failed")
@@ -378,7 +378,7 @@ async def test_usecase_failure_propagates_at_owning_stage(
 
 
 async def test_empty_recall_skips_content_and_model(
-    retrieval_deps, snapshot_reader, storage
+        retrieval_deps, snapshot_reader, storage
 ):
     storage.get_chunks = AsyncMock(wraps=storage.get_chunks)
     usecase = VectorRetrieval(
@@ -387,17 +387,17 @@ async def test_empty_recall_skips_content_and_model(
         reranker=retrieval_deps.reranker,
     )
     assert (
-        await usecase.retrieve(
-            "query", snapshot=ResourceSnapshot(PermissionScope("reader"))
-        )
-        == []
+            await usecase.retrieve(
+                "query", snapshot=ResourceSnapshot(PermissionScope("reader"))
+            )
+            == []
     )
     storage.get_chunks.assert_not_awaited()
     retrieval_deps.client.rerank.assert_not_awaited()
 
 
 async def test_one_shared_usecase_serves_concurrent_snapshots_and_configs(
-    retrieval_deps, visible_chunks, read_acl_repository
+        retrieval_deps, visible_chunks, read_acl_repository
 ):
     retrieval_deps.matches[:] = [match(visible_chunks[0], embedding=[1.0, 0.0])]
     allowed, denied = await asyncio.gather(
@@ -420,8 +420,8 @@ async def test_one_shared_usecase_serves_concurrent_snapshots_and_configs(
         if call.args[0].embedding is not None
     ]
     assert {
-        (request.top_k, request.include_embedding) for request in dense_requests
-    } == {(7, False), (9, True)}
+               (request.top_k, request.include_embedding) for request in dense_requests
+           } == {(7, False), (9, True)}
     assert retrieval_deps.client.rerank.await_count == 1
     assert retrieval_deps.client.rerank.call_args.kwargs["query"] == "allowed"
     assert read_acl_repository.get_resource_acls.await_count == 2
@@ -452,7 +452,7 @@ async def test_invalid_call_fails_before_backend_io(retrieval_deps, kwargs):
     "mode, calls, embeddings", [("dense", 1, 1), ("sparse", 1, 0), ("hybrid", 2, 1)]
 )
 async def test_application_modes_and_authoritative_metadata(
-    retrieval_deps, visible_chunks, storage, snapshot_reader, mode, calls, embeddings
+        retrieval_deps, visible_chunks, storage, snapshot_reader, mode, calls, embeddings
 ):
     chunk = visible_chunks[0]
     chunk.metadata.update(business={"year": 2024, "nested": ["权威值"]})

@@ -22,7 +22,7 @@ pytestmark = pytest.mark.mongo_integration
 
 
 async def test_real_mongo_extracted_graph_facts_round_trip(
-    mongo_storage, chunk, graph_ontology
+        mongo_storage, chunk, graph_ontology
 ):
     storage, _, _ = mongo_storage
     client = SimpleNamespace(
@@ -79,7 +79,7 @@ async def mongo_storage():
 
 
 async def test_real_mongo_round_trip_idempotency_and_unique_indexes(
-    mongo_storage, document, chunk
+        mongo_storage, document, chunk
 ):
     storage, documents, chunks = mongo_storage
     await storage.ensure_indexes()

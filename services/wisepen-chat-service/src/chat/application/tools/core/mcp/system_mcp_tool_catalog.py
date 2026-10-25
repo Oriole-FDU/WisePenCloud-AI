@@ -461,10 +461,14 @@ class SystemMcpToolCatalog:
         return list(descriptors)
 
     async def load_system_tools(self) -> dict[str, McpRemoteTool]:
-        system_descriptors, sandbox_descriptors = await asyncio.gather(
-            self._load_tools("system", self._mcp_service_client),
-            self._load_tools("sandbox", self._sandbox_mcp_service_client),
-        )
+        # 在服务发现之前排除沙箱，避免以搜索为主的实验等待沙箱连接。
+        if settings.MCP_SANDBOX_ENABLED:
+            system_descriptors, sandbox_descriptors = await asyncio.gather(
+                self._load_tools("system", self._mcp_service_client),
+                self._load_tools("sandbox", self._sandbox_mcp_service_client),
+            )
+        else:
+            system_descriptors = await self._load_tools("system", self._mcp_service_client)
         tools: dict[str, McpRemoteTool] = {}
         tools.update(self._build_remote_tools(
             system_descriptors,
@@ -472,12 +476,13 @@ class SystemMcpToolCatalog:
             _SYSTEM_TOOL_CONFIGS,
             prefix="system_",
         ))
-        tools.update(self._build_remote_tools(
-            sandbox_descriptors,
-            self._sandbox_mcp_service_client,
-            _SANDBOX_TOOL_CONFIGS,
-            prefix="sandbox_",
-        ))
+        if settings.MCP_SANDBOX_ENABLED:
+            tools.update(self._build_remote_tools(
+                sandbox_descriptors,
+                self._sandbox_mcp_service_client,
+                _SANDBOX_TOOL_CONFIGS,
+                prefix="sandbox_",
+            ))
         return tools
 
     @staticmethod

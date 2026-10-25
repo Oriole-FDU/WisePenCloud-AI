@@ -4,8 +4,8 @@ import asyncio
 from dataclasses import replace
 
 import pytest
-from common.core.domain import GroupRoleType
 
+from common.core.domain import GroupRoleType
 from rag.application.acl.models import GroupResourceAcl, PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
 from rag.core.schema import ContentRevision
@@ -13,7 +13,7 @@ from rag.core.schema import ContentRevision
 
 @pytest.mark.parametrize("offer_version", [1, 2])
 async def test_snapshot_authorizes_the_applied_version_against_market_offer(
-    snapshot_reader, read_acls, make_read_document, publish_read_document, offer_version
+        snapshot_reader, read_acls, make_read_document, publish_read_document, offer_version
 ):
     document = await publish_read_document(make_read_document("resource"))
     read_acls["resource"] = ResourceAcl(
@@ -32,12 +32,12 @@ async def test_snapshot_authorizes_the_applied_version_against_market_offer(
 
 
 async def test_snapshot_reader_batches_pending_resources_and_reuses_visible_decisions(
-    snapshot_reader,
-    read_acls,
-    read_acl_repository,
-    publication_store,
-    make_read_document,
-    publish_read_document,
+        snapshot_reader,
+        read_acls,
+        read_acl_repository,
+        publication_store,
+        make_read_document,
+        publish_read_document,
 ):
     a = await publish_read_document(make_read_document("a"))
     b = await publish_read_document(make_read_document("b"))
@@ -73,16 +73,16 @@ async def test_snapshot_reader_batches_pending_resources_and_reuses_visible_deci
 )
 @pytest.mark.parametrize("read_kind", ["documents", "chunks"])
 async def test_invisible_decisions_are_cached_and_do_not_block_visible_resources(
-    snapshot_reader,
-    storage,
-    read_acls,
-    read_acl_repository,
-    publication_store,
-    make_read_document,
-    make_read_chunk,
-    publish_read_document,
-    invisible,
-    read_kind,
+        snapshot_reader,
+        storage,
+        read_acls,
+        read_acl_repository,
+        publication_store,
+        make_read_document,
+        make_read_chunk,
+        publish_read_document,
+        invisible,
+        read_kind,
 ):
     visible = await publish_read_document(make_read_document("visible"))
     read_acls["visible"] = ResourceAcl("visible", 1, "reader")
@@ -123,12 +123,12 @@ async def test_invisible_decisions_are_cached_and_do_not_block_visible_resources
 
 @pytest.mark.parametrize("initial", ["missing", "staged", "missing-acl", "denied"])
 async def test_initially_invisible_resource_requires_new_snapshot_to_become_visible(
-    snapshot_reader,
-    read_acls,
-    publication_store,
-    make_read_document,
-    publish_read_document,
-    initial,
+        snapshot_reader,
+        read_acls,
+        publication_store,
+        make_read_document,
+        publish_read_document,
+        initial,
 ):
     document = make_read_document()
     revision = ContentRevision.create(
@@ -154,12 +154,12 @@ async def test_initially_invisible_resource_requires_new_snapshot_to_become_visi
     "change", ["new-applied", "staged-only", "acl-revoked", "destroyed"]
 )
 async def test_selected_revision_and_visibility_survive_later_changes(
-    snapshot_reader,
-    read_acls,
-    publication_store,
-    make_read_document,
-    publish_read_document,
-    change,
+        snapshot_reader,
+        read_acls,
+        publication_store,
+        make_read_document,
+        publish_read_document,
+        change,
 ):
     first = await publish_read_document(make_read_document())
     read_acls["resource"] = ResourceAcl("resource", 1, "reader")
@@ -191,56 +191,56 @@ async def test_selected_revision_and_visibility_survive_later_changes(
     "scope,acl,allowed",
     [
         (
-            PermissionScope("reader"),
-            ResourceAcl("resource", 1, "reader", excluded_read_users=["reader"]),
-            True,
+                PermissionScope("reader"),
+                ResourceAcl("resource", 1, "reader", excluded_read_users=["reader"]),
+                True,
         ),
         (
-            PermissionScope("reader"),
-            ResourceAcl(
-                "resource",
-                1,
-                "other",
-                readable_users=["reader"],
-                excluded_read_users=["reader"],
-            ),
-            True,
+                PermissionScope("reader"),
+                ResourceAcl(
+                    "resource",
+                    1,
+                    "other",
+                    readable_users=["reader"],
+                    excluded_read_users=["reader"],
+                ),
+                True,
         ),
         (
-            PermissionScope("reader", {"g": GroupRoleType.ADMIN}),
-            ResourceAcl(
-                "resource",
-                1,
-                "other",
-                excluded_read_users=["reader"],
-                group_acls=[GroupResourceAcl("g", True)],
-            ),
-            False,
+                PermissionScope("reader", {"g": GroupRoleType.ADMIN}),
+                ResourceAcl(
+                    "resource",
+                    1,
+                    "other",
+                    excluded_read_users=["reader"],
+                    group_acls=[GroupResourceAcl("g", True)],
+                ),
+                False,
         ),
         (
-            PermissionScope("reader", {"g": GroupRoleType.ADMIN}),
-            ResourceAcl(
-                "resource", 1, "other", group_acls=[GroupResourceAcl("g", False)]
-            ),
-            True,
+                PermissionScope("reader", {"g": GroupRoleType.ADMIN}),
+                ResourceAcl(
+                    "resource", 1, "other", group_acls=[GroupResourceAcl("g", False)]
+                ),
+                True,
         ),
         (
-            PermissionScope("reader", {"g": GroupRoleType.MEMBER}),
-            ResourceAcl(
-                "resource", 1, "other", group_acls=[GroupResourceAcl("g", True)]
-            ),
-            True,
+                PermissionScope("reader", {"g": GroupRoleType.MEMBER}),
+                ResourceAcl(
+                    "resource", 1, "other", group_acls=[GroupResourceAcl("g", True)]
+                ),
+                True,
         ),
     ],
 )
 async def test_authorization_uses_existing_resource_acl_rules(
-    snapshot_reader,
-    read_acls,
-    make_read_document,
-    publish_read_document,
-    scope,
-    acl,
-    allowed,
+        snapshot_reader,
+        read_acls,
+        make_read_document,
+        publish_read_document,
+        scope,
+        acl,
+        allowed,
 ):
     document = await publish_read_document(make_read_document())
     read_acls["resource"] = acl
@@ -250,9 +250,9 @@ async def test_authorization_uses_existing_resource_acl_rules(
 
 
 async def test_empty_and_unpublished_batches_do_not_query_acl(
-    snapshot_reader,
-    read_acl_repository,
-    publication_store,
+        snapshot_reader,
+        read_acl_repository,
+        publication_store,
 ):
     snapshot = ResourceSnapshot(PermissionScope("reader"))
     assert await snapshot_reader.read_documents([], snapshot=snapshot) == []
@@ -263,13 +263,13 @@ async def test_empty_and_unpublished_batches_do_not_query_acl(
 
 @pytest.mark.parametrize("failed_backend", ["publication", "acl"])
 async def test_io_failure_propagates_without_caching_invisibility(
-    snapshot_reader,
-    read_acls,
-    read_acl_repository,
-    publication_store,
-    make_read_document,
-    publish_read_document,
-    failed_backend,
+        snapshot_reader,
+        read_acls,
+        read_acl_repository,
+        publication_store,
+        make_read_document,
+        publish_read_document,
+        failed_backend,
 ):
     document = await publish_read_document(make_read_document())
     read_acls["resource"] = ResourceAcl("resource", 1, "reader")
@@ -290,11 +290,11 @@ async def test_io_failure_propagates_without_caching_invisibility(
 
 
 async def test_shared_snapshot_reader_keeps_concurrent_users_isolated(
-    snapshot_reader,
-    read_acls,
-    read_acl_repository,
-    make_read_document,
-    publish_read_document,
+        snapshot_reader,
+        read_acls,
+        read_acl_repository,
+        make_read_document,
+        publish_read_document,
 ):
     document = await publish_read_document(make_read_document())
     read_acls["resource"] = ResourceAcl("resource", 1, "reader")
@@ -327,11 +327,11 @@ async def test_shared_snapshot_reader_keeps_concurrent_users_isolated(
 
 
 async def test_interleaved_resolutions_do_not_overwrite_completed_selection(
-    snapshot_reader,
-    read_acls,
-    read_acl_repository,
-    make_read_document,
-    publish_read_document,
+        snapshot_reader,
+        read_acls,
+        read_acl_repository,
+        make_read_document,
+        publish_read_document,
 ):
     await publish_read_document(make_read_document())
     read_acls["resource"] = ResourceAcl("resource", 1, "reader")

@@ -7,8 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from common.utils.markdown import MarkdownChunker, OutlineFormatter
 
+from common.utils.markdown import MarkdownChunker, OutlineFormatter
 from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.reading import DocumentReading, SectionReadScope
@@ -28,7 +28,7 @@ SOURCE = (
 
 @pytest.fixture
 async def reading_setup(
-    make_read_document, publish_read_document, read_acls, snapshot_reader
+        make_read_document, publish_read_document, read_acls, snapshot_reader
 ):
     document = await publish_read_document(make_read_document(text=SOURCE))
     read_acls[document.resource_id] = ResourceAcl(document.resource_id, 1, "reader")
@@ -51,7 +51,7 @@ async def test_ingestion_ids_and_parent_links_are_shared_with_chunks(reading_set
         for section in common.sections
     }
     for actual, original in zip(
-        document.structure.sections, common.sections, strict=True
+            document.structure.sections, common.sections, strict=True
     ):
         assert actual == replace(
             original,
@@ -70,7 +70,7 @@ async def test_ingestion_ids_and_parent_links_are_shared_with_chunks(reading_set
 
 
 async def test_outline_ids_can_be_used_directly_for_neighborhood_and_reading(
-    reading_setup,
+        reading_setup,
 ):
     document, usecase, snapshot = (
         reading_setup.document,
@@ -111,7 +111,7 @@ async def test_section_text_is_exact_complete_original_span(reading_setup, scope
         span = (
             section.own_span if scope is SectionReadScope.OWN else section.subtree_span
         )
-        assert item.text == SOURCE[span.start_offset : span.end_offset]
+        assert item.text == SOURCE[span.start_offset: span.end_offset]
         assert item.section_path == section.section_path
     first_chapter = next(item for item in result if item.section_path == ["第一章"])
     assert first_chapter.text.startswith("# 第一章\n\n  直属原文。")
@@ -119,7 +119,7 @@ async def test_section_text_is_exact_complete_original_span(reading_setup, scope
 
 
 async def test_chunk_text_is_exact_original_and_location_with_fixed_fields(
-    reading_setup, storage
+        reading_setup, storage
 ):
     document, usecase, snapshot = (
         reading_setup.document,
@@ -141,7 +141,7 @@ async def test_chunk_text_is_exact_original_and_location_with_fixed_fields(
 
 
 async def test_chunk_reads_deduplicate_preserving_order_and_fetch_once(
-    reading_setup, storage, make_read_chunk
+        reading_setup, storage, make_read_chunk
 ):
     document, usecase, snapshot = (
         reading_setup.document,
@@ -159,12 +159,12 @@ async def test_chunk_reads_deduplicate_preserving_order_and_fetch_once(
 
 
 async def test_chunk_reads_omit_invisible_stale_and_missing(
-    reading_setup,
-    storage,
-    read_acls,
-    make_read_document,
-    make_read_chunk,
-    publish_read_document,
+        reading_setup,
+        storage,
+        read_acls,
+        make_read_document,
+        make_read_chunk,
+        publish_read_document,
 ):
     document, usecase, snapshot = (
         reading_setup.document,
@@ -195,7 +195,7 @@ async def test_chunk_reads_omit_invisible_stale_and_missing(
 
 @pytest.mark.parametrize("text", ["", "# 只有标题\n"])
 async def test_visible_document_without_sections_has_empty_outline(
-    text, make_read_document, publish_read_document, read_acls, snapshot_reader
+        text, make_read_document, publish_read_document, read_acls, snapshot_reader
 ):
     document = await publish_read_document(make_read_document(text=text))
     read_acls[document.resource_id] = ResourceAcl(document.resource_id, 1, "reader")
@@ -209,13 +209,13 @@ async def test_visible_document_without_sections_has_empty_outline(
     "state", ["missing", "staged", "destroyed", "missing-acl", "denied"]
 )
 async def test_partial_visibility_never_formats_or_reads_hidden_document(
-    reading_setup,
-    state,
-    make_read_document,
-    publish_read_document,
-    publication_store,
-    storage,
-    read_acls,
+        reading_setup,
+        state,
+        make_read_document,
+        publish_read_document,
+        publication_store,
+        storage,
+        read_acls,
 ):
     hidden = make_read_document("hidden", text="# 隐藏章节\n\n隐藏正文。\n")
     await storage.upsert_documents([hidden])
@@ -238,13 +238,13 @@ async def test_partial_visibility_never_formats_or_reads_hidden_document(
     hidden_id = hidden.structure.sections[0].section_id
     ids = [hidden_id, visible, "missing", visible]
     with patch(
-        "rag.application.reading.OutlineFormatter", wraps=OutlineFormatter
+            "rag.application.reading.OutlineFormatter", wraps=OutlineFormatter
     ) as formatter:
         assert (
-            await reading_setup.usecase.global_outline(
-                hidden.resource_id, snapshot=reading_setup.snapshot
-            )
-            is None
+                await reading_setup.usecase.global_outline(
+                    hidden.resource_id, snapshot=reading_setup.snapshot
+                )
+                is None
         )
         formatter.assert_not_called()
         neighbors = await reading_setup.usecase.neighborhood(
@@ -259,7 +259,7 @@ async def test_partial_visibility_never_formats_or_reads_hidden_document(
 
 
 async def test_identical_structures_in_two_resources_do_not_share_section_identity(
-    reading_setup, make_read_document, publish_read_document, read_acls
+        reading_setup, make_read_document, publish_read_document, read_acls
 ):
     other = await publish_read_document(make_read_document("other", text=SOURCE))
     read_acls["other"] = ResourceAcl("other", 1, "reader")
@@ -274,13 +274,13 @@ async def test_identical_structures_in_two_resources_do_not_share_section_identi
 
 @pytest.mark.parametrize("change", ["version", "acl", "destroyed"])
 async def test_first_snapshot_decision_survives_change_and_old_ids_never_read_new_version(
-    reading_setup,
-    change,
-    make_read_document,
-    publish_read_document,
-    publication_store,
-    read_acl_repository,
-    read_acls,
+        reading_setup,
+        change,
+        make_read_document,
+        publish_read_document,
+        publication_store,
+        read_acl_repository,
+        read_acls,
 ):
     usecase, document, snapshot = (
         reading_setup.usecase,
@@ -298,15 +298,15 @@ async def test_first_snapshot_decision_survives_change_and_old_ids_never_read_ne
         await publication_store.destroy_resources([document.resource_id])
     assert await usecase.read_sections([section_id], snapshot=snapshot)
     assert (await usecase.neighborhood([section_id], snapshot=snapshot))[
-        0
-    ].content_revision == before.content_revision
+               0
+           ].content_revision == before.content_revision
     assert publication_store.get_states.await_count == 1
     assert read_acl_repository.get_resource_acls.await_count == 1
     assert (
-        await usecase.read_sections(
-            [section_id], snapshot=ResourceSnapshot(PermissionScope("reader"))
-        )
-        == []
+            await usecase.read_sections(
+                [section_id], snapshot=ResourceSnapshot(PermissionScope("reader"))
+            )
+            == []
     )
     if change == "version":
         assert await usecase.read_sections(
@@ -340,21 +340,21 @@ async def test_denied_snapshot_remains_denied_after_acl_grant(reading_setup, rea
     ],
 )
 async def test_wrong_document_identity_is_omitted_without_fallback(
-    reading_setup, storage, field, value
+        reading_setup, storage, field, value
 ):
     document = reading_setup.document
     await storage.delete_revisions([(document.resource_id, document.content_revision)])
     await storage.upsert_documents([replace(document, **{field: value})])
     assert (
-        await reading_setup.usecase.read_sections(
-            [document.structure.sections[1].section_id], snapshot=reading_setup.snapshot
-        )
-        == []
+            await reading_setup.usecase.read_sections(
+                [document.structure.sections[1].section_id], snapshot=reading_setup.snapshot
+            )
+            == []
     )
 
 
 async def test_batch_io_deduplicates_document_and_reuses_shared_snapshot(
-    reading_setup, storage, publication_store, read_acl_repository, snapshot_reader
+        reading_setup, storage, publication_store, read_acl_repository, snapshot_reader
 ):
     storage.get_documents_by_section_ids = AsyncMock(
         wraps=storage.get_documents_by_section_ids
@@ -373,7 +373,7 @@ async def test_batch_io_deduplicates_document_and_reuses_shared_snapshot(
 
 
 async def test_missing_fact_after_snapshot_selection_is_not_replaced(
-    reading_setup, storage
+        reading_setup, storage
 ):
     document = reading_setup.document
     await reading_setup.usecase.global_outline(
@@ -381,10 +381,10 @@ async def test_missing_fact_after_snapshot_selection_is_not_replaced(
     )
     await storage.delete_revisions([(document.resource_id, document.content_revision)])
     assert (
-        await reading_setup.usecase.read_sections(
-            [document.structure.sections[1].section_id], snapshot=reading_setup.snapshot
-        )
-        == []
+            await reading_setup.usecase.read_sections(
+                [document.structure.sections[1].section_id], snapshot=reading_setup.snapshot
+            )
+            == []
     )
 
 
@@ -400,7 +400,7 @@ async def test_shared_usecase_serves_independent_concurrent_snapshots(reading_se
 
 
 async def test_empty_input_has_no_io(
-    snapshot_reader, collections, publication_store, read_acl_repository
+        snapshot_reader, collections, publication_store, read_acl_repository
 ):
     usecase = DocumentReading(reader=snapshot_reader)
     snapshot = ResourceSnapshot(PermissionScope("reader"))

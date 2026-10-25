@@ -12,5 +12,5 @@ relation_specs:
   in_department:
     relation_type: in_department
     description: 起点雇员隶属于终点部门，必须有正文依据。
-    allowed_sources: [Person]
-    allowed_targets: [Department]
+    allowed_sources: [ Person ]
+    allowed_targets: [ Department ]

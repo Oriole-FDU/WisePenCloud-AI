@@ -9,12 +9,12 @@ class ContentReader(Protocol):
     """按明确身份读取内容；批量结果去重、保序并省略缺失对象。"""
 
     async def get_documents(
-        self,
-        revisions: list[tuple[str, str]],  # (resource_id, content_revision)
+            self,
+            revisions: list[tuple[str, str]],  # (resource_id, content_revision)
     ) -> list[Document]: ...
 
     async def get_documents_by_section_ids(
-        self, section_ids: list[str]
+            self, section_ids: list[str]
     ) -> list[Document]:
         """按章节 ID 批量定位文档；文档去重，按首次匹配章节的请求顺序返回。"""
         ...
@@ -22,10 +22,10 @@ class ContentReader(Protocol):
     async def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]: ...
 
     async def get_revision_chunks(
-        self,
-        *,
-        resource_id: str,
-        content_revision: str,
+            self,
+            *,
+            resource_id: str,
+            content_revision: str,
     ) -> list[Chunk]:
         """读取指定 revision 的全部 Chunk，按 chunk_index 升序返回。"""
         ...

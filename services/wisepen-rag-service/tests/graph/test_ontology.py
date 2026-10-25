@@ -105,8 +105,8 @@ def test_load_ontology_file(graph_ontology, tmp_path, suffix):
         ("empty.yaml", ""),
         ("list.json", "[]"),
         (
-            "nested.json",
-            '{"domain": "work", "entity_specs": {"Person": {"category": "Person", "description": "人员", "unknown": true}}}',
+                "nested.json",
+                '{"domain": "work", "entity_specs": {"Person": {"category": "Person", "description": "人员", "unknown": true}}}',
         ),
         ("types.json", '{"domain": 1}'),
     ],
@@ -124,7 +124,7 @@ def test_missing_file_raises_io_error(tmp_path):
 
 
 def test_node_relation_options_are_category_permissions_not_observed_edges(
-    graph_ontology,
+        graph_ontology,
 ):
     graph_ontology.relation_specs["mentions"] = RelationSpec(
         "mentions", "任意实体提及任意实体"
@@ -136,9 +136,9 @@ def test_node_relation_options_are_category_permissions_not_observed_edges(
         name="甲公司", category="Company", source_id="chunk"
     )
     assert [
-        (option.relation_type, option.direction) for option in person.relations
-    ] == [("works_at", "outgoing"), ("mentions", "both")]
+               (option.relation_type, option.direction) for option in person.relations
+           ] == [("works_at", "outgoing"), ("mentions", "both")]
     assert [
-        (option.relation_type, option.direction) for option in company.relations
-    ] == [("works_at", "incoming"), ("mentions", "both")]
+               (option.relation_type, option.direction) for option in company.relations
+           ] == [("works_at", "incoming"), ("mentions", "both")]
     assert replace(person, relations=[]).id == person.id

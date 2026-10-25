@@ -4,19 +4,19 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from common.utils.retrieval import Candidate, RetrievalPipeline
 from dependency_injector import providers
 from pydantic import ValidationError
 
+from common.utils.retrieval import Candidate, RetrievalPipeline
 from rag.application.publication import DocumentReadyEvent, PublicationAction
 from rag.application.retrieval import PreparedChunk
 from rag.container import Container
 
 
 async def test_pipeline_routes_share_live_mapping_and_are_isolated_per_container(
-    platform_settings,
-    storage,
-    publication_store,
+        platform_settings,
+        storage,
+        publication_store,
 ):
     from rag.ingestion import IngestionPipeline
     from rag.ingestion.chunkers import MarkdownChunker
@@ -88,7 +88,7 @@ def test_capability_configuration_fails_before_connections(platform_settings, ch
     ],
 )
 async def test_configured_pipeline_persists_facts_and_vectors(
-    platform_settings, storage, document, enabled, pipeline_name, expects_context
+        platform_settings, storage, document, enabled, pipeline_name, expects_context
 ):
     AppSettings = type(platform_settings)
     values = platform_settings.model_dump() | {"ENABLE_CONTEXTUALIZE": enabled}

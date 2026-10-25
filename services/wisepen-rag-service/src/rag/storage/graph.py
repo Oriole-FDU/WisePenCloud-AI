@@ -23,25 +23,25 @@ class GraphSourceProjection:
 
 class GraphReader(Protocol):
     async def get_nodes(
-        self, node_ids: list[str], *, filters: MetadataFilters | None = None
+            self, node_ids: list[str], *, filters: MetadataFilters | None = None
     ) -> list[GraphNode]:
         """按请求 ID、来源 Chunk ID 排序返回来源事实，空 IDs 无 I/O。"""
         ...
 
     async def get_relations(
-        self, edge_ids: list[str], *, filters: MetadataFilters | None = None
+            self, edge_ids: list[str], *, filters: MetadataFilters | None = None
     ) -> list[GraphEdge]:
         """同一逻辑关系的各来源分别返回，描述不汇总。"""
         ...
 
     async def get_neighbors(
-        self,
-        node_ids: list[str],
-        *,
-        direction: GraphDirection = GraphDirection.OUTGOING,
-        relation_types: list[str] | None = None,
-        filters: MetadataFilters | None = None,
-        limit: int | None = 100,
+            self,
+            node_ids: list[str],
+            *,
+            direction: GraphDirection = GraphDirection.OUTGOING,
+            relation_types: list[str] | None = None,
+            filters: MetadataFilters | None = None,
+            limit: int | None = 100,
     ) -> list[GraphEdge]:
         """limit 限制逻辑关系数；None 完整定位连接，匹配来源始终完整返回。"""
         ...
@@ -59,7 +59,7 @@ class GraphWriter(Protocol):
 
 class GraphStorage(GraphReader, GraphWriter, Protocol):
     """一个实例绑定一个物理图，核心 ID 不包含后端图命名空间。"""
-    
+
 
 class GraphVectorKind(StrEnum):
     ENTITY = "entity"
@@ -105,7 +105,7 @@ def entity_vector_text(node: GraphNode, ontology: Ontology) -> str:
 
 
 def relationship_vector_text(
-    edge: GraphEdge, nodes: dict[str, GraphNode], ontology: Ontology
+        edge: GraphEdge, nodes: dict[str, GraphNode], ontology: Ontology
 ) -> str:
     """有向两端、谓词说明与关系来源描述共同表达关系语义。"""
     source = nodes[edge.source_id]

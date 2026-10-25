@@ -48,20 +48,20 @@ def _field_condition(item: MetadataFilter) -> models.FieldCondition:
         raise ValueError("EQ requires a string, boolean or finite number")
     if item.operator is FilterOperator.IN:
         if (
-            isinstance(value, list)
-            and value
-            and (
+                isinstance(value, list)
+                and value
+                and (
                 all(type(entry) is str for entry in value)
                 or all(type(entry) is int for entry in value)
-            )
+        )
         ):
             return models.FieldCondition(key=key, match=models.MatchAny(any=value))
         raise ValueError("IN requires a nonempty homogeneous string or integer list")
     if item.operator in (
-        FilterOperator.GT,
-        FilterOperator.GTE,
-        FilterOperator.LT,
-        FilterOperator.LTE,
+            FilterOperator.GT,
+            FilterOperator.GTE,
+            FilterOperator.LT,
+            FilterOperator.LTE,
     ):
         if type(value) not in (int, float) or not isfinite(value):
             raise ValueError("range comparisons require a finite number")

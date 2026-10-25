@@ -35,7 +35,7 @@ def indexer(embedding_client, vector_writer):
 
 
 async def test_zero_chunks_has_no_embedding_or_storage_io(
-    indexer, embedding_client, vector_writer
+        indexer, embedding_client, vector_writer
 ):
     await indexer.index([])
     embedding_client.embed.assert_not_awaited()
@@ -43,7 +43,7 @@ async def test_zero_chunks_has_no_embedding_or_storage_io(
 
 
 async def test_provider_default_dimensions_are_used_without_indexer_override(
-    indexer, embedding_client, vector_writer, chunk
+        indexer, embedding_client, vector_writer, chunk
 ):
     embedding_client.dimensions = None
     embedding_client.embed.side_effect = None
@@ -53,7 +53,7 @@ async def test_provider_default_dimensions_are_used_without_indexer_override(
 
 
 async def test_retrieval_text_and_identity_projection_preserve_input(
-    indexer, embedding_client, vector_writer, chunk
+        indexer, embedding_client, vector_writer, chunk
 ):
     second = replace(chunk, chunk_id="other", raw_text="第二块", metadata={})
     chunks = [chunk, second]
@@ -79,7 +79,7 @@ async def test_retrieval_text_and_identity_projection_preserve_input(
 
 
 async def test_embedding_and_storage_alternate_by_batch(
-    indexer, embedding_client, vector_writer, chunk
+        indexer, embedding_client, vector_writer, chunk
 ):
     calls = []
 
@@ -105,7 +105,7 @@ async def test_embedding_and_storage_alternate_by_batch(
 
 @pytest.mark.parametrize("conflicting_identity", [False, True])
 async def test_business_metadata_factory_adds_fields_without_replacing_chunk_identity(
-    embedding_client, vector_writer, chunk, conflicting_identity
+        embedding_client, vector_writer, chunk, conflicting_identity
 ):
     additions = {"year": 2020, "employee": "李明"}
     if conflicting_identity:
@@ -136,7 +136,7 @@ async def test_business_metadata_factory_adds_fields_without_replacing_chunk_ide
 
 @pytest.mark.parametrize("failure", ["embedding", "writer"])
 async def test_later_batch_failure_stops_without_compensating_completed_writes(
-    indexer, embedding_client, vector_writer, chunk, failure
+        indexer, embedding_client, vector_writer, chunk, failure
 ):
     error = OSError("provider failed")
     if failure == "embedding":
@@ -151,7 +151,7 @@ async def test_later_batch_failure_stops_without_compensating_completed_writes(
 
 
 async def test_embedding_response_value_error_is_retryable_and_never_written(
-    indexer, embedding_client, vector_writer, chunk
+        indexer, embedding_client, vector_writer, chunk
 ):
     original = ValueError("embedding response count, dimensions or values are invalid")
     embedding_client.embed.side_effect = original

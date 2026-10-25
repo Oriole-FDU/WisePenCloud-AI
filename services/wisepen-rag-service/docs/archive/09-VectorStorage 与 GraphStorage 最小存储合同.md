@@ -24,7 +24,8 @@
 10. Mongo Chunk facts（含图谱 metadata）作为可重建输入，Neo4j GraphStorage 作为拓扑及来源 Chunk 关联投影；
 11. 不增加额外 Repository 层、Storage Router 或跨存储一致性机制。
 
-内容事实采用同样的接口隔离：`ContentReader`、`ContentWriter` 组合成 `ContentStorage`。统一后端分别存取 Document、Chunk，不把两者统一成 Node；模型位于 `core/schema/content.py`。
+内容事实采用同样的接口隔离：`ContentReader`、`ContentWriter` 组合成 `ContentStorage`。统一后端分别存取
+Document、Chunk，不把两者统一成 Node；模型位于 `core/schema/content.py`。
 
 ## 2. LlamaIndex 对本方案的启发
 
@@ -38,7 +39,8 @@ delete(...)
 query(VectorStoreQuery)
 ```
 
-它没有为每一种业务对象创建独立的 VectorStore 协议。RAG 采用同样的思路：Chunk、Entity、Relationship 在进入向量库前都转换成统一 `VectorRecord`，但它们的业务语义仍由上层 projection writer 和 collection 配置决定。
+它没有为每一种业务对象创建独立的 VectorStore 协议。RAG 采用同样的思路：Chunk、Entity、Relationship 在进入向量库前都转换成统一
+`VectorRecord`，但它们的业务语义仍由上层 projection writer 和 collection 配置决定。
 
 ### 2.2 PropertyGraphStore
 
@@ -53,7 +55,8 @@ upsert relations
 delete
 ```
 
-RAG 保留同样的形态。GraphNode/GraphEdge 的图谱 metadata 和来源 Chunk 关联保存在可重建的 GraphStorage 投影中，原始抽取事实保存在 Chunk facts；不增加 Mongo GraphFactStore，也不把 local/global/hybrid 下沉到 GraphStorage。
+RAG 保留同样的形态。GraphNode/GraphEdge 的图谱 metadata 和来源 Chunk 关联保存在可重建的 GraphStorage 投影中，原始抽取事实保存在
+Chunk facts；不增加 Mongo GraphFactStore，也不把 local/global/hybrid 下沉到 GraphStorage。
 
 ### 2.3 StorageContext
 
@@ -72,9 +75,12 @@ class RagStorageContext:
 
 ### 2.4 ContentStorage
 
-内容存储已经独立实现在 `storage/content.py`：Reader 按明确 revision 批量读取 Document、按 ID 批量读取 Chunk，并按 revision 顺序读取 Chunk；Writer 批量 upsert 两种对象，按 revision 或资源物理删除二者。MongoContentStorage 绑定 `document_revisions`、`doc_chunks` 两个集合，显式创建身份唯一索引，每批 500 条有序 upsert。
+内容存储已经独立实现在 `storage/content.py`：Reader 按明确 revision 批量读取 Document、按 ID 批量读取 Chunk，并按 revision
+顺序读取 Chunk；Writer 批量 upsert 两种对象，按 revision 或资源物理删除二者。MongoContentStorage 绑定 `document_revisions`、
+`doc_chunks` 两个集合，显式创建身份唯一索引，每批 500 条有序 upsert。
 
-内容写入不推断 active、不隐式删除批次之外的 Chunk、不解释 ACL；删除由调用方先撤销可见性。ChunkFactsIndexer 只依赖 ContentWriter。向量与图适配器继续只保存可重建投影。
+内容写入不推断 active、不隐式删除批次之外的 Chunk、不解释 ACL；删除由调用方先撤销可见性。ChunkFactsIndexer 只依赖
+ContentWriter。向量与图适配器继续只保存可重建投影。
 
 ## 3. VectorStorage
 
@@ -123,7 +129,8 @@ class VectorMatch:
     metadata: Mapping[str, object] = field(default_factory=dict)
 ```
 
-`VectorRecord` 是为了让不同业务对象共享一套向量写入和查询接口，并不意味着 Chunk、Entity、Relationship 在领域层被合并。Projection Writer 负责将它们各自的语义文本和 identity 投影为该类型：
+`VectorRecord` 是为了让不同业务对象共享一套向量写入和查询接口，并不意味着 Chunk、Entity、Relationship 在领域层被合并。Projection
+Writer 负责将它们各自的语义文本和 identity 投影为该类型：
 
 ```text
 Chunk.retrieval_text       -> chunk_vectors
@@ -194,7 +201,8 @@ class GraphStorage(GraphReader, GraphWriter, Protocol):
     """绑定一个图后端的拓扑存储适配器。"""
 ```
 
-不再增加只为适配 Storage 而存在的 `GraphNodeRecord`、`GraphRelationRecord`。GraphNode/GraphEdge 已经是统一图事实模型，Storage 只是负责保存和读取它们。
+不再增加只为适配 Storage 而存在的 `GraphNodeRecord`、`GraphRelationRecord`。GraphNode/GraphEdge 已经是统一图事实模型，Storage
+只是负责保存和读取它们。
 
 ### 4.2 GraphStorage 原语
 
@@ -222,7 +230,8 @@ Neo4j 可以用 Cypher 实现这些原语，但 Cypher 只是 Adapter 内部细�
 
 ### 5.1 通用过滤模型
 
-Storage 接收通用 `MetadataFilters`，参考 LlamaIndex 的 `MetadataFilter(key, value, operator)` 和 `MetadataFilters(filters, condition)`：
+Storage 接收通用 `MetadataFilters`，参考 LlamaIndex 的 `MetadataFilter(key, value, operator)` 和
+`MetadataFilters(filters, condition)`：
 
 - 单项过滤表达字段、值和比较操作；
 - 多项过滤支持 `AND/OR/NOT` 组合；
@@ -259,7 +268,8 @@ plugin 仍然负责：
 - 请求字段对应哪个 projection metadata key；
 - 请求值和类型校验。
 
-Storage 只执行编译结果。现有 `FilterOp` 可以继续作为 plugin 内部声明 DSL，但 `MetadataFilterCondition` 不再作为 Qdrant/Neo4j 的共同公共类型。
+Storage 只执行编译结果。现有 `FilterOp` 可以继续作为 plugin 内部声明 DSL，但 `MetadataFilterCondition` 不再作为
+Qdrant/Neo4j 的共同公共类型。
 
 ### 5.3 ACL 与 revision
 

@@ -1,14 +1,20 @@
 # 检索与一跳拓展完整输出
 
-本文件由 retrieval_outputs.py 实际运行生成。应用、快照授权与事实回查使用当前代码；存储、embedding、rerank 使用固定本地替身。分数是演示设定，不代表模型质量。
+本文件由 retrieval_outputs.py 实际运行生成。应用、快照授权与事实回查使用当前代码；存储、embedding、rerank
+使用固定本地替身。分数是演示设定，不代表模型质量。
 
-所有实际序列化字段、默认值、null、metadata、正文、描述和来源 ID 均完整保留。top_k=10 高于案例实际来源数，无任何文本裁剪；完整输入另见 inputs.json。
+所有实际序列化字段、默认值、null、metadata、正文、描述和来源 ID 均完整保留。top_k=10 高于案例实际来源数，无任何文本裁剪；完整输入另见
+inputs.json。
 
-ChunkHit.metadata 在响应组装时排除 entities、relationships；输入文件保留完整内部 metadata，图检索的顶层 entities/relationships 和 seed_entities 不受影响。
+ChunkHit.metadata 在响应组装时排除 entities、relationships；输入文件保留完整内部 metadata，图检索的顶层
+entities/relationships 和 seed_entities 不受影响。
 
-向量 dense/sparse/hybrid 的候选替身刻意返回同一组记录，用于对照输出结构；不能据此推断真实检索模式的召回结果相同。vector_graph_disabled 演示 relations 为 null；其他向量案例启用全图连接查询。
+向量 dense/sparse/hybrid 的候选替身刻意返回同一组记录，用于对照输出结构；不能据此推断真实检索模式的召回结果相同。vector_graph_disabled
+演示 relations 为 null；其他向量案例启用全图连接查询。
 
-图用例按逻辑 ID 收拢：实体与关系都只返回 id/sources，各来源描述独立保留。内部图运算使用核心模型的结构化端点与谓词，不解析返回 ID。核心 GraphNode.id、GraphEdge.id 是计算属性，仅输入事实的序列化不包含它们；输入文件 computed_entity_ids 供核对。核心 GraphNode.source_id 是来源 Chunk，GraphEdge.source_id 是起点实体，两者含义不同。
+图用例按逻辑 ID 收拢：实体与关系都只返回 id/sources，各来源描述独立保留。内部图运算使用核心模型的结构化端点与谓词，不解析返回
+ID。核心 GraphNode.id、GraphEdge.id 是计算属性，仅输入事实的序列化不包含它们；输入文件 computed_entity_ids 供核对。核心
+GraphNode.source_id 是来源 Chunk，GraphEdge.source_id 是起点实体，两者含义不同。
 
 ## 固定数据
 

@@ -87,8 +87,8 @@ class MemoryDriver:
         operation = query.splitlines()[0].removeprefix("// graph:")
         self.calls.append((operation, query, copy.deepcopy(parameters)))
         if (
-            self.fail_operation == operation
-            and self.transactions == self.fail_transaction
+                self.fail_operation == operation
+                and self.transactions == self.fail_transaction
         ):
             raise OSError("transaction write failed")
         if self.block_operation == operation:
@@ -135,8 +135,8 @@ class MemoryDriver:
             for row in parameters["rows"]:
                 for edge in row["edges"]:
                     if (
-                        edge["source_id"] in state["nodes"]
-                        and edge["target_id"] in state["nodes"]
+                            edge["source_id"] in state["nodes"]
+                            and edge["target_id"] in state["nodes"]
                     ):
                         state["edges"][edge["edge_id"]] = (
                             edge["source_id"],
@@ -151,13 +151,13 @@ class MemoryDriver:
         elif operation == "cleanup_relations":
             for edge_id in parameters["edge_ids"]:
                 if not any(
-                    edge_id in source["edges"] for source in state["sources"].values()
+                        edge_id in source["edges"] for source in state["sources"].values()
                 ):
                     state["edges"].pop(edge_id, None)
         elif operation == "cleanup_nodes":
             for node_id in parameters["node_ids"]:
                 if not any(
-                    node_id in source["nodes"] for source in state["sources"].values()
+                        node_id in source["nodes"] for source in state["sources"].values()
                 ) and not any(node_id in edge[:2] for edge in state["edges"].values()):
                     state["nodes"].discard(node_id)
         elif operation in ("get_nodes", "get_relations", "get_neighbors"):
@@ -169,8 +169,8 @@ class MemoryDriver:
                     outgoing = "source.node_id IN $ids" in query and source in seed
                     incoming = "target.node_id IN $ids" in query and target in seed
                     if (outgoing or incoming) and (
-                        parameters["relation_types"] is None
-                        or relation_type in parameters["relation_types"]
+                            parameters["relation_types"] is None
+                            or relation_type in parameters["relation_types"]
                     ):
                         candidates.append(edge_id)
                 field = "edges"

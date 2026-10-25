@@ -28,7 +28,7 @@ def indexer(graph_ontology, graph_vector_writers):
 
 
 async def test_per_source_semantics_readonly_and_replay(
-    indexer, chunk, make_graph_facts, graph_vector_writers
+        indexer, chunk, make_graph_facts, graph_vector_writers
 ):
     usecase, embedding = indexer
     make_graph_facts(chunk, description="首个来源")
@@ -53,8 +53,8 @@ async def test_per_source_semantics_readonly_and_replay(
     assert all(record.embedding == [1.0, 0.0] for record in entities.records.values())
     assert all("不索引" not in record.text for record in entities.records.values())
     assert {
-        record.text.split("description: ")[-1] for record in entities.records.values()
-    } == {"首个来源", "第二来源"}
+               record.text.split("description: ")[-1] for record in entities.records.values()
+           } == {"首个来源", "第二来源"}
     original = deepcopy(entities.records)
     await usecase.index([chunk])
     assert entities.records == original
@@ -62,7 +62,7 @@ async def test_per_source_semantics_readonly_and_replay(
 
 
 async def test_fact_reduction_and_empty_clear_only_given_source(
-    indexer, chunk, make_graph_facts, graph_vector_writers
+        indexer, chunk, make_graph_facts, graph_vector_writers
 ):
     usecase, embedding = indexer
     make_graph_facts(chunk)
@@ -85,7 +85,7 @@ async def test_fact_reduction_and_empty_clear_only_given_source(
 
 
 async def test_bad_embedding_does_not_delete_current_batch(
-    indexer, chunk, make_graph_facts, graph_vector_writers
+        indexer, chunk, make_graph_facts, graph_vector_writers
 ):
     make_graph_facts(chunk)
     usecase, embedding = indexer
@@ -100,7 +100,7 @@ async def test_bad_embedding_does_not_delete_current_batch(
 
 
 async def test_later_embedding_failure_preserves_prior_batch(
-    indexer, graph_ontology, chunk, make_graph_facts, graph_vector_writers
+        indexer, graph_ontology, chunk, make_graph_facts, graph_vector_writers
 ):
     _, embedding = indexer
     entities, relationships = graph_vector_writers
@@ -133,7 +133,7 @@ async def test_later_embedding_failure_preserves_prior_batch(
 
 @pytest.mark.parametrize("failure", ["delete", "upsert", "cancel"])
 async def test_partial_write_failure_can_be_replayed(
-    indexer, chunk, make_graph_facts, graph_vector_writers, failure
+        indexer, chunk, make_graph_facts, graph_vector_writers, failure
 ):
     usecase, _ = indexer
     make_graph_facts(chunk)
@@ -160,7 +160,7 @@ async def test_empty_input_has_no_io(indexer, graph_vector_writers):
 
 @pytest.mark.parametrize("failure", [None, "topology", "embedding"])
 async def test_combined_graph_indexer_orders_topology_before_vectors(
-    indexer, graph_ontology, chunk, make_graph_facts, graph_vector_writers, failure
+        indexer, graph_ontology, chunk, make_graph_facts, graph_vector_writers, failure
 ):
     _, embedding = indexer
     entities, relationships = graph_vector_writers

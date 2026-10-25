@@ -14,7 +14,7 @@ from rag.backends.kafka import RetryPolicy
 
 @pytest.mark.parametrize("failure", [None, "temporary", "permanent"])
 async def test_acl_uses_shared_backend_and_correct_confirmation_policy(
-    monkeypatch, failure
+        monkeypatch, failure
 ):
     message = SimpleNamespace(
         topic="acl",

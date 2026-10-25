@@ -10,11 +10,11 @@ class IngestionPipeline:
     """按配置串行执行；输入不复制，失败后停止且不回滚已完成写入。"""
 
     def __init__(
-        self,
-        *,
-        chunker: Chunker,
-        transformers: list[Transformer],
-        indexers: list[Indexer],
+            self,
+            *,
+            chunker: Chunker,
+            transformers: list[Transformer],
+            indexers: list[Indexer],
     ) -> None:
         self.chunker = chunker
         self.transformers = transformers

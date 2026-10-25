@@ -28,7 +28,7 @@ class MongoPublicationStore(PublicationStore):
         self._collection = collection
 
     async def get_states(
-        self, resource_ids: list[str]
+            self, resource_ids: list[str]
     ) -> list[ResourcePublicationState]:
         """按 resource_id 批量读取；去重保序，缺失项跳过。"""
         unique_ids = list(dict.fromkeys(resource_ids))
@@ -143,7 +143,7 @@ class MongoPublicationStore(PublicationStore):
                     },
                     upsert=True,
                 )
-                for resource_id in unique_ids[start : start + _BATCH_SIZE]
+                for resource_id in unique_ids[start: start + _BATCH_SIZE]
             ]
             await self._collection.bulk_write(operations, ordered=True)
 
@@ -164,7 +164,7 @@ class MongoPublicationStore(PublicationStore):
         )
 
     async def list_destroyed_resource_ids(
-        self, *, after_resource_id: str | None = None, limit: int = 100
+            self, *, after_resource_id: str | None = None, limit: int = 100
     ) -> list[str]:
         query = {"destroyed": True}
         if after_resource_id is not None:
@@ -185,8 +185,8 @@ class MongoPublicationStore(PublicationStore):
 
 
 def _stage_action(
-    revision: ContentRevision,
-    current: ResourcePublicationState | None,
+        revision: ContentRevision,
+        current: ResourcePublicationState | None,
 ) -> PublicationAction:
     """先淘汰低版本，再解释最高版本冲突；旧版本不进入同版本冲突判断。"""
     if current is None:
@@ -200,9 +200,9 @@ def _stage_action(
             return PublicationAction.STALE
     for known in known_revisions:
         if (
-            known is not None
-            and known.document_version == revision.document_version
-            and known.content_sha256 != revision.content_sha256
+                known is not None
+                and known.document_version == revision.document_version
+                and known.content_sha256 != revision.content_sha256
         ):
             raise ContentConflictError(
                 f"resource {revision.resource_id} version {revision.document_version} "

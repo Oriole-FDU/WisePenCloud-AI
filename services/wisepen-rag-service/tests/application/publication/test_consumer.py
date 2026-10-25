@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiokafka import TopicPartition
-from common.utils.markdown import MarkdownChunker
 from pydantic import ValidationError
 
+from common.utils.markdown import MarkdownChunker
 from rag.application.publication import (
     DocumentReadyEvent,
     PublicationEventConsumer,
@@ -86,7 +86,7 @@ def consumer(publication):
 
 
 async def test_commit_happens_after_applied_and_only_for_current_partition(
-    consumer, kafka, publication_store, storage, projection
+        consumer, kafka, publication_store, storage, projection
 ):
     client, factory = kafka
     client.getone.side_effect = [record(content()), asyncio.CancelledError()]
@@ -101,8 +101,8 @@ async def test_commit_happens_after_applied_and_only_for_current_partition(
             [("resource", state.applied_revision.content_revision)]
         )
         assert (
-            documents[0].text == content()["content"]
-            and documents[0].structure.sections
+                documents[0].text == content()["content"]
+                and documents[0].structure.sections
         )
         projection.index.assert_awaited_once()
         assert offsets == {TopicPartition(DOCUMENT_TOPIC, 2): 11}
@@ -123,11 +123,11 @@ async def test_commit_happens_after_applied_and_only_for_current_partition(
 
 
 async def test_platform_consumer_routes_type_and_preserves_metadata(
-    consumer,
-    kafka,
-    pipeline_routes,
-    storage,
-    publication_store,
+        consumer,
+        kafka,
+        pipeline_routes,
+        storage,
+        publication_store,
 ):
     from rag.ingestion import IngestionPipeline
     from rag.ingestion.chunkers import MarkdownChunker as RagMarkdownChunker
@@ -157,10 +157,10 @@ async def test_platform_consumer_routes_type_and_preserves_metadata(
 
 
 async def test_unknown_type_uses_existing_permanent_error_dlq_contract(
-    consumer,
-    kafka,
-    collections,
-    publication_collection,
+        consumer,
+        kafka,
+        collections,
+        publication_collection,
 ):
     client, _ = kafka
     client.getone.side_effect = [
@@ -177,7 +177,7 @@ async def test_unknown_type_uses_existing_permanent_error_dlq_contract(
 
 
 async def test_cleanup_logs_extra_failure_without_changing_primary_error(
-    consumer, monkeypatch
+        consumer, monkeypatch
 ):
     log = Mock()
     monkeypatch.setattr("rag.application.publication.publish.error", log)
@@ -209,7 +209,7 @@ async def test_cleanup_logs_extra_failure_without_changing_primary_error(
 
 @pytest.mark.parametrize("skip", ["duplicate", "stale", "destroyed"])
 async def test_explicit_skips_are_committed_without_rebuilding(
-    consumer, kafka, publication, projection, skip
+        consumer, kafka, publication, projection, skip
 ):
     await publication.publish(
         DocumentReadyEvent.model_validate(content(version=2)).to_document()
@@ -240,7 +240,7 @@ async def test_explicit_skips_are_committed_without_rebuilding(
     ],
 )
 async def test_bad_payload_goes_to_dlq_before_commit_without_business_io(
-    consumer, kafka, collections, publication_collection, bad
+        consumer, kafka, collections, publication_collection, bad
 ):
     message = record(content())
     message.value = bad
@@ -261,7 +261,7 @@ async def test_bad_payload_goes_to_dlq_before_commit_without_business_io(
 
 
 async def test_same_version_conflict_goes_directly_to_dlq_without_rebuild(
-    consumer, kafka, publication, projection
+        consumer, kafka, publication, projection
 ):
     await publication.publish(
         DocumentReadyEvent.model_validate(content()).to_document()
@@ -280,7 +280,7 @@ async def test_same_version_conflict_goes_directly_to_dlq_without_rebuild(
 
 
 async def test_exhausted_projection_failure_keeps_old_applied_and_facts_before_dlq_ack(
-    consumer, kafka, publication, projection, publication_store, storage
+        consumer, kafka, publication, projection, publication_store, storage
 ):
     first = DocumentReadyEvent.model_validate(content()).to_document()
     await publication.publish(first)
@@ -307,7 +307,7 @@ async def test_exhausted_projection_failure_keeps_old_applied_and_facts_before_d
 
 
 async def test_commit_failure_propagates_then_replay_skips_already_applied_build(
-    consumer, kafka, projection, publication_store
+        consumer, kafka, projection, publication_store
 ):
     client, factory = kafka
     message = record(content())
@@ -334,7 +334,7 @@ async def test_commit_failure_propagates_then_replay_skips_already_applied_build
 
 
 async def test_failed_dlq_send_stops_both_loops_and_leaves_source_uncommitted(
-    consumer, kafka
+        consumer, kafka
 ):
     client, factory = kafka
     client.getone.return_value = record({"bad": True})
@@ -349,7 +349,7 @@ async def test_failed_dlq_send_stops_both_loops_and_leaves_source_uncommitted(
 
 
 async def test_destroy_loop_invalidates_content_during_projection_and_both_commit(
-    consumer, kafka, projection, publication_store
+        consumer, kafka, projection, publication_store
 ):
     client, factory = kafka
     client.getone.side_effect = [record(content()), asyncio.CancelledError()]
@@ -382,7 +382,7 @@ async def test_destroy_loop_invalidates_content_during_projection_and_both_commi
 
 
 async def test_cancel_during_projection_keeps_uncommitted_staged_facts(
-    consumer, kafka, projection, publication_store
+        consumer, kafka, projection, publication_store
 ):
     client, _ = kafka
     client.getone.return_value = record(content())
@@ -406,7 +406,7 @@ async def test_cancel_during_projection_keeps_uncommitted_staged_facts(
 
 
 async def test_incomplete_facts_follow_value_error_dlq_policy_without_apply(
-    kafka, publication, storage, projection, publication_store
+        kafka, publication, storage, projection, publication_store
 ):
     original_read = storage.get_documents
     reads = 0
@@ -457,7 +457,7 @@ def test_content_event_builds_canonical_document_without_changing_text(text):
     assert document.structure.total_length == len(text)
     assert document.structure.anchors == parsed.anchors
     for actual, source in zip(
-        document.structure.sections, parsed.sections, strict=True
+            document.structure.sections, parsed.sections, strict=True
     ):
         assert actual == replace(
             source,
@@ -496,8 +496,8 @@ def test_destroy_event_flattens_all_resource_types_without_inventing_type_policy
     )
     assert event.resource_ids == ["a", "b", "b", "c"]
     assert (
-        ResourceDestroyedEvent.model_validate({"typedResourceIds": {}}).resource_ids
-        == []
+            ResourceDestroyedEvent.model_validate({"typedResourceIds": {}}).resource_ids
+            == []
     )
 
 
@@ -548,7 +548,7 @@ async def test_publication_started_requires_both_main_consumers(consumer, kafka)
 
 
 async def test_failed_publication_start_never_signals_ready_and_stops_both(
-    consumer, kafka
+        consumer, kafka
 ):
     client, factory = kafka
     factory.destroy_client.start.side_effect = OSError("broker unavailable")

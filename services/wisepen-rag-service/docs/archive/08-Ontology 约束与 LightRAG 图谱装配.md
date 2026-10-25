@@ -7,7 +7,8 @@
 3. 未知 Entity 类型、Relationship 类型或非法端点关系被丢弃，保留同一 Chunk 中的合法事实；
 4. Entity 的基础身份使用 `ontology domain + entity_type + normalized entity_name`；
 5. Relationship 默认按 ontology 的 source/target 类型保存为有向关系；
-6. Chunk metadata 保存来源事实；图查询需要的来源 Chunk 关联作为 GraphStorage 投影的一部分维护，但 Chunk 检索只暴露 Entity 候选；
+6. Chunk metadata 保存来源事实；图查询需要的来源 Chunk 关联作为 GraphStorage 投影的一部分维护，但 Chunk 检索只暴露 Entity
+   候选；
 7. 确定性 Producer 和 LLM Extractor 统一装配到同一 GraphStore，不建立两套互不兼容的图谱模型；
 8. ontology 划分不同 Producer 负责的 Entity category 和 Relationship type，原则上避免两条路径竞争同一事实；
 9. 确定性 Producer 主要从 Document metadata 和结构事实生成图谱，LLM Extractor 主要补充文本语义；
@@ -100,11 +101,13 @@ relationship_description
 
 RAG 的本地边记录可以使用 `source_node_id`、`target_node_id` 和 `relation_type`，但必须由 ontology 校验方向和端点类别。
 
-当前 ontology 的 `allowed_sources` 和 `allowed_targets` 已经表达方向，因此默认保存有向 Relationship。未来若需要对称关系，应增加明确的 ontology 语义，不在本子方案隐式转成无向边。
+当前 ontology 的 `allowed_sources` 和 `allowed_targets` 已经表达方向，因此默认保存有向 Relationship。未来若需要对称关系，应增加明确的
+ontology 语义，不在本子方案隐式转成无向边。
 
 ### 2.3 Source
 
-来源由 Chunk metadata 中持久化的 Entity/Relationship 抽取事实及其所属 Chunk 隐含表达。GraphIndexer 将来源 Chunk 关联写入 Neo4j 图投影；图查询通过关联取得 Chunk ID 并回查 Mongo Chunk，不另设 GraphChunkSource 集合。
+来源由 Chunk metadata 中持久化的 Entity/Relationship 抽取事实及其所属 Chunk 隐含表达。GraphIndexer 将来源 Chunk 关联写入
+Neo4j 图投影；图查询通过关联取得 Chunk ID 并回查 Mongo Chunk，不另设 GraphChunkSource 集合。
 
 ## 3. 两条 Producer 路径的装配
 
@@ -116,13 +119,16 @@ RAG 的本地边记录可以使用 `source_node_id`、`target_node_id` 和 `rela
 - Document structure；
 - ontology 允许的 category 和 relation type。
 
-它适合生成结构上确定的 Resource、组织、人员、栏目、文档层级等事实，并为这些事实生成稳定的 Entity/Relationship 和 metadata filter values。
+它适合生成结构上确定的 Resource、组织、人员、栏目、文档层级等事实，并为这些事实生成稳定的 Entity/Relationship 和 metadata
+filter values。
 
-在五类核心抽象中，这些规则由 GraphIndexer 调用，输入来自 Chunk 已携带的结构字段和必要 metadata。Document 级原始信息在准备或分块时传递，不要求 `Indexer.index()` 再接收 Document。
+在五类核心抽象中，这些规则由 GraphIndexer 调用，输入来自 Chunk 已携带的结构字段和必要 metadata。Document 级原始信息在准备或分块时传递，不要求
+`Indexer.index()` 再接收 Document。
 
 ### 3.2 LLM Extractor
 
-LLM Extractor 作为 GraphExtractor Transformer，读取摄入中的 Chunk 和注入的 ontology，负责补充正文中表达的语义 Entity/Relationship：
+LLM Extractor 作为 GraphExtractor Transformer，读取摄入中的 Chunk 和注入的 ontology，负责补充正文中表达的语义
+Entity/Relationship：
 
 - 不再使用 `chunk_selector`；
 - `graph_enabled=True` 时接收该 revision 的完整 Chunk 列表；
@@ -131,7 +137,8 @@ LLM Extractor 作为 GraphExtractor Transformer，读取摄入中的 Chunk 和�
 - description 可以为空；
 - 可以为已有结构 Entity 补充 description，但不要求所有结构 Entity 都经过 LLM。
 
-结果写入普通 `metadata["entities"]` 和 `metadata["relationships"]`；Transformer 不访问存储，metadata 本身不引入 Pydantic 校验。
+结果写入普通 `metadata["entities"]` 和 `metadata["relationships"]`；Transformer 不访问存储，metadata 本身不引入 Pydantic
+校验。
 
 ### 3.3 统一装配
 
@@ -151,7 +158,8 @@ Chunk metadata + 结构字段
   -> Neo4j topology / Entity+Relationship vector projections
 ```
 
-不建立 producer 优先级、冲突事件或复杂事实合并状态。相同稳定 ID 的重复写入必须幂等；字段协调只采用最小的确定性 upsert 规则，不扩展为事实仲裁系统。
+不建立 producer 优先级、冲突事件或复杂事实合并状态。相同稳定 ID 的重复写入必须幂等；字段协调只采用最小的确定性 upsert
+规则，不扩展为事实仲裁系统。
 
 ## 4. Plugin 身份与注册表
 

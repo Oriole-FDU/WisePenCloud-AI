@@ -13,10 +13,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from common.utils.markdown.chunking.tokenizer import default_token_counter
-from common.utils.retrieval import ModelReranker
 from pydantic import TypeAdapter
 
+from common.utils.markdown.chunking.tokenizer import default_token_counter
+from common.utils.retrieval import ModelReranker
 from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.application.graph import (
@@ -115,14 +115,14 @@ async def main() -> None:
     revisions = {}
     acls = {}
     for (
-        resource,
-        text,
-        name,
-        category,
-        description,
-        target,
-        target_description,
-        predicate,
+            resource,
+            text,
+            name,
+            category,
+            description,
+            target,
+            target_description,
+            predicate,
     ) in rows:
         revision = ContentRevision.create(
             resource_id=resource, document_version=1, text=text
@@ -206,22 +206,22 @@ async def main() -> None:
         )
 
     async def neighbors(
-        ids, *, direction, relation_types=None, filters=None, limit=100
+            ids, *, direction, relation_types=None, filters=None, limit=100
     ):
         matching = [
             edge
             for edge in all_edges
             if (
-                (
-                    direction in (GraphDirection.OUTGOING, GraphDirection.BOTH)
-                    and edge.source_id in ids
-                )
-                or (
-                    direction in (GraphDirection.INCOMING, GraphDirection.BOTH)
-                    and edge.target_id in ids
-                )
-            )
-            and (relation_types is None or edge.relation_type in relation_types)
+                       (
+                               direction in (GraphDirection.OUTGOING, GraphDirection.BOTH)
+                               and edge.source_id in ids
+                       )
+                       or (
+                               direction in (GraphDirection.INCOMING, GraphDirection.BOTH)
+                               and edge.target_id in ids
+                       )
+               )
+               and (relation_types is None or edge.relation_type in relation_types)
         ]
         selected = sorted({edge.id for edge in matching})[:limit]
         return sorted(
@@ -251,8 +251,8 @@ async def main() -> None:
 
     graph_matches = []
     for kind, fact in (
-        (GraphVectorKind.ENTITY, next(iter(facts[0][0].values()))),
-        (GraphVectorKind.RELATIONSHIP, next(iter(facts[0][1].values()))),
+            (GraphVectorKind.ENTITY, next(iter(facts[0][0].values()))),
+            (GraphVectorKind.RELATIONSHIP, next(iter(facts[0][1].values()))),
     ):
         graph_matches.append(
             VectorMatch(
@@ -377,9 +377,9 @@ async def main() -> None:
         )
     )
     for name, ids, direction in (
-        ("traversal_person", [person], GraphDirection.OUTGOING),
-        ("traversal_company", [company], GraphDirection.BOTH),
-        ("traversal_shared", [person, company], GraphDirection.BOTH),
+            ("traversal_person", [person], GraphDirection.OUTGOING),
+            ("traversal_company", [company], GraphDirection.BOTH),
+            ("traversal_shared", [person, company], GraphDirection.BOTH),
     ):
         result = await traversal.traverse(ids, snapshot=snapshot, direction=direction)
         cases.append(
@@ -470,9 +470,9 @@ async def main() -> None:
         )
         print(f"{name}: {output / (name + '.json')}")
     for name, result_type in (
-        ("graph", GraphRetrievalResult),
-        ("vector", list[ChunkHit]),
-        ("traversal", GraphTraversalResult),
+            ("graph", GraphRetrievalResult),
+            ("vector", list[ChunkHit]),
+            ("traversal", GraphTraversalResult),
     ):
         schema = TypeAdapter(result_type).json_schema()
         (output / f"schema_{name}.json").write_text(
@@ -486,19 +486,19 @@ async def main() -> None:
         "",
     ]
     for model in (
-        GraphDirection,
-        GraphRelationOption,
-        GraphNode,
-        GraphEdge,
-        GraphEntitySource,
-        GraphEntity,
-        GraphRelationshipSource,
-        GraphRelationship,
-        Chunk,
-        GraphNodeReference,
-        ChunkHit,
-        GraphRetrievalResult,
-        GraphTraversalResult,
+            GraphDirection,
+            GraphRelationOption,
+            GraphNode,
+            GraphEdge,
+            GraphEntitySource,
+            GraphEntity,
+            GraphRelationshipSource,
+            GraphRelationship,
+            Chunk,
+            GraphNodeReference,
+            ChunkHit,
+            GraphRetrievalResult,
+            GraphTraversalResult,
     ):
         models.extend(
             [

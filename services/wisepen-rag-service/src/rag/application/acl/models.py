@@ -26,9 +26,9 @@ class PermissionScope:
 
     @classmethod
     def from_group_roles(
-        cls,
-        user_id: str,
-        group_roles: Mapping[str, GroupRoleType | None],
+            cls,
+            user_id: str,
+            group_roles: Mapping[str, GroupRoleType | None],
     ) -> "PermissionScope":
         # 浅拷贝一次，避免调用方后续修改影响授权快照
         return cls(user_id=user_id, group_roles=dict(group_roles))
@@ -64,7 +64,7 @@ class ResourceAcl:
     group_acls: list[GroupResourceAcl] = field(default_factory=list)
 
     def can_read(
-        self, scope: PermissionScope, *, document_version: int | None = None
+            self, scope: PermissionScope, *, document_version: int | None = None
     ) -> bool:
         """投影上游预计算 ACL 的 VIEW 判定；用户覆盖优先，群组授权按位或。"""
         user_id = scope.user_id
@@ -89,8 +89,8 @@ class ResourceAcl:
                 continue
             # 上游管理员先于市场版本限制；普通成员的授权只适用于售卖版本。
             if (
-                group_acl.market_offer_version is not None
-                and document_version != group_acl.market_offer_version
+                    group_acl.market_offer_version is not None
+                    and document_version != group_acl.market_offer_version
             ):
                 continue
             if group_acl.default_readable:

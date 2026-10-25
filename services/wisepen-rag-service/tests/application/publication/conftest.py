@@ -14,11 +14,11 @@ from rag.ingestion.pipeline import IngestionPipeline
 @pytest.fixture
 def make_document():
     def make(
-        *,
-        version=1,
-        text="# 标题\n\n  中文正文😀。\n\n",
-        resource_id="resource",
-        metadata=None,
+            *,
+            version=1,
+            text="# 标题\n\n  中文正文😀。\n\n",
+            resource_id="resource",
+            metadata=None,
     ):
         document = DocumentReadyEvent.model_validate(
             {"resourceId": resource_id, "version": version, "content": text}

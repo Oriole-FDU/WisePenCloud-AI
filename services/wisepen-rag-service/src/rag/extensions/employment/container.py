@@ -11,7 +11,6 @@ from rag.extensions.base import Extension
 from rag.ingestion import IngestionPipeline
 from rag.ingestion.indexers import VectorIndexer
 from rag.storage.vector import IndexableField, IndexKind, VectorCollection
-
 from .api import build_api
 from .metadata import EmploymentMetadataTransformer, employment_projection
 from .tools import EmploymentTools

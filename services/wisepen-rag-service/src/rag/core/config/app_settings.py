@@ -4,8 +4,9 @@ import asyncio
 import threading
 
 import yaml
-from common.logger import error
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from common.logger import error
 
 
 class AppSettings(BaseModel):

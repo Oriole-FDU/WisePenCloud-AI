@@ -11,11 +11,11 @@ from rag.application.common.snapshot import ResourceSnapshot
 
 
 async def test_documents_omit_invisible_and_missing_facts_preserving_order(
-    snapshot_reader,
-    storage,
-    read_acls,
-    make_read_document,
-    publish_read_document,
+        snapshot_reader,
+        storage,
+        read_acls,
+        make_read_document,
+        publish_read_document,
 ):
     a, b, denied, missing = [
         make_read_document(resource_id)
@@ -43,12 +43,12 @@ async def test_documents_omit_invisible_and_missing_facts_preserving_order(
 
 
 async def test_chunks_inherit_resource_permission_and_match_selected_revision(
-    snapshot_reader,
-    storage,
-    read_acls,
-    make_read_document,
-    make_read_chunk,
-    publish_read_document,
+        snapshot_reader,
+        storage,
+        read_acls,
+        make_read_document,
+        make_read_chunk,
+        publish_read_document,
 ):
     first, newest, denied = (
         make_read_document(),
@@ -82,15 +82,15 @@ async def test_chunks_inherit_resource_permission_and_match_selected_revision(
 
 @pytest.mark.parametrize("first_read", ["documents", "chunks"])
 async def test_document_and_chunk_suboperations_share_snapshot(
-    snapshot_reader,
-    storage,
-    read_acls,
-    read_acl_repository,
-    publication_store,
-    make_read_document,
-    make_read_chunk,
-    publish_read_document,
-    first_read,
+        snapshot_reader,
+        storage,
+        read_acls,
+        read_acl_repository,
+        publication_store,
+        make_read_document,
+        make_read_chunk,
+        publish_read_document,
+        first_read,
 ):
     document = make_read_document()
     chunk = make_read_chunk(document)
@@ -117,11 +117,11 @@ async def test_document_and_chunk_suboperations_share_snapshot(
 
 
 async def test_document_read_during_apply_change_uses_pinned_revision(
-    snapshot_reader,
-    storage,
-    read_acls,
-    make_read_document,
-    publish_read_document,
+        snapshot_reader,
+        storage,
+        read_acls,
+        make_read_document,
+        publish_read_document,
 ):
     first, newest = make_read_document(), make_read_document(version=2, text="新版")
     await publish_read_document(first)
@@ -145,12 +145,12 @@ async def test_document_read_during_apply_change_uses_pinned_revision(
 
 
 async def test_chunk_read_after_apply_change_does_not_mix_versions(
-    snapshot_reader,
-    storage,
-    read_acls,
-    make_read_document,
-    make_read_chunk,
-    publish_read_document,
+        snapshot_reader,
+        storage,
+        read_acls,
+        make_read_document,
+        make_read_chunk,
+        publish_read_document,
 ):
     first, newest = make_read_document(), make_read_document(version=2, text="新版")
     await publish_read_document(first)
@@ -177,13 +177,13 @@ async def test_chunk_read_after_apply_change_does_not_mix_versions(
     ],
 )
 async def test_bad_document_identity_does_not_block_other_documents(
-    snapshot_reader,
-    storage,
-    read_acls,
-    make_read_document,
-    publish_read_document,
-    changed_field,
-    value,
+        snapshot_reader,
+        storage,
+        read_acls,
+        make_read_document,
+        publish_read_document,
+        changed_field,
+        value,
 ):
     a, b = make_read_document("a"), make_read_document("b")
     for document in (a, b):
@@ -199,12 +199,12 @@ async def test_bad_document_identity_does_not_block_other_documents(
 
 
 async def test_missing_pinned_facts_do_not_switch_to_new_revision(
-    snapshot_reader,
-    storage,
-    read_acls,
-    make_read_document,
-    make_read_chunk,
-    publish_read_document,
+        snapshot_reader,
+        storage,
+        read_acls,
+        make_read_document,
+        make_read_chunk,
+        publish_read_document,
 ):
     first, newest = make_read_document(), make_read_document(version=2, text="新版")
     await publish_read_document(first)
@@ -226,13 +226,13 @@ async def test_missing_pinned_facts_do_not_switch_to_new_revision(
 
 
 async def test_destroyed_or_revoked_after_selection_is_observed_by_new_call(
-    snapshot_reader,
-    storage,
-    read_acls,
-    publication_store,
-    make_read_document,
-    make_read_chunk,
-    publish_read_document,
+        snapshot_reader,
+        storage,
+        read_acls,
+        publication_store,
+        make_read_document,
+        make_read_chunk,
+        publish_read_document,
 ):
     document = make_read_document()
     chunk = make_read_chunk(document)
@@ -257,11 +257,11 @@ async def test_destroyed_or_revoked_after_selection_is_observed_by_new_call(
 
 
 async def test_empty_and_missing_chunks_have_no_state_or_acl_io(
-    snapshot_reader,
-    storage,
-    read_acl_repository,
-    publication_store,
-    collections,
+        snapshot_reader,
+        storage,
+        read_acl_repository,
+        publication_store,
+        collections,
 ):
     snapshot = ResourceSnapshot(PermissionScope("reader"))
     assert await snapshot_reader.read_documents([], snapshot=snapshot) == []
@@ -276,14 +276,14 @@ async def test_empty_and_missing_chunks_have_no_state_or_acl_io(
 @pytest.mark.parametrize("method", ["documents", "chunks"])
 @pytest.mark.parametrize("exception", [OSError, ValueError])
 async def test_content_io_and_decoding_errors_propagate(
-    snapshot_reader,
-    storage,
-    read_acls,
-    make_read_document,
-    make_read_chunk,
-    publish_read_document,
-    method,
-    exception,
+        snapshot_reader,
+        storage,
+        read_acls,
+        make_read_document,
+        make_read_chunk,
+        publish_read_document,
+        method,
+        exception,
 ):
     document = make_read_document()
     await publish_read_document(document)
@@ -303,10 +303,10 @@ async def test_content_io_and_decoding_errors_propagate(
 
 
 async def test_shared_reading_use_case_serves_distinct_users_without_request_state(
-    snapshot_reader,
-    read_acls,
-    make_read_document,
-    publish_read_document,
+        snapshot_reader,
+        read_acls,
+        make_read_document,
+        publish_read_document,
 ):
     document = make_read_document()
     await publish_read_document(document)

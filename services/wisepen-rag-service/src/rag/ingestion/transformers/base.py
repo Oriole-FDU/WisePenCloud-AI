@@ -7,8 +7,8 @@ from rag.core.schema import Chunk, Document
 
 class Transformer(Protocol):
     async def transform(
-        self,
-        chunks: list[Chunk],
-        *,
-        document: Document | None = None,
+            self,
+            chunks: list[Chunk],
+            *,
+            document: Document | None = None,
     ) -> list[Chunk]: ...

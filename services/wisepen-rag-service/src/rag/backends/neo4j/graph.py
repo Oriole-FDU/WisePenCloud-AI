@@ -10,7 +10,6 @@ from pydantic import TypeAdapter
 from rag.core.schema import GraphEdge, GraphNode
 from rag.core.schema.filters import MetadataFilters
 from rag.storage.graph import GraphDirection, GraphSourceProjection, GraphStorage
-
 from .filters import compile_filters
 
 _node_adapter = TypeAdapter(GraphNode)
@@ -25,12 +24,12 @@ class Neo4jGraphStorage(GraphStorage):
     """
 
     def __init__(
-        self,
-        *,
-        driver: AsyncDriver,
-        database: str = "neo4j",
-        graph_name: str = "rag_v4",
-        batch_size: int = 64,
+            self,
+            *,
+            driver: AsyncDriver,
+            database: str = "neo4j",
+            graph_name: str = "rag_v4",
+            batch_size: int = 64,
     ) -> None:
         # 图名必须是合法 Cypher 标识符
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", graph_name):
@@ -97,7 +96,7 @@ class Neo4jGraphStorage(GraphStorage):
             )
 
         for start in range(0, len(rows), self._batch_size):
-            batch = rows[start : start + self._batch_size]
+            batch = rows[start: start + self._batch_size]
             async with (
                 self._driver.session(database=self._database) as session,
                 await session.begin_transaction() as transaction,
@@ -189,10 +188,10 @@ class Neo4jGraphStorage(GraphStorage):
             await transaction.commit()
 
     async def _remove_sources(
-        self,
-        transaction: AsyncTransaction,
-        expression: str,
-        parameters: dict[str, object],
+            self,
+            transaction: AsyncTransaction,
+            expression: str,
+            parameters: dict[str, object],
     ) -> dict:
         """删除匹配的来源节点，返回被解除引用的节点/边 ID。"""
         result = await transaction.run(
@@ -212,7 +211,7 @@ class Neo4jGraphStorage(GraphStorage):
         return dict(affected)
 
     async def _cleanup_orphans(
-        self, transaction: AsyncTransaction, affected: dict
+            self, transaction: AsyncTransaction, affected: dict
     ) -> None:
         """只清理本次触碰的图元，不做全图垃圾扫描。"""
 
@@ -247,7 +246,7 @@ class Neo4jGraphStorage(GraphStorage):
         return records
 
     async def get_nodes(
-        self, node_ids: list[str], *, filters: MetadataFilters | None = None
+            self, node_ids: list[str], *, filters: MetadataFilters | None = None
     ) -> list[GraphNode]:
         if not node_ids:
             return []
@@ -282,7 +281,7 @@ class Neo4jGraphStorage(GraphStorage):
         return nodes
 
     async def get_relations(
-        self, edge_ids: list[str], *, filters: MetadataFilters | None = None
+            self, edge_ids: list[str], *, filters: MetadataFilters | None = None
     ) -> list[GraphEdge]:
         if not edge_ids:
             return []
@@ -304,13 +303,13 @@ class Neo4jGraphStorage(GraphStorage):
         return self._decode_edges(records)
 
     async def get_neighbors(
-        self,
-        node_ids: list[str],
-        *,
-        direction: GraphDirection = GraphDirection.OUTGOING,
-        relation_types: list[str] | None = None,
-        filters: MetadataFilters | None = None,
-        limit: int | None = 100,
+            self,
+            node_ids: list[str],
+            *,
+            direction: GraphDirection = GraphDirection.OUTGOING,
+            relation_types: list[str] | None = None,
+            filters: MetadataFilters | None = None,
+            limit: int | None = 100,
     ) -> list[GraphEdge]:
         direction = GraphDirection(direction)
         if limit is not None and (type(limit) is not int or limit <= 0):

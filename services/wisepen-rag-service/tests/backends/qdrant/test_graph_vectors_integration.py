@@ -23,7 +23,7 @@ def embedding():
 
 
 async def test_real_source_replacement_fact_reduction_empty_and_other_source_preservation(
-    real_graph_vectors, graph_ontology, chunk, make_graph_facts, embedding
+        real_graph_vectors, graph_ontology, chunk, make_graph_facts, embedding
 ):
     entities, relationships, _ = real_graph_vectors
     make_graph_facts(chunk)
@@ -71,7 +71,7 @@ async def test_real_source_replacement_fact_reduction_empty_and_other_source_pre
 
 @pytest.mark.parametrize("mode", list(GraphRetrievalMode))
 async def test_real_graph_seed_modes_with_dense_only_collections(
-    real_graph_vectors, graph_ontology, chunk, make_graph_facts, embedding, mode
+        real_graph_vectors, graph_ontology, chunk, make_graph_facts, embedding, mode
 ):
     entities, relationships, _ = real_graph_vectors
     make_graph_facts(chunk)

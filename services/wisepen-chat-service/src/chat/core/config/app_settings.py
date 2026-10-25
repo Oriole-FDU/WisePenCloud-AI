@@ -117,6 +117,8 @@ class AppSettings(BaseModel):
     SKILL_MATCH_TOP_K: int = 20
 
     # MCP Native 配置
+    # 实验分支默认只发现主 MCP 的工具，搜索实验不连接沙箱服务。
+    MCP_SANDBOX_ENABLED: bool = False
     MCP_SYSTEM_LIST_TOOLS_CACHE_TTL_SECONDS: float = 60.0
     MCP_USER_LIST_TOOLS_CACHE_TTL_SECONDS: float = 60.0
     MCP_DEFAULT_TIMEOUT_SECONDS: float = 15.0

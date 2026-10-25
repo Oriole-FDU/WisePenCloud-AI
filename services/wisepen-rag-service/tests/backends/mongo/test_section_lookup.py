@@ -19,7 +19,7 @@ def make_document(resource_id, version):
 
 
 async def test_lookup_batches_deduplicates_documents_and_restores_request_order(
-    storage, collections
+        storage, collections
 ):
     first, newer, other = (
         make_document("a", 1),
@@ -50,7 +50,7 @@ async def test_lookup_missing_sections_returns_no_documents(storage, collections
 
 @pytest.mark.parametrize("failure", ["query", "decode"])
 async def test_lookup_propagates_backend_and_decode_errors(
-    storage, collections, failure
+        storage, collections, failure
 ):
     document = make_document("a", 1)
     await storage.upsert_documents([document])

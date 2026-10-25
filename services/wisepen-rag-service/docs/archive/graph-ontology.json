@@ -15,8 +15,12 @@
     "works_at": {
       "relation_type": "works_at",
       "description": "起点人员在终点组织任职，必须有正文依据。",
-      "allowed_sources": ["Person"],
-      "allowed_targets": ["Organization"]
+      "allowed_sources": [
+        "Person"
+      ],
+      "allowed_targets": [
+        "Organization"
+      ]
     }
   }
 }

@@ -16,12 +16,12 @@ class GraphFactLoader:
     """一次调用内共享来源读取与解析；筛选条件不承担授权职责。"""
 
     def __init__(
-        self,
-        *,
-        snapshot_reader: ResourceSnapshotReader,
-        graph_reader: GraphReader,
-        snapshot: ResourceSnapshot,
-        filters: MetadataFilters | None = None,
+            self,
+            *,
+            snapshot_reader: ResourceSnapshotReader,
+            graph_reader: GraphReader,
+            snapshot: ResourceSnapshot,
+            filters: MetadataFilters | None = None,
     ) -> None:
         self.snapshot_reader = snapshot_reader
         self.graph_reader = graph_reader
@@ -42,15 +42,15 @@ class GraphFactLoader:
             if key not in self._observed
         ]
         for start in range(0, len(pending), 64):
-            batch = pending[start : start + 64]
+            batch = pending[start: start + 64]
             chunks = await self.snapshot_reader.read_chunks(
                 batch, snapshot=self.snapshot
             )
             for chunk in chunks:
                 # 无图事实的 Chunk 不进入缓存。
                 if (
-                    "entities" not in chunk.metadata
-                    and "relationships" not in chunk.metadata
+                        "entities" not in chunk.metadata
+                        and "relationships" not in chunk.metadata
                 ):
                     continue
 
@@ -107,7 +107,7 @@ class GraphFactLoader:
         return edges
 
     async def visible_connections(
-        self, node_ids: list[str]
+            self, node_ids: list[str]
     ) -> dict[str, list[GraphRelationOption]]:
         """完整定位一跳后再授权，不能用检索数量上限推导连接不存在。"""
         # 按节点收集其一跳关系的方向集合。
@@ -126,8 +126,8 @@ class GraphFactLoader:
         )
         for edge in await self.read_edges(projections):
             for node_id, direction in (
-                (edge.source_id, GraphDirection.OUTGOING),
-                (edge.target_id, GraphDirection.INCOMING),
+                    (edge.source_id, GraphDirection.OUTGOING),
+                    (edge.target_id, GraphDirection.INCOMING),
             ):
                 if node_id in directions:
                     previous = directions[node_id].get(edge.relation_type)
@@ -149,7 +149,7 @@ class GraphFactLoader:
 
 
 def _matches_source(
-    metadata: dict[str, str | None], filters: MetadataFilters
+        metadata: dict[str, str | None], filters: MetadataFilters
 ) -> bool:
     """当前事实复核与存储边界相同的来源筛选语义。"""
     matches = []

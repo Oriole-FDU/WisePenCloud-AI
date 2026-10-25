@@ -19,7 +19,7 @@ from rag.ingestion.pipeline import IngestionPipeline
 
 
 async def test_publish_saves_facts_before_every_required_projection(
-    storage, publication_store, make_document
+        storage, publication_store, make_document
 ):
     calls = []
     document = make_document()
@@ -42,8 +42,8 @@ async def test_publish_saves_facts_before_every_required_projection(
     async def write(documents):
         assert documents[0] is document
         assert (await publication_store.get_states(["resource"]))[
-            0
-        ].staged_revision == revision
+                   0
+               ].staged_revision == revision
         calls.append("document")
         await original_write(documents)
 
@@ -64,8 +64,8 @@ async def test_publish_saves_facts_before_every_required_projection(
         assert saved == chunks
         assert saved[0].retrieval_text.startswith("标题\n\n增强上下文\n\n")
         assert (await publication_store.get_states(["resource"]))[
-            0
-        ].applied_revision is None
+                   0
+               ].applied_revision is None
 
     async def second_projection(chunks):
         calls.append("projection-2")
@@ -118,7 +118,7 @@ async def test_publish_saves_facts_before_every_required_projection(
 
 
 async def test_identity_mismatch_has_no_io(
-    publication, collections, publication_collection, projection, make_document
+        publication, collections, publication_collection, projection, make_document
 ):
     with pytest.raises(ContentIdentityError):
         await publication.publish(replace(make_document(), content_revision="wrong"))
@@ -131,13 +131,13 @@ async def test_identity_mismatch_has_no_io(
 
 @pytest.mark.parametrize("skip", ["duplicate", "stale", "destroyed"])
 async def test_ignored_submissions_do_not_write_or_rebuild_metadata(
-    publication,
-    publication_store,
-    collections,
-    projection,
-    storage,
-    make_document,
-    skip,
+        publication,
+        publication_store,
+        collections,
+        projection,
+        storage,
+        make_document,
+        skip,
 ):
     document = make_document()
     assert await publication.publish(document) is PublicationAction.APPLIED
@@ -165,12 +165,12 @@ async def test_ignored_submissions_do_not_write_or_rebuild_metadata(
         collection.bulk_write.assert_not_awaited()
     projection.index.assert_not_awaited()
     assert (await storage.get_documents([("resource", document.content_revision)]))[
-        0
-    ].metadata == document.metadata
+               0
+           ].metadata == document.metadata
 
 
 async def test_same_version_conflict_stops_before_content_or_projection(
-    publication, collections, projection, make_document
+        publication, collections, projection, make_document
 ):
     await publication.publish(make_document())
     for collection in collections:
@@ -187,7 +187,7 @@ async def test_same_version_conflict_stops_before_content_or_projection(
     "failed_stage", ["document", "transformer", "chunks", "projection"]
 )
 async def test_failed_build_preserves_old_applied_and_completed_facts(
-    storage, publication_store, make_document, failed_stage
+        storage, publication_store, make_document, failed_stage
 ):
     projection = SimpleNamespace(index=AsyncMock())
     later_projection = SimpleNamespace(index=AsyncMock())
@@ -237,7 +237,7 @@ async def test_failed_build_preserves_old_applied_and_completed_facts(
 
 
 async def test_staged_replay_can_finish_after_projection_failure(
-    publication, projection, publication_store, make_document
+        publication, projection, publication_store, make_document
 ):
     document = make_document()
     projection.index.side_effect = RuntimeError("projection failed")
@@ -252,27 +252,27 @@ async def test_staged_replay_can_finish_after_projection_failure(
 
 @pytest.mark.parametrize("text", ["", " \n\t\n"])
 async def test_zero_chunk_documents_are_published(
-    publication, projection, storage, publication_store, make_document, text
+        publication, projection, storage, publication_store, make_document, text
 ):
     document = make_document(text=text)
     assert await publication.publish(document) is PublicationAction.APPLIED
     projection.index.assert_awaited_once_with([])
     assert (
-        await storage.get_revision_chunks(
-            resource_id="resource", content_revision=document.content_revision
-        )
-        == []
+            await storage.get_revision_chunks(
+                resource_id="resource", content_revision=document.content_revision
+            )
+            == []
     )
     assert await storage.get_documents([("resource", document.content_revision)]) == [
         document
     ]
     assert (await publication_store.get_states(["resource"]))[
-        0
-    ].applied_revision.content_revision == document.content_revision
+               0
+           ].applied_revision.content_revision == document.content_revision
 
 
 async def test_heading_only_document_is_published_with_common_chunking(
-    publication, projection, storage, make_document
+        publication, projection, storage, make_document
 ):
     document = make_document(text="# 只有标题\n")
     assert await publication.publish(document) is PublicationAction.APPLIED
@@ -287,7 +287,7 @@ async def test_heading_only_document_is_published_with_common_chunking(
 @pytest.mark.parametrize("change", ["newer", "destroyed"])
 @pytest.mark.parametrize("timing", ["projection", "read"])
 async def test_build_or_read_race_cannot_publish_invalidated_candidate(
-    publication, projection, publication_store, storage, make_document, change, timing
+        publication, projection, publication_store, storage, make_document, change, timing
 ):
     first, candidate = make_document(), make_document(version=2)
     await publication.publish(first)
@@ -326,9 +326,9 @@ async def test_build_or_read_race_cannot_publish_invalidated_candidate(
         assert state.applied_revision.content_revision == first.content_revision
     else:
         assert (
-            state.destroyed
-            and state.applied_revision is None
-            and state.staged_revision is None
+                state.destroyed
+                and state.applied_revision is None
+                and state.staged_revision is None
         )
     # 失效构建仍可留下事实；本轮不把发布失效扩展为物理补偿流程。
     assert await storage.get_documents([("resource", candidate.content_revision)]) == [

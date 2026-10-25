@@ -55,9 +55,9 @@ def test_event_rejects_invalid_external_types(change):
 
 
 async def test_multiple_registered_routes_and_default_use_the_same_publisher(
-    storage,
-    publication_store,
-    make_document,
+        storage,
+        publication_store,
+        make_document,
 ):
     projections = {
         key: SimpleNamespace(index=AsyncMock()) for key in (None, "history", "science")
@@ -132,7 +132,7 @@ async def test_identity_check_precedes_type_route(make_document):
 
 
 async def test_route_is_selected_once_before_stage(
-    storage, publication_store, make_document
+        storage, publication_store, make_document
 ):
     first, replacement = (
         SimpleNamespace(index=AsyncMock()),
@@ -162,17 +162,17 @@ async def test_route_is_selected_once_before_stage(
         pipelines=routes,
     )
     assert (
-        await publisher.publish(replace(make_document(), type="history"))
-        is PublicationAction.APPLIED
+            await publisher.publish(replace(make_document(), type="history"))
+            is PublicationAction.APPLIED
     )
     first.index.assert_awaited_once()
     replacement.index.assert_not_awaited()
 
 
 async def test_type_and_metadata_require_new_version_and_destroyed_still_blocks_publish(
-    storage,
-    publication_store,
-    make_document,
+        storage,
+        publication_store,
+        make_document,
 ):
     first, second = (
         SimpleNamespace(index=AsyncMock()),
@@ -200,8 +200,8 @@ async def test_type_and_metadata_require_new_version_and_destroyed_still_blocks_
     assert await publisher.publish(changed) is PublicationAction.ALREADY_APPLIED
     second.index.assert_not_awaited()
     assert (
-        await storage.get_documents([(original.resource_id, original.content_revision)])
-    )[0] == original
+               await storage.get_documents([(original.resource_id, original.content_revision)])
+           )[0] == original
     # 替换路由也不会自动重建相同已发布 revision。
     routes["history"] = pipeline(second)
     assert await publisher.publish(original) is PublicationAction.ALREADY_APPLIED
@@ -212,18 +212,18 @@ async def test_type_and_metadata_require_new_version_and_destroyed_still_blocks_
     assert await publisher.publish(original) is PublicationAction.STALE
     await publisher.destroy_resources([original.resource_id])
     assert (
-        await publisher.publish(replace(make_document(version=3), type="history"))
-        is PublicationAction.DESTROYED
+            await publisher.publish(replace(make_document(version=3), type="history"))
+            is PublicationAction.DESTROYED
     )
     assert first.index.await_count == 1 and second.index.await_count == 1
 
 
 async def test_registered_graph_failure_keeps_old_applied_and_saved_metadata(
-    storage,
-    publication_store,
-    make_document,
-    graph_ontology,
-    make_graph_facts,
+        storage,
+        publication_store,
+        make_document,
+        graph_ontology,
+        make_graph_facts,
 ):
     vectors = SimpleNamespace(upsert=AsyncMock())
     embedding = SimpleNamespace(

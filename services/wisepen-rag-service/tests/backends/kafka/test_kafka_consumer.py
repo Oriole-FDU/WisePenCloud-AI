@@ -35,14 +35,14 @@ class Broker:
         self.producer_factory = Mock(return_value=self.producer)
 
     def record(
-        self,
-        *,
-        topic="main",
-        value=b'{"n":1}',
-        key=b"resource",
-        partition=2,
-        offset=10,
-        headers=None,
+            self,
+            *,
+            topic="main",
+            value=b'{"n":1}',
+            key=b"resource",
+            partition=2,
+            offset=10,
+            headers=None,
     ):
         return SimpleNamespace(
             topic=topic,
@@ -144,7 +144,7 @@ async def test_success_decodes_wire_format_then_commits_exact_partition(broker, 
 
 
 async def test_quick_retry_backoff_is_one_two_four_seconds_then_dlq(
-    broker, monkeypatch
+        broker, monkeypatch
 ):
     waits = []
     original_sleep = asyncio.sleep
@@ -179,8 +179,8 @@ async def test_unknown_program_error_has_only_process_local_retry_budget(broker)
     assert set(broker.clients) == {"main"}
     assert dict(broker.sent[0].headers)["upstream"] == b"original"
     assert (
-        dict(broker.sent[0].headers)[DeliveryHeader.EXCEPTION_TYPE]
-        == b"builtins.KeyError"
+            dict(broker.sent[0].headers)[DeliveryHeader.EXCEPTION_TYPE]
+            == b"builtins.KeyError"
     )
 
 
@@ -232,7 +232,7 @@ async def test_forward_failure_propagates_without_committing_source(broker):
 
 
 async def test_commit_failure_after_successful_forward_preserves_published_dlq(
-    broker,
+        broker,
 ):
     error = RuntimeError("commit failed")
     broker.commit_error = error
@@ -246,7 +246,7 @@ async def test_commit_failure_after_successful_forward_preserves_published_dlq(
 
 @pytest.mark.parametrize("stage", ["producer-start", "consumer-start", "getone"])
 async def test_infrastructure_failure_closes_all_resources_and_propagates(
-    broker, stage
+        broker, stage
 ):
     error = RuntimeError(stage)
     if stage == "producer-start":

@@ -11,7 +11,6 @@ from common.utils.retrieval import (
     Retriever,
     RoundRobinFusion,
 )
-
 from rag.core.schema.filters import MetadataFilters
 from rag.retrievers.vector import embed_query
 from rag.storage.graph import GraphVectorKind
@@ -38,14 +37,14 @@ class GraphRetriever(Retriever[GraphMatch]):
     """初始化固定路线、预算与融合；查询调用只接收字符串，无请求状态。"""
 
     def __init__(
-        self,
-        *,
-        embedding_client: EmbeddingClient,
-        routes: list[tuple[GraphVectorKind, VectorReader, int]],
-        candidate_limit: int = 60,
-        filters: MetadataFilters | None = None,
-        include_embedding: bool = False,
-        fusion: Fusion[GraphMatch] | None = None,
+            self,
+            *,
+            embedding_client: EmbeddingClient,
+            routes: list[tuple[GraphVectorKind, VectorReader, int]],
+            candidate_limit: int = 60,
+            filters: MetadataFilters | None = None,
+            include_embedding: bool = False,
+            fusion: Fusion[GraphMatch] | None = None,
     ) -> None:
         super().__init__(top_k=candidate_limit)
         self._embedding_client = embedding_client
@@ -56,18 +55,18 @@ class GraphRetriever(Retriever[GraphMatch]):
 
     @classmethod
     def from_storage(
-        cls,
-        *,
-        embedding_client: EmbeddingClient,
-        entity_reader: VectorReader | None = None,
-        relationship_reader: VectorReader | None = None,
-        mode: GraphRetrievalMode = GraphRetrievalMode.HYBRID,
-        entity_top_k: int | None = None,
-        relationship_top_k: int | None = None,
-        candidate_limit: int = 60,
-        filters: MetadataFilters | None = None,
-        include_embedding: bool = False,
-        fusion: Fusion[GraphMatch] | None = None,
+            cls,
+            *,
+            embedding_client: EmbeddingClient,
+            entity_reader: VectorReader | None = None,
+            relationship_reader: VectorReader | None = None,
+            mode: GraphRetrievalMode = GraphRetrievalMode.HYBRID,
+            entity_top_k: int | None = None,
+            relationship_top_k: int | None = None,
+            candidate_limit: int = 60,
+            filters: MetadataFilters | None = None,
+            include_embedding: bool = False,
+            fusion: Fusion[GraphMatch] | None = None,
     ) -> "GraphRetriever":
         """单路用总预算，hybrid 默认各 30 条，默认 Common RoundRobin 融合。
 
@@ -78,24 +77,24 @@ class GraphRetriever(Retriever[GraphMatch]):
 
         # 单路模式下不允许单独指定某路预算
         if mode is not GraphRetrievalMode.HYBRID and (
-            entity_top_k is not None or relationship_top_k is not None
+                entity_top_k is not None or relationship_top_k is not None
         ):
             raise ValueError("route budgets are only supported in hybrid mode")
 
         routes = []
         for selected, kind, reader, budget in (
-            (
-                mode in (GraphRetrievalMode.LOCAL, GraphRetrievalMode.HYBRID),
-                GraphVectorKind.ENTITY,
-                entity_reader,
-                entity_top_k,
-            ),
-            (
-                mode in (GraphRetrievalMode.GLOBAL, GraphRetrievalMode.HYBRID),
-                GraphVectorKind.RELATIONSHIP,
-                relationship_reader,
-                relationship_top_k,
-            ),
+                (
+                        mode in (GraphRetrievalMode.LOCAL, GraphRetrievalMode.HYBRID),
+                        GraphVectorKind.ENTITY,
+                        entity_reader,
+                        entity_top_k,
+                ),
+                (
+                        mode in (GraphRetrievalMode.GLOBAL, GraphRetrievalMode.HYBRID),
+                        GraphVectorKind.RELATIONSHIP,
+                        relationship_reader,
+                        relationship_top_k,
+                ),
         ):
             if not selected:
                 continue

@@ -20,10 +20,10 @@ class MongoContentStorage(ContentStorage):
     """
 
     def __init__(
-        self,
-        *,
-        documents: AsyncCollection,
-        chunks: AsyncCollection,
+            self,
+            *,
+            documents: AsyncCollection,
+            chunks: AsyncCollection,
     ) -> None:
         self._documents = documents
         self._chunks = chunks
@@ -40,7 +40,7 @@ class MongoContentStorage(ContentStorage):
                     _document_adapter.dump_python(document, mode="python"),
                     upsert=True,
                 )
-                for document in documents[start : start + _BATCH_SIZE]
+                for document in documents[start: start + _BATCH_SIZE]
             ]
             await self._documents.bulk_write(operations, ordered=True)
 
@@ -78,12 +78,12 @@ class MongoContentStorage(ContentStorage):
                     _chunk_adapter.dump_python(chunk, mode="python"),
                     upsert=True,
                 )
-                for chunk in chunks[start : start + _BATCH_SIZE]
+                for chunk in chunks[start: start + _BATCH_SIZE]
             ]
             await self._chunks.bulk_write(operations, ordered=True)
 
     async def get_documents_by_section_ids(
-        self, section_ids: list[str]
+            self, section_ids: list[str]
     ) -> list[Document]:
         """定位章节事实所属的文档；不选择发布版本或判断可见性。"""
         unique_ids = list(dict.fromkeys(section_ids))
@@ -127,10 +127,10 @@ class MongoContentStorage(ContentStorage):
         ]
 
     async def get_revision_chunks(
-        self,
-        *,
-        resource_id: str,
-        content_revision: str,
+            self,
+            *,
+            resource_id: str,
+            content_revision: str,
     ) -> list[Chunk]:
         """读取指定 revision 下的全部 chunk，按 chunk_index 升序返回。"""
         records = await (

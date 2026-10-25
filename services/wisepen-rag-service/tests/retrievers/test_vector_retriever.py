@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from common.utils.retrieval import RrfFusion
 
+from common.utils.retrieval import RrfFusion
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
 from rag.retrievers.vector import VectorRetrievalMode, VectorRetriever
 from rag.storage.vector import VectorMatch
@@ -180,7 +180,7 @@ async def test_blank_query_fails_before_embedding_and_storage(deps, query):
 
 
 async def test_provider_default_dimensions_need_no_separate_retriever_configuration(
-    deps,
+        deps,
 ):
     deps[1].dimensions = None
     deps[1].embed.return_value = [[1.0, 0.0, 0.5]]

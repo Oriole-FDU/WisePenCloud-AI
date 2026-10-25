@@ -35,7 +35,7 @@ KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC: wisepen-resource-physical-destroy-topic
 KAFKA_RAG_PUBLICATION_GROUP_ID: wisepen-rag-v4-publication-group
 
 # 按 extensions/__init__.py 的登记名称启用；图抽取示例还需完整 INSTRUCTION_*。
-EXTENSIONS: []
+EXTENSIONS: [ ]
 # EXTENSIONS: [employment]
 # Employment 同时提供图工具/API，还须启用 Neo4j 并配置可信网关密钥：
 # FROM_SOURCE_SECRET: your-private-gateway-secret

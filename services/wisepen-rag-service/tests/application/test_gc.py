@@ -36,12 +36,12 @@ def gc_env(publication_store, storage, read_acls):
 
 
 async def test_keyset_gc_removes_all_revisions_preserves_live_resource_and_markers(
-    gc_env,
-    publication_store,
-    storage,
-    make_read_document,
-    make_read_chunk,
-    publish_read_document,
+        gc_env,
+        publication_store,
+        storage,
+        make_read_document,
+        make_read_chunk,
+        publish_read_document,
 ):
     env = gc_env
     documents = [
@@ -59,36 +59,36 @@ async def test_keyset_gc_removes_all_revisions_preserves_live_resource_and_marke
     report = await env.collector.collect()
     assert report == GcReport(scanned=4, cleaned=4)
     assert [
-        call.kwargs["after_resource_id"]
-        for call in publication_store.list_destroyed_resource_ids.call_args_list
-    ] == [None, "b", "missing"]
+               call.kwargs["after_resource_id"]
+               for call in publication_store.list_destroyed_resource_ids.call_args_list
+           ] == [None, "b", "missing"]
     assert [
-        chunk.resource_id
-        for chunk in await storage.get_chunks([chunk.chunk_id for chunk in chunks])
-    ] == ["live"]
+               chunk.resource_id
+               for chunk in await storage.get_chunks([chunk.chunk_id for chunk in chunks])
+           ] == ["live"]
     assert [
-        document.resource_id
-        for document in await storage.get_documents(
+               document.resource_id
+               for document in await storage.get_documents(
             [(doc.resource_id, doc.content_revision) for doc in documents]
         )
-    ] == ["live"]
+           ] == ["live"]
     assert all(
         state.destroyed
         for state in await publication_store.get_states(["a", "b", "c", "missing"])
     )
     assert (await publication_store.get_states(["live"]))[
-        0
-    ].applied_revision is not None
+               0
+           ].applied_revision is not None
     assert (
-        await publication_store.stage_revision(
-            ContentRevision.create(resource_id="a", document_version=3, text="late")
-        )
-        is PublicationAction.DESTROYED
+            await publication_store.stage_revision(
+                ContentRevision.create(resource_id="a", document_version=3, text="late")
+            )
+            is PublicationAction.DESTROYED
     )
     for writer in env.vectors:
         assert [
-            call.args[0].filters[0].value for call in writer.delete.call_args_list
-        ] == ["a", "b", "c", "missing"]
+                   call.args[0].filters[0].value for call in writer.delete.call_args_list
+               ] == ["a", "b", "c", "missing"]
     # 标记不设置完成状态，重复执行仍覆盖相同资源。
     assert await env.collector.collect() == report
 
@@ -116,10 +116,10 @@ async def test_gc_scan_failure_keeps_periodic_isolation(gc_env, monkeypatch):
 
 @pytest.mark.parametrize("stage", ["vector", "graph", "acl", "content"])
 async def test_resource_failure_keeps_partial_progress_continues_and_rerun_recovers(
-    gc_env,
-    publication_store,
-    storage,
-    stage,
+        gc_env,
+        publication_store,
+        storage,
+        stage,
 ):
     env = gc_env
     await publication_store.destroy_resources(["a", "b"])
@@ -146,7 +146,7 @@ async def test_resource_failure_keeps_partial_progress_continues_and_rerun_recov
 
 
 async def test_late_content_and_acl_are_reclaimed_again(
-    gc_env, publication_store, storage, make_read_document, make_read_chunk, read_acls
+        gc_env, publication_store, storage, make_read_document, make_read_chunk, read_acls
 ):
     env = gc_env
     await publication_store.destroy_resources(["late"])
@@ -170,13 +170,12 @@ async def test_empty_gc_has_no_delete_io(gc_env):
 
 
 async def test_gc_deletes_projections_and_acl_before_content(
-    gc_env, publication_store, storage
+        gc_env, publication_store, storage
 ):
     env = gc_env
     await publication_store.destroy_resources(["gone"])
     operations = []
     for index, writer in enumerate(env.vectors):
-
         async def delete(filters, index=index):
             operations.append(f"vector-{index}")
             assert filters.filters[0].key == "resource_id"
@@ -227,7 +226,7 @@ async def test_scan_failure_propagates_from_collect_but_periodic_loop_resumes(gc
 
 
 async def test_gc_cancellation_does_not_become_resource_error(
-    gc_env, publication_store
+        gc_env, publication_store
 ):
     await publication_store.destroy_resources(["a"])
     gc_env.vectors[0].delete.side_effect = asyncio.CancelledError()

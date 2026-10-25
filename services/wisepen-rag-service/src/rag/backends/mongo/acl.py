@@ -17,8 +17,8 @@ class MongoResourceAclRepository(ResourceAclRepository):
         self._collection = collection
 
     async def get_resource_acls(
-        self,
-        resource_ids: Sequence[str],
+            self,
+            resource_ids: Sequence[str],
     ) -> Mapping[str, ResourceAcl]:
         # 去重并保持输入顺序；空输入直接返回，避免无意义查询
         unique_resource_ids = list(dict.fromkeys(resource_ids))

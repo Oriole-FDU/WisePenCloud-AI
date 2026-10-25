@@ -5,8 +5,8 @@ import asyncio
 from contextlib import AsyncExitStack
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
-from common.logger import info
 
+from common.logger import info
 from rag.backends.kafka import DeliveryHeader
 
 

@@ -57,7 +57,7 @@ def revision(version=1, resource_id="resource"):
 
 
 async def test_real_gc_keyset_all_revisions_local_acl_and_permanent_markers(
-    mongo_publication,
+        mongo_publication,
 ):
     store, database = mongo_publication
     storage = MongoContentStorage(
@@ -118,7 +118,7 @@ async def test_real_state_round_trip_order_and_unique_identity(mongo_publication
 
 
 async def test_real_initial_stage_competition_never_overwrites_higher_version(
-    mongo_publication,
+        mongo_publication,
 ):
     store, _ = mongo_publication
     first, newer = revision(), revision(2)
@@ -139,7 +139,7 @@ async def test_real_initial_stage_competition_never_overwrites_higher_version(
 @pytest.mark.parametrize("operation", ["stage", "apply"])
 @pytest.mark.parametrize("change", ["newer", "destroyed"])
 async def test_real_conditional_update_blocks_interleaved_state_change(
-    mongo_publication, operation, change
+        mongo_publication, operation, change
 ):
     store, database = mongo_publication
     await store.stage_revision(revision())
@@ -174,8 +174,8 @@ async def test_real_conditional_update_blocks_interleaved_state_change(
     state = (await store.get_states(["resource"]))[0]
     if change == "newer":
         assert (
-            state.staged_revision == revision(3)
-            and state.applied_revision == revision()
+                state.staged_revision == revision(3)
+                and state.applied_revision == revision()
         )
     else:
         assert state == ResourcePublicationState("resource", destroyed=True)
@@ -197,7 +197,7 @@ async def test_real_destroy_upsert_is_permanent_and_resource_scoped(mongo_public
 
 
 async def test_real_content_with_fake_projection_publishes_and_preserves_old_applied_on_failure(
-    mongo_publication, document
+        mongo_publication, document
 ):
     store, database = mongo_publication
     content = MongoContentStorage(
@@ -239,8 +239,8 @@ async def test_real_content_with_fake_projection_publishes_and_preserves_old_app
     assert caught.value is error
     state = (await store.get_states([document.resource_id]))[0]
     assert (
-        state.applied_revision == first_revision
-        and state.staged_revision == next_revision
+            state.applied_revision == first_revision
+            and state.staged_revision == next_revision
     )
     assert await content.get_documents(
         [(document.resource_id, next_revision.content_revision)]

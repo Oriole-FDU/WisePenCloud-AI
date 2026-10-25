@@ -11,7 +11,7 @@ from rag.storage.vector import IndexableField, IndexKind, VectorCollection
 
 
 def test_register_manifest_and_reject_collection_collision(
-    platform_settings, monkeypatch
+        platform_settings, monkeypatch
 ):
     import rag.extensions as registry
     from rag.extensions.base import Extension
@@ -50,7 +50,7 @@ def test_register_extensions_rejects_unknown_name(platform_settings):
 
 @pytest.mark.parametrize("secret", [None, " ", "gateway"])
 def test_employment_manifest_declares_collection_and_requires_gateway(
-    platform_settings, secret
+        platform_settings, secret
 ):
     from rag.extensions.employment import EmploymentContainer
 
@@ -59,14 +59,14 @@ def test_employment_manifest_declares_collection_and_requires_gateway(
     )
     platform = Container(settings=settings)
     for name in (
-        "qdrant_client",
-        "content_storage",
-        "publication_store",
-        "acl_repository",
-        "embedding_client",
-        "instruction_client",
-        "graph_storage",
-        "rerank_client",
+            "qdrant_client",
+            "content_storage",
+            "publication_store",
+            "acl_repository",
+            "embedding_client",
+            "instruction_client",
+            "graph_storage",
+            "rerank_client",
     ):
         getattr(platform, name).override(providers.Object(object()))
     platform.rerank_client.override(
@@ -83,7 +83,7 @@ def test_employment_manifest_declares_collection_and_requires_gateway(
     assert manifest.api is not None
     assert IndexableField("year", IndexKind.INTEGER) in binding.metadata_index_fields
     assert (
-        IndexableField("employee", IndexKind.KEYWORD) in binding.metadata_index_fields
+            IndexableField("employee", IndexKind.KEYWORD) in binding.metadata_index_fields
     )
     assert {field.name for field in binding.metadata_index_fields} == {
         "resource_id",

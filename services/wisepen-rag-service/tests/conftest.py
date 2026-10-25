@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from bson import BSON
-from common.utils.markdown import MarkdownChunker
 from pymongo.errors import DuplicateKeyError
 
+from common.utils.markdown import MarkdownChunker
 from rag.backends.mongo.content import MongoContentStorage
 from rag.backends.mongo.publication import MongoPublicationStore
 from rag.core.schema import (
@@ -237,8 +237,8 @@ class MemoryPublicationCollection(MemoryCollection):
         if hook is not None:
             await hook()
         if any(
-            existing["resource_id"] == record["resource_id"]
-            for existing in self.records
+                existing["resource_id"] == record["resource_id"]
+                for existing in self.records
         ):
             raise DuplicateKeyError("duplicate resource_id")
         record = BSON(BSON.encode(record)).decode()

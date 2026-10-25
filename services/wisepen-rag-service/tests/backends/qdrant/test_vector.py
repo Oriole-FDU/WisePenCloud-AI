@@ -38,7 +38,7 @@ def dense_vectors(qdrant_client):
 
 
 async def test_dense_only_creation_indexes_upsert_and_query(
-    dense_vectors, qdrant_client
+        dense_vectors, qdrant_client
 ):
     qdrant_client.collection_exists.return_value = False
     qdrant_client.get_collection.return_value.config.params.sparse_vectors = None
@@ -51,18 +51,18 @@ async def test_dense_only_creation_indexes_upsert_and_query(
         ]
     )
     assert (
-        qdrant_client.create_collection.await_args.kwargs["sparse_vectors_config"]
-        is None
+            qdrant_client.create_collection.await_args.kwargs["sparse_vectors_config"]
+            is None
     )
     assert [
-        call.kwargs["field_name"]
-        for call in qdrant_client.create_payload_index.await_args_list
-    ] == [
-        "metadata.resource_id",
-        "metadata.content_revision",
-        "metadata.chunk_id",
-        "metadata.ontology_name",
-    ]
+               call.kwargs["field_name"]
+               for call in qdrant_client.create_payload_index.await_args_list
+           ] == [
+               "metadata.resource_id",
+               "metadata.content_revision",
+               "metadata.chunk_id",
+               "metadata.ontology_name",
+           ]
     await dense_vectors.upsert([record()])
     point = qdrant_client.upsert.await_args.kwargs["points"][0]
     assert point.vector == {"dense": [1.0, 0.0]}
@@ -71,7 +71,7 @@ async def test_dense_only_creation_indexes_upsert_and_query(
 
 
 async def test_dense_only_sparse_request_rejected_before_io(
-    dense_vectors, qdrant_client
+        dense_vectors, qdrant_client
 ):
     with pytest.raises(ValueError, match="sparse"):
         await dense_vectors.query(VectorQuery(text="任职"))
@@ -80,7 +80,7 @@ async def test_dense_only_sparse_request_rejected_before_io(
 
 @pytest.mark.parametrize("fields", [[""], ["nested.key"]])
 async def test_invalid_metadata_index_fields_fail_before_io(
-    dense_vectors, qdrant_client, fields
+        dense_vectors, qdrant_client, fields
 ):
     with pytest.raises(ValueError):
         await dense_vectors.ensure_collection(
@@ -106,7 +106,7 @@ async def test_empty_upsert_has_no_io(vectors, qdrant_client):
 
 
 async def test_points_have_stable_id_and_both_vectors_without_text_payload(
-    vectors, qdrant_client
+        vectors, qdrant_client
 ):
     item = record()
     await vectors.upsert([item])
@@ -114,9 +114,9 @@ async def test_points_have_stable_id_and_both_vectors_without_text_payload(
     await vectors.upsert([item])
     second = qdrant_client.upsert.call_args.kwargs["points"][0]
     assert (
-        first.id
-        == second.id
-        == str(uuid5(NAMESPACE_URL, f"wisepen-rag-v4:vector:{item.record_id}"))
+            first.id
+            == second.id
+            == str(uuid5(NAMESPACE_URL, f"wisepen-rag-v4:vector:{item.record_id}"))
     )
     assert first.vector["dense"] == item.embedding
     assert first.vector["sparse"].text == item.text
@@ -128,7 +128,7 @@ async def test_points_have_stable_id_and_both_vectors_without_text_payload(
 
 
 async def test_upsert_batch_boundary_and_partial_failure(
-    vectors, qdrant_client, completed
+        vectors, qdrant_client, completed
 ):
     items = [record(index) for index in range(513)]
     error = OSError("Qdrant unavailable")
@@ -137,13 +137,13 @@ async def test_upsert_batch_boundary_and_partial_failure(
         await vectors.upsert(items)
     assert caught.value is error
     assert [
-        len(call.kwargs["points"]) for call in qdrant_client.upsert.call_args_list
-    ] == [256, 256]
+               len(call.kwargs["points"]) for call in qdrant_client.upsert.call_args_list
+           ] == [256, 256]
     qdrant_client.upsert.reset_mock(side_effect=True)
     await vectors.upsert(items)
     assert [
-        len(call.kwargs["points"]) for call in qdrant_client.upsert.call_args_list
-    ] == [256, 256, 1]
+               len(call.kwargs["points"]) for call in qdrant_client.upsert.call_args_list
+           ] == [256, 256, 1]
 
 
 @pytest.mark.parametrize("operation", ["upsert", "delete", "index"])
@@ -151,7 +151,7 @@ async def test_upsert_batch_boundary_and_partial_failure(
     "status", [models.UpdateStatus.ACKNOWLEDGED, models.UpdateStatus.WAIT_TIMEOUT]
 )
 async def test_only_completed_counts_as_success(
-    vectors, qdrant_client, operation, status
+        vectors, qdrant_client, operation, status
 ):
     method = {
         "upsert": qdrant_client.upsert,
@@ -173,7 +173,7 @@ async def test_only_completed_counts_as_success(
 
 
 async def test_initialization_creates_collection_and_indexes_explicitly(
-    vectors, qdrant_client
+        vectors, qdrant_client
 ):
     qdrant_client.collection_exists.return_value = False
     await vectors.ensure_collection([IndexableField("resource_id", IndexKind.KEYWORD)])
@@ -183,13 +183,13 @@ async def test_initialization_creates_collection_and_indexes_explicitly(
     assert args["vectors_config"]["dense"].distance == models.Distance.COSINE
     assert args["sparse_vectors_config"]["sparse"].modifier == models.Modifier.IDF
     assert [
-        call.kwargs["field_name"]
-        for call in qdrant_client.create_payload_index.call_args_list
-    ] == ["metadata.resource_id"]
+               call.kwargs["field_name"]
+               for call in qdrant_client.create_payload_index.call_args_list
+           ] == ["metadata.resource_id"]
 
 
 async def test_existing_collection_reinitialization_repairs_partial_indexes(
-    vectors, qdrant_client, completed
+        vectors, qdrant_client, completed
 ):
     qdrant_client.create_payload_index.side_effect = [
         completed,
@@ -217,7 +217,7 @@ async def test_existing_collection_reinitialization_repairs_partial_indexes(
     "change", ["size", "distance", "dense_name", "sparse_name", "idf"]
 )
 async def test_existing_collection_conflict_does_not_recreate(
-    vectors, qdrant_client, change
+        vectors, qdrant_client, change
 ):
     params = qdrant_client.get_collection.return_value.config.params
     if change == "size":
@@ -240,7 +240,7 @@ async def test_existing_collection_conflict_does_not_recreate(
 
 @pytest.mark.parametrize("dense", [True, False])
 async def test_query_preserves_original_ids_scores_and_order(
-    vectors, qdrant_client, dense
+        vectors, qdrant_client, dense
 ):
     filters = MetadataFilters([MetadataFilter("content_revision", "revision")])
     qdrant_client.query_points.return_value = SimpleNamespace(
@@ -301,7 +301,7 @@ async def test_invalid_query_has_no_io(vectors, qdrant_client, query):
     ],
 )
 async def test_bad_provider_payload_is_not_a_valid_match(
-    vectors, qdrant_client, payload
+        vectors, qdrant_client, payload
 ):
     qdrant_client.query_points.return_value = SimpleNamespace(
         points=[SimpleNamespace(payload=payload, score=1.0)]
@@ -347,7 +347,7 @@ async def test_real_client_forwards_bm25_documents_without_local_inference(compl
 
 @pytest.mark.parametrize("dense", [True, False])
 async def test_queries_request_named_dense_vector_for_either_recall_route(
-    qdrant_client, dense
+        qdrant_client, dense
 ):
     vectors = QdrantVectorStorage(
         client=qdrant_client,
@@ -393,7 +393,7 @@ async def test_queries_request_named_dense_vector_for_either_recall_route(
     ],
 )
 async def test_requested_vector_data_errors_propagate(
-    vectors, qdrant_client, dense, vector
+        vectors, qdrant_client, dense, vector
 ):
     qdrant_client.query_points.return_value = SimpleNamespace(
         points=[
@@ -439,7 +439,7 @@ async def test_typed_business_payload_indexes(qdrant_client, kind, schema):
 
 
 async def test_empty_fields_still_check_vector_configuration(
-    qdrant_client, dense_vectors
+        qdrant_client, dense_vectors
 ):
     await dense_vectors.ensure_collection([])
     qdrant_client.get_collection.assert_awaited_once_with("graph_entities")

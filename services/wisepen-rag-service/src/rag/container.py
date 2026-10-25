@@ -4,14 +4,14 @@ from collections.abc import Callable
 from operator import attrgetter, getitem
 from typing import TYPE_CHECKING
 
-from common.utils.ai_clients import EmbeddingClient, InstructionClient, RerankClient
-from common.utils.retrieval import ModelReranker
 from dependency_injector import containers, providers
 from neo4j import AsyncDriver, AsyncGraphDatabase
 from openai import AsyncOpenAI
 from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient
 
+from common.utils.ai_clients import EmbeddingClient, InstructionClient, RerankClient
+from common.utils.retrieval import ModelReranker
 from rag.application.acl.synchronizer import AclEventConsumer, AclSynchronizer
 from rag.application.common.snapshot import ResourceSnapshotReader
 from rag.application.gc import ResourceGarbageCollector
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 
 def _instruction_client(
-    settings: "AppSettings", openai_provider: Callable[[], AsyncOpenAI]
+        settings: "AppSettings", openai_provider: Callable[[], AsyncOpenAI]
 ) -> InstructionClient:
     """构造指令模型客户端；未配置模型时报错，避免半装配。"""
     if settings.INSTRUCTION_MODEL is None:
@@ -45,7 +45,7 @@ def _instruction_client(
 
 
 def _graph_storage(
-    settings: "AppSettings", driver_provider: Callable[[], AsyncDriver]
+        settings: "AppSettings", driver_provider: Callable[[], AsyncDriver]
 ) -> Neo4jGraphStorage | None:
     """图存储未启用时返回 None，让上层显式选择走图或不走图。"""
     if not settings.ENABLE_GRAPH_STORAGE:
@@ -70,7 +70,7 @@ def _contextualize_branch(enabled: bool) -> str:
 
 
 def _garbage_collector(
-    settings, store, content, acls, vectors, graph
+        settings, store, content, acls, vectors, graph
 ) -> ResourceGarbageCollector:
     # 清理目标来自平台存储，不取决于本次文档或垂类是否启用图算法。
     return ResourceGarbageCollector(

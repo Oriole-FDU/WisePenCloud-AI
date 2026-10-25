@@ -109,9 +109,12 @@ entity_description
 
 ## 2. Chunk 到 Entity 的来源关系
 
-图事实的来源 Chunk 由其所在的持久化 Chunk 隐含表达，不建立单独的 `GraphChunkSource` 事实集合。`ChunkHit.graph_nodes` 直接从该 Chunk 的 Entity metadata 生成；Relationship metadata 同样带有稳定 edge ID。
+图事实的来源 Chunk 由其所在的持久化 Chunk 隐含表达，不建立单独的 `GraphChunkSource` 事实集合。`ChunkHit.graph_nodes` 直接从该
+Chunk 的 Entity metadata 生成；Relationship metadata 同样带有稳定 edge ID。
 
-为支持图查询回到来源文本，GraphIndexer 将来源 Chunk 关联写入 Neo4j 图投影。GraphRetriever 从遍历结果收集来源 Chunk ID，再按 resource/revision 批量读取 Mongo Chunk，最终校验 active revision 和 ACL。Neo4j 丢失时，可从 Chunk metadata 重建来源关联，不调用 LLM。
+为支持图查询回到来源文本，GraphIndexer 将来源 Chunk 关联写入 Neo4j 图投影。GraphRetriever 从遍历结果收集来源 Chunk ID，再按
+resource/revision 批量读取 Mongo Chunk，最终校验 active revision 和 ACL。Neo4j 丢失时，可从 Chunk metadata 重建来源关联，不调用
+LLM。
 
 ## 3. 三种 LightRAG 图谱查询模式
 
@@ -151,7 +154,8 @@ query
 
 ### 3.3 `hybrid`
 
-`hybrid` 同时执行 local 和 global 两条图谱路径，再在统一候选池中去重、排序和裁剪上下文预算。它不是 Chunk hybrid retrieval 的别名，而是图谱内部的实体路径与关系路径组合。
+`hybrid` 同时执行 local 和 global 两条图谱路径，再在统一候选池中去重、排序和裁剪上下文预算。它不是 Chunk hybrid retrieval
+的别名，而是图谱内部的实体路径与关系路径组合。
 
 ### 3.4 `mix` 的责任归属
 
@@ -184,7 +188,8 @@ class RetrieveHybridResponse:
     parents: list[DynamicParentResponse]
 ```
 
-当 `expand_parents=True` 时，RAG 才按 section 和匹配 Chunk 组装 `DynamicParent`；当开关关闭时，`parents` 为空，并在最终 Response 层移除。
+当 `expand_parents=True` 时，RAG 才按 section 和匹配 Chunk 组装 `DynamicParent`；当开关关闭时，`parents` 为空，并在最终
+Response 层移除。
 
 工具路径为：
 
@@ -203,7 +208,8 @@ query
 
 ### 4.2 模型选择 seed
 
-模型只能从返回的 `ChunkHit.graph_nodes` 中选择 node ID，并将其放入后续 `GraphRetrieveRequest.seed_node_ids`。GraphRetriever 必须重新校验：
+模型只能从返回的 `ChunkHit.graph_nodes` 中选择 node ID，并将其放入后续 `GraphRetrieveRequest.seed_node_ids`
+。GraphRetriever 必须重新校验：
 
 - node 是否属于请求允许的 resource；
 - node 是否属于请求固定的 content revision；

@@ -27,8 +27,8 @@ async def test_integer_year_employee_filter_and_resource_cleanup(real_graph_vect
     )
     info = await client.get_collection(storage.collection)
     assert (
-        info.payload_schema["metadata.year"].data_type
-        == models.PayloadSchemaType.INTEGER
+            info.payload_schema["metadata.year"].data_type
+            == models.PayloadSchemaType.INTEGER
     )
     await storage.upsert(
         [
@@ -39,10 +39,10 @@ async def test_integer_year_employee_filter_and_resource_cleanup(real_graph_vect
                 {"resource_id": resource, "year": year, "employee": employee},
             )
             for key, resource, year, employee in [
-                ("a", "r1", 2020, "李明"),
-                ("b", "r2", 2024, "李明"),
-                ("c", "r3", 2024, "陈晨"),
-            ]
+            ("a", "r1", 2020, "李明"),
+            ("b", "r2", 2024, "李明"),
+            ("c", "r3", 2024, "陈晨"),
+        ]
         ]
     )
     filters = MetadataFilters(
@@ -52,11 +52,11 @@ async def test_integer_year_employee_filter_and_resource_cleanup(real_graph_vect
         ]
     )
     assert [
-        hit.record_id
-        for hit in await storage.query(
+               hit.record_id
+               for hit in await storage.query(
             VectorQuery(embedding=[1.0, 0.0], filters=filters)
         )
-    ] == ["b"]
+           ] == ["b"]
     await storage.delete(MetadataFilters([MetadataFilter("resource_id", "r2")]))
     assert await storage.query(VectorQuery(embedding=[1.0, 0.0], filters=filters)) == []
     assert len(await storage.query(VectorQuery(embedding=[1.0, 0.0]))) == 2

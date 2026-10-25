@@ -54,10 +54,10 @@ async def test_source_projection_scope_dedup_and_readonly(graph_ontology, chunk)
     before = copy.deepcopy([chunk, second])
     writer = SimpleNamespace(replace_sources=AsyncMock())
     assert (
-        await GraphIndexer(ontology=graph_ontology, writer=writer).index(
-            [chunk, second]
-        )
-        is None
+            await GraphIndexer(ontology=graph_ontology, writer=writer).index(
+                [chunk, second]
+            )
+            is None
     )
     assert [chunk, second] == before
     projections = writer.replace_sources.await_args.args[0]
@@ -80,7 +80,7 @@ async def test_source_projection_scope_dedup_and_readonly(graph_ontology, chunk)
 
 
 async def test_empty_success_is_explicit_replacement_and_writer_failure_propagates(
-    graph_ontology, chunk
+        graph_ontology, chunk
 ):
     chunk.metadata.update(entities=[], relationships=[])
     writer = SimpleNamespace(
@@ -91,9 +91,9 @@ async def test_empty_success_is_explicit_replacement_and_writer_failure_propagat
         await GraphIndexer(ontology=graph_ontology, writer=writer).index([chunk])
     projection = writer.replace_sources.await_args.args[0][0]
     assert (
-        projection.chunk_id == chunk.chunk_id
-        and projection.nodes == []
-        and projection.edges == []
+            projection.chunk_id == chunk.chunk_id
+            and projection.nodes == []
+            and projection.edges == []
     )
     assert projection.metadata["ontology_name"] == graph_ontology.domain
     assert chunk == before

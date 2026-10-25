@@ -17,13 +17,13 @@ from rag.storage.graph import GraphDirection, GraphSourceProjection
 
 
 def projection(
-    chunk_id,
-    resource="resource",
-    *,
-    name="Alice",
-    target="Acme",
-    description="source description",
-    revision="revision",
+        chunk_id,
+        resource="resource",
+        *,
+        name="Alice",
+        target="Acme",
+        description="source description",
+        revision="revision",
 ):
     source = GraphNode(
         name=name,
@@ -83,7 +83,7 @@ async def test_unlimited_neighbors_omit_cypher_limit_and_keep_all_sources(driver
 
 
 async def test_shared_entities_relationships_keep_all_source_facts_and_request_order(
-    driver,
+        driver,
 ):
     storage = Neo4jGraphStorage(driver=driver)
     first = projection("z", "first", description="first description")
@@ -114,16 +114,16 @@ async def test_shared_entities_relationships_keep_all_source_facts_and_request_o
         [first.nodes[0].id], filters=resource_filter("first")
     ) == [first.nodes[0]]
     assert (
-        await storage.get_relations(
-            [first.edges[0].id], filters=resource_filter("second")
-        )
-        == second.edges
+            await storage.get_relations(
+                [first.edges[0].id], filters=resource_filter("second")
+            )
+            == second.edges
     )
     assert all(result.consumed for result in driver.results)
 
 
 async def test_same_source_replacement_removes_old_facts_and_preserves_other_sources(
-    driver,
+        driver,
 ):
     storage = Neo4jGraphStorage(driver=driver)
     first = projection("first", description="old")
@@ -134,8 +134,8 @@ async def test_same_source_replacement_removes_old_facts_and_preserves_other_sou
     assert await storage.get_relations([first.edges[0].id]) == second.edges
     assert await storage.get_relations([changed.edges[0].id]) == changed.edges
     assert {
-        node.source_id for node in await storage.get_nodes([first.nodes[0].id])
-    } == {"first", "second"}
+               node.source_id for node in await storage.get_nodes([first.nodes[0].id])
+           } == {"first", "second"}
     assert await storage.get_nodes([changed.nodes[1].id]) == [changed.nodes[1]]
     await storage.replace_sources([GraphSourceProjection("first", changed.metadata)])
     assert await storage.get_relations([changed.edges[0].id]) == []
@@ -148,7 +148,7 @@ async def test_same_source_replacement_removes_old_facts_and_preserves_other_sou
 
 
 async def test_delete_filtered_sources_preserves_shared_identity_then_cleans_orphans(
-    driver,
+        driver,
 ):
     storage = Neo4jGraphStorage(driver=driver)
     first, second = projection("first", "a"), projection("second", "b")
@@ -224,8 +224,8 @@ async def test_cross_document_two_hops_and_revision_filters(driver):
     hop = await storage.get_neighbors([first.nodes[0].id], filters=selected)
     assert hop == first.edges
     assert (
-        await storage.get_neighbors([hop[0].target_id], filters=selected)
-        == second.edges
+            await storage.get_neighbors([hop[0].target_id], filters=selected)
+            == second.edges
     )
 
 
@@ -300,10 +300,10 @@ async def test_empty_calls_validation_serialization_and_explicit_schema(driver):
     assert await storage.get_neighbors(["a"], relation_types=[]) == []
     assert driver.calls == []
     for invoke in (
-        storage.delete_sources(MetadataFilters()),
-        storage.get_nodes(["a"], filters=MetadataFilters()),
-        storage.get_neighbors(["a"], limit=0),
-        storage.get_neighbors(["a"], direction="unsupported"),
+            storage.delete_sources(MetadataFilters()),
+            storage.get_nodes(["a"], filters=MetadataFilters()),
+            storage.get_neighbors(["a"], limit=0),
+            storage.get_neighbors(["a"], direction="unsupported"),
     ):
         with pytest.raises(ValueError):
             await invoke
@@ -346,7 +346,7 @@ def test_invalid_backend_settings(driver, settings):
 
 
 async def test_persisted_mongo_facts_to_indexer_to_topology(
-    driver, storage, graph_ontology, chunk
+        driver, storage, graph_ontology, chunk
 ):
     sources = [projection(chunk.chunk_id), projection("second")]
     chunks = [

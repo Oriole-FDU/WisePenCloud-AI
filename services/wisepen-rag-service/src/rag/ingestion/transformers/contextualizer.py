@@ -7,13 +7,13 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from hashlib import sha256
 
+from openai import OpenAIError
+from pydantic import TypeAdapter
+
 from common.logger import warning
 from common.utils.ai_clients.instruction import InstructionClient
 from common.utils.markdown import OutlineFormatter, Section
 from common.utils.markdown.chunking.tokenizer import TokenCounter, default_token_counter
-from openai import OpenAIError
-from pydantic import TypeAdapter
-
 from rag.core.schema import Chunk, Document
 
 _STRATEGY_VERSION = "contextualizer-v1"  # 参与缓存指纹，策略变更时需升级
@@ -60,7 +60,7 @@ class _DocumentInput:
 
 
 def _index_document(
-    document: Document, chunks: list[Chunk], counter: TokenCounter
+        document: Document, chunks: list[Chunk], counter: TokenCounter
 ) -> _DocumentInput:
     """索引可信结构；在线由 Common 生成，持久化输入在读取边界校验。"""
     ordered = sorted(chunks, key=lambda chunk: chunk.chunk_index)
@@ -145,13 +145,13 @@ def _select_outline(data: _DocumentInput, chunk: Chunk, budget: int) -> str:
 
 
 def _render_prompt(
-    material: str,
-    target: str,
-    *,
-    target_chars: int,
-    whole_document: bool = False,
-    metadata: str = "",
-    outline: str = "",
+        material: str,
+        target: str,
+        *,
+        target_chars: int,
+        whole_document: bool = False,
+        metadata: str = "",
+        outline: str = "",
 ) -> str:
     """全文与局部上下文使用不同标签，避免把局部片段误认为全文。"""
     if whole_document:
@@ -180,7 +180,7 @@ def _render_prompt(
 
 
 def _select_prompt(
-    data: _DocumentInput, index: int, metadata: str, settings: _PromptSettings
+        data: _DocumentInput, index: int, metadata: str, settings: _PromptSettings
 ) -> str | None:
     """按全文、祖先子树、章节正文、邻近 Chunk 的优先级选取材料。"""
     chunk = data.chunks[index]
@@ -213,7 +213,7 @@ def _select_prompt(
     # 自根向下寻找最高可容纳的祖先子树：尽量给更多相关结构，但不超预算。
     for section in data.chains.get(chunk.section_id, []):
         span = section.subtree_span
-        prompt = render(data.document.text[span.start_offset : span.end_offset])
+        prompt = render(data.document.text[span.start_offset: span.end_offset])
         if data.count(prompt) <= budget:
             return prompt
 
@@ -222,7 +222,7 @@ def _select_prompt(
     section = data.sections.get(chunk.section_id)
     if section is not None:
         span = section.own_span
-        own = data.document.text[span.start_offset : span.end_offset]
+        own = data.document.text[span.start_offset: span.end_offset]
         # 若章节自身正文可容纳，则以整段章节正文为种子，并扩展到章节 chunk 边界。
         if data.count(render(own)) <= budget:
             seed = own
@@ -242,7 +242,7 @@ def _select_prompt(
             [
                 *(item.raw_text for item in data.chunks[left:seed_lo]),
                 seed,
-                *(item.raw_text for item in data.chunks[seed_hi + 1 : right + 1]),
+                *(item.raw_text for item in data.chunks[seed_hi + 1: right + 1]),
             ]
         )
         return render(material)
@@ -308,16 +308,16 @@ class Contextualizer:
     """可选的 Chunk 上下文增强；并发限制共享，文档索引按调用隔离。"""
 
     def __init__(
-        self,
-        *,
-        client: InstructionClient,
-        token_counter: TokenCounter | None = None,
-        max_context_tokens: int = 8000,
-        target_context_chars: int = 100,
-        max_output_tokens: int = 150,
-        before_ratio: float = 0.5,
-        outline_token_ratio: float = 0.15,
-        max_concurrency: int = 4,
+            self,
+            *,
+            client: InstructionClient,
+            token_counter: TokenCounter | None = None,
+            max_context_tokens: int = 8000,
+            target_context_chars: int = 100,
+            max_output_tokens: int = 150,
+            before_ratio: float = 0.5,
+            outline_token_ratio: float = 0.15,
+            max_concurrency: int = 4,
     ) -> None:
         self._client = client
         self._counter = token_counter or default_token_counter()
@@ -332,7 +332,7 @@ class Contextualizer:
         self._semaphore = asyncio.Semaphore(max_concurrency)
 
     async def transform(
-        self, chunks: list[Chunk], *, document: Document | None = None
+            self, chunks: list[Chunk], *, document: Document | None = None
     ) -> list[Chunk]:
         if not chunks:
             return chunks
@@ -380,8 +380,8 @@ class Contextualizer:
             previous = chunk.metadata.get("contextual_context")
             # 只有状态 OK、指纹一致且旧输出仍有效时才跳过模型调用。
             if (
-                chunk.metadata.get("context_status") == ContextStatus.OK.value
-                and chunk.metadata.get("context_version") == fingerprint
+                    chunk.metadata.get("context_status") == ContextStatus.OK.value
+                    and chunk.metadata.get("context_version") == fingerprint
             ):
                 try:
                     if not isinstance(previous, str):

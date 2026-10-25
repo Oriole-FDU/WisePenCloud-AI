@@ -1,0 +1,21 @@
+{
+  "captured_on": "2026-10-22",
+  "repositories": [
+    {
+      "name": "deepseek-harness",
+      "url": "https://github.com/deepseek-ai/deepseek-harness.git",
+      "path": "deepseek-harness",
+      "branch": "master",
+      "commit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+      "shallow": true
+    },
+    {
+      "name": "codex",
+      "url": "https://github.com/openai/codex.git",
+      "path": "codex",
+      "branch": "main",
+      "commit": "b337fe06b7d8d6e5b42295e04c5e92c2b9c46567",
+      "shallow": true
+    }
+  ]
+}

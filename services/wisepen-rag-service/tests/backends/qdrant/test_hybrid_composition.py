@@ -4,9 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
 from common.utils.ai_clients import EmbeddingClient
 from common.utils.retrieval import ModelReranker
-
 from rag.application.acl.models import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.application.publication import DocumentReadyEvent
@@ -18,7 +18,7 @@ from rag.ingestion.chunkers import MarkdownChunker
 
 @pytest.mark.parametrize("diversity", ["off", "high"])
 async def test_storage_to_vector_retrieval_composition(
-    storage, publication_store, vectors, qdrant_client, document, diversity
+        storage, publication_store, vectors, qdrant_client, document, diversity
 ):
     # storage/publication_store 是实际 Mongo adapter；vectors 是实际 Qdrant adapter。
     # fixture 只把数据库 collection 和 Qdrant 网络客户端替换为本地测试边界。
@@ -146,5 +146,5 @@ async def test_storage_to_vector_retrieval_composition(
         span = (
             section.own_span if scope is SectionReadScope.OWN else section.subtree_span
         )
-        assert result[0].text == document.text[span.start_offset : span.end_offset]
+        assert result[0].text == document.text[span.start_offset: span.end_offset]
     acl_repository.get_resource_acls.assert_awaited_once_with([document.resource_id])

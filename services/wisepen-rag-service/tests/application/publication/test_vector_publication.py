@@ -54,7 +54,7 @@ def vector_flow(storage, publication_store):
 
 @pytest.mark.parametrize("model_fails", [False, True])
 async def test_contextualizer_optional_failure_still_publishes_required_indexes(
-    vector_flow, storage, publication_store, make_document, model_fails
+        vector_flow, storage, publication_store, make_document, model_fails
 ):
     publisher, embedding, client = vector_flow
     instruction = SimpleNamespace(
@@ -80,12 +80,12 @@ async def test_contextualizer_optional_failure_still_publishes_required_indexes(
         chunk.retrieval_text for chunk in chunks
     ]
     assert (await publication_store.get_states([document.resource_id]))[
-        0
-    ].applied_revision.content_revision == document.content_revision
+               0
+           ].applied_revision.content_revision == document.content_revision
 
 
 async def test_context_success_does_not_hide_required_vector_failure(
-    vector_flow, publication_store, make_document
+        vector_flow, publication_store, make_document
 ):
     publisher, _, client = vector_flow
     publisher._pipeline.transformers.append(
@@ -99,12 +99,12 @@ async def test_context_success_does_not_hide_required_vector_failure(
     with pytest.raises(OSError):
         await publisher.publish(make_document())
     assert (await publication_store.get_states(["resource"]))[
-        0
-    ].applied_revision is None
+               0
+           ].applied_revision is None
 
 
 async def test_facts_exist_and_publication_waits_for_both_vectors(
-    vector_flow, storage, publication_store, make_document
+        vector_flow, storage, publication_store, make_document
 ):
     publisher, _, client = vector_flow
     document = make_document()
@@ -120,8 +120,8 @@ async def test_facts_exist_and_publication_waits_for_both_vectors(
             set(point.vector) == {"dense", "sparse"} for point in kwargs["points"]
         )
         assert (await publication_store.get_states(["resource"]))[
-            0
-        ].applied_revision is None
+                   0
+               ].applied_revision is None
         return models.UpdateResult(operation_id=1, status=models.UpdateStatus.COMPLETED)
 
     client.upsert.side_effect = upsert
@@ -132,7 +132,7 @@ async def test_facts_exist_and_publication_waits_for_both_vectors(
 
 @pytest.mark.parametrize("failure", ["embedding", "sparse", "acknowledged"])
 async def test_vector_failure_keeps_old_applied_and_replay_can_finish(
-    vector_flow, storage, publication_store, make_document, failure
+        vector_flow, storage, publication_store, make_document, failure
 ):
     publisher, embedding, client = vector_flow
     first, candidate = make_document(), make_document(version=2)
@@ -170,7 +170,7 @@ async def test_vector_failure_keeps_old_applied_and_replay_can_finish(
 
 @pytest.mark.parametrize("change", ["newer", "destroyed"])
 async def test_state_change_during_vector_write_blocks_apply(
-    vector_flow, publication_store, make_document, change
+        vector_flow, publication_store, make_document, change
 ):
     publisher, _, client = vector_flow
     first, candidate = make_document(), make_document(version=2)
@@ -200,7 +200,7 @@ async def test_state_change_during_vector_write_blocks_apply(
 
 
 async def test_zero_chunk_publication_has_no_embedding_or_qdrant_io(
-    vector_flow, make_document
+        vector_flow, make_document
 ):
     publisher, embedding, client = vector_flow
     assert await publisher.publish(make_document(text="")) is PublicationAction.APPLIED

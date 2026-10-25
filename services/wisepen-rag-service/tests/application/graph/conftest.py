@@ -46,18 +46,18 @@ class MemoryGraph:
         )
 
     async def _neighbors(
-        self, ids, *, direction, relation_types=None, limit=100, **kwargs
+            self, ids, *, direction, relation_types=None, limit=100, **kwargs
     ):
         edges = [
             edge
             for edge in self.edges
             if (
-                direction in (GraphDirection.OUTGOING, GraphDirection.BOTH)
-                and edge.source_id in ids
-                or direction in (GraphDirection.INCOMING, GraphDirection.BOTH)
-                and edge.target_id in ids
-            )
-            and (relation_types is None or edge.relation_type in relation_types)
+                       direction in (GraphDirection.OUTGOING, GraphDirection.BOTH)
+                       and edge.source_id in ids
+                       or direction in (GraphDirection.INCOMING, GraphDirection.BOTH)
+                       and edge.target_id in ids
+               )
+               and (relation_types is None or edge.relation_type in relation_types)
         ]
         selected = sorted({edge.id for edge in edges})
         if limit is not None:
@@ -70,13 +70,13 @@ class MemoryGraph:
 
 @pytest.fixture
 async def graph_env(
-    graph_ontology,
-    make_read_document,
-    make_read_chunk,
-    publish_read_document,
-    storage,
-    read_acls,
-    snapshot_reader,
+        graph_ontology,
+        make_read_document,
+        make_read_chunk,
+        publish_read_document,
+        storage,
+        read_acls,
+        snapshot_reader,
 ):
     ontology = replace(
         graph_ontology,
@@ -185,12 +185,12 @@ async def graph_env(
     }
 
     def match(
-        index=0,
-        kind=GraphVectorKind.ENTITY,
-        position=0,
-        score=1.0,
-        embedding=None,
-        **metadata,
+            index=0,
+            kind=GraphVectorKind.ENTITY,
+            position=0,
+            score=1.0,
+            embedding=None,
+            **metadata,
     ):
         chunk = chunks[index]
         nodes, edges = facts[index]

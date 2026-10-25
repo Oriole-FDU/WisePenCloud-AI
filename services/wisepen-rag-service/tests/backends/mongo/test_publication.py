@@ -23,7 +23,7 @@ def revision(version=1, text="正文", resource_id="resource"):
 
 
 async def test_destroyed_cursor_orders_filters_and_does_not_skip_late_markers(
-    publication_store,
+        publication_store,
 ):
     await publication_store.destroy_resources(["z", "a", "m"])
     await publication_store.stage_revision(revision(resource_id="live"))
@@ -32,14 +32,14 @@ async def test_destroyed_cursor_orders_filters_and_does_not_skip_late_markers(
         after_resource_id="m", limit=2
     ) == ["z"]
     assert (
-        await publication_store.list_destroyed_resource_ids(after_resource_id="z") == []
+            await publication_store.list_destroyed_resource_ids(after_resource_id="z") == []
     )
     await publication_store.destroy_resources(["b"])
     assert await publication_store.list_destroyed_resource_ids() == ["a", "b", "m", "z"]
 
 
 async def test_stage_apply_replay_and_newer_candidate_preserve_applied(
-    publication_store, publication_collection
+        publication_store, publication_collection
 ):
     first, second = revision(), revision(2)
     assert await publication_store.stage_revision(first) is PublicationAction.STAGED
@@ -49,12 +49,12 @@ async def test_stage_apply_replay_and_newer_candidate_preserve_applied(
     ]
     assert await publication_store.apply_revision(first) is PublicationAction.APPLIED
     assert (
-        await publication_store.stage_revision(first)
-        is PublicationAction.ALREADY_APPLIED
+            await publication_store.stage_revision(first)
+            is PublicationAction.ALREADY_APPLIED
     )
     assert (
-        await publication_store.apply_revision(first)
-        is PublicationAction.ALREADY_APPLIED
+            await publication_store.apply_revision(first)
+            is PublicationAction.ALREADY_APPLIED
     )
     assert await publication_store.stage_revision(second) is PublicationAction.STAGED
     assert await publication_store.get_states(["resource"]) == [
@@ -125,13 +125,13 @@ async def test_state_batch_read_is_scoped_deduplicated_and_ordered(publication_s
     assert await publication_store.get_states(
         ["resource", "missing", "other", "resource"]
     ) == [
-        ResourcePublicationState("resource", first),
-        ResourcePublicationState("other", other),
-    ]
+               ResourcePublicationState("resource", first),
+               ResourcePublicationState("other", other),
+           ]
 
 
 async def test_empty_batches_have_no_io_and_indexes_are_explicit(
-    publication_store, publication_collection
+        publication_store, publication_collection
 ):
     assert await publication_store.get_states([]) == []
     assert await publication_store.destroy_resources([]) is None
@@ -149,7 +149,7 @@ async def test_empty_batches_have_no_io_and_indexes_are_explicit(
 
 
 async def test_destroy_is_permanent_idempotent_scoped_and_can_precede_stage(
-    publication_store,
+        publication_store,
 ):
     first, other = revision(), revision(resource_id="other")
     await publication_store.stage_revision(first)
@@ -164,24 +164,24 @@ async def test_destroy_is_permanent_idempotent_scoped_and_can_precede_stage(
         ResourcePublicationState("other", other),
     ]
     for candidate in (
-        first,
-        revision(100),
-        revision(text="冲突"),
-        revision(resource_id="unseen"),
+            first,
+            revision(100),
+            revision(text="冲突"),
+            revision(resource_id="unseen"),
     ):
         assert (
-            await publication_store.stage_revision(candidate)
-            is PublicationAction.DESTROYED
+                await publication_store.stage_revision(candidate)
+                is PublicationAction.DESTROYED
         )
         assert (
-            await publication_store.apply_revision(candidate)
-            is PublicationAction.DESTROYED
+                await publication_store.apply_revision(candidate)
+                is PublicationAction.DESTROYED
         )
 
 
 @pytest.mark.parametrize("fail_second", [False, True])
 async def test_destroy_batches_preserve_partial_success(
-    publication_store, publication_collection, fail_second
+        publication_store, publication_collection, fail_second
 ):
     ids = [f"resource-{index}" for index in range(1001)]
     if fail_second:
@@ -203,7 +203,7 @@ async def test_destroy_batches_preserve_partial_success(
     "competing", ["newer", "applied", "destroyed", "same", "missing", "conflict"]
 )
 async def test_initial_insert_competition_is_classified_without_retry(
-    publication_store, publication_collection, competing
+        publication_store, publication_collection, competing
 ):
     candidate = revision()
 
@@ -244,7 +244,7 @@ async def test_initial_insert_competition_is_classified_without_retry(
     "change", ["newer", "applied", "destroyed", "conflict", "eligible"]
 )
 async def test_stage_conditions_cover_both_pointers_and_destroyed(
-    publication_store, publication_collection, change
+        publication_store, publication_collection, change
 ):
     await publication_store.stage_revision(revision())
     candidate = revision(2)
@@ -286,7 +286,7 @@ async def test_stage_conditions_cover_both_pointers_and_destroyed(
 
 @pytest.mark.parametrize("change", ["newer", "destroyed", "applied"])
 async def test_apply_conditions_block_replaced_or_destroyed_candidate(
-    publication_store, publication_collection, change
+        publication_store, publication_collection, change
 ):
     candidate = revision()
     await publication_store.stage_revision(candidate)
@@ -309,7 +309,7 @@ async def test_apply_conditions_block_replaced_or_destroyed_candidate(
 
 
 async def test_apply_missing_stage_observation_is_not_retried(
-    publication_store, publication_collection
+        publication_store, publication_collection
 ):
     candidate = revision()
     await publication_store.stage_revision(candidate)
@@ -326,12 +326,12 @@ async def test_apply_missing_stage_observation_is_not_retried(
     with pytest.raises(RevisionNotStagedError):
         await publication_store.apply_revision(candidate)
     assert (await publication_store.get_states(["resource"]))[
-        0
-    ].staged_revision == candidate
+               0
+           ].staged_revision == candidate
 
 
 async def test_apply_failed_condition_with_candidate_present_is_state_changed(
-    publication_store, publication_collection
+        publication_store, publication_collection
 ):
     candidate = revision()
     await publication_store.stage_revision(candidate)
@@ -343,7 +343,7 @@ async def test_apply_failed_condition_with_candidate_present_is_state_changed(
 
 
 async def test_store_io_and_corrupt_state_failures_propagate(
-    publication_store, publication_collection
+        publication_store, publication_collection
 ):
     error = RuntimeError("database unavailable")
     publication_collection.find_one.side_effect = error

@@ -42,7 +42,7 @@ def test_ontology_checks_node_category_and_relation_direction(graph_ontology, ch
 
 
 def test_complete_ontology_semantics_and_optional_descriptions(
-    graph_ontology, chunk, make_graph_facts
+        graph_ontology, chunk, make_graph_facts
 ):
     nodes, edges = make_graph_facts(chunk)
     entity = entity_vector_text(nodes[0], graph_ontology)
@@ -50,8 +50,8 @@ def test_complete_ontology_semantics_and_optional_descriptions(
         edges[0], {node.id: node for node in nodes}, graph_ontology
     )
     assert (
-        entity
-        == "ontology: work\nontology_description: 工作关系\ncategory: Person\ncategory_description: 人员\nname: 张三\ndescription: 来源描述"
+            entity
+            == "ontology: work\nontology_description: 工作关系\ncategory: Person\ncategory_description: 人员\nname: 张三\ndescription: 来源描述"
     )
     assert all(
         text in relation
@@ -74,26 +74,26 @@ def test_complete_ontology_semantics_and_optional_descriptions(
         graph_ontology,
     ).endswith("keywords: ")
     assert (
-        entity_vector_text(
-            nodes[0], replace(graph_ontology, description="另一本体说明")
-        )
-        != entity
+            entity_vector_text(
+                nodes[0], replace(graph_ontology, description="另一本体说明")
+            )
+            != entity
     )
     assert (
-        entity_vector_text(
-            nodes[0],
-            replace(
-                graph_ontology,
-                entity_specs={
-                    **graph_ontology.entity_specs,
-                    "Person": replace(
-                        graph_ontology.entity_specs["Person"],
-                        description="新的类别含义",
-                    ),
-                },
-            ),
-        )
-        != entity
+            entity_vector_text(
+                nodes[0],
+                replace(
+                    graph_ontology,
+                    entity_specs={
+                        **graph_ontology.entity_specs,
+                        "Person": replace(
+                            graph_ontology.entity_specs["Person"],
+                            description="新的类别含义",
+                        ),
+                    },
+                ),
+            )
+            != entity
     )
 
 
@@ -102,15 +102,15 @@ def test_record_identity_includes_kind_source_and_fact_without_delimiter_alias()
     assert identifier.startswith("gvec_") and len(identifier) == 69
     assert identifier == graph_vector_record_id(GraphVectorKind.ENTITY, "a", "b")
     assert (
-        len(
-            {
-                identifier,
-                graph_vector_record_id(GraphVectorKind.RELATIONSHIP, "a", "b"),
-                graph_vector_record_id(GraphVectorKind.ENTITY, "other", "b"),
-                graph_vector_record_id(GraphVectorKind.ENTITY, "a", "other"),
-            }
-        )
-        == 4
+            len(
+                {
+                    identifier,
+                    graph_vector_record_id(GraphVectorKind.RELATIONSHIP, "a", "b"),
+                    graph_vector_record_id(GraphVectorKind.ENTITY, "other", "b"),
+                    graph_vector_record_id(GraphVectorKind.ENTITY, "a", "other"),
+                }
+            )
+            == 4
     )
     assert graph_vector_record_id(
         GraphVectorKind.ENTITY, "a::b", "c"
@@ -118,7 +118,7 @@ def test_record_identity_includes_kind_source_and_fact_without_delimiter_alias()
 
 
 def test_strict_cache_and_ordinary_projection_share_fact_rules(
-    graph_ontology, chunk, make_graph_facts
+        graph_ontology, chunk, make_graph_facts
 ):
     nodes, edges = make_graph_facts(chunk)
     chunk.metadata["entities"].append(asdict(replace(nodes[0], description="不覆盖")))

@@ -6,11 +6,11 @@ from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from functools import partial
 
+from fastapi import FastAPI
+
 from common.logger import error, info, setup_logging_intercept
 from common.observability import instrument_fastapi_app, setup_observability
 from common.web.exception_handlers import setup_global_exception_handlers
-from fastapi import FastAPI
-
 from rag.core.config.bootstrap_settings import bootstrap_settings
 
 # 日志与可观测性必须在导入业务模块前初始化
@@ -19,7 +19,6 @@ setup_observability(
     service_name=bootstrap_settings.SERVICE_NAME,
     environment=bootstrap_settings.PROFILE,
 )
-
 
 from rag.api.router import api_router
 from rag.container import container
@@ -103,8 +102,8 @@ async def lifespan(app: FastAPI):
                 connected = []
                 if settings.KAFKA_ENABLED:
                     for name, consumer in (
-                        ("acl", container.acl_consumer()),
-                        ("publication", container.publication_consumer()),
+                            ("acl", container.acl_consumer()),
+                            ("publication", container.publication_consumer()),
                     ):
                         started = asyncio.Event()
                         connected.append(started)
@@ -164,7 +163,6 @@ no_proxy = ",".join(
 os.environ["no_proxy"] = no_proxy
 os.environ["NO_PROXY"] = no_proxy
 
-
 # 把 Nacos 拉到的 settings 注入容器，再按配置接入垂类，最后装配 FastAPI 应用
 container.settings.override(settings)
 
@@ -175,7 +173,6 @@ app.state.service_name = bootstrap_settings.SERVICE_NAME
 app.include_router(api_router, prefix="/rag")
 instrument_fastapi_app(app)
 setup_global_exception_handlers(app, is_dev=bootstrap_settings.IS_DEV)
-
 
 if __name__ == "__main__":
     import uvicorn

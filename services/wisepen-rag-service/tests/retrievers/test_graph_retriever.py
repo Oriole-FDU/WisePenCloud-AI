@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from common.utils.retrieval import Candidate, RetrievalPipeline, RrfFusion
 
+from common.utils.retrieval import Candidate, RetrievalPipeline, RrfFusion
 from rag.core.schema.filters import MetadataFilter, MetadataFilters
 from rag.retrievers import GraphMatch, GraphRetrievalMode, GraphRetriever
 from rag.storage.graph import GraphVectorKind
@@ -37,7 +37,7 @@ def build(deps, **options):
     ],
 )
 async def test_single_route_uses_total_limit_and_preserves_provider_scores(
-    deps, mode, kind
+        deps, mode, kind
 ):
     reader = (
         deps.entity_reader
@@ -64,7 +64,7 @@ async def test_single_route_uses_total_limit_and_preserves_provider_scores(
     deps.embedding_client.embed.assert_awaited_once_with(texts=["查询"])
     request = reader.query.await_args.args[0]
     assert (
-        request.top_k == 1 and request.filters is filters and request.include_embedding
+            request.top_k == 1 and request.filters is filters and request.include_embedding
     )
     assert request.embedding == [1.0, 0.0] and request.text is None
     other.query.assert_not_awaited()
@@ -113,8 +113,8 @@ async def test_hybrid_one_embedding_parallel_reads_and_round_robin(deps):
         for reader in (deps.entity_reader, deps.relationship_reader)
     )
     assert (
-        deps.entity_reader.query.await_args.args[0].embedding
-        is deps.relationship_reader.query.await_args.args[0].embedding
+            deps.entity_reader.query.await_args.args[0].embedding
+            is deps.relationship_reader.query.await_args.args[0].embedding
     )
     deps.embedding_client.embed.assert_awaited_once_with(texts=["查询"])
 
@@ -134,16 +134,16 @@ async def test_explicit_budgets_rrf_and_kind_namespace_preserve_sources(deps):
         fusion=RrfFusion(),
     ).retrieve("查询")
     assert (
-        len(result) == 3 and len({candidate.candidate_id for candidate in result}) == 3
+            len(result) == 3 and len({candidate.candidate_id for candidate in result}) == 3
     )
     assert all(candidate.score > 0 for candidate in result)
     assert deps.entity_reader.query.await_args.args[0].top_k == 2
     assert deps.relationship_reader.query.await_args.args[0].top_k == 4
     assert [
-        item.payload.vector.metadata["chunk_id"]
-        for item in result
-        if item.payload.kind is GraphVectorKind.ENTITY
-    ] == ["a", "b"]
+               item.payload.vector.metadata["chunk_id"]
+               for item in result
+               if item.payload.kind is GraphVectorKind.ENTITY
+           ] == ["a", "b"]
 
 
 @pytest.mark.parametrize(
@@ -210,8 +210,8 @@ async def test_concurrent_queries_keep_vectors_request_local(deps):
     await asyncio.gather(retriever.retrieve("first"), retriever.retrieve("second"))
     for reader in (deps.entity_reader, deps.relationship_reader):
         assert {
-            tuple(call.args[0].embedding) for call in reader.query.await_args_list
-        } == {(1.0, 0.0), (0.0, 1.0)}
+                   tuple(call.args[0].embedding) for call in reader.query.await_args_list
+               } == {(1.0, 0.0), (0.0, 1.0)}
 
 
 async def test_common_pipeline_preparation_owns_authorization_before_reranking(deps):

@@ -19,12 +19,12 @@ class EmploymentTools:
     """映射业务筛选参数，编排通用合同、图谱与原文读取用例。"""
 
     def __init__(
-        self,
-        *,
-        contracts: VectorRetrieval,
-        graph_retrieval: GraphRetrieval,
-        graph_traversal: GraphTraversal,
-        document_reading: DocumentReading,
+            self,
+            *,
+            contracts: VectorRetrieval,
+            graph_retrieval: GraphRetrieval,
+            graph_traversal: GraphTraversal,
+            document_reading: DocumentReading,
     ) -> None:
         self._contracts = contracts
         self._graph_retrieval = graph_retrieval
@@ -32,15 +32,15 @@ class EmploymentTools:
         self.reading = document_reading
 
     async def search_contracts(
-        self,
-        query: str,
-        *,
-        snapshot: ResourceSnapshot,
-        year_from: int | None = None,
-        year_to: int | None = None,
-        employee: str | None = None,
-        top_k: int = 10,
-        candidate_limit: int = 60,
+            self,
+            query: str,
+            *,
+            snapshot: ResourceSnapshot,
+            year_from: int | None = None,
+            year_to: int | None = None,
+            employee: str | None = None,
+            top_k: int = 10,
+            candidate_limit: int = 60,
     ) -> list[ChunkHit]:
         # HTTP 请求模型拥有业务参数校验；内部调用方遵守相同合同。
         fields = []
@@ -61,12 +61,12 @@ class EmploymentTools:
         )
 
     async def search_graph(
-        self,
-        query: str,
-        *,
-        snapshot: ResourceSnapshot,
-        mode: GraphRetrievalMode = GraphRetrievalMode.HYBRID,
-        top_k: int = 10,
+            self,
+            query: str,
+            *,
+            snapshot: ResourceSnapshot,
+            mode: GraphRetrievalMode = GraphRetrievalMode.HYBRID,
+            top_k: int = 10,
     ) -> GraphRetrievalResult:
         return await self._graph_retrieval.retrieve(
             query,
@@ -78,11 +78,11 @@ class EmploymentTools:
         )
 
     async def follow(
-        self,
-        node_ids: list[str],
-        *,
-        snapshot: ResourceSnapshot,
-        direction: GraphDirection = GraphDirection.OUTGOING,
+            self,
+            node_ids: list[str],
+            *,
+            snapshot: ResourceSnapshot,
+            direction: GraphDirection = GraphDirection.OUTGOING,
     ) -> GraphTraversalResult:
         return await self._graph_traversal.traverse(
             node_ids,

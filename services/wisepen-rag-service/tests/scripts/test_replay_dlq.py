@@ -85,7 +85,7 @@ def replay_env(script, monkeypatch):
 
 
 async def test_replay_is_bounded_and_preserves_original_partition_without_committing(
-    script, replay_env
+        script, replay_env
 ):
     env = replay_env
     assert await script.replay(env.args) == 2
@@ -103,7 +103,7 @@ async def test_replay_is_bounded_and_preserves_original_partition_without_commit
 
 
 async def test_replay_stops_at_initial_end_even_when_count_is_larger(
-    script, replay_env
+        script, replay_env
 ):
     replay_env.args.count = 99
     assert await script.replay(replay_env.args) == 2
@@ -111,7 +111,7 @@ async def test_replay_stops_at_initial_end_even_when_count_is_larger(
 
 
 async def test_replay_send_failure_preserves_partial_progress_and_closes_connections(
-    script, replay_env
+        script, replay_env
 ):
     failure = OSError("broker down")
     replay_env.producer.send_and_wait.side_effect = [None, failure]

@@ -5,11 +5,11 @@ import json
 from dataclasses import asdict
 from hashlib import sha256
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from common.logger import error, warning
 from common.utils.ai_clients.instruction import InstructionClient
 from common.utils.markdown.chunking.tokenizer import TokenCounter, default_token_counter
-from pydantic import BaseModel, ConfigDict, Field
-
 from rag.core.schema import Chunk, Document, GraphEdge, GraphNode, Ontology
 from rag.core.schema.graph import GraphFactValidationError
 
@@ -94,11 +94,11 @@ class GraphExtraction(BaseModel):
 
 
 def _merge_facts(
-    result: GraphExtraction,
-    chunk: Chunk,
-    ontology: Ontology,
-    nodes: dict[str, GraphNode],
-    edges: dict[str, GraphEdge],
+        result: GraphExtraction,
+        chunk: Chunk,
+        ontology: Ontology,
+        nodes: dict[str, GraphNode],
+        edges: dict[str, GraphEdge],
 ) -> None:
     """同一来源内首次合法事实优先；补漏只增补，不改写已接受事实。"""
     for entity in result.entities:
@@ -166,16 +166,16 @@ class GraphExtractor:
     """
 
     def __init__(
-        self,
-        *,
-        ontology: Ontology,
-        client: InstructionClient,
-        token_counter: TokenCounter | None = None,
-        max_input_tokens: int = 8000,
-        max_output_tokens: int = 4096,
-        max_concurrency: int = 4,
-        gleaning: bool = False,
-        reuse_existing: bool = True,
+            self,
+            *,
+            ontology: Ontology,
+            client: InstructionClient,
+            token_counter: TokenCounter | None = None,
+            max_input_tokens: int = 8000,
+            max_output_tokens: int = 4096,
+            max_concurrency: int = 4,
+            gleaning: bool = False,
+            reuse_existing: bool = True,
     ) -> None:
         self._ontology = ontology
         self._client = client
@@ -187,10 +187,10 @@ class GraphExtractor:
         self._semaphore = asyncio.Semaphore(max_concurrency)
 
     async def transform(
-        self,
-        chunks: list[Chunk],
-        *,
-        document: Document | None = None,
+            self,
+            chunks: list[Chunk],
+            *,
+            document: Document | None = None,
     ) -> list[Chunk]:
         if not chunks:
             return chunks
@@ -248,9 +248,9 @@ class GraphExtractor:
 
             # 指纹与缓存都合法时跳过模型；否则整块重算。
             if (
-                self._reuse_existing
-                and chunk.metadata.get("graph_version") == fingerprint
-                and _valid_cached_facts(chunk, self._ontology)
+                    self._reuse_existing
+                    and chunk.metadata.get("graph_version") == fingerprint
+                    and _valid_cached_facts(chunk, self._ontology)
             ):
                 return None
 
@@ -304,7 +304,7 @@ class GraphExtractor:
                     {
                         "role": "user",
                         "content": _GLEAN_PROMPT
-                        + json.dumps(accepted, ensure_ascii=False),
+                                   + json.dumps(accepted, ensure_ascii=False),
                     },
                 ]
                 if input_tokens(glean_messages) > self._max_input_tokens:
@@ -340,7 +340,7 @@ class GraphExtractor:
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for chunk, result in zip(chunks, results, strict=True):
                 if isinstance(result, BaseException) and not isinstance(
-                    result, asyncio.CancelledError
+                        result, asyncio.CancelledError
                 ):
                     error(
                         "graph_task_cleanup_failed", exc=result, chunk_id=chunk.chunk_id

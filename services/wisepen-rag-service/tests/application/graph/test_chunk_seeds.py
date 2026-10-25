@@ -48,7 +48,7 @@ def connected_retrieval(graph_env, snapshot_reader):
     ["valid", "missing", "partial", "bad-source", "bad-structure"],
 )
 async def test_chunk_hits_entity_references_are_from_selected_authorized_chunk(
-    graph_env, snapshot_reader, storage, state
+        graph_env, snapshot_reader, storage, state
 ):
     env = graph_env
     chunk = env.chunks[0]
@@ -95,7 +95,7 @@ async def test_chunk_hits_entity_references_are_from_selected_authorized_chunk(
 
 
 async def test_hit_metadata_filters_graph_records_without_mutating_source(
-    graph_env, connected_retrieval, storage
+        graph_env, connected_retrieval, storage
 ):
     env = graph_env
     chunk = env.chunks[0]
@@ -119,7 +119,7 @@ async def test_hit_metadata_filters_graph_records_without_mutating_source(
 
 
 async def test_graph_seed_parser_program_errors_propagate_from_retrieval(
-    graph_env, connected_retrieval, storage, monkeypatch
+        graph_env, connected_retrieval, storage, monkeypatch
 ):
     env = graph_env
     chunk = env.chunks[0]
@@ -137,7 +137,7 @@ async def test_graph_seed_parser_program_errors_propagate_from_retrieval(
 
 
 async def test_connections_span_other_chunks_and_only_final_hits_are_queried(
-    graph_env, connected_retrieval
+        graph_env, connected_retrieval
 ):
     env = graph_env
     hits = await connected_retrieval.usecase.retrieve(
@@ -146,9 +146,9 @@ async def test_connections_span_other_chunks_and_only_final_hits_are_queried(
     seeds = {seed.id: seed for seed in hits[0].seed_entities}
     person, company = env.facts[0][0]
     assert [
-        (option.relation_type, option.direction)
-        for option in seeds[company.id].relations
-    ] == [("supplies", GraphDirection.OUTGOING), ("works_at", GraphDirection.INCOMING)]
+               (option.relation_type, option.direction)
+               for option in seeds[company.id].relations
+           ] == [("supplies", GraphDirection.OUTGOING), ("works_at", GraphDirection.INCOMING)]
     assert seeds[person.id].relations[0].direction is GraphDirection.OUTGOING
     env.graph.get_neighbors.assert_awaited_once()
     request = env.graph.get_neighbors.call_args
@@ -163,14 +163,14 @@ async def test_connections_span_other_chunks_and_only_final_hits_are_queried(
 
 @pytest.mark.parametrize("hidden", ["denied", "destroyed", "stale", "missing-acl"])
 async def test_hidden_sources_do_not_prove_connections(
-    graph_env,
-    connected_retrieval,
-    storage,
-    publication_store,
-    publish_read_document,
-    make_read_document,
-    read_acls,
-    hidden,
+        graph_env,
+        connected_retrieval,
+        storage,
+        publication_store,
+        publish_read_document,
+        make_read_document,
+        read_acls,
+        hidden,
 ):
     env = graph_env
     # a 仍提供人员实体，只有 c 能为其关系背书；写入时的本体提示保持存在。
@@ -194,7 +194,7 @@ async def test_hidden_sources_do_not_prove_connections(
 
 @pytest.mark.parametrize("self_loop", [False, True])
 async def test_connections_merge_opposite_directions_and_self_loops(
-    graph_env, connected_retrieval, storage, self_loop
+        graph_env, connected_retrieval, storage, self_loop
 ):
     env = graph_env
     chunk = env.chunks[1]
@@ -212,15 +212,15 @@ async def test_connections_merge_opposite_directions_and_self_loops(
     )
     company = hits[0].seed_entities[1]
     assert (
-        next(
-            option for option in company.relations if option.relation_type == "supplies"
-        ).direction
-        is GraphDirection.BOTH
+            next(
+                option for option in company.relations if option.relation_type == "supplies"
+            ).direction
+            is GraphDirection.BOTH
     )
 
 
 async def test_connections_beyond_one_hundred_are_not_lost(
-    graph_env, connected_retrieval, storage
+        graph_env, connected_retrieval, storage
 ):
     env = graph_env
     chunk = env.chunks[1]
@@ -241,7 +241,7 @@ async def test_connections_beyond_one_hundred_are_not_lost(
 
 @pytest.mark.parametrize("damage", ["network", "facts"])
 async def test_enabled_connection_failures_propagate(
-    graph_env, connected_retrieval, storage, damage
+        graph_env, connected_retrieval, storage, damage
 ):
     env = graph_env
     if damage == "network":

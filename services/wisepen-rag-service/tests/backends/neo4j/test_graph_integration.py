@@ -104,11 +104,11 @@ async def test_real_gc_shared_contributions_then_orphan_cleanup(real_storage):
     )
     assert await gc.collect() == GcReport(1, 1, 0)
     assert [
-        node.source_id for node in await storage.get_nodes([first.nodes[0].id])
-    ] == ["second"]
+               node.source_id for node in await storage.get_nodes([first.nodes[0].id])
+           ] == ["second"]
     assert [
-        edge.source_ids for edge in await storage.get_relations([first.edges[0].id])
-    ] == [["second"]]
+               edge.source_ids for edge in await storage.get_relations([first.edges[0].id])
+           ] == [["second"]]
     store.list_destroyed_resource_ids.side_effect = [["live"], []]
     assert await gc.collect() == GcReport(1, 1, 0)
     async with driver.session(database=database) as session:
@@ -122,7 +122,7 @@ async def test_real_gc_shared_contributions_then_orphan_cleanup(real_storage):
 
 
 async def test_real_shared_provenance_replacement_reading_and_orphan_cleanup(
-    real_storage,
+        real_storage,
 ):
     storage, driver, database, graph_name = real_storage
     first = make_source("a", "doc-a", description="第一份描述")
@@ -142,10 +142,10 @@ async def test_real_shared_provenance_replacement_reading_and_orphan_cleanup(
         second.edges[0],
     ]
     assert (
-        await storage.get_neighbors(
-            [first.nodes[0].id], direction=GraphDirection.INCOMING
-        )
-        == []
+            await storage.get_neighbors(
+                [first.nodes[0].id], direction=GraphDirection.INCOMING
+            )
+            == []
     )
     assert await storage.get_neighbors(
         [first.nodes[1].id], direction=GraphDirection.INCOMING
@@ -188,7 +188,7 @@ async def test_real_failed_second_batch_retains_old_and_previous_commit(real_sto
 
 
 async def test_real_indexer_cross_document_path_and_namespace_isolation(
-    real_storage, graph_ontology, chunk
+        real_storage, graph_ontology, chunk
 ):
     storage, driver, database, graph_name = real_storage
     from rag.ingestion.indexers import GraphIndexer
@@ -221,12 +221,12 @@ async def test_real_indexer_cross_document_path_and_namespace_isolation(
         first.nodes[0]
     ]
     assert (
-        await storage.get_relations([first.edges[0].id], filters=selected)
-        == first.edges
+            await storage.get_relations([first.edges[0].id], filters=selected)
+            == first.edges
     )
     assert (
-        await storage.get_neighbors([first.nodes[0].id], filters=selected)
-        == first.edges
+            await storage.get_neighbors([first.nodes[0].id], filters=selected)
+            == first.edges
     )
     denied = MetadataFilters([MetadataFilter("ontology_name", "other")])
     assert await storage.get_nodes([first.nodes[0].id], filters=denied) == []

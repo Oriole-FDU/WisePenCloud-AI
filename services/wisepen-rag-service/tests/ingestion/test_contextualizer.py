@@ -9,9 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
 from common.utils.markdown import Section, SourceSpan
 from common.utils.markdown.chunking.tokenizer import default_token_counter
-
 from rag.core.schema import Chunk, Document, DocumentStructure
 from rag.ingestion.transformers import Contextualizer
 
@@ -184,7 +184,7 @@ async def test_highest_fitting_ancestor_and_deterministic_json_metadata(client):
 
 
 async def test_own_span_seed_keeps_entire_direct_content_not_chunk_reconstruction(
-    client,
+        client,
 ):
     own = "# Parent\n\n完整直属内容\n\n"
     child = "## Huge child\n" + "x" * 1800
@@ -310,7 +310,7 @@ async def test_real_bpe_full_prompt_budget_boundary(client):
 
 
 async def test_one_chunk_failure_keeps_other_success_and_program_errors_propagate(
-    client,
+        client,
 ):
     doc, chunks = make_input("first", "second")
     client.complete.side_effect = [TimeoutError("first failed"), "第二块上下文"]

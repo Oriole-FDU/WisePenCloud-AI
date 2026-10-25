@@ -18,7 +18,7 @@ def chunks():
 
 
 async def test_pipeline_preserves_order_identity_and_in_place_metadata(
-    document, chunks
+        document, chunks
 ):
     calls = []
     identity = (chunks[0].chunk_id, chunks[0].content_revision, chunks[0].chunk_index)
@@ -76,14 +76,14 @@ async def test_pipeline_preserves_order_identity_and_in_place_metadata(
     for transformer in transformers:
         transformer.transform.assert_awaited_once_with(chunks, document=document)
     assert (
-        chunks[0].chunk_id,
-        chunks[0].content_revision,
-        chunks[0].chunk_index,
-    ) == identity
+               chunks[0].chunk_id,
+               chunks[0].content_revision,
+               chunks[0].chunk_index,
+           ) == identity
 
 
 async def test_pipeline_passes_each_returned_list_and_indexes_only_final_list(
-    document, chunks
+        document, chunks
 ):
     intermediate = [chunks[0]]
     final = [Chunk("new-chunk", "resource", "revision", 1, None, [], "新正文", 3, [])]
@@ -108,7 +108,7 @@ async def test_pipeline_passes_each_returned_list_and_indexes_only_final_list(
 
 @pytest.mark.parametrize("failed_stage", range(5))
 async def test_pipeline_propagates_original_failure_and_stops(
-    document, chunks, failed_stage
+        document, chunks, failed_stage
 ):
     calls = []
     writes = []
@@ -160,7 +160,7 @@ async def test_pipeline_propagates_original_failure_and_stops(
 
 @pytest.mark.parametrize("empty", [False, True])
 async def test_pipeline_without_transformers_passes_chunker_list(
-    document, chunks, empty
+        document, chunks, empty
 ):
     initial = [] if empty else chunks
     chunker = SimpleNamespace(split=AsyncMock(return_value=initial))

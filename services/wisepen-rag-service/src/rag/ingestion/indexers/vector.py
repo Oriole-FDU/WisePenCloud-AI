@@ -3,10 +3,8 @@
 from collections.abc import Callable
 
 from common.utils.ai_clients.embedding import EmbeddingClient
-
 from rag.core.schema import Chunk
 from rag.storage.vector import VectorRecord, VectorWriter
-
 from .base import Indexer
 
 
@@ -14,12 +12,12 @@ class VectorIndexer(Indexer):
     """只读 Chunk；metadata_factory 提供业务增量，资源身份始终来自 Chunk。"""
 
     def __init__(
-        self,
-        *,
-        embedding_client: EmbeddingClient,
-        writer: VectorWriter,
-        batch_size: int = 32,
-        metadata_factory: Callable[[Chunk], dict[str, object]] | None = None,
+            self,
+            *,
+            embedding_client: EmbeddingClient,
+            writer: VectorWriter,
+            batch_size: int = 32,
+            metadata_factory: Callable[[Chunk], dict[str, object]] | None = None,
     ) -> None:
         self._embedding_client = embedding_client
         self._writer = writer
@@ -29,7 +27,7 @@ class VectorIndexer(Indexer):
     async def index(self, chunks: list[Chunk]) -> None:
         """每批先 embedding 后写入；失败停止后续批次，已完成的事实与投影保留。"""
         for start in range(0, len(chunks), self._batch_size):
-            batch = chunks[start : start + self._batch_size]
+            batch = chunks[start: start + self._batch_size]
             texts = [chunk.retrieval_text for chunk in batch]
 
             try:

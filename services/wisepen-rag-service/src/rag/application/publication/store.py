@@ -13,7 +13,7 @@ class PublicationStore(Protocol):
     """批量读取去重保序、缺失省略；空批量无 I/O，异常直接传播。"""
 
     async def get_states(
-        self, resource_ids: list[str]
+            self, resource_ids: list[str]
     ) -> list[ResourcePublicationState]: ...
 
     async def stage_revision(self, revision: ContentRevision) -> PublicationAction:
@@ -29,7 +29,7 @@ class PublicationStore(Protocol):
         ...
 
     async def list_destroyed_resource_ids(
-        self, *, after_resource_id: str | None = None, limit: int = 100
+            self, *, after_resource_id: str | None = None, limit: int = 100
     ) -> list[str]:
         """按资源 ID 升序分页永久销毁标记；只提供定位，不删除标记。"""
         ...

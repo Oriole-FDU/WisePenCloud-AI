@@ -36,7 +36,7 @@ KAFKA_RAG_ACL_RECALC_GROUP_ID: wisepen-rag-v4-acl-recalc-group
 KAFKA_DOCUMENT_READY_TOPIC: wisepen-document-ready-topic
 KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC: wisepen-resource-physical-destroy-topic
 KAFKA_RAG_PUBLICATION_GROUP_ID: wisepen-rag-v4-publication-group
-EXTENSIONS: []
+EXTENSIONS: [ ]
 # Employment 需要完整指令配置、Neo4j 和网关密钥；链显式不带上下文。
 # EXTENSIONS: [employment]
 # FROM_SOURCE_SECRET: replace-with-private-gateway-secret

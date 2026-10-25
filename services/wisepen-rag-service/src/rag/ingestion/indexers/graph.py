@@ -4,7 +4,6 @@ from dataclasses import replace
 from hashlib import sha256
 
 from common.utils.ai_clients.embedding import EmbeddingClient
-
 from rag.core.schema import Chunk, Ontology
 from rag.core.schema.filters import FilterOperator, MetadataFilter, MetadataFilters
 from rag.storage.graph import (
@@ -17,7 +16,6 @@ from rag.storage.graph import (
     relationship_vector_text,
 )
 from rag.storage.vector import VectorRecord, VectorWriter
-
 from .base import Indexer
 
 
@@ -28,20 +26,20 @@ class GraphIndexer(Indexer):
     """
 
     def __init__(
-        self,
-        *,
-        ontology: Ontology,
-        writer: GraphWriter | None = None,
-        embedding_client: EmbeddingClient | None = None,
-        entity_writer: VectorWriter | None = None,
-        relationship_writer: VectorWriter | None = None,
-        source_batch_size: int = 64,
-        embedding_batch_size: int = 32,
+            self,
+            *,
+            ontology: Ontology,
+            writer: GraphWriter | None = None,
+            embedding_client: EmbeddingClient | None = None,
+            entity_writer: VectorWriter | None = None,
+            relationship_writer: VectorWriter | None = None,
+            source_batch_size: int = 64,
+            embedding_batch_size: int = 32,
     ) -> None:
         # 向量投影三件套必须同时配置或同时缺省
         configured = (embedding_client, entity_writer, relationship_writer)
         if any(value is not None for value in configured) and any(
-            value is None for value in configured
+                value is None for value in configured
         ):
             raise ValueError(
                 "graph vectors require embedding client and both vector writers"
@@ -87,22 +85,22 @@ class GraphIndexer(Indexer):
     async def _index_vectors(self, chunks: list[Chunk], facts: list) -> None:
         # 按来源批处理，避免一次性占用过多内存与模型配额
         for start in range(0, len(chunks), self._source_batch_size):
-            batch = chunks[start : start + self._source_batch_size]
+            batch = chunks[start: start + self._source_batch_size]
 
             entity_records = []
             relationship_records = []
 
             # 组装本批的实体与关系向量记录（先不带 embedding）
             for chunk, (nodes, edges) in zip(
-                batch, facts[start : start + len(batch)], strict=True
+                    batch, facts[start: start + len(batch)], strict=True
             ):
                 for kind, items, records in (
-                    (GraphVectorKind.ENTITY, nodes.values(), entity_records),
-                    (
-                        GraphVectorKind.RELATIONSHIP,
-                        edges.values(),
-                        relationship_records,
-                    ),
+                        (GraphVectorKind.ENTITY, nodes.values(), entity_records),
+                        (
+                                GraphVectorKind.RELATIONSHIP,
+                                edges.values(),
+                                relationship_records,
+                        ),
                 ):
                     for item in items:
                         # 实体与关系使用不同的向量文本模板
@@ -140,7 +138,7 @@ class GraphIndexer(Indexer):
 
             # 分批调用 embedding；响应合同由 Common 核对，失败转为可重试错误
             for offset in range(0, len(records), self._embedding_batch_size):
-                current = records[offset : offset + self._embedding_batch_size]
+                current = records[offset: offset + self._embedding_batch_size]
                 try:
                     vectors = await self._embedding_client.embed(
                         texts=[record.text for record in current]

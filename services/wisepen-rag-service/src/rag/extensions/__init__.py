@@ -14,7 +14,7 @@ _BUILDERS: dict[str, Callable[..., containers.DeclarativeContainer]] = {
 
 
 def register_extensions(
-    platform: containers.DeclarativeContainer,
+        platform: containers.DeclarativeContainer,
 ) -> dict[str, Extension]:
     """构造扩展并注册来源存储；由平台生命周期统一初始化和挂载。"""
     names = platform.settings().EXTENSIONS

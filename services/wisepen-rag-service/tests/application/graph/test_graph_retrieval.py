@@ -6,9 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from common.utils.retrieval import ModelReranker
 from pydantic import TypeAdapter
 
+from common.utils.retrieval import ModelReranker
 from rag.application.acl.models import ResourceAcl
 from rag.application.graph import (
     GraphRetrieval,
@@ -31,7 +31,7 @@ from rag.storage.vector import VectorMatch
 
 @pytest.mark.parametrize("mode", ["local", "global", "hybrid", "traversal"])
 async def test_grouped_sources_keep_descriptions_keywords_and_metadata_authorized(
-    graph_env, storage, read_acls, mode
+        graph_env, storage, read_acls, mode
 ):
     env = graph_env
     first, second = env.chunks[0], env.chunks[2]
@@ -104,15 +104,15 @@ async def test_modes_group_sources_once_and_keep_full_material(graph_env, mode):
         {"a", "c"} if mode is GraphRetrievalMode.LOCAL else {"a", "b", "c", "d"}
     )
     assert {
-        source.description for edge in result.relationships for source in edge.sources
-    } == {"a-任职", "c-任职"}
+               source.description for edge in result.relationships for source in edge.sources
+           } == {"a-任职", "c-任职"}
     assert {
-        source.description for node in result.entities for source in node.sources
-    } == (
-        {"a-张三", "c-张三"}
-        if mode is GraphRetrievalMode.LOCAL
-        else {"a-张三", "c-张三", "a-甲公司", "b-甲公司", "c-甲公司", "d-无关公司描述"}
-    )
+               source.description for node in result.entities for source in node.sources
+           } == (
+               {"a-张三", "c-张三"}
+               if mode is GraphRetrievalMode.LOCAL
+               else {"a-张三", "c-张三", "a-甲公司", "b-甲公司", "c-甲公司", "d-无关公司描述"}
+           )
     assert [hit.rank for hit in result.chunks] == list(range(1, len(result.chunks) + 1))
     assert len({node.id for node in result.entities}) == len(result.entities)
     assert len(result.relationships) == 1
@@ -124,10 +124,10 @@ async def test_modes_group_sources_once_and_keep_full_material(graph_env, mode):
     )
     env.embedding.embed.assert_awaited_once_with(texts=["query"])
     assert env.entity_reader.query.await_count == (
-        mode is not GraphRetrievalMode.GLOBAL
+            mode is not GraphRetrievalMode.GLOBAL
     )
     assert env.relation_reader.query.await_count == (
-        mode is not GraphRetrievalMode.LOCAL
+            mode is not GraphRetrievalMode.LOCAL
     )
     limited_calls = [
         call
@@ -138,7 +138,7 @@ async def test_modes_group_sources_once_and_keep_full_material(graph_env, mode):
 
 
 async def test_shared_context_adds_global_endpoint_sources_without_their_relations(
-    graph_env,
+        graph_env,
 ):
     env = graph_env
     env.relations[:] = [env.match(kind=GraphVectorKind.RELATIONSHIP)]
@@ -157,7 +157,7 @@ async def test_shared_context_adds_global_endpoint_sources_without_their_relatio
 
 @pytest.mark.parametrize("hidden", ["denied", "destroyed", "missing-acl"])
 async def test_hidden_sources_cannot_supply_candidates_or_neighborhood(
-    graph_env, read_acls, publication_store, hidden
+        graph_env, read_acls, publication_store, hidden
 ):
     env = graph_env
     if hidden == "denied":
@@ -178,8 +178,8 @@ async def test_hidden_sources_cannot_supply_candidates_or_neighborhood(
     env.entities[:] = [env.match(0)]
     env.graph.get_neighbors.reset_mock()
     assert (
-        await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == GraphRetrievalResult()
+            await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
+            == GraphRetrievalResult()
     )
     env.graph.get_neighbors.assert_not_awaited()
 
@@ -199,8 +199,8 @@ async def test_bad_vector_identity_is_not_repaired_from_mongo(graph_env, field, 
     match = env.match()
     env.entities[:] = [replace(match, metadata={**match.metadata, field: value})]
     assert (
-        await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == GraphRetrievalResult()
+            await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
+            == GraphRetrievalResult()
     )
     env.graph.get_nodes.assert_not_awaited()
     env.graph.get_neighbors.assert_not_awaited()
@@ -214,22 +214,22 @@ async def test_wrong_record_id_and_missing_metadata_skip_content_io(graph_env, s
         replace(env.match(), metadata={}),
     ]
     assert (
-        await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == GraphRetrievalResult()
+            await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
+            == GraphRetrievalResult()
     )
     storage.get_chunks.assert_not_awaited()
 
 
 async def test_changed_description_invalidates_vector_but_projection_uses_current_mongo(
-    graph_env, storage
+        graph_env, storage
 ):
     env = graph_env
     env.entities[:] = [env.match()]
     env.chunks[0].metadata["entities"][0]["description"] = "更新后的人员描述"
     await storage.upsert_chunks([env.chunks[0]])
     assert (
-        await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == GraphRetrievalResult()
+            await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
+            == GraphRetrievalResult()
     )
     # 通过未变化的公司种子验证拓扑材料始终采用当前来源事实。
     env.relations[:] = [env.match(kind=GraphVectorKind.RELATIONSHIP)]
@@ -243,7 +243,7 @@ async def test_changed_description_invalidates_vector_but_projection_uses_curren
 
 @pytest.mark.parametrize("state", ["absent", "empty", "partial", "structure", "source"])
 async def test_missing_facts_skip_but_damaged_current_facts_raise(
-    graph_env, storage, state
+        graph_env, storage, state
 ):
     env = graph_env
     env.entities[:] = [env.match()]
@@ -261,8 +261,8 @@ async def test_missing_facts_skip_but_damaged_current_facts_raise(
     await storage.upsert_chunks([chunk])
     if state in ("absent", "empty"):
         assert (
-            await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-            == GraphRetrievalResult()
+                await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
+                == GraphRetrievalResult()
         )
     else:
         with pytest.raises((TypeError, ValueError)):
@@ -271,7 +271,7 @@ async def test_missing_facts_skip_but_damaged_current_facts_raise(
 
 
 async def test_illegal_facts_and_missing_relation_are_dropped_individually(
-    graph_env, storage
+        graph_env, storage
 ):
     env = graph_env
     env.entities[:] = [env.match()]
@@ -282,8 +282,8 @@ async def test_illegal_facts_and_missing_relation_are_dropped_individually(
     await storage.upsert_chunks([env.chunks[0]])
     hits = await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
     assert {
-        source.chunk_id for edge in hits.relationships for source in edge.sources
-    } == {env.chunks[2].chunk_id}
+               source.chunk_id for edge in hits.relationships for source in edge.sources
+           } == {env.chunks[2].chunk_id}
     assert env.chunks[0].chunk_id in {
         source.chunk_id for node in hits.entities for source in node.sources
     }
@@ -300,7 +300,7 @@ async def test_missing_topology_preserves_authorized_vector_seed(graph_env):
 
 
 async def test_reranking_uses_unique_full_chunks_and_top_k_only_limits_chunks(
-    graph_env,
+        graph_env,
 ):
     env = graph_env
     env.entities[:] = [env.match(0), env.match(2), env.match(0, position=1)]
@@ -340,7 +340,7 @@ async def test_reranking_uses_unique_full_chunks_and_top_k_only_limits_chunks(
     "failure", ["embedding", "vector", "graph", "content", "cancel", "rerank"]
 )
 async def test_failures_and_cancel_propagate_except_common_reranker_fallback(
-    graph_env, storage, failure
+        graph_env, storage, failure
 ):
     env = graph_env
     env.entities[:] = [env.match()]
@@ -361,14 +361,14 @@ async def test_failures_and_cancel_propagate_except_common_reranker_fallback(
     usecase = GraphRetrieval(**env.dependencies, reranker=reranker)
     if failure == "rerank":
         assert (
-            len(
-                (
-                    await usecase.retrieve(
-                        "query", snapshot=env.snapshot(), mode="local"
-                    )
-                ).chunks
-            )
-            == 2
+                len(
+                    (
+                        await usecase.retrieve(
+                            "query", snapshot=env.snapshot(), mode="local"
+                        )
+                    ).chunks
+                )
+                == 2
         )
     else:
         with pytest.raises(type(error)) as caught:
@@ -377,7 +377,7 @@ async def test_failures_and_cancel_propagate_except_common_reranker_fallback(
 
 
 async def test_same_snapshot_keeps_first_revision_and_visibility(
-    graph_env, read_acls, publication_store, publish_read_document, make_read_document
+        graph_env, read_acls, publication_store, publish_read_document, make_read_document
 ):
     env = graph_env
     env.entities[:] = [env.match()]
@@ -387,11 +387,11 @@ async def test_same_snapshot_keeps_first_revision_and_visibility(
     read_acls["c"] = ResourceAcl("c", 2, "other")
     await publication_store.destroy_resources(["a"])
     assert (
-        await env.retrieval.retrieve("query", snapshot=snapshot, mode="local") == first
+            await env.retrieval.retrieve("query", snapshot=snapshot, mode="local") == first
     )
     assert (
-        await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == GraphRetrievalResult()
+            await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
+            == GraphRetrievalResult()
     )
 
 
@@ -454,15 +454,15 @@ async def test_common_and_enum_validation_fails_before_io(graph_env, kwargs):
 
 
 async def test_single_route_only_requires_selected_reader_and_empty_recall_skips_graph(
-    graph_env, storage
+        graph_env, storage
 ):
     env = graph_env
     dependencies = {**env.dependencies, "relationship_reader": None}
     usecase = GraphRetrieval(**dependencies)
     storage.get_chunks = AsyncMock(wraps=storage.get_chunks)
     assert (
-        await usecase.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == GraphRetrievalResult()
+            await usecase.retrieve("query", snapshot=env.snapshot(), mode="local")
+            == GraphRetrievalResult()
     )
     storage.get_chunks.assert_not_awaited()
     env.graph.get_nodes.assert_not_awaited()
@@ -471,7 +471,7 @@ async def test_single_route_only_requires_selected_reader_and_empty_recall_skips
 
 
 async def test_indexed_source_vectors_reach_authorized_evidence_without_mutating_chunks(
-    graph_env, graph_vector_writers
+        graph_env, graph_vector_writers
 ):
     env = graph_env
     before = [asdict(chunk) for chunk in env.chunks]
@@ -493,7 +493,7 @@ async def test_indexed_source_vectors_reach_authorized_evidence_without_mutating
 
 @pytest.mark.parametrize("change", ["description", "keywords"])
 async def test_global_current_fact_digest_includes_relationship_material(
-    graph_env, storage, change
+        graph_env, storage, change
 ):
     env = graph_env
     env.relations[:] = [env.match(kind=GraphVectorKind.RELATIONSHIP)]
@@ -502,14 +502,14 @@ async def test_global_current_fact_digest_includes_relationship_material(
     )
     await storage.upsert_chunks([env.chunks[0]])
     assert (
-        await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="global")
-        == GraphRetrievalResult()
+            await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="global")
+            == GraphRetrievalResult()
     )
     env.graph.get_relations.assert_not_awaited()
 
 
 async def test_global_endpoint_source_description_is_current_without_affecting_relation_digest(
-    graph_env, storage
+        graph_env, storage
 ):
     env = graph_env
     env.relations[:] = [env.match(kind=GraphVectorKind.RELATIONSHIP)]
@@ -541,20 +541,20 @@ async def test_local_expansion_options_do_not_change_global_relation_scope(graph
 
 
 async def test_old_revision_vector_does_not_fall_back_to_other_source(
-    graph_env, publish_read_document, make_read_document
+        graph_env, publish_read_document, make_read_document
 ):
     env = graph_env
     env.entities[:] = [env.match()]
     await publish_read_document(make_read_document("a", version=2))
     assert (
-        await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == GraphRetrievalResult()
+            await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
+            == GraphRetrievalResult()
     )
     env.graph.get_neighbors.assert_not_awaited()
 
 
 async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ontologies(
-    graph_env, graph_vector_writers, storage, snapshot_reader
+        graph_env, graph_vector_writers, storage, snapshot_reader
 ):
     env = graph_env
     foreign = Ontology(
@@ -579,8 +579,8 @@ async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ont
     )
     await storage.upsert_chunks([chunk])
     env.graph.nodes = [
-        node for node in env.graph.nodes if node.source_id != chunk.chunk_id
-    ] + nodes
+                          node for node in env.graph.nodes if node.source_id != chunk.chunk_id
+                      ] + nodes
     env.graph.edges.append(edge)
     entity_writer, relation_writer = graph_vector_writers
     env.embedding.embed.side_effect = lambda *, texts: [[1.0, 0.0] for _ in texts]
@@ -660,7 +660,7 @@ async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ont
 
 
 async def test_changed_extraction_version_invalidates_old_vector_without_query_ontology(
-    graph_env, storage
+        graph_env, storage
 ):
     env = graph_env
     env.chunks[0].metadata["graph_version"] = "old"
@@ -668,6 +668,6 @@ async def test_changed_extraction_version_invalidates_old_vector_without_query_o
     env.chunks[0].metadata["graph_version"] = "new"
     await storage.upsert_chunks([env.chunks[0]])
     assert (
-        await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
-        == GraphRetrievalResult()
+            await env.retrieval.retrieve("query", snapshot=env.snapshot(), mode="local")
+            == GraphRetrievalResult()
     )

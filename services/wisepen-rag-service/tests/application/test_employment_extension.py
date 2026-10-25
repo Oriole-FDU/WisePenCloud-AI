@@ -109,10 +109,10 @@ class MemoryGraph:
                 node
                 for source in self.sources.values()
                 if filters is None
-                or all(
-                    source.metadata[field.key] == field.value
-                    for field in filters.filters
-                )
+                   or all(
+                source.metadata[field.key] == field.value
+                for field in filters.filters
+            )
                 for node in source.nodes
                 if node.id in ids
             ],
@@ -125,10 +125,10 @@ class MemoryGraph:
                 edge
                 for source in self.sources.values()
                 if filters is None
-                or all(
-                    source.metadata[field.key] == field.value
-                    for field in filters.filters
-                )
+                   or all(
+                source.metadata[field.key] == field.value
+                for field in filters.filters
+            )
                 for edge in source.edges
                 if edge.id in ids
             ],
@@ -136,23 +136,23 @@ class MemoryGraph:
         )
 
     async def _neighbors(
-        self, ids, *, direction, relation_types=None, limit=100, filters=None
+            self, ids, *, direction, relation_types=None, limit=100, filters=None
     ):
         edges = [
             edge
             for source in self.sources.values()
             if filters is None
-            or all(
+               or all(
                 source.metadata[field.key] == field.value for field in filters.filters
             )
             for edge in source.edges
             if (
-                direction in (GraphDirection.OUTGOING, GraphDirection.BOTH)
-                and edge.source_id in ids
-                or direction in (GraphDirection.INCOMING, GraphDirection.BOTH)
-                and edge.target_id in ids
-            )
-            and (relation_types is None or edge.relation_type in relation_types)
+                       direction in (GraphDirection.OUTGOING, GraphDirection.BOTH)
+                       and edge.source_id in ids
+                       or direction in (GraphDirection.INCOMING, GraphDirection.BOTH)
+                       and edge.target_id in ids
+               )
+               and (relation_types is None or edge.relation_type in relation_types)
         ]
         selected = sorted({edge.id for edge in edges})[:limit]
         return sorted(
@@ -170,22 +170,22 @@ class MemoryGraph:
 
 @pytest.fixture
 async def employment_env(
-    platform_settings, storage, publication_store, read_acl_repository, read_acls
+        platform_settings, storage, publication_store, read_acl_repository, read_acls
 ):
     settings = type(platform_settings)(
         **(
-            platform_settings.model_dump()
-            | {
-                "EXTENSIONS": ["employment"],
-                "ENABLE_GRAPH_STORAGE": True,
-                "NEO4J_URI": "neo4j://localhost:7687",
-                "NEO4J_USERNAME": "test",
-                "NEO4J_PASSWORD": "test",
-                "INSTRUCTION_BASE_URL": "http://localhost/v1",
-                "INSTRUCTION_API_KEY": "test",
-                "INSTRUCTION_MODEL": "test",
-                "FROM_SOURCE_SECRET": "test-gateway",
-            }
+                platform_settings.model_dump()
+                | {
+                    "EXTENSIONS": ["employment"],
+                    "ENABLE_GRAPH_STORAGE": True,
+                    "NEO4J_URI": "neo4j://localhost:7687",
+                    "NEO4J_USERNAME": "test",
+                    "NEO4J_PASSWORD": "test",
+                    "INSTRUCTION_BASE_URL": "http://localhost/v1",
+                    "INSTRUCTION_API_KEY": "test",
+                    "INSTRUCTION_MODEL": "test",
+                    "FROM_SOURCE_SECRET": "test-gateway",
+                }
         )
     )
     platform = Container(settings=settings)
@@ -229,7 +229,7 @@ async def employment_env(
         .splitlines()
     ]
     for event, department in zip(
-        events, ("研发部", "产品部", "研发部", "研发部"), strict=True
+            events, ("研发部", "产品部", "研发部", "研发部"), strict=True
     ):
         data = event.metadata
         instruction.structured_complete.return_value = GraphExtraction.model_validate(
@@ -311,8 +311,8 @@ async def test_publish_all_indexes_metadata_and_seeds(employment_env):
             event for event in env.events if event.resource_id == chunk.resource_id
         )
         assert {
-            key: chunk.metadata[key] for key in ("employee", "start_date")
-        } == event.metadata
+                   key: chunk.metadata[key] for key in ("employee", "start_date")
+               } == event.metadata
         stored_document = (
             await env.storage.get_documents(
                 [(chunk.resource_id, chunk.content_revision)]
@@ -328,9 +328,9 @@ async def test_publish_all_indexes_metadata_and_seeds(employment_env):
         employee="陈晨",
     )
     assert (
-        len(hits) == 1
-        and hits[0].metadata["employee"] == "陈晨"
-        and hits[0].metadata["start_date"].startswith("2022-")
+            len(hits) == 1
+            and hits[0].metadata["employee"] == "陈晨"
+            and hits[0].metadata["start_date"].startswith("2022-")
     )
     assert hits[0].text == env.chunks[2].raw_text
     assert hits[0].seed_entities[0].id == "employment:Person:陈晨"
@@ -344,20 +344,20 @@ async def test_publish_all_indexes_metadata_and_seeds(employment_env):
     assert env.platform.pipeline().transformers == []
     before = env.instruction.structured_complete.await_count
     assert (
-        await env.publisher.publish(env.events[0].to_document())
-        is PublicationAction.ALREADY_APPLIED
+            await env.publisher.publish(env.events[0].to_document())
+            is PublicationAction.ALREADY_APPLIED
     )
     assert env.instruction.structured_complete.await_count == before
 
 
 async def test_metadata_validation_preserves_original_values_and_chunk_isolation(
-    document,
+        document,
 ):
     original = {"employee": "  LI   Ming  ", "start_date": "2020-03-01"}
     document = replace(
         document,
         text="# 内部劳动合同\n\n"
-        + "员工隶属于研发部，负责软件研发和项目维护。\n\n" * 40,
+             + "员工隶属于研发部，负责软件研发和项目维护。\n\n" * 40,
         metadata=original,
     )
     chunks = await MarkdownChunker(40, 70).split(document)
@@ -417,8 +417,8 @@ async def test_authoritative_prepare_rejects_stale_or_hidden(employment_env, cha
         await env.publication_store.stage_revision(rev)
         await env.publication_store.apply_revision(rev)
     assert (
-        await env.extension.tools().search_contracts("合同", snapshot=env.snapshot())
-        == []
+            await env.extension.tools().search_contracts("合同", snapshot=env.snapshot())
+            == []
     )
 
 
@@ -431,8 +431,8 @@ async def test_business_changes_use_new_version_and_rebuild_projection(employmen
     }
     unchanged_version = original.model_copy(update={"metadata": metadata})
     assert (
-        await env.publisher.publish(unchanged_version.to_document())
-        is PublicationAction.ALREADY_APPLIED
+            await env.publisher.publish(unchanged_version.to_document())
+            is PublicationAction.ALREADY_APPLIED
     )
     rows = await env.extension.tools().search_contracts(
         "合同", snapshot=env.snapshot(), year_from=2023, year_to=2023
@@ -440,8 +440,8 @@ async def test_business_changes_use_new_version_and_rebuild_projection(employmen
     assert rows == []
     new_version = unchanged_version.model_copy(update={"document_version": 2})
     assert (
-        await env.publisher.publish(new_version.to_document())
-        is PublicationAction.APPLIED
+            await env.publisher.publish(new_version.to_document())
+            is PublicationAction.APPLIED
     )
     rows = await env.extension.tools().search_contracts(
         "合同", snapshot=env.snapshot(), year_from=2023, year_to=2023
@@ -492,8 +492,8 @@ async def test_generic_graph_wrapping_and_explicit_two_hops(employment_env, mode
         for source in node.sources
     )
     assert (
-        await tools.follow(["employment:Person:陈晨"], snapshot=env.snapshot())
-        == GraphTraversalResult()
+            await tools.follow(["employment:Person:陈晨"], snapshot=env.snapshot())
+            == GraphTraversalResult()
     )
 
 
@@ -516,7 +516,7 @@ async def test_registered_extra_collection_is_cleaned_with_shared_gc(employment_
 
 
 async def test_specialized_index_failure_blocks_apply_and_retry_recovers(
-    employment_env,
+        employment_env,
 ):
     env = employment_env
     event = env.events[0].model_copy(update={"document_version": 2})
@@ -524,8 +524,8 @@ async def test_specialized_index_failure_blocks_apply_and_retry_recovers(
     with pytest.raises(OSError):
         await env.publisher.publish(event.to_document())
     assert (await env.publication_store.get_states([event.resource_id]))[
-        0
-    ].applied_revision.document_version == 1
+               0
+           ].applied_revision.document_version == 1
     env.dedicated.upsert.side_effect = env.dedicated._upsert
     assert await env.publisher.publish(event.to_document()) is PublicationAction.APPLIED
 
@@ -564,19 +564,19 @@ async def test_api_mount_trusted_identity_and_full_sources(employment_env):
     parent.mount("/rag/extensions/employment", api)
     headers = {"X-From-Source": "test-gateway", "X-User-Id": "reader"}
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=parent), base_url="http://test"
+            transport=httpx.ASGITransport(app=parent), base_url="http://test"
     ) as client:
         path = "/rag/extensions/employment/contracts/search"
         assert (await client.post(path, json={"query": "合同"})).status_code == 404
         assert (
-            await client.post(path, json={"query": "合同"}, headers=headers)
-        ).status_code == 503
+                   await client.post(path, json={"query": "合同"}, headers=headers)
+               ).status_code == 503
         api.state.ready = True
         assert (
-            await client.post(
-                path, json={"query": "合同"}, headers={"X-From-Source": "test-gateway"}
-            )
-        ).status_code == 401
+                   await client.post(
+                       path, json={"query": "合同"}, headers={"X-From-Source": "test-gateway"}
+                   )
+               ).status_code == 401
         response = await client.post(
             path, json={"query": "合同", "year_from": 2024}, headers=headers
         )
@@ -602,10 +602,10 @@ async def test_api_mount_trusted_identity_and_full_sources(employment_env):
         assert employee.status_code == 200
         assert [hit["metadata"]["employee"] for hit in employee.json()] == ["陈晨"]
         assert (
-            await client.post(
-                path, json={"query": "合同", "user_id": "owner"}, headers=headers
-            )
-        ).status_code == 422
+                   await client.post(
+                       path, json={"query": "合同", "user_id": "owner"}, headers=headers
+                   )
+               ).status_code == 422
         hidden = await client.post(
             path, json={"query": "合同"}, headers={**headers, "X-User-Id": "unknown"}
         )
@@ -616,7 +616,7 @@ async def test_api_mount_trusted_identity_and_full_sources(employment_env):
             headers=headers,
         )
         assert (
-            traversal.status_code == 200 and len(traversal.json()["relationships"]) == 2
+                traversal.status_code == 200 and len(traversal.json()["relationships"]) == 2
         )
         outline = await client.get(
             "/rag/extensions/employment/contracts/employment-contract-001/outline",
@@ -631,7 +631,7 @@ async def test_api_preserves_storage_failure(employment_env):
     api.state.ready = True
     env.dedicated.query.side_effect = OSError("vector database unavailable")
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=api), base_url="http://test"
+            transport=httpx.ASGITransport(app=api), base_url="http://test"
     ) as client:
         with pytest.raises(OSError):
             await client.post(
@@ -660,14 +660,14 @@ async def test_authorization_precedes_rerank_and_empty_skips_model(employment_en
     env.acls.clear()
     model.rerank.reset_mock()
     assert (
-        await env.extension.tools().search_contracts("合同", snapshot=env.snapshot())
-        == []
+            await env.extension.tools().search_contracts("合同", snapshot=env.snapshot())
+            == []
     )
     model.rerank.assert_not_awaited()
 
 
 async def test_graph_tools_select_ontology_without_requiring_business_metadata(
-    employment_env,
+        employment_env,
 ):
     env = employment_env
     chunk = env.chunks[2]
@@ -745,8 +745,8 @@ async def test_tools_select_namespace_from_facts_without_parsing_id(employment_e
     )
     assert foreign_topology.entities
     assert (
-        await env.extension.tools().follow([person.id], snapshot=env.snapshot())
-        == GraphTraversalResult()
+            await env.extension.tools().follow([person.id], snapshot=env.snapshot())
+            == GraphTraversalResult()
     )
 
 
@@ -798,14 +798,14 @@ async def test_api_openapi_exposes_tool_result_contracts(employment_env):
         "chunks",
     }
     assert {
-        item.get("type")
-        for item in schemas["GraphNodeReference"]["properties"]["relations"]["anyOf"]
-    } == {"array", "null"}
+               item.get("type")
+               for item in schemas["GraphNodeReference"]["properties"]["relations"]["anyOf"]
+           } == {"array", "null"}
     assert "ResourceSnapshot" not in schemas
 
 
 async def test_contract_search_without_graph_reports_unknown_connections(
-    employment_env,
+        employment_env,
 ):
     env = employment_env
     env.platform.graph_storage.override(providers.Object(None))

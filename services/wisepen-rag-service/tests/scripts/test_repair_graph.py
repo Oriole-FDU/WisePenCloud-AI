@@ -49,7 +49,7 @@ def flow(storage, publication_store, graph_ontology):
 
 
 async def prepare(
-    flow, resource_id="resource", *, version=1, applied=True, text="# 标题\n\n正文"
+        flow, resource_id="resource", *, version=1, applied=True, text="# 标题\n\n正文"
 ):
     document = DocumentReadyEvent.model_validate(
         {"resourceId": resource_id, "version": version, "content": text}
@@ -265,7 +265,7 @@ def config_arguments(tmp_path, graph_ontology):
 
 
 def test_cli_validates_files_scope_and_limits_before_connections(
-    repair, tmp_path, graph_ontology
+        repair, tmp_path, graph_ontology
 ):
     arguments = config_arguments(tmp_path, graph_ontology)
     resources = tmp_path / "resources.txt"
@@ -284,9 +284,9 @@ def test_cli_validates_files_scope_and_limits_before_connections(
     assert args.resource_ids == ["a", "b", "中文资源"]
     assert args.force and args.gleaning and args.ontology == graph_ontology
     for extra in (
-        [],
-        ["--resource-id", "a", "--max-input-tokens", "0"],
-        ["--resource-file", str(tmp_path / "missing")],
+            [],
+            ["--resource-id", "a", "--max-input-tokens", "0"],
+            ["--resource-file", str(tmp_path / "missing")],
     ):
         with pytest.raises(SystemExit):
             repair.parse_args([*arguments, *extra])
@@ -297,7 +297,7 @@ def test_cli_validates_files_scope_and_limits_before_connections(
 
 @pytest.mark.parametrize("fail_at", [None, "model-constructor", "repair"])
 async def test_run_closes_clients_on_success_and_failure(
-    repair, monkeypatch, tmp_path, graph_ontology, fail_at
+        repair, monkeypatch, tmp_path, graph_ontology, fail_at
 ):
     args = repair.parse_args(
         [
@@ -337,7 +337,7 @@ class DatabaseClient:
 
 
 def test_main_reports_nonzero_and_setup_errors(
-    repair, monkeypatch, tmp_path, graph_ontology, capsys
+        repair, monkeypatch, tmp_path, graph_ontology, capsys
 ):
     arguments = [
         *config_arguments(tmp_path, graph_ontology),
@@ -354,7 +354,7 @@ def test_main_reports_nonzero_and_setup_errors(
 
 
 async def test_graph_failure_keeps_facts_then_reuses_cache_and_rewrites_topology(
-    repair, flow
+        repair, flow
 ):
     document, chunks = await prepare(flow)
     writer = SimpleNamespace(
@@ -392,7 +392,7 @@ async def test_graph_stage_after_facts_and_failed_resource_continues(repair, flo
         observed.append(chunks[0].resource_id)
         stored = await flow.content.get_chunks([chunks[0].chunk_id])
         assert (
-            stored[0].metadata["graph_version"] == chunks[0].metadata["graph_version"]
+                stored[0].metadata["graph_version"] == chunks[0].metadata["graph_version"]
         )
         if chunks[0].resource_id == "bad":
             raise OSError("graph failed")
@@ -439,7 +439,7 @@ def graph_arguments():
 
 
 def test_cli_graph_opt_in_defaults_and_environment_validation(
-    repair, tmp_path, graph_ontology, monkeypatch
+        repair, tmp_path, graph_ontology, monkeypatch
 ):
     for name in ("URI", "USERNAME", "PASSWORD", "DATABASE", "GRAPH_NAME"):
         monkeypatch.delenv(f"RAG_GRAPH_REPAIR_NEO4J_{name}", raising=False)
@@ -466,7 +466,7 @@ def test_cli_graph_opt_in_defaults_and_environment_validation(
 
 @pytest.mark.parametrize("failure", [None, "schema", "repair", "cancel"])
 async def test_graph_mode_explicit_initialization_and_all_clients_close(
-    repair, monkeypatch, tmp_path, graph_ontology, failure
+        repair, monkeypatch, tmp_path, graph_ontology, failure
 ):
     args = repair.parse_args(
         [
@@ -508,7 +508,7 @@ async def test_graph_mode_explicit_initialization_and_all_clients_close(
 
 
 async def test_graph_disabled_does_not_create_driver(
-    repair, monkeypatch, tmp_path, graph_ontology
+        repair, monkeypatch, tmp_path, graph_ontology
 ):
     args = repair.parse_args(
         [*config_arguments(tmp_path, graph_ontology), "--resource-id", "resource"]
@@ -615,8 +615,8 @@ async def test_combined_indexer_failure_keeps_mongo_cache_and_continues(repair, 
 
     async def index(chunks):
         assert (
-            "graph_version"
-            in (await flow.content.get_chunks([chunks[0].chunk_id]))[0].metadata
+                "graph_version"
+                in (await flow.content.get_chunks([chunks[0].chunk_id]))[0].metadata
         )
         seen.append(chunks[0].resource_id)
         if seen[-1] == "bad":
@@ -640,7 +640,7 @@ async def test_combined_indexer_failure_keeps_mongo_cache_and_continues(repair, 
 
 
 def test_cli_projection_only_vector_configuration(
-    repair, tmp_path, graph_ontology, monkeypatch
+        repair, tmp_path, graph_ontology, monkeypatch
 ):
     arguments = [
         *config_arguments(tmp_path, graph_ontology)[:6],
@@ -652,27 +652,27 @@ def test_cli_projection_only_vector_configuration(
     assert args.entity_vector_collection == "graph_entity_source_vectors_v4"
     assert args.relation_vector_collection == "graph_relation_source_vectors_v4"
     for extra in (
-        ["--projection-only"],
-        ["--projection-only", *vector_arguments(), "--force"],
-        ["--projection-only", *vector_arguments(), "--gleaning"],
-        ["--projection-only", *vector_arguments(), "--embedding-dimensions", "0"],
-        [
-            "--projection-only",
-            *vector_arguments(),
-            "--entity-vector-collection",
-            "same",
-            "--relation-vector-collection",
-            "same",
-        ],
+            ["--projection-only"],
+            ["--projection-only", *vector_arguments(), "--force"],
+            ["--projection-only", *vector_arguments(), "--gleaning"],
+            ["--projection-only", *vector_arguments(), "--embedding-dimensions", "0"],
+            [
+                "--projection-only",
+                *vector_arguments(),
+                "--entity-vector-collection",
+                "same",
+                "--relation-vector-collection",
+                "same",
+            ],
     ):
         with pytest.raises(SystemExit):
             repair.parse_args([*arguments, *extra])
     for name, value in (
-        ("QDRANT_URL", "http://isolated"),
-        ("EMBEDDING_BASE_URL", "http://embedding/v1"),
-        ("EMBEDDING_API_KEY", "test"),
-        ("EMBEDDING_MODEL", "model"),
-        ("EMBEDDING_DIMENSIONS", "2"),
+            ("QDRANT_URL", "http://isolated"),
+            ("EMBEDDING_BASE_URL", "http://embedding/v1"),
+            ("EMBEDDING_API_KEY", "test"),
+            ("EMBEDDING_MODEL", "model"),
+            ("EMBEDDING_DIMENSIONS", "2"),
     ):
         monkeypatch.setenv(f"RAG_GRAPH_REPAIR_{name}", value)
     args = repair.parse_args([*arguments, "--projection-only", "--with-graph-vectors"])
@@ -681,7 +681,7 @@ def test_cli_projection_only_vector_configuration(
 
 @pytest.mark.parametrize("failure", [None, "schema", "repair", "cancel"])
 async def test_vectors_only_setup_no_instruction_or_neo4j_and_closes_clients(
-    repair, monkeypatch, tmp_path, graph_ontology, failure
+        repair, monkeypatch, tmp_path, graph_ontology, failure
 ):
     args = repair.parse_args(
         [
@@ -722,8 +722,8 @@ async def test_vectors_only_setup_no_instruction_or_neo4j_and_closes_clients(
     else:
         assert (await repair.run(args)).repaired == 1
         assert (
-            execute.await_args.kwargs["extractor"] is None
-            and execute.await_args.kwargs["facts"] is None
+                execute.await_args.kwargs["extractor"] is None
+                and execute.await_args.kwargs["facts"] is None
         )
     for storage_instance in vectors:
         storage_instance.ensure_collection.assert_awaited_once_with(

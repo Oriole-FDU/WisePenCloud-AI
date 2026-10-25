@@ -48,6 +48,10 @@ ENV/
 # 前端仓库独立维护，不纳入本仓库提交。
 /WisePenView/
 
+# 上游源码只作本地调研，研究文档保留在同级目录。
+/references/multi-agent/deepseek-harness/
+/references/multi-agent/codex/
+
 # 操作系统
 .DS_Store
 Thumbs.db

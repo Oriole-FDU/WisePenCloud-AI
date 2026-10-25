@@ -9,7 +9,6 @@ from bson import ObjectId
 from pydantic import BaseModel, ConfigDict, Field
 
 from rag.backends.kafka import KafkaConsumerClient, RetryPolicy
-
 from .models import GroupResourceAcl, ResourceAcl
 from .store import ResourceAclRepository
 
@@ -28,10 +27,10 @@ class AclSynchronizer:
     """消费 ACL 刷新事件并完整替换本地资源 ACL。"""
 
     def __init__(
-        self,
-        *,
-        collection: Any,
-        repository: ResourceAclRepository,
+            self,
+            *,
+            collection: Any,
+            repository: ResourceAclRepository,
     ) -> None:
         self._collection = collection
         self._repository = repository
@@ -61,7 +60,7 @@ class AclSynchronizer:
         return synchronized
 
     async def _read_authoritative(
-        self, resource_ids: Sequence[str]
+            self, resource_ids: Sequence[str]
     ) -> dict[str, ResourceAcl]:
         if not resource_ids:
             return {}
@@ -79,14 +78,14 @@ class AclEventConsumer:
     """用 RAG 共用消费者接收 ACL 重算事件，投影成功后才确认消息。"""
 
     def __init__(
-        self,
-        *,
-        projection: AclSynchronizer,
-        bootstrap_servers: str,
-        topic: str,
-        group_id: str,
-        max_poll_interval_ms: int = 300_000,
-        retry_policy: RetryPolicy | None = None,
+            self,
+            *,
+            projection: AclSynchronizer,
+            bootstrap_servers: str,
+            topic: str,
+            group_id: str,
+            max_poll_interval_ms: int = 300_000,
+            retry_policy: RetryPolicy | None = None,
     ) -> None:
         self._projection = projection
         self._consumer = KafkaConsumerClient(
@@ -107,7 +106,7 @@ def _has_view(mask: int) -> bool:
 
 
 def _read_user_masks(
-    value: Any, *, resource_id: str, field: str
+        value: Any, *, resource_id: str, field: str
 ) -> tuple[list[str], list[str]]:
     """解析权威用户掩码；合法缺省由调用方归一化，非法条目拒绝整个投影。"""
     if not isinstance(value, dict):
@@ -130,7 +129,7 @@ def _read_user_masks(
 
 
 def _read_group_acls(
-    value: Any, *, resource_id: str, market_versions: dict[str, int]
+        value: Any, *, resource_id: str, market_versions: dict[str, int]
 ) -> list[GroupResourceAcl]:
     """把权威记录中的 computedGroupAcls 投影为本地群组 ACL。"""
     if not isinstance(value, dict):
@@ -212,8 +211,8 @@ def _project(record: Mapping[str, Any], resource_id: str) -> ResourceAcl:
         market = bind.get("marketSaleInfo")
         if market is not None:
             if (
-                not isinstance(market, dict)
-                or type(market.get("offerVersion")) is not int
+                    not isinstance(market, dict)
+                    or type(market.get("offerVersion")) is not int
             ):
                 raise AuthoritativeAclError(
                     f"{resource_id}: groupBinds.{group_id}.marketSaleInfo requires an integer offerVersion"

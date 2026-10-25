@@ -67,7 +67,7 @@ async def wait_for_commit(observer, partition, offset):
 
 
 async def test_real_kafka_transient_failure_retries_then_publishes_both_versions(
-    kafka_broker, publication, publication_store, projection
+        kafka_broker, publication, publication_store, projection
 ):
     servers, topics, group_id, producer, observer, policies = kafka_broker
     first = await producer.send_and_wait(
@@ -103,8 +103,8 @@ async def test_real_kafka_transient_failure_retries_then_publishes_both_versions
         )
         state = (await publication_store.get_states(["resource"]))[0]
         assert (
-            state.applied_revision.document_version == 2
-            and state.staged_revision is None
+                state.applied_revision.document_version == 2
+                and state.staged_revision is None
         )
         assert projection.index.await_count == 3
     finally:
@@ -114,7 +114,7 @@ async def test_real_kafka_transient_failure_retries_then_publishes_both_versions
 
 
 async def test_real_kafka_destroy_before_content_is_permanent_and_both_are_acknowledged(
-    kafka_broker, publication, publication_store, projection
+        kafka_broker, publication, publication_store, projection
 ):
     servers, topics, group_id, producer, observer, policies = kafka_broker
     consumer = PublicationEventConsumer(
@@ -164,7 +164,7 @@ async def test_real_kafka_destroy_before_content_is_permanent_and_both_are_ackno
 
 
 async def test_real_kafka_quick_retry_then_dlq_keeps_original_record(
-    kafka_broker, publication, publication_store, projection
+        kafka_broker, publication, publication_store, projection
 ):
     servers, topics, group_id, producer, observer, policies = kafka_broker
     payload = json.dumps(
@@ -196,8 +196,8 @@ async def test_real_kafka_quick_retry_then_dlq_keeps_original_record(
         headers = dict(terminal.headers)
         assert headers[DeliveryHeader.ORIGINAL_TOPIC] == original.topic.encode()
         assert (
-            headers[DeliveryHeader.ORIGINAL_PARTITION]
-            == str(original.partition).encode()
+                headers[DeliveryHeader.ORIGINAL_PARTITION]
+                == str(original.partition).encode()
         )
         assert headers[DeliveryHeader.ORIGINAL_OFFSET] == str(original.offset).encode()
         assert headers[DeliveryHeader.EXCEPTION_TYPE] == b"builtins.OSError"

@@ -13,7 +13,6 @@ from rag.storage.vector import (
     VectorQuery,
     VectorRecord,
 )
-
 from .filters import compile_filters
 
 # SDK 类型仅在后端翻译，业务和装配层使用统一声明。
@@ -29,14 +28,14 @@ class QdrantVectorStorage:
     """只执行向量 CRUD；启用 sparse 时 client 须支持服务端 BM25 转发。"""
 
     def __init__(
-        self,
-        *,
-        client: AsyncQdrantClient,
-        collection: str,
-        dense_vector_size: int,
-        dense_vector_name: str = "dense",
-        sparse_vector_name: str | None = "sparse",
-        batch_size: int = 256,
+            self,
+            *,
+            client: AsyncQdrantClient,
+            collection: str,
+            dense_vector_size: int,
+            dense_vector_name: str = "dense",
+            sparse_vector_name: str | None = "sparse",
+            batch_size: int = 256,
     ) -> None:
         if dense_vector_size <= 0 or batch_size <= 0:
             raise ValueError("vector size and batch size must be positive")
@@ -56,7 +55,7 @@ class QdrantVectorStorage:
         return self._collection
 
     async def ensure_collection(
-        self, metadata_index_fields: list[IndexableField]
+            self, metadata_index_fields: list[IndexableField]
     ) -> None:
         """显式创建或核对 collection；索引按声明翻译并等待确认，空列表仍核对集合。"""
         if any(not field.name or "." in field.name for field in metadata_index_fields):
@@ -86,13 +85,13 @@ class QdrantVectorStorage:
         )
         sparse = (params.sparse_vectors or {}).get(self._sparse_vector_name)
         if (
-            dense is None
-            or dense.size != self._dense_vector_size
-            or dense.distance != models.Distance.COSINE
-            or (
+                dense is None
+                or dense.size != self._dense_vector_size
+                or dense.distance != models.Distance.COSINE
+                or (
                 self._sparse_vector_name is not None
                 and (sparse is None or sparse.modifier != models.Modifier.IDF)
-            )
+        )
         ):
             raise ValueError(f"incompatible vector configuration: {self._collection}")
 
@@ -113,7 +112,7 @@ class QdrantVectorStorage:
         """整条 point 替换；每批写入配置的向量，部分成功保留，不隐式初始化。"""
         for start in range(0, len(records), self._batch_size):
             points = []
-            for record in records[start : start + self._batch_size]:
+            for record in records[start: start + self._batch_size]:
                 vector = {self._dense_vector_name: record.embedding}
                 if self._sparse_vector_name is not None:
                     vector[self._sparse_vector_name] = models.Document(
@@ -187,9 +186,9 @@ class QdrantVectorStorage:
             record_id, metadata = payload.get("record_id"), payload.get("metadata")
             # 库中的坏投影不能伪装成无候选或用 point UUID 代替原业务身份。
             if (
-                not isinstance(record_id, str)
-                or not record_id
-                or not isinstance(metadata, dict)
+                    not isinstance(record_id, str)
+                    or not record_id
+                    or not isinstance(metadata, dict)
             ):
                 raise RuntimeError("invalid vector match payload")
             embedding = None
@@ -201,12 +200,12 @@ class QdrantVectorStorage:
                 )
                 # 请求向量后缺失或坏数据必须暴露，不能用空向量掩盖后端错误。
                 if (
-                    not isinstance(embedding, list)
-                    or len(embedding) != self._dense_vector_size
-                    or any(
-                        type(value) not in (int, float) or not isfinite(value)
-                        for value in embedding
-                    )
+                        not isinstance(embedding, list)
+                        or len(embedding) != self._dense_vector_size
+                        or any(
+                    type(value) not in (int, float) or not isfinite(value)
+                    for value in embedding
+                )
                 ):
                     raise RuntimeError("invalid vector match embedding")
             matches.append(VectorMatch(record_id, point.score, metadata, embedding))
