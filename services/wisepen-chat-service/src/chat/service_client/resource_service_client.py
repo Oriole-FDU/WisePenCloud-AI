@@ -28,6 +28,7 @@ class ResourceClient:
         resource_id: str,
         user_id: str | int,
         group_role_map: Mapping[str, GroupRoleType],
+        target_version: int | None = None,
     ) -> ResourcePermission:
         resource_id = (resource_id or "").strip()
         try:
@@ -38,6 +39,7 @@ class ResourceClient:
                     "resourceId": resource_id,
                     "userId": int(user_id),
                     "groupRoles": self._serialize_group_roles(group_role_map),
+                    "targetVersion": target_version,
                 },
             )
         except RpcError as e:
@@ -48,6 +50,21 @@ class ResourceClient:
                 msg=f"unexpected data payload: {data!r}",
             )
         return ResourcePermission.from_response(data)
+
+    async def has_load_permission(
+        self,
+        resource_id: str,
+        user_id: str | int,
+        group_role_map: Mapping[str, GroupRoleType],
+        target_version: int | None = None,
+    ) -> bool:
+        permission = await self.check_res_permission(
+            resource_id=resource_id,
+            user_id=user_id,
+            group_role_map=group_role_map,
+            target_version=target_version,
+        )
+        return bool(permission and permission.allows("LOAD"))
 
     async def get_resource_info(
         self,

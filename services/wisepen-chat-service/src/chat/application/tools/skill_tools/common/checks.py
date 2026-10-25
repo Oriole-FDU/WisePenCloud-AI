@@ -48,16 +48,22 @@ class SkillPermissionCheck(ToolPreflightHook):
         if is_builtin_skill_id(skill_id): # 内置 Skill 不需要鉴权
             return ToolPreflightResult(ok=True)
 
+        skill_versions = context.get("skill_versions") or {}
+        target_version = skill_versions.get(skill_id)
+        if not isinstance(target_version, int) or target_version <= 0:
+            target_version = None
+
         try:
-            res_check_permission_res = await self._resource_client.check_res_permission(
+            has_load_permission = await self._resource_client.has_load_permission(
                 resource_id=skill_id,
                 user_id=SecurityContextHolder.get_user_id(),
                 group_role_map=SecurityContextHolder.get_group_role_map(),
+                target_version=target_version,
             )
         except Exception as e:
             return ToolPreflightResult(ok=False, message=f"Failed to check permission for skill '{skill_id}'.")
 
-        if res_check_permission_res and res_check_permission_res.allows("VIEW"):
+        if has_load_permission:
             return ToolPreflightResult(ok=True)
         else:
             return ToolPreflightResult(ok=False, message=f"Permission denied for skill '{skill_id}'.")
