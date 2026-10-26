@@ -1,0 +1,2390 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-10-26T22:00:08.266006Z",
+  "sampling": {
+    "arxiv_records_parsed_for_schema": 1,
+    "s2_records_read_per_gzip_shard": 1,
+    "s2_gzip_shards_sampled": 90,
+    "large_file_hashes_computed": false,
+    "full_gzip_validation_performed": false,
+    "full_corpus_import_performed": false,
+    "sample_validity_scope": "Sample parsing does not establish full-file integrity or corpus completeness."
+  },
+  "release_provenance": {
+    "dataset_release": "2026-10-20",
+    "declared_by": "services/wisepen-scholar-service/scripts/download_s2.py::RELEASE_ID",
+    "claim": "Local downloader declaration only; not independently verified with Semantic Scholar."
+  },
+  "arxiv": {
+    "path": "services/wisepen-scholar-service/third_party_data/arxiv-metadata-oai-snapshot.json",
+    "size_bytes": 5649388235,
+    "mtime_utc": "2026-10-26T14:45:09.019228Z",
+    "format": "jsonl",
+    "sample": {
+      "records_read": 1,
+      "record_fields": [
+        "abstract",
+        "authors",
+        "authors_parsed",
+        "categories",
+        "comments",
+        "doi",
+        "id",
+        "journal-ref",
+        "license",
+        "report-no",
+        "submitter",
+        "title",
+        "update_date",
+        "versions"
+      ],
+      "versions_item_fields": [
+        "created",
+        "version"
+      ]
+    },
+    "selected_fields": [
+      "id",
+      "doi",
+      "title",
+      "abstract",
+      "authors",
+      "categories",
+      "versions[].version",
+      "versions[].created",
+      "update_date"
+    ]
+  },
+  "s2_datasets": [
+    {
+      "name": "papers",
+      "format": "gzip-jsonl",
+      "file_count": 60,
+      "compressed_size_bytes_total": 53124464221,
+      "first_record_sampled_from_each_file": true,
+      "selected_fields": [
+        "corpusid",
+        "externalids.ArXiv",
+        "externalids.DOI",
+        "citationcount",
+        "influentialcitationcount",
+        "isopenaccess"
+      ],
+      "files": [
+        {
+          "path": "s2_download/papers/papers_part_0000.json.gz",
+          "size_bytes": 728124108,
+          "mtime_utc": "2026-10-26T16:44:04.646218Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0001.json.gz",
+          "size_bytes": 1073891726,
+          "mtime_utc": "2026-10-26T16:43:18.916457Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0002.json.gz",
+          "size_bytes": 660869376,
+          "mtime_utc": "2026-10-26T17:31:28.312640Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0003.json.gz",
+          "size_bytes": 658828652,
+          "mtime_utc": "2026-10-26T17:31:14.365507Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0004.json.gz",
+          "size_bytes": 1073891288,
+          "mtime_utc": "2026-10-26T17:53:51.804973Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0005.json.gz",
+          "size_bytes": 724063448,
+          "mtime_utc": "2026-10-26T17:47:34.285882Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0006.json.gz",
+          "size_bytes": 737330494,
+          "mtime_utc": "2026-10-26T17:48:54.621632Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0007.json.gz",
+          "size_bytes": 641803854,
+          "mtime_utc": "2026-10-26T17:47:42.331669Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0008.json.gz",
+          "size_bytes": 703037486,
+          "mtime_utc": "2026-10-26T17:53:50.290657Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0009.json.gz",
+          "size_bytes": 743126407,
+          "mtime_utc": "2026-10-26T17:59:24.644757Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0010.json.gz",
+          "size_bytes": 701546550,
+          "mtime_utc": "2026-10-26T17:58:53.745726Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0011.json.gz",
+          "size_bytes": 1073920955,
+          "mtime_utc": "2026-10-26T18:04:54.304177Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0012.json.gz",
+          "size_bytes": 647020943,
+          "mtime_utc": "2026-10-26T18:03:22.949236Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0013.json.gz",
+          "size_bytes": 1073796923,
+          "mtime_utc": "2026-10-26T18:09:10.736014Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0014.json.gz",
+          "size_bytes": 1073822179,
+          "mtime_utc": "2026-10-26T18:13:27.065346Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0015.json.gz",
+          "size_bytes": 1073908222,
+          "mtime_utc": "2026-10-26T18:13:45.312003Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0016.json.gz",
+          "size_bytes": 1073961773,
+          "mtime_utc": "2026-10-26T18:17:31.383714Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0017.json.gz",
+          "size_bytes": 657144896,
+          "mtime_utc": "2026-10-26T18:13:44.321655Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0018.json.gz",
+          "size_bytes": 693430051,
+          "mtime_utc": "2026-10-26T18:18:14.286970Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0019.json.gz",
+          "size_bytes": 707919040,
+          "mtime_utc": "2026-10-26T18:22:31.560864Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0020.json.gz",
+          "size_bytes": 1073957686,
+          "mtime_utc": "2026-10-26T18:27:28.485041Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0021.json.gz",
+          "size_bytes": 764936011,
+          "mtime_utc": "2026-10-26T18:23:35.609200Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0022.json.gz",
+          "size_bytes": 1073908012,
+          "mtime_utc": "2026-10-26T18:31:16.637415Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0023.json.gz",
+          "size_bytes": 1073867417,
+          "mtime_utc": "2026-10-26T18:32:05.821964Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0024.json.gz",
+          "size_bytes": 1073853241,
+          "mtime_utc": "2026-10-26T18:36:12.442993Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0025.json.gz",
+          "size_bytes": 1073869541,
+          "mtime_utc": "2026-10-26T18:37:33.305978Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0026.json.gz",
+          "size_bytes": 736184539,
+          "mtime_utc": "2026-10-26T18:36:58.190095Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0027.json.gz",
+          "size_bytes": 1073982166,
+          "mtime_utc": "2026-10-26T18:46:10.217294Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0028.json.gz",
+          "size_bytes": 1073816223,
+          "mtime_utc": "2026-10-26T18:46:23.466486Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0029.json.gz",
+          "size_bytes": 768722873,
+          "mtime_utc": "2026-10-26T18:46:41.425735Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0030.json.gz",
+          "size_bytes": 1073921947,
+          "mtime_utc": "2026-10-26T18:50:43.824966Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0031.json.gz",
+          "size_bytes": 1073810470,
+          "mtime_utc": "2026-10-26T18:51:30.059315Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0032.json.gz",
+          "size_bytes": 721000839,
+          "mtime_utc": "2026-10-26T18:55:28.522157Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0033.json.gz",
+          "size_bytes": 746101500,
+          "mtime_utc": "2026-10-26T18:55:58.845634Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0034.json.gz",
+          "size_bytes": 1073894244,
+          "mtime_utc": "2026-10-26T19:00:33.495138Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0035.json.gz",
+          "size_bytes": 1073875854,
+          "mtime_utc": "2026-10-26T19:11:50.120113Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0036.json.gz",
+          "size_bytes": 690587763,
+          "mtime_utc": "2026-10-26T19:00:26.118321Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0037.json.gz",
+          "size_bytes": 701195708,
+          "mtime_utc": "2026-10-26T19:11:50.642407Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0038.json.gz",
+          "size_bytes": 1073884828,
+          "mtime_utc": "2026-10-26T19:17:07.538840Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0039.json.gz",
+          "size_bytes": 618324355,
+          "mtime_utc": "2026-10-26T19:15:40.972486Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0040.json.gz",
+          "size_bytes": 1073766368,
+          "mtime_utc": "2026-10-26T19:21:43.616486Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0041.json.gz",
+          "size_bytes": 1073775383,
+          "mtime_utc": "2026-10-26T19:25:38.904555Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0042.json.gz",
+          "size_bytes": 1073805100,
+          "mtime_utc": "2026-10-26T19:25:45.428256Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0043.json.gz",
+          "size_bytes": 1073894186,
+          "mtime_utc": "2026-10-26T19:30:31.932707Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0044.json.gz",
+          "size_bytes": 659008262,
+          "mtime_utc": "2026-10-26T19:26:35.376701Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0045.json.gz",
+          "size_bytes": 1073854946,
+          "mtime_utc": "2026-10-26T19:34:15.889902Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0046.json.gz",
+          "size_bytes": 695596057,
+          "mtime_utc": "2026-10-26T19:34:15.336798Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0047.json.gz",
+          "size_bytes": 1073834408,
+          "mtime_utc": "2026-10-26T19:40:30.653370Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0048.json.gz",
+          "size_bytes": 730770521,
+          "mtime_utc": "2026-10-26T19:38:09.598831Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0049.json.gz",
+          "size_bytes": 661038541,
+          "mtime_utc": "2026-10-26T19:39:58.581229Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0050.json.gz",
+          "size_bytes": 663224452,
+          "mtime_utc": "2026-10-26T19:44:08.361055Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0051.json.gz",
+          "size_bytes": 1073829808,
+          "mtime_utc": "2026-10-26T19:50:59.782642Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0052.json.gz",
+          "size_bytes": 1073874487,
+          "mtime_utc": "2026-10-26T19:51:44.822263Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0053.json.gz",
+          "size_bytes": 1073977251,
+          "mtime_utc": "2026-10-26T19:53:45.631657Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0054.json.gz",
+          "size_bytes": 699294386,
+          "mtime_utc": "2026-10-26T19:49:39.780640Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0055.json.gz",
+          "size_bytes": 1073864226,
+          "mtime_utc": "2026-10-26T19:57:56.497550Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0056.json.gz",
+          "size_bytes": 643363987,
+          "mtime_utc": "2026-10-26T19:57:59.788814Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0057.json.gz",
+          "size_bytes": 736548520,
+          "mtime_utc": "2026-10-26T20:00:29.776471Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0058.json.gz",
+          "size_bytes": 1073971570,
+          "mtime_utc": "2026-10-26T20:06:57.329362Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/papers/papers_part_0059.json.gz",
+          "size_bytes": 668038174,
+          "mtime_utc": "2026-10-26T20:02:22.862291Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "authors",
+              "citationcount",
+              "corpusid",
+              "externalids",
+              "influentialcitationcount",
+              "isopenaccess",
+              "journal",
+              "publicationdate",
+              "publicationtypes",
+              "publicationvenueid",
+              "referencecount",
+              "s2fieldsofstudy",
+              "title",
+              "url",
+              "venue",
+              "year"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "tldrs",
+      "format": "gzip-jsonl",
+      "file_count": 30,
+      "compressed_size_bytes_total": 6582078516,
+      "first_record_sampled_from_each_file": true,
+      "selected_fields": [
+        "corpusid",
+        "model",
+        "text"
+      ],
+      "files": [
+        {
+          "path": "s2_download/tldrs/tldrs_part_0000.json.gz",
+          "size_bytes": 222833792,
+          "mtime_utc": "2026-10-26T20:00:49.486616Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0001.json.gz",
+          "size_bytes": 221441612,
+          "mtime_utc": "2026-10-26T20:00:51.543197Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0002.json.gz",
+          "size_bytes": 225360316,
+          "mtime_utc": "2026-10-26T20:04:25.619119Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0003.json.gz",
+          "size_bytes": 215841079,
+          "mtime_utc": "2026-10-26T20:04:38.824213Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0004.json.gz",
+          "size_bytes": 221555753,
+          "mtime_utc": "2026-10-26T20:04:47.908891Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0005.json.gz",
+          "size_bytes": 214357619,
+          "mtime_utc": "2026-10-26T20:06:11.990876Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0006.json.gz",
+          "size_bytes": 213753796,
+          "mtime_utc": "2026-10-26T20:07:13.679825Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0007.json.gz",
+          "size_bytes": 221577281,
+          "mtime_utc": "2026-10-26T20:07:33.018996Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0008.json.gz",
+          "size_bytes": 217416451,
+          "mtime_utc": "2026-10-26T20:07:37.593124Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0009.json.gz",
+          "size_bytes": 213578686,
+          "mtime_utc": "2026-10-26T20:08:59.551774Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0010.json.gz",
+          "size_bytes": 225320399,
+          "mtime_utc": "2026-10-26T20:09:52.503252Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0011.json.gz",
+          "size_bytes": 222459831,
+          "mtime_utc": "2026-10-26T20:10:09.628767Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0012.json.gz",
+          "size_bytes": 216605239,
+          "mtime_utc": "2026-10-26T20:10:28.165185Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0013.json.gz",
+          "size_bytes": 216552680,
+          "mtime_utc": "2026-10-26T20:10:24.985509Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0014.json.gz",
+          "size_bytes": 218683055,
+          "mtime_utc": "2026-10-26T20:11:42.698401Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0015.json.gz",
+          "size_bytes": 221680902,
+          "mtime_utc": "2026-10-26T20:12:23.139074Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0016.json.gz",
+          "size_bytes": 221814672,
+          "mtime_utc": "2026-10-26T20:13:23.589906Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0017.json.gz",
+          "size_bytes": 219600762,
+          "mtime_utc": "2026-10-26T20:13:10.643567Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0018.json.gz",
+          "size_bytes": 216608362,
+          "mtime_utc": "2026-10-26T20:13:27.853786Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0019.json.gz",
+          "size_bytes": 218456929,
+          "mtime_utc": "2026-10-26T20:14:30.340240Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0020.json.gz",
+          "size_bytes": 223031821,
+          "mtime_utc": "2026-10-26T20:15:13.915911Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0021.json.gz",
+          "size_bytes": 223255155,
+          "mtime_utc": "2026-10-26T20:16:02.142365Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0022.json.gz",
+          "size_bytes": 213591971,
+          "mtime_utc": "2026-10-26T20:16:19.019950Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0023.json.gz",
+          "size_bytes": 223365115,
+          "mtime_utc": "2026-10-26T20:16:07.728797Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0024.json.gz",
+          "size_bytes": 220646783,
+          "mtime_utc": "2026-10-26T20:17:30.079979Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0025.json.gz",
+          "size_bytes": 215353513,
+          "mtime_utc": "2026-10-26T20:17:25.643508Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0026.json.gz",
+          "size_bytes": 220295115,
+          "mtime_utc": "2026-10-26T20:18:17.959348Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0027.json.gz",
+          "size_bytes": 220346608,
+          "mtime_utc": "2026-10-26T20:18:49.079500Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0028.json.gz",
+          "size_bytes": 219610312,
+          "mtime_utc": "2026-10-26T20:18:52.348802Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        },
+        {
+          "path": "s2_download/tldrs/tldrs_part_0029.json.gz",
+          "size_bytes": 217082907,
+          "mtime_utc": "2026-10-26T20:19:02.960323Z",
+          "first_record_sample": {
+            "type": "object",
+            "fields": [
+              "corpusid",
+              "model",
+              "text"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "api_experiments": [
+    {
+      "path": "s2_full_fields.json",
+      "size_bytes": 50658,
+      "mtime_utc": "2026-10-26T21:30:37.578697Z",
+      "format": "json",
+      "json_shape": {
+        "type": "object",
+        "length": null
+      },
+      "response_records": [
+        {
+          "type": "object",
+          "fields": [
+            "abstract",
+            "authors",
+            "citationCount",
+            "citationStyles",
+            "corpusId",
+            "embedding",
+            "externalIds",
+            "fieldsOfStudy",
+            "influentialCitationCount",
+            "isOpenAccess",
+            "journal",
+            "openAccessPdf",
+            "paperId",
+            "publicationDate",
+            "publicationTypes",
+            "publicationVenue",
+            "referenceCount",
+            "s2FieldsOfStudy",
+            "title",
+            "tldr",
+            "url",
+            "venue",
+            "year"
+          ],
+          "nested_shapes": {
+            "externalIds": {
+              "type": "object",
+              "fields": [
+                "ArXiv",
+                "CorpusId",
+                "DBLP",
+                "DOI"
+              ]
+            },
+            "authors": {
+              "type": "array",
+              "item_fields": [
+                "authorId",
+                "name"
+              ]
+            },
+            "openAccessPdf": {
+              "type": "object",
+              "fields": [
+                "disclaimer",
+                "license",
+                "status",
+                "url"
+              ]
+            },
+            "citationStyles": {
+              "type": "object",
+              "fields": [
+                "bibtex"
+              ]
+            },
+            "tldr": {
+              "type": "object",
+              "fields": [
+                "model",
+                "text"
+              ]
+            }
+          }
+        }
+      ],
+      "selected_api_fields": {
+        "identity": [
+          "paperId",
+          "corpusId",
+          "externalIds",
+          "url",
+          "title"
+        ],
+        "enrichment": [
+          "tldr",
+          "citationCount",
+          "influentialCitationCount",
+          "isOpenAccess",
+          "openAccessPdf.url",
+          "citationStyles.bibtex"
+        ],
+        "full_details_when_missing": [
+          "abstract",
+          "authors",
+          "year",
+          "publicationDate",
+          "venue"
+        ]
+      },
+      "values_recorded": false
+    },
+    {
+      "path": "s2_batch_results.json",
+      "size_bytes": 113884,
+      "mtime_utc": "2026-10-26T21:31:46.734351Z",
+      "format": "json",
+      "json_shape": {
+        "type": "array",
+        "length": 3
+      },
+      "response_records": [
+        {
+          "type": "object",
+          "fields": [
+            "abstract",
+            "authors",
+            "citationCount",
+            "citationStyles",
+            "corpusId",
+            "embedding",
+            "externalIds",
+            "fieldsOfStudy",
+            "influentialCitationCount",
+            "isOpenAccess",
+            "journal",
+            "openAccessPdf",
+            "paperId",
+            "publicationDate",
+            "publicationTypes",
+            "publicationVenue",
+            "referenceCount",
+            "s2FieldsOfStudy",
+            "title",
+            "tldr",
+            "url",
+            "venue",
+            "year"
+          ],
+          "nested_shapes": {
+            "externalIds": {
+              "type": "object",
+              "fields": [
+                "ArXiv",
+                "CorpusId",
+                "DBLP",
+                "DOI"
+              ]
+            },
+            "authors": {
+              "type": "array",
+              "item_fields": [
+                "authorId",
+                "name"
+              ]
+            },
+            "openAccessPdf": {
+              "type": "object",
+              "fields": [
+                "disclaimer",
+                "license",
+                "status",
+                "url"
+              ]
+            },
+            "citationStyles": {
+              "type": "object",
+              "fields": [
+                "bibtex"
+              ]
+            },
+            "tldr": {
+              "type": "object",
+              "fields": [
+                "model",
+                "text"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "fields": [
+            "abstract",
+            "authors",
+            "citationCount",
+            "citationStyles",
+            "corpusId",
+            "embedding",
+            "externalIds",
+            "fieldsOfStudy",
+            "influentialCitationCount",
+            "isOpenAccess",
+            "journal",
+            "openAccessPdf",
+            "paperId",
+            "publicationDate",
+            "publicationTypes",
+            "publicationVenue",
+            "referenceCount",
+            "s2FieldsOfStudy",
+            "title",
+            "tldr",
+            "url",
+            "venue",
+            "year"
+          ],
+          "nested_shapes": {
+            "externalIds": {
+              "type": "object",
+              "fields": [
+                "ArXiv",
+                "CorpusId",
+                "DBLP",
+                "MAG"
+              ]
+            },
+            "authors": {
+              "type": "array",
+              "item_fields": [
+                "authorId",
+                "name"
+              ]
+            },
+            "openAccessPdf": {
+              "type": "object",
+              "fields": [
+                "disclaimer",
+                "license",
+                "status",
+                "url"
+              ]
+            },
+            "citationStyles": {
+              "type": "object",
+              "fields": [
+                "bibtex"
+              ]
+            },
+            "tldr": {
+              "type": "object",
+              "fields": [
+                "model",
+                "text"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "fields": [
+            "abstract",
+            "authors",
+            "citationCount",
+            "citationStyles",
+            "corpusId",
+            "embedding",
+            "externalIds",
+            "fieldsOfStudy",
+            "influentialCitationCount",
+            "isOpenAccess",
+            "journal",
+            "openAccessPdf",
+            "paperId",
+            "publicationDate",
+            "publicationTypes",
+            "publicationVenue",
+            "referenceCount",
+            "s2FieldsOfStudy",
+            "title",
+            "tldr",
+            "url",
+            "venue",
+            "year"
+          ],
+          "nested_shapes": {
+            "externalIds": {
+              "type": "object",
+              "fields": [
+                "ACL",
+                "CorpusId",
+                "DBLP",
+                "DOI",
+                "MAG"
+              ]
+            },
+            "authors": {
+              "type": "array",
+              "item_fields": [
+                "authorId",
+                "name"
+              ]
+            },
+            "openAccessPdf": {
+              "type": "object",
+              "fields": [
+                "disclaimer",
+                "license",
+                "status",
+                "url"
+              ]
+            },
+            "citationStyles": {
+              "type": "object",
+              "fields": [
+                "bibtex"
+              ]
+            },
+            "tldr": {
+              "type": "object",
+              "fields": [
+                "model",
+                "text"
+              ]
+            }
+          }
+        }
+      ],
+      "selected_api_fields": {
+        "identity": [
+          "paperId",
+          "corpusId",
+          "externalIds",
+          "url",
+          "title"
+        ],
+        "enrichment": [
+          "tldr",
+          "citationCount",
+          "influentialCitationCount",
+          "isOpenAccess",
+          "openAccessPdf.url",
+          "citationStyles.bibtex"
+        ],
+        "full_details_when_missing": [
+          "abstract",
+          "authors",
+          "year",
+          "publicationDate",
+          "venue"
+        ]
+      },
+      "values_recorded": false
+    }
+  ]
+}

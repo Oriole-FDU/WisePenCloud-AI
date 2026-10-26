@@ -16,6 +16,17 @@ MANIFEST
 *.log
 logs/
 
+# Scholar 本地输入、API 实验响应和可重建运行产物
+/s2_download/
+/s2_full_fields.json
+/s2_batch_results.json
+/services/wisepen-scholar-service/third_party_data/
+/services/wisepen-scholar-service/data/
+/services/wisepen-scholar-service/logs/
+/services/wisepen-scholar-service/runs/
+/services/wisepen-scholar-service/**/*.duckdb
+/services/wisepen-scholar-service/**/*.duckdb.wal
+
 # 虚拟环境
 .venv/
 venv/
@@ -55,3 +66,5 @@ ENV/
 # 操作系统
 .DS_Store
 Thumbs.db
+
+/services/wisepen-scholar-service/.runtime/

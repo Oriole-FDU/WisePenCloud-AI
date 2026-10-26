@@ -7,5 +7,21 @@ __pycache__
 .idea
 .run
 .vscode
-docs
 logs
+*.log
+docs
+**/.env
+
+# Scholar datasets, experiment responses, and rebuildable outputs
+/s2_download/
+/s2_full_fields.json
+/s2_batch_results.json
+/services/wisepen-scholar-service/third_party_data/
+/services/wisepen-scholar-service/data/
+/services/wisepen-scholar-service/logs/
+/services/wisepen-scholar-service/runs/
+/services/wisepen-scholar-service/**/*.duckdb
+/services/wisepen-scholar-service/**/*.duckdb.wal
+
+
+/services/wisepen-scholar-service/.runtime/
