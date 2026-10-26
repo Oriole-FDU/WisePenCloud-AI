@@ -1,0 +1,34 @@
+[project]
+name = "wisepen-scholar-service"
+version = "0.1.0"
+description = "WisePen Scholar local academic paper service"
+requires-python = ">=3.11"
+dependencies = [
+    "wisepen-common",
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic-settings",
+    "pyyaml",
+    "elasticsearch>=8.17,<9",
+    "redis>=5",
+    "duckdb>=1.4,<2",
+    "orjson",
+    "dependency-injector",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-asyncio", "httpx"]
+
+[project.scripts]
+scholar-etl = "scholar.etl.cli:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv.sources]
+wisepen-common = { workspace = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "--basetemp=.pytest_tmp"

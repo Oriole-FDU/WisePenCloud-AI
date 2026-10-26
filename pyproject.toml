@@ -10,6 +10,7 @@ dependencies = [
     "wisepen-common",
     "wisepen-rag-service",
     "wisepen-sandbox-service",
+    "wisepen-scholar-service",
     "mcp>=1.27,<2",
 ]
 
@@ -27,3 +28,4 @@ wisepen-mcp-service = { workspace = true }
 wisepen-common = { workspace = true }
 wisepen-sandbox-service = { workspace = true }
 wisepen-rag-service = { workspace = true }
+wisepen-scholar-service = { workspace = true }

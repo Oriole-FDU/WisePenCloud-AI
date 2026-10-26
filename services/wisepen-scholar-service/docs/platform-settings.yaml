@@ -1,0 +1,12 @@
+# Nacos Data ID: wisepen-scholar-service-dev.yaml
+# Replace placeholders through the existing Nacos secret configuration channel.
+FROM_SOURCE_SECRET: "<shared internal source secret>"
+ELASTICSEARCH_URIS:
+  - "http://wisepen-dev-server:9200"
+ELASTICSEARCH_USERNAME: "<username>"
+ELASTICSEARCH_PASSWORD: "<password>"
+REDIS_URL: "redis://:<password>@wisepen-dev-server:6379/1"
+SCHOLAR_INDEX_ALIAS: "wisepen-scholar-arxiv"
+SCHOLAR_QUERY_CACHE_TTL_SECONDS: 600
+SCHOLAR_REQUEST_TIMEOUT_SECONDS: 25
+SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS: 120

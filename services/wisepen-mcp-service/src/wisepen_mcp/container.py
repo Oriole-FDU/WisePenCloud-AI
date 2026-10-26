@@ -12,6 +12,7 @@ from wisepen_mcp.service_client import (
     NoteClient,
     NoteCollabClient,
     ResourceClient,
+    ScholarClient,
 )
 
 
@@ -53,6 +54,10 @@ class Container(containers.DeclarativeContainer):
     )
     note_client = providers.Singleton(
         NoteClient,
+        rpc=rpc_client,
+    )
+    scholar_client = providers.Singleton(
+        ScholarClient,
         rpc=rpc_client,
     )
 

@@ -3,6 +3,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 from wisepen_mcp.capabilities.note_ai import register_note_ai_tools
+from wisepen_mcp.capabilities.scholar import register_scholar_tools
 from wisepen_mcp.capabilities.skill_creator import register_skill_creator_tools
 from wisepen_mcp.capabilities.user_resource import register_user_resource_tools
 from wisepen_mcp.capabilities.web_search import register_web_search_tools
@@ -12,6 +13,7 @@ from wisepen_mcp.service_client import (
     NoteClient,
     NoteCollabClient,
     ResourceClient,
+    ScholarClient,
 )
 
 
@@ -22,6 +24,7 @@ def build_mcp_server(
     resource_client: ResourceClient,
     document_client: DocumentClient,
     note_client: NoteClient,
+    scholar_client: ScholarClient,
 ) -> FastMCP:
     mcp = FastMCP(
         "wisepen-mcp-service",
@@ -36,6 +39,7 @@ def build_mcp_server(
     register_note_ai_tools(mcp, note_collab_client, resource_client, note_client)
     register_user_resource_tools(mcp, resource_client, document_client)
     register_web_search_tools(mcp)
+    register_scholar_tools(mcp, scholar_client)
     return mcp
 
 
