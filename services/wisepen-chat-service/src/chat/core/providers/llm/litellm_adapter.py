@@ -9,6 +9,7 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.provider import ProviderType
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
+from chat.core.langfuse.generation import record_generation_request
 from chat.domain.interfaces.llm import (
     LLMCompletionResult,
     LLMEventType,
@@ -153,6 +154,9 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
         # LiteLLM 作为 fallback 路径，tools 继续透传 OpenAI-compatible schema
         usage_payload: Any = {}
         tool_acc: dict[int, dict[str, str]] = {}
+        record_generation_request(
+            {"messages": formatted_msgs, "tools": tools}, protocol="litellm.chat_completions",
+        )
         try:
             response = await litellm.acompletion(
                 model=litellm_model, # 模型名

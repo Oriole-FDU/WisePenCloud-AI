@@ -8,6 +8,7 @@ from typing import Any, Mapping, Sequence
 
 from pydantic import BaseModel
 
+from chat.core.langfuse.tool import observe_tool_execution
 from chat.application.tools.core.definition import ClientToolResult, ToolRiskLevel
 from chat.application.tools.core.execution.hooks.builtin import JsonSchemaCheck, RequiredContextCheck
 from chat.application.tools.core.execution.result import (
@@ -66,6 +67,7 @@ class ToolExecutor:
                                        tool_execution_error=tool_execution_error)
 
 
+    @observe_tool_execution
     async def execute_one(self, invocation: ToolInvocation) -> ToolExecutionResult:
         started_at = datetime.now(timezone.utc)
         tool = self._tool_scope.get(invocation.tool_name)

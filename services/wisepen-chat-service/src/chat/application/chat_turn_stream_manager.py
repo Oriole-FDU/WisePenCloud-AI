@@ -1,14 +1,20 @@
+from __future__ import annotations
+
 import asyncio
 import uuid
 from collections.abc import AsyncIterator, Callable
+from typing import TYPE_CHECKING
 
 from fastapi import BackgroundTasks
 
 from chat.api.vercel_formats import message_finish, message_start, stream_done, error as sse_error
-from chat.core.persistence.redis.chat_turn_stream import RedisChatTurnStream
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 from common.logger import error, info
+from chat.core.langfuse.observability import observe_turn
+
+if TYPE_CHECKING:
+    from chat.core.persistence.redis.chat_turn_stream import RedisChatTurnStream
 
 
 class ChatTurnStreamManager:
@@ -87,27 +93,31 @@ class ChatTurnStreamManager:
         background_tasks = BackgroundTasks()
 
         try:
-            # 后台执行器统一负责消息生命周期帧，页面连接只转发。
-            await self._stream_repo.append_frame(turn_id, message_start(f"msg_{uuid.uuid4().hex}"))
+            # 生命周期跟随后台执行；页面的 SSE 断开、续接不会重复创建或结束记录。
+            with observe_turn(user_id=user_id, session_id=session_id, turn_id=turn_id) as observation:
+                try:
+                    await self._stream_repo.append_frame(turn_id, message_start(f"msg_{uuid.uuid4().hex}"))
 
-            async for frame in build_chat_gen(background_tasks, turn_id):
-                # 业务输出帧写入前检查租约，避免旧 runner 在会话所有权失效后继续写内容
-                renewed = await self._stream_repo.renew_active_turn(user_id, session_id, turn_id) # 续期
-                if not renewed: # 无法续期，中止任务
-                    await self._stream_repo.append_frame(turn_id, sse_error(error_text="当前对话运行租约已失效"))
+                    async for frame in build_chat_gen(background_tasks, turn_id):
+                        # 业务输出帧写入前检查租约，避免旧 runner 在会话所有权失效后继续写内容
+                        renewed = await self._stream_repo.renew_active_turn(user_id, session_id, turn_id) # 续期
+                        if not renewed: # 无法续期，中止任务
+                            observation.fail("当前对话运行租约已失效")
+                            await self._stream_repo.append_frame(turn_id, sse_error(error_text="当前对话运行租约已失效"))
+                            await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
+                            return
+                        await self._stream_repo.append_frame(turn_id, frame)
+
+                    # 必要的保存和计费由生成器完成；标题、记忆写回等后置任务不计入整轮耗时。
+                    await self._stream_repo.release_active_turn(user_id, session_id, turn_id)
+                    await self._stream_repo.append_frame(turn_id, message_finish())
                     await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
-                    return
-                await self._stream_repo.append_frame(turn_id, frame)
-
-            # 在执行后台任务前释放 active_turn
-            await self._stream_repo.release_active_turn(user_id, session_id, turn_id)
-
-            await self._stream_repo.append_frame(turn_id, message_finish())
-            await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
-        except Exception as exc:
-            error("chat turn runner failed.", turn_id=turn_id, session_id=session_id, exc=exc)
-            await self._stream_repo.append_frame(turn_id, sse_error(error_text=str(exc)))
-            await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
+                    observation.complete()
+                except Exception as exc:
+                    observation.fail(exc)
+                    error("chat turn runner failed.", turn_id=turn_id, session_id=session_id, exc=exc)
+                    await self._stream_repo.append_frame(turn_id, sse_error(error_text=str(exc)))
+                    await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
         finally:
             self._tasks.pop(turn_id, None)
             try:

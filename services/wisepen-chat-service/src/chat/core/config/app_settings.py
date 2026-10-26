@@ -26,6 +26,15 @@ class AppSettings(BaseModel):
 
     model_config = ConfigDict()
 
+    # Langfuse 从 Nacos 读取；环境标签独立配置，不限制为引导配置中的 dev/prod。
+    # 缺省关闭；启用后的连接配置校验由观测模块处理，不阻断业务启动。
+    LANGFUSE_ENABLED: bool = False
+    LANGFUSE_BASE_URL: str = ""
+    LANGFUSE_PUBLIC_KEY: str = Field(default="", repr=False)
+    LANGFUSE_SECRET_KEY: str = Field(default="", repr=False)
+    LANGFUSE_ENVIRONMENT: str = "default"
+    LANGFUSE_MAX_TEXT_CHARS: int = Field(default=16000, ge=256, le=100000)
+
     # LLM 默认网关配置（作为 fallback，主对话链路从 Provider 表动态获取）
     LLM_BASE_URL: str
     LLM_API_KEY: str
