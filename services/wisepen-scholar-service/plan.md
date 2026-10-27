@@ -14,7 +14,7 @@ Scholar 提供论文检索、精确查询和趋势发现，供 Agent 组合完�
 | arXiv 本地镜像            | 提供基础论文事实及本地召回，覆盖范围以实际 arXiv 收录为准                         |
 | OpenAlex                  | 通过用户 BYOK 提供跨学科学术检索及精确查询                                        |
 | S2                        | 提供通用学术信号；离线数据集、在线精确查询和每日同步各有明确调用边界              |
-| Hugging Face Papers（HF） | 提供 Computer Science 专用富化和趋势发现，使用官方 SDK                            |
+| Hugging Face Papers（HF） | 提供 Computer Science 专用富化和趋势发现，使用异步 HTTP API                       |
 
 V1 不建设全文语料库、向量检索、完整引用图、作者研究工具、用户密钥管理系统或研究问题拆解流程。不预生成经典、热门、高影响力等学术判断标签，也不把不同来源的指标相加。
 
@@ -38,7 +38,9 @@ V1 不建设全文语料库、向量检索、完整引用图、作者研究工�
 
 `domain/models/` 中的 `paper.py`、`identifiers.py` 只保存论文和身份领域语义。请求、结果、来源执行状态等细节放在具体应用用例或其共享执行模型中，不放入一个总 models.py。
 
-`providers/field_mapping.py` 是通用领域到所有聚合类学术来源映射的统一负责人，目前只加入已使用的 arXiv 映射。`providers/` 后续承载学术供应商适配；`domain/interfaces/` 目前留空，实际接入 arXiv、OpenAlex 等供应商时再确定需要的接口，不预建空实现。
+`providers/field_mapping.py` 统一负责通用领域到各聚合类学术来源的映射。`providers/` 只承载在线学术能力适配：本地 arXiv 搜索由 `ArxivProvider` 调用论文仓储，检索用例通过 `PaperSearcher.search()` 使用它；OpenAlex 实现同一搜索能力。arXiv OAI 抓取和 S2 数据集、release、差分处理属于独立 `etl/` 步骤。
+
+`domain/interfaces/` 按业务能力声明 `PaperSearcher.search()`、`PaperEnricher.enrich()`、`PaperDiscoverer.discover()`，不按 S2 等供应商名称声明接口。Provider 按实际能力实现任意一个或多个接口，不要求全实现，也不限制只能实现一个。HF 同时提供富化和发现；S2 在线适配提供富化。应用用例拥有路由、缓存、离线优先、请求预算与结果编排；供应商负责请求协议及来源事实投影。S2 在线和离线调用共用 `core` 中的 HTTP 传输与 Redis 发送配额，不将离线方法放入 provider。
 
 ## 2. 领域映射与检索路由
 
@@ -102,7 +104,7 @@ API/MCP 边界负责解析请求，封闭值集合使用枚举。内部按 searc
 V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次提交日期，结果保留其来源；不拿元数据更新时间代替发表时间。
 
 明确请求 CS 时，在候选归并并截取最终数量后执行 HF 富化。优先缓存，仅对有 arXiv ID 的候选调用官方 SDK `paper_info`，并发数默认
-4，受本次请求预算约束。保留点赞、代码仓库、关联模型和数据集的实际返回值；不抓取整个关联仓库目录，不假定返回条目穷尽所有产物。404
+4，受本次请求预算约束。HF 使用 `httpx.AsyncClient`，可选平台凭证来自 Nacos `HF_TOKEN`，不使用同步 SDK 或 `to_thread`。保留点赞、代码仓库、关联模型和数据集的实际返回值；不抓取整个关联仓库目录，不假定返回条目穷尽所有产物。404
 表示 HF 没有对应记录，其他网络故障报告富化未完成；均保留基础论文结果。
 
 ### 3.2 `lookup_papers`
@@ -141,9 +143,7 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 
 删除 `query`、`all_time`、`popular`。发现以渠道分发信号为入口，不执行主题搜索。
 
-使用官方 `huggingface_hub.HfApi.list_daily_papers`：daily 获取最近可用内容；weekly/monthly 分别传当前 UTC
-自然周、自然月，返回实际查询窗口。按需使用同一 HF 适配器的详情和缓存补充研究产物，不调用在线 S2。同步 SDK
-调用在线程中执行，并发和超时有界，不阻塞事件循环。
+使用 HF 官方论文 HTTP API：daily 获取最近可用内容；weekly/monthly 分别传当前 UTC 自然周、自然月，返回实际查询窗口。按需使用同一 HF 适配器的详情和缓存补充研究产物，不调用在线 S2。所有请求通过异步客户端执行，并发和超时有界。
 
 ### 3.4 输出、缺失与部分结果
 
@@ -331,7 +331,7 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
   精确查询；中断恢复和重复运行不产生重复论文。未完成索引不切换服务别名。
 - **边界**：不调用 OpenAlex、在线 S2 或 HF；只交付本地能力，不声称最终领域富化已完成。
 - **提交**：`feat(scholar): deliver local arxiv search and lookup`。
-- **状态**：实现及小样本真实 ES 验证完成；全量导入已完成，全量索引发布与端到端验收进行中。
+- **状态**：已提交 `45231bef`；全量 3,224,542 篇已发布，真实 ES/HTTP/MCP 验收与重复运行验证通过。
 
 ### P2：S2 离线富化
 
@@ -340,7 +340,7 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
   model、无 S2 关联及重复执行。ES 每篇仍只有一个基础文档，抽样与 DuckDB 一致。
 - **边界**：不请求在线 API 补齐整个历史库，不将在线独有字段变为离线必填项。
 - **提交**：`feat(scholar): enrich local papers from s2 datasets`。
-- **状态**：待开发；依赖 P1。
+- **状态**：离线导入、关联及发布实现完成，14 项受影响 ETL 测试通过；真实 ES 小样本投影及重复运行通过。现有 90 个分片正在后台全量扫描，完整性和全量富化发布尚未验收。
 
 ### P3：OpenAlex BYOK 与显式多源检索
 
@@ -362,7 +362,7 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
 
 ### P5：CS 专用 HF 富化与论文发现
 
-- **交付**：官方 SDK 适配、CS 请求配置的 HF 富化、无 query 的 discover，以及相关缓存和真实产物映射。
+- **交付**：异步 HF HTTP 适配、Nacos `HF_TOKEN`、CS 请求配置的 HF 富化、无 query 的 discover，以及相关缓存和真实产物映射。
 - **验收**：同样的 CS 候选在 General 请求下不执行 HF、明确 CS 请求下执行；缓存满足时不重复调用；无 arXiv ID 不猜测匹配；HF
   无记录和服务故障不丢弃基础论文。验证日/自然周/月、recent/trending、SDK 线程调用、并发预算与三个工具间的边界。
 - **边界**：不加入主题发现搜索、全时热门榜、学术质量分数或候选内容推断领域。
@@ -396,7 +396,7 @@ ES、Redis、Nacos 或供应商协议的成功结论。没有新变化、失败�
   的结果，已确认父字段 authors 返回 authorId/name，以及 PDF、BibTeX、TLDR 等所选字段的形态。
 - 样本实际存在空 PDF URL、空 publicationDate，以及开放获取标记和 PDF 状态不一致的情况；按来源合法缺省处理，不把它们当成整篇失败。
 - 不再以先前带 User-Agent 或 authors 子字段的失败请求判定精选字段批量不可用，也不重复执行已保存的实验。
-- 本机已验证官方 HF SDK 支持 list_daily_papers、paper_info 及关联模型/数据集字段；服务级集成尚待 P5。
-- P1 行为测试 14 项、MCP 全套测试 103 项已通过；真实 Nacos 配置加载、ES/Redis 连通及小样本发布已验证。全量 ES 发布与 HTTP/MCP 端到端验收仍在进行；部署产物属于 P6。详见阶段验收记录。
+- 已检查 HF 官方 SDK 对应的 HTTP 协议；按最新决定改为原生异步 HTTP，服务级集成尚待 P5。
+- P1 行为测试 14 项、MCP 全套测试 103 项已通过；真实 Nacos、ES 8.19.18、Redis、全量别名发布及 HTTP/MCP 端到端验收通过，重复导入/发布维持 3,224,542 篇、pending=0。部署产物属于 P6。详见阶段验收记录。
 
 官方协议参考：[S2 Graph API](https://api.semanticscholar.org/api-docs/)、[S2 Datasets API](https://api.semanticscholar.org/api-docs/datasets)、[HF HfApi](https://huggingface.co/docs/huggingface_hub/en/package_reference/hf_api)、[arXiv OAI-PMH](https://github.com/arXiv/arxiv-docs/blob/develop/source/help/oa/index.md)、[OpenAlex 过滤](https://help.openalex.org/api/filtering/)。

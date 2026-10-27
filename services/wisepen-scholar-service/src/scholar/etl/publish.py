@@ -35,6 +35,11 @@ async def publish_arxiv(
         await es.indices.create(
             index=target, mappings=ARXIV_MAPPING, settings={"refresh_interval": "-1"}
         )
+    else:
+        # 离线富化沿用已发布论文 ID；先增加实际使用的字段，再重放受影响文档。
+        await es.indices.put_mapping(
+            index=target, properties=ARXIV_MAPPING["properties"]
+        )
     batches = 0
     while max_batches is None or batches < max_batches:
         # 先限定待发布 ID，再按范围读取完整文档，避免每一批都排序整库 JSON。

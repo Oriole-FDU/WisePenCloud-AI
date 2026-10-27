@@ -96,6 +96,9 @@ class FakeIndices:
     async def create(self, *, index, mappings, settings):
         self.es.documents[index] = {}
 
+    async def put_mapping(self, *, index, properties):
+        pass
+
     async def refresh(self, *, index):
         self.es.refreshes.append(index)
 

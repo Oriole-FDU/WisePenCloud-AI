@@ -34,6 +34,27 @@ ARXIV_MAPPING = {
         "submitted_date": {"type": "date"},
         "updated_date": {"type": "date"},
         "versions": {"type": "object", "enabled": False},
+        "metadata": {
+            "properties": {
+                "s2": {
+                    "properties": {
+                        "corpus_id": {"type": "keyword"},
+                        "citation_count": {"type": "long"},
+                        "influential_citation_count": {"type": "long"},
+                        "is_open_access": {"type": "boolean"},
+                        "tldr": {
+                            "properties": {
+                                "model": {"type": "keyword"},
+                                "text": {"type": "text"},
+                            }
+                        },
+                        "release": {"type": "keyword"},
+                        "paper_source": {"type": "object", "enabled": False},
+                        "tldr_source": {"type": "object", "enabled": False},
+                    }
+                }
+            }
+        },
     },
 }
 
@@ -104,7 +125,12 @@ class ElasticsearchPaperRepository:
                         {
                             "multi_match": {
                                 "query": query,
-                                "fields": ["title^3", "abstract", "authors"],
+                                "fields": [
+                                    "title^3",
+                                    "abstract",
+                                    "authors",
+                                    "metadata.s2.tldr.text",
+                                ],
                             }
                         }
                     ],
@@ -168,6 +194,7 @@ class ElasticsearchPaperRepository:
             source=PaperSource.ARXIV,
             # 供应商附加信息按来源命名空间保留，不扩散为领域级强类型依赖。
             metadata={
+                **document.get("metadata", {}),
                 "arxiv": {
                     name: document[name]
                     for name in (
@@ -180,6 +207,6 @@ class ElasticsearchPaperRepository:
                         "comments",
                         "license",
                     )
-                }
+                },
             },
         )
