@@ -7,8 +7,12 @@ from typing import Any
 
 
 class PaperSource(StrEnum):
+    """内置来源名称；注册新适配器可以使用自己的来源字符串。"""
+
     ARXIV = "arxiv"
     OPENALEX = "openalex"
+    HUGGINGFACE = "huggingface"
+    S2 = "s2"
 
 
 @dataclass
@@ -17,12 +21,12 @@ class Paper:
 
     arxiv_id: str | None
     doi: str | None
-    title: str
+    title: str | None
     abstract: str | None
     authors: list[str]
     publication_date: date | None
     year: int | None
     url: str
     pdf_url: str | None
-    source: PaperSource
+    source: str
     metadata: dict[str, Any] = field(default_factory=dict)

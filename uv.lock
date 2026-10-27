@@ -5505,6 +5505,7 @@ dependencies = [
     { name = "duckdb" },
     { name = "elasticsearch" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "orjson" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
@@ -5515,7 +5516,6 @@ dependencies = [
 
 [package.optional-dependencies]
 test = [
-    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -5526,7 +5526,7 @@ requires-dist = [
     { name = "duckdb", specifier = ">=1.4,<2" },
     { name = "elasticsearch", specifier = ">=8.17,<9" },
     { name = "fastapi" },
-    { name = "httpx", marker = "extra == 'test'" },
+    { name = "httpx" },
     { name = "orjson" },
     { name = "pydantic-settings" },
     { name = "pytest", marker = "extra == 'test'" },

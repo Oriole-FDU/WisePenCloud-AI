@@ -3,10 +3,9 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from scholar.domain.models.paper import PaperSource
-
 
 class SourceExecutionStatus(StrEnum):
+    NOT_EXECUTED = "not_executed"
     COMPLETED = "completed"
     PARTIAL = "partial"
     FAILED = "failed"
@@ -14,7 +13,8 @@ class SourceExecutionStatus(StrEnum):
 
 @dataclass
 class SourceExecution:
-    source: PaperSource
+    source: str
     cache_hit: bool
     coverage: str
     status: SourceExecutionStatus = SourceExecutionStatus.COMPLETED
+    error: str | None = None

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from scholar.application.lookup import LookupPurpose, PaperLookup
 from scholar.application.search import PaperSearch, SourceScope
-from scholar.providers.field_mapping import AcademicField
+from scholar.domain.models.fields import AcademicField
 
 
 class SearchRequest(BaseModel):

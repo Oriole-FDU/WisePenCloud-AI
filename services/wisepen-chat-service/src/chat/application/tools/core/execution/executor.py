@@ -83,7 +83,12 @@ class ToolExecutor:
                 )
 
             tool_config = self._tool_scope.config_for(invocation.tool_name)
-            if tool.definition.config_spec is not None and tool_config is None:
+            # config_spec 也描述可选项；只有 required_keys 才阻止无配置调用。
+            if (
+                tool.definition.config_spec is not None
+                and tool.definition.config_spec.required_keys
+                and tool_config is None
+            ):
                 raise ToolExecutionError(
                     reason="Tool Config Missing",
                     detail_reason=f"Tool '{invocation.tool_name}' requires user configuration.",

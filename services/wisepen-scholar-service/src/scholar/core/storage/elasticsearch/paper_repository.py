@@ -2,13 +2,13 @@
 
 from datetime import date
 
+import orjson
 from common.logger import warn
 from elasticsearch import AsyncElasticsearch
 
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.repositories.paper_repository import (
-    LookupFailureReason,
     PaperLookupMatch,
 )
 
@@ -163,7 +163,7 @@ class ElasticsearchPaperRepository:
                 )
                 results.append(
                     PaperLookupMatch(
-                        papers=[], failure_reason=LookupFailureReason.SOURCE_ERROR
+                        papers=[], error=orjson.dumps(result["error"]).decode()
                     )
                 )
                 continue

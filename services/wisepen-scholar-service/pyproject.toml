@@ -14,10 +14,11 @@ dependencies = [
     "duckdb>=1.4,<2",
     "orjson",
     "dependency-injector",
+    "httpx",
 ]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-asyncio", "httpx"]
+test = ["pytest", "pytest-asyncio"]
 
 [project.scripts]
 scholar-etl = "scholar.etl.cli:main"

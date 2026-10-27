@@ -2,6 +2,8 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from common.core.exceptions import RpcError
+from mcp.shared.memory import create_connected_server_and_client_session
 
 from wisepen_mcp.capabilities import build_mcp_server
 from wisepen_mcp.service_client import ScholarClient
@@ -11,9 +13,12 @@ class RpcSpy:
     def __init__(self):
         self.calls = []
         self.response = {"papers": [{"title": "A local paper"}]}
+        self.error = None
 
     async def post(self, service_name, path, **kwargs):
         self.calls.append((service_name, path, kwargs))
+        if self.error is not None:
+            raise self.error
         return self.response
 
 
@@ -113,19 +118,20 @@ async def test_search_papers_call_passes_http_contract_and_returns_scholar_data(
     response = {"items": [{"id": "arxiv:2601.12345", "signals": {"citations": 2}}]}
     rpc.response = response
 
-    result = await mcp.call_tool(
-        "search_papers",
-        {
-            "query": "  retrieval systems  ",
-            "field": "mathematics",
-            "published_after": "2026-01-02",
-            "published_before": "2026-03-04",
-            "limit": 7,
-            "source_scope": "default",
-        },
-    )
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool(
+            "search_papers",
+            {
+                "query": "  retrieval systems  ",
+                "field": "mathematics",
+                "published_after": "2026-01-02",
+                "published_before": "2026-03-04",
+                "limit": 7,
+                "source_scope": "default",
+            },
+        )
 
-    assert result[1] == response
+    assert result.structuredContent == response
     assert rpc.calls == [
         (
             "wisepen-scholar-service",
@@ -151,12 +157,13 @@ async def test_lookup_papers_call_passes_identifiers_and_p1_purpose(scholar_serv
     response = {"items": [{"id": "doi:10.1000/example"}]}
     rpc.response = response
 
-    result = await mcp.call_tool(
-        "lookup_papers",
-        {"identifiers": [" DOI:10.1000/example "]},
-    )
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool(
+            "lookup_papers",
+            {"identifiers": [" DOI:10.1000/example "]},
+        )
 
-    assert result[1] == response
+    assert result.structuredContent == response
     assert rpc.calls == [
         (
             "wisepen-scholar-service",
@@ -188,6 +195,65 @@ async def test_scholar_total_timeout_cancels_slow_search_and_lookup_calls():
         )
     with pytest.raises(TimeoutError):
         await client.lookup_papers(identifiers=["arxiv:2401.00001"], purpose="details")
-
     assert rpc.cancelled_calls == 2
     assert rpc.timeouts == [0.01, 0.01]
+
+
+@pytest.mark.asyncio
+async def test_byok_metadata_is_per_call_and_only_forwarded_in_http_headers(
+    scholar_server,
+):
+    mcp, rpc = scholar_server
+    async with create_connected_server_and_client_session(mcp) as session:
+        await session.call_tool(
+            "search_papers",
+            {"query": "test"},
+            meta={"com.wisepen/tool_config": {"api_key": "search-user-key"}},
+        )
+        await session.call_tool(
+            "lookup_papers",
+            {"identifiers": ["1706.03762"]},
+            meta={"com.wisepen/tool_config": {"api_key": "lookup-user-key"}},
+        )
+        await session.call_tool("search_papers", {"query": "test"})
+
+    assert rpc.calls[0][2]["headers"] == {"X-OpenAlex-Api-Key": "search-user-key"}
+    assert rpc.calls[1][2]["headers"] == {"X-OpenAlex-Api-Key": "lookup-user-key"}
+    assert "headers" not in rpc.calls[2][2]
+    assert all("api_key" not in call[2]["json"] for call in rpc.calls)
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "message"),
+    [
+        (
+            200,
+            503,
+            "OpenAlex search unavailable: upstream single-source failure",
+        ),
+        (429, 429, "Too Many Requests: retry after 12 seconds"),
+        (None, None, "ReadTimeout: Scholar request exceeded its time budget"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_scholar_rpc_failures_are_visible_as_mcp_tool_errors(
+    scholar_server, status, code, message
+):
+    mcp, rpc = scholar_server
+    rpc.error = RpcError(
+        service_name="wisepen-scholar-service",
+        path="/scholar/papers/search",
+        status=status,
+        code=code,
+        msg=message,
+    )
+
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool("search_papers", {"query": "retrieval"})
+
+    visible_error = "\n".join(
+        item.text for item in result.content if item.type == "text"
+    )
+    assert result.isError is True
+    assert message in visible_error
+    assert "source_error" not in visible_error

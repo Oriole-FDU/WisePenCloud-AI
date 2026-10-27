@@ -4,9 +4,10 @@ from datetime import date
 from enum import StrEnum
 from typing import Annotated, Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
+from wisepen_mcp.capabilities.core.tool_metadata import get_tool_config_value
 from wisepen_mcp.service_client import ScholarClient
 
 
@@ -47,6 +48,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         ),
     )
     async def search_papers(
+        ctx: Context,
         query: Annotated[
             str,
             Field(
@@ -79,6 +81,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             published_before=published_before,
             limit=limit,
             source_scope=source_scope.value,
+            openalex_api_key=_openalex_key(ctx),
         )
 
     @mcp.tool(
@@ -89,6 +92,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         ),
     )
     async def lookup_papers(
+        ctx: Context,
         identifiers: Annotated[
             list[str],
             Field(
@@ -105,7 +109,13 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         return await scholar_client.lookup_papers(
             identifiers=identifiers,
             purpose=purpose.value,
+            openalex_api_key=_openalex_key(ctx),
         )
+
+def _openalex_key(ctx: Context) -> str | None:
+    # 用户秘密配置经 MCP 元数据传递，不能成为模型可见的工具参数。
+    value = get_tool_config_value(ctx, "api_key")
+    return value.strip() or None if isinstance(value, str) else None
 
 
 __all__ = [

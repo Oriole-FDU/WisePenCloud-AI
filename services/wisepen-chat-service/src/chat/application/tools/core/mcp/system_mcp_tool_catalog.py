@@ -40,7 +40,31 @@ _WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
     secret_keys=("api_key",),
 )
 
+_SCHOLAR_OPENALEX_API_KEY_CONFIG = ToolConfigSpec(
+    schema={
+        "type": "object",
+        "properties": {
+            "api_key": {
+                "type": "string",
+                "title": "OpenAlex API Key",
+                "description": "可选；未配置时 Scholar 仍可使用本地论文数据。",
+                "writeOnly": True,
+            },
+        },
+        "additionalProperties": False,
+    },
+    secret_keys=("api_key",),
+)
+
 _WEB_SEARCH_POLICY = ToolPolicy(
+    expose_by_default=True,
+    risk_level=ToolRiskLevel.LOW,
+    timeout_seconds=30.0,
+    persist_output=True,
+    max_output_chars=None,
+)
+
+_SCHOLAR_POLICY = ToolPolicy(
     expose_by_default=True,
     risk_level=ToolRiskLevel.LOW,
     timeout_seconds=30.0,
@@ -217,6 +241,18 @@ _SYSTEM_TOOL_CONFIGS: list[dict[str, Any]] = [{
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
         "failure_reason": "Firecrawl Search Failed",
+    },{
+        "tool_name": "search_papers",
+        "ui_spec": ToolUISpec(display_name="搜索论文"),
+        "policy": _SCHOLAR_POLICY,
+        "config_spec": _SCHOLAR_OPENALEX_API_KEY_CONFIG,
+        "failure_reason": "Scholar Paper Search Failed",
+    },{
+        "tool_name": "lookup_papers",
+        "ui_spec": ToolUISpec(display_name="查询论文"),
+        "policy": _SCHOLAR_POLICY,
+        "config_spec": _SCHOLAR_OPENALEX_API_KEY_CONFIG,
+        "failure_reason": "Scholar Paper Lookup Failed",
     }
 ]
 

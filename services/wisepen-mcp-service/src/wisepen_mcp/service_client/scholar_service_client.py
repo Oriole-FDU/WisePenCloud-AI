@@ -6,7 +6,6 @@ from typing import Any
 
 from common.http.rpc_client import RpcClient
 
-
 _SCHOLAR_SERVICE_NAME = "wisepen-scholar-service"
 _SEARCH_PAPERS_PATH = "/scholar/papers/search"
 _LOOKUP_PAPERS_PATH = "/scholar/papers/lookup"
@@ -35,6 +34,7 @@ class ScholarClient:
         published_before: date | None,
         limit: int,
         source_scope: str,
+        openalex_api_key: str | None = None,
     ) -> dict[str, Any]:
         # MCP 用 date 生成日期 Schema；HTTP JSON 使用 Scholar 约定的 ISO 日期字符串。
         async with asyncio.timeout(self._timeout):
@@ -54,6 +54,11 @@ class ScholarClient:
                     "source_scope": source_scope,
                 },
                 timeout=self._timeout,
+                **(
+                    {"headers": {"X-OpenAlex-Api-Key": openalex_api_key}}
+                    if openalex_api_key
+                    else {}
+                ),
             )
 
     async def lookup_papers(
@@ -61,6 +66,7 @@ class ScholarClient:
         *,
         identifiers: list[str],
         purpose: str,
+        openalex_api_key: str | None = None,
     ) -> dict[str, Any]:
         async with asyncio.timeout(self._timeout):
             return await self._rpc.post(
@@ -71,7 +77,11 @@ class ScholarClient:
                     "purpose": purpose,
                 },
                 timeout=self._timeout,
+                **(
+                    {"headers": {"X-OpenAlex-Api-Key": openalex_api_key}}
+                    if openalex_api_key
+                    else {}
+                ),
             )
-
 
 __all__ = ["ScholarClient"]

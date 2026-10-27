@@ -19,8 +19,12 @@ class AppSettings(BaseModel):
     ELASTICSEARCH_USERNAME: str
     ELASTICSEARCH_PASSWORD: str
     REDIS_URL: str
+    HF_TOKEN: str | None = Field(default=None, repr=False)
     SCHOLAR_INDEX_ALIAS: str = "wisepen-scholar-arxiv"
     SCHOLAR_QUERY_CACHE_TTL_SECONDS: int = Field(default=600, gt=0)
+    SCHOLAR_PAPER_CACHE_TTL_SECONDS: int = Field(default=86400, gt=0)
+    SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS: int = Field(default=3600, gt=0)
+    SCHOLAR_HF_CONCURRENCY: int = Field(default=4, gt=0)
     SCHOLAR_REQUEST_TIMEOUT_SECONDS: float = Field(default=25, gt=0)
     SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS: float = Field(default=120, gt=0)
 

@@ -121,6 +121,10 @@ def scholar_client():
             "SCHOLAR_INDEX_ALIAS": "test-scholar-papers",
             "SCHOLAR_QUERY_CACHE_TTL_SECONDS": 60,
             "SCHOLAR_REQUEST_TIMEOUT_SECONDS": 3,
+            "HF_TOKEN": None,
+            "SCHOLAR_HF_CONCURRENCY": 4,
+            "SCHOLAR_PAPER_CACHE_TTL_SECONDS": 86400,
+            "SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS": 3600,
         }
     )
     container.elasticsearch.override(providers.Object(es))
@@ -230,7 +234,7 @@ def test_lookup_preserves_input_order_duplicates_and_per_identifier_status(
         "found",
         "found",
         "invalid_identifier",
-        "unsupported_identifier",
+        "missing_api_key",
         "ambiguous",
         "not_found",
     ]
@@ -260,8 +264,21 @@ def test_lookup_keeps_successes_when_one_msearch_item_fails(scholar_client):
     assert result["items"][0]["status"] == "found"
     assert result["items"][0]["paper"]["arxiv_id"] == "2201.00001"
     assert result["items"][1]["status"] == "failed"
-    assert result["items"][1]["failure_reason"] == "source_error"
+    assert "search_phase_execution_exception" in result["items"][1]["error"]
     assert result["execution"][0]["status"] == "partial"
+
+
+def test_lookup_whole_failure_exposes_original_error_to_the_caller(scholar_client):
+    client, _, _ = scholar_client
+    response = client.post(
+        "/scholar/papers/lookup",
+        headers=AUTHORIZED,
+        json={"identifiers": ["10.5555/p1.error"]},
+    )
+
+    assert response.status_code == 503
+    assert "search_phase_execution_exception" in response.json()["msg"]
+    assert response.json()["data"] is None
 
 
 @pytest.mark.parametrize(
@@ -307,3 +324,82 @@ def test_common_from_source_header_blocks_missing_and_invalid_tokens(scholar_cli
     assert invalid.status_code == 404
     assert es.info_calls == 0
     assert redis.ping_calls == 0
+
+
+def test_lookup_preserves_selected_offline_s2_facts(scholar_client):
+    client, es, _ = scholar_client
+    s2 = {
+        "corpus_id": "1001",
+        "citation_count": 0,
+        "influential_citation_count": 0,
+        "is_open_access": False,
+        "tldr": {"model": "tldr@v2.0.0", "text": ""},
+        "release": "declared-test-release",
+    }
+    es.lookup_documents[("arxiv_id", "2201.00001")] = [
+        {**PAPER_A, "metadata": {"s2": s2}}
+    ]
+    response = client.post(
+        "/scholar/papers/lookup",
+        headers=AUTHORIZED,
+        json={"identifiers": ["arxiv:2201.00001"]},
+    )
+    assert response.json()["data"]["items"][0]["paper"]["metadata"]["s2"] == s2
+
+
+def test_search_uses_openalex_header_and_user_scoped_cache(scholar_client):
+    client, _, redis = scholar_client
+
+    class RecordingSearcher:
+        def __init__(self):
+            self.calls = []
+            self.lookup_calls = []
+
+        async def search(self, **kwargs):
+            self.calls.append(kwargs)
+            return []
+
+        async def lookup(self, identifier, *, api_key):
+            self.lookup_calls.append((identifier, api_key))
+
+    searcher = RecordingSearcher()
+    request = {"query": "clinical trials", "field": "medicine"}
+    headers = {**AUTHORIZED, "X-OpenAlex-Api-Key": "user-secret"}
+    with container.openalex_searcher.override(providers.Object(searcher)):
+        first = client.post(
+            "/scholar/papers/search",
+            headers={**headers, "X-User-Id": "user-a"},
+            json=request,
+        )
+        repeated = client.post(
+            "/scholar/papers/search",
+            headers={**headers, "X-User-Id": "user-a"},
+            json=request,
+        )
+        another_user = client.post(
+            "/scholar/papers/search",
+            headers={**headers, "X-User-Id": "user-b"},
+            json=request,
+        )
+        lookup = client.post(
+            "/scholar/papers/lookup",
+            headers={**headers, "X-User-Id": "user-a"},
+            json={"identifiers": ["openalex:W123"]},
+        )
+
+    assert [first.status_code, repeated.status_code, another_user.status_code] == [
+        200,
+        200,
+        200,
+    ]
+    assert first.json()["data"]["execution"][0]["cache_hit"] is False
+    assert repeated.json()["data"]["execution"][0]["cache_hit"] is True
+    assert another_user.json()["data"]["execution"][0]["cache_hit"] is False
+    assert len(searcher.calls) == 2
+    assert all(call["api_key"] == "user-secret" for call in searcher.calls)
+    assert all(call["field"].value == "medicine" for call in searcher.calls)
+    assert lookup.status_code == 200
+    assert lookup.json()["data"]["items"][0]["status"] == "not_found"
+    assert len(searcher.lookup_calls) == 1
+    assert searcher.lookup_calls[0][1] == "user-secret"
+    assert "user-secret" not in str(redis.values)

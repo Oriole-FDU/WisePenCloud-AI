@@ -5,16 +5,16 @@ Scholar 是内部 HTTP 微服务。MCP 工具由现有 `wisepen-mcp-service` 注
 ## 结构与迭代边界
 
 - `api/schemas` 在 HTTP 边界校验完整契约；`api/endpoints` 只做 DTO 转换、预算控制及容器注入。
-- `application/search.py`、`lookup.py` 分别拥有检索与精确查询用例；应用层依赖领域仓储端口，不依赖 ES、Redis 驱动。
-- `domain/models/paper.py`、`identifiers.py` 保存领域论文及身份；请求、结果、执行状态属于具体 application 用例。Paper 的来源附加事实使用 `metadata[来源名]` 自由字典，约定优于配置，不依赖 ArxivMetadata 类型。
-- `providers/field_mapping.py` 统一负责通用领域到各聚合搜索源的映射，目前只维护已使用的 arXiv 映射；`providers` 用于后续学术供应商适配。`domain/interfaces` 暂留空，接入真实供应商时再确定接口。
+- `application/search/`、`application/lookup/` 分别拥有检索和精确查询用例；候选后处理属于 search 内部，S2 在线富化的消费边界属于 lookup 内部。没有独立的 candidate/enrichment 应用服务。`field_policies.py` 是两者共享的领域策略表。
+- `domain/models/paper.py`、`identifiers.py` 保存领域论文及身份；请求、结果、执行状态属于具体应用用例或共享执行模型。`Paper.source` 接受开放来源字符串，来源附加事实放在 `metadata[来源名]` 自由字典中，不依赖供应商专用领域类型。
+- `domain/interfaces` 按搜索、富化、发现能力声明通用端口；provider 可实现一个或多个能力。`providers/field_mapping.py` 仍是领域分类到 arXiv/OpenAlex 来源参数的统一映射文件。
 - `core/storage` 实现 ES 论文读模型和 Redis 查询缓存；`container.py` 装配依赖。
 - `core/config` 与 Chat/Sandbox 一样，通过 Bootstrap 定位 Nacos，再由 AppSettings 加载业务字段；`main.py` 负责日志、观测、安全中间件、客户端生命周期和服务注册。
 - `etl` 独立维护 DuckDB 来源事实及发布进度；HTTP 不读写 DuckDB，不启动 ETL。
 
-P1 提供本地 arXiv 的 `search_papers` 与 `lookup_papers(purpose=details)`。参数枚举保留计划中完整合同；未接入的多源计划和富化 purpose 明确返回能力不可用。General 只代表本地 arXiv 覆盖，CS 查询此阶段返回基础论文，HF 专用富化在 P5 接入。
+P1 本地 arXiv 闭环已提交。当前工作树还包含 OpenAlex BYOK、策略驱动的默认/多源检索与精确 lookup；P3 的最终整体验收结果待 root 补录。CS 搜索后处理已通过原生异步 HTTP 调用 HF 并使用配置缓存；公开论文发现仍属于 P5，在线 S2 purpose 富化仍单独按 P4 验收。
 
-后续迭代保留这些入口及职责：P2 扩展离线来源事实和 ES 投影，P3 在应用检索计划中接入 OpenAlex 来源与现有用户配置，P4 为 lookup 增加富化用例，P5 接入 HF 适配器及 discovery，P6 增加独立同步任务。不会用阶段名称建立另一套 API 或总服务。
+领域策略声明默认来源、无凭证计划、多源计划、搜索后处理器及发现器；来源绑定由容器注册。单源搜索或所有来源都失败时传播 provider 错误；多源仅在至少一个来源成功时返回部分结果，并保留失败来源错误文本。lookup 批次只有在存在其他可用项时才以逐项状态保留 provider 失败；可选搜索后处理失败保留基础论文及错误文本。程序错误和取消不会降级为来源部分失败。
 
 ## 配置与启动
 
@@ -49,7 +49,7 @@ uv run --no-sync scholar-etl publish
 
 `POST /scholar/papers/lookup` 接受 identifiers、purpose，逐项保留输入顺序、重复输入、未找到、标识错误或 DOI 歧义。arXiv 版本和官方 URL 归一化，DOI 不区分大小写。没有本地来源映射的领域不会退回全库检索。所有业务响应使用 Common `R<T>`。
 
-现有 MCP 服务的 `search_papers`、`lookup_papers` 使用 Nacos RpcClient 调用这些 HTTP 接口，返回解包后的 data；来源路由和论文归一化不复制到 MCP。
+现有 MCP 服务的 `search_papers`、`lookup_papers` 使用 Nacos RpcClient 调用这些 HTTP 接口，返回解包后的 data；来源路由和论文归一化不复制到 MCP。阶段能力和验收进度见 [P3 验收草稿](docs/p3-acceptance.md)，最终 root 验收结果尚待补录。
 
 ## 验证
 

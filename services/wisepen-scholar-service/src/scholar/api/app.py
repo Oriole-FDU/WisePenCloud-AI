@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
 
 from scholar.api.router import api_router
+from scholar.domain.interfaces.provider_error import ProviderError
 
 
 def create_app(*, from_source_secret: str, lifespan=None) -> FastAPI:
@@ -29,12 +30,12 @@ def create_app(*, from_source_secret: str, lifespan=None) -> FastAPI:
     @app.exception_handler(RedisError)
     @app.exception_handler(TransportError)
     @app.exception_handler(ApiError)
+    @app.exception_handler(ProviderError)
     async def dependency_error(request: Request, exc):
         return JSONResponse(
             status_code=503,
-            content=R.fail(
-                ResultCode.SYSTEM_ERROR, "Scholar storage is unavailable"
-            ).model_dump(),
+            # HTTP/MCP 将真实外部错误交给调用方决策，不再抹平成分类字符串。
+            content=R.fail(ResultCode.SYSTEM_ERROR, str(exc)).model_dump(),
         )
 
     @app.exception_handler(TimeoutError)

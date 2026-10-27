@@ -66,10 +66,10 @@ class ToolScope:
         return len(self._tools)
 
     def to_suspension_data(self) -> dict[str, Any]:
+        # 工具配置可能含密钥；恢复时按当前用户重新读取，不写入挂起快照。
         return {
             "tool_names": list(self._tools),
             "context": dict(self._context),
-            "configs": {name: dict(config) for name, config in self._configs.items()},
             "client_tool_capabilities": list(self._client_tool_capabilities),
         }
 
@@ -227,11 +227,20 @@ class ToolRegistry:
             )
 
         selected_tools = {name: tools[name] for name in tool_names}
+        configured_tool_names, tool_configs = await self._resolve_tool_config(
+            user_id, selected_tools
+        )
+        # 挂起快照不持久化密钥；恢复时只保留当前用户仍启用且必填配置完整的工具。
+        selected_tools = {
+            name: tool
+            for name, tool in selected_tools.items()
+            if tool.definition.config_spec is None or name in configured_tool_names
+        }
 
         return ToolScope(
             tools=selected_tools,
             context=dict(staging_data.get("context") or {}),
-            configs=dict(staging_data.get("configs") or {}),
+            configs=tool_configs,
             client_tool_capabilities=client_tool_capabilities,
         )
 
@@ -255,7 +264,12 @@ class ToolRegistry:
             legacy_config_name = name.removeprefix("system_").removeprefix("sandbox_")
             entity = configs.get(name) or configs.get(legacy_config_name)
             # 检查用户是否有配置、是否启用、必填项是否完整
-            if entity is None or not entity.enabled: continue # 不满足的跳过
+            if entity is None:
+                # 空 required_keys 表示配置可选；没有配置记录时仍允许工具使用本地能力。
+                if not config_spec.required_keys:
+                    configured_tool_names.add(name)
+                continue
+            if not entity.enabled: continue # 不满足的跳过
             missing: list[str] = []
             for key in config_spec.required_keys:
                 source = entity.secret_config if key in config_spec.secret_keys else entity.config

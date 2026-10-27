@@ -38,9 +38,13 @@ V1 不建设全文语料库、向量检索、完整引用图、作者研究工�
 
 `domain/models/` 中的 `paper.py`、`identifiers.py` 只保存论文和身份领域语义。请求、结果、来源执行状态等细节放在具体应用用例或其共享执行模型中，不放入一个总 models.py。
 
-`providers/field_mapping.py` 统一负责通用领域到各聚合类学术来源的映射。`providers/` 只承载在线学术能力适配：本地 arXiv 搜索由 `ArxivProvider` 调用论文仓储，检索用例通过 `PaperSearcher.search()` 使用它；OpenAlex 实现同一搜索能力。arXiv OAI 抓取和 S2 数据集、release、差分处理属于独立 `etl/` 步骤。
+`application/` 只有 `search/` 与 `lookup/` 两个用例包。`search/use_case.py` 负责来源计划、检索缓存和候选融合；`search/enrichment.py` 是搜索用例内的可选候选后处理，不是独立 application service。精确查询及其 S2 purpose 富化归 `lookup/` 内部；P4 的在线 S2 对外接入仍单独验收。
 
-`domain/interfaces/` 按业务能力声明 `PaperSearcher.search()`、`PaperEnricher.enrich()`、`PaperDiscoverer.discover()`，不按 S2 等供应商名称声明接口。Provider 按实际能力实现任意一个或多个接口，不要求全实现，也不限制只能实现一个。HF 同时提供富化和发现；S2 在线适配提供富化。应用用例拥有路由、缓存、离线优先、请求预算与结果编排；供应商负责请求协议及来源事实投影。S2 在线和离线调用共用 `core` 中的 HTTP 传输与 Redis 发送配额，不将离线方法放入 provider。
+`application/field_policies.py` 是 search 与 lookup 共用的领域策略表。`FieldPolicy` 明确记录默认来源计划、无凭证计划、多源计划、搜索后处理器和发现器；容器注册来源名称到 provider 能力的绑定。新增医疗来源时，兼容的 PubMed/WoS searcher、富化器及容器注册可以由领域配置选择，无需在核心检索、缓存或融合流程增加供应商分支。`Paper.source` 接受开放字符串，来源专有事实放在 `metadata[来源名]` 自由字典中。
+
+`providers/field_mapping.py` 仍是通用领域到 arXiv/OpenAlex 参数的统一映射文件。`providers/` 承载在线能力适配：本地 arXiv 搜索由 `ArxivProvider` 调用论文仓储，OpenAlex 实现同一 `PaperSearcher` 能力；HF 使用原生异步 HTTP，当前由 CS 搜索后处理调用。arXiv OAI 抓取和 S2 数据集、release、差分处理属于独立 `etl/` 步骤。
+
+`domain/interfaces/` 按业务能力声明 `PaperSearcher.search()`、`PaperEnricher.enrich()`、`PaperDiscoverer.discover()`，不按供应商名称声明端口。一个 provider 可实现一个或多个能力。已知外部 I/O 由 provider 转为 `ProviderError`，保留原异常文本和 cause，不附带 reason/status 分类；程序错误和取消继续传播。S2 在线与离线调用共用 `core` 中的 HTTP 传输和 Redis 发送配额，不将离线方法放入 provider。
 
 ## 2. 领域映射与检索路由
 
@@ -75,7 +79,8 @@ subfield。arXiv 多分类按 OR 查询。
 - `default`：有 OpenAlex 密钥时按上表选一个默认召回源，不自动叠加其他来源。无密钥时，General 查询本地全库；有 arXiv
   映射的领域按映射查询；无映射则报告能力不可用。
 - `multi_source`：General 和有 arXiv 映射的领域注册 arXiv + OpenAlex 计划；无对应 arXiv 分类的领域暂不注册该计划。不得把单源执行描述为完整多源检索。
-- 多源计划缺少 OpenAlex 配置时，在执行来源调用前报配置错误；配置齐全但执行中一个来源失败，保留成功结果并报告未完成来源。
+- 多源计划缺少所需凭证或 provider 绑定时，在执行来源调用前报能力不可用；不静默退回默认源。
+- 单源 ProviderError 直接传播；多源只有至少一个来源成功才返回其结果，并在失败来源执行记录中保留原错误文本。所有来源都失败时传播 provider 错误；程序错误和取消不会被改写为来源部分失败。
 - 来源故障不隐式改变默认来源或放宽领域过滤。
 
 候选按规范标识符归并，不能只凭标题相似度认定同一论文。优先 arXiv ID，再使用无冲突的 DOI 等精确身份；标识冲突保留诊断，不任意合并。多源使用等权
@@ -103,9 +108,9 @@ API/MCP 边界负责解析请求，封闭值集合使用枚举。内部按 searc
 
 V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次提交日期，结果保留其来源；不拿元数据更新时间代替发表时间。
 
-明确请求 CS 时，在候选归并并截取最终数量后执行 HF 富化。优先缓存，仅对有 arXiv ID 的候选调用官方 SDK `paper_info`，并发数默认
+明确请求 CS 时，在候选归并并截取最终数量后执行 HF 富化。优先缓存，仅对有 arXiv ID 的候选请求 HF 论文详情，并发数默认
 4，受本次请求预算约束。HF 使用 `httpx.AsyncClient`，可选平台凭证来自 Nacos `HF_TOKEN`，不使用同步 SDK 或 `to_thread`。保留点赞、代码仓库、关联模型和数据集的实际返回值；不抓取整个关联仓库目录，不假定返回条目穷尽所有产物。404
-表示 HF 没有对应记录，其他网络故障报告富化未完成；均保留基础论文结果。
+表示 HF 没有对应记录，其他已知外部 I/O 错误保留原文本并标记可选后处理未完成；均保留基础论文结果。程序错误和取消继续传播。
 
 ### 3.2 `lookup_papers`
 
@@ -129,7 +134,7 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 3. 已有核心字段满足需求时直接返回；成功请求确认字段为空时，在缓存有效期内不重复请求。`0`、`false` 是已知值，不视为缺失。
 4. enrich 只请求身份与富化字段；full 缺基础信息时才增加基础字段。已知基础信息不因富化需要重新获取。
 5. 没有 OpenAlex 密钥时，enrich/full 仍可通过平台 S2 按精确 ID 查询；full 可以使用同次 S2 响应取得所需基础信息。
-6. 批量结果按输入顺序逐项报告。重复输入可以合并 I/O，但保留对应关系；某项未找到或失败不能清空整批已有结果。
+6. 批量结果按输入顺序逐项报告。重复输入可以合并 I/O，但保留对应关系；有可用项时，其他项的 provider 失败保留在对应结果中。整批没有可用结果且 provider 调用全部失败时传播首个原始 ProviderError。
 7. 不新增 `include_signals`、`refresh`、`provider` 或 lookup 领域参数。
 
 ### 3.3 `discover_papers`
@@ -138,7 +143,7 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 |----------|----------------------------------------------|--------------------------------------|
 | `field`  | 必填发现领域枚举，V1 只有 `computer_science` | 仅暴露已注册的发现能力               |
 | `period` | `daily`、`weekly`、`monthly`，默认 `daily`   | 渠道日期或自然周期，不是滚动 7/30 天 |
-| `sort`   | `recent`、`trending`，默认 `trending`        | `recent` 映射为 SDK `publishedAt`    |
+| `sort`   | `recent`、`trending`，默认 `trending`        | `recent` 映射为上游 `publishedAt`    |
 | `limit`  | 默认 10，范围 1–15                           | 最终返回数量                         |
 
 删除 `query`、`all_time`、`popular`。发现以渠道分发信号为入口，不执行主题搜索。
@@ -344,11 +349,12 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
 
 ### P3：OpenAlex BYOK 与显式多源检索
 
-- **交付**：按工具的可选用户凭证、请求传递、领域默认路由、多源计划和 RRF；同步 Chat/MCP 的最小接入调整。
-- **验收**：未配置密钥仍可看见并调用本地工具；不同用户和不同工具不混用凭证；密钥不进入模型参数、日志和缓存；默认单源、无映射不回退、缺配置报错、运行故障部分返回和跨源归并均符合契约。
-- **边界**：不建设共享凭证模型，不加入 S2 关键词召回或暗中叠加其他来源。
+- **交付**：OpenAlex 按工具请求接收可选用户凭证；`FieldPolicy` 声明默认/无凭证/多源路由及搜索后处理；多源融合与 OpenAlex 精确 details lookup 接入现有用例。
+- **验收**：凭证不进入模型参数、请求 URL、缓存明文或日志；默认单源、缺凭证计划、未映射路由符合策略；只在多源已有成功来源时保留其他来源错误文本，单源和全来源失败传播 ProviderError；精确 lookup 保留顺序、重复项、未找到、歧义及真正部分成功。
+- **扩展边界**：字段映射仍集中在 `providers/field_mapping.py`；来源名是开放字符串，provider 可实现多个能力。医疗 PubMed/WoS mock 用例通过 provider 注册和 FieldPolicy 配置增加检索源及临床试验后处理，不修改核心编排算法；这不代表已接入真实 PubMed/WoS 服务。
+- **边界**：不建设共享凭证模型，不加入 S2 关键词召回或暗中叠加其他来源；可选搜索后处理失败保留基础候选和原错误文本。
 - **提交**：`feat(scholar): add openalex byok and multisource search`。
-- **状态**：待开发；依赖 P1，可与 P2 分别验收。
+- **状态**：已完成；71 项 Scholar 定向测试、8 项 MCP 工具测试及真实 ES/Redis/Nacos/OpenAlex/HF 链路通过，见 [P3 验收记录](docs/p3-acceptance.md)。
 
 ### P4：purpose 驱动的 S2 在线富化
 
@@ -362,12 +368,12 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
 
 ### P5：CS 专用 HF 富化与论文发现
 
-- **交付**：异步 HF HTTP 适配、Nacos `HF_TOKEN`、CS 请求配置的 HF 富化、无 query 的 discover，以及相关缓存和真实产物映射。
+- **交付**：完成异步 HF HTTP、Nacos `HF_TOKEN` 与 CS 搜索后处理的验收，并接入无 query 的 discover、周期结果和相关缓存。HF 已由 CS 搜索后处理使用；发现用例和完整 P5 验收仍未完成。
 - **验收**：同样的 CS 候选在 General 请求下不执行 HF、明确 CS 请求下执行；缓存满足时不重复调用；无 arXiv ID 不猜测匹配；HF
-  无记录和服务故障不丢弃基础论文。验证日/自然周/月、recent/trending、SDK 线程调用、并发预算与三个工具间的边界。
+  无记录和服务故障不丢弃基础论文。验证日/自然周/月、recent/trending、异步调用、并发预算与三个工具间的边界。
 - **边界**：不加入主题发现搜索、全时热门榜、学术质量分数或候选内容推断领域。
 - **提交**：`feat(scholar): add cs enrichment and paper discovery`。
-- **状态**：待开发；依赖 P3 的领域检索计划，可独立于 P4 验收。
+- **状态**：待验收；依赖 P3 的领域检索计划，可独立于 P4 验收。
 
 ### P6：持续同步、恢复与运行交付
 
@@ -396,7 +402,8 @@ ES、Redis、Nacos 或供应商协议的成功结论。没有新变化、失败�
   的结果，已确认父字段 authors 返回 authorId/name，以及 PDF、BibTeX、TLDR 等所选字段的形态。
 - 样本实际存在空 PDF URL、空 publicationDate，以及开放获取标记和 PDF 状态不一致的情况；按来源合法缺省处理，不把它们当成整篇失败。
 - 不再以先前带 User-Agent 或 authors 子字段的失败请求判定精选字段批量不可用，也不重复执行已保存的实验。
-- 已检查 HF 官方 SDK 对应的 HTTP 协议；按最新决定改为原生异步 HTTP，服务级集成尚待 P5。
+- 已检查 HF 官方 SDK 对应的 HTTP 协议，当前 provider 使用原生异步 HTTP，且已由 CS 搜索候选后处理调用；公开 discovery 接线及 P5 最终验收仍待完成。
+- P3 的多源路由、OpenAlex lookup、错误传播及医疗多源扩展行为测试见 `tests/test_multisource_search.py`、`tests/test_openalex_lookup.py`、`tests/test_candidate_enrichment.py` 和 `tests/test_openalex_provider.py`；最终结果见 [P3 验收记录](docs/p3-acceptance.md)。
 - P1 行为测试 14 项、MCP 全套测试 103 项已通过；真实 Nacos、ES 8.19.18、Redis、全量别名发布及 HTTP/MCP 端到端验收通过，重复导入/发布维持 3,224,542 篇、pending=0。部署产物属于 P6。详见阶段验收记录。
 
 官方协议参考：[S2 Graph API](https://api.semanticscholar.org/api-docs/)、[S2 Datasets API](https://api.semanticscholar.org/api-docs/datasets)、[HF HfApi](https://huggingface.co/docs/huggingface_hub/en/package_reference/hf_api)、[arXiv OAI-PMH](https://github.com/arXiv/arxiv-docs/blob/develop/source/help/oa/index.md)、[OpenAlex 过滤](https://help.openalex.org/api/filtering/)。
