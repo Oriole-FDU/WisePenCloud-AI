@@ -851,54 +851,10 @@ def apply_s2_projection(
             [release_id, release_id, release_id],
         )
         db.execute("""
-            CREATE OR REPLACE TEMP TABLE _s2_changed AS
-            WITH updated AS (
-                SELECT a.arxiv_id,a.document,p.s2_document,
-                    (
-                        SELECT map_from_entries(
-                            list(struct_pack(key := d.key, value := d.value))
-                        )
-                        FROM json_each(a.document) d
-                        WHERE d.key <> 'metadata'
-                    ) AS base_fields,
-                    coalesce(
-                        (
-                            SELECT map_from_entries(
-                                list(struct_pack(key := m.key, value := m.value))
-                            )
-                            FROM json_each(
-                                coalesce(json_extract(a.document,'$.metadata'),'{}'::JSON)
-                            ) m
-                            WHERE m.key <> 's2'
-                        ),
-                        map([]::VARCHAR[], []::JSON[])
-                    ) AS other_metadata
-                FROM arxiv a JOIN _s2_projection p USING(arxiv_id)
-            ), rebuilt AS (
-                SELECT arxiv_id,document,s2_document,
-                    to_json(map_concat(
-                        base_fields,
-                        map(['metadata'], [to_json(map_concat(
-                            other_metadata,
-                            map(['s2'], [s2_document])
-                        ))])
-                    )) AS new_document
-                FROM updated
-            )
-            SELECT arxiv_id,new_document FROM rebuilt
-            WHERE json_extract(document,'$.metadata.s2') IS DISTINCT FROM
-                s2_document;
+            CREATE OR REPLACE TEMP TABLE _s2_projection_targets AS
+            SELECT arxiv_id FROM _s2_projection
         """)
-        changed = db.execute("SELECT count(*) FROM _s2_changed").fetchone()[0]
-        if changed:
-            db.execute(
-                """UPDATE arxiv AS a SET document=c.new_document
-                FROM _s2_changed c WHERE a.arxiv_id=c.arxiv_id"""
-            )
-            db.execute(
-                "INSERT OR IGNORE INTO pending_publish SELECT arxiv_id FROM _s2_changed"
-            )
-            db.execute("UPDATE import_state SET published=false WHERE singleton=true")
+        changed = _write_s2_document_changes(db)
         db.commit()
     except BaseException:
         db.rollback()
@@ -912,3 +868,127 @@ def apply_s2_projection(
             "SELECT count(*) FROM s2_diagnostics WHERE release_id=?", [release_id]
         ).fetchone()[0],
     }
+
+
+def apply_s2_diff_projection(
+    db: duckdb.DuckDBPyConnection, target_release: str
+) -> dict:
+    """投影差分后保留的本地 CorpusID，并清除已失去关联的旧 S2 元数据。"""
+    _create_schema(db)
+    db.begin()
+    try:
+        db.execute("""
+            CREATE OR REPLACE TEMP TABLE _s2_diff_conflicted_arxiv AS
+            SELECT arxiv_id FROM s2_diff_current_papers
+            GROUP BY arxiv_id HAVING count(*) > 1
+        """)
+        db.execute(
+            """CREATE OR REPLACE TEMP TABLE _s2_projection AS
+            SELECT p.arxiv_id,
+                to_json(struct_pack(
+                    corpus_id := p.corpus_id,
+                    citation_count := p.citation_count,
+                    influential_citation_count := p.influential_citation_count,
+                    is_open_access := p.is_open_access,
+                    tldr := CASE WHEN t.corpus_id IS NULL THEN NULL::JSON
+                        ELSE to_json(struct_pack(model := t.model, text := t.text)) END,
+                    release := ?,
+                    paper_source := to_json(struct_pack(
+                        release := p.source_release, path := p.source_path,
+                        line := p.source_line)),
+                    tldr_source := CASE WHEN t.corpus_id IS NULL THEN NULL::JSON
+                        ELSE to_json(struct_pack(
+                            release := t.source_release, path := t.source_path,
+                            line := t.source_line)) END
+                )) AS s2_document
+            FROM s2_diff_current_papers p
+            LEFT JOIN s2_diff_current_tldrs t USING(corpus_id)
+            WHERE NOT EXISTS (
+                SELECT 1 FROM _s2_diff_conflicted_arxiv c
+                WHERE c.arxiv_id=p.arxiv_id
+            )""",
+            [target_release],
+        )
+        db.execute(
+            """CREATE OR REPLACE TEMP TABLE _s2_projection_targets AS
+            SELECT arxiv_id FROM s2_diff_current_papers
+            UNION
+            SELECT arxiv_id FROM s2_diff_affected WHERE target_release=?""",
+            [target_release],
+        )
+        changed = _write_s2_document_changes(db)
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+
+    return {
+        "release_id": target_release,
+        "projected": changed,
+        "pending": db.execute("SELECT count(*) FROM pending_publish").fetchone()[0],
+        "diagnostics": db.execute(
+            """SELECT count(*) FROM s2_diff_diagnostics
+            WHERE to_release=?""",
+            [target_release],
+        ).fetchone()[0],
+    }
+
+
+def _write_s2_document_changes(db: duckdb.DuckDBPyConnection) -> int:
+    """按目标 ID 重建来源字典；JSON map 独立聚合以免多个键产生笛卡尔积。"""
+    db.execute("""
+        CREATE OR REPLACE TEMP TABLE _s2_changed AS
+        WITH updated AS (
+            SELECT a.arxiv_id,a.document,p.s2_document,
+                (
+                    SELECT map_from_entries(
+                        list(struct_pack(key := d.key, value := d.value))
+                    )
+                    FROM json_each(a.document) d
+                    WHERE d.key <> 'metadata'
+                ) AS base_fields,
+                coalesce(
+                    (
+                        SELECT map_from_entries(
+                            list(struct_pack(key := m.key, value := m.value))
+                        )
+                        FROM json_each(
+                            coalesce(json_extract(a.document,'$.metadata'),'{}'::JSON)
+                        ) m
+                        WHERE m.key <> 's2'
+                    ),
+                    map([]::VARCHAR[], []::JSON[])
+                ) AS other_metadata
+            FROM arxiv a
+            JOIN _s2_projection_targets target USING(arxiv_id)
+            LEFT JOIN _s2_projection p USING(arxiv_id)
+        ), rebuilt AS (
+            SELECT arxiv_id,document,s2_document,
+                CASE
+                    WHEN s2_document IS NULL AND len(map_keys(other_metadata))=0
+                        THEN to_json(base_fields)
+                    ELSE to_json(map_concat(
+                        base_fields,
+                        map(['metadata'], [to_json(
+                            CASE WHEN s2_document IS NULL THEN other_metadata
+                                ELSE map_concat(other_metadata, map(['s2'], [s2_document]))
+                            END
+                        )])
+                    ))
+                END AS new_document
+            FROM updated
+        )
+        SELECT arxiv_id,new_document FROM rebuilt
+        WHERE json_extract(document,'$.metadata.s2') IS DISTINCT FROM s2_document;
+    """)
+    changed = int(db.execute("SELECT count(*) FROM _s2_changed").fetchone()[0])
+    if changed:
+        db.execute(
+            """UPDATE arxiv AS a SET document=c.new_document
+            FROM _s2_changed c WHERE a.arxiv_id=c.arxiv_id"""
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO pending_publish SELECT arxiv_id FROM _s2_changed"
+        )
+        db.execute("UPDATE import_state SET published=false WHERE singleton=true")
+    return changed

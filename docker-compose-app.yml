@@ -119,6 +119,46 @@ services:
         aliases:
           - sandbox-service
 
+  scholar-service:
+    profiles: ["scholar"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: wisepen-scholar-service
+        SERVICE_PKG: scholar
+        SERVICE_PORT: "19916"
+        SERVICE_PROJECT: wisepen-scholar-service
+        PYPI_INDEX_URL: ${PYPI_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+    image: ${DOCKER_REGISTRY}/wisepencloud-scholar:${APP_VERSION}
+    container_name: wisepen-scholar-service
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+      - PROFILE=prod
+      - NACOS_SERVER_ADDR=nacos:8848
+      - NACOS_NAMESPACE_ID=
+      - NACOS_GROUP=DEFAULT_GROUP
+      - NACOS_USERNAME=${NACOS_USERNAME}
+      - NACOS_PASSWORD=${NACOS_PASSWORD}
+      - SERVICE_HOST=0.0.0.0
+      - SERVICE_PORT=19916
+      - LOG_LEVEL=INFO
+      - OTEL_SERVICE_NAME=wisepen-scholar-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_METRICS_EXPORTER=otlp
+      - OTEL_LOGS_EXPORTER=otlp
+    volumes:
+      - ../logs/scholar:/logs
+      # 独立 ETL 容器复用同一目录；HTTP 服务只通过 ES/Redis 读取。
+      - ../data/scholar:/app/services/wisepen-scholar-service/.runtime
+    networks:
+      wisepen-net:
+        aliases:
+          - scholar-service
+
 networks:
   wisepen-net:
     external: true

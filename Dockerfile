@@ -25,6 +25,7 @@ COPY services/wisepen-chat-service/pyproject.toml   services/wisepen-chat-servic
 COPY services/wisepen-mcp-service/pyproject.toml    services/wisepen-mcp-service/pyproject.toml
 COPY services/wisepen-rag-service/pyproject.toml    services/wisepen-rag-service/pyproject.toml
 COPY services/wisepen-sandbox-service/pyproject.toml services/wisepen-sandbox-service/pyproject.toml
+COPY services/wisepen-scholar-service/pyproject.toml services/wisepen-scholar-service/pyproject.toml
 
 # 只预装当前服务及其依赖的第三方包，不把整个 workspace 的依赖带入镜像。
 RUN uv sync --frozen --no-dev --no-install-workspace --package ${SERVICE_PROJECT} \

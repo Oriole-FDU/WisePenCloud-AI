@@ -23,6 +23,11 @@ services:
       cloud-infra_cloud-net:
         aliases:
           - sandbox-service
+  scholar-service:
+    networks:
+      cloud-infra_cloud-net:
+        aliases:
+          - scholar-service
 
 networks:
   cloud-infra_cloud-net:

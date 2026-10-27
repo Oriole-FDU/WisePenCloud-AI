@@ -1,0 +1,10 @@
+[Unit]
+Description=Run WisePen Scholar synchronization daily
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+Unit=scholar-sync.service
+
+[Install]
+WantedBy=timers.target

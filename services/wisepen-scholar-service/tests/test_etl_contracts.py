@@ -1,4 +1,4 @@
-"""P1 ETL 的可观察 checkpoint 与版本发布行为。"""
+"""ETL checkpoint、全量发布与增量发布的可观察行为。"""
 
 import orjson
 import pytest
@@ -106,17 +106,27 @@ class FakeIndices:
         self.es.settings_updates.append(index)
 
     async def update_aliases(self, *, actions):
+        if self.es.fail_alias_update:
+            raise RuntimeError("simulated alias update failure")
         self.es.alias_updates.append(actions)
 
 
 class FakeElasticsearch:
-    """记录发布协议副作用，可注入逐项失败、count 错误或抽样不一致。"""
+    """记录发布协议副作用，可注入逐项、计数、抽样或别名失败。"""
 
-    def __init__(self, *, bulk_statuses=(), count_override=None, corrupt_sample=False):
+    def __init__(
+        self,
+        *,
+        bulk_statuses=(),
+        count_override=None,
+        corrupt_sample=False,
+        fail_alias_update=False,
+    ):
         self.documents = {}
         self.bulk_statuses = list(bulk_statuses)
         self.count_override = count_override
         self.corrupt_sample = corrupt_sample
+        self.fail_alias_update = fail_alias_update
         self.bulk_calls = []
         self.count_calls = []
         self.mget_calls = []
@@ -127,23 +137,46 @@ class FakeElasticsearch:
 
     async def bulk(self, *, operations):
         self.bulk_calls.append(operations)
-        target = operations[0]["index"]["_index"]
+        work = []
+        target = None
+        offset = 0
+        while offset < len(operations):
+            operation = operations[offset]
+            action = next(iter(operation))
+            details = operation[action]
+            target = details["_index"]
+            if action == "delete":
+                work.append((action, details["_id"], None))
+                offset += 1
+            else:
+                work.append((action, details["_id"], operations[offset + 1]))
+                offset += 2
         statuses = (
             self.bulk_statuses.pop(0)
             if self.bulk_statuses
-            else [201] * (len(operations) // 2)
+            else [
+                201
+                if action == "index"
+                else 200
+                if arxiv_id in self.documents[target]
+                else 404
+                for action, arxiv_id, _ in work
+            ]
         )
         items = []
-        for position, status in enumerate(statuses):
-            action = operations[position * 2]["index"]
-            document = operations[position * 2 + 1]
-            if 200 <= status < 300:
-                self.documents[target][action["_id"]] = document
-                items.append({"index": {"status": status}})
+        for (action, arxiv_id, document), status in zip(work, statuses, strict=True):
+            if action == "index" and 200 <= status < 300:
+                self.documents[target][arxiv_id] = document
+                items.append({action: {"status": status}})
+            elif action == "delete" and 200 <= status < 300:
+                self.documents[target].pop(arxiv_id, None)
+                items.append({action: {"status": status}})
+            elif action == "delete" and status == 404:
+                items.append({action: {"status": status}})
             else:
                 items.append(
                     {
-                        "index": {
+                        action: {
                             "status": status,
                             "error": {"type": "temporary_failure"},
                         }
@@ -203,6 +236,134 @@ async def test_publish_acknowledges_only_successes_replays_failures_and_is_idemp
     assert len(es.bulk_calls) == 2
     assert len(es.alias_updates) == 1
     assert len(es.documents[target]) == 2
+
+
+@pytest.mark.asyncio
+async def test_initial_publish_deletes_tombstones_before_alias_switch(
+    completed_database,
+):
+    completed_database.execute(
+        "INSERT INTO pending_delete VALUES ('2101.00001', '2026-10-27')"
+    )
+    es = FakeElasticsearch(fail_alias_update=True)
+
+    with pytest.raises(RuntimeError, match="alias update failure"):
+        await publish_arxiv(completed_database, es, "papers")
+
+    assert (
+        completed_database.execute("SELECT arxiv_id FROM pending_delete").fetchall()
+        == []
+    )
+    assert es.bulk_calls[-1] == [
+        {"delete": {"_index": next(iter(es.documents)), "_id": "2101.00001"}}
+    ]
+    assert es.alias_updates == []
+    assert database_status(completed_database)["import"]["published"] is False
+
+    es.fail_alias_update = False
+    result = await publish_arxiv(completed_database, es, "papers")
+
+    assert result["pending_delete"] == 0
+    assert es.alias_updates
+    assert database_status(completed_database)["import"]["published"] is True
+    assert len(es.bulk_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_unpublished_existing_target_replays_failed_tombstone_before_validation(
+    completed_database,
+):
+    target = "papers-existing"
+    old_documents = {
+        arxiv_id: orjson.loads(document)
+        for arxiv_id, document in completed_database.execute(
+            "SELECT arxiv_id,document FROM arxiv"
+        ).fetchall()
+    }
+    completed_database.execute(
+        "UPDATE import_state SET target_index=?,published=false", [target]
+    )
+    completed_database.execute("DELETE FROM arxiv WHERE arxiv_id='2202.00002'")
+    completed_database.execute(
+        "DELETE FROM pending_publish WHERE arxiv_id='2202.00002'"
+    )
+    completed_database.execute(
+        "INSERT INTO pending_delete VALUES ('2202.00002', '2026-10-27')"
+    )
+    es = FakeElasticsearch(bulk_statuses=[[201], [429]])
+    es.documents[target] = old_documents
+
+    with pytest.raises(RuntimeError, match="full ES delete failed"):
+        await publish_arxiv(completed_database, es, "papers")
+
+    assert completed_database.execute(
+        "SELECT arxiv_id FROM pending_delete"
+    ).fetchall() == [("2202.00002",)]
+    assert (
+        completed_database.execute("SELECT arxiv_id FROM pending_publish").fetchall()
+        == []
+    )
+    assert "2202.00002" in es.documents[target]
+    assert es.count_calls == []
+    assert es.alias_updates == []
+
+    result = await publish_arxiv(completed_database, es, "papers")
+
+    assert result["pending_delete"] == 0
+    assert result["import"]["published"] is True
+    assert "2202.00002" not in es.documents[target]
+    assert es.count_calls == [target]
+    assert len(es.alias_updates) == 1
+    assert es.bulk_calls[-1] == [{"delete": {"_index": target, "_id": "2202.00002"}}]
+
+
+@pytest.mark.asyncio
+async def test_incremental_publish_indexes_and_deletes_with_pending_replay(
+    completed_database,
+):
+    es = FakeElasticsearch()
+    initial = await publish_arxiv(completed_database, es, "papers")
+    target = initial["import"]["target_index"]
+    updated = completed_database.execute(
+        "SELECT document FROM arxiv WHERE arxiv_id='2201.00001'"
+    ).fetchone()[0]
+    document = orjson.loads(updated)
+    document["title"] = "Updated title"
+    completed_database.execute(
+        "UPDATE arxiv SET document=?::JSON WHERE arxiv_id='2201.00001'",
+        [orjson.dumps(document).decode()],
+    )
+    completed_database.execute("INSERT INTO pending_publish VALUES ('2201.00001')")
+    completed_database.execute("DELETE FROM arxiv WHERE arxiv_id='2202.00002'")
+    completed_database.execute(
+        "INSERT INTO pending_delete VALUES ('2202.00002', '2026-10-27')"
+    )
+    es.bulk_statuses.append([201, 429])
+
+    with pytest.raises(RuntimeError, match="incremental ES bulk failed"):
+        await publish_arxiv(completed_database, es, "papers")
+
+    assert (
+        completed_database.execute("SELECT arxiv_id FROM pending_publish").fetchall()
+        == []
+    )
+    assert completed_database.execute(
+        "SELECT arxiv_id FROM pending_delete"
+    ).fetchall() == [("2202.00002",)]
+    assert es.documents[target]["2201.00001"]["title"] == "Updated title"
+    assert "2202.00002" in es.documents[target]
+    assert len(es.alias_updates) == 1
+
+    # 模拟远端已删除、但本地尚未确认的崩溃点；重放的 404 应确认删除。
+    del es.documents[target]["2202.00002"]
+    replayed = await publish_arxiv(completed_database, es, "papers")
+
+    assert replayed["pending"] == 0
+    assert replayed["pending_delete"] == 0
+    assert replayed["import"]["published"] is True
+    assert "2202.00002" not in es.documents[target]
+    assert len(es.alias_updates) == 1
+    assert es.bulk_calls[-1] == [{"delete": {"_index": target, "_id": "2202.00002"}}]
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,10 @@ def open_database(path: str | Path) -> duckdb.DuckDBPyConnection:
             arxiv_id VARCHAR PRIMARY KEY, doi VARCHAR, source JSON, document JSON
         );
         CREATE TABLE IF NOT EXISTS pending_publish (arxiv_id VARCHAR PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS pending_delete (
+            arxiv_id VARCHAR PRIMARY KEY,
+            datestamp VARCHAR NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS import_state (
             singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK(singleton),
             source_path VARCHAR, source_size BIGINT, source_mtime_ns BIGINT,

@@ -10,6 +10,14 @@ from scholar.core.storage.elasticsearch.paper_repository import ARXIV_MAPPING
 from scholar.etl.arxiv import database_status
 
 
+def _publication_status(db: duckdb.DuckDBPyConnection) -> dict:
+    status = database_status(db)
+    status["pending_delete"] = db.execute(
+        "SELECT count(*) FROM pending_delete"
+    ).fetchone()[0]
+    return status
+
+
 async def publish_arxiv(
     db: duckdb.DuckDBPyConnection,
     es: AsyncElasticsearch,
@@ -25,8 +33,103 @@ async def publish_arxiv(
     if row is None or not row[0]:
         raise ValueError("arXiv import must reach EOF before publication")
     target, published = row[1:]
+
     if published:
-        return database_status(db)
+        if not target:
+            raise ValueError("published arXiv state is missing its target index")
+        batches = 0
+        while max_batches is None or batches < max_batches:
+            rows = db.execute(
+                """WITH pending AS MATERIALIZED (
+                    SELECT arxiv_id FROM pending_publish
+                    UNION
+                    SELECT arxiv_id FROM pending_delete
+                )
+                SELECT p.arxiv_id,
+                    CASE WHEN d.arxiv_id IS NULL THEN 'index' ELSE 'delete' END,
+                    a.document
+                FROM pending p
+                LEFT JOIN pending_delete d USING(arxiv_id)
+                LEFT JOIN arxiv a USING(arxiv_id)
+                ORDER BY p.arxiv_id LIMIT ?""",
+                [batch_size],
+            ).fetchall()
+            if not rows:
+                break
+
+            operations = []
+            for arxiv_id, action, document in rows:
+                if action == "delete":
+                    operations.append({"delete": {"_index": target, "_id": arxiv_id}})
+                else:
+                    operations.extend(
+                        [
+                            {"index": {"_index": target, "_id": arxiv_id}},
+                            orjson.loads(document),
+                        ]
+                    )
+
+            response = await es.bulk(operations=operations)
+            succeeded, failed = [], []
+            for (arxiv_id, action, _), item in zip(
+                rows, response["items"], strict=True
+            ):
+                result = item[action]
+                status = result["status"]
+                # 删除重放可能遇到上次已成功但尚未确认的 404。
+                if 200 <= status < 300 or (action == "delete" and status == 404):
+                    succeeded.append((arxiv_id, action))
+                else:
+                    failed.append(
+                        {
+                            "arxiv_id": arxiv_id,
+                            "action": action,
+                            "error": result.get("error"),
+                        }
+                    )
+
+            if succeeded:
+                db.begin()
+                try:
+                    for arxiv_id, action in succeeded:
+                        db.execute(
+                            "DELETE FROM pending_publish WHERE arxiv_id=?", [arxiv_id]
+                        )
+                        if action == "delete":
+                            db.execute(
+                                "DELETE FROM pending_delete WHERE arxiv_id=?",
+                                [arxiv_id],
+                            )
+                    db.commit()
+                except BaseException:
+                    db.rollback()
+                    raise
+
+            if failed:
+                raise RuntimeError(
+                    f"incremental ES bulk failed; failed items remain pending: {failed[:3]}"
+                )
+
+            batches += 1
+            print(
+                orjson.dumps(
+                    {
+                        "stage": "publish-incremental",
+                        "index": target,
+                        "indexed": sum(action == "index" for _, action in succeeded),
+                        "deleted": sum(action == "delete" for _, action in succeeded),
+                        "pending_publish": db.execute(
+                            "SELECT count(*) FROM pending_publish"
+                        ).fetchone()[0],
+                        "pending_delete": db.execute(
+                            "SELECT count(*) FROM pending_delete"
+                        ).fetchone()[0],
+                    }
+                ).decode(),
+                flush=True,
+            )
+        return _publication_status(db)
+
     if target is None:
         target = f"{alias}-{uuid4().hex}"
         db.execute("UPDATE import_state SET target_index=?", [target])
@@ -68,10 +171,16 @@ async def publish_arxiv(
             else:
                 failed.append({"arxiv_id": arxiv_id, "error": result["error"]})
         if succeeded:
-            db.execute(
-                "DELETE FROM pending_publish WHERE arxiv_id IN (SELECT json_extract_string(value,'$') FROM json_each(?))",
-                [orjson.dumps(succeeded).decode()],
-            )
+            db.begin()
+            try:
+                db.execute(
+                    "DELETE FROM pending_publish WHERE arxiv_id IN (SELECT json_extract_string(value,'$') FROM json_each(?))",
+                    [orjson.dumps(succeeded).decode()],
+                )
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
         if failed:
             raise RuntimeError(
                 f"ES bulk failed; successful items acknowledged, remaining items replayable: {failed[:3]}"
@@ -90,7 +199,60 @@ async def publish_arxiv(
             flush=True,
         )
     if db.execute("SELECT count(*) FROM pending_publish").fetchone()[0]:
-        return database_status(db)
+        return _publication_status(db)
+    while max_batches is None or batches < max_batches:
+        deleted = db.execute(
+            "SELECT arxiv_id FROM pending_delete ORDER BY arxiv_id LIMIT ?",
+            [batch_size],
+        ).fetchall()
+        if not deleted:
+            break
+        operations = [
+            {"delete": {"_index": target, "_id": arxiv_id}} for (arxiv_id,) in deleted
+        ]
+        response = await es.bulk(operations=operations)
+        succeeded, failed = [], []
+        for (arxiv_id,), item in zip(deleted, response["items"], strict=True):
+            result = item["delete"]
+            status = result["status"]
+            # 网络结果未知时，重放可能遇到 ES 已删除、本地尚未确认的 404。
+            if 200 <= status < 300 or status == 404:
+                succeeded.append(arxiv_id)
+            else:
+                failed.append({"arxiv_id": arxiv_id, "error": result.get("error")})
+
+        if succeeded:
+            db.begin()
+            try:
+                for arxiv_id in succeeded:
+                    db.execute(
+                        "DELETE FROM pending_delete WHERE arxiv_id=?", [arxiv_id]
+                    )
+                db.commit()
+            except BaseException:
+                db.rollback()
+                raise
+        if failed:
+            raise RuntimeError(
+                f"full ES delete failed; failed items remain pending: {failed[:3]}"
+            )
+
+        batches += 1
+        print(
+            orjson.dumps(
+                {
+                    "stage": "publish-delete",
+                    "index": target,
+                    "deleted": len(succeeded),
+                    "pending_delete": db.execute(
+                        "SELECT count(*) FROM pending_delete"
+                    ).fetchone()[0],
+                }
+            ).decode(),
+            flush=True,
+        )
+    if db.execute("SELECT count(*) FROM pending_delete").fetchone()[0]:
+        return _publication_status(db)
     await es.indices.refresh(index=target)
     expected = db.execute("SELECT count(*) FROM arxiv").fetchone()[0]
     actual = (await es.count(index=target))["count"]
@@ -109,6 +271,13 @@ async def publish_arxiv(
         {"add": {"index": target, "alias": alias}},
     ]
     await es.indices.update_aliases(actions=actions)
-    # 别名切换后崩溃会重做相同验证和切换，不能提前声称发布完成。
-    db.execute("UPDATE import_state SET published=true")
-    return database_status(db)
+    # 索引与删除待办均已逐项确认；别名切换成功后再标记为已发布。
+    db.begin()
+    try:
+        # 别名切换后崩溃可重做同一验证和切换，不能提前声称发布完成。
+        db.execute("UPDATE import_state SET published=true")
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return _publication_status(db)

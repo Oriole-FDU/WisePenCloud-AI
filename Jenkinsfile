@@ -14,6 +14,7 @@ pipeline {
         booleanParam(name: 'DEPLOY_CHAT_SERVICE', defaultValue: true, description: '构建并部署 chat-service')
         booleanParam(name: 'DEPLOY_MCP_SERVICE', defaultValue: true, description: '构建并部署 mcp-service')
         booleanParam(name: 'DEPLOY_SANDBOX_SERVICE', defaultValue: true, description: '构建并部署 sandbox-service')
+        booleanParam(name: 'DEPLOY_SCHOLAR_SERVICE', defaultValue: false, description: '构建并部署 scholar-service')
     }
 
     stages {
@@ -37,6 +38,9 @@ pipeline {
                     }
                     if (params.DEPLOY_SANDBOX_SERVICE) {
                         selectedServices << 'sandbox-service'
+                    }
+                    if (params.DEPLOY_SCHOLAR_SERVICE) {
+                        selectedServices << 'scholar-service'
                     }
                     if (selectedServices.isEmpty()) {
                         error '至少需要选择一个要构建并部署的服务。'
@@ -83,6 +87,25 @@ pipeline {
                                     --build-arg SERVICE_PKG=wisepen_mcp \\
                                     --build-arg SERVICE_PORT=19911 \\
                                     --build-arg SERVICE_PROJECT=wisepen-mcp-service \\
+                                    --build-arg PYPI_INDEX_URL="\${PYPI_INDEX_URL}" \\
+                                    -f Dockerfile .
+                            """
+                        }
+                    }
+                }
+                stage('Scholar Service') {
+                    when {
+                        expression { return params.DEPLOY_SCHOLAR_SERVICE }
+                    }
+                    steps {
+                        script {
+                            sh """
+                                docker build \\
+                                    -t ${DOCKER_REGISTRY}/${PROJECT_NAME}-scholar:${IMAGE_TAG} \\
+                                    --build-arg SERVICE_DIR=wisepen-scholar-service \\
+                                    --build-arg SERVICE_PKG=scholar \\
+                                    --build-arg SERVICE_PORT=19916 \\
+                                    --build-arg SERVICE_PROJECT=wisepen-scholar-service \\
                                     --build-arg PYPI_INDEX_URL="\${PYPI_INDEX_URL}" \\
                                     -f Dockerfile .
                             """
