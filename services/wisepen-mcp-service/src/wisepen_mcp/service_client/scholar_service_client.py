@@ -67,6 +67,7 @@ class ScholarClient:
         *,
         identifiers: list[str],
         purpose: str,
+        field: str = "general",
         openalex_api_key: str | None = None,
     ) -> dict[str, Any]:
         async with asyncio.timeout(self._timeout):
@@ -76,6 +77,7 @@ class ScholarClient:
                 json={
                     "identifiers": identifiers,
                     "purpose": purpose,
+                    "field": field,
                 },
                 timeout=self._timeout,
                 **(

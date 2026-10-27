@@ -4,36 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import date
 from enum import StrEnum
-from typing import Any
 
 import orjson
-from common.core.exceptions import ServiceException
-from common.utils.retrieval import Candidate, RrfFusion
-from redis.exceptions import RedisError
 
-from scholar.application.field_policies import FieldPolicy
+from common.utils.retrieval import Candidate, RrfFusion
+from scholar.application.enrichment import EnrichmentRunner
+from scholar.application.field_policies import COMMON_ENRICHERS, FieldPolicy
 from scholar.application.source_execution import SourceExecution, SourceExecutionStatus
-from scholar.domain.error_codes import ScholarErrorCode
-from scholar.domain.interfaces.paper_enricher import PaperEnricher, PaperEnrichment
 from scholar.domain.interfaces.paper_searcher import PaperSearcher
 from scholar.domain.interfaces.provider_error import ProviderError
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import (
-    IdentifierKind,
-    PaperIdentifier,
     normalize_arxiv,
     normalize_doi,
-    parse_identifier,
 )
 from scholar.domain.models.paper import Paper
-from scholar.domain.repositories.paper_enrichment_cache import (
-    CachedPaperEnrichment,
-    PaperEnrichmentCache,
-)
 from scholar.domain.repositories.query_cache_repository import QueryCacheRepository
 
 
@@ -69,45 +57,18 @@ class SearchBinding:
     coverage: str = ""
 
 
-@dataclass
-class EnrichmentBinding:
-    """一个配置来源的身份覆盖、缓存读取与可选富化能力。"""
-
-    enricher: PaperEnricher | None
-    cache: PaperEnrichmentCache | None
-    identifier_kinds: list[IdentifierKind]
-    coverage: str = ""
-    fields: list[str] = field(default_factory=list)
-
-
 class PaperSearchService:
-    _IDENTIFIER_PRIORITY = (
-        IdentifierKind.ARXIV,
-        IdentifierKind.DOI,
-        IdentifierKind.CORPUS_ID,
-        IdentifierKind.S2,
-    )
-
     def __init__(
         self,
         searchers: dict[str, SearchBinding],
         policies: dict[AcademicField, FieldPolicy],
         query_cache: QueryCacheRepository,
-        enrichment_bindings: dict[str, EnrichmentBinding],
-        *,
-        positive_ttl_seconds: int = 86400,
-        negative_ttl_seconds: int = 3600,
-        concurrency: int = 4,
+        enrichment: EnrichmentRunner,
     ):
         self.searchers = searchers
         self.policies = policies
         self.query_cache = query_cache
-        self.enrichment_bindings = enrichment_bindings
-        self.positive_ttl_seconds = positive_ttl_seconds
-        self.negative_ttl_seconds = negative_ttl_seconds
-        # 共享实例限制并发请求用例同时进入来源富化端口的数量。
-        self._provider_slots = asyncio.Semaphore(concurrency)
-        self._cache_slots = asyncio.Semaphore(concurrency)
+        self.enrichment = enrichment
 
     async def search(
         self,
@@ -121,8 +82,10 @@ class PaperSearchService:
         plan = policy.searchers
         if query.source_scope == SourceScope.MULTI_SOURCE:
             results = await asyncio.gather(
-                *(self._search_source(source, query, credentials.get(source), user_id)
-                  for source in plan),
+                *(
+                    self._search_source(source, query, credentials.get(source), user_id)
+                    for source in plan
+                ),
                 return_exceptions=True,
             )
         else:
@@ -139,7 +102,7 @@ class PaperSearchService:
                     results.append(result)
                     break
         ranked, execution, failures = {}, [], []
-        for source, result in zip(plan[:len(results)], results, strict=True):
+        for source, result in zip(plan[: len(results)], results, strict=True):
             if isinstance(result, BaseException):
                 # 只隔离已知外部失败；程序错误和取消直接传播。
                 if not isinstance(result, ProviderError):
@@ -164,13 +127,29 @@ class PaperSearchService:
             papers, conflicts = ranked[plan[len(results) - 1]][: query.limit], []
         else:
             papers, conflicts = self._fuse_sources(ranked, limit=query.limit)
-        # 只处理最终候选；召回缓存不存领域专有富化或上次执行状态。
-        enriched_papers, enrichment_execution = await self._enrich_candidates(
-            papers, policy.enrichers
+        # 只排除本次成功来源；注册过但未执行或失败的来源仍可提供增量。
+        succeeded = {
+            source
+            for source, result in zip(plan, results)
+            if not isinstance(result, BaseException)
+        }
+        targets = [self.enrichment.target(None, paper) for paper in papers]
+        enrichment_execution = await self.enrichment.run(
+            targets,
+            common_sources=[]
+            if succeeded.intersection(COMMON_ENRICHERS)
+            else [
+                source
+                for source in COMMON_ENRICHERS
+                if source in self.enrichment.bindings
+            ],
+            domain_sources=[
+                source for source in policy.enrichers if source not in succeeded
+            ],
+            credentials=credentials,
         )
-        return SearchResult(
-            enriched_papers, execution, conflicts, enrichment_execution
-        )
+        enriched_papers = [target.paper for target in targets]
+        return SearchResult(enriched_papers, execution, conflicts, enrichment_execution)
 
     async def _search_source(
         self, source: str, query: PaperSearch, api_key: str | None, user_id: str | None
@@ -318,236 +297,3 @@ class PaperSearchService:
         return [candidate.payload for candidate in fused[:limit]], list(
             dict.fromkeys(conflicts)
         )
-
-    async def _enrich_candidates(
-        self, papers: list[Paper], sources: list[str]
-    ) -> tuple[list[Paper], list[SourceExecution]]:
-        """按来源配置顺序合并信号；输入候选不会被原地修改或重排。"""
-        enriched_papers = deepcopy(papers)
-        executions = []
-        for source in sources:
-            binding = self.enrichment_bindings[source]
-            positions: dict[PaperIdentifier, list[int]] = {}
-            for index, paper in enumerate(enriched_papers):
-                known_fields = paper.metadata.get(source, {})
-                if binding.fields and all(
-                    name in known_fields for name in binding.fields
-                ):
-                    continue
-                identifier = self._select_identifier(paper, binding.identifier_kinds)
-                if identifier is not None:
-                    positions.setdefault(identifier, []).append(index)
-            executions.append(
-                await self._enrich_source(source, binding, positions, enriched_papers)
-            )
-        return enriched_papers, executions
-
-    async def _enrich_source(
-        self,
-        source: str,
-        binding: EnrichmentBinding,
-        positions: dict[PaperIdentifier, list[int]],
-        papers: list[Paper],
-    ) -> SourceExecution:
-        successes: set[PaperIdentifier] = set()
-        failures: set[PaperIdentifier] = set()
-        cache_hits: set[PaperIdentifier] = set()
-        pending = []
-        error = None
-
-        if not positions:
-            return SourceExecution(
-                source=source,
-                cache_hit=False,
-                coverage=binding.coverage,
-                status=SourceExecutionStatus.NOT_EXECUTED,
-            )
-
-        for identifier, indexes in positions.items():
-            cached = None
-            if binding.cache is not None:
-                try:
-                    async with self._cache_slots:
-                        cached = await binding.cache.get([identifier])
-                except RedisError as exc:
-                    failures.add(identifier)
-                    error = error or str(exc)
-                    continue
-
-            if cached is None:
-                if binding.enricher is not None:
-                    pending.append(identifier)
-                continue
-
-            cache_hits.add(identifier)
-            if not cached.record_found:
-                successes.add(identifier)
-                continue
-            enrichment = cached.enrichment
-            if self._conflicts(identifier, indexes, papers, enrichment):
-                failures.add(identifier)
-                error = error or "Cached enrichment has conflicting paper identifiers"
-                continue
-            self._merge_into_candidates(indexes, papers, enrichment)
-            successes.add(identifier)
-
-        if pending:
-            try:
-                async with self._provider_slots:
-                    responses = await binding.enricher.enrich(
-                        pending, include_details=False
-                    )
-            except ProviderError as exc:
-                # 可选后处理失败仍保留已召回论文；程序错误和取消直接传播。
-                failures.update(pending)
-                error = error or str(exc)
-            else:
-                for identifier, enrichment in zip(pending, responses, strict=True):
-                    if enrichment is not None and self._conflicts(
-                        identifier, positions[identifier], papers, enrichment
-                    ):
-                        failures.add(identifier)
-                        error = error or "Enrichment has conflicting paper identifiers"
-                        continue
-
-                    successes.add(identifier)
-                    aliases = (identifier,)
-                    if enrichment is not None:
-                        aliases = tuple(
-                            dict.fromkeys((identifier, *enrichment.identifiers))
-                        )
-                        self._merge_into_candidates(
-                            positions[identifier], papers, enrichment
-                        )
-
-                    if binding.cache is not None:
-                        record = CachedPaperEnrichment(
-                            enrichment=enrichment,
-                            cache_aliases=aliases,
-                            record_found=enrichment is not None,
-                            details_confirmed=(
-                                enrichment is not None and enrichment.paper is not None
-                            ),
-                        )
-                        ttl = (
-                            self.positive_ttl_seconds
-                            if enrichment is not None
-                            else self.negative_ttl_seconds
-                        )
-                        try:
-                            await binding.cache.put(
-                                list(aliases), record, ttl_seconds=ttl
-                            )
-                        except RedisError as exc:
-                            failures.add(identifier)
-                            error = error or str(exc)
-
-        unexecuted = len(positions) - len(successes | failures)
-        if failures:
-            status = (
-                SourceExecutionStatus.PARTIAL
-                if successes
-                else SourceExecutionStatus.FAILED
-            )
-        elif unexecuted:
-            status = (
-                SourceExecutionStatus.PARTIAL
-                if successes
-                else SourceExecutionStatus.NOT_EXECUTED
-            )
-        else:
-            status = SourceExecutionStatus.COMPLETED
-        return SourceExecution(
-            source=source,
-            cache_hit=bool(cache_hits),
-            coverage=binding.coverage,
-            status=status,
-            error=error,
-        )
-
-    @classmethod
-    def _select_identifier(
-        cls, paper: Paper, supported: list[IdentifierKind]
-    ) -> PaperIdentifier | None:
-        available = {
-            identifier.kind: identifier for identifier in cls._identifiers(paper)
-        }
-        supported_kinds = set(supported)
-        return next(
-            (
-                available[kind]
-                for kind in cls._IDENTIFIER_PRIORITY
-                if kind in supported_kinds and kind in available
-            ),
-            None,
-        )
-
-    @staticmethod
-    def _identifiers(paper: Paper) -> list[PaperIdentifier]:
-        identifiers = []
-        if paper.arxiv_id is not None:
-            identifiers.append(parse_identifier(paper.arxiv_id))
-        if paper.doi is not None:
-            identifiers.append(parse_identifier(paper.doi))
-        return identifiers
-
-    @classmethod
-    def _conflicts(
-        cls,
-        requested: PaperIdentifier,
-        indexes: list[int],
-        papers: list[Paper],
-        enrichment: PaperEnrichment,
-    ) -> bool:
-        response_ids = enrichment.identifiers
-        observed: dict[IdentifierKind, str] = {}
-        for identifier in response_ids:
-            previous = observed.setdefault(identifier.kind, identifier.value)
-            if previous != identifier.value:
-                return True
-            if (
-                identifier.kind == requested.kind
-                and identifier.value != requested.value
-            ):
-                return True
-        return any(
-            known.kind in observed and observed[known.kind] != known.value
-            for index in indexes
-            for known in cls._identifiers(papers[index])
-        )
-
-    @classmethod
-    def _merge_into_candidates(
-        cls,
-        indexes: list[int],
-        papers: list[Paper],
-        enrichment: PaperEnrichment,
-    ) -> None:
-        for index in indexes:
-            paper = papers[index]
-            for namespace, values in enrichment.metadata.items():
-                paper.metadata[namespace] = cls._merge_value(
-                    paper.metadata.get(namespace), values
-                )
-
-    @classmethod
-    def _merge_value(cls, existing: Any, incoming: Any) -> Any:
-        if isinstance(existing, dict) and isinstance(incoming, dict):
-            merged = deepcopy(existing)
-            for key, value in incoming.items():
-                if key not in merged or merged[key] is None:
-                    merged[key] = deepcopy(value)
-                elif isinstance(merged[key], dict) and isinstance(value, dict):
-                    merged[key] = cls._merge_value(merged[key], value)
-            return merged
-        return deepcopy(incoming if existing is None else existing)
-
-
-__all__ = [
-    "EnrichmentBinding",
-    "PaperSearch",
-    "PaperSearchService",
-    "SearchBinding",
-    "SearchResult",
-    "SourceScope",
-]

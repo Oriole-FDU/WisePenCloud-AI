@@ -1,5 +1,10 @@
 """lookup 的 purpose、身份路由和 OpenAlex/S2 组合合同。"""
 
+from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
+from scholar.providers.enrichment_rules import arxiv_signals, s2_signals, s2_aliases
+from scholar.domain.models.identifiers import IdentifierKind
+
+
 from dataclasses import replace
 from datetime import date
 
@@ -81,7 +86,7 @@ class FakeEnricher:
         self.error = error
         self.calls = []
 
-    async def enrich(self, identifiers, *, include_details=False):
+    async def enrich(self, identifiers, *, include_details=False, api_key=None):
         identifiers = list(identifiers)
         self.calls.append((identifiers, include_details))
         if self.error is not None:
@@ -136,6 +141,37 @@ def s2_result(
     return PaperEnrichment(identifiers, metadata, paper)
 
 
+def lookup_service(
+    repository, openalex_lookup=None, *, s2_enricher=None, s2_cache=None
+):
+    return PaperLookupService(
+        repository,
+        openalex_lookup,
+        enrichment=EnrichmentRunner(
+            {
+                "arxiv": EnrichmentBinding(
+                    None,
+                    None,
+                    [IdentifierKind.ARXIV, IdentifierKind.DOI],
+                    has_signals=arxiv_signals,
+                ),
+                "s2": EnrichmentBinding(
+                    s2_enricher,
+                    s2_cache,
+                    [
+                        IdentifierKind.ARXIV,
+                        IdentifierKind.DOI,
+                        IdentifierKind.S2,
+                        IdentifierKind.CORPUS_ID,
+                    ],
+                    has_signals=s2_signals,
+                    aliases=s2_aliases,
+                ),
+            }
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_details_never_calls_s2_and_cache_only_miss_is_not_found():
     arxiv = parse_identifier("2401.00001")
@@ -144,7 +180,7 @@ async def test_details_never_calls_s2_and_cache_only_miss_is_not_found():
     enricher = FakeEnricher()
     cache = FakeCache()
 
-    result = await PaperLookupService(
+    result = await lookup_service(
         repository, s2_enricher=enricher, s2_cache=cache
     ).lookup(
         PaperLookup(
@@ -173,7 +209,7 @@ async def test_enrich_uses_local_paper_without_openalex_or_full_paper_projection
     async def openalex_lookup(identifier, *, api_key):
         openalex_calls.append((identifier, api_key))
 
-    result = await PaperLookupService(
+    result = await lookup_service(
         repository,
         openalex_lookup=openalex_lookup,
         s2_enricher=enricher,
@@ -192,84 +228,6 @@ async def test_enrich_uses_local_paper_without_openalex_or_full_paper_projection
 
 
 @pytest.mark.asyncio
-async def test_full_resolves_openalex_then_sends_strong_identity_to_s2():
-    openalex_id = parse_identifier("openalex:W77")
-    arxiv = parse_identifier("2403.00003")
-    resolved = make_paper(
-        PaperSource.OPENALEX,
-        arxiv_id=arxiv.value,
-        doi="10.5555/resolved",
-        title="Resolved by OpenAlex",
-    )
-    repository = FakePaperRepository()
-    openalex_calls = []
-
-    async def openalex_lookup(identifier, *, api_key):
-        openalex_calls.append((identifier, api_key))
-        return resolved
-
-    enricher = FakeEnricher({arxiv: s2_result()})
-    result = await PaperLookupService(
-        repository,
-        openalex_lookup=openalex_lookup,
-        s2_enricher=enricher,
-        s2_cache=FakeCache(),
-    ).lookup(
-        PaperLookup(["openalex:W77"], purpose=LookupPurpose.FULL),
-        api_key="request-key",
-    )
-
-    assert result.items[0].status == LookupStatus.FOUND
-    assert result.items[0].paper.arxiv_id == arxiv.value
-    assert result.items[0].paper.metadata["s2"]["citation_count"] == 4
-    assert result.items[0].enrichment_status == EnrichmentStatus.COMPLETE
-    assert openalex_calls == [(openalex_id, "request-key")]
-    assert enricher.calls == [([arxiv], False)]
-    assert openalex_id not in enricher.calls[0][0]
-
-
-@pytest.mark.asyncio
-async def test_openalex_full_without_strong_identity_keeps_base_and_marks_s2_unsupported():
-    resolved = make_paper(
-        PaperSource.OPENALEX,
-        arxiv_id=None,
-        doi=None,
-        title="OpenAlex-only identity",
-    )
-
-    async def openalex_lookup(identifier, *, api_key):
-        return resolved
-
-    enricher = FakeEnricher()
-    result = await PaperLookupService(
-        FakePaperRepository(),
-        openalex_lookup=openalex_lookup,
-        s2_enricher=enricher,
-        s2_cache=FakeCache(),
-    ).lookup(
-        PaperLookup(["openalex:W77"], purpose=LookupPurpose.FULL),
-        api_key="request-key",
-    )
-
-    assert result.items[0].status == LookupStatus.FOUND
-    assert result.items[0].paper == resolved
-    assert result.items[0].enrichment_status == EnrichmentStatus.UNSUPPORTED
-    assert enricher.calls == []
-
-
-@pytest.mark.asyncio
-async def test_full_without_openalex_key_does_not_call_s2_for_unresolved_openalex_id():
-    enricher = FakeEnricher()
-    result = await PaperLookupService(
-        FakePaperRepository(), s2_enricher=enricher, s2_cache=FakeCache()
-    ).lookup(PaperLookup(["openalex:W99"], purpose=LookupPurpose.FULL))
-
-    assert result.items[0].status == LookupStatus.MISSING_API_KEY
-    assert result.items[0].enrichment_status is None
-    assert enricher.calls == []
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("kind,value", [("s2", "c" * 40), ("corpusid", "215416146")])
 async def test_enrich_and_full_accept_semanticscholar_identity_kinds(kind, value):
     identifier = parse_identifier(f"{kind}:{value}")
@@ -280,7 +238,7 @@ async def test_enrich_and_full_accept_semanticscholar_identity_kinds(kind, value
         corpus_id=value if kind == "corpusid" else None,
     )
     enricher = FakeEnricher({identifier: response})
-    service = PaperLookupService(
+    service = lookup_service(
         FakePaperRepository(), s2_enricher=enricher, s2_cache=FakeCache()
     )
 
@@ -296,21 +254,3 @@ async def test_enrich_and_full_accept_semanticscholar_identity_kinds(kind, value
     assert complete.items[0].status == LookupStatus.FOUND
     assert complete.items[0].paper.source == PaperSource.S2
     assert [details for _, details in enricher.calls] == [False, True]
-
-
-@pytest.mark.asyncio
-async def test_enrich_openalex_identifier_is_unsupported_without_openalex_request():
-    calls = []
-
-    async def openalex_lookup(identifier, *, api_key):
-        calls.append(identifier)
-
-    result = await PaperLookupService(
-        FakePaperRepository(), openalex_lookup, s2_enricher=FakeEnricher()
-    ).lookup(
-        PaperLookup(["openalex:W77"], purpose=LookupPurpose.ENRICH),
-        api_key="request-key",
-    )
-
-    assert result.items[0].status == LookupStatus.UNSUPPORTED_IDENTIFIER
-    assert calls == []

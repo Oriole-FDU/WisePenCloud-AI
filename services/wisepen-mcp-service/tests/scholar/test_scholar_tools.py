@@ -98,7 +98,7 @@ async def test_mcp_scholar_schemas_expose_declared_contracts(scholar_server):
     ]
 
     lookup = tools["lookup_papers"].inputSchema
-    assert set(lookup["properties"]) == {"identifiers", "purpose"}
+    assert set(lookup["properties"]) == {"identifiers", "purpose", "field"}
     assert lookup["required"] == ["identifiers"]
     assert lookup["properties"]["identifiers"]["minItems"] == 1
     assert lookup["properties"]["identifiers"]["maxItems"] == 20
@@ -168,7 +168,7 @@ async def test_search_papers_call_passes_http_contract_and_returns_scholar_data(
 
 
 @pytest.mark.asyncio
-async def test_lookup_papers_call_passes_identifiers_and_p1_purpose(scholar_server):
+async def test_lookup_papers_passes_identifiers_purpose_and_field(scholar_server):
     mcp, rpc = scholar_server
     response = {"items": [{"id": "doi:10.1000/example"}]}
     rpc.response = response
@@ -176,7 +176,7 @@ async def test_lookup_papers_call_passes_identifiers_and_p1_purpose(scholar_serv
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool(
             "lookup_papers",
-            {"identifiers": [" DOI:10.1000/example "]},
+            {"identifiers": [" DOI:10.1000/example "], "field": "medicine"},
         )
 
     assert result.structuredContent == response
@@ -188,6 +188,7 @@ async def test_lookup_papers_call_passes_identifiers_and_p1_purpose(scholar_serv
                 "json": {
                     "identifiers": [" DOI:10.1000/example "],
                     "purpose": "details",
+                    "field": "medicine",
                 },
                 "timeout": 30.0,
             },

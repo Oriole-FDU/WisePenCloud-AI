@@ -120,10 +120,12 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             LookupPurpose,
             Field(description="Requested Scholar lookup purpose."),
         ] = LookupPurpose.DETAILS,
+        field: Annotated[SearchField, Field(description="Field selecting domain enrichment; details is unchanged.")] = SearchField.GENERAL,
     ) -> dict[str, Any]:
         return await scholar_client.lookup_papers(
             identifiers=identifiers,
             purpose=purpose.value,
+            field=field.value,
             openalex_api_key=_openalex_key(ctx),
         )
 

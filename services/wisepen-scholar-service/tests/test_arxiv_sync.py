@@ -29,7 +29,7 @@ class FakeEnricher:
         self.calls = []
         self.events = events
 
-    async def enrich(self, identifiers, *, include_details=False):
+    async def enrich(self, identifiers, *, include_details=False, api_key=None):
         if self.events is not None:
             self.events.append("enrich")
         self.calls.append((identifiers, include_details))

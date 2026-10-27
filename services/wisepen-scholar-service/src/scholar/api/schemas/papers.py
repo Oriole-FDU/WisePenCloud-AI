@@ -1,11 +1,15 @@
 """HTTP 请求校验；封闭参数沿用完整能力契约，不创建阶段专用 API。"""
 
 from datetime import date
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from scholar.application.discovery import PaperDiscoveryQuery
+from scholar.application.field_policies import FIELD_POLICIES
 from scholar.application.lookup import LookupPurpose, PaperLookup
 from scholar.application.search import PaperSearch, SourceScope
+from scholar.domain.interfaces.paper_discoverer import DiscoveryPeriod, DiscoverySort
 from scholar.domain.models.fields import AcademicField
 
 
@@ -44,6 +48,35 @@ class LookupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     identifiers: list[str] = Field(min_length=1, max_length=20)
     purpose: LookupPurpose = LookupPurpose.DETAILS
+    field: AcademicField = AcademicField.GENERAL
 
     def to_query(self) -> PaperLookup:
         return PaperLookup(**self.model_dump())
+
+
+DiscoveryField = StrEnum(
+    "DiscoveryField",
+    {
+        field.name.upper(): field.value
+        for field, policy in FIELD_POLICIES.items()
+        if policy.discoverer is not None
+    },
+    module=__name__,
+)
+
+
+class DiscoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field: DiscoveryField
+    period: DiscoveryPeriod = DiscoveryPeriod.DAILY
+    sort: DiscoverySort = DiscoverySort.TRENDING
+    limit: int = Field(default=10, ge=1, le=15)
+
+    def to_query(self) -> PaperDiscoveryQuery:
+        return PaperDiscoveryQuery(
+            field=AcademicField(self.field.value),
+            period=self.period,
+            sort=self.sort,
+            limit=self.limit,
+        )

@@ -1,5 +1,8 @@
 """从公开搜索用例验证候选富化，并验证共享事实缓存的 alias 失效。"""
 
+from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
+
+
 import asyncio
 from datetime import date
 
@@ -9,7 +12,6 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from scholar.application.field_policies import FieldPolicy
 from scholar.application.search import (
-    EnrichmentBinding,
     PaperSearch,
     PaperSearchService,
     SearchBinding,
@@ -112,7 +114,7 @@ class FakeEnricher:
         self.outcomes = outcomes
         self.calls = []
 
-    async def enrich(self, identifiers, *, include_details=False):
+    async def enrich(self, identifiers, *, include_details=False, api_key=None):
         self.calls.append((list(identifiers), include_details))
         return [self.outcomes[identifier] for identifier in identifiers]
 
@@ -132,7 +134,7 @@ class FakePaperRepository:
         ]
 
 
-def search_service(papers, bindings, sources, *, concurrency=4):
+def search_service(papers, bindings, sources):
     searcher = FakeSearcher(papers)
     service = PaperSearchService(
         searchers={"base": SearchBinding(searcher, coverage="base papers")},
@@ -142,8 +144,7 @@ def search_service(papers, bindings, sources, *, concurrency=4):
             )
         },
         query_cache=FakeQueryCache(),
-        enrichment_bindings=bindings,
-        concurrency=concurrency,
+        enrichment=EnrichmentRunner(bindings),
     )
     return service, searcher
 
@@ -242,14 +243,11 @@ async def test_configured_hf_enrichment_preserves_order_values_and_caches_404():
     ]
     assert result.papers[0].metadata["huggingface"]["linked_datasets"] == []
     assert result.papers[0].metadata["huggingface"]["num_total_datasets"] is None
-    assert result.papers[1].metadata["huggingface"]["upvotes"] == 12
+    assert result.papers[1].metadata["huggingface"]["upvotes"] == 0
+    assert result.papers[1].metadata["huggingface"]["github_repo"] == "new/repository"
     assert result.papers[1].metadata["huggingface"]["linked_models"] == [
-        {"id": "existing/model", "likes": 3}
+        {"id": "org/model", "likes": 0}
     ]
-    assert result.papers[1].metadata["huggingface"]["github_repo"] == ""
-    assert result.papers[1].metadata["huggingface"]["github_stars"] is False
-    assert result.papers[1].metadata["huggingface"]["linked_datasets"] == []
-    assert result.papers[1].metadata["huggingface"]["num_total_models"] == 0
     assert first.metadata == {}
     assert second.metadata["huggingface"]["upvotes"] == 12
     assert [request.url.path.rsplit("/", 1)[-1] for request in requests] == [
@@ -279,7 +277,7 @@ async def test_cached_source_only_merges_known_records_and_does_not_fetch_misses
         enrichment=PaperEnrichment(
             identifiers=[arxiv_id],
             metadata={
-                "s2": {
+                "signals": {
                     "citation_count": 0,
                     "tldr": {"model": "online", "text": "new summary"},
                 }
@@ -291,7 +289,7 @@ async def test_cached_source_only_merges_known_records_and_does_not_fetch_misses
     )
     first = make_paper(
         metadata={
-            "s2": {
+            "signals": {
                 "citation_count": None,
                 "tldr": {"model": "offline", "text": ""},
             }
@@ -301,21 +299,21 @@ async def test_cached_source_only_merges_known_records_and_does_not_fetch_misses
     service, _ = search_service(
         [first, missing],
         {
-            "s2": EnrichmentBinding(
+            "signals": EnrichmentBinding(
                 enricher=None,
                 cache=cache,
                 identifier_kinds=[IdentifierKind.ARXIV],
             )
         },
-        ["s2"],
+        ["signals"],
     )
 
     result = await search(service)
 
-    assert result.papers[0].metadata["s2"]["citation_count"] == 0
-    assert result.papers[0].metadata["s2"]["tldr"] == {
-        "model": "offline",
-        "text": "",
+    assert result.papers[0].metadata["signals"]["citation_count"] == 0
+    assert result.papers[0].metadata["signals"]["tldr"] == {
+        "model": "online",
+        "text": "new summary",
     }
     assert result.papers[1].metadata == {}
     assert result.enrichment_execution[0].status == SourceExecutionStatus.PARTIAL
@@ -411,7 +409,7 @@ async def test_optional_enrichment_provider_error_preserves_base_candidate():
     paper = make_paper()
 
     class FailedEnricher:
-        async def enrich(self, identifiers, *, include_details=False):
+        async def enrich(self, identifiers, *, include_details=False, api_key=None):
             raise ProviderError("Hugging Face is unavailable")
 
     service, _ = search_service(
@@ -440,7 +438,7 @@ async def test_search_propagates_single_source_provider_error():
         searchers={"base": SearchBinding(FailingSearcher(ProviderError("offline")))},
         policies={AcademicField.GENERAL: FieldPolicy(searchers=["base"])},
         query_cache=FakeQueryCache(),
-        enrichment_bindings={},
+        enrichment=EnrichmentRunner({}),
     )
 
     with pytest.raises(ProviderError, match="offline"):
@@ -462,7 +460,7 @@ async def test_search_propagates_error_when_all_multisource_providers_fail():
             )
         },
         query_cache=FakeQueryCache(),
-        enrichment_bindings={},
+        enrichment=EnrichmentRunner({}),
     )
 
     with pytest.raises(ProviderError, match="arXiv offline"):
@@ -655,7 +653,7 @@ async def test_confirmed_empty_fields_skip_reads_but_missing_field_uses_enricher
 
 
 @pytest.mark.asyncio
-async def test_search_bounds_concurrent_enrichment_requests():
+async def test_search_reuses_identical_enrichment_across_concurrent_queries():
     class BlockingEnricher:
         def __init__(self):
             self.active = 0
@@ -664,7 +662,7 @@ async def test_search_bounds_concurrent_enrichment_requests():
             self.entered = asyncio.Event()
             self.release = asyncio.Event()
 
-        async def enrich(self, identifiers, *, include_details=False):
+        async def enrich(self, identifiers, *, include_details=False, api_key=None):
             self.calls.append(list(identifiers))
             self.active += 1
             self.peak = max(self.peak, self.active)
@@ -689,7 +687,6 @@ async def test_search_bounds_concurrent_enrichment_requests():
             )
         },
         ["hf"],
-        concurrency=1,
     )
     first = asyncio.create_task(search(service, query="first"))
     await enricher.entered.wait()
@@ -701,7 +698,7 @@ async def test_search_bounds_concurrent_enrichment_requests():
     enricher.release.set()
     await asyncio.gather(first, second)
     assert enricher.peak == 1
-    assert len(enricher.calls) == 2
+    assert len(enricher.calls) == 1
 
 
 class FakeRedisPipeline:

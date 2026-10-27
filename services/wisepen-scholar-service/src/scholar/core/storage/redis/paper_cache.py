@@ -1,4 +1,4 @@
-"""Redis 共享论文富化缓存；缓存键仅由公共论文身份组成。"""
+"""Redis 共享论文富化缓存；公共来源按身份共享，BYOK 来源按凭证指纹隔离。"""
 
 from pydantic import TypeAdapter
 from redis.asyncio import Redis
@@ -14,9 +14,9 @@ class RedisPaperEnrichmentCache:
         self.redis, self.namespace = redis, namespace
 
     async def get(
-        self, identifiers: list[PaperIdentifier]
+        self, identifiers: list[PaperIdentifier], *, scope: str | None = None
     ) -> CachedPaperEnrichment | None:
-        keys = [self._key(identifier) for identifier in identifiers]
+        keys = [self._key(identifier, scope) for identifier in identifiers]
         values = await self.redis.mget(keys)
         cached = next((value for value in values if value is not None), None)
         return None if cached is None else _ENRICHMENT.validate_json(cached)
@@ -27,12 +27,13 @@ class RedisPaperEnrichmentCache:
         value: CachedPaperEnrichment,
         *,
         ttl_seconds: int,
+        scope: str | None = None,
     ) -> None:
         payload = _ENRICHMENT.dump_json(value)
         # 统一事务写入身份别名，避免部分更新把两个不同论文身份接在一起。
         async with self.redis.pipeline(transaction=True) as pipeline:
             for identifier in dict.fromkeys(identifiers):
-                pipeline.set(self._key(identifier), payload, ex=ttl_seconds)
+                pipeline.set(self._key(identifier, scope), payload, ex=ttl_seconds)
             await pipeline.execute()
 
     async def invalidate(self, identifiers: list[PaperIdentifier]) -> None:
@@ -50,8 +51,8 @@ class RedisPaperEnrichmentCache:
             *(self._key(identifier) for identifier in dict.fromkeys(aliases))
         )
 
-    def _key(self, identifier: PaperIdentifier) -> str:
+    def _key(self, identifier: PaperIdentifier, scope: str | None = None) -> str:
         return (
-            f"scholar:enrichment:{self.namespace}:"
+            f"scholar:enrichment:{self.namespace}{':' + scope if scope else ''}:"
             f"{identifier.kind.value}:{identifier.value}"
         )

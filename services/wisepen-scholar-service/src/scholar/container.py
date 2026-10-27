@@ -5,10 +5,21 @@ from dependency_injector import containers, providers
 from redis.asyncio import Redis
 
 from scholar.application.discovery import PaperDiscoveryService
+from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.field_policies import FIELD_POLICIES
+from scholar.providers.enrichment_rules import (
+    arxiv_signals,
+    s2_signals,
+    s2_aliases,
+    s2_short_lived,
+    openalex_aliases,
+    openalex_signals,
+)
 from scholar.application.lookup import PaperLookupService
-from scholar.application.search import PaperSearchService, SearchBinding
-from scholar.application.search.enrichment import EnrichmentBinding
+from scholar.application.search import (
+    PaperSearchService,
+    SearchBinding,
+)
 from scholar.core.s2_transport import S2Transport
 from scholar.core.storage.elasticsearch.paper_repository import (
     ElasticsearchPaperRepository,
@@ -83,6 +94,13 @@ class Container(containers.DeclarativeContainer):
             lambda alias: f"{alias}:s2", config.SCHOLAR_INDEX_ALIAS
         ),
     )
+    openalex_cache = providers.Singleton(
+        RedisPaperEnrichmentCache,
+        redis=redis,
+        namespace=providers.Callable(
+            lambda alias: f"{alias}:openalex", config.SCHOLAR_INDEX_ALIAS
+        ),
+    )
     huggingface_cache = providers.Singleton(
         RedisPaperEnrichmentCache,
         redis=redis,
@@ -109,19 +127,37 @@ class Container(containers.DeclarativeContainer):
             enricher=arxiv_searcher,
             cache=None,
             identifier_kinds=[IdentifierKind.ARXIV, IdentifierKind.DOI],
-            coverage="已有本地论文事实。",
+            coverage="已有本地论文事实及离线 S2 信号。",
+            has_signals=arxiv_signals,
         ),
         s2=providers.Factory(
             EnrichmentBinding,
-            enricher=None,
+            enricher=s2_provider,
             cache=s2_cache,
+            has_signals=s2_signals,
+            aliases=s2_aliases,
+            short_lived=s2_short_lived,
             identifier_kinds=[
                 IdentifierKind.ARXIV,
                 IdentifierKind.DOI,
                 IdentifierKind.CORPUS_ID,
                 IdentifierKind.S2,
             ],
-            coverage="已有公共 S2 缓存；此路径不调用在线 S2。",
+            coverage="公共 S2 缓存和在线精确富化。",
+        ),
+        openalex=providers.Factory(
+            EnrichmentBinding,
+            enricher=openalex_searcher,
+            cache=openalex_cache,
+            requires_api_key=True,
+            identifier_kinds=[
+                IdentifierKind.OPENALEX,
+                IdentifierKind.DOI,
+                IdentifierKind.ARXIV,
+            ],
+            has_signals=openalex_signals,
+            aliases=openalex_aliases,
+            coverage="OpenAlex 精确身份富化，使用当前请求的用户密钥。",
         ),
         huggingface=providers.Factory(
             EnrichmentBinding,
@@ -129,6 +165,7 @@ class Container(containers.DeclarativeContainer):
             cache=huggingface_cache,
             identifier_kinds=[IdentifierKind.ARXIV],
             coverage="HF 社区及研究产物事实。",
+            has_signals=lambda metadata: bool(metadata.get("huggingface")),
             fields=[
                 "upvotes",
                 "github_repo",
@@ -140,24 +177,25 @@ class Container(containers.DeclarativeContainer):
             ],
         ),
     )
+    enrichment_runner = providers.Singleton(
+        EnrichmentRunner,
+        bindings=enrichment_bindings,
+        positive_ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
+        negative_ttl_seconds=config.SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS,
+    )
     paper_search_service = providers.Singleton(
         PaperSearchService,
         searchers=search_bindings,
         policies=providers.Object(FIELD_POLICIES),
         query_cache=query_cache_repository,
-        enrichment_bindings=enrichment_bindings,
-        positive_ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
-        negative_ttl_seconds=config.SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS,
-        concurrency=config.SCHOLAR_HF_CONCURRENCY,
+        enrichment=enrichment_runner,
     )
     paper_lookup_service = providers.Singleton(
         PaperLookupService,
         paper_repository=paper_repository,
         openalex_lookup=openalex_searcher.provided.lookup,
-        s2_enricher=s2_provider,
-        s2_cache=s2_cache,
-        positive_ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
-        negative_ttl_seconds=config.SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS,
+        enrichment=enrichment_runner,
+        policies=providers.Object(FIELD_POLICIES),
     )
     paper_discovery_service = providers.Singleton(
         PaperDiscoveryService,

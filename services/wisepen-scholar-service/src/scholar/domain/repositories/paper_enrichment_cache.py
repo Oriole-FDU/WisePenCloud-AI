@@ -17,7 +17,7 @@ class CachedPaperEnrichment:
 
 class PaperEnrichmentCache(Protocol):
     async def get(
-        self, identifiers: list[PaperIdentifier]
+        self, identifiers: list[PaperIdentifier], *, scope: str | None = None
     ) -> CachedPaperEnrichment | None: ...
 
     async def put(
@@ -26,6 +26,7 @@ class PaperEnrichmentCache(Protocol):
         value: CachedPaperEnrichment,
         *,
         ttl_seconds: int,
+        scope: str | None = None,
     ) -> None: ...
 
     async def invalidate(self, identifiers: list[PaperIdentifier]) -> None: ...

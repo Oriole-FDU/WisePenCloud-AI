@@ -20,17 +20,15 @@ V1 不建设全文语料库、向量检索、完整引用图、作者研究工�
 
 ### 1.1 不得混淆的富化入口
 
-| 入口                                          | 通用 S2 数据           | 在线 S2                              | 在线 HF                          |
-|-----------------------------------------------|------------------------|--------------------------------------|----------------------------------|
-| `search_papers(field=general)` 及其他普通领域 | 复用已有离线数据、缓存 | 禁止                                 | 不执行专用富化                   |
-| `search_papers(field=computer_science)`       | 复用已有离线数据、缓存 | 禁止                                 | 执行 CS 配置的专用富化，优先缓存 |
-| `lookup_papers(purpose=details)`              | 返回已有数据           | 禁止                                 | 不调用                           |
-| `lookup_papers(purpose=enrich/full)`          | 优先复用已有数据       | 核心引用指标或 TLDR 缺失时允许       | 不调用                           |
-| `discover_papers`                             | 可以复用已有通用数据   | 禁止                                 | 使用 HF 发现及必要详情能力       |
-| 每日 arXiv 同步                               | 复用本地关联和信号     | 对新增、身份变化及待补充论文批量富化 | 不调用                           |
+| 入口 | 通用富化 | 领域增量 |
+|------|----------|----------|
+| search | 本次成功 searcher 包含 arxiv/s2/openalex 时直接消费检索数据，否则执行通用链 | 全部执行，排除本次成功执行的同源 searcher |
+| lookup details | 本地、缓存和原有 OpenAlex 精确详情查询，不在线调用 enricher | 不执行 |
+| lookup enrich/full | 每篇依次 arxiv→s2→openalex，获得可用信号即停止 | 按请求 field 全部执行 |
+| discover | 直接交付渠道列表，不逐篇执行通用链 | 保留渠道实际返回的数据 |
+| 每日同步 | 保留独立离线补充规则和持久进度 | 不执行在线领域增量 |
 
-领域专用富化由请求选择的配置决定。General 即使查到了 CS 论文，也不推断其领域、执行 HF 富化或附加 CS 专用缓存。lookup
-没有领域参数，不根据论文内容推断并触发 HF。S2 不提供 V1 在线关键词搜索路径。
+领域由请求配置选择，不从结果内容推断。初始仅 CS 的 enrichers 注册 HF，其余为空。通用链未解决论文按来源批量回退，0/false 是有效信号；arXiv 只有基础论文信息不算富化成功。
 
 ### 1.2 工程架构约定
 
@@ -38,11 +36,11 @@ V1 不建设全文语料库、向量检索、完整引用图、作者研究工�
 
 `domain/models/` 中的 `paper.py`、`identifiers.py` 只保存论文和身份领域语义。请求、结果、来源执行状态等细节放在具体应用用例或其共享执行模型中，不放入一个总 models.py。
 
-`application/` 只有 search、lookup、discover 三个用例。`search/use_case.py` 负责来源计划、检索缓存和候选融合；`search/enrichment.py` 是搜索用例内的可选候选后处理，不是独立 application service。精确查询及其 S2 purpose 富化归 `lookup/` 内部；发现由 `discovery.py` 按领域配置调用发现能力。共用领域策略和执行结果不另立业务服务。
+`application/` 只有 search、lookup、discover 三个用例，分别由 `search.py`、`lookup.py`、`discovery.py` 编排。`enrichment.py` 是 search/lookup 共用的内部执行机制，负责通用短路、领域增量、缓存及在途请求复用，不是额外应用服务。供应商信号与身份规则通过注册绑定注入，留在 `providers/`。
 
 `application/field_policies.py` 是 search 与 lookup 共用的领域策略表。`FieldPolicy` 只记录有序 `searchers`、领域增量 `enrichers` 和 `discoverer`；容器注册来源名称到 provider 能力的绑定。新增医疗来源时，兼容的 PubMed/WoS searcher、富化器及容器注册可以由领域配置选择，无需在核心检索、缓存或融合流程增加供应商分支。`Paper.source` 接受开放字符串，来源专有事实放在 `metadata[来源名]` 自由字典中。
 
-`providers/field_mapping.py` 仍是通用领域到 arXiv/OpenAlex 参数的统一映射文件。`providers/` 承载在线能力适配：本地 arXiv 搜索由 `ArxivProvider` 调用论文仓储，OpenAlex 实现同一 `PaperSearcher` 能力；HF 使用原生异步 HTTP，当前由 CS 搜索后处理调用。arXiv OAI 抓取和 S2 数据集、release、差分处理属于独立 `etl/` 步骤。
+`providers/field_mapping.py` 仍是通用领域到 arXiv/OpenAlex 参数的统一映射文件。`providers/` 承载在线能力适配：本地 arXiv 搜索由 `ArxivProvider` 调用论文仓储，OpenAlex 实现同一 `PaperSearcher` 能力；HF 使用原生异步 HTTP，由 CS 搜索后处理和 lookup field 配置调用。arXiv OAI 抓取和 S2 数据集、release、差分处理属于独立 `etl/` 步骤。
 
 `domain/interfaces/` 按业务能力声明 `PaperSearcher.search()`、`PaperEnricher.enrich()`、`PaperDiscoverer.discover()`，不按供应商名称声明端口。一个 provider 可实现一个或多个能力。已知外部 I/O 由 provider 转为 `ProviderError`，保留原异常文本和 cause，不附带 reason/status 分类；程序错误和取消继续传播。S2 在线与离线调用共用 `core` 中的 HTTP 传输和 Redis 发送配额，不将离线方法放入 provider。
 
@@ -85,7 +83,7 @@ CS、数学、物理为 `[arxiv, openalex]`；其他已有双源领域为 `[open
 ### 2.3 本次调整的独立提交
 
 1. 检索策略：有序回退、多源实际执行和领域配置收敛，26 项相关测试通过。
-2. 富化编排：通用 arxiv→s2→openalex 择一成功，领域增量全部执行；按本次成功 searcher 去重；lookup 增加 field。
+2. 富化编排：已接通通用短路链、领域增量、按实际成功 searcher 去重、OpenAlex 精选投影和 lookup field。保留身份冲突、缓存、凭证隔离与取消合同；临床增量以替身 provider 验证，未接入真实临床来源。
 3. S2 队列：Redis FIFO 共用全局 1 RPS，在线前方任务超过 Nacos 阈值时跳过；默认阈值 5，排队数量只进入执行结果。
 
 领域 `enrichers` 只登记增量来源。平台不默认融合同名字段、不做语义去重，provider 负责输出键唯一并避免重复通用事实。
@@ -122,7 +120,8 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 | 参数          | 类型与默认值                                | 语义                                                                                |
 |---------------|---------------------------------------------|-------------------------------------------------------------------------------------|
 | `identifiers` | 必填字符串列表，1–20 项                     | DOI、arXiv ID、带明确命名空间的 OpenAlex ID、S2 Paper ID、Corpus ID，或相应官方 URL |
-| `purpose`     | `details`、`enrich`、`full`，默认 `details` | 控制详情投影与在线富化权限                                                          |
+| `purpose`     | `details`、`enrich`、`full`，默认 `details` | 控制详情投影与在线富化权限 |
+| `field` | 领域枚举，默认 `general` | 选择领域增量来源，不影响精确身份解析 |
 
 | purpose   | 基础信息           | 富化                     | 在线 S2  |
 |-----------|--------------------|--------------------------|----------|
@@ -134,13 +133,12 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 
 1. details 优先读取本地 arXiv 和缓存；未满足详情需求且该工具配置了 OpenAlex 密钥时，可以按精确 ID 查询
    OpenAlex。没有密钥时仍可返回本地及缓存结果，不静默调用 S2。
-2. enrich/full 优先读取离线数据和缓存；只有 `citationCount`、`influentialCitationCount` 或 TLDR 缺失时，才允许在线 S2。单独缺
-   PDF、BibTeX、开放状态或作者信息不触发联网。
-3. 已有核心字段满足需求时直接返回；成功请求确认字段为空时，在缓存有效期内不重复请求。`0`、`false` 是已知值，不视为缺失。
-4. enrich 只请求身份与富化字段；full 缺基础信息时才增加基础字段。已知基础信息不因富化需要重新获取。
-5. 没有 OpenAlex 密钥时，enrich/full 仍可通过平台 S2 按精确 ID 查询；full 可以使用同次 S2 响应取得所需基础信息。
-6. 批量结果按输入顺序逐项报告。重复输入可以合并 I/O，但保留对应关系；有可用项时，其他项的 provider 失败保留在对应结果中。整批没有可用结果且 provider 调用全部失败时传播首个原始 ProviderError。
-7. 不新增 `include_signals`、`refresh`、`provider` 或 lookup 领域参数。
+2. enrich/full 的通用链固定为 arxiv→s2→openalex，每篇取得任一有效信号即停止，不要求补齐所有字段。未找到、身份不支持、外部失败或拥堵跳过均允许下一来源；同来源只请求尚未解决的论文。
+3. 通用链结束后全部执行 field.enrichers；不因通用成功或其他领域来源失败而终止。`PaperEnricher.enrich()` 接收 include_details 和可选请求级 api_key。
+4. enrich 只返回身份和信号；full 缺基础信息时才请求详情，保留已经取得的基础论文。OpenAlex 按产品约定要求用户 key，缺失参与普通来源回退，不另设无凭证计划。
+5. 通用前序失败被后续成功补足时为 complete；存在信号但通用未成功或领域增量失败为 partial。没有信号且发生外部失败时，enrich 抛原始异常；full 仍保留基础论文。执行记录保留全部失败过程。
+6. 保留输入顺序、重复项、身份冲突隔离、来源缓存和凭证隔离。只有正常未找到可以负缓存，鉴权、网络故障和拥堵不能伪装为未找到。同请求在途 I/O 去重，最后一个等待者取消才取消共享请求。
+
 
 ### 3.3 `discover_papers`
 
@@ -205,6 +203,12 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 - `openAccessPdf.url` 的空字符串在接入处转换为无可用链接；`publicationDate` 可以为空，保留独立 year，不补造月份或日期。
 - `isOpenAccess` 与 PDF 子对象的状态可能不一致，分别忠实读取来源，不推导访问许可、不用其中一个改写另一个，也不新增一致性校验阻塞结果。
 - 真实边界解析后信任内部数据，不重复逐字段校验，不为未知内部破坏状态增加回退。供应商参数错误应明确暴露，不静默裁剪字段或吞错。
+
+### 4.3 OpenAlex 精选富化投影
+
+保留精确身份、作者 ORCID 与机构、引用数、FWCI/引用百分位、主要主题、开放获取及最佳全文位置（含 license/version）、撤稿标记、MeSH 和 study_designs。检索与 lookup 使用相同投影，避免检索成功后丢失上游信号。study_designs 是上游的研究设计分类，不作为临床试验注册或证据核验的替代。单篇详情支持完整作者，列表遵守上游作者截断限制。
+
+平台不默认融合同名字段，也不对语义相近字段进行语义去重。实现者负责保证输出键不冲突，并尽量只提供领域增量价值，避免重复通用富化数据。输出保留来源命名空间，不递归合并或统一不同来源指标。
 
 ## 5. 本地论文库、初始化与发布
 
@@ -299,7 +303,7 @@ ETL 负责。
 
 ### 7.2 S2 全局 1 RPS 与生命周期
 
-- lookup、每日同步及数据集元信息请求统一经过 S2 Gateway，共享跨进程 Redis 协调的 1 RPS。下载签名对象存储分片与 S2 API
+- lookup、每日同步及数据集元信息请求统一经过 S2Transport，共享跨进程 Redis 协调的 1 RPS。下载签名对象存储分片与 S2 API
   请求分别处理。
 - 用户调用有界同步等待，Scholar 总预算默认 25 秒，MCP 30 秒，预算覆盖排队及外部调用；取消或超时后不把本次请求转成持久后台任务。
 - 只对本次仍缺失的论文批量请求，复用缓存及相同在途请求，避免逐论文、逐字段、逐作者 I/O。
@@ -356,14 +360,14 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
 
 ### P3：OpenAlex BYOK 与显式多源检索
 
-- **交付**：OpenAlex 按工具请求接收可选用户凭证；`FieldPolicy` 声明默认/无凭证/多源路由及搜索后处理；多源融合与 OpenAlex 精确 details lookup 接入现有用例。
+- **交付**：OpenAlex 按工具请求接收可选用户凭证；`FieldPolicy` 声明有序 searchers、领域 enrichers 和 discoverer；多源融合与 OpenAlex 精确 details lookup 接入现有用例。
 - **验收**：凭证不进入模型参数、请求 URL、缓存明文或日志；默认单源、缺凭证计划、未映射路由符合策略；只在多源已有成功来源时保留其他来源错误文本，单源和全来源失败传播 ProviderError；精确 lookup 保留顺序、重复项、未找到、歧义及真正部分成功。
 - **扩展边界**：字段映射仍集中在 `providers/field_mapping.py`；来源名是开放字符串，provider 可实现多个能力。医疗 PubMed/WoS mock 用例通过 provider 注册和 FieldPolicy 配置增加检索源及临床试验后处理，不修改核心编排算法；这不代表已接入真实 PubMed/WoS 服务。
 - **边界**：不建设共享凭证模型，不加入 S2 关键词召回或暗中叠加其他来源；可选搜索后处理失败保留基础候选和原错误文本。
 - **提交**：`feat(scholar): add openalex byok and multisource search`。
 - **状态**：已完成；71 项 Scholar 定向测试、8 项 MCP 工具测试及真实 ES/Redis/Nacos/OpenAlex/HF 链路通过，见 [P3 验收记录](docs/p3-acceptance.md)。
 
-### P4：purpose 驱动的 S2 在线富化
+### P4：purpose 与 field 驱动的富化编排
 
 - **交付**：lookup 三种 purpose、固定的精选字段集、单篇/批量适配、论文缓存、全局限流和有界等待。
 - **验收**：真实批量请求不含 User-Agent、不使用 authors 子字段；混合 ID 正确映射，PDF 与 BibTeX 可用；details/search/discover

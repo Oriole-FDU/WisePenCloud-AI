@@ -42,10 +42,8 @@ class HuggingFaceProvider:
         self._request_limit = asyncio.Semaphore(concurrency)
 
     async def enrich(
-        self,
-        identifiers: list[PaperIdentifier],
-        *,
-        include_details: bool = False,
+        self, identifiers: list[PaperIdentifier], *, include_details: bool = False,
+        api_key: str | None = None,
     ) -> list[PaperEnrichment | None]:
         return await asyncio.gather(
             *(

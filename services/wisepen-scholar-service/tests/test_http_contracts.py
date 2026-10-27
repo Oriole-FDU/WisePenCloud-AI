@@ -7,7 +7,7 @@ from dependency_injector import providers
 from fastapi.testclient import TestClient
 
 from scholar.api.app import create_app
-from scholar.api.endpoints import discovery, health, papers
+from scholar.api.endpoints import health, papers
 from scholar.container import container
 from scholar.domain.interfaces.paper_discoverer import PaperDiscovery
 from scholar.domain.interfaces.provider_error import ProviderError
@@ -138,7 +138,7 @@ def scholar_client():
     )
     container.elasticsearch.override(providers.Object(es))
     container.redis.override(providers.Object(redis))
-    container.wire(modules=[health, papers, discovery])
+    container.wire(modules=[health, papers])
     try:
         with TestClient(create_app(from_source_secret=FROM_SOURCE_SECRET)) as client:
             yield client, es, redis
@@ -200,10 +200,34 @@ def test_search_cache_reuses_identical_request_and_isolates_changed_inputs(
         changed_query.status_code,
         changed_field.status_code,
     ] == [200, 200, 200, 200]
-    assert first.json()["data"]["execution"][0]["cache_hit"] is False
-    assert repeated.json()["data"]["execution"][0]["cache_hit"] is True
-    assert changed_query.json()["data"]["execution"][0]["cache_hit"] is False
-    assert changed_field.json()["data"]["execution"][0]["cache_hit"] is False
+    assert (
+        next(e for e in first.json()["data"]["execution"] if e["source"] == "arxiv")[
+            "cache_hit"
+        ]
+        is False
+    )
+    assert (
+        next(e for e in repeated.json()["data"]["execution"] if e["source"] == "arxiv")[
+            "cache_hit"
+        ]
+        is True
+    )
+    assert (
+        next(
+            e
+            for e in changed_query.json()["data"]["execution"]
+            if e["source"] == "arxiv"
+        )["cache_hit"]
+        is False
+    )
+    assert (
+        next(
+            e
+            for e in changed_field.json()["data"]["execution"]
+            if e["source"] == "arxiv"
+        )["cache_hit"]
+        is False
+    )
     assert len(es.search_calls) == 3
 
 
@@ -297,7 +321,7 @@ def test_full_lookup_keeps_base_facts_or_raises_when_s2_fails(
     client, _, _ = scholar_client
 
     class LimitedEnricher:
-        async def enrich(self, identifiers, *, include_details=False):
+        async def enrich(self, identifiers, *, include_details=False, api_key=None):
             raise ProviderError("429 Too Many Requests from Semantic Scholar")
 
     with container.s2_provider.override(providers.Object(LimitedEnricher())):
@@ -319,24 +343,20 @@ def test_full_lookup_keeps_base_facts_or_raises_when_s2_fails(
         assert response.json()["data"] is None
 
 
-@pytest.mark.parametrize(
-    ("path", "payload"),
-    [
-        (
-            "/scholar/papers/search",
-            {"query": "graph models", "source_scope": "multi_source"},
-        ),
-    ],
-)
-def test_schema_accepts_unavailable_capabilities_and_preserves_business_code(
-    scholar_client, path, payload
-):
+def test_multisource_without_openalex_key_keeps_arxiv_success(scholar_client):
     client, _, _ = scholar_client
-    response = client.post(path, headers=AUTHORIZED, json=payload)
-
+    response = client.post(
+        "/scholar/papers/search",
+        headers=AUTHORIZED,
+        json={"query": "graph models", "source_scope": "multi_source"},
+    )
     assert response.status_code == 200
-    assert response.json()["code"] == 503
-    assert response.json()["data"] is None
+    data = response.json()["data"]
+    assert data["papers"] == []  # 正常空召回仍是来源成功。
+    assert {e["source"]: e["status"] for e in data["execution"]} == {
+        "openalex": "failed",
+        "arxiv": "completed",
+    }
 
 
 def test_health_reports_503_until_alias_is_published(scholar_client):

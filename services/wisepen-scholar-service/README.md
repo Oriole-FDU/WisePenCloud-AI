@@ -5,7 +5,7 @@ Scholar 是内部 HTTP 微服务。MCP 工具由现有 `wisepen-mcp-service` 注
 ## 结构与迭代边界
 
 - `api/schemas` 在 HTTP 边界校验完整契约；`api/endpoints` 只做 DTO 转换、预算控制及容器注入。
-- application 提供 search、lookup、discover 三个用例，分别位于 `search/`、`lookup/` 和 `discovery.py`；候选后处理属于 search 内部，S2 在线富化属于 lookup 内部。没有独立的 candidate/enrichment 应用服务。`field_policies.py` 共享领域策略。
+- application 提供 search、lookup、discover 三个用例（`search.py`、`lookup.py`、`discovery.py`）。`enrichment.py` 是检索后处理与 lookup 共用的内部执行机制；`field_policies.py` 声明有序 searchers、领域增量 enrichers 和 discoverer。
 - `domain/models/paper.py`、`identifiers.py` 保存领域论文及身份；请求、结果、执行状态属于具体应用用例或共享执行模型。`Paper.source` 接受开放来源字符串，来源附加事实放在 `metadata[来源名]` 自由字典中，不依赖供应商专用领域类型。
 - `domain/interfaces` 按搜索、富化、发现能力声明通用端口；provider 可实现一个或多个能力。`providers/field_mapping.py` 仍是领域分类到 arXiv/OpenAlex 来源参数的统一映射文件。
 - `core/storage` 实现 ES 论文读模型和 Redis 查询缓存；`container.py` 装配依赖。
@@ -16,7 +16,9 @@ P1 本地 arXiv、P3 配置驱动检索、P4 lookup 在线富化已验收；P2 �
 
 P6 已提供独立 OAI/S2 差分同步与恢复、Compose/Jenkins/systemd 模板；真实完整同步的剩余验收见 [P6 记录](docs/p6-acceptance.md)。部署交付仅包含配置和说明，本次不启动 Docker、不构建镜像、不做生产部署。
 
-领域策略声明默认来源、无凭证计划、多源计划、搜索后处理器及发现器；来源绑定由容器注册。单源搜索或所有来源都失败时传播 provider 错误；多源仅在至少一个来源成功时返回部分结果，并保留失败来源错误文本。lookup 批次只有在存在其他可用项时才以逐项状态保留 provider 失败；可选搜索后处理失败保留基础论文及错误文本。程序错误和取消不会降级为来源部分失败。
+单源检索按优先级回退，仅外部来源失败尝试下一项，正常空列表也结束。多源全部执行并报告实际成功和失败；全部失败抛原始异常。程序错误和取消直接传播。
+
+通用富化依次 arxiv→s2→openalex，每篇有有效信号即停止；领域增量全部执行，初始仅 CS 注册 HF。搜索成功来源包含任一通用来源时跳过通用富化，领域富化排除本次成功的同源 searcher。供应商规则位于适配器及注册绑定，新增临床增量只需 provider、注册和领域配置。平台不默认融合同名字段或做语义去重。
 
 ## 配置与启动
 
@@ -51,13 +53,13 @@ uv run --no-sync scholar-etl publish
 
 `POST /scholar/papers/discover` 与现有 MCP `discover_papers` 提供 CS 的 daily/weekly/monthly 渠道发现，默认 trending，支持 recent 和 limit，不接受 query。每次只发一个官方列表请求，直接交付成功响应；daily 使用官方最新内容默认值，weekly/monthly 传周期参数。不按渠道日期丢弃或过滤结果，见 [P5 验收记录](docs/p5-acceptance.md)。
 
-Lookup 的 `details/enrich/full` 已接入同一个用例。details 可复用缓存且不在线访问 S2；enrich 只输出精选信号；full 同时返回可用基础论文。没有可用结果的外部失败直接抛出，已有论文或信号的部分结果保留真实错误。缓存与真实边界验收见 [P4 记录](docs/p4-acceptance.md)。
+Lookup 的 `details/enrich/full` 已接入同一个用例。details 可复用缓存且不在线调用 enricher；enrich 只输出精选信号；full 同时返回可用基础论文。没有可用结果的外部失败直接抛出，已有论文或信号的部分结果保留真实错误。缓存与真实边界验收见 [P4 记录](docs/p4-acceptance.md)。
 
 `POST /scholar/papers/search` 接受 query、field、published_after/before、limit、source_scope。时间按首次提交日期包含两端过滤；领域采用 plan.md 的 arXiv 分类映射。查询缓存默认 10 分钟，缓存只存论文事实，每次重新构造执行情况。
 
 本地检索初版采用 English 子字段上的 BM25F 近似召回，标题/TLDR/摘要权重为 3:2:1，原词形和短语匹配加分，引用数不参与排序。新查询需要先完整回填子字段后再启用；算法、参数和不干扰现有离线任务的迁移边界见[检索基线](docs/search-baseline.md)。
 
-`POST /scholar/papers/lookup` 接受 identifiers、purpose，逐项保留输入顺序、重复输入、未找到、标识错误或 DOI 歧义。arXiv 版本和官方 URL 归一化，DOI 不区分大小写。没有本地来源映射的领域不会退回全库检索。所有业务响应使用 Common `R<T>`。
+`POST /scholar/papers/lookup` 接受 identifiers、purpose、field（默认 general），逐项保留输入顺序、重复输入、未找到、标识错误或 DOI 歧义。arXiv 版本和官方 URL 归一化，DOI 不区分大小写。没有本地来源映射的领域不会退回全库检索。所有业务响应使用 Common `R<T>`。
 
 现有 MCP 服务的 search、lookup、discover 工具使用 Nacos RpcClient 调用这些 HTTP 接口，返回解包后的 data；来源路由和论文归一化不复制到 MCP。配置驱动的检索及医疗多源扩展验收见 [P3 记录](docs/p3-acceptance.md)。
 

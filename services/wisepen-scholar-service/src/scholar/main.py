@@ -17,13 +17,13 @@ import uvicorn
 from common.observability import instrument_fastapi_app
 
 from scholar.api.app import create_app
-from scholar.api.endpoints import discovery, health, papers
+from scholar.api.endpoints import health, papers
 from scholar.container import container
 from scholar.core.config.app_settings import settings
 from scholar.core.config.nacos import nacos_client_manager
 
 container.config.from_dict(settings.model_dump())
-container.wire(modules=[health, papers, discovery])
+container.wire(modules=[health, papers])
 
 
 @asynccontextmanager

@@ -12,7 +12,7 @@ from scholar.application.search import (
     SearchResult,
     SourceScope,
 )
-from scholar.application.search import EnrichmentBinding
+from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.source_execution import (
     SourceExecutionStatus,
 )
@@ -109,7 +109,7 @@ def service(*, arxiv=None, openalex=None, cache=None):
             field: replace(policy, enrichers=[])
             for field, policy in FIELD_POLICIES.items()
         },
-        enrichment_bindings={},
+        enrichment=EnrichmentRunner({}),
         query_cache=cache or MemoryCache(),
     )
 
@@ -398,7 +398,7 @@ class RecordingEnricher:
         self.source = source
         self.calls = []
 
-    async def enrich(self, identifiers, *, include_details=False):
+    async def enrich(self, identifiers, *, include_details=False, api_key=None):
         self.calls.append(identifiers)
         return [
             PaperEnrichment([identifier], {self.source: {"available": True}})
@@ -446,7 +446,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
         enrichers=["clinical_trials"],
     )
     search = PaperSearchService(
-        bindings, {AcademicField.MEDICINE: policy}, MemoryCache(), enrichment
+        bindings, {AcademicField.MEDICINE: policy}, MemoryCache(), EnrichmentRunner(enrichment)
     )
     single = await search.search(PaperSearch("cancer", field=AcademicField.MEDICINE))
     assert single.papers[0].source == "pubmed"
@@ -483,7 +483,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
             )
         },
         MemoryCache(),
-        enrichment,
+        EnrichmentRunner(enrichment),
     )
     result = await changed.search(PaperSearch("cancer", field=AcademicField.MEDICINE))
     assert result.papers[0].source == "web_of_science"
@@ -506,7 +506,7 @@ async def test_field_configuration_controls_enrichment_after_final_limit():
             ),
         },
         MemoryCache(),
-        enrich,
+        EnrichmentRunner(enrich),
     )
     general = await search.search(PaperSearch("same CS papers", limit=2))
     assert not specialized.calls
@@ -526,7 +526,7 @@ async def test_default_falls_back_only_on_provider_failure_and_stops_on_empty_re
     search = PaperSearchService(
         {"primary": SearchBinding(primary), "secondary": SearchBinding(secondary)},
         {AcademicField.GENERAL: FieldPolicy(["primary", "secondary"])},
-        MemoryCache(), {},
+        MemoryCache(), EnrichmentRunner({}),
     )
     result = await search.search(PaperSearch("fallback"))
     assert result.papers[0].source == "secondary"

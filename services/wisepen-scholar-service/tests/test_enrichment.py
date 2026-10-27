@@ -1,5 +1,15 @@
 """经 lookup 公共入口验证 S2 富化与共享缓存合同。"""
 
+from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
+from scholar.providers.enrichment_rules import (
+    arxiv_signals,
+    s2_signals,
+    s2_aliases,
+    s2_short_lived,
+)
+from scholar.domain.models.identifiers import IdentifierKind
+
+
 import asyncio
 from dataclasses import replace
 from datetime import date
@@ -14,7 +24,6 @@ from scholar.application.lookup import (
     PaperLookup,
     PaperLookupService,
 )
-from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.interfaces.provider_error import ProviderError
@@ -79,7 +88,7 @@ class FakeEnricher:
         self.cancelled = asyncio.Event()
         self.block = False
 
-    async def enrich(self, identifiers, *, include_details=False):
+    async def enrich(self, identifiers, *, include_details=False, api_key=None):
         identifiers = list(identifiers)
         self.calls.append((identifiers, include_details))
         self.entered.set()
@@ -197,8 +206,29 @@ def s2_enrichment(
 def service(*, repository=None, enricher=None, cache=None):
     return PaperLookupService(
         repository or FakePaperRepository(),
-        s2_enricher=enricher,
-        s2_cache=cache,
+        enrichment=EnrichmentRunner(
+            {
+                "arxiv": EnrichmentBinding(
+                    None,
+                    None,
+                    [IdentifierKind.ARXIV, IdentifierKind.DOI],
+                    has_signals=arxiv_signals,
+                ),
+                "s2": EnrichmentBinding(
+                    enricher,
+                    cache,
+                    [
+                        IdentifierKind.ARXIV,
+                        IdentifierKind.DOI,
+                        IdentifierKind.S2,
+                        IdentifierKind.CORPUS_ID,
+                    ],
+                    has_signals=s2_signals,
+                    aliases=s2_aliases,
+                    short_lived=s2_short_lived,
+                ),
+            }
+        ),
     )
 
 
@@ -316,7 +346,7 @@ async def test_observed_at_alone_does_not_suppress_missing_core_lookup():
 
 
 @pytest.mark.asyncio
-async def test_online_values_fill_unknown_fields_without_replacing_offline_facts():
+async def test_existing_offline_signal_stops_common_chain_without_field_completion():
     arxiv = parse_identifier("2401.00001")
     offline = {
         "corpus_id": "123",
@@ -340,18 +370,10 @@ async def test_online_values_fill_unknown_fields_without_replacing_offline_facts
 
     metadata = result.items[0].metadata["s2"]
     assert metadata["citation_count"] == 5
-    assert metadata["influential_citation_count"] == 3
-    assert metadata["tldr"] == {"model": "release-model", "text": "release summary"}
-    assert metadata["is_open_access"] is False
-    assert metadata["release"] == "release-2026-01"
-    assert metadata["paper_source"] == {"path": "papers/part-1.gz", "line": 7}
-    assert metadata["open_access_pdf"] == "https://example.test/paper.pdf"
+    assert metadata == offline
     assert result.items[0].paper is None
-    assert paper.metadata["s2"] == offline
-    assert cache.puts[0][2] == 86400
-    assert {arxiv, parse_identifier("10.5555/example")} <= set(cache.puts[0][0])
-    assert parse_identifier("s2:" + "a" * 40) in cache.puts[0][0]
-    assert parse_identifier("corpusid:123") in cache.puts[0][0]
+    assert enricher.calls == []
+    assert cache.puts == []
 
 
 @pytest.mark.asyncio
@@ -469,10 +491,9 @@ async def test_provider_failure_preserves_existing_offline_signals():
     assert result.items[0].metadata["s2"]["citation_count"] == 0
     assert result.items[1].paper is None
     assert result.items[1].metadata["s2"]["citation_count"] == 5
-    assert result.items[1].enrichment_status == EnrichmentStatus.FAILED
-    assert result.items[1].error == str(failure)
-    assert result.execution[-1].status == SourceExecutionStatus.FAILED
-    assert enricher.calls == [([second_id], False)]
+    assert result.items[1].enrichment_status == EnrichmentStatus.COMPLETE
+    assert result.items[1].error is None
+    assert enricher.calls == []
 
 
 @pytest.mark.asyncio
@@ -517,14 +538,14 @@ async def test_identity_conflict_keeps_base_and_does_not_write_aliases():
         doi=doi.value,
         corpus_id=222,
     )
-    enricher = FakeEnricher({doi: response})
+    enricher = FakeEnricher({parse_identifier(paper.arxiv_id): response})
 
     result = await service(
         repository=repository, enricher=enricher, cache=cache
-    ).lookup(PaperLookup([doi.value], purpose=LookupPurpose.ENRICH))
+    ).lookup(PaperLookup([doi.value], purpose=LookupPurpose.FULL))
 
     assert result.items[0].status == LookupStatus.FOUND
-    assert result.items[0].paper is None
+    assert result.items[0].paper.arxiv_id == paper.arxiv_id
     assert result.items[0].metadata["s2"] == {"corpus_id": "111"}
     assert "conflicts" in result.items[0].error
     assert cache.puts == []
@@ -578,11 +599,11 @@ async def test_concurrent_lookups_revalidate_distinct_offline_s2_identities():
     lookup = service(repository=repository, enricher=enricher, cache=FakeCache())
 
     first = asyncio.create_task(
-        lookup.lookup(PaperLookup([arxiv.value], purpose=LookupPurpose.ENRICH))
+        lookup.lookup(PaperLookup([arxiv.value], purpose=LookupPurpose.FULL))
     )
     await enricher.entered.wait()
     second = asyncio.create_task(
-        lookup.lookup(PaperLookup([arxiv.value], purpose=LookupPurpose.ENRICH))
+        lookup.lookup(PaperLookup([arxiv.value], purpose=LookupPurpose.FULL))
     )
     await repository.second_read.wait()
     await asyncio.sleep(0)
