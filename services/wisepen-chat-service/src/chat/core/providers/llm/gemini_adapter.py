@@ -9,6 +9,7 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.provider import ProviderType
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
+from chat.core.langfuse.generation import record_generation_request
 from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, TokenUsage, TokenUsageSource
 from chat.domain.entities.message import ToolCallMessage
 from chat.domain.repositories.model_repo import ModelRequestInfo
@@ -77,6 +78,9 @@ class GeminiAdapter(LLMProvider):
         }
 
         accumulated_parts: list[Any] = [] # 积累消息
+        record_generation_request(
+            {"contents": contents, "tools": config_kwargs["tools"]}, protocol="gemini.generate_content",
+        )
         final_usage: Any = None
         try:
             stream = await client.aio.models.generate_content_stream(

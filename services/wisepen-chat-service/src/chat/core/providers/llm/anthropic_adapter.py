@@ -7,6 +7,7 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.provider import ProviderType
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
+from chat.core.langfuse.generation import record_generation_request
 from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, TokenUsage
 from chat.domain.entities.message import ToolCallMessage
 from chat.domain.repositories.model_repo import ModelRequestInfo
@@ -87,6 +88,11 @@ class AnthropicAdapter(LLMProvider):
         }
         if anthropic_system_message: # system prompt
             request_kwargs["system"] = anthropic_system_message
+
+        record_generation_request(
+            {key: request_kwargs.get(key) for key in ("messages", "system", "tools")},
+            protocol="anthropic.messages", model_parameters={"max_tokens": request_kwargs["max_tokens"]},
+        )
 
         try:
             async with client.messages.stream(**without_none(request_kwargs)) as stream:

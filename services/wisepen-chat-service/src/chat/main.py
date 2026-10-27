@@ -14,6 +14,7 @@ setup_observability(
 )
 
 import os
+import asyncio
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -25,6 +26,7 @@ from chat.core.config.nacos import nacos_client_manager
 from common.web.middleware import SecurityHeaderMiddleware
 from common.web.exception_handlers import setup_global_exception_handlers
 from common.observability import instrument_fastapi_app
+from chat.core.langfuse.observability import initialize_langfuse, shutdown_langfuse
 
 from chat.container import container  # noqa: F401 — 触发 dependency_injector wiring，不可删除
 from chat.core.config.app_settings import settings
@@ -54,6 +56,16 @@ async def lifespan(app: FastAPI):
     # --- 启动阶段 ---
     info("service starting.", service=bootstrap_settings.SERVICE_NAME)
 
+    initialize_langfuse(
+        enabled=settings.LANGFUSE_ENABLED,
+        base_url=settings.LANGFUSE_BASE_URL,
+        public_key=settings.LANGFUSE_PUBLIC_KEY,
+        secret_key=settings.LANGFUSE_SECRET_KEY,
+        environment=settings.LANGFUSE_ENVIRONMENT,
+        max_text_chars=settings.LANGFUSE_MAX_TEXT_CHARS,
+        sensitive_values=(settings.FROM_SOURCE_SECRET, settings.LLM_API_KEY, settings.ZERO_ENTROPY_API_KEY),
+    )
+
     # 初始化 Beanie
     mongo_client = AsyncMongoClient(settings.MONGODB_URL)
     await init_beanie(
@@ -67,7 +79,7 @@ async def lifespan(app: FastAPI):
         await nacos_client_manager.register_instance()
     except Exception as e:
         error("nacos instance register failed.", exc=e)
-    
+
     # 启动 Kafka Producer
     kafka_producer = container.kafka_producer()
     await kafka_producer.start()
@@ -87,6 +99,9 @@ async def lifespan(app: FastAPI):
 
     # --- 关闭阶段 ---
     info("service stopping.", service=bootstrap_settings.SERVICE_NAME)
+
+    # 关闭 Langfuse；队列提交放在线程中，避免阻塞应用的事件循环。
+    await asyncio.to_thread(shutdown_langfuse)
 
     # 关闭 Kafka Producer
     kafka_producer = container.kafka_producer()
@@ -111,6 +126,7 @@ async def lifespan(app: FastAPI):
         await nacos_client_manager.deregister_instance()
     except Exception as e:
         error("nacos instance deregister failed.", exc=e)
+
 
 container.wire(modules=[
     attachment_endpoints,

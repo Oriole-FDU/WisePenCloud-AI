@@ -29,7 +29,11 @@ from chat.application.agents import (
     AgentResolver,
     DefaultAgentResolver, AgentSpec, DEFAULT_AGENT_ID,
 )
-from chat.application.events import StepFinishEvent, ErrorEvent
+from chat.application.events import StepFinishEvent, ErrorEvent, TextDeltaEvent
+from chat.core.langfuse.observability import (
+    record_turn_input, record_turn_text, record_turn_output, record_turn_model,
+    record_turn_error, record_turn_cancelled, record_turn_waiting,
+)
 from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
 from chat.application.tools.core import ToolRegistry
@@ -119,6 +123,11 @@ class ChatTurnCoordinator:
         suspended_chat: SuspendedChat | None = await self._suspended_chat_repo.find_suspended_by_session(session_id, user_id)
         if suspended_chat is None:
             raise ServiceException(ChatErrorCode.SUSPENDED_CHAT_NOT_FOUND)
+        for message in reversed(suspended_chat.context.messages_for_llm):
+            if message.role == Role.USER:
+                record_turn_input(message.content or "", execution="resume")
+                break
+        record_turn_model(suspended_chat.context.model_info)
         suspended_chat_id = str(suspended_chat.id)
         tool_scope = await self._tool_registry.recover_derived(suspended_chat.context.tool_scope_data, user_id)
 
@@ -180,6 +189,7 @@ class ChatTurnCoordinator:
             cancel_requested: Callable[[], Awaitable[bool]] | None = None,
             identity_type: Optional[IdentityType] = None,
     ):
+        record_turn_input(user_query)
         chat_turn_context = ChatTurnContext()
         chat_turn_context.session_id = session_id
         chat_turn_context.user_id = user_id
@@ -236,6 +246,7 @@ class ChatTurnCoordinator:
             provider_id=provider_id,
             runtime_options=runtime_options or {}
         )
+        record_turn_model(chat_turn_context.model_info)
         await self._ensure_billable_chat_allowed(
             user_id=user_id,
             billing_group_id=chat_turn_context.agent_spec.billing_group_id,
@@ -391,6 +402,10 @@ class ChatTurnCoordinator:
                 tool_approval_status=tool_approval_status,
                 cancel_requested=cancel_requested,
             ):
+                if isinstance(event, TextDeltaEvent):
+                    record_turn_text(event.delta)
+                elif isinstance(event, ErrorEvent):
+                    record_turn_error(event.error_text)
                 # QueryLoopRuntime 产出的事件如果是 StepFinishEvent 额外处理消息累积
                 if isinstance(event, StepFinishEvent):
                     chat_turn_context.token_usage.add(event.token_usage) # 计费
@@ -398,11 +413,13 @@ class ChatTurnCoordinator:
                         # 向 chat_record_messages 追加中间消息（Tool Calls）
                         chat_turn_context.chat_record_messages.extend(event.intermediate_messages)
                         if event.aborted:
+                            record_turn_cancelled()
                             yield to_vercel_sse(event)
                             yield to_vercel_sse(ErrorEvent(error_text="本轮对话已被用户取消"))
                             return
                         # SSE流需要中断（因调用客户端工具、需要工具调用批准等）
                         if event.suspension is not None:
+                            record_turn_waiting()
                             chat_turn_context.messages_for_llm.extend(event.intermediate_messages)
                             suspended_turn_context = SuspendedTurnContext(
                                 model_info=chat_turn_context.model_info,
@@ -422,12 +439,16 @@ class ChatTurnCoordinator:
                     else:
                         # 向 chat_record_messages 追加最终回复消息
                         chat_turn_context.chat_record_messages.append(event.final_assistant_message)
+                        if event.final_assistant_message is not None:
+                            record_turn_output(event.final_assistant_message.content or "")
                 yield to_vercel_sse(event)
 
                 # 切断SSE流
                 if isinstance(event, StepFinishEvent) and event.suspension is not None:
                     return
         except ServiceException as e:
+            # 错误随后会被转成 SSE 并正常返回，必须在此显式标记本轮失败。
+            record_turn_error(e)
             error("chat stream generation failed.", session_id=chat_turn_context.session_id, exc=e)
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return

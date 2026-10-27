@@ -30,6 +30,7 @@ from chat.application.tools.core.execution.result import ToolExecutionResult
 from chat.application.tools.core.llm.invocation import ToolInvocation, classify_tools
 from chat.application.tools.core.llm.renderer import tool_result_renderer
 from chat.core.config.app_settings import settings
+from chat.core.langfuse.generation import observe_generation
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.message import MessageModelInfo, ToolCallMessage
 from chat.domain.error_codes import ChatErrorCode
@@ -273,21 +274,26 @@ class QueryLoopRuntime:
             tool_schemas = tool_scope.schemas() \
                 if model_info.support_tools and llm_provider.supports_tools() else []
             try:
-                # 调用模型流式接口，Provider 内部负责原生协议解析并产出 LLMStreamEvent 事件
-                async for llm_provider_event in llm_provider.stream_chat_completion(
-                    messages=messages,
-                    model_request=model_info,
-                    tools=tool_schemas or None,
-                ):
-                    # 请求取消检查点
-                    if cancel_requested is not None and await cancel_requested():
-                        raise asyncio.CancelledError
-                    if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
-                        token_usage.add(llm_provider_event.usage)
+                # 每次 Provider 调用一个 Generation；工具执行、用量估算和持久化不计入模型耗时。
+                with observe_generation(
+                    model_info=model_info, messages=messages, tools=tool_schemas or None, iteration=iteration,
+                ) as generation:
+                    # 调用及消费方式保持原样；埋点只旁路读取请求和事件。
+                    async for llm_provider_event in llm_provider.stream_chat_completion(
+                        messages=messages,
+                        model_request=model_info,
+                        tools=tool_schemas or None,
+                    ):
+                        generation.record_event(llm_provider_event)
+                        # 请求取消检查点
+                        if cancel_requested is not None and await cancel_requested():
+                            raise asyncio.CancelledError
+                        if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
+                            token_usage.add(llm_provider_event.usage)
 
-                    # 把 LLMStreamEvent 事件交给解释器，产出 StreamEvent
-                    for event in event_interpreter.consume(llm_provider_event):
-                        yield event
+                        # 把 LLMStreamEvent 事件交给解释器，产出 StreamEvent
+                        for event in event_interpreter.consume(llm_provider_event):
+                            yield event
             except ServiceException:
                 raise  # 已经是业务异常，直接向上传播
             except asyncio.CancelledError: # 补全取消消息

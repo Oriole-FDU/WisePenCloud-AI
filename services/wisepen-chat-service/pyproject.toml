@@ -29,4 +29,5 @@ dependencies = [
     "wisepen-common",
     "httpx",
     "jieba>=0.42.1",
+    "langfuse==5.0.1",
 ]
