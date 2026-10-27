@@ -6,6 +6,7 @@ ELASTICSEARCH_URIS:
 ELASTICSEARCH_USERNAME: "<username>"
 ELASTICSEARCH_PASSWORD: "<password>"
 REDIS_URL: "redis://:<password>@wisepen-dev-server:6379/1"
+S2_API_KEY: "<platform Semantic Scholar API key>"
 # Optional; set only through the existing Nacos secret channel when HF is used.
 HF_TOKEN: null
 SCHOLAR_INDEX_ALIAS: "wisepen-scholar-arxiv"

@@ -30,6 +30,7 @@ async def lifespan(app):
     info("service starting.", service=bootstrap_settings.SERVICE_NAME)
     openalex_http = container.openalex_http()
     huggingface_http = container.huggingface_http()
+    s2_http = container.s2_http()
     try:
         await nacos_client_manager.register_instance()
         yield
@@ -37,6 +38,7 @@ async def lifespan(app):
         await nacos_client_manager.deregister_instance()
         await openalex_http.aclose()
         await huggingface_http.aclose()
+        await s2_http.aclose()
         await container.redis().aclose()
         await container.elasticsearch().close()
 

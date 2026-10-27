@@ -19,6 +19,7 @@ class AppSettings(BaseModel):
     ELASTICSEARCH_USERNAME: str
     ELASTICSEARCH_PASSWORD: str
     REDIS_URL: str
+    S2_API_KEY: str = Field(repr=False)
     HF_TOKEN: str | None = Field(default=None, repr=False)
     SCHOLAR_INDEX_ALIAS: str = "wisepen-scholar-arxiv"
     SCHOLAR_QUERY_CACHE_TTL_SECONDS: int = Field(default=600, gt=0)

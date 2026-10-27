@@ -8,6 +8,7 @@ from scholar.application.field_policies import FIELD_POLICIES
 from scholar.application.lookup import PaperLookupService
 from scholar.application.search import PaperSearchService, SearchBinding
 from scholar.application.search.enrichment import EnrichmentBinding
+from scholar.core.s2_transport import S2Transport
 from scholar.core.storage.elasticsearch.paper_repository import (
     ElasticsearchPaperRepository,
     create_elasticsearch,
@@ -18,6 +19,7 @@ from scholar.domain.models.identifiers import IdentifierKind
 from scholar.providers.arxiv import ArxivProvider
 from scholar.providers.huggingface import HuggingFaceProvider
 from scholar.providers.openalex import OpenAlexProvider
+from scholar.providers.s2 import S2Provider
 
 
 class Container(containers.DeclarativeContainer):
@@ -40,6 +42,13 @@ class Container(containers.DeclarativeContainer):
     huggingface_http = providers.Singleton(
         httpx.AsyncClient, timeout=config.SCHOLAR_REQUEST_TIMEOUT_SECONDS
     )
+    s2_http = providers.Singleton(
+        httpx.AsyncClient, timeout=config.SCHOLAR_REQUEST_TIMEOUT_SECONDS
+    )
+    s2_transport = providers.Singleton(
+        S2Transport, http=s2_http, redis=redis, api_key=config.S2_API_KEY
+    )
+    s2_provider = providers.Singleton(S2Provider, transport=s2_transport)
     paper_repository = providers.Singleton(
         ElasticsearchPaperRepository, es=elasticsearch, alias=config.SCHOLAR_INDEX_ALIAS
     )
@@ -133,10 +142,14 @@ class Container(containers.DeclarativeContainer):
         negative_ttl_seconds=config.SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS,
         concurrency=config.SCHOLAR_HF_CONCURRENCY,
     )
-    paper_lookup_service = providers.Factory(
+    paper_lookup_service = providers.Singleton(
         PaperLookupService,
         paper_repository=paper_repository,
         openalex_lookup=openalex_searcher.provided.lookup,
+        s2_enricher=s2_provider,
+        s2_cache=s2_cache,
+        positive_ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
+        negative_ttl_seconds=config.SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS,
     )
 
 

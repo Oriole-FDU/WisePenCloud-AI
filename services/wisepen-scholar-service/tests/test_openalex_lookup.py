@@ -3,7 +3,6 @@ from datetime import date
 
 import httpx
 import pytest
-from common.core.exceptions import ServiceException
 
 from scholar.application.lookup import (
     LookupPurpose,
@@ -12,9 +11,11 @@ from scholar.application.lookup import (
     PaperLookupService,
 )
 from scholar.application.source_execution import SourceExecutionStatus
+from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.interfaces.provider_error import ProviderError
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.models.paper import Paper, PaperSource
+from scholar.domain.repositories.paper_enrichment_cache import CachedPaperEnrichment
 from scholar.domain.repositories.paper_repository import PaperLookupMatch
 
 
@@ -88,7 +89,7 @@ async def test_lookup_keeps_local_hits_ambiguity_and_failure_without_openalex_fa
         LookupStatus.FOUND,
         LookupStatus.AMBIGUOUS,
         LookupStatus.FAILED,
-        LookupStatus.UNSUPPORTED_IDENTIFIER,
+        LookupStatus.NOT_FOUND,
     ]
     assert [item.identifier for item in result.items[:2]] == [
         "https://arxiv.org/abs/2401.00001v2",
@@ -99,8 +100,10 @@ async def test_lookup_keeps_local_hits_ambiguity_and_failure_without_openalex_fa
     assert result.items[3].error == "msearch item rejected"
     assert repository.calls == [[arxiv, doi, failed]]
     assert openalex_calls == []
-    assert [item.status for item in result.execution] == [SourceExecutionStatus.PARTIAL]
+    assert result.execution[0].status == SourceExecutionStatus.PARTIAL
     assert result.execution[0].error == "msearch item rejected"
+    assert result.execution[1].source == "s2"
+    assert result.execution[1].status == SourceExecutionStatus.NOT_EXECUTED
 
 
 @pytest.mark.asyncio
@@ -147,8 +150,10 @@ async def test_lookup_fills_only_local_not_found_once_per_normalized_identifier(
     assert [item.source for item in result.execution] == [
         PaperSource.ARXIV,
         PaperSource.OPENALEX,
+        "s2",
     ]
     assert result.execution[1].status == SourceExecutionStatus.COMPLETED
+    assert result.execution[2].status == SourceExecutionStatus.NOT_EXECUTED
     assert "current-request-key" not in repr(result)
 
 
@@ -179,8 +184,10 @@ async def test_lookup_reports_missing_key_only_for_openalex_identity():
         ]
     ]
     assert openalex_calls == []
-    assert result.execution[-1].source == PaperSource.OPENALEX
-    assert result.execution[-1].status == SourceExecutionStatus.FAILED
+    assert result.execution[1].source == PaperSource.OPENALEX
+    assert result.execution[1].status == SourceExecutionStatus.FAILED
+    assert result.execution[2].source == "s2"
+    assert result.execution[2].status == SourceExecutionStatus.NOT_EXECUTED
 
 
 @pytest.mark.asyncio
@@ -267,6 +274,37 @@ async def test_single_doi_local_miss_then_openalex_error_reraises_provider_error
 
     assert caught.value is error
     assert repository.calls == [[doi]]
+
+
+@pytest.mark.asyncio
+async def test_partial_details_cache_hit_does_not_mask_openalex_failure():
+    doi = PaperIdentifier(IdentifierKind.DOI, "10.1234/missing")
+    error = ProviderError("OpenAlex 429 response")
+    cached = CachedPaperEnrichment(
+        enrichment=PaperEnrichment(
+            identifiers=[doi], metadata={"s2": {"citation_count": 0}}
+        ),
+        cache_aliases=(doi,),
+        record_found=True,
+        details_confirmed=False,
+    )
+
+    class Cache:
+        async def get(self, identifiers):
+            return cached
+
+        async def put(self, identifiers, value, *, ttl_seconds):
+            raise AssertionError("details lookup must be cache-only")
+
+    async def openalex_lookup(identifier, *, api_key):
+        raise error
+
+    with pytest.raises(ProviderError) as caught:
+        await PaperLookupService(
+            FakePaperRepository(), openalex_lookup, s2_cache=Cache()
+        ).lookup(PaperLookup([doi.value]), api_key="request-key")
+
+    assert caught.value is error
 
 
 @pytest.mark.asyncio
@@ -363,19 +401,37 @@ async def test_program_error_and_cancellation_propagate(failure):
     assert caught.value is failure
 
 
-@pytest.mark.parametrize("purpose", [LookupPurpose.ENRICH, LookupPurpose.FULL])
 @pytest.mark.asyncio
-async def test_lookup_leaves_enrich_and_full_to_s2_stage(purpose):
+async def test_enrich_does_not_send_unresolved_openalex_id_to_either_source():
     repository = FakePaperRepository()
     openalex_calls = []
 
     async def openalex_lookup(identifier, *, api_key):
         openalex_calls.append(identifier)
 
-    with pytest.raises(ServiceException):
-        await PaperLookupService(repository, openalex_lookup).lookup(
-            PaperLookup(["openalex:W77"], purpose=purpose), api_key="request-key"
-        )
+    result = await PaperLookupService(repository, openalex_lookup).lookup(
+        PaperLookup(["openalex:W77"], purpose=LookupPurpose.ENRICH),
+        api_key="request-key",
+    )
 
+    assert result.items[0].status == LookupStatus.UNSUPPORTED_IDENTIFIER
     assert repository.calls == []
     assert openalex_calls == []
+
+
+@pytest.mark.asyncio
+async def test_full_openalex_id_uses_openalex_before_s2_identity_is_available():
+    repository = FakePaperRepository()
+    openalex_calls = []
+
+    async def openalex_lookup(identifier, *, api_key):
+        openalex_calls.append(identifier)
+
+    result = await PaperLookupService(repository, openalex_lookup).lookup(
+        PaperLookup(["openalex:W77"], purpose=LookupPurpose.FULL),
+        api_key="request-key",
+    )
+
+    assert result.items[0].status == LookupStatus.NOT_FOUND
+    assert repository.calls == []
+    assert openalex_calls == [PaperIdentifier(IdentifierKind.OPENALEX, "W77")]

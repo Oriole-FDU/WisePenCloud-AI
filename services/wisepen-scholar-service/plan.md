@@ -186,7 +186,7 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 - `fieldsOfStudy`、`s2FieldsOfStudy`：不参与当前路由、过滤或排序。
 - `publicationVenue`、`publicationTypes`、`journal`：使用 venue 展示发表渠道，使用 BibTeX 完成引用，不建设额外出版实体结构。
 
-`authors` 仅解析 API 实际返回的作者 ID 和姓名。不请求 `authors.*`，不为其失败增加逐作者补查或字段自动拆分回退。机构等展示占位文案不作为来源事实保存。
+`authors` 仅解析 API 实际返回的姓名以填充基础 Paper，不保留没有消费者的作者画像。不请求 `authors.*`，不为其失败增加逐作者补查或字段自动拆分回退。机构等展示占位文案不作为来源事实保存。
 
 ### 4.2 已验证协议与必要边界
 
@@ -364,7 +364,7 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
   部分结果。
 - **边界**：不获取 embedding、作者画像等弃选字段，不预置逐作者补查、未知字段自动裁剪或持久用户任务队列。
 - **提交**：`feat(scholar): add purpose-aware s2 enrichment`。
-- **状态**：待开发；依赖 P2/P3 的已有查询与凭证通道。
+- **状态**：已实现并接入 lookup；公开行为、HTTP、真实 Redis 配额、保存响应投影及正式 S2 Graph 成功请求已验收，见 [P4 验收记录](docs/p4-acceptance.md)。
 
 ### P5：CS 专用 HF 富化与论文发现
 

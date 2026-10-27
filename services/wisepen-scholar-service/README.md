@@ -12,7 +12,7 @@ Scholar 是内部 HTTP 微服务。MCP 工具由现有 `wisepen-mcp-service` 注
 - `core/config` 与 Chat/Sandbox 一样，通过 Bootstrap 定位 Nacos，再由 AppSettings 加载业务字段；`main.py` 负责日志、观测、安全中间件、客户端生命周期和服务注册。
 - `etl` 独立维护 DuckDB 来源事实及发布进度；HTTP 不读写 DuckDB，不启动 ETL。
 
-P1 本地 arXiv 闭环已提交。当前工作树还包含 OpenAlex BYOK、策略驱动的默认/多源检索与精确 lookup；P3 的最终整体验收结果待 root 补录。CS 搜索后处理已通过原生异步 HTTP 调用 HF 并使用配置缓存；公开论文发现仍属于 P5，在线 S2 purpose 富化仍单独按 P4 验收。
+P1 本地 arXiv 闭环、P3 OpenAlex BYOK 与配置驱动检索已验收；P2 真实全量 S2 导入仍在后台进行。CS 搜索后处理通过原生异步 HTTP 调用 HF，lookup 的 S2 purpose 富化按 P4 验收。公开论文发现属于 P5。
 
 领域策略声明默认来源、无凭证计划、多源计划、搜索后处理器及发现器；来源绑定由容器注册。单源搜索或所有来源都失败时传播 provider 错误；多源仅在至少一个来源成功时返回部分结果，并保留失败来源错误文本。lookup 批次只有在存在其他可用项时才以逐项状态保留 provider 失败；可选搜索后处理失败保留基础论文及错误文本。程序错误和取消不会降级为来源部分失败。
 
@@ -44,6 +44,8 @@ uv run --no-sync scholar-etl publish
 `--max-batches N` 限制本次工作量，适合验证恢复；未读到 EOF 的导入不能发布。发布逐项确认 Bulk，成功项移出待发布集合，失败项重放同一文档 ID。全部文档数量及内容抽样检查通过后，才原子切换版本索引别名。旧索引不自动删除。在线请求总预算默认 25 秒；独立 ETL 的单次存储请求超时默认 120 秒，通过 `SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS` 配置。资源有限的 ES 实例可以用 `publish --batch-size 1000` 减少单次写入压力。
 
 ## HTTP 与 MCP
+
+Lookup 的 `details/enrich/full` 已接入同一个用例。details 可复用缓存且不在线访问 S2；enrich 只输出精选信号；full 同时返回可用基础论文。没有可用结果的外部失败直接抛出，已有论文或信号的部分结果保留真实错误。缓存与真实边界验收见 [P4 记录](docs/p4-acceptance.md)。
 
 `POST /scholar/papers/search` 接受 query、field、published_after/before、limit、source_scope。时间按首次提交日期包含两端过滤；领域采用 plan.md 的 arXiv 分类映射。查询缓存默认 10 分钟，缓存只存论文事实，每次重新构造执行情况。
 

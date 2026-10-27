@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from scholar.api.app import create_app
 from scholar.api.endpoints import health, papers
 from scholar.container import container
+from scholar.domain.interfaces.provider_error import ProviderError
 
 FROM_SOURCE_SECRET = "scholar-test-secret"
 AUTHORIZED = {"X-From-Source": FROM_SOURCE_SECRET}
@@ -104,6 +105,9 @@ class FakeRedis:
     async def get(self, key):
         return self.values.get(key)
 
+    async def mget(self, keys):
+        return [self.values.get(key) for key in keys]
+
     async def set(self, key, value, *, ex):
         self.values[key] = value
 
@@ -122,6 +126,7 @@ def scholar_client():
             "SCHOLAR_QUERY_CACHE_TTL_SECONDS": 60,
             "SCHOLAR_REQUEST_TIMEOUT_SECONDS": 3,
             "HF_TOKEN": None,
+            "S2_API_KEY": "test-s2-key",
             "SCHOLAR_HF_CONCURRENCY": 4,
             "SCHOLAR_PAPER_CACHE_TTL_SECONDS": 86400,
             "SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS": 3600,
@@ -281,16 +286,41 @@ def test_lookup_whole_failure_exposes_original_error_to_the_caller(scholar_clien
     assert response.json()["data"] is None
 
 
+@pytest.mark.parametrize("identifier", ["2201.00001", "corpusid:123"])
+def test_full_lookup_keeps_base_facts_or_raises_when_s2_fails(
+    scholar_client, identifier
+):
+    client, _, _ = scholar_client
+
+    class LimitedEnricher:
+        async def enrich(self, identifiers, *, include_details=False):
+            raise ProviderError("429 Too Many Requests from Semantic Scholar")
+
+    with container.s2_provider.override(providers.Object(LimitedEnricher())):
+        response = client.post(
+            "/scholar/papers/lookup",
+            headers=AUTHORIZED,
+            json={"identifiers": [identifier], "purpose": "full"},
+        )
+
+    if identifier == "2201.00001":
+        assert response.status_code == 200
+        item = response.json()["data"]["items"][0]
+        assert item["paper"]["title"] == "First paper"
+        assert item["enrichment_status"] == "failed"
+        assert "429" in item["error"]
+    else:
+        assert response.status_code == 503
+        assert "429" in response.json()["msg"]
+        assert response.json()["data"] is None
+
+
 @pytest.mark.parametrize(
     ("path", "payload"),
     [
         (
             "/scholar/papers/search",
             {"query": "graph models", "source_scope": "multi_source"},
-        ),
-        (
-            "/scholar/papers/lookup",
-            {"identifiers": ["2201.00001"], "purpose": "enrich"},
         ),
     ],
 )
