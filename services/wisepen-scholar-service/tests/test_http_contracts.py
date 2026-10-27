@@ -1,12 +1,15 @@
 """Scholar HTTP 合同：认证、检索投影、缓存和逐项标识结果。"""
 
+from datetime import date
+
 import pytest
 from dependency_injector import providers
 from fastapi.testclient import TestClient
 
 from scholar.api.app import create_app
-from scholar.api.endpoints import health, papers
+from scholar.api.endpoints import discovery, health, papers
 from scholar.container import container
+from scholar.domain.interfaces.paper_discoverer import PaperDiscovery
 from scholar.domain.interfaces.provider_error import ProviderError
 
 FROM_SOURCE_SECRET = "scholar-test-secret"
@@ -124,6 +127,7 @@ def scholar_client():
         {
             "SCHOLAR_INDEX_ALIAS": "test-scholar-papers",
             "SCHOLAR_QUERY_CACHE_TTL_SECONDS": 60,
+            "SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS": 900,
             "SCHOLAR_REQUEST_TIMEOUT_SECONDS": 3,
             "HF_TOKEN": None,
             "S2_API_KEY": "test-s2-key",
@@ -134,7 +138,7 @@ def scholar_client():
     )
     container.elasticsearch.override(providers.Object(es))
     container.redis.override(providers.Object(redis))
-    container.wire(modules=[health, papers])
+    container.wire(modules=[health, papers, discovery])
     try:
         with TestClient(create_app(from_source_secret=FROM_SOURCE_SECRET)) as client:
             yield client, es, redis
@@ -433,3 +437,36 @@ def test_search_uses_openalex_header_and_user_scoped_cache(scholar_client):
     assert len(searcher.lookup_calls) == 1
     assert searcher.lookup_calls[0][1] == "user-secret"
     assert "user-secret" not in str(redis.values)
+
+
+def test_discovery_uses_registered_provider_and_caches_real_window(scholar_client):
+    client, _, _ = scholar_client
+
+    class DailyPapers:
+        def __init__(self):
+            self.calls = []
+
+        async def discover(self, **kwargs):
+            self.calls.append(kwargs)
+            return PaperDiscovery([], date(2026, 10, 26), date(2026, 10, 26))
+
+    provider = DailyPapers()
+    payload = {"field": "computer_science", "limit": 2}
+    with container.huggingface_provider.override(providers.Object(provider)):
+        first = client.post(
+            "/scholar/papers/discover", headers=AUTHORIZED, json=payload
+        )
+        repeated = client.post(
+            "/scholar/papers/discover", headers=AUTHORIZED, json=payload
+        )
+        invalid = client.post(
+            "/scholar/papers/discover",
+            headers=AUTHORIZED,
+            json={**payload, "query": "LLM"},
+        )
+
+    assert first.status_code == repeated.status_code == 200
+    assert first.json()["data"]["window_start"] == "2026-10-26"
+    assert repeated.json()["data"]["execution"][0]["cache_hit"]
+    assert len(provider.calls) == 1
+    assert invalid.status_code == 400

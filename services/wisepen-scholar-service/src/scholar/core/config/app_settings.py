@@ -23,6 +23,7 @@ class AppSettings(BaseModel):
     HF_TOKEN: str | None = Field(default=None, repr=False)
     SCHOLAR_INDEX_ALIAS: str = "wisepen-scholar-arxiv"
     SCHOLAR_QUERY_CACHE_TTL_SECONDS: int = Field(default=600, gt=0)
+    SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS: int = Field(default=900, gt=0)
     SCHOLAR_PAPER_CACHE_TTL_SECONDS: int = Field(default=86400, gt=0)
     SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS: int = Field(default=3600, gt=0)
     SCHOLAR_HF_CONCURRENCY: int = Field(default=4, gt=0)

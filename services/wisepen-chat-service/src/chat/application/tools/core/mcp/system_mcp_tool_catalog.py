@@ -253,6 +253,11 @@ _SYSTEM_TOOL_CONFIGS: list[dict[str, Any]] = [{
         "policy": _SCHOLAR_POLICY,
         "config_spec": _SCHOLAR_OPENALEX_API_KEY_CONFIG,
         "failure_reason": "Scholar Paper Lookup Failed",
+    },{
+        "tool_name": "discover_papers",
+        "ui_spec": ToolUISpec(display_name="发现论文"),
+        "policy": _SCHOLAR_POLICY,
+        "failure_reason": "Scholar Paper Discovery Failed",
     }
 ]
 

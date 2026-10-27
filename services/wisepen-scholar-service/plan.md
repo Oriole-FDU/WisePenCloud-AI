@@ -38,7 +38,7 @@ V1 不建设全文语料库、向量检索、完整引用图、作者研究工�
 
 `domain/models/` 中的 `paper.py`、`identifiers.py` 只保存论文和身份领域语义。请求、结果、来源执行状态等细节放在具体应用用例或其共享执行模型中，不放入一个总 models.py。
 
-`application/` 只有 `search/` 与 `lookup/` 两个用例包。`search/use_case.py` 负责来源计划、检索缓存和候选融合；`search/enrichment.py` 是搜索用例内的可选候选后处理，不是独立 application service。精确查询及其 S2 purpose 富化归 `lookup/` 内部；P4 的在线 S2 对外接入仍单独验收。
+`application/` 只有 search、lookup、discover 三个用例。`search/use_case.py` 负责来源计划、检索缓存和候选融合；`search/enrichment.py` 是搜索用例内的可选候选后处理，不是独立 application service。精确查询及其 S2 purpose 富化归 `lookup/` 内部；发现由 `discovery.py` 按领域配置调用发现能力。共用领域策略和执行结果不另立业务服务。
 
 `application/field_policies.py` 是 search 与 lookup 共用的领域策略表。`FieldPolicy` 明确记录默认来源计划、无凭证计划、多源计划、搜索后处理器和发现器；容器注册来源名称到 provider 能力的绑定。新增医疗来源时，兼容的 PubMed/WoS searcher、富化器及容器注册可以由领域配置选择，无需在核心检索、缓存或融合流程增加供应商分支。`Paper.source` 接受开放字符串，来源专有事实放在 `metadata[来源名]` 自由字典中。
 
@@ -143,12 +143,14 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 |----------|----------------------------------------------|--------------------------------------|
 | `field`  | 必填发现领域枚举，V1 只有 `computer_science` | 仅暴露已注册的发现能力               |
 | `period` | `daily`、`weekly`、`monthly`，默认 `daily`   | 渠道日期或自然周期，不是滚动 7/30 天 |
-| `sort`   | `recent`、`trending`，默认 `trending`        | `recent` 映射为上游 `publishedAt`    |
+| `sort`   | 默认 `recent`，暂不支持周期内 `trending`    | `recent` 映射为上游 `publishedAt`    |
 | `limit`  | 默认 10，范围 1–15                           | 最终返回数量                         |
 
 删除 `query`、`all_time`、`popular`。发现以渠道分发信号为入口，不执行主题搜索。
 
-使用 HF 官方论文 HTTP API：daily 获取最近可用内容；weekly/monthly 分别传当前 UTC 自然周、自然月，返回实际查询窗口。按需使用同一 HF 适配器的详情和缓存补充研究产物，不调用在线 S2。所有请求通过异步客户端执行，并发和超时有界。
+使用 HF 官方论文 HTTP API：daily 先确定最新可用分发日，再按明确日期取列表；weekly/monthly 分别传当前 UTC 自然周、自然月，返回实际查询窗口。分发日只读 `submittedOnDailyAt`，不从论文或外层 `publishedAt` 推断；上游结果缺失日期或越窗时直接抛错。真实 API 的 `trending` 忽略日/周/月筛选，因此暂时明确报错，不静默替换排序或声称返回周期趋势。保留枚举供后续可靠能力启用。
+
+发现结果保留渠道列表实际返回的研究产物信号，不额外逐篇拉取详情，也不调用在线 S2。所有请求通过异步客户端执行，并发和超时有界。
 
 ### 3.4 输出、缺失与部分结果
 
@@ -368,12 +370,12 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
 
 ### P5：CS 专用 HF 富化与论文发现
 
-- **交付**：完成异步 HF HTTP、Nacos `HF_TOKEN` 与 CS 搜索后处理的验收，并接入无 query 的 discover、周期结果和相关缓存。HF 已由 CS 搜索后处理使用；发现用例和完整 P5 验收仍未完成。
+- **交付**：完成异步 HF HTTP、Nacos `HF_TOKEN` 与 CS 搜索后处理的验收，并接入无 query 的 discover、周期结果和相关缓存。
 - **验收**：同样的 CS 候选在 General 请求下不执行 HF、明确 CS 请求下执行；缓存满足时不重复调用；无 arXiv ID 不猜测匹配；HF
-  无记录和服务故障不丢弃基础论文。验证日/自然周/月、recent/trending、异步调用、并发预算与三个工具间的边界。
+  无记录和服务故障不丢弃基础论文。验证日/自然周/月、recent 及不支持 trending 的明确失败、异步调用、并发预算与三个工具间的边界。
 - **边界**：不加入主题发现搜索、全时热门榜、学术质量分数或候选内容推断领域。
 - **提交**：`feat(scholar): add cs enrichment and paper discovery`。
-- **状态**：待验收；依赖 P3 的领域检索计划，可独立于 P4 验收。
+- **状态**：已完成；发现、HTTP、MCP/Chat 合同与真实 HF 日/周/月、Nacos/MCP 调用通过，见 [P5 验收记录](docs/p5-acceptance.md)。
 
 ### P6：持续同步、恢复与运行交付
 
@@ -402,7 +404,7 @@ ES、Redis、Nacos 或供应商协议的成功结论。没有新变化、失败�
   的结果，已确认父字段 authors 返回 authorId/name，以及 PDF、BibTeX、TLDR 等所选字段的形态。
 - 样本实际存在空 PDF URL、空 publicationDate，以及开放获取标记和 PDF 状态不一致的情况；按来源合法缺省处理，不把它们当成整篇失败。
 - 不再以先前带 User-Agent 或 authors 子字段的失败请求判定精选字段批量不可用，也不重复执行已保存的实验。
-- 已检查 HF 官方 SDK 对应的 HTTP 协议，当前 provider 使用原生异步 HTTP，且已由 CS 搜索候选后处理调用；公开 discovery 接线及 P5 最终验收仍待完成。
+- 已检查 HF 官方 SDK 对应的 HTTP 协议，当前 provider 使用原生异步 HTTP，由 CS 搜索候选后处理及公开 discover 用例调用；周期筛选以真实分发日期核验，trending 的已知上游限制见 P5 验收记录。
 - P3 的多源路由、OpenAlex lookup、错误传播及医疗多源扩展行为测试见 `tests/test_multisource_search.py`、`tests/test_openalex_lookup.py`、`tests/test_candidate_enrichment.py` 和 `tests/test_openalex_provider.py`；最终结果见 [P3 验收记录](docs/p3-acceptance.md)。
 - P1 行为测试 14 项、MCP 全套测试 103 项已通过；真实 Nacos、ES 8.19.18、Redis、全量别名发布及 HTTP/MCP 端到端验收通过，重复导入/发布维持 3,224,542 篇、pending=0。部署产物属于 P6。详见阶段验收记录。
 

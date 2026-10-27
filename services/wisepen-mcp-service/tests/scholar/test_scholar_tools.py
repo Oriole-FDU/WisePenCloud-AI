@@ -109,6 +109,22 @@ async def test_mcp_scholar_schemas_expose_declared_contracts(scholar_server):
         "full",
     ]
 
+    discovery = tools["discover_papers"].inputSchema
+    assert set(discovery["properties"]) == {"field", "period", "sort", "limit"}
+    assert discovery["required"] == ["field"]
+    assert discovery["$defs"]["DiscoveryField"]["enum"] == ["computer_science"]
+    assert discovery["$defs"]["DiscoveryPeriod"]["enum"] == [
+        "daily",
+        "weekly",
+        "monthly",
+    ]
+    assert discovery["$defs"]["DiscoverySort"]["enum"] == ["recent", "trending"]
+    assert discovery["properties"]["period"]["default"] == "daily"
+    assert discovery["properties"]["sort"]["default"] == "recent"
+    assert discovery["properties"]["limit"]["default"] == 10
+    assert discovery["properties"]["limit"]["minimum"] == 1
+    assert discovery["properties"]["limit"]["maximum"] == 15
+
 
 @pytest.mark.asyncio
 async def test_search_papers_call_passes_http_contract_and_returns_scholar_data(
@@ -180,7 +196,42 @@ async def test_lookup_papers_call_passes_identifiers_and_p1_purpose(scholar_serv
 
 
 @pytest.mark.asyncio
-async def test_scholar_total_timeout_cancels_slow_search_and_lookup_calls():
+async def test_discover_papers_maps_period_and_returns_scholar_data(scholar_server):
+    mcp, rpc = scholar_server
+    response = {"papers": [{"title": "A discovered paper"}], "window_start": None}
+    rpc.response = response
+
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool(
+            "discover_papers",
+            {
+                "field": "computer_science",
+                "period": "weekly",
+                "sort": "recent",
+                "limit": 6,
+            },
+        )
+
+    assert result.structuredContent == response
+    assert rpc.calls == [
+        (
+            "wisepen-scholar-service",
+            "/scholar/papers/discover",
+            {
+                "json": {
+                    "field": "computer_science",
+                    "period": "weekly",
+                    "sort": "recent",
+                    "limit": 6,
+                },
+                "timeout": 30.0,
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_scholar_total_timeout_cancels_slow_calls():
     rpc = SlowRpcSpy()
     client = ScholarClient(rpc, timeout=0.01)
 
@@ -195,8 +246,15 @@ async def test_scholar_total_timeout_cancels_slow_search_and_lookup_calls():
         )
     with pytest.raises(TimeoutError):
         await client.lookup_papers(identifiers=["arxiv:2401.00001"], purpose="details")
-    assert rpc.cancelled_calls == 2
-    assert rpc.timeouts == [0.01, 0.01]
+    with pytest.raises(TimeoutError):
+        await client.discover_papers(
+            field="computer_science",
+            period="daily",
+            sort="trending",
+            limit=10,
+        )
+    assert rpc.cancelled_calls == 3
+    assert rpc.timeouts == [0.01, 0.01, 0.01]
 
 
 @pytest.mark.asyncio

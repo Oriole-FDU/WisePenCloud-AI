@@ -32,6 +32,15 @@ class FakeMcpClient:
                 },
             ),
             McpToolDescriptor(
+                name="discover_papers",
+                description="Discover scholarly papers.",
+                input_schema={
+                    "type": "object",
+                    "properties": {"field": {"type": "string"}},
+                    "required": ["field"],
+                },
+            ),
+            McpToolDescriptor(
                 name="exa_search",
                 description="Search with Exa.",
                 input_schema={
@@ -106,6 +115,7 @@ async def test_optional_scholar_config_keeps_local_tools_callable(scholar_tools)
 
     assert scope.get("system_search_papers") is not None
     assert scope.get("system_lookup_papers") is not None
+    assert scope.get("system_discover_papers") is not None
     assert scope.get("system_exa_search") is None
     assert "api_key" not in json.dumps(scope.schemas())
 
@@ -114,6 +124,10 @@ async def test_optional_scholar_config_keeps_local_tools_callable(scholar_tools)
     assert response.configured is True
     assert response.enabled is True
     assert response.config_schema["properties"]["api_key"]["writeOnly"] is True
+    discovery_response = build_tool_response(scope.get("system_discover_papers"), None)
+    assert discovery_response.requires_config is False
+    assert discovery_response.enabled is True
+    assert discovery_response.config_schema == {}
     results = await ToolDispatcher().dispatch(
         [
             ToolInvocation("search", "system_search_papers", {"query": "retrieval"}),
@@ -121,6 +135,11 @@ async def test_optional_scholar_config_keeps_local_tools_callable(scholar_tools)
                 "lookup",
                 "system_lookup_papers",
                 {"identifiers": ["arxiv:2601.12345"]},
+            ),
+            ToolInvocation(
+                "discover",
+                "system_discover_papers",
+                {"field": "computer_science"},
             ),
         ],
         scope,
@@ -130,6 +149,7 @@ async def test_optional_scholar_config_keeps_local_tools_callable(scholar_tools)
     assert [(name, config) for name, _, config in mcp_client.calls] == [
         ("search_papers", None),
         ("lookup_papers", None),
+        ("discover_papers", None),
     ]
 
 

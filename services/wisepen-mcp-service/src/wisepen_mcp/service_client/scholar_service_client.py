@@ -9,6 +9,7 @@ from common.http.rpc_client import RpcClient
 _SCHOLAR_SERVICE_NAME = "wisepen-scholar-service"
 _SEARCH_PAPERS_PATH = "/scholar/papers/search"
 _LOOKUP_PAPERS_PATH = "/scholar/papers/lookup"
+_DISCOVER_PAPERS_PATH = "/scholar/papers/discover"
 
 
 class ScholarClient:
@@ -83,5 +84,27 @@ class ScholarClient:
                     else {}
                 ),
             )
+
+    async def discover_papers(
+        self,
+        *,
+        field: str,
+        period: str,
+        sort: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        async with asyncio.timeout(self._timeout):
+            return await self._rpc.post(
+                self._service_name,
+                _DISCOVER_PAPERS_PATH,
+                json={
+                    "field": field,
+                    "period": period,
+                    "sort": sort,
+                    "limit": limit,
+                },
+                timeout=self._timeout,
+            )
+
 
 __all__ = ["ScholarClient"]

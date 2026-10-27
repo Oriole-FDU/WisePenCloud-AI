@@ -39,6 +39,21 @@ class LookupPurpose(StrEnum):
     FULL = "full"
 
 
+class DiscoveryField(StrEnum):
+    COMPUTER_SCIENCE = "computer_science"
+
+
+class DiscoveryPeriod(StrEnum):
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
+class DiscoverySort(StrEnum):
+    RECENT = "recent"
+    TRENDING = "trending"
+
+
 def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
     @mcp.tool(
         name="search_papers",
@@ -111,6 +126,38 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             purpose=purpose.value,
             openalex_api_key=_openalex_key(ctx),
         )
+
+    @mcp.tool(
+        name="discover_papers",
+        description=(
+            "Discover papers by field and time window. Scholar returns the actual window and execution result."
+        ),
+    )
+    async def discover_papers(
+        field: Annotated[
+            DiscoveryField,
+            Field(description="A field with a registered discovery capability."),
+        ],
+        period: Annotated[
+            DiscoveryPeriod, Field(description="Daily, natural week, or natural month.")
+        ] = DiscoveryPeriod.DAILY,
+        sort: Annotated[
+            DiscoverySort,
+            Field(
+                description="Use recent; period-scoped trending is currently unavailable from HF."
+            ),
+        ] = DiscoverySort.RECENT,
+        limit: Annotated[
+            int, Field(ge=1, le=15, description="Maximum number of papers to return.")
+        ] = 10,
+    ) -> dict[str, Any]:
+        return await scholar_client.discover_papers(
+            field=field.value,
+            period=period.value,
+            sort=sort.value,
+            limit=limit,
+        )
+
 
 def _openalex_key(ctx: Context) -> str | None:
     # 用户秘密配置经 MCP 元数据传递，不能成为模型可见的工具参数。

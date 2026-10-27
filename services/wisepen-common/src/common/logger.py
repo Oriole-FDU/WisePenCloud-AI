@@ -27,12 +27,18 @@ class _InterceptHandler(logging.Handler):
         _loguru.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
-def setup_logging_intercept(log_level: str = "INFO"):
+def setup_logging_intercept(log_level: str = "INFO", *, diagnose: bool = True):
     normalized_level = (log_level or "INFO").upper()
 
     _loguru.remove()
     # Loguru 负责本地控制台可读输出
-    _loguru.add(sys.stdout, level=normalized_level, colorize=True, enqueue=False)
+    _loguru.add(
+        sys.stdout,
+        level=normalized_level,
+        colorize=True,
+        enqueue=False,
+        diagnose=diagnose,
+    )
 
     numeric_level = getattr(logging, normalized_level, logging.INFO)
     logging.basicConfig(handlers=[_InterceptHandler()], level=numeric_level, force=True)

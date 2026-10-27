@@ -7,7 +7,8 @@ from common.observability import setup_observability
 
 from scholar.core.config.bootstrap_settings import bootstrap_settings
 
-setup_logging_intercept(bootstrap_settings.LOG_LEVEL)
+# BYOK 密钥会进入请求栈，异常日志保留错误和回溯，但不展开局部变量。
+setup_logging_intercept(bootstrap_settings.LOG_LEVEL, diagnose=False)
 setup_observability(
     service_name=bootstrap_settings.SERVICE_NAME, environment=bootstrap_settings.PROFILE
 )
@@ -16,13 +17,13 @@ import uvicorn
 from common.observability import instrument_fastapi_app
 
 from scholar.api.app import create_app
-from scholar.api.endpoints import health, papers
+from scholar.api.endpoints import discovery, health, papers
 from scholar.container import container
 from scholar.core.config.app_settings import settings
 from scholar.core.config.nacos import nacos_client_manager
 
 container.config.from_dict(settings.model_dump())
-container.wire(modules=[health, papers])
+container.wire(modules=[health, papers, discovery])
 
 
 @asynccontextmanager

@@ -4,6 +4,7 @@ import httpx
 from dependency_injector import containers, providers
 from redis.asyncio import Redis
 
+from scholar.application.discovery import PaperDiscoveryService
 from scholar.application.field_policies import FIELD_POLICIES
 from scholar.application.lookup import PaperLookupService
 from scholar.application.search import PaperSearchService, SearchBinding
@@ -13,6 +14,7 @@ from scholar.core.storage.elasticsearch.paper_repository import (
     ElasticsearchPaperRepository,
     create_elasticsearch,
 )
+from scholar.core.storage.redis.discovery_cache import RedisDiscoveryCacheRepository
 from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
 from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
 from scholar.domain.models.identifiers import IdentifierKind
@@ -57,6 +59,12 @@ class Container(containers.DeclarativeContainer):
         redis=redis,
         namespace=config.SCHOLAR_INDEX_ALIAS,
         ttl=config.SCHOLAR_QUERY_CACHE_TTL_SECONDS,
+    )
+    discovery_cache_repository = providers.Singleton(
+        RedisDiscoveryCacheRepository,
+        redis=redis,
+        namespace=config.SCHOLAR_INDEX_ALIAS,
+        ttl=config.SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS,
     )
     arxiv_searcher = providers.Singleton(
         ArxivProvider, paper_repository=paper_repository
@@ -150,6 +158,12 @@ class Container(containers.DeclarativeContainer):
         s2_cache=s2_cache,
         positive_ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
         negative_ttl_seconds=config.SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS,
+    )
+    paper_discovery_service = providers.Singleton(
+        PaperDiscoveryService,
+        discoverers=providers.Dict(huggingface=huggingface_provider),
+        policies=providers.Object(FIELD_POLICIES),
+        cache=discovery_cache_repository,
     )
 
 

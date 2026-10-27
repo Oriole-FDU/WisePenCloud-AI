@@ -80,15 +80,37 @@ class HuggingFaceProvider:
         sort: DiscoverySort,
         limit: int,
     ) -> PaperDiscovery:
+        if sort == DiscoverySort.TRENDING:
+            # HF 的 trending 不应用周期筛选，不能将全局列表标成日、周或月结果。
+            raise ProviderError(
+                "Hugging Face Daily Papers does not support period-scoped trending"
+            )
+
         now = datetime.now(UTC)
         params: dict[str, str | int] = {
             "p": 0,
             "limit": limit,
-            "sort": "publishedAt" if sort == DiscoverySort.RECENT else "trending",
+            "sort": "publishedAt",
         }
         window_start = None
         window_end = None
-        if period == DiscoveryPeriod.WEEKLY:
+        if period == DiscoveryPeriod.DAILY:
+            # 首条只确定最新渠道日期；第二次显式按日期取数，避免 limit 跨日。
+            latest_response = await self._get(
+                f"{_HF_ORIGIN}/api/daily_papers",
+                params={"p": 0, "limit": 1, "sort": "publishedAt"},
+            )
+            latest_rows = latest_response.json()
+            if not latest_rows:
+                return PaperDiscovery(papers=[], window_start=None, window_end=None)
+
+            latest_date = self._parse_date(self._submitted_at(latest_rows[0]))
+            if latest_date is None:
+                raise ProviderError(
+                    "Hugging Face Daily Papers row is missing submittedOnDailyAt"
+                )
+            params["date"] = latest_date.isoformat()
+        elif period == DiscoveryPeriod.WEEKLY:
             iso_week = now.isocalendar()
             params["week"] = f"{iso_week.year}-W{iso_week.week:02d}"
             window_start = now.date() - timedelta(days=now.weekday())
@@ -102,6 +124,21 @@ class HuggingFaceProvider:
 
         response = await self._get(f"{_HF_ORIGIN}/api/daily_papers", params=params)
         rows = response.json()
+        submitted_dates = [self._parse_date(self._submitted_at(row)) for row in rows]
+        if period == DiscoveryPeriod.DAILY:
+            if any(value is None or value != latest_date for value in submitted_dates):
+                raise ProviderError(
+                    "Hugging Face Daily Papers returned rows outside the requested date"
+                )
+            window_start = window_end = latest_date
+        elif rows and any(
+            value is None or value < window_start or value > window_end
+            for value in submitted_dates
+        ):
+            raise ProviderError(
+                f"Daily Papers returned rows outside the requested {period} window"
+            )
+
         observed_at = datetime.now(UTC).isoformat()
         papers = [
             self._to_paper(
@@ -109,15 +146,6 @@ class HuggingFaceProvider:
             )
             for row in rows
         ]
-
-        if period == DiscoveryPeriod.DAILY:
-            submitted_dates = [
-                value
-                for row in rows
-                if (value := self._parse_date(self._submitted_at(row))) is not None
-            ]
-            if submitted_dates:
-                window_start, window_end = min(submitted_dates), max(submitted_dates)
 
         return PaperDiscovery(
             papers=papers,
@@ -209,10 +237,9 @@ class HuggingFaceProvider:
 
     @staticmethod
     def _submitted_at(payload: dict[str, Any]) -> str | None:
+        # Daily Papers 的渠道分发时间由 submittedOnDailyAt 表示，publishedAt 是论文日期。
         nested = payload.get("paper", {})
-        if nested.get("publishedAt") and payload.get("publishedAt"):
-            return payload["publishedAt"]
-        return payload.get("submittedOnDailyAt")
+        return nested.get("submittedOnDailyAt") or payload.get("submittedOnDailyAt")
 
     @classmethod
     def _to_paper(cls, payload: dict[str, Any], metadata: dict[str, Any]) -> Paper:
