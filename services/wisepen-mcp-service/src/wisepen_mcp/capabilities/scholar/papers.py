@@ -144,9 +144,9 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         sort: Annotated[
             DiscoverySort,
             Field(
-                description="Use recent; period-scoped trending is currently unavailable from HF."
+                description="Request recent or trending order within the selected channel period."
             ),
-        ] = DiscoverySort.RECENT,
+        ] = DiscoverySort.TRENDING,
         limit: Annotated[
             int, Field(ge=1, le=15, description="Maximum number of papers to return.")
         ] = 10,

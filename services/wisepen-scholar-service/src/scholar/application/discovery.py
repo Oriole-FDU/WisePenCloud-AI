@@ -24,7 +24,7 @@ from scholar.domain.repositories.discovery_cache import DiscoveryCacheRepository
 class PaperDiscoveryQuery:
     field: AcademicField
     period: DiscoveryPeriod = DiscoveryPeriod.DAILY
-    sort: DiscoverySort = DiscoverySort.RECENT
+    sort: DiscoverySort = DiscoverySort.TRENDING
     limit: int = 10
 
 

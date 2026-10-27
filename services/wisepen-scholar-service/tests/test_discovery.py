@@ -336,7 +336,7 @@ def test_discovery_request_schema_has_only_registered_field_and_no_query():
     ]
     assert schema["$defs"]["DiscoverySort"]["enum"] == ["recent", "trending"]
     assert properties["period"]["default"] == "daily"
-    assert properties["sort"]["default"] == "recent"
+    assert properties["sort"]["default"] == "trending"
     assert properties["limit"]["default"] == 10
     assert properties["limit"]["minimum"] == 1
     assert properties["limit"]["maximum"] == 15

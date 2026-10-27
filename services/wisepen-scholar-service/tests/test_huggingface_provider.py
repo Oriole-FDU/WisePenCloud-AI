@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 
 import httpx
 import pytest
+
 import scholar.providers.huggingface as huggingface_provider
 from scholar.domain.interfaces.paper_discoverer import (
     DiscoveryPeriod,
@@ -419,6 +420,7 @@ async def test_periodic_discovery_sends_hf_period_and_returns_natural_window(
     assert result.window_end == end
 
 
+@pytest.mark.parametrize("sort", list(DiscoverySort))
 @pytest.mark.parametrize(
     ("period", "outside_submission_date"),
     [
@@ -428,7 +430,7 @@ async def test_periodic_discovery_sends_hf_period_and_returns_natural_window(
 )
 @pytest.mark.asyncio
 async def test_periodic_discovery_rejects_rows_outside_requested_window(
-    monkeypatch, period, outside_submission_date
+    monkeypatch, period, outside_submission_date, sort
 ):
     monkeypatch.setattr(huggingface_provider, "datetime", FixedDateTime)
     row = paper_info_payload()
@@ -441,7 +443,7 @@ async def test_periodic_discovery_rejects_rows_outside_requested_window(
         with pytest.raises(ProviderError):
             await HuggingFaceProvider(http).discover(
                 period=period,
-                sort=DiscoverySort.RECENT,
+                sort=sort,
                 limit=1,
             )
 
@@ -474,19 +476,29 @@ async def test_empty_daily_discovery_has_no_assumed_window(monkeypatch):
 
 @pytest.mark.parametrize("period", list(DiscoveryPeriod))
 @pytest.mark.asyncio
-async def test_trending_discovery_is_rejected_before_http_request(period):
+async def test_trending_discovery_forwards_official_period_and_sort(
+    monkeypatch, period
+):
+    monkeypatch.setattr(huggingface_provider, "datetime", FixedDateTime)
     requests = []
 
     async def handle(request):
         requests.append(request)
-        return httpx.Response(200, json=[])
+        return httpx.Response(200, json=[paper_info_payload()])
 
     async with client_for(handle) as http:
-        with pytest.raises(ProviderError, match="period-scoped trending"):
-            await HuggingFaceProvider(http).discover(
-                period=period,
-                sort=DiscoverySort.TRENDING,
-                limit=1,
-            )
+        result = await HuggingFaceProvider(http).discover(
+            period=period,
+            sort=DiscoverySort.TRENDING,
+            limit=1,
+        )
 
-    assert requests == []
+    assert len(result.papers) == 1
+    params = requests[-1].url.params
+    assert params["sort"] == "trending"
+    selector = {
+        DiscoveryPeriod.DAILY: "date",
+        DiscoveryPeriod.WEEKLY: "week",
+        DiscoveryPeriod.MONTHLY: "month",
+    }[period]
+    assert selector in params

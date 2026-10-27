@@ -120,7 +120,7 @@ async def test_mcp_scholar_schemas_expose_declared_contracts(scholar_server):
     ]
     assert discovery["$defs"]["DiscoverySort"]["enum"] == ["recent", "trending"]
     assert discovery["properties"]["period"]["default"] == "daily"
-    assert discovery["properties"]["sort"]["default"] == "recent"
+    assert discovery["properties"]["sort"]["default"] == "trending"
     assert discovery["properties"]["limit"]["default"] == 10
     assert discovery["properties"]["limit"]["minimum"] == 1
     assert discovery["properties"]["limit"]["maximum"] == 15

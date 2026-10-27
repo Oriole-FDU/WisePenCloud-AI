@@ -80,17 +80,12 @@ class HuggingFaceProvider:
         sort: DiscoverySort,
         limit: int,
     ) -> PaperDiscovery:
-        if sort == DiscoverySort.TRENDING:
-            # HF 的 trending 不应用周期筛选，不能将全局列表标成日、周或月结果。
-            raise ProviderError(
-                "Hugging Face Daily Papers does not support period-scoped trending"
-            )
-
         now = datetime.now(UTC)
         params: dict[str, str | int] = {
             "p": 0,
             "limit": limit,
-            "sort": "publishedAt",
+            # 官方 SDK 将周期与排序参数一起透传，不在客户端预先禁止合法组合。
+            "sort": "publishedAt" if sort == DiscoverySort.RECENT else "trending",
         }
         window_start = None
         window_end = None

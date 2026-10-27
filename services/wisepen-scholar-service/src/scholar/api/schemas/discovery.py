@@ -25,7 +25,7 @@ class DiscoveryRequest(BaseModel):
 
     field: DiscoveryField
     period: DiscoveryPeriod = DiscoveryPeriod.DAILY
-    sort: DiscoverySort = DiscoverySort.RECENT
+    sort: DiscoverySort = DiscoverySort.TRENDING
     limit: int = Field(default=10, ge=1, le=15)
 
     def to_query(self) -> PaperDiscoveryQuery:
