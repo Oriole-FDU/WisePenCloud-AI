@@ -1,7 +1,7 @@
 """一次性离线迁移：冻结旧索引、异步 reindex、验收后切换 alias 与 DuckDB 写入目标。
 
 整个运行持有 DuckDB 写连接，阻止其他进程启动 ETL；旧索引保留并保持只读。
-进程被强杀时使用同一 journal 的 --rollback 恢复，不能直接重跑覆盖恢复记录。
+断网后用 --resume 继续跟踪原 ES 任务；需要放弃迁移时用 --rollback 恢复。
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import duckdb
+from elastic_transport import ConnectionError, ConnectionTimeout
 from redis.asyncio import Redis
 
 from scholar.core.storage.elasticsearch.paper_repository import (
@@ -61,12 +62,19 @@ async def rollback(db, es, state: dict) -> None:
 
 
 async def migrate(
-    db, es, redis, alias: str, journal: Path, *, poll_seconds: float = 15
+    db,
+    es,
+    redis,
+    alias: str,
+    journal: Path,
+    *,
+    poll_seconds: float = 15,
+    resume: bool = False,
 ) -> dict:
     """复制期间服务仍可读旧索引；全部验收通过才执行短暂的双目标切换。"""
-    if journal.exists():
+    if journal.exists() and not resume:
         raise FileExistsError(
-            f"journal already exists; inspect or use --rollback: {journal}"
+            f"journal already exists; use --resume or --rollback: {journal}"
         )
     row = db.execute(
         "SELECT complete,published,target_index FROM import_state"
@@ -84,15 +92,38 @@ async def migrate(
     original = (await es.indices.get_settings(index=old, flat_settings=True))[old][
         "settings"
     ]
-    if original.get("index.blocks.write", "false") == "true":
-        raise RuntimeError(
-            "source index is already write-blocked; resolve the previous operation first"
-        )
-    state = {"alias": alias, "old_index": old, "new_index": f"{alias}-{uuid4().hex}"}
-    record(journal, state, "migration_prepare")
+    if resume:
+        state = json.loads(journal.read_text(encoding="utf-8"))
+        if state["alias"] != alias or state["old_index"] != old:
+            raise RuntimeError(
+                "resume requires the original alias and offline write target; use --rollback for a partial cutover"
+            )
+        # 写屏障持续存在，才能证明断网期间复制源没有继续变化。
+        if original.get("index.blocks.write", "false") != "true":
+            raise RuntimeError(
+                "source is no longer frozen; cannot reuse the old copy safely"
+            )
+        if not state.get("task_id"):
+            raise RuntimeError(
+                "no recorded ES task to resume; inspect the preparation failure"
+            )
+        state.pop("error", None)
+        state.pop("committed", None)
+    else:
+        if original.get("index.blocks.write", "false") == "true":
+            raise RuntimeError(
+                "source index is already write-blocked; resolve the previous operation first"
+            )
+        state = {
+            "alias": alias,
+            "old_index": old,
+            "new_index": f"{alias}-{uuid4().hex}",
+        }
+        record(journal, state, "migration_prepare")
     try:
-        # add_block 等待在途写入完成；随后 refresh 确保 scroll 能看到全部已发布文档。
-        await es.indices.add_block(index=old, block="write")
+        # 恢复时重新取得本地写锁并核对冻结源，复用原任务，不重建或覆盖目标索引。
+        if not resume:
+            await es.indices.add_block(index=old, block="write")
         await es.indices.refresh(index=old)
         total = db.execute("SELECT count(*) FROM arxiv").fetchone()[0]
         if (await es.count(index=old))["count"] != total:
@@ -100,28 +131,29 @@ async def migrate(
                 "source index count differs from the offline paper database"
             )
         new = state["new_index"]
-        await es.indices.create(
-            index=new,
-            mappings=ARXIV_MAPPING,
-            settings={
-                "number_of_shards": original["index.number_of_shards"],
-                "number_of_replicas": 0,
-                "refresh_interval": "-1",
-            },
-        )
-        response = await es.reindex(
-            source={"index": old, "size": 1000},
-            dest={"index": new, "op_type": "create"},
-            wait_for_completion=False,
-            slices=1,
-        )
+        if not resume:
+            await es.indices.create(
+                index=new,
+                mappings=ARXIV_MAPPING,
+                settings={
+                    "number_of_shards": original["index.number_of_shards"],
+                    "number_of_replicas": 0,
+                    "refresh_interval": "-1",
+                },
+            )
+            response = await es.reindex(
+                source={"index": old, "size": 1000},
+                dest={"index": new, "op_type": "create"},
+                wait_for_completion=False,
+                slices=1,
+            )
+            state["task_id"] = response["task"]
         record(
             journal,
             state,
             "migration_copy",
-            task_id=response["task"],
             total=total,
-            written=0,
+            written=state.get("written", 0),
         )
         while True:
             task = await es.tasks.get(task_id=state["task_id"])
@@ -225,7 +257,13 @@ async def migrate(
         )
         return state
     except BaseException as failure:
-        # 网络、校验和本地提交失败均保留原异常；恢复也失败时同时报告，禁止伪称恢复完成。
+        # 复制/验收期断网并不代表 ES 任务失败；保留写屏障和任务，避免误取消后台成果。
+        if isinstance(failure, (ConnectionError, ConnectionTimeout)) and state[
+            "stage"
+        ] in ("migration_prepare", "migration_copy", "migration_verify"):
+            record(journal, state, "migration_paused", error=str(failure))
+            raise
+        # 校验或切换失败仍回滚；恢复也失败时同时报告，禁止伪称恢复完成。
         record(journal, state, "migration_rollback", error=str(failure))
         try:
             await rollback(db, es, state)
@@ -254,7 +292,9 @@ async def main() -> None:
         type=Path,
         default=SERVICE_ROOT / ".runtime/search-index-migration.json",
     )
-    parser.add_argument("--rollback", action="store_true")
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--rollback", action="store_true")
+    action.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     # 不创建空库或修改 schema；连接已有数据库的写锁也是本次迁移的离线互斥边界。
     if not args.db.is_file():
@@ -276,7 +316,14 @@ async def main() -> None:
                 await rollback(db, es, state)
                 record(args.journal, state, "migration_rolled_back", committed=False)
             else:
-                await migrate(db, es, redis, settings.SCHOLAR_INDEX_ALIAS, args.journal)
+                await migrate(
+                    db,
+                    es,
+                    redis,
+                    settings.SCHOLAR_INDEX_ALIAS,
+                    args.journal,
+                    resume=args.resume,
+                )
 
 
 if __name__ == "__main__":

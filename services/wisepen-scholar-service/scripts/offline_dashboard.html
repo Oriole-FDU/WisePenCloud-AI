@@ -20,7 +20,7 @@
 const $=id=>document.getElementById(id), fmt=v=>typeof v==='number'?new Intl.NumberFormat('zh-CN',{maximumFractionDigits:1}).format(v):String(v);
 const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labels={running:'运行中',succeeded:'已完成',failed:'失败',interrupted:'监控已中断，退出码未知'};
-const stageNames={import:'读取 arXiv 快照',s2_import:'筛选 S2 文件',s2_projection:'生成合并后的论文',s2_projection_write:'写入合并后的论文',s2_projection_commit:'S2 信息合并已提交',publish:'更新检索索引','publish-incremental':'更新检索索引','publish-delete':'同步删除',migration_prepare:'确认离线基线并冻结旧索引',migration_copy:'完整回填新检索索引',migration_verify:'核对数量、元数据和实际检索',migration_switch:'切换检索别名与离线写入目标',migration_complete:'迁移完成，旧索引保留',migration_rollback:'迁移失败，正在恢复',migration_rolled_back:'已恢复原索引与写入目标'};
+const stageNames={import:'读取 arXiv 快照',s2_import:'筛选 S2 文件',s2_projection:'生成合并后的论文',s2_projection_write:'写入合并后的论文',s2_projection_commit:'S2 信息合并已提交',publish:'更新检索索引','publish-incremental':'更新检索索引','publish-delete':'同步删除',migration_prepare:'确认离线基线并冻结旧索引',migration_copy:'完整回填新检索索引',migration_verify:'核对数量、元数据和实际检索',migration_switch:'切换检索别名与离线写入目标',migration_complete:'迁移完成，旧索引保留',migration_paused:'网络中断，任务保留等待续接',migration_rollback:'迁移失败，正在恢复',migration_rolled_back:'已恢复原索引与写入目标'};
 const metricNames={scanned:'当前分片已读取',retained:'当前分片已保留',staged_changed:'已生成，尚待提交',written:'已处理的论文',projected:'关联论文',pending:'待更新索引',pending_publish:'待更新索引',pending_delete:'待删除',records:'已读取记录',batch:'批次',total:'总量',invalidated_cache_keys:'已失效查询缓存'};
 const date=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'—';
 let busy=false;

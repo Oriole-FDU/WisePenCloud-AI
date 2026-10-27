@@ -36,7 +36,15 @@ uv run --no-sync python scripts/offline_dashboard.py run --name "检索索引迁
 
 复制完成后恢复旧索引的刷新和副本策略，核对完整复制结果、文档总数、S2/TLDR 覆盖数、样本文档及真正的 BM25F 检索。随后原子切 alias、更新 DuckDB 写入目标、仅失效本服务 alias 下的查询缓存，再确认两端指向相同新索引。旧索引保留且只读；脚本不启动业务服务或部署容器。
 
-跨 ES / DuckDB 的切换不具备分布式事务：普通失败自动恢复两端并重新抛出错误。若进程被强杀或恢复失败，保持 ETL 停止，使用 `.runtime/search-index-migration.json` 恢复记录执行：
+复制或验收期间本机断网不意味着 ES 后台任务失败。脚本保留旧索引写屏障、任务 ID 和新索引，记录 `migration_paused` 并报出原网络异常。网络恢复后，以下命令复用原任务继续等待或直接进入验收，不重建索引、不重新复制全库：
+
+```powershell
+uv run --no-sync python scripts/offline_dashboard.py run --name "续接检索索引迁移：验收与切换" search-index-migration -- uv run --no-sync python -u scripts/migrate_search_index.py --resume
+```
+
+续接只适用于仍指向旧索引、旧索引持续只读且没有新待办的窗口。若原 ES 复制任务本身失败，续接会保留真实错误并进入恢复，不把不完整索引用于检索。
+
+跨 ES / DuckDB 的切换不具备分布式事务：数据校验或切换失败自动恢复两端并重新抛出错误。若切换过程中被强杀或恢复失败，保持 ETL 停止，使用 `.runtime/search-index-migration.json` 恢复记录执行：
 
 ```powershell
 uv run --no-sync python scripts/offline_dashboard.py run --name "恢复原检索索引与离线写入目标" search-index-rollback -- uv run --no-sync python -u scripts/migrate_search_index.py --rollback
