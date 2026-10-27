@@ -12,7 +12,7 @@ from scholar.application.search import (
     SearchResult,
     SourceScope,
 )
-from scholar.application.search.enrichment import EnrichmentBinding
+from scholar.application.search import EnrichmentBinding
 from scholar.application.source_execution import (
     SourceExecutionStatus,
 )
@@ -63,6 +63,8 @@ class FakeSearcher:
 
     async def search(self, **kwargs):
         self.calls.append(kwargs)
+        if getattr(self, "requires_key", False) and not kwargs.get("api_key"):
+            raise ProviderError("OpenAlex API key is required")
         if isinstance(self.search_result, Exception):
             raise self.search_result
         if callable(self.search_result):
@@ -94,6 +96,8 @@ def paper(
 
 
 def service(*, arxiv=None, openalex=None, cache=None):
+    openalex = openalex or FakeSearcher()
+    openalex.requires_key = True
     return PaperSearchService(
         searchers={
             "arxiv": SearchBinding(arxiv or FakeSearcher()),
@@ -102,7 +106,7 @@ def service(*, arxiv=None, openalex=None, cache=None):
             ),
         },
         policies={
-            field: replace(policy, search_enrichers=[])
+            field: replace(policy, enrichers=[])
             for field, policy in FIELD_POLICIES.items()
         },
         enrichment_bindings={},
@@ -155,7 +159,7 @@ async def test_default_routing_uses_mapped_openalex_or_preserves_local_arxiv_ord
 
     assert oa.calls[0]["field"] == AcademicField.LAW
     assert oa.calls[0]["api_key"] == "law-key"
-    assert len(oa.calls) == 1
+    assert len(oa.calls) == 2
     assert arxiv.calls[0]["field"] == AcademicField.COMPUTER_SCIENCE
     assert arxiv.calls[1]["field"] == AcademicField.GENERAL
     assert [item.title for item in cs_result.papers] == ["First", "Second"]
@@ -190,30 +194,21 @@ async def test_arxiv_provider_maps_shared_field_and_does_not_forward_api_key():
 
 
 @pytest.mark.asyncio
-async def test_multisource_missing_key_fails_before_cache_or_source_calls():
+async def test_multisource_missing_key_keeps_successful_local_source():
     arxiv = FakePaperRepository()
     openalex = FakeSearcher()
-    cache = MemoryCache()
-    search = service(arxiv=arxiv, openalex=openalex, cache=cache)
-
-    with pytest.raises(ServiceException):
-        await search.search(
-            PaperSearch("question", source_scope=SourceScope.MULTI_SOURCE)
-        )
-    with pytest.raises(ServiceException):
-        await search.search(
-            PaperSearch(
-                "question",
-                field=AcademicField.LAW,
-                source_scope=SourceScope.MULTI_SOURCE,
-            ),
-            credentials={"openalex": "law-key"},
-            user_id="user-1",
-        )
-
-    assert cache.get_calls == []
-    assert arxiv.calls == []
-    assert openalex.calls == []
+    search = service(arxiv=arxiv, openalex=openalex)
+    result = await search.search(PaperSearch("question", source_scope=SourceScope.MULTI_SOURCE))
+    assert result.papers == []
+    assert {e.source: e.status for e in result.execution} == {
+        "openalex": SourceExecutionStatus.FAILED, "arxiv": SourceExecutionStatus.COMPLETED,
+    }
+    assert len(arxiv.calls) == len(openalex.calls) == 1
+    single = await search.search(
+        PaperSearch("law", field=AcademicField.LAW, source_scope=SourceScope.MULTI_SOURCE),
+        credentials={"openalex": "law-key"},
+    )
+    assert [e.source for e in single.execution] == ["openalex"]
 
 
 @pytest.mark.asyncio
@@ -325,8 +320,8 @@ async def test_multisource_fuses_by_exact_ids_and_keeps_identifier_conflicts_vis
     )
 
     assert isinstance(result, SearchResult)
-    assert result.papers[0].title == "arXiv facts"
-    assert result.papers[0].doi == "10.1000/arxiv-doi"
+    assert result.papers[0].title == "OpenAlex facts"
+    assert result.papers[0].doi == "10.1000/openalex-doi"
     assert result.papers[0].metadata == {
         "openalex": {"id": "W1"},
         "arxiv": {"raw_id": "1706.03762"},
@@ -392,11 +387,10 @@ async def test_multisource_retains_success_and_reports_provider_failure(message)
     )
 
     assert result.papers == [arxiv_result]
-    assert [execution.status for execution in result.execution] == [
-        SourceExecutionStatus.COMPLETED,
-        SourceExecutionStatus.FAILED,
-    ]
-    assert result.execution[1].error == message
+    assert {e.source: e.status for e in result.execution} == {
+        "arxiv": SourceExecutionStatus.COMPLETED, "openalex": SourceExecutionStatus.FAILED,
+    }
+    assert result.execution[0].error == message
 
 
 class RecordingEnricher:
@@ -448,9 +442,8 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
         "openalex": SearchBinding(oa, requires_api_key=True),
     }
     policy = FieldPolicy(
-        default_search_plan=["pubmed"],
-        multi_source_plan=["pubmed", "web_of_science", "openalex"],
-        search_enrichers=["clinical_trials"],
+        searchers=["pubmed", "web_of_science", "openalex"],
+        enrichers=["clinical_trials"],
     )
     search = PaperSearchService(
         bindings, {AcademicField.MEDICINE: policy}, MemoryCache(), enrichment
@@ -486,7 +479,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
         bindings,
         {
             AcademicField.MEDICINE: replace(
-                policy, default_search_plan=["web_of_science"]
+                policy, searchers=["web_of_science"]
             )
         },
         MemoryCache(),
@@ -509,7 +502,7 @@ async def test_field_configuration_controls_enrichment_after_final_limit():
         {
             AcademicField.GENERAL: FieldPolicy(["local"]),
             AcademicField.COMPUTER_SCIENCE: FieldPolicy(
-                ["local"], search_enrichers=["specialized"]
+                ["local"], enrichers=["specialized"]
             ),
         },
         MemoryCache(),
@@ -524,3 +517,25 @@ async def test_field_configuration_controls_enrichment_after_final_limit():
     assert [p.arxiv_id for p in general.papers] == [p.arxiv_id for p in cs.papers]
     assert all("specialized" not in p.metadata for p in general.papers)
     assert all(p.metadata["specialized"]["available"] for p in cs.papers)
+
+
+@pytest.mark.asyncio
+async def test_default_falls_back_only_on_provider_failure_and_stops_on_empty_result():
+    secondary = FakeSearcher([paper("secondary", doi="10.1000/secondary")])
+    primary = FakeSearcher(ProviderError("primary offline"))
+    search = PaperSearchService(
+        {"primary": SearchBinding(primary), "secondary": SearchBinding(secondary)},
+        {AcademicField.GENERAL: FieldPolicy(["primary", "secondary"])},
+        MemoryCache(), {},
+    )
+    result = await search.search(PaperSearch("fallback"))
+    assert result.papers[0].source == "secondary"
+    assert [e.status for e in result.execution] == [SourceExecutionStatus.FAILED, SourceExecutionStatus.COMPLETED]
+    primary.search_result = []
+    result = await search.search(PaperSearch("empty is success"))
+    assert result.papers == []
+    assert len(result.execution) == 1
+    assert len(secondary.calls) == 1
+    primary.search_result = TypeError("program bug")
+    with pytest.raises(TypeError, match="program bug"):
+        await search.search(PaperSearch("bug"))

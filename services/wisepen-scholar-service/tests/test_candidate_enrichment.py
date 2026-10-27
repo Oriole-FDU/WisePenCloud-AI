@@ -8,8 +8,12 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from scholar.application.field_policies import FieldPolicy
-from scholar.application.search import PaperSearch, PaperSearchService, SearchBinding
-from scholar.application.search.enrichment import EnrichmentBinding
+from scholar.application.search import (
+    EnrichmentBinding,
+    PaperSearch,
+    PaperSearchService,
+    SearchBinding,
+)
 from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
@@ -134,7 +138,7 @@ def search_service(papers, bindings, sources, *, concurrency=4):
         searchers={"base": SearchBinding(searcher, coverage="base papers")},
         policies={
             AcademicField.GENERAL: FieldPolicy(
-                default_search_plan=["base"], search_enrichers=list(sources)
+                searchers=["base"], enrichers=list(sources)
             )
         },
         query_cache=FakeQueryCache(),
@@ -434,7 +438,7 @@ async def test_optional_enrichment_provider_error_preserves_base_candidate():
 async def test_search_propagates_single_source_provider_error():
     service = PaperSearchService(
         searchers={"base": SearchBinding(FailingSearcher(ProviderError("offline")))},
-        policies={AcademicField.GENERAL: FieldPolicy(default_search_plan=["base"])},
+        policies={AcademicField.GENERAL: FieldPolicy(searchers=["base"])},
         query_cache=FakeQueryCache(),
         enrichment_bindings={},
     )
@@ -454,8 +458,7 @@ async def test_search_propagates_error_when_all_multisource_providers_fail():
         },
         policies={
             AcademicField.GENERAL: FieldPolicy(
-                default_search_plan=["arxiv"],
-                multi_source_plan=["arxiv", "openalex"],
+                searchers=["arxiv"],
             )
         },
         query_cache=FakeQueryCache(),

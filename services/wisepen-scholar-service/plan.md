@@ -40,7 +40,7 @@ V1 不建设全文语料库、向量检索、完整引用图、作者研究工�
 
 `application/` 只有 search、lookup、discover 三个用例。`search/use_case.py` 负责来源计划、检索缓存和候选融合；`search/enrichment.py` 是搜索用例内的可选候选后处理，不是独立 application service。精确查询及其 S2 purpose 富化归 `lookup/` 内部；发现由 `discovery.py` 按领域配置调用发现能力。共用领域策略和执行结果不另立业务服务。
 
-`application/field_policies.py` 是 search 与 lookup 共用的领域策略表。`FieldPolicy` 明确记录默认来源计划、无凭证计划、多源计划、搜索后处理器和发现器；容器注册来源名称到 provider 能力的绑定。新增医疗来源时，兼容的 PubMed/WoS searcher、富化器及容器注册可以由领域配置选择，无需在核心检索、缓存或融合流程增加供应商分支。`Paper.source` 接受开放字符串，来源专有事实放在 `metadata[来源名]` 自由字典中。
+`application/field_policies.py` 是 search 与 lookup 共用的领域策略表。`FieldPolicy` 只记录有序 `searchers`、领域增量 `enrichers` 和 `discoverer`；容器注册来源名称到 provider 能力的绑定。新增医疗来源时，兼容的 PubMed/WoS searcher、富化器及容器注册可以由领域配置选择，无需在核心检索、缓存或融合流程增加供应商分支。`Paper.source` 接受开放字符串，来源专有事实放在 `metadata[来源名]` 自由字典中。
 
 `providers/field_mapping.py` 仍是通用领域到 arXiv/OpenAlex 参数的统一映射文件。`providers/` 承载在线能力适配：本地 arXiv 搜索由 `ArxivProvider` 调用论文仓储，OpenAlex 实现同一 `PaperSearcher` 能力；HF 使用原生异步 HTTP，当前由 CS 搜索后处理调用。arXiv OAI 抓取和 S2 数据集、release、差分处理属于独立 `etl/` 步骤。
 
@@ -72,21 +72,24 @@ subfield。arXiv 多分类按 OR 查询。
 | `law` | 法学理论、民商、国际法、刑法 | `topics.subfield.id:3308` | 无对应分类 | OpenAlex；不静默扩大到整个社会科学 |
 | `materials_environmental_sciences` | 材料、地学、环境生态、气象地理 | `19,23,25`（OR） | `cond-mat.mtrl-sci,physics.ao-ph,physics.geo-ph` | OpenAlex；arXiv 仅覆盖对应交叉物理方向 |
 
-### 2.2 默认与多源计划
+### 2.2 有序检索与多源执行
 
-`source_scope` 使用固定枚举 `default`、`multi_source`。
+`FieldPolicy.searchers` 是唯一检索名单，顺序即优先级；不再定义无凭证或独立多源计划。
+`default` 依次调用来源，只在 ProviderError 时回退；正常空列表也算成功并结束。
+`multi_source` 调用所有注册来源，保留成功结果和失败执行记录；所有来源失败时抛原始异常。
+程序错误与取消直接传播。缺 OpenAlex key 属于普通来源失败，不提前拒绝整个计划。
 
-- `default`：有 OpenAlex 密钥时按上表选一个默认召回源，不自动叠加其他来源。无密钥时，General 查询本地全库；有 arXiv
-  映射的领域按映射查询；无映射则报告能力不可用。
-- `multi_source`：General 和有 arXiv 映射的领域注册 arXiv + OpenAlex 计划；无对应 arXiv 分类的领域暂不注册该计划。不得把单源执行描述为完整多源检索。
-- 多源计划缺少所需凭证或 provider 绑定时，在执行来源调用前报能力不可用；不静默退回默认源。
-- 单源 ProviderError 直接传播；多源只有至少一个来源成功才返回其结果，并在失败来源执行记录中保留原错误文本。所有来源都失败时传播 provider 错误；程序错误和取消不会被改写为来源部分失败。
-- 来源故障不隐式改变默认来源或放宽领域过滤。
+CS、数学、物理为 `[arxiv, openalex]`；其他已有双源领域为 `[openalex, arxiv]`；其余领域为 `[openalex]`。
+返回的 execution 仅记录实际尝试的来源、缓存命中及结果。单源保留原排序，多源沿用精确身份归并与等权 RRF。
 
-候选按规范标识符归并，不能只凭标题相似度认定同一论文。优先 arXiv ID，再使用无冲突的 DOI 等精确身份；标识冲突保留诊断，不任意合并。多源使用等权
-RRF，复用 Common 已有算法，不直接比较不同来源的原始分数。单源保留原生排序；HF 和引用指标不重排相关性结果。
+### 2.3 本次调整的独立提交
 
-领域配置表达映射、默认来源、多源计划和专用富化器。通用执行器执行选中的配置，不检查论文内容再选择领域。V1 不建设动态插件加载或分阶段条件召回框架。
+1. 检索策略：有序回退、多源实际执行和领域配置收敛，26 项相关测试通过。
+2. 富化编排：通用 arxiv→s2→openalex 择一成功，领域增量全部执行；按本次成功 searcher 去重；lookup 增加 field。
+3. S2 队列：Redis FIFO 共用全局 1 RPS，在线前方任务超过 Nacos 阈值时跳过；默认阈值 5，排队数量只进入执行结果。
+
+领域 `enrichers` 只登记增量来源。平台不默认融合同名字段、不做语义去重，provider 负责输出键唯一并避免重复通用事实。
+本次不操作后台离线任务，不部署生产。
 
 ## 3. 三个工具与 HTTP 契约
 

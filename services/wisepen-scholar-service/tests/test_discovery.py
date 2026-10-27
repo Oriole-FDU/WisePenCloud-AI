@@ -7,7 +7,7 @@ from common.core.exceptions import ServiceException
 from pydantic import ValidationError
 
 import scholar.application.discovery as discovery_module
-from scholar.api.schemas.discovery import DiscoveryRequest
+from scholar.api.schemas.papers import DiscoveryRequest
 from scholar.application.discovery import PaperDiscoveryQuery, PaperDiscoveryService
 from scholar.application.field_policies import FieldPolicy
 from scholar.application.source_execution import SourceExecutionStatus
@@ -82,7 +82,7 @@ def make_paper(arxiv_id):
 def service_for(field, source, discoverer, cache):
     return PaperDiscoveryService(
         discoverers={source: discoverer},
-        policies={field: FieldPolicy(default_search_plan=[], discoverer=source)},
+        policies={field: FieldPolicy(searchers=[], discoverer=source)},
         cache=cache,
     )
 
@@ -278,7 +278,7 @@ async def test_missing_discovery_capability_fails_before_cache_read(
     service = PaperDiscoveryService(
         discoverers=discoverers,
         policies={
-            field: FieldPolicy(default_search_plan=[], discoverer=registered_source)
+            field: FieldPolicy(searchers=[], discoverer=registered_source)
         },
         cache=cache,
     )

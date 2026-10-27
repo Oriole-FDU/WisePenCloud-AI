@@ -41,6 +41,8 @@ class OpenAlexProvider:
         limit: int,
         api_key: str | None = None,
     ) -> list[Paper]:
+        if not api_key:
+            raise ProviderError("OpenAlex API key is required")
         field_filter = OPENALEX_FILTERS[field]
         filters = [field_filter] if field_filter else []
         if published_after:

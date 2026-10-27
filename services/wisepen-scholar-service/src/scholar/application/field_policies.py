@@ -8,90 +8,36 @@ from scholar.domain.models.paper import PaperSource
 
 @dataclass
 class FieldPolicy:
-    """计划中的来源均须实际执行；专有富化与发现独立于检索计划。"""
+    """检索来源按优先级排列；富化列表只登记领域专用增量能力。"""
 
-    default_search_plan: list[str]
-    without_credentials_plan: list[str] | None = None
-    multi_source_plan: list[str] | None = None
-    search_enrichers: list[str] = field(default_factory=list)
+    searchers: list[str]
+    # 平台不融合同名字段、不做语义去重；provider 应保证键唯一并提供增量价值。
+    enrichers: list[str] = field(default_factory=list)
     discoverer: str | None = None
 
 
-# 这里显式登记计划，不从“有 arXiv 分类”推断多源能力。
-# 搜索 S2 绑定只有公共缓存读取能力；在线 S2 仅注入 lookup 和独立 ETL。
+# 通用来源互为替代，优先读取本地离线事实，再使用在线来源。
+COMMON_ENRICHERS = [PaperSource.ARXIV, PaperSource.S2, PaperSource.OPENALEX]
+
 FIELD_POLICIES = {
-    AcademicField.GENERAL: FieldPolicy(
-        default_search_plan=[PaperSource.OPENALEX],
-        without_credentials_plan=[PaperSource.ARXIV],
-        multi_source_plan=[PaperSource.ARXIV, PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
+    AcademicField.GENERAL: FieldPolicy([PaperSource.OPENALEX, PaperSource.ARXIV]),
     AcademicField.COMPUTER_SCIENCE: FieldPolicy(
-        default_search_plan=[PaperSource.ARXIV],
-        multi_source_plan=[PaperSource.ARXIV, PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2, PaperSource.HUGGINGFACE],
+        [PaperSource.ARXIV, PaperSource.OPENALEX],
+        enrichers=[PaperSource.HUGGINGFACE],
         discoverer=PaperSource.HUGGINGFACE,
     ),
-    AcademicField.MEDICINE: FieldPolicy(
-        default_search_plan=[PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
-    AcademicField.BIOLOGY: FieldPolicy(
-        default_search_plan=[PaperSource.OPENALEX],
-        without_credentials_plan=[PaperSource.ARXIV],
-        multi_source_plan=[PaperSource.ARXIV, PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
-    AcademicField.ENGINEERING: FieldPolicy(
-        default_search_plan=[PaperSource.OPENALEX],
-        without_credentials_plan=[PaperSource.ARXIV],
-        multi_source_plan=[PaperSource.ARXIV, PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
-    AcademicField.ECONOMICS_BUSINESS: FieldPolicy(
-        default_search_plan=[PaperSource.OPENALEX],
-        without_credentials_plan=[PaperSource.ARXIV],
-        multi_source_plan=[PaperSource.ARXIV, PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
-    AcademicField.MATHEMATICS: FieldPolicy(
-        default_search_plan=[PaperSource.ARXIV],
-        multi_source_plan=[PaperSource.ARXIV, PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
-    AcademicField.PHYSICS: FieldPolicy(
-        default_search_plan=[PaperSource.ARXIV],
-        multi_source_plan=[PaperSource.ARXIV, PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
-    AcademicField.CHEMISTRY: FieldPolicy(
-        default_search_plan=[PaperSource.OPENALEX],
-        without_credentials_plan=[PaperSource.ARXIV],
-        multi_source_plan=[PaperSource.ARXIV, PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
-    AcademicField.PSYCHOLOGY: FieldPolicy(
-        default_search_plan=[PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
-    AcademicField.SOCIAL_SCIENCES: FieldPolicy(
-        default_search_plan=[PaperSource.OPENALEX],
-        without_credentials_plan=[PaperSource.ARXIV],
-        multi_source_plan=[PaperSource.ARXIV, PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
-    AcademicField.ARTS_HUMANITIES: FieldPolicy(
-        default_search_plan=[PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
-    AcademicField.LAW: FieldPolicy(
-        default_search_plan=[PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
-    ),
+    AcademicField.MEDICINE: FieldPolicy([PaperSource.OPENALEX]),
+    AcademicField.BIOLOGY: FieldPolicy([PaperSource.OPENALEX, PaperSource.ARXIV]),
+    AcademicField.ENGINEERING: FieldPolicy([PaperSource.OPENALEX, PaperSource.ARXIV]),
+    AcademicField.ECONOMICS_BUSINESS: FieldPolicy([PaperSource.OPENALEX, PaperSource.ARXIV]),
+    AcademicField.MATHEMATICS: FieldPolicy([PaperSource.ARXIV, PaperSource.OPENALEX]),
+    AcademicField.PHYSICS: FieldPolicy([PaperSource.ARXIV, PaperSource.OPENALEX]),
+    AcademicField.CHEMISTRY: FieldPolicy([PaperSource.OPENALEX, PaperSource.ARXIV]),
+    AcademicField.PSYCHOLOGY: FieldPolicy([PaperSource.OPENALEX]),
+    AcademicField.SOCIAL_SCIENCES: FieldPolicy([PaperSource.OPENALEX, PaperSource.ARXIV]),
+    AcademicField.ARTS_HUMANITIES: FieldPolicy([PaperSource.OPENALEX]),
+    AcademicField.LAW: FieldPolicy([PaperSource.OPENALEX]),
     AcademicField.MATERIALS_ENVIRONMENTAL_SCIENCES: FieldPolicy(
-        default_search_plan=[PaperSource.OPENALEX],
-        without_credentials_plan=[PaperSource.ARXIV],
-        multi_source_plan=[PaperSource.ARXIV, PaperSource.OPENALEX],
-        search_enrichers=[PaperSource.ARXIV, PaperSource.S2],
+        [PaperSource.OPENALEX, PaperSource.ARXIV]
     ),
 }
