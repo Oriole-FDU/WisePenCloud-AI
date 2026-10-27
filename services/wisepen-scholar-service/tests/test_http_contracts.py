@@ -165,7 +165,7 @@ def test_search_sends_domain_and_inclusive_date_bounds_to_es(scholar_client):
     assert response.status_code == 200
     assert response.json()["data"]["papers"] == []
     query = es.search_calls[0]["query"]["bool"]
-    assert query["must"][0]["multi_match"]["query"] == "graph models"
+    assert query["must"][0]["combined_fields"]["query"] == "graph models"
     assert {
         "bool": {
             "should": [{"wildcard": {"categories": "cs.*"}}],

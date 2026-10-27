@@ -12,9 +12,9 @@ Scholar 是内部 HTTP 微服务。MCP 工具由现有 `wisepen-mcp-service` 注
 - `core/config` 与 Chat/Sandbox 一样，通过 Bootstrap 定位 Nacos，再由 AppSettings 加载业务字段；`main.py` 负责日志、观测、安全中间件、客户端生命周期和服务注册。
 - `etl` 独立维护 DuckDB 来源事实及发布进度；HTTP 不读写 DuckDB，不启动 ETL。
 
-P1 本地 arXiv、P3 配置驱动检索、P4 lookup 在线富化和 P5 发现已验收；P2 真实全量 S2 导入仍在后台进行。CS 搜索与发现通过原生异步 HTTP 调用 HF。
+P1 本地 arXiv、P3 配置驱动检索、P4 lookup 在线富化已验收；P2 正在合并本地 S2 信息并更新检索索引。P5 发现按 HF 官方 SDK 的请求与返回流程实现。CS 搜索与发现通过原生异步 HTTP 调用 HF。
 
-P6 已提供独立 OAI/S2 差分同步与恢复、Compose/Jenkins/systemd 模板；实现及 165 项全套测试通过，真实完整同步与构建环境的剩余验收见 [P6 记录](docs/p6-acceptance.md) 和 [部署说明](docs/deployment.md)。
+P6 已提供独立 OAI/S2 差分同步与恢复、Compose/Jenkins/systemd 模板；真实完整同步的剩余验收见 [P6 记录](docs/p6-acceptance.md)。部署交付仅包含配置和说明，本次不启动 Docker、不构建镜像、不做生产部署。
 
 领域策略声明默认来源、无凭证计划、多源计划、搜索后处理器及发现器；来源绑定由容器注册。单源搜索或所有来源都失败时传播 provider 错误；多源仅在至少一个来源成功时返回部分结果，并保留失败来源错误文本。lookup 批次只有在存在其他可用项时才以逐项状态保留 provider 失败；可选搜索后处理失败保留基础论文及错误文本。程序错误和取消不会降级为来源部分失败。
 
@@ -45,13 +45,17 @@ uv run --no-sync scholar-etl publish
 
 `--max-batches N` 限制本次工作量，适合验证恢复；未读到 EOF 的导入不能发布。发布逐项确认 Bulk，成功项移出待发布集合，失败项重放同一文档 ID。全部文档数量及内容抽样检查通过后，才原子切换版本索引别名。旧索引不自动删除。在线请求总预算默认 25 秒；独立 ETL 的单次存储请求超时默认 120 秒，通过 `SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS` 配置。资源有限的 ES 实例可以用 `publish --batch-size 1000` 减少单次写入压力。
 
+离线任务可用[本地监控看板](docs/offline-dashboard.md)查看阶段进度、速率、真实退出码和错误日志。看板仅读取快照，不轮询数据库；现有 ETL 命令经 `scripts/offline_dashboard.py run` 包装后自动接入。
+
 ## HTTP 与 MCP
 
-`POST /scholar/papers/discover` 与现有 MCP `discover_papers` 提供 CS 的 daily/weekly/monthly 渠道发现，默认 recent，支持 limit，不接受 query。HF 的 trending 忽略周期筛选，当前请求该排序会明确失败。返回实际窗口及渠道已有信号，不在线请求 S2；见 [P5 验收记录](docs/p5-acceptance.md)。
+`POST /scholar/papers/discover` 与现有 MCP `discover_papers` 提供 CS 的 daily/weekly/monthly 渠道发现，默认 trending，支持 recent 和 limit，不接受 query。每次只发一个官方列表请求，直接交付成功响应；daily 使用官方最新内容默认值，weekly/monthly 传周期参数。不按渠道日期丢弃或过滤结果，见 [P5 验收记录](docs/p5-acceptance.md)。
 
 Lookup 的 `details/enrich/full` 已接入同一个用例。details 可复用缓存且不在线访问 S2；enrich 只输出精选信号；full 同时返回可用基础论文。没有可用结果的外部失败直接抛出，已有论文或信号的部分结果保留真实错误。缓存与真实边界验收见 [P4 记录](docs/p4-acceptance.md)。
 
 `POST /scholar/papers/search` 接受 query、field、published_after/before、limit、source_scope。时间按首次提交日期包含两端过滤；领域采用 plan.md 的 arXiv 分类映射。查询缓存默认 10 分钟，缓存只存论文事实，每次重新构造执行情况。
+
+本地检索初版采用 English 子字段上的 BM25F 近似召回，标题/TLDR/摘要权重为 3:2:1，原词形和短语匹配加分，引用数不参与排序。新查询需要先完整回填子字段后再启用；算法、参数和不干扰现有离线任务的迁移边界见[检索基线](docs/search-baseline.md)。
 
 `POST /scholar/papers/lookup` 接受 identifiers、purpose，逐项保留输入顺序、重复输入、未找到、标识错误或 DOI 歧义。arXiv 版本和官方 URL 归一化，DOI 不区分大小写。没有本地来源映射的领域不会退回全库检索。所有业务响应使用 Common `R<T>`。
 

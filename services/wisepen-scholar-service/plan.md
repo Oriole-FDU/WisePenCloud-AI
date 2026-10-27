@@ -108,6 +108,8 @@ API/MCP 边界负责解析请求，封闭值集合使用枚举。内部按 searc
 
 V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次提交日期，结果保留其来源；不拿元数据更新时间代替发表时间。
 
+本地召回采用 `.en` 子字段上的 `combined_fields`（BM25F 近似），标题/TLDR/摘要权重为 3:2:1，英语分析后使用 `2<70%` 命中门槛；原词形与短语匹配仅加分。保留 BM25 默认 `k1=1.2`、`b=0.75`，不将作者或引用数混入概念排序，不建设评测平台。新索引须完整回填子字段后再启用新版查询；不干扰当前后台写入，后续迁移协调 alias 与 ETL 的具体写入目标。参数依据和独立小索引行为验证见[检索基线](docs/search-baseline.md)。
+
 明确请求 CS 时，在候选归并并截取最终数量后执行 HF 富化。优先缓存，仅对有 arXiv ID 的候选请求 HF 论文详情，并发数默认
 4，受本次请求预算约束。HF 使用 `httpx.AsyncClient`，可选平台凭证来自 Nacos `HF_TOKEN`，不使用同步 SDK 或 `to_thread`。保留点赞、代码仓库、关联模型和数据集的实际返回值；不抓取整个关联仓库目录，不假定返回条目穷尽所有产物。404
 表示 HF 没有对应记录，其他已知外部 I/O 错误保留原文本并标记可选后处理未完成；均保留基础论文结果。程序错误和取消继续传播。
@@ -143,12 +145,12 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 |----------|----------------------------------------------|--------------------------------------|
 | `field`  | 必填发现领域枚举，V1 只有 `computer_science` | 仅暴露已注册的发现能力               |
 | `period` | `daily`、`weekly`、`monthly`，默认 `daily`   | 渠道日期或自然周期，不是滚动 7/30 天 |
-| `sort`   | 默认 `recent`，暂不支持周期内 `trending`    | `recent` 映射为上游 `publishedAt`    |
+| `sort`   | `recent`、`trending`，默认 `trending`        | 与周期参数一起按官方协议传递         |
 | `limit`  | 默认 10，范围 1–15                           | 最终返回数量                         |
 
 删除 `query`、`all_time`、`popular`。发现以渠道分发信号为入口，不执行主题搜索。
 
-使用 HF 官方论文 HTTP API：daily 先确定最新可用分发日，再按明确日期取列表；weekly/monthly 分别传当前 UTC 自然周、自然月，返回实际查询窗口。分发日只读 `submittedOnDailyAt`，不从论文或外层 `publishedAt` 推断；上游结果缺失日期或越窗时直接抛错。真实 API 的 `trending` 忽略日/周/月筛选，因此暂时明确报错，不静默替换排序或声称返回周期趋势。保留枚举供后续可靠能力启用。
+使用 HF 官方论文 HTTP API，并遵循[官方 HfApi 源码](https://raw.githubusercontent.com/huggingface/huggingface_hub/main/src/huggingface_hub/hf_api.py)的单次请求与返回流程：daily 不传日期，由上游返回最近内容；weekly/monthly 分别传当前 UTC ISO 周、自然月。周期与排序参数一起透传，成功响应按上游顺序交付，不因渠道日期缺失或跨度而拒绝、过滤论文，不额外探测日期或发第二次请求。窗口字段仅描述显式请求范围，daily 为上游默认而留空。
 
 发现结果保留渠道列表实际返回的研究产物信号，不额外逐篇拉取详情，也不调用在线 S2。所有请求通过异步客户端执行，并发和超时有界。
 
@@ -327,7 +329,7 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
   gzip 全部完整或全库数据已导入。
 - **边界**：不新增来源，不迁移输入数据，不把实验脚本的网络设置当成服务默认配置。
 - **提交**：`docs(scholar): define v1 contracts and data baseline`。
-- **状态**：实现与数据基线检查完成，等待用户验收。
+- **状态**：实现与数据基线检查完成，已独立提交供审阅；全量数据验收分别记录于 P1/P2。
 
 ### P1：arXiv 本地检索闭环
 
@@ -347,7 +349,7 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
   model、无 S2 关联及重复执行。ES 每篇仍只有一个基础文档，抽样与 DuckDB 一致。
 - **边界**：不请求在线 API 补齐整个历史库，不将在线独有字段变为离线必填项。
 - **提交**：`feat(scholar): enrich local papers from s2 datasets`。
-- **状态**：离线导入、关联及发布实现完成，14 项受影响 ETL 测试通过；真实 ES 小样本投影及重复运行通过。现有 90 个分片正在后台全量扫描，完整性和全量富化发布尚未验收。
+- **状态**：离线导入、关联及发布实现完成，14 项受影响 ETL 测试通过；真实 ES 小样本投影及重复运行通过。90 个分片已全部读取；内存不足修复后正在合并已筛选的 S2 信息，再更新检索索引，完整发布仍待验收。
 
 ### P3：OpenAlex BYOK 与显式多源检索
 
@@ -372,20 +374,20 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
 
 - **交付**：完成异步 HF HTTP、Nacos `HF_TOKEN` 与 CS 搜索后处理的验收，并接入无 query 的 discover、周期结果和相关缓存。
 - **验收**：同样的 CS 候选在 General 请求下不执行 HF、明确 CS 请求下执行；缓存满足时不重复调用；无 arXiv ID 不猜测匹配；HF
-  无记录和服务故障不丢弃基础论文。验证日/自然周/月、recent 及不支持 trending 的明确失败、异步调用、并发预算与三个工具间的边界。
+  无记录和服务故障不丢弃基础论文。验证日/自然周/月、recent/trending 官方请求参数、响应保序交付、异步调用、并发预算与三个工具间的边界；不自行按日期拒绝或过滤成功响应。
 - **边界**：不加入主题发现搜索、全时热门榜、学术质量分数或候选内容推断领域。
 - **提交**：`feat(scholar): add cs enrichment and paper discovery`。
-- **状态**：已完成；发现、HTTP、MCP/Chat 合同与真实 HF 日/周/月、Nacos/MCP 调用通过，见 [P5 验收记录](docs/p5-acceptance.md)。
+- **状态**：发现按官方 SDK 的单次请求与响应转换流程收敛；daily 使用上游最新内容默认值，周/月及排序参数透传，成功响应不做日期拒绝或过滤。见 [P5 验收记录](docs/p5-acceptance.md)。
 
 ### P6：持续同步、恢复与运行交付
 
 - **交付**：每日 OAI + 批量 S2 API、新 release 差分、发布恢复、外部调度说明；补齐 Scholar 镜像、Compose 和 Jenkins 接入配置。
 - **验收**：真实验证新增、普通修改、身份变化、S2 暂未收录、旧 DOI 记录通过 API 关联、release 更新与删除；单独缺附加字段不触发
   API，在线 lookup 与 ETL 共享 1 RPS。注入 Bulk 部分成功后失败，重放完成且未提前推进游标或 release；基础论文不被 S2
-  删除误删；完整镜像不含数据集和凭证。
-- **边界**：不在 HTTP 进程运行 ETL，不因同步引入跨库事务，不做生产部署。
+  删除误删；构建上下文排除数据集和凭证，部署部分仅验收配置及说明。
+- **边界**：不在 HTTP 进程运行 ETL，不因同步引入跨库事务。部署部分交付配置和运行说明，不启动本机 Docker、不构建镜像、不执行生产部署；这些操作不是本次完成门槛。
 - **提交**：`feat(scholar): add incremental synchronization and deployment`。
-- **状态**：实现已完成，包含独立同步 CLI、OAI 3 秒串行请求、差分断点重放和部署模板；Scholar 全套 165 项测试及构建通过。真实同步需等待 P2 完整发布基线，当前验收范围及环境限制见 [P6 记录](docs/p6-acceptance.md)，未将其标为真实运行验收完成。
+- **状态**：实现已完成，包含独立同步 CLI、OAI 3 秒串行请求、差分断点重放和部署模板；阶段全套 165 项测试及 Python 包构建通过。真实同步需等待 P2 完整发布基线，当前验收范围见 [P6 记录](docs/p6-acceptance.md)，未将其标为真实运行验收完成；本机 Docker 和生产部署不纳入验收。
 
 ## 9. 验证原则与证据
 
@@ -404,7 +406,7 @@ ES、Redis、Nacos 或供应商协议的成功结论。没有新变化、失败�
   的结果，已确认父字段 authors 返回 authorId/name，以及 PDF、BibTeX、TLDR 等所选字段的形态。
 - 样本实际存在空 PDF URL、空 publicationDate，以及开放获取标记和 PDF 状态不一致的情况；按来源合法缺省处理，不把它们当成整篇失败。
 - 不再以先前带 User-Agent 或 authors 子字段的失败请求判定精选字段批量不可用，也不重复执行已保存的实验。
-- 已检查 HF 官方 SDK 对应的 HTTP 协议，当前 provider 使用原生异步 HTTP，由 CS 搜索候选后处理及公开 discover 用例调用；周期筛选以真实分发日期核验，trending 的已知上游限制见 P5 验收记录。
+- HF provider 使用原生异步 HTTP，按官方 SDK 的请求与返回流程实现；成功响应不自行按日期拒绝或过滤。日/周/月 trending 的真实 HTTP、缓存及 MCP 调用通过，见 P5 验收记录。
 - P3 的多源路由、OpenAlex lookup、错误传播及医疗多源扩展行为测试见 `tests/test_multisource_search.py`、`tests/test_openalex_lookup.py`、`tests/test_candidate_enrichment.py` 和 `tests/test_openalex_provider.py`；最终结果见 [P3 验收记录](docs/p3-acceptance.md)。
 - P1 行为测试 14 项、MCP 全套测试 103 项已通过；真实 Nacos、ES 8.19.18、Redis、全量别名发布及 HTTP/MCP 端到端验收通过，重复导入/发布维持 3,224,542 篇、pending=0。部署产物属于 P6。详见阶段验收记录。
 

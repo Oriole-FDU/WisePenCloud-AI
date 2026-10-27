@@ -28,9 +28,14 @@ ARXIV_MAPPING = {
             )
         },
         **{
-            field: {"type": "text"}
-            for field in ("title", "abstract", "authors", "journal_ref", "comments")
+            # 原字段保留未词干的词项；.en 去停用词并归并英语词形，用于概念召回。
+            field: {
+                "type": "text",
+                "fields": {"en": {"type": "text", "analyzer": "english"}},
+            }
+            for field in ("title", "abstract")
         },
+        **{field: {"type": "text"} for field in ("authors", "journal_ref", "comments")},
         "submitted_date": {"type": "date"},
         "updated_date": {"type": "date"},
         "versions": {"type": "object", "enabled": False},
@@ -45,7 +50,12 @@ ARXIV_MAPPING = {
                         "tldr": {
                             "properties": {
                                 "model": {"type": "keyword"},
-                                "text": {"type": "text"},
+                                "text": {
+                                    "type": "text",
+                                    "fields": {
+                                        "en": {"type": "text", "analyzer": "english"}
+                                    },
+                                },
                             }
                         },
                         "release": {"type": "keyword"},
@@ -123,16 +133,42 @@ class ElasticsearchPaperRepository:
                 "bool": {
                     "must": [
                         {
-                            "multi_match": {
+                            # BM25F 近似按词跨字段匹配，允许标题与摘要共同满足命中门槛。
+                            # 三个字段使用相同的 english analyzer，门槛不计英语停用词。
+                            "combined_fields": {
                                 "query": query,
                                 "fields": [
-                                    "title^3",
-                                    "abstract",
-                                    "authors",
-                                    "metadata.s2.tldr.text",
+                                    "title.en^3",
+                                    "metadata.s2.tldr.text.en^2",
+                                    "abstract.en",
                                 ],
+                                "minimum_should_match": "2<70%",
                             }
                         }
+                    ],
+                    # 原词形与短语只调整已召回论文的分数，不扩大召回或引入作者名命中。
+                    "should": [
+                        {
+                            "multi_match": {
+                                "query": query,
+                                "type": "most_fields",
+                                "fields": [
+                                    "title",
+                                    "metadata.s2.tldr.text^0.5",
+                                    "abstract^0.3",
+                                ],
+                            }
+                        },
+                        {"match_phrase": {"title.en": {"query": query, "boost": 2}}},
+                        {
+                            "match_phrase": {
+                                "abstract.en": {
+                                    "query": query,
+                                    "slop": 2,
+                                    "boost": 0.5,
+                                }
+                            }
+                        },
                     ],
                     "filter": filters,
                 }
