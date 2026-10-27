@@ -11,7 +11,7 @@
 <main>
 <header><div><div class="brand">WISEPEN / SCHOLAR</div><h1>离线任务运行台</h1><p>把已下载的 S2 引用数、TLDR 等信息合并到本地 arXiv 论文，再更新检索索引。</p></div><div class="sync"><div id="connection"><i class="dot"></i>每 3 秒更新</div><div id="updated">正在读取任务状态…</div><button id="refresh">立即刷新</button></div></header>
 <div id="warning" role="alert"></div><section id="baseline"></section>
-<section class="facts"><strong>这几步分别在做什么</strong><p class="note">① arXiv 快照 → 建立论文库，已完成。<br>② 本地 S2 的 90 个压缩文件 → 筛出能关联这些论文的信息，已完成，无需重扫。<br>③ 合并 S2 信息 → 把引用数、TLDR 等写进对应论文；前次写入失败已回滚，重跑状态见下方。<br>④ 更新检索索引 → 将合并后的论文写入 Elasticsearch；与步骤③分别验收。<br>增量同步另属后续工作，只有下方明确出现对应任务，才表示已启动。</p></section>
+<section class="facts"><strong>这几步分别在做什么</strong><p class="note">① 读取 arXiv 快照 → 建立基础论文库。<br>② 筛选本地 S2 文件 → 只保留能关联这些论文的引用数、TLDR 等信息。<br>③ 合并 S2 信息 → 把已筛出的信息写进对应论文，不重新读取原始压缩文件。<br>④ 更新检索索引 → 将合并后的论文写入 Elasticsearch。<br>以上是流程说明；完成情况以数据基线和下方任务为准。增量同步会另外列出任务。</p></section>
 <div class="section-label">本次任务 <span>记录实际退出码；日志停更不等于任务失败</span></div><section id="jobs"></section>
 <div id="history-label" class="section-label" hidden>历史日志 <span>仅保留原文，不据此推断进程状态</span></div><section id="history"></section>
 <footer>仅本机可访问 · 状态来自任务快照和日志 · 不轮询 DuckDB / Elasticsearch · 不操作部署环境</footer>
@@ -19,9 +19,9 @@
 <script>
 const $=id=>document.getElementById(id), fmt=v=>typeof v==='number'?new Intl.NumberFormat('zh-CN',{maximumFractionDigits:1}).format(v):String(v);
 const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const labels={running:'运行中',succeeded:'已完成',failed:'失败',interrupted:'已中断，退出码未知'};
-const stageNames={import:'读取 arXiv 快照',s2_import:'筛选 S2 文件',s2_projection:'生成合并后的论文',s2_projection_write:'写入合并后的论文',publish:'更新检索索引','publish-incremental':'更新检索索引','publish-delete':'同步删除'};
-const metricNames={scanned:'当前分片已读取',retained:'当前分片已保留',staged_changed:'已生成，尚待提交',written:'已处理的论文',projected:'关联论文',pending:'待更新索引',pending_publish:'待更新索引',pending_delete:'待删除',records:'已读取记录',batch:'批次',total:'总量'};
+const labels={running:'运行中',succeeded:'已完成',failed:'失败',interrupted:'监控已中断，退出码未知'};
+const stageNames={import:'读取 arXiv 快照',s2_import:'筛选 S2 文件',s2_projection:'生成合并后的论文',s2_projection_write:'写入合并后的论文',s2_projection_commit:'S2 信息合并已提交',publish:'更新检索索引','publish-incremental':'更新检索索引','publish-delete':'同步删除',migration_prepare:'确认离线基线并冻结旧索引',migration_copy:'完整回填新检索索引',migration_verify:'核对数量、元数据和实际检索',migration_switch:'切换检索别名与离线写入目标',migration_complete:'迁移完成，旧索引保留',migration_rollback:'迁移失败，正在恢复',migration_rolled_back:'已恢复原索引与写入目标'};
+const metricNames={scanned:'当前分片已读取',retained:'当前分片已保留',staged_changed:'已生成，尚待提交',written:'已处理的论文',projected:'关联论文',pending:'待更新索引',pending_publish:'待更新索引',pending_delete:'待删除',records:'已读取记录',batch:'批次',total:'总量',invalidated_cache_keys:'已失效查询缓存'};
 const date=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'—';
 let busy=false;
 function jobCard(job){
@@ -30,8 +30,8 @@ function jobCard(job){
   const stages=Object.keys(job.stages).map(stage=>`<div class="stage seen ${stage===job.stage?'active':''}">${escape(stageNames[stage]||stage)}</div>`).join('');
   const rate=entry?.rate&&job.status==='running'?`<div class="metric"><label>本阶段平均速度</label><strong>${fmt(entry.rate)}<small> / 秒</small></strong></div>`:'';
   let notice='';
-  if(event.committed===false){notice=job.status==='succeeded'?'任务已成功退出；以上为提交前最后一条进度。':job.status==='failed'?'任务失败；上面的处理量未提交，不能算作入库成果。':'正在事务内处理；以上数量尚未提交。';}
-  return `<article class="job ${job.status}"><div class="job-head"><h2>${escape(job.name)}</h2><span class="badge ${job.status}">${labels[job.status]}</span></div><div class="meta"><span>开始 ${date(job.started_at)}</span><span>最近进度 ${date(job.updated_at)}</span>${job.finished_at?`<span>结束 ${date(job.finished_at)}</span>`:''}<span>${job.exit_code===null?'PID '+job.child_pid:'退出码 '+job.exit_code}</span></div><div class="stages">${stages}</div><div class="metrics">${metrics}${rate}</div>${notice?`<div class="commit-note ${job.status}">${notice}</div>`:''}${event.source_path?`<p class="note">当前分片：${escape(event.source_path.split(/[\\/]/).pop())}</p>`:''}<details data-job="${escape(job.id)}"><summary>查看最近日志${job.status==='failed'?'与失败原因':''}</summary><pre>${escape(job.log)}</pre></details></article>`;
+  if(event.committed===false){notice=job.status==='succeeded'?'任务已成功退出；以上为提交前最后一条进度。':job.status==='failed'?'任务失败；上面的处理量未提交，不能算作入库成果。':job.status==='interrupted'?'监控已中断；以上是最后一次提交前进度，不能据此判断任务成败。':'正在事务内处理；以上数量尚未提交。';}
+  return `<article class="job ${job.status}"><div class="job-head"><h2>${escape(job.name)}</h2><span class="badge ${job.status}">${labels[job.status]}</span></div><div class="meta"><span>开始 ${date(job.started_at)}</span><span>最近进度 ${date(job.updated_at)}</span>${job.finished_at?`<span>结束 ${date(job.finished_at)}</span>`:''}<span>${job.exit_code===null?'PID '+job.child_pid:'退出码 '+job.exit_code}</span></div><div class="stages">${stages}</div><div class="metrics">${metrics}${rate}</div>${notice?`<div class="commit-note ${job.status}">${notice}</div>`:''}${event.new_index?`<p class="note">旧索引：${escape(event.old_index)}<br>新索引：${escape(event.new_index)}${event.total?'<br>回填进度：'+fmt(100*event.written/event.total)+'%':''}</p>`:''}${event.source_path?`<p class="note">当前分片：${escape(event.source_path.split(/[\\/]/).pop())}</p>`:''}<details data-job="${escape(job.id)}"><summary>查看最近日志${job.status==='failed'?'与失败原因':''}</summary><pre>${escape(job.log)}</pre></details></article>`;
 }
 async function refresh(){
   if(busy)return;busy=true;

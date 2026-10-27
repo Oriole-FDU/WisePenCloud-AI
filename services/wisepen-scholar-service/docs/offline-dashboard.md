@@ -28,3 +28,5 @@ uv run --no-sync python scripts/offline_dashboard.py serve --log "前次投影=.
 历史日志只展示原文，不能证明进程仍在运行。可选的 `.runtime/offline-dashboard/baseline.json` 用于记录一次性核对的数据基线，格式为 `{"recorded_at":"ISO-8601 UTC 时间","items":[{"label":"本地论文","value":3224542}],"note":"核对范围说明"}`；它不会随 ETL 自动更新，页面明确保留核对时间。
 
 看板只监听 `127.0.0.1`，不提供网页执行命令、停止任务或生产部署入口。关闭看板不影响包装器及离线任务；重新启动会继续读取保留的快照。
+
+完整检索索引迁移也通过上述 `run` 包装器启动，命令和失败恢复步骤见 [检索初版说明](search-baseline.md#执行完整迁移)。看板展示冻结、回填、验收、切换、完成或恢复阶段，以及新旧索引名和已复制数量；成功退出后才表示迁移完成。

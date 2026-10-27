@@ -18,11 +18,31 @@
 
 ## 索引启用边界
 
-代码中的 mapping 用于新建索引；给旧索引增加 `.en` 不会自动回填已索引文档。新查询须在 `.en` 回填完整后随服务版本一起启用。本次不修改正在写入的索引，不执行全库 reindex 或 alias 切换。
+代码中的 mapping 用于新建索引；给旧索引增加 `.en` 不会自动回填已索引文档。新查询须在 `.en` 回填完整后随服务版本一起启用。迁移由独立离线脚本执行，实际完成状态以迁移 journal 和看板退出码为准。
 
 后续迁移使用一次完整的新索引重建，保留旧索引以便回滚。必须在现有离线发布完成、待办清空并停止写入后执行。除了原子切换 ES alias，还要协调更新 DuckDB `import_state.target_index`：现有 ETL 将它作为写入目标，单独切 alias 会让后续增量继续写旧索引。迁移期间保持 ETL 停写，失败时恢复 alias 和写入目标，再恢复任务。
 
 重建新索引时可暂设 `refresh_interval=-1`、`number_of_replicas=0`，完成后恢复预定的刷新及副本策略，再检查数据和切换。现有发布器已关闭新索引批量写入期间的刷新；副本配置与整库迁移不在本次检索算法改动中展开。
+
+### 执行完整迁移
+
+在服务目录执行；配置仍从既有 `.env` / Nacos 加载，不在参数中传凭证：
+
+```powershell
+uv run --no-sync python scripts/offline_dashboard.py run --name "检索索引迁移：回填英语词干字段" search-index-migration -- uv run --no-sync python -u scripts/migrate_search_index.py
+```
+
+脚本持有 DuckDB 写连接，阻止其他进程运行 ETL；确认导入已发布、待办为零且 alias 与 `target_index` 一致后，给旧索引加写屏障并刷新，保留读服务。新建相同主分片数、临时关闭刷新和副本的索引，通过 ES 异步 `_reindex` 完整重建所有文档，不重扫原始文件、不重写 DuckDB 论文数据。脚本每 15 秒读取这一个任务的进度供看板展示，不轮询全库。
+
+复制完成后恢复旧索引的刷新和副本策略，核对完整复制结果、文档总数、S2/TLDR 覆盖数、样本文档及真正的 BM25F 检索。随后原子切 alias、更新 DuckDB 写入目标、仅失效本服务 alias 下的查询缓存，再确认两端指向相同新索引。旧索引保留且只读；脚本不启动业务服务或部署容器。
+
+跨 ES / DuckDB 的切换不具备分布式事务：普通失败自动恢复两端并重新抛出错误。若进程被强杀或恢复失败，保持 ETL 停止，使用 `.runtime/search-index-migration.json` 恢复记录执行：
+
+```powershell
+uv run --no-sync python scripts/offline_dashboard.py run --name "恢复原检索索引与离线写入目标" search-index-rollback -- uv run --no-sync python -u scripts/migrate_search_index.py --rollback
+```
+
+回滚只适用于迁移后尚未恢复写入的窗口；恢复 ETL 后，旧索引不再包含新写入，不能直接回滚。成功迁移后可启动包含新版查询的服务。不要在迁移完成前重启到新版查询，也不要在恢复记录存在时直接覆盖它重跑。
 
 ## 依据与验证范围
 
