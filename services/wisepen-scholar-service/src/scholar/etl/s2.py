@@ -12,6 +12,7 @@ from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
 
 _DEFAULT_TLDR_MODEL = "tldr@v2.0.0"
 _DEFAULT_BATCH_SIZE = 50_000
+_PROJECTION_TARGET_BATCH_SIZE = 5_000
 
 
 def _create_schema(db: duckdb.DuckDBPyConnection) -> None:
@@ -854,7 +855,7 @@ def apply_s2_projection(
             CREATE OR REPLACE TEMP TABLE _s2_projection_targets AS
             SELECT arxiv_id FROM _s2_projection
         """)
-        changed = _write_s2_document_changes(db)
+        changed = _write_s2_document_changes(db, replace_arxiv_table=True)
         db.commit()
     except BaseException:
         db.rollback()
@@ -882,6 +883,7 @@ def apply_s2_diff_projection(
             SELECT arxiv_id FROM s2_diff_current_papers
             GROUP BY arxiv_id HAVING count(*) > 1
         """)
+        # 发布投影只重建本 release 实际影响的论文，其他文档保留原来源事实。
         db.execute(
             """CREATE OR REPLACE TEMP TABLE _s2_projection AS
             SELECT p.arxiv_id,
@@ -902,21 +904,24 @@ def apply_s2_diff_projection(
                             line := t.source_line)) END
                 )) AS s2_document
             FROM s2_diff_current_papers p
+            JOIN (
+                SELECT DISTINCT arxiv_id FROM s2_diff_affected
+                WHERE target_release=?
+            ) affected USING(arxiv_id)
             LEFT JOIN s2_diff_current_tldrs t USING(corpus_id)
             WHERE NOT EXISTS (
                 SELECT 1 FROM _s2_diff_conflicted_arxiv c
                 WHERE c.arxiv_id=p.arxiv_id
             )""",
-            [target_release],
+            [target_release, target_release],
         )
         db.execute(
             """CREATE OR REPLACE TEMP TABLE _s2_projection_targets AS
-            SELECT arxiv_id FROM s2_diff_current_papers
-            UNION
-            SELECT arxiv_id FROM s2_diff_affected WHERE target_release=?""",
+            SELECT DISTINCT arxiv_id FROM s2_diff_affected
+            WHERE target_release=?""",
             [target_release],
         )
-        changed = _write_s2_document_changes(db)
+        changed = _write_s2_document_changes(db, replace_arxiv_table=False)
         db.commit()
     except BaseException:
         db.rollback()
@@ -934,17 +939,62 @@ def apply_s2_diff_projection(
     }
 
 
-def _write_s2_document_changes(db: duckdb.DuckDBPyConnection) -> int:
-    """按目标 ID 重建来源字典；JSON map 独立聚合以免多个键产生笛卡尔积。"""
+def _write_s2_document_changes(
+    db: duckdb.DuckDBPyConnection, *, replace_arxiv_table: bool
+) -> int:
+    """按有序 ID 范围重建文档；调用方事务统一提交事实与待发布集合。"""
     db.execute("""
-        CREATE OR REPLACE TEMP TABLE _s2_changed AS
-        WITH updated AS (
-            SELECT a.arxiv_id,a.document,p.s2_document,
+        CREATE OR REPLACE TEMP TABLE _s2_changed (
+            arxiv_id VARCHAR,
+            new_document JSON
+        )
+    """)
+    replacement_ranges = None
+    if replace_arxiv_table:
+        # 全量 JSON UPDATE 的旧行版本会保留在事务 undo buffers；完整快照改用新表写入后原子换名。
+        replacement_ranges = db.execute(
+            """SELECT min(arxiv_id),max(arxiv_id)
+            FROM (
+                SELECT arxiv_id,
+                    (row_number() OVER (ORDER BY arxiv_id)-1) // ? AS batch_number
+                FROM arxiv
+            )
+            GROUP BY batch_number ORDER BY batch_number""",
+            [_PROJECTION_TARGET_BATCH_SIZE],
+        ).fetchall()
+
+    # 只保存每 5000 个有序 target 的边界；范围内非 target 仍由 SQL JOIN 排除。
+    ranges = db.execute(
+        """SELECT min(arxiv_id),max(arxiv_id)
+        FROM (
+            SELECT arxiv_id,
+                (row_number() OVER (ORDER BY arxiv_id)-1) // ? AS batch_number
+            FROM _s2_projection_targets
+        )
+        GROUP BY batch_number ORDER BY batch_number""",
+        [_PROJECTION_TARGET_BATCH_SIZE],
+    ).fetchall()
+
+    staged_changed = 0
+    for range_start, range_end in ranges:
+        # 先筛掉 S2 JSON 未变化的论文，再展开并重建其余 metadata map。
+        inserted = db.execute(
+            """INSERT INTO _s2_changed
+            WITH changed_targets AS MATERIALIZED (
+                SELECT a.arxiv_id,a.document,p.s2_document
+                FROM arxiv a
+                JOIN _s2_projection_targets target USING(arxiv_id)
+                LEFT JOIN _s2_projection p USING(arxiv_id)
+                WHERE a.arxiv_id BETWEEN ? AND ?
+                    AND json_extract(a.document,'$.metadata.s2')
+                        IS DISTINCT FROM p.s2_document
+            ), updated AS (
+                SELECT c.arxiv_id,c.document,c.s2_document,
                 (
                     SELECT map_from_entries(
                         list(struct_pack(key := d.key, value := d.value))
                     )
-                    FROM json_each(a.document) d
+                    FROM json_each(c.document) d
                     WHERE d.key <> 'metadata'
                 ) AS base_fields,
                 coalesce(
@@ -953,42 +1003,123 @@ def _write_s2_document_changes(db: duckdb.DuckDBPyConnection) -> int:
                             list(struct_pack(key := m.key, value := m.value))
                         )
                         FROM json_each(
-                            coalesce(json_extract(a.document,'$.metadata'),'{}'::JSON)
+                            coalesce(json_extract(c.document,'$.metadata'),'{}'::JSON)
                         ) m
                         WHERE m.key <> 's2'
                     ),
                     map([]::VARCHAR[], []::JSON[])
                 ) AS other_metadata
-            FROM arxiv a
-            JOIN _s2_projection_targets target USING(arxiv_id)
-            LEFT JOIN _s2_projection p USING(arxiv_id)
-        ), rebuilt AS (
-            SELECT arxiv_id,document,s2_document,
-                CASE
-                    WHEN s2_document IS NULL AND len(map_keys(other_metadata))=0
-                        THEN to_json(base_fields)
-                    ELSE to_json(map_concat(
-                        base_fields,
-                        map(['metadata'], [to_json(
-                            CASE WHEN s2_document IS NULL THEN other_metadata
-                                ELSE map_concat(other_metadata, map(['s2'], [s2_document]))
-                            END
-                        )])
-                    ))
-                END AS new_document
-            FROM updated
+                FROM changed_targets c
+            ), rebuilt AS (
+                SELECT arxiv_id,
+                    CASE
+                        WHEN s2_document IS NULL AND len(map_keys(other_metadata))=0
+                            THEN to_json(base_fields)
+                        ELSE to_json(map_concat(
+                            base_fields,
+                            map(['metadata'], [to_json(
+                                CASE WHEN s2_document IS NULL THEN other_metadata
+                                    ELSE map_concat(other_metadata, map(['s2'], [s2_document]))
+                                END
+                            )])
+                        ))
+                    END AS new_document
+                FROM updated
+            )
+            SELECT arxiv_id,new_document FROM rebuilt ORDER BY arxiv_id
+            RETURNING arxiv_id""",
+            [range_start, range_end],
+        ).fetchall()
+        staged_changed += len(inserted)
+        print(
+            orjson.dumps(
+                {
+                    "stage": "s2_projection",
+                    "range_start": range_start,
+                    "range_end": range_end,
+                    "staged_changed": staged_changed,
+                    "committed": False,
+                }
+            ).decode(),
+            flush=True,
         )
-        SELECT arxiv_id,new_document FROM rebuilt
-        WHERE json_extract(document,'$.metadata.s2') IS DISTINCT FROM s2_document;
-    """)
-    changed = int(db.execute("SELECT count(*) FROM _s2_changed").fetchone()[0])
+
+    changed = staged_changed
     if changed:
-        db.execute(
-            """UPDATE arxiv AS a SET document=c.new_document
-            FROM _s2_changed c WHERE a.arxiv_id=c.arxiv_id"""
-        )
-        db.execute(
-            "INSERT OR IGNORE INTO pending_publish SELECT arxiv_id FROM _s2_changed"
-        )
+        written = 0
+        if replace_arxiv_table:
+            # INSERT 只追加到新表，不为旧 document 建立事务 undo；分批限制单条 INSERT 的工作集。
+            db.execute(
+                """CREATE TABLE _arxiv_s2_replacement (
+                    arxiv_id VARCHAR PRIMARY KEY,
+                    doi VARCHAR,
+                    source JSON,
+                    document JSON
+                )"""
+            )
+            for range_start, range_end in replacement_ranges:
+                inserted = db.execute(
+                    """INSERT INTO _arxiv_s2_replacement
+                    SELECT a.arxiv_id,a.doi,a.source,coalesce(c.new_document,a.document)
+                    FROM arxiv a
+                    LEFT JOIN (
+                        SELECT arxiv_id,new_document FROM _s2_changed
+                        WHERE arxiv_id BETWEEN ? AND ?
+                    ) c USING(arxiv_id)
+                    WHERE a.arxiv_id BETWEEN ? AND ?
+                    ORDER BY a.arxiv_id
+                    RETURNING arxiv_id""",
+                    [range_start, range_end, range_start, range_end],
+                ).fetchall()
+                written += len(inserted)
+                print(
+                    orjson.dumps(
+                        {
+                            "stage": "s2_projection_write",
+                            "range_start": range_start,
+                            "range_end": range_end,
+                            "staged_changed": changed,
+                            "written": written,
+                            "committed": False,
+                        }
+                    ).decode(),
+                    flush=True,
+                )
+            db.execute("ALTER TABLE arxiv RENAME TO _arxiv_s2_previous")
+            db.execute("ALTER TABLE _arxiv_s2_replacement RENAME TO arxiv")
+            db.execute("DROP TABLE _arxiv_s2_previous")
+        else:
+            # 差分只写受影响的少量文档，避免为局部变更复制整张 arxiv 表。
+            for range_start, range_end in ranges:
+                updated = db.execute(
+                    """UPDATE arxiv AS a SET document=c.new_document
+                    FROM _s2_changed c
+                    WHERE a.arxiv_id=c.arxiv_id
+                        AND a.arxiv_id BETWEEN ? AND ?
+                    RETURNING a.arxiv_id""",
+                    [range_start, range_end],
+                ).fetchall()
+                written += len(updated)
+                print(
+                    orjson.dumps(
+                        {
+                            "stage": "s2_projection_write",
+                            "range_start": range_start,
+                            "range_end": range_end,
+                            "staged_changed": changed,
+                            "written": written,
+                            "committed": False,
+                        }
+                    ).decode(),
+                    flush=True,
+                )
+
+        for range_start, range_end in ranges:
+            db.execute(
+                """INSERT OR IGNORE INTO pending_publish
+                SELECT arxiv_id FROM _s2_changed
+                WHERE arxiv_id BETWEEN ? AND ?""",
+                [range_start, range_end],
+            )
         db.execute("UPDATE import_state SET published=false WHERE singleton=true")
     return changed

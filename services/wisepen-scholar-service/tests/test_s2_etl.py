@@ -3,6 +3,7 @@
 import gzip
 import os
 
+import duckdb
 import orjson
 import pytest
 
@@ -421,7 +422,7 @@ def test_resume_uses_full_shard_inventory_and_rejects_added_files(tmp_path):
         db.close()
 
 
-def test_projection_preserves_other_metadata_and_explicit_nulls(tmp_path):
+def test_projection_preserves_other_metadata_and_explicit_nulls(tmp_path, capsys):
     db = _database(tmp_path, [("2801.00001", "10.2800/one")])
     papers_dir = tmp_path / "papers"
     tldrs_dir = tmp_path / "tldrs"
@@ -446,12 +447,21 @@ def test_projection_preserves_other_metadata_and_explicit_nulls(tmp_path):
 
     try:
         import_s2(db, papers_dir, tldrs_dir, release_id="replace-test")
+        capsys.readouterr()
         first = apply_s2_projection(db, "replace-test")
+        progress = [
+            orjson.loads(line)
+            for line in capsys.readouterr().out.splitlines()
+            if line.strip()
+        ]
         document = orjson.loads(
             db.execute(
                 "SELECT document FROM arxiv WHERE arxiv_id='2801.00001'"
             ).fetchone()[0]
         )
+        assert db.execute(
+            "SELECT doi,source FROM arxiv WHERE arxiv_id='2801.00001'"
+        ).fetchone() == ("10.2800/one", "{}")
         assert document["metadata"]["other"] == {
             "kept": True,
             "nullable": None,
@@ -462,6 +472,17 @@ def test_projection_preserves_other_metadata_and_explicit_nulls(tmp_path):
         assert "tldr_source" in s2 and s2["tldr_source"] is None
 
         assert first["projected"] == 1
+        staging_events = [e for e in progress if e["stage"] == "s2_projection"]
+        write_events = [e for e in progress if e["stage"] == "s2_projection_write"]
+        assert staging_events
+        assert staging_events[-1]["staged_changed"] == 1
+        assert write_events
+        assert write_events[-1]["written"] == 1
+        assert all(event["committed"] is False for event in progress)
+        with pytest.raises(duckdb.ConstraintException):
+            db.execute(
+                "INSERT INTO arxiv VALUES ('2801.00001','10.2800/one','{}'::JSON,'{}'::JSON)"
+            )
         assert apply_s2_projection(db, "replace-test")["projected"] == 0
         assert db.execute("SELECT count(*) FROM pending_publish").fetchone()[0] == 1
     finally:

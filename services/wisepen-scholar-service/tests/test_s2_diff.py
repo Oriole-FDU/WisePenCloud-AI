@@ -356,6 +356,70 @@ async def test_diff_chain_replaces_local_facts_and_clears_deleted_associations(
 
 
 @pytest.mark.asyncio
+async def test_diff_sync_preserves_unaffected_paper_metadata_and_pending_set(tmp_path):
+    db = _base_database(tmp_path)
+    unaffected = {
+        arxiv_id: orjson.loads(document)["metadata"]["s2"]
+        for arxiv_id, document in db.execute(
+            "SELECT arxiv_id,document FROM arxiv WHERE arxiv_id IN ('2202.00002','2203.00003')"
+        ).fetchall()
+    }
+    update_url = _url("/p/ab/update.gz")
+    edges = _manifest(
+        [_edge("A", "B", update=[update_url])],
+        [_edge("A", "B")],
+    )
+    client = _FakeDatasetsClient(edges)
+    http = _http(
+        {"/p/ab/update.gz": _gzip_jsonl([_paper(11, "2201.00001", "10.2201/one", 9)])}
+    )
+    published_ids = []
+
+    async def publish():
+        published_ids.extend(
+            db.execute(
+                "SELECT arxiv_id FROM pending_publish ORDER BY arxiv_id"
+            ).fetchall()
+        )
+        db.execute("DELETE FROM pending_publish")
+        db.execute("UPDATE import_state SET published=true")
+        from scholar.etl.arxiv import database_status
+
+        return database_status(db)
+
+    async def invalidate(_identifiers):
+        return None
+
+    try:
+        result = await sync_s2_diffs(
+            db,
+            client,
+            http,
+            tmp_path / "diff-work",
+            publish_pending=publish,
+            invalidate_aliases=invalidate,
+            base_release="A",
+            target_release="B",
+        )
+        documents = {
+            arxiv_id: orjson.loads(document)
+            for arxiv_id, document in db.execute(
+                "SELECT arxiv_id,document FROM arxiv"
+            ).fetchall()
+        }
+
+        assert result["complete"] is True
+        assert documents["2201.00001"]["metadata"]["s2"]["release"] == "B"
+        for arxiv_id, original_s2 in unaffected.items():
+            assert documents[arxiv_id]["metadata"]["s2"] == original_s2
+        assert published_ids == [("2201.00001",)]
+        assert db.execute("SELECT count(*) FROM pending_publish").fetchone()[0] == 0
+    finally:
+        await http.aclose()
+        db.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("publish_status", "expected_complete"),
     [
