@@ -1,4 +1,4 @@
-"""缓存成功的发现论文和实际上游查询窗口。"""
+"""缓存成功的发现论文和显式请求范围。"""
 
 import orjson
 from pydantic import TypeAdapter

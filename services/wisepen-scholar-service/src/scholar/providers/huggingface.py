@@ -84,28 +84,13 @@ class HuggingFaceProvider:
         params: dict[str, str | int] = {
             "p": 0,
             "limit": limit,
-            # 官方 SDK 将周期与排序参数一起透传，不在客户端预先禁止合法组合。
+            # 与官方 HfApi.list_daily_papers 一致：透传筛选与排序，按上游顺序接收结果。
             "sort": "publishedAt" if sort == DiscoverySort.RECENT else "trending",
         }
         window_start = None
         window_end = None
-        if period == DiscoveryPeriod.DAILY:
-            # 首条只确定最新渠道日期；第二次显式按日期取数，避免 limit 跨日。
-            latest_response = await self._get(
-                f"{_HF_ORIGIN}/api/daily_papers",
-                params={"p": 0, "limit": 1, "sort": "publishedAt"},
-            )
-            latest_rows = latest_response.json()
-            if not latest_rows:
-                return PaperDiscovery(papers=[], window_start=None, window_end=None)
-
-            latest_date = self._parse_date(self._submitted_at(latest_rows[0]))
-            if latest_date is None:
-                raise ProviderError(
-                    "Hugging Face Daily Papers row is missing submittedOnDailyAt"
-                )
-            params["date"] = latest_date.isoformat()
-        elif period == DiscoveryPeriod.WEEKLY:
+        # 官方 date 默认取最近内容；daily 不额外探测日期或重发第二次请求。
+        if period == DiscoveryPeriod.WEEKLY:
             iso_week = now.isocalendar()
             params["week"] = f"{iso_week.year}-W{iso_week.week:02d}"
             window_start = now.date() - timedelta(days=now.weekday())
@@ -119,21 +104,6 @@ class HuggingFaceProvider:
 
         response = await self._get(f"{_HF_ORIGIN}/api/daily_papers", params=params)
         rows = response.json()
-        submitted_dates = [self._parse_date(self._submitted_at(row)) for row in rows]
-        if period == DiscoveryPeriod.DAILY:
-            if any(value is None or value != latest_date for value in submitted_dates):
-                raise ProviderError(
-                    "Hugging Face Daily Papers returned rows outside the requested date"
-                )
-            window_start = window_end = latest_date
-        elif rows and any(
-            value is None or value < window_start or value > window_end
-            for value in submitted_dates
-        ):
-            raise ProviderError(
-                f"Daily Papers returned rows outside the requested {period} window"
-            )
-
         observed_at = datetime.now(UTC).isoformat()
         papers = [
             self._to_paper(

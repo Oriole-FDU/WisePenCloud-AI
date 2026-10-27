@@ -1,4 +1,4 @@
-"""论文渠道发现能力及其实际查询窗口。"""
+"""论文渠道发现能力及其显式请求范围。"""
 
 from dataclasses import dataclass
 from datetime import date
@@ -22,7 +22,7 @@ class DiscoverySort(StrEnum):
 @dataclass
 class PaperDiscovery:
     papers: list[Paper]
-    window_start: date | None
+    window_start: date | None  # 显式请求范围；由上游决定最新内容时可为空。
     window_end: date | None
 
 

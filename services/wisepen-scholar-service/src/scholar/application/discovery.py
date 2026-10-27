@@ -1,4 +1,4 @@
-"""按领域策略调用发现渠道，并缓存上游候选与实际查询窗口。"""
+"""按领域策略调用发现渠道，并缓存上游候选与显式请求范围。"""
 
 import hashlib
 from dataclasses import dataclass

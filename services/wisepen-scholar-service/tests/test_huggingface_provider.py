@@ -231,274 +231,77 @@ class FixedDateTime(datetime):
         return cls(2026, 10, 27, 12, tzinfo=UTC)
 
 
-@pytest.mark.asyncio
-async def test_daily_discovery_uses_hf_submission_date_and_real_paper_facts(
-    monkeypatch,
-):
-    monkeypatch.setattr(huggingface_provider, "datetime", FixedDateTime)
-    requests = []
-    row = paper_info_payload()
-    response_rows = [[row], [row]]
-
-    async def handle(request):
-        requests.append(request)
-        return httpx.Response(200, json=response_rows[len(requests) - 1])
-
-    async with client_for(handle) as http:
-        result = await HuggingFaceProvider(http).discover(
-            period=DiscoveryPeriod.DAILY,
-            sort=DiscoverySort.RECENT,
-            limit=5,
-        )
-
-    assert len(requests) == 2
-    assert dict(requests[0].url.params) == {
-        "p": "0",
-        "limit": "1",
-        "sort": "publishedAt",
-    }
-    assert dict(requests[1].url.params) == {
-        "p": "0",
-        "limit": "5",
-        "sort": "publishedAt",
-        "date": "2026-10-26",
-    }
-    assert "query" not in requests[1].url.params
-    assert "authorization" not in requests[1].headers
-    assert result.window_start == date(2026, 10, 26)
-    assert result.window_end == date(2026, 10, 26)
-    paper = result.papers[0]
-    assert paper.source == PaperSource.HUGGINGFACE
-    assert paper.arxiv_id == "2401.00001"
-    assert paper.title == "A research paper"
-    assert paper.abstract == ""
-    assert paper.publication_date == date(2020, 1, 2)
-    assert paper.metadata["huggingface"]["submitted_at"] == "2026-10-26T00:00:00Z"
-
-
-@pytest.mark.asyncio
-async def test_daily_discovery_falls_back_to_flat_submission_date(monkeypatch):
-    monkeypatch.setattr(huggingface_provider, "datetime", FixedDateTime)
-    row = paper_info_payload()
-    del row["paper"]["submittedOnDailyAt"]
-    requests = []
-
-    async def handle(request):
-        requests.append(request)
-        return httpx.Response(200, json=[row])
-
-    async with client_for(handle) as http:
-        result = await HuggingFaceProvider(http).discover(
-            period=DiscoveryPeriod.DAILY,
-            sort=DiscoverySort.RECENT,
-            limit=1,
-        )
-
-    assert (result.window_start, result.window_end) == (
-        date(2026, 10, 24),
-        date(2026, 10, 24),
-    )
-    assert dict(requests[1].url.params)["date"] == "2026-10-24"
-
-
+@pytest.mark.parametrize("sort", list(DiscoverySort))
 @pytest.mark.parametrize(
-    "response_rows",
+    ("period", "selector", "window"),
     [
-        pytest.param(
-            [
-                [
-                    {
-                        **paper_info_payload(),
-                        "submittedOnDailyAt": None,
-                        "paper": {
-                            **paper_info_payload()["paper"],
-                            "submittedOnDailyAt": None,
-                        },
-                    },
-                ]
-            ],
-            id="missing-submission-date",
-        ),
-        pytest.param(
-            [
-                [paper_info_payload()],
-                [
-                    {
-                        **paper_info_payload("2401.00002"),
-                        "submittedOnDailyAt": None,
-                        "paper": {
-                            **paper_info_payload("2401.00002")["paper"],
-                            "submittedOnDailyAt": None,
-                        },
-                    }
-                ],
-            ],
-            id="missing-submission-date-in-day-results",
-        ),
-        pytest.param(
-            [
-                [paper_info_payload()],
-                [
-                    paper_info_payload(),
-                    {
-                        **paper_info_payload("2401.00002"),
-                        "paper": {
-                            **paper_info_payload("2401.00002")["paper"],
-                            "submittedOnDailyAt": "2026-10-25T00:00:00Z",
-                        },
-                    },
-                ],
-            ],
-            id="mixed-submission-dates",
-        ),
-    ],
-)
-@pytest.mark.asyncio
-async def test_daily_discovery_rejects_missing_or_mixed_submission_dates(
-    monkeypatch, response_rows
-):
-    monkeypatch.setattr(huggingface_provider, "datetime", FixedDateTime)
-    requests = []
-    request_index = 0
-
-    async def handle(request):
-        nonlocal request_index
-        requests.append(request)
-        rows = (
-            response_rows[request_index] if len(response_rows) > 1 else response_rows[0]
-        )
-        request_index += 1
-        return httpx.Response(200, json=rows)
-
-    async with client_for(handle) as http:
-        with pytest.raises(ProviderError):
-            await HuggingFaceProvider(http).discover(
-                period=DiscoveryPeriod.DAILY,
-                sort=DiscoverySort.RECENT,
-                limit=2,
-            )
-
-
-@pytest.mark.parametrize(
-    ("period", "sort", "expected_params", "start", "end"),
-    [
+        (DiscoveryPeriod.DAILY, {}, (None, None)),
         (
             DiscoveryPeriod.WEEKLY,
-            DiscoverySort.RECENT,
-            {"p": "0", "limit": "3", "sort": "publishedAt", "week": "2026-W44"},
-            date(2026, 10, 26),
-            date(2026, 11, 1),
+            {"week": "2026-W44"},
+            (date(2026, 10, 26), date(2026, 11, 1)),
         ),
         (
             DiscoveryPeriod.MONTHLY,
-            DiscoverySort.RECENT,
-            {"p": "0", "limit": "3", "sort": "publishedAt", "month": "2026-10"},
-            date(2026, 10, 1),
-            date(2026, 10, 31),
+            {"month": "2026-10"},
+            (date(2026, 10, 1), date(2026, 10, 31)),
         ),
     ],
 )
 @pytest.mark.asyncio
-async def test_periodic_discovery_sends_hf_period_and_returns_natural_window(
-    monkeypatch, period, sort, expected_params, start, end
+async def test_discovery_follows_official_request_and_preserves_response(
+    monkeypatch, period, selector, window, sort
 ):
     monkeypatch.setattr(huggingface_provider, "datetime", FixedDateTime)
     requests = []
+    first = paper_info_payload("2610.14224")
+    first["paper"]["submittedOnDailyAt"] = "2026-10-14T00:00:00Z"
+    second = paper_info_payload("2412.20138")
+    del second["paper"]["submittedOnDailyAt"]
+    del second["submittedOnDailyAt"]
 
     async def handle(request):
         requests.append(request)
-        return httpx.Response(200, json=[paper_info_payload()])
+        return httpx.Response(200, json=[first, second])
 
     async with client_for(handle) as http:
         result = await HuggingFaceProvider(http).discover(
-            period=period, sort=sort, limit=3
+            period=period, sort=sort, limit=5
         )
 
-    assert dict(requests[0].url.params) == expected_params
-    assert len(result.papers) == 1
-    assert result.window_start == start
-    assert result.window_end == end
-
-
-@pytest.mark.parametrize("sort", list(DiscoverySort))
-@pytest.mark.parametrize(
-    ("period", "outside_submission_date"),
-    [
-        (DiscoveryPeriod.WEEKLY, "2026-10-25T00:00:00Z"),
-        (DiscoveryPeriod.MONTHLY, "2026-09-30T00:00:00Z"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_periodic_discovery_rejects_rows_outside_requested_window(
-    monkeypatch, period, outside_submission_date, sort
-):
-    monkeypatch.setattr(huggingface_provider, "datetime", FixedDateTime)
-    row = paper_info_payload()
-    row["paper"]["submittedOnDailyAt"] = outside_submission_date
-
-    async def handle(request):
-        return httpx.Response(200, json=[row])
-
-    async with client_for(handle) as http:
-        with pytest.raises(ProviderError):
-            await HuggingFaceProvider(http).discover(
-                period=period,
-                sort=sort,
-                limit=1,
-            )
+    # 官方端点的较早论文和缺少渠道日期的论文均是有效结果，不据此丢弃成功响应。
+    assert len(requests) == 1
+    assert dict(requests[0].url.params) == {
+        "p": "0",
+        "limit": "5",
+        "sort": "publishedAt" if sort == DiscoverySort.RECENT else "trending",
+        **selector,
+    }
+    assert "query" not in requests[0].url.params
+    assert "authorization" not in requests[0].headers
+    assert [paper.arxiv_id for paper in result.papers] == ["2610.14224", "2412.20138"]
+    assert (result.window_start, result.window_end) == window
+    paper = result.papers[0]
+    assert paper.source == PaperSource.HUGGINGFACE
+    assert paper.title == "A research paper"
+    assert paper.abstract == ""
+    assert paper.publication_date == date(2020, 1, 2)
+    assert paper.metadata["huggingface"]["submitted_at"] == "2026-10-14T00:00:00Z"
+    assert result.papers[1].metadata["huggingface"]["submitted_at"] is None
 
 
 @pytest.mark.asyncio
-async def test_empty_daily_discovery_has_no_assumed_window(monkeypatch):
+async def test_empty_daily_discovery_returns_empty_success(monkeypatch):
     monkeypatch.setattr(huggingface_provider, "datetime", FixedDateTime)
-    requests = []
 
     async def handle(request):
-        requests.append(request)
         return httpx.Response(200, json=[])
 
     async with client_for(handle) as http:
         result = await HuggingFaceProvider(http).discover(
-            period=DiscoveryPeriod.DAILY,
-            sort=DiscoverySort.RECENT,
-            limit=10,
+            period=DiscoveryPeriod.DAILY, sort=DiscoverySort.RECENT, limit=10
         )
 
-    assert len(requests) == 1
-    assert dict(requests[0].url.params) == {
-        "p": "0",
-        "limit": "1",
-        "sort": "publishedAt",
-    }
+    assert result.papers == []
     assert result.window_start is None
     assert result.window_end is None
-
-
-@pytest.mark.parametrize("period", list(DiscoveryPeriod))
-@pytest.mark.asyncio
-async def test_trending_discovery_forwards_official_period_and_sort(
-    monkeypatch, period
-):
-    monkeypatch.setattr(huggingface_provider, "datetime", FixedDateTime)
-    requests = []
-
-    async def handle(request):
-        requests.append(request)
-        return httpx.Response(200, json=[paper_info_payload()])
-
-    async with client_for(handle) as http:
-        result = await HuggingFaceProvider(http).discover(
-            period=period,
-            sort=DiscoverySort.TRENDING,
-            limit=1,
-        )
-
-    assert len(result.papers) == 1
-    params = requests[-1].url.params
-    assert params["sort"] == "trending"
-    selector = {
-        DiscoveryPeriod.DAILY: "date",
-        DiscoveryPeriod.WEEKLY: "week",
-        DiscoveryPeriod.MONTHLY: "month",
-    }[period]
-    assert selector in params
