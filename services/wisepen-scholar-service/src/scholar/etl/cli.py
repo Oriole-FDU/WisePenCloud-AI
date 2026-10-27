@@ -9,9 +9,13 @@ from redis.asyncio import Redis
 
 from scholar.core.config.bootstrap_settings import SERVICE_ROOT
 from scholar.core.s2_transport import S2Transport
-from scholar.core.storage.elasticsearch.paper_repository import create_elasticsearch
+from scholar.core.storage.elasticsearch.paper_repository import (
+    ARXIV_MAPPING,
+    create_elasticsearch,
+)
 from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
 from scholar.etl.arxiv import database_status, import_arxiv, open_database
+from scholar.etl.arxiv_html import import_arxiv_html
 from scholar.etl.arxiv_oai import ArxivOaiHarvester
 from scholar.etl.arxiv_sync import sync_arxiv
 from scholar.etl.publish import publish_arxiv
@@ -52,6 +56,59 @@ async def run(args):
                 "arxiv": database_status(db),
             }
         from scholar.core.config.app_settings import settings
+
+        if args.command == "import-arxiv-html":
+            db.execute("SET memory_limit='2GB'")
+            db.execute("SET threads=2")
+            state = db.execute(
+                "SELECT complete,published,target_index FROM import_state"
+            ).fetchone()
+            if not state or not state[0] or not state[1]:
+                raise ValueError(
+                    "HTML import requires a completed, published arXiv baseline"
+                )
+            alias = args.alias or settings.SCHOLAR_INDEX_ALIAS
+            async with (
+                create_elasticsearch(
+                    settings.ELASTICSEARCH_URIS,
+                    settings.ELASTICSEARCH_USERNAME,
+                    settings.ELASTICSEARCH_PASSWORD,
+                    settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
+                ) as es,
+                Redis.from_url(settings.REDIS_URL) as redis,
+                httpx.AsyncClient(
+                    timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
+                    follow_redirects=True,
+                ) as http,
+            ):
+                target = state[2]
+                if set(await es.indices.get_alias(name=alias)) != {target}:
+                    raise RuntimeError("ES alias and offline write target disagree")
+                # 追加新字段即可；旧文档无正文也能继续按元数据检索，无需再次全库迁移。
+                await es.indices.put_mapping(
+                    index=target,
+                    properties={"full_text": ARXIV_MAPPING["properties"]["full_text"]},
+                )
+
+                async def publish_html():
+                    result = await publish_arxiv(
+                        db, es, alias, batch_size=args.batch_size
+                    )
+                    await es.indices.refresh(index=target)
+                    async for key in redis.scan_iter(
+                        match=f"scholar:search:{alias}:*", count=500
+                    ):
+                        await redis.unlink(key)
+                    return result
+
+                return await import_arxiv_html(
+                    db,
+                    http,
+                    publish=publish_html,
+                    batch_size=args.batch_size,
+                    request_interval=args.request_interval,
+                    max_batches=args.max_batches,
+                )
 
         if args.command == "publish":
             async with create_elasticsearch(
@@ -139,6 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
         "command",
         choices=[
             "import-arxiv",
+            "import-arxiv-html",
             "import-s2",
             "publish",
             "status",
@@ -157,6 +215,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--alias")
     parser.add_argument("--batch-size", type=int)
+    parser.add_argument(
+        "--request-interval",
+        type=float,
+        default=3,
+        help="HTML 抓取请求起点之间的秒数，至少 3 秒；单连接串行",
+    )
     s2_root = SERVICE_ROOT.parent.parent / "s2_download"
     parser.add_argument("--papers-dir", default=str(s2_root / "papers"))
     parser.add_argument("--tldrs-dir", default=str(s2_root / "tldrs"))
@@ -178,7 +242,9 @@ def main():
     args = parser.parse_args()
     if args.batch_size is None:
         args.batch_size = (
-            100
+            20
+            if args.command == "import-arxiv-html"
+            else 100
             if args.command == "sync-arxiv"
             else 50000
             if args.command in ("import-s2", "sync-s2")
@@ -192,8 +258,16 @@ def main():
         parser.error("import-s2 requires --release-id")
     if args.command == "import-s2" and args.tldr_model is None:
         args.tldr_model = "tldr@v2.0.0"
-    if args.max_batches is not None and args.command not in ("import-arxiv", "publish"):
-        parser.error("--max-batches is only valid for import-arxiv and publish")
+    if args.max_batches is not None and args.command not in (
+        "import-arxiv",
+        "publish",
+        "import-arxiv-html",
+    ):
+        parser.error(
+            "--max-batches is only valid for import-arxiv, import-arxiv-html and publish"
+        )
+    if args.command == "import-arxiv-html" and args.request_interval < 3:
+        parser.error("HTML request interval must be at least 3 seconds")
     if args.from_date is not None and args.command != "sync-arxiv":
         parser.error("--from is only valid for sync-arxiv")
     if (

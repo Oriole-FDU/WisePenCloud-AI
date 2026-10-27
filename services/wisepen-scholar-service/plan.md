@@ -16,7 +16,7 @@ Scholar 提供论文检索、精确查询和趋势发现，供 Agent 组合完�
 | S2                        | 提供通用学术信号；离线数据集、在线精确查询和每日同步各有明确调用边界              |
 | Hugging Face Papers（HF） | 提供 Computer Science 专用富化和趋势发现，使用异步 HTTP API                       |
 
-V1 不建设全文语料库、向量检索、完整引用图、作者研究工具、用户密钥管理系统或研究问题拆解流程。不预生成经典、热门、高影响力等学术判断标签，也不把不同来源的指标相加。
+V1 接入 arXiv 可用 HTML 正文，仅用于索引，不对外展示原文。不建设向量检索、完整引用图、作者研究工具、用户密钥管理系统或研究问题拆解流程。不预生成经典、热门、高影响力等学术判断标签，也不把不同来源的指标相加。
 
 ### 1.1 不得混淆的富化入口
 
@@ -111,7 +111,7 @@ API/MCP 边界负责解析请求，封闭值集合使用枚举。内部按 searc
 
 V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次提交日期，结果保留其来源；不拿元数据更新时间代替发表时间。
 
-本地召回采用 `.en` 子字段上的 `combined_fields`（BM25F 近似），标题/TLDR/摘要权重为 3:2:1，英语分析后使用 `2<70%` 命中门槛；原词形与短语匹配仅加分。保留 BM25 默认 `k1=1.2`、`b=0.75`，不将作者或引用数混入概念排序，不建设评测平台。新索引须完整回填子字段后再启用新版查询；不干扰当前后台写入，后续迁移协调 alias 与 ETL 的具体写入目标。参数依据和独立小索引行为验证见[检索基线](docs/search-baseline.md)。
+本地召回采用元数据 `.en` 子字段与 english `full_text` 上的 `combined_fields`（BM25F 近似），标题/TLDR/摘要/正文权重为 9:6:3:1，英语分析后使用 `2<70%` 命中门槛；原词形与短语匹配仅加分。保留 BM25 默认 `k1=1.2`、`b=0.75`，不将作者或引用数混入概念排序，不建设评测平台。新索引须完整回填子字段后再启用新版查询；不干扰当前后台写入，后续迁移协调 alias 与 ETL 的具体写入目标。参数依据和独立小索引行为验证见[检索基线](docs/search-baseline.md)。
 
 明确请求 CS 时，在候选归并并截取最终数量后执行 HF 富化。优先缓存，仅对有 arXiv ID 的候选请求 HF 论文详情，并发数默认
 4，受本次请求预算约束。HF 使用 `httpx.AsyncClient`，可选平台凭证来自 Nacos `HF_TOKEN`，不使用同步 SDK 或 `to_thread`。保留点赞、代码仓库、关联模型和数据集的实际返回值；不抓取整个关联仓库目录，不假定返回条目穷尽所有产物。404
@@ -418,3 +418,12 @@ ES、Redis、Nacos 或供应商协议的成功结论。没有新变化、失败�
 - P1 行为测试 14 项、MCP 全套测试 103 项已通过；真实 Nacos、ES 8.19.18、Redis、全量别名发布及 HTTP/MCP 端到端验收通过，重复导入/发布维持 3,224,542 篇、pending=0。部署产物属于 P6。详见阶段验收记录。
 
 官方协议参考：[S2 Graph API](https://api.semanticscholar.org/api-docs/)、[S2 Datasets API](https://api.semanticscholar.org/api-docs/datasets)、[HF HfApi](https://huggingface.co/docs/huggingface_hub/en/package_reference/hf_api)、[arXiv OAI-PMH](https://github.com/arXiv/arxiv-docs/blob/develop/source/help/oa/index.md)、[OpenAlex 过滤](https://help.openalex.org/api/filtering/)。
+
+
+## HTML 正文离线补充
+
+使用用户提供的 DOM 清洗规则，将 `/html/{arxiv_id}{version}` 的可用正文保存到 DuckDB，再通过原有 pending / ES 发布链路逐批更新；404/410 或无可用正文静默跳过，不做其他格式回退。网络和上游错误保留待办并报错，重跑复用已保存正文与版本进度。任务从看板启动，先处理新论文，不阻塞索引的元数据检索。
+
+增量元数据修订保留同版本正文，新版本移除旧正文后等待重新采集；S2 更新保留正文。search / lookup 仅返回元数据与 URL，ES 请求也排除 `full_text`。
+
+验收：40 项相关行为回归通过；6 份本地 HTML 样本可清洗，3 篇真实论文完成 HTML → DuckDB → ES 发布；独立 ES 验证正文独立召回、跨字段匹配、元数据加权和返回中排除正文。正式全库任务按批次持续处理，完成情况以看板为准。运行命令及吞吐边界见 [HTML 正文离线入库](docs/arxiv-html-import.md)。

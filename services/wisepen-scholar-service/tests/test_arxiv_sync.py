@@ -2,6 +2,7 @@ from xml.etree import ElementTree as ET
 
 import orjson
 import pytest
+
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.repositories.paper_enrichment_cache import PaperEnrichmentCache
@@ -207,6 +208,34 @@ def cursor_for(db):
     return db.execute(
         "SELECT last_response_date FROM arxiv_sync_state WHERE singleton=true"
     ).fetchone()
+
+
+@pytest.mark.parametrize("next_version", ["v1", "v2"])
+async def test_metadata_updates_keep_only_the_matching_version_full_text(
+    db, next_version
+):
+    identifier = "2401.00001"
+    document = seed_paper(db, identifier, "10.1234/keep", s2=full_s2("101"))
+    document.update(versions=[{"version": "v1"}], full_text="Saved paper body")
+    db.execute(
+        "UPDATE arxiv SET document=?::JSON WHERE arxiv_id=?",
+        [orjson.dumps(document).decode(), identifier],
+    )
+    record = active_record(identifier, "2026-10-23", doi="10.1234/keep")
+    record.metadata.find(f"{{{RAW_NS}}}version").set("version", next_version)
+    publish, _ = publisher(db)
+    await sync_arxiv(
+        db,
+        FakeHarvester(harvest("2026-10-24T00:00:00Z", record)),
+        FakeEnricher(),
+        publish=publish,
+        cache=FakeCache(),
+    )
+    updated = document_for(db, identifier)
+    if next_version == "v1":
+        assert updated["full_text"] == "Saved paper body"
+    else:
+        assert "full_text" not in updated
 
 
 @pytest.mark.asyncio

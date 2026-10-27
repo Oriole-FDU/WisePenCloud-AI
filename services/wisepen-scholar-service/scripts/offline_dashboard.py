@@ -123,8 +123,9 @@ def run_job(args: argparse.Namespace) -> int:
                         (
                             event[k]
                             for k in (
-                                "staged_changed",
                                 "written",
+                                "processed",
+                                "staged_changed",
                                 "scanned",
                                 "pending",
                                 "pending_publish",

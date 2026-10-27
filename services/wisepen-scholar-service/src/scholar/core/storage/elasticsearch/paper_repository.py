@@ -43,6 +43,8 @@ ARXIV_MAPPING = {
             for field in ("title", "abstract")
         },
         **{field: {"type": "text"} for field in ("authors", "journal_ref", "comments")},
+        # 仅供离线索引和召回；不进入 Paper，也不随检索或 lookup 返回。
+        "full_text": {"type": "text", "analyzer": "english"},
         "submitted_date": {"type": "date"},
         "updated_date": {"type": "date"},
         "versions": {"type": "object", "enabled": False},
@@ -136,18 +138,20 @@ class ElasticsearchPaperRepository:
             index=self.alias,
             size=limit,
             track_total_hits=False,
+            source_excludes=["full_text"],
             query={
                 "bool": {
                     "must": [
                         {
                             # BM25F 近似按词跨字段匹配，允许标题与摘要共同满足命中门槛。
-                            # 三个字段使用相同的 english analyzer，门槛不计英语停用词。
+                            # 元数据权重高于正文；四个字段统一使用 english analyzer。
                             "combined_fields": {
                                 "query": query,
                                 "fields": [
-                                    "title.en^3",
-                                    "metadata.s2.tldr.text.en^2",
-                                    "abstract.en",
+                                    "title.en^9",
+                                    "metadata.s2.tldr.text.en^6",
+                                    "abstract.en^3",
+                                    "full_text",
                                 ],
                                 "minimum_should_match": "2<70%",
                             }
@@ -194,7 +198,11 @@ class ElasticsearchPaperRepository:
             searches.extend(
                 [
                     {"index": self.alias},
-                    {"size": 2, "query": {"term": {field: identifier.value}}},
+                    {
+                        "size": 2,
+                        "_source": {"excludes": ["full_text"]},
+                        "query": {"term": {field: identifier.value}},
+                    },
                 ]
             )
         try:
