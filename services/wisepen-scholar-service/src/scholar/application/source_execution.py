@@ -1,5 +1,7 @@
 """本次用例的来源执行情况，与可复用的论文事实分开。"""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -18,3 +20,4 @@ class SourceExecution:
     coverage: str
     status: SourceExecutionStatus = SourceExecutionStatus.COMPLETED
     error: str | None = None
+    queued_ahead: int | None = None

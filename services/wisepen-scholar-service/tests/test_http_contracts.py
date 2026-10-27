@@ -5,7 +5,6 @@ from datetime import date
 import pytest
 from dependency_injector import providers
 from fastapi.testclient import TestClient
-
 from scholar.api.app import create_app
 from scholar.api.endpoints import health, papers
 from scholar.container import container
@@ -132,6 +131,7 @@ def scholar_client():
             "HF_TOKEN": None,
             "S2_API_KEY": "test-s2-key",
             "SCHOLAR_HF_CONCURRENCY": 4,
+            "SCHOLAR_S2_MAX_QUEUED_AHEAD": 5,
             "SCHOLAR_PAPER_CACHE_TTL_SECONDS": 86400,
             "SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS": 3600,
         }
@@ -335,7 +335,7 @@ def test_full_lookup_keeps_base_facts_or_raises_when_s2_fails(
         assert response.status_code == 200
         item = response.json()["data"]["items"][0]
         assert item["paper"]["title"] == "First paper"
-        assert item["enrichment_status"] == "failed"
+        assert item["enrichment_status"] == "partial"
         assert "429" in item["error"]
     else:
         assert response.status_code == 503

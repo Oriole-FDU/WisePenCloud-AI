@@ -9,8 +9,8 @@ from datetime import date
 from enum import StrEnum
 
 import orjson
-
 from common.utils.retrieval import Candidate, RrfFusion
+
 from scholar.application.enrichment import EnrichmentRunner
 from scholar.application.field_policies import COMMON_ENRICHERS, FieldPolicy
 from scholar.application.source_execution import SourceExecution, SourceExecutionStatus

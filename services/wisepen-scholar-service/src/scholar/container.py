@@ -7,14 +7,6 @@ from redis.asyncio import Redis
 from scholar.application.discovery import PaperDiscoveryService
 from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.field_policies import FIELD_POLICIES
-from scholar.providers.enrichment_rules import (
-    arxiv_signals,
-    s2_signals,
-    s2_aliases,
-    s2_short_lived,
-    openalex_aliases,
-    openalex_signals,
-)
 from scholar.application.lookup import PaperLookupService
 from scholar.application.search import (
     PaperSearchService,
@@ -30,6 +22,14 @@ from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
 from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
 from scholar.domain.models.identifiers import IdentifierKind
 from scholar.providers.arxiv import ArxivProvider
+from scholar.providers.enrichment_rules import (
+    arxiv_signals,
+    openalex_aliases,
+    openalex_signals,
+    s2_aliases,
+    s2_short_lived,
+    s2_signals,
+)
 from scholar.providers.huggingface import HuggingFaceProvider
 from scholar.providers.openalex import OpenAlexProvider
 from scholar.providers.s2 import S2Provider
@@ -59,7 +59,11 @@ class Container(containers.DeclarativeContainer):
         httpx.AsyncClient, timeout=config.SCHOLAR_REQUEST_TIMEOUT_SECONDS
     )
     s2_transport = providers.Singleton(
-        S2Transport, http=s2_http, redis=redis, api_key=config.S2_API_KEY
+        S2Transport,
+        http=s2_http,
+        redis=redis,
+        api_key=config.S2_API_KEY,
+        max_queued_ahead=config.SCHOLAR_S2_MAX_QUEUED_AHEAD,
     )
     s2_provider = providers.Singleton(S2Provider, transport=s2_transport)
     paper_repository = providers.Singleton(

@@ -1,5 +1,7 @@
 """与 Chat/Sandbox 相同的 Nacos 配置加载入口。"""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import threading
@@ -27,6 +29,7 @@ class AppSettings(BaseModel):
     SCHOLAR_PAPER_CACHE_TTL_SECONDS: int = Field(default=86400, gt=0)
     SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS: int = Field(default=3600, gt=0)
     SCHOLAR_HF_CONCURRENCY: int = Field(default=4, gt=0)
+    SCHOLAR_S2_MAX_QUEUED_AHEAD: int = Field(default=5, ge=0)
     SCHOLAR_REQUEST_TIMEOUT_SECONDS: float = Field(default=25, gt=0)
     SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS: float = Field(default=120, gt=0)
 

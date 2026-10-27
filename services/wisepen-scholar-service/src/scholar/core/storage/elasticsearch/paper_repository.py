@@ -1,11 +1,18 @@
 """ES 是可重建的完整论文投影，HTTP 从不访问 ETL 的 DuckDB。"""
 
+from __future__ import annotations
+
 from datetime import date
 
 import orjson
 from common.logger import warn
+from elastic_transport import ApiError, ConnectionError, ConnectionTimeout
 from elasticsearch import AsyncElasticsearch
 
+from scholar.domain.interfaces.provider_error import (
+    ProviderError,
+    provider_error_message,
+)
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.repositories.paper_repository import (
@@ -190,7 +197,11 @@ class ElasticsearchPaperRepository:
                     {"size": 2, "query": {"term": {field: identifier.value}}},
                 ]
             )
-        response = await self.es.msearch(searches=searches)
+        try:
+            response = await self.es.msearch(searches=searches)
+        except (ApiError, ConnectionError, ConnectionTimeout) as error:
+            # 网络失败在存储接入边界转换；lookup 可据此回退，程序错误继续传播。
+            raise ProviderError(provider_error_message(error)) from error
         results = []
         for result in response["responses"]:
             if "error" in result:

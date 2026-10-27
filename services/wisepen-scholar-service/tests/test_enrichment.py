@@ -1,22 +1,12 @@
 """经 lookup 公共入口验证 S2 富化与共享缓存合同。"""
 
-from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
-from scholar.providers.enrichment_rules import (
-    arxiv_signals,
-    s2_signals,
-    s2_aliases,
-    s2_short_lived,
-)
-from scholar.domain.models.identifiers import IdentifierKind
-
-
 import asyncio
 from dataclasses import replace
 from datetime import date
 
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
-
+from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.lookup import (
     EnrichmentStatus,
     LookupPurpose,
@@ -27,12 +17,18 @@ from scholar.application.lookup import (
 from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.interfaces.provider_error import ProviderError
-from scholar.domain.models.identifiers import parse_identifier
+from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.repositories.paper_enrichment_cache import (
     CachedPaperEnrichment,
 )
 from scholar.domain.repositories.paper_repository import PaperLookupMatch
+from scholar.providers.enrichment_rules import (
+    arxiv_signals,
+    s2_aliases,
+    s2_short_lived,
+    s2_signals,
+)
 
 
 class FakePaperRepository:
@@ -612,7 +608,7 @@ async def test_concurrent_lookups_revalidate_distinct_offline_s2_identities():
     first_result, second_result = await asyncio.gather(first, second)
 
     assert first_result.items[0].enrichment_status == EnrichmentStatus.COMPLETE
-    assert second_result.items[0].enrichment_status == EnrichmentStatus.FAILED
+    assert second_result.items[0].enrichment_status == EnrichmentStatus.PARTIAL
     assert "conflicts" in second_result.items[0].error
     assert second_result.items[0].metadata["s2"]["paper_id"] == offline_s2_ids[1]
     assert "citation_count" not in second_result.items[0].metadata["s2"]

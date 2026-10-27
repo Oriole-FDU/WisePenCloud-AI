@@ -1,8 +1,10 @@
 """通过公开用例验证通用短路、领域增量和新供应商接入，避免锁定内部实现。"""
 
+import asyncio
+
 import httpx
 import pytest
-
+from elastic_transport import ConnectionError as ElasticConnectionError
 from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.field_policies import FieldPolicy
 from scholar.application.lookup import (
@@ -19,15 +21,20 @@ from scholar.application.search import (
     SourceScope,
 )
 from scholar.application.source_execution import SourceExecutionStatus
+from scholar.core.storage.elasticsearch.paper_repository import (
+    ElasticsearchPaperRepository,
+)
 from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.interfaces.provider_error import ProviderError
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
+from scholar.domain.repositories.paper_enrichment_cache import CachedPaperEnrichment
 from scholar.domain.repositories.paper_repository import PaperLookupMatch
 from scholar.providers.enrichment_rules import arxiv_signals, s2_aliases, s2_signals
 from scholar.providers.openalex import OpenAlexProvider
 from test_enrichment import (
+    FakeCache,
     FakeEnricher,
     FakePaperRepository,
     FakeRedisBoundary,
@@ -347,3 +354,66 @@ async def test_byok_enrichment_cache_and_inflight_do_not_cross_credentials():
     assert all(
         "key-one" not in key and "key-two" not in key for key in cache.redis.values
     )
+
+
+@pytest.mark.asyncio
+async def test_openalex_failed_batch_cancels_remaining_http_and_keeps_original_error():
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def handle(request):
+        if request.url.path.endswith("W1"):
+            await entered.wait()
+            return httpx.Response(503)
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        with pytest.raises(ProviderError, match="503"):
+            await OpenAlexProvider(http).enrich(
+                [parse_identifier("openalex:W1"), parse_identifier("openalex:W2")],
+                api_key="key",
+            )
+    assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_failed_details_extension_does_not_discard_cached_general_signals():
+    identity = parse_identifier("2401.00001")
+    cache = FakeCache()
+    cache.values[identity] = CachedPaperEnrichment(
+        s2_enrichment(paper=False), (identity,), True, False
+    )
+    runner = EnrichmentRunner(
+        bindings(
+            s2=FakeEnricher(error=ProviderError("details unavailable")), cache=cache
+        )
+    )
+    result = await PaperLookupService(FakePaperRepository(), enrichment=runner).lookup(
+        PaperLookup([identity.value], LookupPurpose.FULL),
+    )
+    assert result.items[0].metadata["s2"]["citation_count"] == 20
+    assert (
+        next(e for e in result.execution if e.source == "s2").status
+        == SourceExecutionStatus.PARTIAL
+    )
+
+
+@pytest.mark.asyncio
+async def test_real_repository_network_error_is_a_fallback_source_failure():
+    class UnavailableElasticsearch:
+        async def msearch(self, **kwargs):
+            raise ElasticConnectionError("ES connection lost")
+
+    identity = parse_identifier("2401.00001")
+    repository = ElasticsearchPaperRepository(UnavailableElasticsearch(), "test-alias")
+    runner = EnrichmentRunner(bindings(s2=FakeEnricher({identity: s2_enrichment()})))
+    result = await PaperLookupService(repository, enrichment=runner).lookup(
+        PaperLookup([identity.value], LookupPurpose.ENRICH),
+    )
+    assert result.items[0].enrichment_status == EnrichmentStatus.COMPLETE
+    assert result.execution[0].status == SourceExecutionStatus.FAILED
+    assert "Connection error" in result.execution[0].error

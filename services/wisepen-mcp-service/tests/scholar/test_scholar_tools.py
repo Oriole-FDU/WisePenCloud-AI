@@ -4,7 +4,6 @@ from types import SimpleNamespace
 import pytest
 from common.core.exceptions import RpcError
 from mcp.shared.memory import create_connected_server_and_client_session
-
 from wisepen_mcp.capabilities import build_mcp_server
 from wisepen_mcp.service_client import ScholarClient
 

@@ -13,7 +13,8 @@ from redis.exceptions import RedisError
 
 from scholar.application.source_execution import SourceExecution, SourceExecutionStatus
 from scholar.domain.interfaces.paper_enricher import PaperEnricher, PaperEnrichment
-from scholar.domain.interfaces.provider_error import ProviderError
+from scholar.domain.interfaces.provider_error import ProviderBusy, ProviderError
+from scholar.domain.interfaces.provider_execution import provider_queued_ahead
 from scholar.domain.models.identifiers import (
     IdentifierKind,
     PaperIdentifier,
@@ -65,6 +66,7 @@ class _SourceBatch:
     errors: dict[PaperIdentifier, Exception] = field(default_factory=dict)
     cache_hits: set[PaperIdentifier] = field(default_factory=set)
     cache_errors: list[Exception] = field(default_factory=list)
+    queued_ahead: int | None = None
 
 
 @dataclass
@@ -201,6 +203,7 @@ class EnrichmentRunner:
                 unsupported = True
 
         successes = failures = 0
+        queued_ahead = None
         cache_hits = False
         first_error: Exception | None = None
         for include_details, positions in groups.items():
@@ -218,14 +221,18 @@ class EnrichmentRunner:
                 source, known_ids, include_details, cache_only, api_key
             )
             cache_hits = cache_hits or bool(batch.cache_hits)
+            if batch.queued_ahead is not None:
+                # 同来源需要多个批次时，展示本次最大的准入等待数，不保存到论文缓存。
+                queued_ahead = max(queued_ahead or 0, batch.queued_ahead)
             for identifier, entries in positions.items():
                 error = batch.errors.get(identifier)
                 if error is not None:
-                    failures += 1
+                    if not isinstance(error, ProviderBusy):
+                        failures += 1
                     first_error = first_error or error
                     for target in entries:
                         target.errors.append(error)
-                    continue
+                # 详情补查失败仍可消费此前已验证的缓存信号；失败过程保留在 execution。
                 record = batch.records.get(identifier)
                 if record is None:
                     continue
@@ -272,6 +279,7 @@ class EnrichmentRunner:
             else "Source does not support the known paper identities"
             if unsupported and not any(groups.values())
             else None,
+            queued_ahead=queued_ahead,
         )
 
     async def _shared(
@@ -381,13 +389,20 @@ class EnrichmentRunner:
 
         if not pending:
             return batch
+        token = provider_queued_ahead.set(None)
         try:
-            responses = await binding.enricher.enrich(
-                pending, include_details=include_details, api_key=api_key
-            )
-        except ProviderError as error:
-            batch.errors.update(dict.fromkeys(pending, error))
-            return batch
+            try:
+                responses = await binding.enricher.enrich(
+                    pending,
+                    include_details=include_details,
+                    api_key=api_key,
+                )
+            except ProviderError as error:
+                batch.errors.update(dict.fromkeys(pending, error))
+                return batch
+        finally:
+            batch.queued_ahead = provider_queued_ahead.get()
+            provider_queued_ahead.reset(token)
         for identifier, response in zip(pending, responses, strict=True):
             if response is not None:
                 aliases = self._aliases(binding, response)

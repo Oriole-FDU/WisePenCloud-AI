@@ -1,15 +1,12 @@
 """从公开搜索用例验证候选富化，并验证共享事实缓存的 alias 失效。"""
 
-from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
-
-
 import asyncio
 from datetime import date
 
 import httpx
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
-
+from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.field_policies import FieldPolicy
 from scholar.application.search import (
     PaperSearch,

@@ -1,5 +1,7 @@
 """Hugging Face Papers 的异步 HTTP 适配与精选事实投影。"""
 
+from __future__ import annotations
+
 import asyncio
 import calendar
 from datetime import UTC, date, datetime, timedelta
@@ -42,7 +44,10 @@ class HuggingFaceProvider:
         self._request_limit = asyncio.Semaphore(concurrency)
 
     async def enrich(
-        self, identifiers: list[PaperIdentifier], *, include_details: bool = False,
+        self,
+        identifiers: list[PaperIdentifier],
+        *,
+        include_details: bool = False,
         api_key: str | None = None,
     ) -> list[PaperEnrichment | None]:
         return await asyncio.gather(

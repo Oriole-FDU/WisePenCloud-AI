@@ -1,10 +1,9 @@
-from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 import asyncio
 from datetime import date
 
 import httpx
 import pytest
-
+from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.lookup import (
     LookupStatus,
     PaperLookup,

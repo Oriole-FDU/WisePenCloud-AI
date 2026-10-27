@@ -63,6 +63,8 @@ Lookup 的 `details/enrich/full` 已接入同一个用例。details 可复用缓
 
 现有 MCP 服务的 search、lookup、discover 工具使用 Nacos RpcClient 调用这些 HTTP 接口，返回解包后的 data；来源路由和论文归一化不复制到 MCP。配置驱动的检索及医疗多源扩展验收见 [P3 记录](docs/p3-acceptance.md)。
 
+S2 在线请求使用 Redis FIFO 与离线步骤共享 1 RPS。Nacos `SCHOLAR_S2_MAX_QUEUED_AHEAD` 默认 5，前方超过 5 项立即跳过并回退 OpenAlex；离线不应用拥堵阈值。`execution.queued_ahead` 展示准入快照，缓存命中不携带旧排队信息。
+
 ## 验证
 
 ```powershell
@@ -70,3 +72,5 @@ uv run --no-sync python -m pytest tests -q
 ```
 
 [数据基线](docs/data-baseline.md)记录输入及样本验证范围；[阶段验收记录](docs/p0-p1-acceptance.md)记录真实基础设施与全量导入结果。单元测试中的外部依赖替身不替代真实 ES 验收。
+
+真实 Redis 队列验收使用独立随机命名空间，显式设置 `SCHOLAR_TEST_REDIS_URL` 后执行 `uv run --no-sync pytest tests/test_s2_queue.py -q`。未配置时这 5 项跳过，不连接默认服务命名空间。

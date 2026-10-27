@@ -1,5 +1,7 @@
 """Semantic Scholar 论文富化适配器。"""
 
+from __future__ import annotations
+
 from datetime import UTC, date, datetime
 
 import httpx
@@ -37,7 +39,10 @@ class S2Provider:
         self.transport = transport
 
     async def enrich(
-        self, identifiers: list[PaperIdentifier], *, include_details: bool = False,
+        self,
+        identifiers: list[PaperIdentifier],
+        *,
+        include_details: bool = False,
         api_key: str | None = None,
     ) -> list[PaperEnrichment | None]:
         fields = IDENTITY_FIELDS + ENRICHMENT_FIELDS

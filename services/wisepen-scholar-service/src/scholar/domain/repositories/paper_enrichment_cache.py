@@ -1,5 +1,7 @@
 """可按规范论文身份读写并失效来源富化记录的共享缓存端口。"""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Protocol
 

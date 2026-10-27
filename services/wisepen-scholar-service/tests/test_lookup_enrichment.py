@@ -1,15 +1,10 @@
 """lookup 的 purpose、身份路由和 OpenAlex/S2 组合合同。"""
 
-from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
-from scholar.providers.enrichment_rules import arxiv_signals, s2_signals, s2_aliases
-from scholar.domain.models.identifiers import IdentifierKind
-
-
 from dataclasses import replace
 from datetime import date
 
 import pytest
-
+from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.lookup import (
     EnrichmentStatus,
     LookupPurpose,
@@ -18,9 +13,10 @@ from scholar.application.lookup import (
     PaperLookupService,
 )
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
-from scholar.domain.models.identifiers import parse_identifier
+from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.repositories.paper_repository import PaperLookupMatch
+from scholar.providers.enrichment_rules import arxiv_signals, s2_aliases, s2_signals
 
 
 def make_paper(

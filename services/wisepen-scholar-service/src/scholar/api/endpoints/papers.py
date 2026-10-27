@@ -29,7 +29,7 @@ async def search(
         float, Depends(Provide[Container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS])
     ],
     x_openalex_api_key: Annotated[
-        str | None, Header(alias="X-OpenAlex-Api-Key")
+        str | None, Header(alias="X-OpenAlex-Api-Key")  # noqa: FA102 - @inject needs runtime Annotated metadata.
     ] = None,
 ) -> R[SearchResult]:
     async with asyncio.timeout(timeout):
@@ -55,7 +55,7 @@ async def lookup(
         float, Depends(Provide[Container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS])
     ],
     x_openalex_api_key: Annotated[
-        str | None, Header(alias="X-OpenAlex-Api-Key")
+        str | None, Header(alias="X-OpenAlex-Api-Key")  # noqa: FA102 - @inject needs runtime Annotated metadata.
     ] = None,
 ) -> R[LookupResult]:
     async with asyncio.timeout(timeout):

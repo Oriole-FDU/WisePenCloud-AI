@@ -1,0 +1,262 @@
+"""在独立 Redis 命名空间验证跨客户端 FIFO，不访问 S2 或现有任务键。"""
+
+import asyncio
+import os
+import time
+from uuid import uuid4
+
+import httpx
+import pytest
+import pytest_asyncio
+from redis.asyncio import Redis
+from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
+from scholar.application.lookup import (
+    EnrichmentStatus,
+    LookupPurpose,
+    PaperLookup,
+    PaperLookupService,
+)
+from scholar.application.source_execution import SourceExecutionStatus
+from scholar.core.s2_transport import S2Transport
+from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
+from scholar.domain.interfaces.provider_error import ProviderBusy
+from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
+from scholar.providers.enrichment_rules import s2_signals
+from scholar.providers.s2 import S2Provider
+from test_enrichment import FakeEnricher, FakePaperRepository, s2_enrichment
+
+
+@pytest_asyncio.fixture
+async def queue_boundary():
+    url = os.environ.get("SCHOLAR_TEST_REDIS_URL")
+    if not url:
+        pytest.skip("set SCHOLAR_TEST_REDIS_URL to run real Redis queue acceptance")
+    namespace = f"scholar:test:s2:{uuid4().hex}"
+    first, second = [Redis.from_url(url, socket_timeout=5) for _ in range(2)]
+    await first.ping()
+    try:
+        yield first, second, namespace
+    finally:
+        # Only this fixture's exact keys; never scan or delete the service namespace.
+        await first.delete(
+            *(
+                f"{namespace}:{suffix}"
+                for suffix in ("queue", "leases", "sequence", "send-permit")
+            )
+        )
+        await first.aclose()
+        await second.aclose()
+
+
+async def wait_count(redis, namespace, count):
+    async with asyncio.timeout(5):
+        while await redis.zcard(f"{namespace}:queue") != count:
+            await asyncio.sleep(0.01)
+
+
+async def seed_waiters(redis, namespace, count, *, expired=False):
+    seconds, micros = await redis.time()
+    now = seconds * 1000 + micros // 1000
+    members = {f"existing-{i}": i for i in range(count)}
+    await redis.zadd(f"{namespace}:queue", members)
+    await redis.zadd(
+        f"{namespace}:leases",
+        {member: now - 1 if expired else now + 15000 for member in members},
+    )
+    await redis.set(f"{namespace}:sequence", count)
+
+
+@pytest.mark.asyncio
+async def test_fifo_across_clients_and_offline_shares_one_second_quota(queue_boundary):
+    first, second, namespace = queue_boundary
+    sent = []
+
+    async def handle(request):
+        sent.append((request.url.path, time.monotonic()))
+        return httpx.Response(200, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        online = S2Transport(
+            http, first, "key", namespace=namespace, max_queued_ahead=5
+        )
+        offline = S2Transport(http, second, "key", namespace=namespace)
+        # Hold the current permission so all tasks are demonstrably waiting before send.
+        seconds, micros = await first.time()
+        await first.set(f"{namespace}:send-permit", seconds * 1000 + micros // 1000)
+        tasks = []
+        try:
+            for i, transport in enumerate([online, offline, online]):
+                tasks.append(asyncio.create_task(transport.request("GET", f"test/{i}")))
+                await wait_count(first, namespace, i + 1)
+            await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+    assert [path for path, _ in sent] == ["/test/0", "/test/1", "/test/2"]
+    assert all(after[1] - before[1] >= 0.95 for before, after in zip(sent, sent[1:]))
+    assert await first.zcard(f"{namespace}:queue") == 0
+    assert await first.zcard(f"{namespace}:leases") == 0
+
+
+@pytest.mark.asyncio
+async def test_five_ahead_allowed_six_skipped_and_offline_not_rejected(queue_boundary):
+    first, second, namespace = queue_boundary
+    await seed_waiters(first, namespace, 5)
+
+    async def handle(request):
+        raise AssertionError("waiting or rejected task must not send")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        online = S2Transport(
+            http, first, "key", namespace=namespace, max_queued_ahead=5
+        )
+        allowed = asyncio.create_task(online.request("GET", "allowed"))
+        offline = None
+        try:
+            await wait_count(first, namespace, 6)
+            with pytest.raises(ProviderBusy) as raised:
+                await online.request("GET", "rejected")
+            assert raised.value.queued_ahead == 6
+            assert await first.zcard(f"{namespace}:queue") == 6
+            offline = asyncio.create_task(
+                S2Transport(http, second, "key", namespace=namespace).request(
+                    "GET", "offline"
+                )
+            )
+            await wait_count(first, namespace, 7)
+        finally:
+            allowed.cancel()
+            if offline is not None:
+                offline.cancel()
+            await asyncio.gather(
+                allowed,
+                *([offline] if offline is not None else []),
+                return_exceptions=True,
+            )
+    assert await first.zcard(f"{namespace}:queue") == 5
+    assert await first.zcard(f"{namespace}:leases") == 5
+
+
+@pytest.mark.asyncio
+async def test_timeout_cleans_waiter_and_expired_process_lease_is_pruned(
+    queue_boundary,
+):
+    first, _, namespace = queue_boundary
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
+    ) as http:
+        await seed_waiters(first, namespace, 1)
+        transport = S2Transport(
+            http, first, "key", namespace=namespace, max_queued_ahead=5
+        )
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.05):
+                await transport.request("GET", "timeout")
+        assert await first.zcard(f"{namespace}:queue") == 1
+        assert await first.zcard(f"{namespace}:leases") == 1
+        await first.zadd(f"{namespace}:leases", {"existing-0": 0})
+        await transport.request("GET", "after-expired-process")
+    assert await first.zcard(f"{namespace}:queue") == 0
+    assert await first.zcard(f"{namespace}:leases") == 0
+
+
+@pytest.mark.asyncio
+async def test_busy_is_not_executed_and_openalex_fallback_is_complete(queue_boundary):
+    first, _, namespace = queue_boundary
+    await seed_waiters(first, namespace, 6)
+    identity = parse_identifier("2401.00001")
+
+    async def handle(request):
+        raise AssertionError("busy S2 must not send")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        runner = EnrichmentRunner(
+            {
+                "s2": EnrichmentBinding(
+                    S2Provider(
+                        S2Transport(
+                            http, first, "key", namespace=namespace, max_queued_ahead=5
+                        )
+                    ),
+                    None,
+                    [IdentifierKind.ARXIV],
+                    has_signals=s2_signals,
+                ),
+                "openalex": EnrichmentBinding(
+                    FakeEnricher({identity: s2_enrichment()}),
+                    None,
+                    [IdentifierKind.ARXIV],
+                    has_signals=s2_signals,
+                ),
+            }
+        )
+        result = await PaperLookupService(
+            FakePaperRepository(), enrichment=runner
+        ).lookup(PaperLookup([identity.value], LookupPurpose.ENRICH))
+    execution = next(e for e in result.execution if e.source == "s2")
+    assert execution.status == SourceExecutionStatus.NOT_EXECUTED
+    assert execution.queued_ahead == 6
+    assert "queue busy" in execution.error
+    assert result.items[0].enrichment_status == EnrichmentStatus.COMPLETE
+    assert result.items[0].error is None
+
+
+@pytest.mark.asyncio
+async def test_cache_and_identical_inflight_batch_use_one_queue_task(queue_boundary):
+    first, _, namespace = queue_boundary
+    sent = []
+
+    async def handle(request):
+        sent.append(request)
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "paperId": "a" * 40,
+                    "externalIds": {"ArXiv": "2401.00001"},
+                    "citationCount": 0,
+                }
+            ],
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        cache = RedisPaperEnrichmentCache(first, namespace)
+        runner = EnrichmentRunner(
+            {
+                "s2": EnrichmentBinding(
+                    S2Provider(
+                        S2Transport(
+                            http, first, "key", namespace=namespace, max_queued_ahead=5
+                        )
+                    ),
+                    cache,
+                    [IdentifierKind.ARXIV],
+                    has_signals=s2_signals,
+                )
+            }
+        )
+        service = PaperLookupService(FakePaperRepository(), enrichment=runner)
+        query = PaperLookup(["2401.00001", "2401.00001"], LookupPurpose.ENRICH)
+        seconds, micros = await first.time()
+        await first.set(f"{namespace}:send-permit", seconds * 1000 + micros // 1000)
+        one = asyncio.create_task(service.lookup(query))
+        two = asyncio.create_task(service.lookup(query))
+        try:
+            await wait_count(first, namespace, 1)
+            await asyncio.sleep(0.05)
+            assert await first.zcard(f"{namespace}:queue") == 1
+            results = await asyncio.gather(one, two)
+            assert all(
+                next(e for e in r.execution if e.source == "s2").queued_ahead == 0
+                for r in results
+            )
+            cached = await service.lookup(query)
+            execution = next(e for e in cached.execution if e.source == "s2")
+            assert execution.cache_hit and execution.queued_ahead is None
+            assert len(sent) == 1
+        finally:
+            one.cancel()
+            two.cancel()
+            await asyncio.gather(one, two, return_exceptions=True)
+            await cache.invalidate([parse_identifier("2401.00001")])

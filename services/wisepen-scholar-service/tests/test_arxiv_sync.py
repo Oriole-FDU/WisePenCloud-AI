@@ -2,7 +2,6 @@ from xml.etree import ElementTree as ET
 
 import orjson
 import pytest
-
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.repositories.paper_enrichment_cache import PaperEnrichmentCache

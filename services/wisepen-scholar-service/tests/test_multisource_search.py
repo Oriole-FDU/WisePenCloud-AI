@@ -2,8 +2,7 @@ from dataclasses import replace
 from datetime import date
 
 import pytest
-from common.core.exceptions import ServiceException
-
+from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.field_policies import FIELD_POLICIES, FieldPolicy
 from scholar.application.search import (
     PaperSearch,
@@ -12,7 +11,6 @@ from scholar.application.search import (
     SearchResult,
     SourceScope,
 )
-from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.source_execution import (
     SourceExecutionStatus,
 )
@@ -198,14 +196,19 @@ async def test_multisource_missing_key_keeps_successful_local_source():
     arxiv = FakePaperRepository()
     openalex = FakeSearcher()
     search = service(arxiv=arxiv, openalex=openalex)
-    result = await search.search(PaperSearch("question", source_scope=SourceScope.MULTI_SOURCE))
+    result = await search.search(
+        PaperSearch("question", source_scope=SourceScope.MULTI_SOURCE)
+    )
     assert result.papers == []
     assert {e.source: e.status for e in result.execution} == {
-        "openalex": SourceExecutionStatus.FAILED, "arxiv": SourceExecutionStatus.COMPLETED,
+        "openalex": SourceExecutionStatus.FAILED,
+        "arxiv": SourceExecutionStatus.COMPLETED,
     }
     assert len(arxiv.calls) == len(openalex.calls) == 1
     single = await search.search(
-        PaperSearch("law", field=AcademicField.LAW, source_scope=SourceScope.MULTI_SOURCE),
+        PaperSearch(
+            "law", field=AcademicField.LAW, source_scope=SourceScope.MULTI_SOURCE
+        ),
         credentials={"openalex": "law-key"},
     )
     assert [e.source for e in single.execution] == ["openalex"]
@@ -388,7 +391,8 @@ async def test_multisource_retains_success_and_reports_provider_failure(message)
 
     assert result.papers == [arxiv_result]
     assert {e.source: e.status for e in result.execution} == {
-        "arxiv": SourceExecutionStatus.COMPLETED, "openalex": SourceExecutionStatus.FAILED,
+        "arxiv": SourceExecutionStatus.COMPLETED,
+        "openalex": SourceExecutionStatus.FAILED,
     }
     assert result.execution[0].error == message
 
@@ -446,7 +450,10 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
         enrichers=["clinical_trials"],
     )
     search = PaperSearchService(
-        bindings, {AcademicField.MEDICINE: policy}, MemoryCache(), EnrichmentRunner(enrichment)
+        bindings,
+        {AcademicField.MEDICINE: policy},
+        MemoryCache(),
+        EnrichmentRunner(enrichment),
     )
     single = await search.search(PaperSearch("cancer", field=AcademicField.MEDICINE))
     assert single.papers[0].source == "pubmed"
@@ -477,11 +484,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
     # 调整默认计划只改配置，仍使用同一缓存、融合和专有富化用例。
     changed = PaperSearchService(
         bindings,
-        {
-            AcademicField.MEDICINE: replace(
-                policy, searchers=["web_of_science"]
-            )
-        },
+        {AcademicField.MEDICINE: replace(policy, searchers=["web_of_science"])},
         MemoryCache(),
         EnrichmentRunner(enrichment),
     )
@@ -526,11 +529,15 @@ async def test_default_falls_back_only_on_provider_failure_and_stops_on_empty_re
     search = PaperSearchService(
         {"primary": SearchBinding(primary), "secondary": SearchBinding(secondary)},
         {AcademicField.GENERAL: FieldPolicy(["primary", "secondary"])},
-        MemoryCache(), EnrichmentRunner({}),
+        MemoryCache(),
+        EnrichmentRunner({}),
     )
     result = await search.search(PaperSearch("fallback"))
     assert result.papers[0].source == "secondary"
-    assert [e.status for e in result.execution] == [SourceExecutionStatus.FAILED, SourceExecutionStatus.COMPLETED]
+    assert [e.status for e in result.execution] == [
+        SourceExecutionStatus.FAILED,
+        SourceExecutionStatus.COMPLETED,
+    ]
     primary.search_result = []
     result = await search.search(PaperSearch("empty is success"))
     assert result.papers == []

@@ -1,18 +1,15 @@
 """精确 lookup 用例；details 读取基础事实，full/enrich 执行领域声明的富化。"""
 
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from elastic_transport import (
-    ApiError as ElasticApiError,
-    ConnectionError as ElasticConnectionError,
-    ConnectionTimeout as ElasticConnectionTimeout,
-)
-
 from common.core.exceptions import ServiceException
+
 from scholar.application.enrichment import EnrichmentRunner
 from scholar.application.field_policies import (
     COMMON_ENRICHERS,
@@ -123,12 +120,7 @@ class PaperLookupService:
         if local_ids:
             try:
                 matches = await self.paper_repository.lookup(local_ids)
-            except (
-                ProviderError,
-                ElasticApiError,
-                ElasticConnectionError,
-                ElasticConnectionTimeout,
-            ) as error:
+            except ProviderError as error:
                 if query.purpose == LookupPurpose.DETAILS:
                     raise
                 # 通用链允许本地来源失败后继续；仍保留原始仓储异常供全失败时抛出。
@@ -272,7 +264,11 @@ class PaperLookupService:
                         else None
                     )
                 elif target.errors:
-                    item.enrichment_status = EnrichmentStatus.FAILED
+                    item.enrichment_status = (
+                        EnrichmentStatus.PARTIAL
+                        if item.paper is not None
+                        else EnrichmentStatus.FAILED
+                    )
                     item.status = (
                         LookupStatus.FOUND
                         if item.paper is not None
@@ -286,7 +282,9 @@ class PaperLookupService:
                         for binding in self.enrichment.bindings.values()
                     )
                     item.enrichment_status = (
-                        EnrichmentStatus.NOT_FOUND
+                        EnrichmentStatus.PARTIAL
+                        if item.paper is not None
+                        else EnrichmentStatus.NOT_FOUND
                         if supported
                         else EnrichmentStatus.UNSUPPORTED
                     )

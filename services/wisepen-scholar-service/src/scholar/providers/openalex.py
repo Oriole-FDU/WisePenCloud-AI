@@ -1,16 +1,18 @@
 """OpenAlex HTTP 适配；用户密钥只随当前请求发送，不绑定共享客户端。"""
 
+from __future__ import annotations
+
 import asyncio
 from datetime import UTC, date, datetime
 from urllib.parse import urlsplit
 
 import httpx
 
+from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.interfaces.provider_error import (
     ProviderError,
     provider_error_message,
 )
-from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import (
     IdentifierKind,
@@ -95,9 +97,15 @@ class OpenAlexProvider:
                 paper if include_details else None,
             )
 
-        return list(
-            await asyncio.gather(*(resolve(identifier) for identifier in identifiers))
-        )
+        tasks = [asyncio.create_task(resolve(identifier)) for identifier in identifiers]
+        try:
+            return list(await asyncio.gather(*tasks))
+        finally:
+            # 一个请求失败或调用者取消时，批次的其余 HTTP 不得游离在用例生命周期之外。
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def lookup(
         self, identifier: PaperIdentifier, *, api_key: str
@@ -105,7 +113,7 @@ class OpenAlexProvider:
         if not api_key:
             raise ProviderError("OpenAlex API key is required")
         # 单篇 endpoint 按 DOI 解析 work，不依赖列表中被截断的位置数组；
-        # 应用用例负责批次并发和逐项失败，适配器只表达本次精确查询。
+        # 适配器限制单篇 HTTP 并发，应用用例负责来源之间的回退和失败隔离。
         if identifier.kind == IdentifierKind.OPENALEX:
             key = identifier.value
         elif identifier.kind == IdentifierKind.DOI:

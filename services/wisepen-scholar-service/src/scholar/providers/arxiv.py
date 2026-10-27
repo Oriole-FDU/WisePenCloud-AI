@@ -1,5 +1,7 @@
 """arXiv 在线搜索适配；领域到分类的转换统一由 field_mapping 负责。"""
 
+from __future__ import annotations
+
 from datetime import date
 
 from elastic_transport import (
@@ -29,7 +31,10 @@ class ArxivProvider:
         self.paper_repository = paper_repository
 
     async def enrich(
-        self, identifiers: list[PaperIdentifier], *, include_details: bool = False,
+        self,
+        identifiers: list[PaperIdentifier],
+        *,
+        include_details: bool = False,
         api_key: str | None = None,
     ) -> list[PaperEnrichment | None]:
         """按 arXiv/DOI 精确身份批量投影仓储已有事实，不触发外部请求。"""

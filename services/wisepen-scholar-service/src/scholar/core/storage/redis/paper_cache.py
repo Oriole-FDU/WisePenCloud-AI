@@ -1,5 +1,7 @@
 """Redis 共享论文富化缓存；公共来源按身份共享，BYOK 来源按凭证指纹隔离。"""
 
+from __future__ import annotations
+
 from pydantic import TypeAdapter
 from redis.asyncio import Redis
 

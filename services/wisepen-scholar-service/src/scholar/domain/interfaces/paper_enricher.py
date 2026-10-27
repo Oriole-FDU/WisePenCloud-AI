@@ -1,5 +1,7 @@
 """论文富化能力的通用应用端口。"""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -17,6 +19,9 @@ class PaperEnrichment:
 
 class PaperEnricher(Protocol):
     async def enrich(
-        self, identifiers: list[PaperIdentifier], *, include_details: bool = False,
-        api_key: str | None = None
+        self,
+        identifiers: list[PaperIdentifier],
+        *,
+        include_details: bool = False,
+        api_key: str | None = None,
     ) -> list[PaperEnrichment | None]: ...

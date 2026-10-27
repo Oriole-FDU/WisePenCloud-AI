@@ -1,5 +1,7 @@
 """HTTP 请求校验；封闭参数沿用完整能力契约，不创建阶段专用 API。"""
 
+from __future__ import annotations
+
 from datetime import date
 from enum import StrEnum
 

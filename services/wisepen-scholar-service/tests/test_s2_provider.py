@@ -6,7 +6,6 @@ from datetime import date
 import httpx
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
-
 from scholar.core.s2_transport import S2Transport
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.interfaces.provider_error import ProviderError
@@ -19,7 +18,9 @@ class Permits:
     def __init__(self, delay=0):
         self.delay = delay
 
-    async def eval(self, *args):
+    async def eval(self, script, key_count, *args):
+        if key_count == 3 and args[2].endswith(":sequence"):
+            return [1, 0]
         return self.delay
 
 
