@@ -267,16 +267,6 @@ def _apply_projection(
     old_doi = None if row is None else row[0]
     identity_changed = row is not None and old_doi != projection.doi
     document = projection.document.copy()
-    old_versions = old_document.get("versions", [])
-    new_versions = document["versions"]
-    # 元数据修订不应丢失同一论文版本的全文；新版不能继续索引旧版正文。
-    if (
-        "full_text" in old_document
-        and old_versions
-        and new_versions
-        and old_versions[-1]["version"] == new_versions[-1]["version"]
-    ):
-        document["full_text"] = old_document["full_text"]
     metadata = dict(old_document.get("metadata") or {})
     if identity_changed:
         metadata.pop("s2", None)

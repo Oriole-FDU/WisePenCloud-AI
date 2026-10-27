@@ -9,7 +9,7 @@
 @media(max-width:620px){main{padding:24px 16px}header{align-items:start;flex-direction:column;gap:8px}.sync{text-align:left}.job{padding:18px 16px}.job-head{align-items:start}h1{font-size:25px}.fact strong{font-size:22px}.stages{flex-wrap:wrap}.stage{min-width:75px}.metrics{gap:15px}.metric strong{font-size:21px}}
 </style>
 <main>
-<header><div><div class="brand">WISEPEN / SCHOLAR</div><h1>离线任务运行台</h1><p>离线处理 arXiv / S2 数据与 HTML 正文，并更新论文检索索引。</p></div><div class="sync"><div id="connection"><i class="dot"></i>每 3 秒更新</div><div id="updated">正在读取任务状态…</div><button id="refresh">立即刷新</button></div></header>
+<header><div><div class="brand">WISEPEN / SCHOLAR</div><h1>离线任务运行台</h1><p>把已下载的 S2 引用数、TLDR 等信息合并到本地 arXiv 论文，再更新检索索引。</p></div><div class="sync"><div id="connection"><i class="dot"></i>每 3 秒更新</div><div id="updated">正在读取任务状态…</div><button id="refresh">立即刷新</button></div></header>
 <div id="warning" role="alert"></div><section id="baseline"></section>
 <section class="facts"><strong>这几步分别在做什么</strong><p class="note">① 读取 arXiv 快照 → 建立基础论文库。<br>② 筛选本地 S2 文件 → 只保留能关联这些论文的引用数、TLDR 等信息。<br>③ 合并 S2 信息 → 把已筛出的信息写进对应论文，不重新读取原始压缩文件。<br>④ 更新检索索引 → 将合并后的论文写入 Elasticsearch。<br>以上是流程说明；完成情况以数据基线和下方任务为准。增量同步会另外列出任务。</p></section>
 <div class="section-label">本次任务 <span>记录实际退出码；日志停更不等于任务失败</span></div><section id="jobs"></section>
@@ -20,8 +20,8 @@
 const $=id=>document.getElementById(id), fmt=v=>typeof v==='number'?new Intl.NumberFormat('zh-CN',{maximumFractionDigits:1}).format(v):String(v);
 const escape=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const labels={running:'运行中',succeeded:'已完成',failed:'失败',interrupted:'监控已中断，退出码未知'};
-const stageNames={import:'读取 arXiv 快照',s2_import:'筛选 S2 文件',s2_projection:'生成合并后的论文',s2_projection_write:'写入合并后的论文',s2_projection_commit:'S2 信息合并已提交',publish:'更新检索索引','publish-incremental':'更新检索索引','publish-delete':'同步删除',arxiv_html_prepare:'准备 HTML 版本队列',arxiv_html:'抓取、清洗并保存 HTML 正文',arxiv_html_complete:'HTML 本轮处理结束',migration_prepare:'确认离线基线并冻结旧索引',migration_copy:'完整回填新检索索引',migration_verify:'核对数量、元数据和实际检索',migration_switch:'切换检索别名与离线写入目标',migration_complete:'迁移完成，旧索引保留',migration_paused:'网络中断，任务保留等待续接',migration_rollback:'迁移失败，正在恢复',migration_rolled_back:'已恢复原索引与写入目标'};
-const metricNames={scanned:'当前分片已读取',retained:'当前分片已保留',staged_changed:'已生成，尚待提交',written:'已处理的论文',projected:'关联论文',pending:'待更新索引',pending_publish:'待更新索引',pending_delete:'待删除',records:'已读取记录',batch:'批次',total:'总量',processed:'已检查论文',available:'已保存正文',skipped:'无可用正文，已跳过',remaining:'尚待检查',invalidated_cache_keys:'已失效查询缓存'};
+const stageNames={import:'读取 arXiv 快照',s2_import:'筛选 S2 文件',s2_projection:'生成合并后的论文',s2_projection_write:'写入合并后的论文',s2_projection_commit:'S2 信息合并已提交',publish:'更新检索索引','publish-incremental':'更新检索索引','publish-delete':'同步删除',migration_prepare:'确认离线基线并冻结旧索引',migration_copy:'完整回填新检索索引',migration_verify:'核对数量、元数据和实际检索',migration_switch:'切换检索别名与离线写入目标',migration_complete:'迁移完成，旧索引保留',migration_paused:'网络中断，任务保留等待续接',migration_rollback:'迁移失败，正在恢复',migration_rolled_back:'已恢复原索引与写入目标'};
+const metricNames={scanned:'当前分片已读取',retained:'当前分片已保留',staged_changed:'已生成，尚待提交',written:'已处理的论文',projected:'关联论文',pending:'待更新索引',pending_publish:'待更新索引',pending_delete:'待删除',records:'已读取记录',batch:'批次',total:'总量',invalidated_cache_keys:'已失效查询缓存'};
 const date=value=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'—';
 let busy=false;
 function jobCard(job){

@@ -12,7 +12,7 @@ Scholar 是内部 HTTP 微服务。MCP 工具由现有 `wisepen-mcp-service` 注
 - `core/config` 与 Chat/Sandbox 一样，通过 Bootstrap 定位 Nacos，再由 AppSettings 加载业务字段；`main.py` 负责日志、观测、安全中间件、客户端生命周期和服务注册。
 - `etl` 独立维护 DuckDB 来源事实及发布进度；HTTP 不读写 DuckDB，不启动 ETL。
 
-P1 本地 arXiv、P3 配置驱动检索、P4 lookup 在线富化已验收；P2 已完成本地 S2 全量合并和发布，英语分析字段迁移已完成。P5 发现按 HF 官方 SDK 的请求与返回流程实现。CS 搜索与发现通过原生异步 HTTP 调用 HF。
+P1 本地 arXiv、P3 配置驱动检索、P4 lookup 在线富化已验收；P2 正在合并本地 S2 信息并更新检索索引。P5 发现按 HF 官方 SDK 的请求与返回流程实现。CS 搜索与发现通过原生异步 HTTP 调用 HF。
 
 P6 已提供独立 OAI/S2 差分同步与恢复、Compose/Jenkins/systemd 模板；真实完整同步的剩余验收见 [P6 记录](docs/p6-acceptance.md)。部署交付仅包含配置和说明，本次不启动 Docker、不构建镜像、不做生产部署。
 
@@ -57,7 +57,7 @@ Lookup 的 `details/enrich/full` 已接入同一个用例。details 可复用缓
 
 `POST /scholar/papers/search` 接受 query、field、published_after/before、limit、source_scope。时间按首次提交日期包含两端过滤；领域采用 plan.md 的 arXiv 分类映射。查询缓存默认 10 分钟，缓存只存论文事实，每次重新构造执行情况。
 
-本地检索使用 BM25F 近似，标题/TLDR/摘要/正文权重为 9:6:3:1，原词形和短语匹配加分，引用数不参与排序。正文只用于索引，search / lookup 不返回原文。HTML 正文可用部分通过独立离线任务逐批补齐，启动、续跑和耗时边界见 [HTML 入库](docs/arxiv-html-import.md)，算法参数见[检索基线](docs/search-baseline.md)。
+本地检索初版采用 English 子字段上的 BM25F 近似召回，标题/TLDR/摘要权重为 3:2:1，原词形和短语匹配加分，引用数不参与排序。新查询需要先完整回填子字段后再启用；算法、参数和不干扰现有离线任务的迁移边界见[检索基线](docs/search-baseline.md)。
 
 `POST /scholar/papers/lookup` 接受 identifiers、purpose、field（默认 general），逐项保留输入顺序、重复输入、未找到、标识错误或 DOI 歧义。arXiv 版本和官方 URL 归一化，DOI 不区分大小写。没有本地来源映射的领域不会退回全库检索。所有业务响应使用 Common `R<T>`。
 

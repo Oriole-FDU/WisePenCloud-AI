@@ -15,7 +15,6 @@ dependencies = [
     "orjson",
     "dependency-injector",
     "httpx",
-    "selectolax>=1.0.2",
 ]
 
 [project.optional-dependencies]
