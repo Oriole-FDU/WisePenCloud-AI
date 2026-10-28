@@ -36,9 +36,9 @@ uv run --no-sync uvicorn scholar.main:app --host 127.0.0.1 --port 19916
 ## 初始化和恢复
 
 ```powershell
-uv run --no-sync scholar-etl import-arxiv
-uv run --no-sync scholar-etl status
-uv run --no-sync scholar-etl publish
+uv run --no-sync python deploy/run.py import-arxiv
+uv run --no-sync python deploy/run.py status
+uv run --no-sync python deploy/run.py publish
 ```
 
 默认输入 `third_party_data/arxiv-metadata-oai-snapshot.json`，数据库 `.runtime/scholar.duckdb`。输入中的重复 arXiv ID 按最新 `update_date` 保留，同日取文件中后出现的记录。`--source`、`--db`、`--batch-size` 支持显式覆盖。`publish --alias` 可指定独立验收别名；正式别名默认 `wisepen-scholar-arxiv`。
@@ -47,7 +47,7 @@ uv run --no-sync scholar-etl publish
 
 `--max-batches N` 限制本次工作量，适合验证恢复；未读到 EOF 的导入不能发布。发布逐项确认 Bulk，成功项移出待发布集合，失败项重放同一文档 ID。全部文档数量及内容抽样检查通过后，才原子切换版本索引别名。旧索引不自动删除。在线请求总预算默认 25 秒；独立 ETL 的单次存储请求超时默认 120 秒，通过 `SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS` 配置。资源有限的 ES 实例可以用 `publish --batch-size 1000` 减少单次写入压力。
 
-离线任务可用[本地监控看板](docs/offline-dashboard.md)查看阶段进度、速率、真实退出码和错误日志。看板仅读取快照，不轮询数据库；现有 ETL 命令经 `scripts/offline_dashboard.py run` 包装后自动接入。
+离线任务可用[本地监控看板](docs/offline-dashboard.md)查看阶段进度、速率、真实退出码和错误日志。看板仅读取快照，不轮询数据库；现有 ETL 命令经 `deploy/offline_dashboard.py run` 包装后自动接入。
 
 ## HTTP 与 MCP
 

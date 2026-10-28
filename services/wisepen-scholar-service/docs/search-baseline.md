@@ -1,3 +1,5 @@
+> 当前检索配置见 [混合检索](hybrid-search.md)，离线操作见 [维护文档](../deploy/README.md)。下文保留旧文本基线记录。
+
 # 本地论文检索初版
 
 本版使用 Elasticsearch 原生 BM25/BM25F 文本排序，不新增模型调用、引用数重排或评测平台。参数是可解释的初始先验，不宣称是论文检索的通用最优值。
@@ -29,7 +31,7 @@
 在服务目录执行；配置仍从既有 `.env` / Nacos 加载，不在参数中传凭证：
 
 ```powershell
-uv run --no-sync python scripts/offline_dashboard.py run --name "检索索引迁移：回填英语词干字段" search-index-migration -- uv run --no-sync python -u scripts/migrate_search_index.py
+uv run --no-sync python deploy/offline_dashboard.py run --name "检索索引迁移：回填英语词干字段" search-index-migration -- uv run --no-sync python -u deploy/migrate_search_index.py
 ```
 
 脚本持有 DuckDB 写连接，阻止其他进程运行 ETL；确认导入已发布、待办为零且 alias 与 `target_index` 一致后，给旧索引加写屏障并刷新，保留读服务。新建相同主分片数、临时关闭刷新和副本的索引，通过 ES 异步 `_reindex` 完整重建所有文档，不重扫原始文件、不重写 DuckDB 论文数据。脚本每 15 秒读取这一个任务的进度供看板展示，不轮询全库。
@@ -39,7 +41,7 @@ uv run --no-sync python scripts/offline_dashboard.py run --name "检索索引迁
 复制或验收期间本机断网不意味着 ES 后台任务失败。脚本保留旧索引写屏障、任务 ID 和新索引，记录 `migration_paused` 并报出原网络异常。网络恢复后，以下命令复用原任务继续等待或直接进入验收，不重建索引、不重新复制全库：
 
 ```powershell
-uv run --no-sync python scripts/offline_dashboard.py run --name "续接检索索引迁移：验收与切换" search-index-migration -- uv run --no-sync python -u scripts/migrate_search_index.py --resume
+uv run --no-sync python deploy/offline_dashboard.py run --name "续接检索索引迁移：验收与切换" search-index-migration -- uv run --no-sync python -u deploy/migrate_search_index.py --resume
 ```
 
 续接只适用于仍指向旧索引、旧索引持续只读且没有新待办的窗口。若原 ES 复制任务本身失败，续接会保留真实错误并进入恢复，不把不完整索引用于检索。
@@ -47,7 +49,7 @@ uv run --no-sync python scripts/offline_dashboard.py run --name "续接检索索
 跨 ES / DuckDB 的切换不具备分布式事务：数据校验或切换失败自动恢复两端并重新抛出错误。若切换过程中被强杀或恢复失败，保持 ETL 停止，使用 `.runtime/search-index-migration.json` 恢复记录执行：
 
 ```powershell
-uv run --no-sync python scripts/offline_dashboard.py run --name "恢复原检索索引与离线写入目标" search-index-rollback -- uv run --no-sync python -u scripts/migrate_search_index.py --rollback
+uv run --no-sync python deploy/offline_dashboard.py run --name "恢复原检索索引与离线写入目标" search-index-rollback -- uv run --no-sync python -u deploy/migrate_search_index.py --rollback
 ```
 
 回滚只适用于迁移后尚未恢复写入的窗口；恢复 ETL 后，旧索引不再包含新写入，不能直接回滚。成功迁移后可启动包含新版查询的服务。不要在迁移完成前重启到新版查询，也不要在恢复记录存在时直接覆盖它重跑。

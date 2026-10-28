@@ -1,3 +1,21 @@
+# 当前实施约定（2026-10-28）
+
+本节更新覆盖下文历史阶段中的检索、离线同步和凭证约定。
+
+- 本地检索采用 BM25 dis_max + SPECTER2 + RRF60 + 有界引用加分；title/TLDR/abstract=3/2/1，取消 `2<70%`。实现与参数见 [混合检索](hybrid-search.md)。
+- 模型合同并入 embedding_runtime，检索规则内联在仓储及 arXiv provider；召回规模、RRF k、引用加分权重和 CPU 线程通过 AppSettings/Nacos 控制。离线 SQL 输入指纹继续负责向量续跑复用和增量失效判断。
+- Scholar main 一次启动 HTTP 与 CPU 查询编码，使用工作区依赖；NACOS_ENABLED 可关闭 Nacos。没有额外启动入口。
+- CS 检索来源为 `[arxiv, huggingface]`。通用富化链保持 arxiv → s2 → openalex；CS 的领域增量为 HF。
+- OpenAlex/HF 允许 BYOK 优先，否则使用平台配置；429 按普通来源失败回退。S2 不允许 BYOK，继续共享 Redis FIFO 和全局 1 RPS。
+- 来源查询批量读取并缓存候选，用户 limit 只裁剪返回结果；缓存继续隔离日期、领域、凭证与模型版本。HF 保留 AI summary、关键词与模型名。
+- 本次 GPU FP16 只负责存量灌库。后续每日 arXiv OAI + S2 Graph batch，必须请求 `embedding.specter_v2`；不使用 S2 diff，不下载 release 大包。离线代码移出 src，位于 deploy/offline。
+- 分期交付：HF 搜索；查询编码与同进程启动；存量向量持久化及每日 API 同步；混合检索与版本索引切换。每期维护稳定接口，向量不进入 Paper。
+- 验收包含顺序回退、BYOK/平台缓存隔离、limit 复用、v2 向量持久化/重放、增量保留向量及全量 alias 切换。真实 62 篇集成验收已通过；全量运行结果以迁移日志为准。
+
+操作入口及每日维护见 [deploy/README.md](../deploy/README.md)。V2 学习排序见 [TODO](TODO.md)。
+
+---
+
 # WisePen Scholar V1 开发计划
 
 > 本文是需求、边界与分期验收的唯一计划。各阶段只交付当期能力，通过验收后独立提交；不以空实现、临时 API 或未来字段补齐阶段外能力。
@@ -12,11 +30,11 @@ Scholar 提供论文检索、精确查询和趋势发现，供 Agent 组合完�
 | MCP 服务                  | 注册三个工具，读取用户工具配置，向 Scholar 传递请求和必要凭证；不复制学术业务逻辑 |
 | Chat 服务                 | 沿用现有工具目录、用户秘密配置及 MCP `_meta` 通道                                 |
 | arXiv 本地镜像            | 提供基础论文事实及本地召回，覆盖范围以实际 arXiv 收录为准                         |
-| OpenAlex                  | 通过用户 BYOK 提供跨学科学术检索及精确查询                                        |
+| OpenAlex                  | 使用用户 BYOK 或平台配置提供跨学科学术检索及精确查询                                        |
 | S2                        | 提供通用学术信号；离线数据集、在线精确查询和每日同步各有明确调用边界              |
-| Hugging Face Papers（HF） | 提供 Computer Science 专用富化和趋势发现，使用异步 HTTP API                       |
+| Hugging Face Papers（HF） | 提供 Computer Science 搜索、专用富化和趋势发现，使用异步 HTTP API                       |
 
-V1 不建设全文语料库、向量检索、完整引用图、作者研究工具、用户密钥管理系统或研究问题拆解流程。不预生成经典、热门、高影响力等学术判断标签，也不把不同来源的指标相加。
+V1 不建设全文语料库、完整引用图、作者研究工具、用户密钥管理系统或研究问题拆解流程。不预生成经典、热门、高影响力等学术判断标签，也不把不同来源的指标相加。
 
 ### 1.1 不得混淆的富化入口
 
@@ -28,7 +46,7 @@ V1 不建设全文语料库、向量检索、完整引用图、作者研究工�
 | discover | 直接交付渠道列表，不逐篇执行通用链 | 保留渠道实际返回的数据 |
 | 每日同步 | 保留独立离线补充规则和持久进度 | 不执行在线领域增量 |
 
-领域由请求配置选择，不从结果内容推断。初始仅 CS 的 enrichers 注册 HF，其余为空。通用链未解决论文按来源批量回退，0/false 是有效信号；arXiv 只有基础论文信息不算富化成功。
+领域由请求配置选择，不从结果内容推断。初始仅 CS 的 field_enrichers 注册 HF，其余为空。通用链未解决论文按来源批量回退，0/false 是有效信号；arXiv 只有基础论文信息不算富化成功。
 
 ### 1.2 工程架构约定
 
@@ -38,9 +56,9 @@ V1 不建设全文语料库、向量检索、完整引用图、作者研究工�
 
 `application/` 只有 search、lookup、discover 三个用例，分别由 `search.py`、`lookup.py`、`discovery.py` 编排。`enrichment.py` 是 search/lookup 共用的内部执行机制，负责通用短路、领域增量、缓存及在途请求复用，不是额外应用服务。供应商信号与身份规则通过注册绑定注入，留在 `providers/`。
 
-`application/field_policies.py` 是 search 与 lookup 共用的领域策略表。`FieldPolicy` 只记录有序 `searchers`、领域增量 `enrichers` 和 `discoverer`；容器注册来源名称到 provider 能力的绑定。新增医疗来源时，兼容的 PubMed/WoS searcher、富化器及容器注册可以由领域配置选择，无需在核心检索、缓存或融合流程增加供应商分支。`Paper.source` 接受开放字符串，来源专有事实放在 `metadata[来源名]` 自由字典中。
+`application/field_policies.py` 是 search 与 lookup 共用的领域策略表。`FieldPolicy` 只记录有序 `searchers`、领域增量 `field_enrichers` 和 `discoverer`；容器注册来源名称到 provider 能力的绑定。新增医疗来源时，兼容的 PubMed/WoS searcher、富化器及容器注册可以由领域配置选择，无需在核心检索、缓存或融合流程增加供应商分支。`Paper.source` 接受开放字符串，来源专有事实放在 `metadata[来源名]` 自由字典中。
 
-`providers/field_mapping.py` 仍是通用领域到 arXiv/OpenAlex 参数的统一映射文件。`providers/` 承载在线能力适配：本地 arXiv 搜索由 `ArxivProvider` 调用论文仓储，OpenAlex 实现同一 `PaperSearcher` 能力；HF 使用原生异步 HTTP，由 CS 搜索后处理和 lookup field 配置调用。arXiv OAI 抓取和 S2 数据集、release、差分处理属于独立 `etl/` 步骤。
+`providers/field_mapping.py` 仍是通用领域到 arXiv/OpenAlex 参数的统一映射文件。`providers/` 承载在线能力适配：本地 arXiv 搜索由 `ArxivProvider` 调用论文仓储，OpenAlex 实现同一 `PaperSearcher` 能力；HF 使用原生异步 HTTP，由 CS 搜索后处理和 lookup field 配置调用。arXiv OAI、存量文件导入和每日 S2 API 处理属于独立 `deploy/offline/` 步骤。
 
 `domain/interfaces/` 按业务能力声明 `PaperSearcher.search()`、`PaperEnricher.enrich()`、`PaperDiscoverer.discover()`，不按供应商名称声明端口。一个 provider 可实现一个或多个能力。已知外部 I/O 由 provider 转为 `ProviderError`，保留原异常文本和 cause，不附带 reason/status 分类；程序错误和取消继续传播。S2 在线与离线调用共用 `core` 中的 HTTP 传输和 Redis 发送配额，不将离线方法放入 provider。
 
@@ -77,7 +95,7 @@ subfield。arXiv 多分类按 OR 查询。
 `multi_source` 调用所有注册来源，保留成功结果和失败执行记录；所有来源失败时抛原始异常。
 程序错误与取消直接传播。缺 OpenAlex key 属于普通来源失败，不提前拒绝整个计划。
 
-CS、数学、物理为 `[arxiv, openalex]`；其他已有双源领域为 `[openalex, arxiv]`；其余领域为 `[openalex]`。
+CS 为 `[arxiv, huggingface]`；数学、物理为 `[arxiv, openalex]`；其他已有双源领域为 `[openalex, arxiv]`；其余领域为 `[openalex]`。
 返回的 execution 仅记录实际尝试的来源、缓存命中及结果。单源保留原排序，多源沿用精确身份归并与等权 RRF。
 
 ### 2.3 本次调整的独立提交
@@ -86,7 +104,7 @@ CS、数学、物理为 `[arxiv, openalex]`；其他已有双源领域为 `[open
 2. 富化编排：已提交 `5e92fcc9`，Scholar 165 项、MCP Scholar 9 项测试通过。已接通通用短路链、领域增量、按实际成功 searcher 去重、OpenAlex 精选投影和 lookup field。保留身份冲突、缓存、凭证隔离与取消合同；临床增量以替身 provider 验证，未接入真实临床来源。
 3. S2 队列：已实现 Redis FIFO、Nacos 准入阈值和 queued_ahead。真实 Redis 独立命名空间验收 5 项通过，覆盖两个客户端 FIFO/1 RPS、5/6 阈值、离线准入、取消/超时、过期租约、拥堵回退和缓存/在途合并。
 
-领域 `enrichers` 只登记增量来源。平台不默认融合同名字段、不做语义去重，provider 负责输出键唯一并避免重复通用事实。
+领域 `field_enrichers` 只登记增量来源。平台不默认融合同名字段、不做语义去重，provider 负责输出键唯一并避免重复通用事实。
 本次不操作后台离线任务，不部署生产。最终验收另覆盖 OpenAlex 批次取消、已有缓存信号保留、ES 外部失败回退和 full 基础论文保留时的 partial 语义。
 
 最终验收：Scholar 全部 173 项通过（包括显式连接现有 Redis、使用独立随机命名空间的 5 项队列验收）；MCP Scholar 9 项通过；本次路径的仓库根目录 Ruff 检查和 git diff --check 通过。S2/OpenAlex/HF 的此次编排行为以可控 HTTP 边界测试验证；真实 Redis 验收不代表完成生产部署或重启了运行中任务。
@@ -111,10 +129,10 @@ API/MCP 边界负责解析请求，封闭值集合使用枚举。内部按 searc
 
 V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次提交日期，结果保留其来源；不拿元数据更新时间代替发表时间。
 
-本地召回采用 `.en` 子字段上的 `combined_fields`（BM25F 近似），标题/TLDR/摘要权重为 3:2:1，英语分析后使用 `2<70%` 命中门槛；原词形与短语匹配仅加分。保留 BM25 默认 `k1=1.2`、`b=0.75`，不将作者或引用数混入概念排序，不建设评测平台。新索引须完整回填子字段后再启用新版查询；不干扰当前后台写入，后续迁移协调 alias 与 ETL 的具体写入目标。参数依据和独立小索引行为验证见[检索基线](docs/search-baseline.md)。
+本地召回采用 BM25 dis_max 与 SPECTER2 两路，各取 200，RRF k=60 融合，再按有界引用信号加分。title/TLDR/abstract 权重为 3/2/1，原字段与 `.en` 在逻辑字段内取较高分；OR 召回、完整标题加 8、标题短语加 4。引用数与高影响引用数的平滑加分合计不超过 30%，不使用年份。参数、缓存与编码流程见 [混合检索](hybrid-search.md)。
 
 明确请求 CS 时，在候选归并并截取最终数量后执行 HF 富化。优先缓存，仅对有 arXiv ID 的候选请求 HF 论文详情，并发数默认
-4，受本次请求预算约束。HF 使用 `httpx.AsyncClient`，可选平台凭证来自 Nacos `HF_TOKEN`，不使用同步 SDK 或 `to_thread`。保留点赞、代码仓库、关联模型和数据集的实际返回值；不抓取整个关联仓库目录，不假定返回条目穷尽所有产物。404
+4，受本次请求预算约束。HF 使用 `httpx.AsyncClient`，凭证优先取 BYOK，否则取 Nacos `HF_TOKEN`，不使用同步 SDK 或 `to_thread`。保留 AI 摘要、关键词、摘要模型、点赞、代码仓库、关联模型和数据集的实际返回值；不抓取整个关联仓库目录，不假定返回条目穷尽所有产物。404
 表示 HF 没有对应记录，其他已知外部 I/O 错误保留原文本并标记可选后处理未完成；均保留基础论文结果。程序错误和取消继续传播。
 
 ### 3.2 `lookup_papers`
@@ -136,8 +154,8 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 1. details 优先读取本地 arXiv 和缓存；未满足详情需求且该工具配置了 OpenAlex 密钥时，可以按精确 ID 查询
    OpenAlex。没有密钥时仍可返回本地及缓存结果，不静默调用 S2。
 2. enrich/full 的通用链固定为 arxiv→s2→openalex，每篇取得任一有效信号即停止，不要求补齐所有字段。未找到、身份不支持、外部失败或拥堵跳过均允许下一来源；同来源只请求尚未解决的论文。
-3. 通用链结束后全部执行 field.enrichers；不因通用成功或其他领域来源失败而终止。`PaperEnricher.enrich()` 接收 include_details 和可选请求级 api_key。
-4. enrich 只返回身份和信号；full 缺基础信息时才请求详情，保留已经取得的基础论文。OpenAlex 按产品约定要求用户 key，缺失参与普通来源回退，不另设无凭证计划。
+3. 通用链结束后全部执行 field.field_enrichers；不因通用成功或其他领域来源失败而终止。`PaperEnricher.enrich()` 接收 include_details 和可选请求级 api_key。
+4. enrich 只返回身份和信号；full 缺基础信息时才请求详情，保留已经取得的基础论文。OpenAlex 使用 BYOK 或平台 key，缺失参与普通来源回退，不另设无凭证计划。
 5. 通用前序失败被后续成功补足时为 complete；有可用基础论文或信号、但通用未成功或领域增量失败为 partial。没有信号且发生外部失败时，enrich 抛原始异常；full 仍保留基础论文。执行记录保留全部失败过程。
 6. 保留输入顺序、重复项、身份冲突隔离、来源缓存和凭证隔离。只有正常未找到可以负缓存，鉴权、网络故障和拥堵不能伪装为未找到。同请求在途 I/O 去重，最后一个等待者取消才取消共享请求。
 
@@ -188,7 +206,7 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 以下数据不进入 V1 的请求、规范模型或索引：
 
 - 作者机构、H-index、作者论文数及引用量：没有作者研究用例，不增加作者接口调用。
-- `embedding`：没有向量检索消费者。
+- `embedding`：在线论文响应不携带向量；每日离线 API 必须指定 `embedding.specter_v2` 并单独持久化。
 - `referenceCount`：当前工具不消费参考文献数量。
 - `fieldsOfStudy`、`s2FieldsOfStudy`：不参与当前路由、过滤或排序。
 - `publicationVenue`、`publicationTypes`、`journal`：使用 venue 展示发表渠道，使用 BibTeX 完成引用，不建设额外出版实体结构。
@@ -265,7 +283,7 @@ ETL 负责。
 - DuckDB 变更与待发布集合在本地事务中提交；ES 成功项确认后移出待发布集合。失败保留可重放进度，完成后才推进已发布标记。
 - 增量允许逐批可见，保证单篇文档自洽；不建设 DuckDB 与 ES 的分布式事务。
 
-## 6. 每日同步与 S2 release 更新
+## 6. 每日同步与恢复
 
 ### 6.1 每日 arXiv + S2 API
 
@@ -273,21 +291,14 @@ ETL 负责。
 2. 首轮采用上述补采起点，后续 from 取上次成功处理的服务端响应日期，不设置 until；分页和重放幂等。分页 token
    过期时从已确认范围重新获取，不跳过未完成记录。
 3. 导入新增及修改的基础记录，基础论文可先发布，不等待 S2 收录。
-4. 对新增论文、身份标识变化或上一轮待补充记录，先复用本地关联和已有信号；只有 `citationCount`、`influentialCitationCount` 或
-   TLDR 缺失时，才按精确 ID 批量调用 S2 API。单独缺 PDF、BibTeX 或开放状态不触发请求；普通标题、摘要等修改不重复获取已有信号。
-5. API 结果按 Corpus ID 关联，持久记录 API 来源和观测时间，重新生成受影响 ES 文档。未收录或失败进入该 ETL
-   任务的待处理进度，不永久解释为没有信号。
+4. 对新增、修改与上一轮待补充论文按精确 ID 批量调用 S2 Graph API，显式请求 `embedding.specter_v2`。同步引用、TLDR 和 768 维 v2 向量，不启动 GPU。
+5. API 结果与向量在 DuckDB 事务中保存，失效论文缓存后发布 ES；完成待发布工作后才推进 OAI 游标。S2 暂未收录或缺向量时保留待办。
 
-这个流程解决“初始化时未保留的旧 S2 DOI 记录，后来才对应到新 arXiv 论文”的关联缺口。V1 不为此建立全量 S2 标识符索引或每日回扫原始分片。
+### 6.2 向量及断点维护
 
-### 6.2 S2 release 差分
+存量论文使用本次 GPU FP16 proximity 灌库；日后向量由 S2 API 提供。标题或摘要改变会使旧向量失效；仅引用/TLDR 变化复用有效向量。发布附带匹配当前输入的向量，删除论文同时清理向量与待办。
 
-- 新 release 发布后，按官方版本链应用 `papers/tldrs` 的更新及删除，不跳过中间变更。
-- 修改关联前记录旧关联影响范围，更新后同时考虑新关联，重新生成受影响论文。仍然只保留当前本地库相关数据。
-- release 更新替换对应 S2 富化记录，删除移除对应数据及关联；失去有效关联时清除该来源的富化，不删除 arXiv 基础论文。
-- API 补充记录标明其观测时间，release 记录标明数据集版本。release 替换后结果反映该 release 的事实，不混合不同记录或累计引用量。
-- 每日任务和 release 任务串行写 DuckDB，不能并发覆盖彼此的暂存、关联或待发布集合。
-- 受影响论文缓存失效，查询缓存按 TTL 过期。整轮变更与 ES 发布完成后才推进已完成 release。
+不再使用 S2 release diff，不下载大包，不每日回扫原始分片。网络、429 和发布失败使任务非零退出，保留已提交数据、待办及未推进游标；重跑原命令续接。操作见 [维护文档](../deploy/README.md)。
 
 ## 7. 运行配置、凭证、限流和缓存
 
@@ -361,7 +372,7 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
 
 ### P3：OpenAlex BYOK 与显式多源检索
 
-- **交付**：OpenAlex 按工具请求接收可选用户凭证；`FieldPolicy` 声明有序 searchers、领域 enrichers 和 discoverer；多源融合与 OpenAlex 精确 details lookup 接入现有用例。
+- **交付**：OpenAlex 按工具请求接收可选用户凭证；`FieldPolicy` 声明有序 searchers、领域 field_enrichers 和 discoverer；多源融合与 OpenAlex 精确 details lookup 接入现有用例。
 - **验收**：凭证不进入模型参数、请求 URL、缓存明文或日志；默认单源、缺凭证计划、未映射路由符合策略；只在多源已有成功来源时保留其他来源错误文本，单源和全来源失败传播 ProviderError；精确 lookup 保留顺序、重复项、未找到、歧义及真正部分成功。
 - **扩展边界**：字段映射仍集中在 `providers/field_mapping.py`；来源名是开放字符串，provider 可实现多个能力。医疗 PubMed/WoS mock 用例通过 provider 注册和 FieldPolicy 配置增加检索源及临床试验后处理，不修改核心编排算法；这不代表已接入真实 PubMed/WoS 服务。
 - **边界**：不建设共享凭证模型，不加入 S2 关键词召回或暗中叠加其他来源；可选搜索后处理失败保留基础候选和原错误文本。
@@ -388,13 +399,13 @@ TTL 均可配置。先检查来源可用性，再访问相应查询缓存；缺�
 
 ### P6：持续同步、恢复与运行交付
 
-- **交付**：每日 OAI + 批量 S2 API、新 release 差分、发布恢复、外部调度说明；补齐 Scholar 镜像、Compose 和 Jenkins 接入配置。
-- **验收**：真实验证新增、普通修改、身份变化、S2 暂未收录、旧 DOI 记录通过 API 关联、release 更新与删除；单独缺附加字段不触发
-  API，在线 lookup 与 ETL 共享 1 RPS。注入 Bulk 部分成功后失败，重放完成且未提前推进游标或 release；基础论文不被 S2
+- **交付**：每日 OAI + 批量 S2 API（含 specter_v2）、发布恢复、外部调度说明；补齐 Scholar 镜像、Compose 和 Jenkins 接入配置。
+- **验收**：真实验证新增、普通修改、身份变化、S2 暂未收录、旧 DOI 记录通过 API 关联、OAI 删除和向量失效；单独缺附加字段不触发
+  API，在线 lookup 与 ETL 共享 1 RPS。注入 Bulk 部分成功后失败，重放完成且未提前推进游标；基础论文不被 S2
   删除误删；构建上下文排除数据集和凭证，部署部分仅验收配置及说明。
 - **边界**：不在 HTTP 进程运行 ETL，不因同步引入跨库事务。部署部分交付配置和运行说明，不启动本机 Docker、不构建镜像、不执行生产部署；这些操作不是本次完成门槛。
 - **提交**：`feat(scholar): add incremental synchronization and deployment`。
-- **状态**：实现已完成，包含独立同步 CLI、OAI 3 秒串行请求、差分断点重放和部署模板；阶段全套 165 项测试及 Python 包构建通过。真实同步需等待 P2 完整发布基线，当前验收范围见 [P6 记录](docs/p6-acceptance.md)，未将其标为真实运行验收完成；本机 Docker 和生产部署不纳入验收。
+- **状态**：实现已完成，包含独立同步 CLI、OAI 3 秒串行请求、API 待办重放、向量持久化和部署模板；阶段全套 165 项测试及 Python 包构建通过。真实同步需等待 P2 完整发布基线，当前验收范围见 [P6 记录](docs/p6-acceptance.md)，未将其标为真实运行验收完成；本机 Docker 和生产部署不纳入验收。
 
 ## 9. 验证原则与证据
 
