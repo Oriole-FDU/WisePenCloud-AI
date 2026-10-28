@@ -10,7 +10,7 @@ import pytest
 from pdf_fakes import MemoryPdfCache, make_pdf_service
 from scholar.domain.models.paper import Paper
 from scholar.domain.models.source_execution import SourceExecutionStatus
-from scholar.providers.unpaywall import UnpaywallProvider
+from scholar.core.providers import UnpaywallProvider
 
 
 def paper(**changes):

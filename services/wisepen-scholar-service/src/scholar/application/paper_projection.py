@@ -4,7 +4,7 @@ from dataclasses import replace
 from typing import Any
 
 from scholar.domain.models.paper import Paper
-from scholar.providers.policies import PROVIDER_POLICIES
+from scholar.core.providers import PROVIDER_POLICIES
 
 
 def _compact(value: Any) -> Any:

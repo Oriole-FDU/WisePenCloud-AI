@@ -10,7 +10,7 @@ from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import parse_identifier
 from scholar.domain.models.paper import PaperSource
-from scholar.providers.s2 import S2Provider, S2Transport
+from scholar.core.providers import S2Provider, S2Transport
 
 
 class Permits:

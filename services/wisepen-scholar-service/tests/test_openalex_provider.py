@@ -9,7 +9,7 @@ from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import parse_identifier
-from scholar.providers.openalex import OpenAlexProvider
+from scholar.core.providers import OpenAlexProvider
 
 
 @pytest.fixture

@@ -25,12 +25,12 @@ from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
 from scholar.core.storage.redis.pdf_cache import RedisPdfCache
 from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
 from scholar.ml.specter import DIMENSIONS, QUERY_MODEL
-from scholar.providers.arxiv import ArxivProvider
-from scholar.providers.policies import PROVIDER_POLICIES
-from scholar.providers.huggingface import HuggingFaceProvider
-from scholar.providers.openalex import OpenAlexProvider
-from scholar.providers.s2 import S2Provider, S2Transport
-from scholar.providers.unpaywall import UnpaywallProvider
+from scholar.core.providers import ArxivProvider
+from scholar.core.providers import PROVIDER_POLICIES
+from scholar.core.providers import HuggingFaceProvider
+from scholar.core.providers import OpenAlexProvider
+from scholar.core.providers import S2Provider, S2Transport
+from scholar.core.providers import UnpaywallProvider
 
 
 class Container(containers.DeclarativeContainer):

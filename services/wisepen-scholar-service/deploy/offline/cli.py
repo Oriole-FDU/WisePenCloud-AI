@@ -17,7 +17,7 @@ from redis.asyncio import Redis
 from scholar.core.config.bootstrap_settings import SERVICE_ROOT
 from scholar.core.storage.elasticsearch.paper_repository import create_elasticsearch
 from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
-from scholar.providers.s2 import S2Transport
+from scholar.core.providers import S2Transport
 
 
 async def run(args):

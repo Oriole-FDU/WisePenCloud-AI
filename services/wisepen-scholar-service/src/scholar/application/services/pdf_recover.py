@@ -14,7 +14,7 @@ from scholar.domain.models.source_execution import (
     SourceExecutionStatus,
 )
 from scholar.domain.repositories.pdf_cache import PdfCache
-from scholar.providers.policies import PROVIDER_POLICIES
+from scholar.core.providers import PROVIDER_POLICIES
 
 
 class PaperPdfRecoverService:

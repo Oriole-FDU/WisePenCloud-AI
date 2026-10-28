@@ -26,7 +26,7 @@ from scholar.domain.models.identifiers import (
 from scholar.domain.models.paper import Paper
 from scholar.domain.repositories.paper_repository import PaperRepository
 from scholar.ml.specter import MODEL_SIGNATURE
-from scholar.providers.s2 import has_signals as s2_has_signals
+from scholar.core.providers.s2 import has_signals as s2_has_signals
 
 # 领域 → arXiv 分类映射；None 表示该领域不支持 arXiv 搜索，空列表表示不限分类。
 ARXIV_CATEGORIES: dict[AcademicField, list[str] | None] = {

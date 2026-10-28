@@ -19,8 +19,8 @@ from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.providers.policies import PROVIDER_POLICIES
-from scholar.providers.huggingface import HuggingFaceProvider
+from scholar.core.providers import PROVIDER_POLICIES
+from scholar.core.providers import HuggingFaceProvider
 
 
 def make_paper(arxiv_id, *, source=PaperSource.ARXIV, metadata=None):

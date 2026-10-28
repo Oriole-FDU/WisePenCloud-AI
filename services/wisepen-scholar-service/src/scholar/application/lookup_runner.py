@@ -26,8 +26,8 @@ from scholar.domain.repositories.paper_lookup_cache import (
     CachedPaperLookup,
     PaperLookupCache,
 )
-from scholar.providers.policies import ProviderPolicy
-from scholar.providers.s2 import s2_queued_ahead
+from scholar.core.providers import ProviderPolicy
+from scholar.core.providers import s2_queued_ahead
 
 
 @dataclass

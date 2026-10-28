@@ -6,7 +6,7 @@ from dataclasses import replace
 from copy import deepcopy
 from datetime import date
 
-from scholar.providers.policies import PROVIDER_POLICIES
+from scholar.core.providers import PROVIDER_POLICIES
 
 import pytest
 from scholar.application.lookup_runner import LookupBinding, LookupRunner

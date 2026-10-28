@@ -10,7 +10,7 @@ from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.providers.arxiv import ArxivProvider
+from scholar.core.providers import ArxivProvider
 
 
 @pytest.fixture

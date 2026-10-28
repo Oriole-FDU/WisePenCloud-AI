@@ -18,7 +18,7 @@ from scholar.application.services.search import (
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.paper import Paper
 from scholar.domain.models.source_execution import SourceExecutionStatus
-from scholar.providers.arxiv import ArxivProvider
+from scholar.core.providers import ArxivProvider
 
 
 def paper(identifier, metrics=None):

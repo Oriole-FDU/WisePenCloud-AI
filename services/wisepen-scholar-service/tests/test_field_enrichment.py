@@ -1,6 +1,6 @@
 
 from pdf_fakes import make_pdf_service
-from scholar.providers.policies import PROVIDER_POLICIES, ProviderPolicy
+from scholar.core.providers import PROVIDER_POLICIES, ProviderPolicy
 from dataclasses import replace
 """验证公共来源回退、身份别名接力和学科增量查询。"""
 
@@ -24,11 +24,11 @@ from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.models.source_execution import SourceExecutionStatus
-from scholar.providers.arxiv import ArxivProvider
-from scholar.providers.arxiv import has_signals as arxiv_signals
-from scholar.providers.openalex import has_signals as openalex_signals
-from scholar.providers.s2 import aliases as s2_aliases
-from scholar.providers.s2 import has_signals as s2_signals
+from scholar.core.providers import ArxivProvider
+from scholar.core.providers import has_signals as arxiv_signals
+from scholar.core.providers import has_signals as openalex_signals
+from scholar.core.providers import aliases as s2_aliases
+from scholar.core.providers import has_signals as s2_signals
 
 
 class FakeProvider:

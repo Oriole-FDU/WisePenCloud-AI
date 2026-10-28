@@ -23,7 +23,7 @@ from scholar.core.storage.elasticsearch.paper_repository import (
 )
 from scholar.domain.models.fields import AcademicField
 from scholar.ml.specter import DEFAULT_MODELS, DIMENSIONS, QUERY_MODEL
-from scholar.providers.arxiv import ArxivProvider
+from scholar.core.providers import ArxivProvider
 
 pytestmark = pytest.mark.skipif(
     os.getenv("SCHOLAR_REAL_ES") != "1",

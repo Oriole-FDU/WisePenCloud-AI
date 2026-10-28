@@ -3,7 +3,7 @@
 from pdf_fakes import make_pdf_service
 
 from dataclasses import replace
-from scholar.providers.policies import PROVIDER_POLICIES
+from scholar.core.providers import PROVIDER_POLICIES
 
 import asyncio
 from datetime import date
@@ -22,10 +22,10 @@ from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
-from scholar.providers import s2
-from scholar.providers.arxiv import has_signals as arxiv_signals
-from scholar.providers.s2 import aliases as s2_aliases
-from scholar.providers.s2 import has_signals as s2_signals
+from scholar.core.providers import s2
+from scholar.core.providers import has_signals as arxiv_signals
+from scholar.core.providers import aliases as s2_aliases
+from scholar.core.providers import has_signals as s2_signals
 
 
 class FakeRedisPipeline:

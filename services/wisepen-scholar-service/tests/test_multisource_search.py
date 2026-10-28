@@ -1,6 +1,6 @@
 
 from pdf_fakes import make_pdf_service
-from scholar.providers.policies import PROVIDER_POLICIES, ProviderPolicy
+from scholar.core.providers import PROVIDER_POLICIES, ProviderPolicy
 from dataclasses import replace
 from datetime import date
 from unittest.mock import AsyncMock
@@ -27,8 +27,8 @@ from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.models.source_execution import (
     SourceExecutionStatus,
 )
-from scholar.providers.arxiv import ARXIV_CATEGORIES, ArxivProvider
-from scholar.providers.openalex import OPENALEX_FILTERS
+from scholar.core.providers import ARXIV_CATEGORIES, ArxivProvider
+from scholar.core.providers import OPENALEX_FILTERS
 
 
 class MemoryCache:

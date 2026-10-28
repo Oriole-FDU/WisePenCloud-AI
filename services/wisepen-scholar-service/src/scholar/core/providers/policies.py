@@ -7,7 +7,7 @@ from typing import Any
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.models.paper import Paper
 from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
-from scholar.providers import arxiv, huggingface, openalex, s2
+from scholar.core.providers import arxiv, huggingface, openalex, s2
 
 
 @dataclass

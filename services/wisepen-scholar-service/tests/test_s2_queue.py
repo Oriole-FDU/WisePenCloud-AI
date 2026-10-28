@@ -3,7 +3,7 @@
 from pdf_fakes import make_pdf_service
 
 from dataclasses import replace
-from scholar.providers.policies import PROVIDER_POLICIES
+from scholar.core.providers import PROVIDER_POLICIES
 
 import asyncio
 import hashlib
@@ -27,8 +27,8 @@ from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper
 from scholar.domain.models.source_execution import SourceExecutionStatus
-from scholar.providers.s2 import S2Provider, S2Transport
-from scholar.providers.s2 import has_signals as s2_signals
+from scholar.core.providers import S2Provider, S2Transport
+from scholar.core.providers import has_signals as s2_signals
 
 
 @pytest_asyncio.fixture

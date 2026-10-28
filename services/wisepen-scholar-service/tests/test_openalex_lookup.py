@@ -3,7 +3,7 @@
 from pdf_fakes import make_pdf_service
 
 from dataclasses import replace
-from scholar.providers.policies import PROVIDER_POLICIES
+from scholar.core.providers import PROVIDER_POLICIES
 
 from datetime import date
 
@@ -19,8 +19,8 @@ from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.providers.arxiv import has_signals as arxiv_signals
-from scholar.providers.openalex import OpenAlexProvider
+from scholar.core.providers import has_signals as arxiv_signals
+from scholar.core.providers import OpenAlexProvider
 
 
 def make_paper(source, *, arxiv_id="2401.00001", metadata=None):

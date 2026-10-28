@@ -40,7 +40,7 @@ from scholar.ml.specter import (
     MODEL_SIGNATURE,
     QUERY_MODEL,
 )
-from scholar.providers.arxiv import ArxivProvider
+from scholar.core.providers import ArxivProvider
 
 
 def record(path: Path, state: dict, stage: str, **progress) -> None:

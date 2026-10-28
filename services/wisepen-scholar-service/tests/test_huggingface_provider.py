@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime
 
 import httpx
 import pytest
-import scholar.providers.huggingface as huggingface_provider
+import scholar.core.providers.huggingface as huggingface_provider
 from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_discoverer import (
     DiscoveryPeriod,
@@ -14,7 +14,7 @@ from scholar.domain.models.identifiers import (
     parse_identifier,
 )
 from scholar.domain.models.paper import PaperSource
-from scholar.providers.huggingface import HuggingFaceProvider
+from scholar.core.providers import HuggingFaceProvider
 
 
 def paper_info_payload(arxiv_id="2401.00001"):
