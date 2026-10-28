@@ -11,10 +11,12 @@ from enum import StrEnum
 import orjson
 
 from common.utils.retrieval import Candidate, RrfFusion
+from common.core.exceptions import ServiceException
 from scholar.application.field_policies import COMMON_ENRICHERS, FieldPolicy
 from scholar.application.lookup_runner import LookupRunner
 from scholar.application.paper_projection import project_paper
-from scholar.domain.errors import ProviderError
+from scholar.application.services.pdf_recover import PaperPdfRecoverService
+from scholar.domain.errors import ProviderError, ScholarErrorCode
 from scholar.domain.interfaces.paper_searcher import PaperSearcher
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
@@ -56,6 +58,7 @@ class SearchBinding:
     searcher: PaperSearcher
     cache_revision: str = "2"
     candidate_limit: int = 100
+    requires_byok: bool = False
 
 
 class PaperSearchService:
@@ -65,6 +68,7 @@ class PaperSearchService:
         policies: dict[AcademicField, FieldPolicy],
         query_cache: QueryCacheRepository,
         lookup: LookupRunner,
+        pdf: PaperPdfRecoverService,
         platform_credentials: dict[str, str] | None = None,
     ):
         self.platform_credentials = platform_credentials or {}
@@ -72,6 +76,7 @@ class PaperSearchService:
         self.policies = policies
         self.query_cache = query_cache
         self.lookup_runner = lookup
+        self.pdf = pdf
 
     async def search(
         self,
@@ -79,9 +84,17 @@ class PaperSearchService:
         *,
         credentials: dict[str, str] | None = None,
     ) -> SearchResult:
-        credentials = self.platform_credentials | (credentials or {})
+        credentials = credentials or {}
         policy = self.policies[query.field]
-        plan = policy.searchers
+        # 搜索的可用性先于缓存判断；平台凭证只在后续富化阶段使用。
+        skipped = {
+            source: SourceExecution(source, False, SourceExecutionStatus.NOT_EXECUTED, f"{source} search requires user BYOK")
+            for source in policy.searchers
+            if self.searchers[source].requires_byok and not credentials.get(source)
+        }
+        plan = [source for source in policy.searchers if source not in skipped]
+        if not plan:
+            raise ServiceException(ScholarErrorCode.CAPABILITY_UNAVAILABLE, "; ".join(item.error for item in skipped.values()))
 
         # 多源：并发请求；单源：按优先级回退，空结果也视为成功。
         if query.source_scope == SourceScope.MULTI_SOURCE:
@@ -157,9 +170,14 @@ class PaperSearchService:
             domain_sources=[
                 source for source in policy.field_enrichers if source not in succeeded
             ],
-            credentials=credentials,
+            credentials=self.platform_credentials | credentials,
         )
-        enriched_papers = [project_paper(target.paper) for target in targets]
+        papers, pdf_execution = await self.pdf.recover([target.paper for target in targets])
+        if pdf_execution is not None:
+            enrichment_execution.append(pdf_execution)
+        enriched_papers = [project_paper(paper) for paper in papers]
+        executions = skipped | {item.source: item for item in execution}
+        execution = [executions[source] for source in policy.searchers if source in executions]
         return SearchResult(enriched_papers, execution, conflicts, enrichment_execution)
 
     async def _search_source(

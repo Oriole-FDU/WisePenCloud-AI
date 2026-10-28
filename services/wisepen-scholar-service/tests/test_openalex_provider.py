@@ -217,12 +217,12 @@ async def test_lookup_always_requests_details_and_returns_full_paper(work):
         "ids",
         "cited_by_count",
         "primary_topic",
-        "open_access",
         "is_retracted",
         "mesh",
         "study_designs",
     } <= fields
     assert detail_fields <= fields
+    assert "open_access" not in fields
     assert isinstance(matches[0], PaperLookupMatch)
     assert len(matches[0].papers) == 1
     paper = matches[0].papers[0]

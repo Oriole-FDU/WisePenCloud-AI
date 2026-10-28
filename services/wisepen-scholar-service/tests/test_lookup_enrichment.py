@@ -1,10 +1,12 @@
 """从 lookup 公共入口验证完整论文查询、缓存复用和逐项结果。"""
 
+from pdf_fakes import make_pdf_service
+
 from dataclasses import replace
 from copy import deepcopy
 from datetime import date
 
-from scholar.providers.policies.enrichment import ENRICHMENT_RULES
+from scholar.providers.policies import PROVIDER_POLICIES
 
 import pytest
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
@@ -83,14 +85,14 @@ def binding(provider, *, cache=None, identifier_kinds=None, **kwargs):
     return LookupBinding(
         provider,
         cache,
-        replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=identifier_kinds or IdentifierKind.members(), **({"has_signals": None} | kwargs)),
+        replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=identifier_kinds or IdentifierKind.members(), **({"has_signals": None} | kwargs)),
     )
 
 
 def service(bindings, *, platform_credentials=None):
     return PaperLookupService(
         LookupRunner(bindings), platform_credentials=platform_credentials
-    )
+    , pdf=make_pdf_service())
 
 
 @pytest.mark.asyncio
@@ -355,7 +357,7 @@ async def test_transformer_lookup_preserves_research_signals_and_removes_interna
         },
         "s2": {
             "corpus_id": "13756489", "citation_count": 197480,
-            "influential_citation_count": 20998, "is_open_access": False,
+            "influential_citation_count": 20998,
             "tldr": "The Transformer uses attention instead of recurrence and convolutions.",
             **extra_s2,
         },
@@ -410,6 +412,5 @@ async def test_medical_lookup_compacts_mesh_and_preserves_distinct_reading_entri
             {"descriptor_name": "COVID-19", "qualifier_name": "immunology", "is_major_topic": False},
             {"descriptor_name": "COVID-19", "qualifier_name": "prevention & control", "is_major_topic": False},
         ],
-        "best_oa_location": {"landing_page_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7745181/", "version": "acceptedVersion"},
-        "open_access": {"is_oa": True, "oa_status": "green"},
+        "best_oa_location": {"landing_page_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7745181/"},
     }}

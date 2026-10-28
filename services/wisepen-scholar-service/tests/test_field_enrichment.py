@@ -1,4 +1,6 @@
-from scholar.providers.policies.enrichment import ENRICHMENT_RULES, EnrichmentRules
+
+from pdf_fakes import make_pdf_service
+from scholar.providers.policies import PROVIDER_POLICIES, ProviderPolicy
 from dataclasses import replace
 """验证公共来源回退、身份别名接力和学科增量查询。"""
 
@@ -68,8 +70,8 @@ def make_paper(
 
 @pytest.mark.asyncio
 async def test_s2_aliases_route_domain_providers_without_changing_core_identity(monkeypatch):
-    rules = EnrichmentRules([IdentifierKind.DOI], lambda paper: paper.metadata["clinical_trials"])
-    monkeypatch.setitem(ENRICHMENT_RULES, "clinical_trials", rules)
+    rules = ProviderPolicy([IdentifierKind.DOI], lambda paper: paper.metadata["clinical_trials"])
+    monkeypatch.setitem(PROVIDER_POLICIES, "clinical_trials", rules)
     corpus = parse_identifier("corpusid:123")
     arxiv = parse_identifier("2401.00001")
     doi = parse_identifier("10.5555/clinical")
@@ -120,13 +122,13 @@ async def test_s2_aliases_route_domain_providers_without_changing_core_identity(
     }
     runner = LookupRunner(
         {
-            PaperSource.S2: LookupBinding(s2, None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.CORPUS_ID], has_signals=s2_signals, aliases=s2_aliases)),
-            PaperSource.HUGGINGFACE: LookupBinding(hf, None, replace(ENRICHMENT_RULES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.CORPUS_ID], has_signals=s2_signals, aliases=s2_aliases)),
+            PaperSource.HUGGINGFACE: LookupBinding(hf, None, replace(PROVIDER_POLICIES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV])),
             "clinical_trials": LookupBinding(clinical, None, rules),
         }
     )
 
-    result = await PaperLookupService(runner, policies=policies).lookup(
+    result = await PaperLookupService(runner, policies=policies, pdf=make_pdf_service()).lookup(
         PaperLookup(
             [f"corpusid:{corpus.value}"], AcademicField.MEDICINE
         )
@@ -166,12 +168,12 @@ async def test_only_unresolved_targets_advance_to_the_next_common_source():
     )
     runner = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
-            PaperSource.S2: LookupBinding(s2, None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
+            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
         }
     )
 
-    result = await PaperLookupService(runner).lookup(
+    result = await PaperLookupService(runner, pdf=make_pdf_service()).lookup(
         PaperLookup([first.value, second.value, second.value])
     )
 
@@ -196,17 +198,17 @@ async def test_general_fallback_success_is_complete_but_domain_failure_is_partia
     hf = FakeProvider(error=ProviderError("HF unavailable"))
     runner = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
-            PaperSource.S2: LookupBinding(s2, None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
-            PaperSource.OPENALEX: LookupBinding(openalex, None, replace(ENRICHMENT_RULES["openalex"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=openalex_signals)),
-            PaperSource.HUGGINGFACE: LookupBinding(hf, None, replace(ENRICHMENT_RULES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
+            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+            PaperSource.OPENALEX: LookupBinding(openalex, None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=openalex_signals)),
+            PaperSource.HUGGINGFACE: LookupBinding(hf, None, replace(PROVIDER_POLICIES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV])),
         }
     )
     policies = {
         AcademicField.COMPUTER_SCIENCE: FieldPolicy([], [PaperSource.HUGGINGFACE])
     }
 
-    result = await PaperLookupService(runner, policies=policies).lookup(
+    result = await PaperLookupService(runner, policies=policies, pdf=make_pdf_service()).lookup(
         PaperLookup(
             [identity.value], AcademicField.COMPUTER_SCIENCE
         ),
@@ -245,12 +247,12 @@ async def test_real_elasticsearch_lookup_error_is_visible_while_s2_fallback_succ
     s2 = FakeProvider({identity: PaperLookupMatch([s2_paper])})
     runner = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
-            PaperSource.S2: LookupBinding(s2, None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
+            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
         }
     )
 
-    result = await PaperLookupService(runner).lookup(
+    result = await PaperLookupService(runner, pdf=make_pdf_service()).lookup(
         PaperLookup([identity.value])
     )
 

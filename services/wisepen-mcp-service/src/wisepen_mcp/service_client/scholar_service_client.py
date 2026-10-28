@@ -37,12 +37,14 @@ class ScholarClient:
         source_scope: str,
         openalex_api_key: str | None = None,
         huggingface_api_key: str | None = None,
+        s2_api_key: str | None = None,
     ) -> dict[str, Any]:
         headers = {
             k: v
             for k, v in {
                 "X-OpenAlex-Api-Key": openalex_api_key,
                 "X-HuggingFace-Api-Key": huggingface_api_key,
+                "X-S2-Api-Key": s2_api_key,
             }.items()
             if v
         }
@@ -74,12 +76,14 @@ class ScholarClient:
         field: str = "general",
         openalex_api_key: str | None = None,
         huggingface_api_key: str | None = None,
+        s2_api_key: str | None = None,
     ) -> dict[str, Any]:
         headers = {
             k: v
             for k, v in {
                 "X-OpenAlex-Api-Key": openalex_api_key,
                 "X-HuggingFace-Api-Key": huggingface_api_key,
+                "X-S2-Api-Key": s2_api_key,
             }.items()
             if v
         }

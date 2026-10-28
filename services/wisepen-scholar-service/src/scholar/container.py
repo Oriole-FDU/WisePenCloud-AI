@@ -10,6 +10,7 @@ from scholar.application.field_policies import FIELD_POLICIES
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.services.discovery import PaperDiscoveryService
 from scholar.application.services.lookup import PaperLookupService
+from scholar.application.services.pdf_recover import PaperPdfRecoverService
 from scholar.application.services.search import (
     PaperSearchService,
     SearchBinding,
@@ -21,13 +22,15 @@ from scholar.core.storage.elasticsearch.paper_repository import (
 )
 from scholar.core.storage.redis.discovery_cache import RedisDiscoveryCacheRepository
 from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
+from scholar.core.storage.redis.pdf_cache import RedisPdfCache
 from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
 from scholar.ml.specter import DIMENSIONS, QUERY_MODEL
 from scholar.providers.arxiv import ArxivProvider
-from scholar.providers.policies.enrichment import ENRICHMENT_POLICIES
+from scholar.providers.policies import PROVIDER_POLICIES
 from scholar.providers.huggingface import HuggingFaceProvider
 from scholar.providers.openalex import OpenAlexProvider
 from scholar.providers.s2 import S2Provider, S2Transport
+from scholar.providers.unpaywall import UnpaywallProvider
 
 
 class Container(containers.DeclarativeContainer):
@@ -52,6 +55,14 @@ class Container(containers.DeclarativeContainer):
     )
     s2_http = providers.Singleton(
         httpx.AsyncClient, timeout=config.SCHOLAR_REQUEST_TIMEOUT_SECONDS
+    )
+    unpaywall_http = providers.Singleton(httpx.AsyncClient, timeout=5)
+    pdf_service = providers.Singleton(
+        PaperPdfRecoverService,
+        provider=providers.Singleton(UnpaywallProvider, http=unpaywall_http, email=config.UNPAYWALL_EMAIL),
+        cache=providers.Singleton(RedisPdfCache, redis=redis),
+        positive_ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
+        negative_ttl_seconds=config.SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS,
     )
     s2_transport = providers.Singleton(
         S2Transport,
@@ -138,11 +149,12 @@ class Container(containers.DeclarativeContainer):
         ),
     )
     platform_credentials = providers.Callable(
-        lambda oa, hf: {
-            k: v for k, v in {"openalex": oa, "huggingface": hf}.items() if v
+        lambda oa, hf, s2: {
+            k: v for k, v in {"openalex": oa, "huggingface": hf, "s2": s2}.items() if v
         },
         config.OPENALEX_API_KEY,
         config.HF_TOKEN,
+        config.S2_API_KEY,
     )
     search_bindings = providers.Dict(
         arxiv=providers.Factory(
@@ -155,20 +167,22 @@ class Container(containers.DeclarativeContainer):
             SearchBinding,
             searcher=openalex_searcher,
             candidate_limit=200,
+            requires_byok=True,
         ),
         huggingface=providers.Factory(
             SearchBinding,
             searcher=huggingface_provider,
+            requires_byok=True,
         ),
     )
     lookup_bindings = providers.Dict(
         arxiv=providers.Factory(LookupBinding, provider=arxiv_searcher, cache=arxiv_cache,
-                                rules=ENRICHMENT_POLICIES["arxiv"]),
-        s2=providers.Factory(LookupBinding, provider=s2_provider, cache=s2_cache, rules=ENRICHMENT_POLICIES["s2"]),
+                                rules=PROVIDER_POLICIES["arxiv"]),
+        s2=providers.Factory(LookupBinding, provider=s2_provider, cache=s2_cache, rules=PROVIDER_POLICIES["s2"]),
         openalex=providers.Factory(LookupBinding, provider=openalex_searcher, cache=openalex_cache,
-                                   rules=ENRICHMENT_POLICIES["openalex"]),
+                                   rules=PROVIDER_POLICIES["openalex"]),
         huggingface=providers.Factory(LookupBinding, provider=huggingface_provider, cache=huggingface_cache,
-                                      rules=ENRICHMENT_POLICIES["huggingface"]),
+                                      rules=PROVIDER_POLICIES["huggingface"]),
     )
     lookup_runner = providers.Singleton(
         LookupRunner,
@@ -183,10 +197,12 @@ class Container(containers.DeclarativeContainer):
         platform_credentials=platform_credentials,
         query_cache=query_cache_repository,
         lookup=lookup_runner,
+        pdf=pdf_service,
     )
     paper_lookup_service = providers.Singleton(
         PaperLookupService,
         lookup=lookup_runner,
+        pdf=pdf_service,
         policies=providers.Object(FIELD_POLICIES),
         platform_credentials=platform_credentials,
     )
@@ -194,8 +210,8 @@ class Container(containers.DeclarativeContainer):
         PaperDiscoveryService,
         discoverers=providers.Dict(huggingface=huggingface_provider),
         policies=providers.Object(FIELD_POLICIES),
-        platform_credentials=platform_credentials,
         cache=discovery_cache_repository,
+        pdf=pdf_service,
     )
 
 

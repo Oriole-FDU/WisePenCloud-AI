@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from contextvars import ContextVar
 from datetime import UTC, date, datetime
 from uuid import uuid4
@@ -85,35 +86,37 @@ class S2Transport:
         self.http, self.redis, self._api_key = http, redis, api_key
         # None 用于离线调用：参与同一配额，但不应用在线拥堵准入阈值。
         self.max_queued_ahead = max_queued_ahead
-        self._queue = f"{namespace}:queue"
-        self._leases = f"{namespace}:leases"
-        self._sequence = f"{namespace}:sequence"
-        # 沿用旧发送许可键，正在运行的旧版离线任务仍共享 1 RPS。
-        self._permit = f"{namespace}:send-permit"
+        self.namespace = namespace
         self.http.headers.pop("User-Agent", None)
 
-    async def request(self, method: str, path: str, **kwargs):
+    async def request(self, method: str, path: str, *, api_key: str | None = None, **kwargs):
+        effective_key = api_key or self._api_key
+        platform = effective_key == self._api_key
+        # 平台沿用原队列以继续与离线共享；用户配额按 key 隔离且不设准入阈值。
+        namespace = self.namespace if platform else f"{self.namespace}:byok:{hashlib.sha256(effective_key.encode()).hexdigest()}"
+        queue, leases, sequence, permit = [f"{namespace}:{suffix}" for suffix in ("queue", "leases", "sequence", "send-permit")]
+        max_ahead = self.max_queued_ahead if platform else None
         member = uuid4().hex
         try:
             accepted, ahead = await self.redis.eval(
                 _ADMIT,
                 3,
-                self._queue,
-                self._leases,
-                self._sequence,
+                queue,
+                leases,
+                sequence,
                 member,
-                -1 if self.max_queued_ahead is None else self.max_queued_ahead,
+                -1 if max_ahead is None else max_ahead,
             )
             s2_queued_ahead.set(ahead)
             if not accepted:
-                raise ProviderBusy(ahead, self.max_queued_ahead)
+                raise ProviderBusy(ahead, max_ahead)
             while True:
                 delay = await self.redis.eval(
                     _PERMIT,
                     3,
-                    self._queue,
-                    self._leases,
-                    self._permit,
+                    queue,
+                    leases,
+                    permit,
                     member,
                 )
                 if delay < 0:
@@ -126,12 +129,12 @@ class S2Transport:
         finally:
             # 取消、超时、Redis 故障均不得留下可绕过配额的发送路径；
             # 清理失败不吞掉，交由调用者感知。
-            await self.redis.eval(_REMOVE, 2, self._queue, self._leases, member)
+            await self.redis.eval(_REMOVE, 2, queue, leases, member)
 
         request = self.http.build_request(
             method,
             f"https://api.semanticscholar.org/{path}",
-            headers={"x-api-key": self._api_key},
+            headers={"x-api-key": effective_key},
             **kwargs,
         )
         response = await self.http.send(request)
@@ -144,7 +147,6 @@ ENRICHMENT_FIELDS = (
     "tldr",
     "citationCount",
     "influentialCitationCount",
-    "isOpenAccess",
     "openAccessPdf",
 )
 DETAIL_FIELDS = ("abstract", "authors", "year", "publicationDate", "venue")
@@ -155,8 +157,7 @@ def has_signals(metadata: dict) -> bool:
 
     三类价值维度取 OR，覆盖不同时效与学科的论文：
 
-    - 计量指标：``citation_count`` / ``influential_citation_count`` /
-      ``is_open_access`` 任一非 None（新论文可能尚无 TLDR，但已有引用统计）。
+    - 计量指标：``citation_count`` / ``influential_citation_count`` 任一非 None。
     - 速读价值：``tldr.text`` 非空（引用为 0 的预印本也可能已有 LLM 摘要）。
     - 阅读入口：``open_access_pdf`` 存在。
     """
@@ -168,7 +169,6 @@ def has_signals(metadata: dict) -> bool:
             for key in (
                 "citation_count",
                 "influential_citation_count",
-                "is_open_access",
             )
         )
         or bool(tldr and tldr.get("text"))
@@ -214,6 +214,10 @@ def short_lived(record: CachedPaperLookup) -> bool:
     )
 
 
+def pdf_url(paper: Paper) -> str | None:
+    return paper.metadata.get("s2", {}).get("open_access_pdf")
+
+
 def project_metadata(paper: Paper) -> dict:
     """保留速读和引用影响；PDF 字段只有提供独立阅读入口时才额外输出。"""
     values = paper.metadata["s2"]
@@ -223,7 +227,6 @@ def project_metadata(paper: Paper) -> dict:
             "corpus_id",
             "citation_count",
             "influential_citation_count",
-            "is_open_access",
             "venue",
         )
     }
@@ -249,6 +252,7 @@ class S2Provider:
             response = await self.transport.request(
                 "POST",
                 "graph/v1/paper/batch",
+                api_key=api_key,
                 params={"fields": ",".join(fields)},
                 json={
                     "ids": [
@@ -296,7 +300,6 @@ class S2Provider:
                 "influential_citation_count": payload.get(
                     "influentialCitationCount"
                 ),
-                "is_open_access": payload.get("isOpenAccess"),
                 "tldr": (
                     None
                     if tldr is None

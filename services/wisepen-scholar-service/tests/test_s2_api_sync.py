@@ -55,7 +55,7 @@ async def test_daily_sync_requests_v2_and_persists_vector_for_publication(db):
     document = publication_documents(db, rows, vector_enabled=True)[0]
     assert document["embedding"] == [0.25] * 768
     assert document["metadata"]["s2"]["citation_count"] == 0
-    assert document["metadata"]["s2"]["is_open_access"] is False
+    assert "is_open_access" not in document["metadata"]["s2"]
     assert document["metadata"]["s2"]["tldr"] == {"text": "summary", "model": "tldr"}
     assert document["metadata"]["s2"]["observed_at"]
     assert "embedding" not in document["metadata"]["s2"]

@@ -1,5 +1,7 @@
 """从 provider 与公开搜索入口验证候选论文的完整 lookup 结果。"""
 
+from pdf_fakes import make_pdf_service
+
 from copy import deepcopy
 from dataclasses import replace
 from datetime import date
@@ -17,7 +19,7 @@ from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.providers.policies.enrichment import ENRICHMENT_RULES
+from scholar.providers.policies import PROVIDER_POLICIES
 from scholar.providers.huggingface import HuggingFaceProvider
 
 
@@ -159,7 +161,7 @@ async def test_search_merges_hf_facts_in_place_and_reuses_positive_and_negative_
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         lookup = LookupRunner(
             {
-                PaperSource.HUGGINGFACE: LookupBinding(HuggingFaceProvider(http), lookup_cache, replace(ENRICHMENT_RULES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV]))
+                PaperSource.HUGGINGFACE: LookupBinding(HuggingFaceProvider(http), lookup_cache, replace(PROVIDER_POLICIES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV]))
             }
         )
         service = PaperSearchService(
@@ -167,7 +169,8 @@ async def test_search_merges_hf_facts_in_place_and_reuses_positive_and_negative_
             {AcademicField.GENERAL: policy},
             query_cache,
             lookup,
-        )
+            platform_credentials={"huggingface": "platform-hf"},
+        pdf=make_pdf_service())
         first = await service.search(PaperSearch("candidate lookup"))
         repeated = await service.search(PaperSearch("candidate lookup"))
 
@@ -197,3 +200,4 @@ async def test_search_merges_hf_facts_in_place_and_reuses_positive_and_negative_
     assert set(lookup_cache.ttls) == {3600, 86400}
     assert repeated.enrichment_execution[0].cache_hit is True
     assert len(requests) == 2
+    assert all(request.headers["authorization"] == "Bearer platform-hf" for request in requests)

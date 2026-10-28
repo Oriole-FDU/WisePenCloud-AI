@@ -73,7 +73,6 @@ async def test_lookup_requests_fixed_fields_and_returns_complete_paper():
         "tldr",
         "citationCount",
         "influentialCitationCount",
-        "isOpenAccess",
         "openAccessPdf",
         "abstract",
         "authors",
@@ -92,7 +91,8 @@ async def test_lookup_requests_fixed_fields_and_returns_complete_paper():
     paper = match.papers[0]
     assert paper.metadata["s2"]["citation_count"] == 0
     assert paper.metadata["s2"]["influential_citation_count"] == 2
-    assert paper.metadata["s2"]["is_open_access"] is False
+    assert "is_open_access" not in paper.metadata["s2"]
+    assert "isOpenAccess" not in fields
     assert paper.metadata["s2"]["tldr"] == {"model": "tldr@v2", "text": ""}
     assert paper.metadata["s2"]["open_access_pdf"] == "https://example.test/paper.pdf"
     assert "citationStyles" not in fields

@@ -4,7 +4,7 @@ from dataclasses import replace
 from typing import Any
 
 from scholar.domain.models.paper import Paper
-from scholar.providers.policies.enrichment import ENRICHMENT_POLICIES
+from scholar.providers.policies import PROVIDER_POLICIES
 
 
 def _compact(value: Any) -> Any:
@@ -28,7 +28,7 @@ def project_paper(paper: Paper) -> Paper:
     """统一装配各来源投影，不修改原论文及其嵌套 metadata。"""
     metadata = {
         source: policy.project_metadata(paper)
-        for source, policy in ENRICHMENT_POLICIES.items()
+        for source, policy in PROVIDER_POLICIES.items()
         if source in paper.metadata
     }
     authors = (

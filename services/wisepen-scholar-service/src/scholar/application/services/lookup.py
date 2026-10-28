@@ -13,6 +13,7 @@ from scholar.application.field_policies import (
 )
 from scholar.application.lookup_runner import LookupRunner
 from scholar.application.paper_projection import project_paper
+from scholar.application.services.pdf_recover import PaperPdfRecoverService
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
 from scholar.domain.models.paper import Paper
@@ -55,11 +56,13 @@ class PaperLookupService:
     def __init__(
         self,
         lookup: LookupRunner,
+        pdf: PaperPdfRecoverService,
         *,
         policies: dict[AcademicField, FieldPolicy] | None = None,
         platform_credentials: dict[str, str] | None = None,
     ):
         self.lookup_runner = lookup
+        self.pdf = pdf
         self.policies = FIELD_POLICIES if policies is None else policies
         self.platform_credentials = platform_credentials or {}
 
@@ -94,6 +97,12 @@ class PaperLookupService:
             domain_sources=policy.field_enrichers,
             credentials=credentials,
         )
+        confirmed = [target for target in targets if target.paper is not None and not target.ambiguous]
+        papers, pdf_execution = await self.pdf.recover([target.paper for target in confirmed])
+        for target, paper in zip(confirmed, papers, strict=True):
+            target.paper = paper
+        if pdf_execution is not None:
+            execution.append(pdf_execution)
         first_error = None
         for identity, target in zip(positions, targets, strict=True):
             if target.errors:
@@ -125,11 +134,7 @@ class PaperLookupService:
                 else None
             )
             # 歧义属于整个身份查询的结果，不把此前的基础论文作为已确认匹配返回。
-            paper = (
-                project_paper(target.paper)
-                if target.paper is not None and not target.ambiguous
-                else None
-            )
+            paper = project_paper(target.paper) if target.paper is not None and not target.ambiguous else None
             for index in positions[identity]:
                 item = items[index]
                 item.status = status

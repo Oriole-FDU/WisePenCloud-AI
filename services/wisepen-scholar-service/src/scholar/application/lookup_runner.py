@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
@@ -25,7 +26,7 @@ from scholar.domain.repositories.paper_lookup_cache import (
     CachedPaperLookup,
     PaperLookupCache,
 )
-from scholar.providers.policies.enrichment import EnrichmentPolicy
+from scholar.providers.policies import ProviderPolicy
 from scholar.providers.s2 import s2_queued_ahead
 
 
@@ -35,7 +36,7 @@ class LookupBinding:
 
     provider: PaperLookupProvider
     cache: PaperLookupCache | None
-    rules: EnrichmentPolicy
+    rules: ProviderPolicy
 
 
 @dataclass
@@ -256,8 +257,7 @@ class LookupRunner:
         known_ids: dict[PaperIdentifier, tuple[PaperIdentifier, ...]],
         api_key: str | None,
     ) -> _SourceBatch:
-        """相同来源与身份的并发调用共享同一份完整事实（在途去重）。"""
-        # 构造稳定 key：来源 + 排序后的 (身份, 别名元组) 序列。
+        """相同来源、凭证与身份共享在途 I/O；持久缓存仍按论文事实共享。"""
         identities = tuple(
             sorted(
                 (
@@ -275,7 +275,8 @@ class LookupRunner:
                 key=lambda entry: (entry[0].kind, entry[0].value),
             )
         )
-        key = (source, identities)
+        fingerprint = hashlib.sha256(api_key.encode()).hexdigest() if api_key else None
+        key = (source, fingerprint, identities)
         async with self._lock:
             entry = self._inflight.get(key)
             if entry is None:

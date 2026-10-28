@@ -54,6 +54,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         description=(
             "Search papers through Scholar. The field and source scope specify the requested operation; Scholar "
             "owns query normalization, routing, and capability availability. Papers include research metadata; Hugging Face linked models and datasets cite the paper."
+            " OpenAlex and Hugging Face search require user BYOK; platform keys are reserved for enrichment."
         ),
     )
     async def search_papers(
@@ -92,6 +93,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             source_scope=source_scope.value,
             openalex_api_key=_secret(ctx, "openalex_api_key"),
             huggingface_api_key=_secret(ctx, "huggingface_api_key"),
+            s2_api_key=_secret(ctx, "s2_api_key"),
         )
 
     @mcp.tool(
@@ -123,12 +125,14 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             field=field.value,
             openalex_api_key=_secret(ctx, "openalex_api_key"),
             huggingface_api_key=_secret(ctx, "huggingface_api_key"),
+            s2_api_key=_secret(ctx, "s2_api_key"),
         )
 
     @mcp.tool(
         name="discover_papers",
         description=(
             "Discover papers by field and time window. Scholar returns the actual window and execution result."
+            " Hugging Face discovery requires user BYOK; linked models and datasets cite the paper."
         ),
     )
     async def discover_papers(

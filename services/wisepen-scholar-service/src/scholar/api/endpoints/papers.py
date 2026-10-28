@@ -36,6 +36,7 @@ async def search(
     x_huggingface_api_key: Annotated[
         str | None, Header(alias="X-HuggingFace-Api-Key")
     ] = None,
+    x_s2_api_key: Annotated[str | None, Header(alias="X-S2-Api-Key")] = None,
 ) -> R[SearchResult]:
     async with asyncio.timeout(timeout):
         return R.success(
@@ -46,6 +47,7 @@ async def search(
                     for key, value in {
                         PaperSource.OPENALEX: x_openalex_api_key,
                         PaperSource.HUGGINGFACE: x_huggingface_api_key,
+                        PaperSource.S2: x_s2_api_key,
                     }.items()
                     if value
                 },
@@ -69,6 +71,7 @@ async def lookup(
     x_huggingface_api_key: Annotated[
         str | None, Header(alias="X-HuggingFace-Api-Key")
     ] = None,
+    x_s2_api_key: Annotated[str | None, Header(alias="X-S2-Api-Key")] = None,
 ) -> R[LookupResult]:
     async with asyncio.timeout(timeout):
         return R.success(
@@ -79,6 +82,7 @@ async def lookup(
                     for key, value in {
                         PaperSource.OPENALEX: x_openalex_api_key,
                         PaperSource.HUGGINGFACE: x_huggingface_api_key,
+                        PaperSource.S2: x_s2_api_key,
                     }.items()
                     if value
                 },

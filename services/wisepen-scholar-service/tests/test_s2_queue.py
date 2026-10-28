@@ -1,9 +1,12 @@
 """在独立 Redis 命名空间验证跨客户端 FIFO，不访问 S2 或现有任务键。"""
 
+from pdf_fakes import make_pdf_service
+
 from dataclasses import replace
-from scholar.providers.policies.enrichment import ENRICHMENT_RULES
+from scholar.providers.policies import PROVIDER_POLICIES
 
 import asyncio
+import hashlib
 import os
 import time
 from itertools import pairwise
@@ -42,7 +45,8 @@ async def queue_boundary():
         # Only this fixture's exact keys; never scan or delete the service namespace.
         await first.delete(
             *(
-                f"{namespace}:{suffix}"
+                f"{prefix}:{suffix}"
+                for prefix in [namespace, *(f"{namespace}:byok:{hashlib.sha256(key.encode()).hexdigest()}" for key in ("user-a", "user-b"))]
                 for suffix in ("queue", "leases", "sequence", "send-permit")
             )
         )
@@ -82,14 +86,15 @@ async def test_fifo_across_clients_and_offline_shares_one_second_quota(queue_bou
             http, first, "key", namespace=namespace, max_queued_ahead=5
         )
         offline = S2Transport(http, second, "key", namespace=namespace)
-        # Hold the current permission so all tasks are demonstrably waiting before send.
-        seconds, micros = await first.time()
-        await first.set(f"{namespace}:send-permit", seconds * 1000 + micros // 1000)
+        # 用显式占位协调入队，避免远程 Redis 往返耗时超过一秒导致观测竞争。
+        await seed_waiters(first, namespace, 1)
         tasks = []
         try:
             for i, transport in enumerate([online, offline, online]):
                 tasks.append(asyncio.create_task(transport.request("GET", f"test/{i}")))
-                await wait_count(first, namespace, i + 1)
+                await wait_count(first, namespace, i + 2)
+            await first.zrem(f"{namespace}:queue", "existing-0")
+            await first.zrem(f"{namespace}:leases", "existing-0")
             await asyncio.gather(*tasks)
         finally:
             for task in tasks:
@@ -203,11 +208,11 @@ async def test_busy_is_not_executed_and_openalex_fallback_is_complete(queue_boun
                         S2Transport(
                             http, first, "key", namespace=namespace, max_queued_ahead=5
                         )
-                    ), None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
-                "openalex": LookupBinding(FallbackProvider(), None, replace(ENRICHMENT_RULES["openalex"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+                    ), None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+                "openalex": LookupBinding(FallbackProvider(), None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
             }
         )
-        result = await PaperLookupService(runner).lookup(
+        result = await PaperLookupService(runner, pdf=make_pdf_service()).lookup(
             PaperLookup([identity.value])
         )
     execution = next(e for e in result.execution if e.source == "s2")
@@ -244,10 +249,10 @@ async def test_cache_and_identical_inflight_batch_use_one_queue_task(queue_bound
                         S2Transport(
                             http, first, "key", namespace=namespace, max_queued_ahead=5
                         )
-                    ), cache, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals))
+                    ), cache, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals))
             }
         )
-        service = PaperLookupService(runner)
+        service = PaperLookupService(runner, pdf=make_pdf_service())
         query = PaperLookup(["2401.00001", "2401.00001"])
         seconds, micros = await first.time()
         await first.set(f"{namespace}:send-permit", seconds * 1000 + micros // 1000)
@@ -270,4 +275,107 @@ async def test_cache_and_identical_inflight_batch_use_one_queue_task(queue_bound
             one.cancel()
             two.cancel()
             await asyncio.gather(one, two, return_exceptions=True)
+            await cache.invalidate([parse_identifier("2401.00001")])
+
+
+@pytest.mark.asyncio
+async def test_byok_fifo_is_per_key_and_different_keys_send_independently(queue_boundary):
+    first, second, namespace = queue_boundary
+    user_queue = f"{namespace}:byok:{hashlib.sha256(b'user-a').hexdigest()}"
+    await seed_waiters(first, user_queue, 1)
+    sent = []
+
+    async def handle(request):
+        sent.append((request.url.path, request.headers["x-api-key"], time.monotonic()))
+        return httpx.Response(200, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        one = S2Transport(http, first, "platform", namespace=namespace, max_queued_ahead=0)
+        two = S2Transport(http, second, "platform", namespace=namespace, max_queued_ahead=0)
+        tasks = []
+        try:
+            tasks.append(asyncio.create_task(one.request("GET", "a1", api_key="user-a")))
+            await wait_count(first, user_queue, 2)
+            tasks.append(asyncio.create_task(two.request("GET", "a2", api_key="user-a")))
+            await wait_count(first, user_queue, 3)
+            await two.request("GET", "b", api_key="user-b")
+            assert sent[0][:2] == ("/b", "user-b")
+            await first.zrem(f"{user_queue}:queue", "existing-0")
+            await first.zrem(f"{user_queue}:leases", "existing-0")
+            await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+    own = [entry for entry in sent if entry[1] == "user-a"]
+    assert [entry[0] for entry in own] == ["/a1", "/a2"]
+    assert own[1][2] - own[0][2] >= 0.95
+    assert await first.zcard(f"{user_queue}:queue") == 0
+
+
+@pytest.mark.asyncio
+async def test_platform_threshold_applies_to_same_key_but_byok_waits_until_cancelled(queue_boundary):
+    first, _, namespace = queue_boundary
+    own = f"{namespace}:byok:{hashlib.sha256(b'user-a').hexdigest()}"
+    await seed_waiters(first, namespace, 6)
+    await seed_waiters(first, own, 6)
+    sent = []
+
+    async def handle(request):
+        sent.append(request.headers["x-api-key"])
+        return httpx.Response(200, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        transport = S2Transport(http, first, "platform", namespace=namespace, max_queued_ahead=5)
+        with pytest.raises(ProviderBusy):
+            await transport.request("GET", "platform", api_key="platform")
+        waiting = asyncio.create_task(transport.request("GET", "byok", api_key="user-a"))
+        try:
+            await wait_count(first, own, 7)
+            await transport.request("GET", "independent", api_key="user-b")
+            assert sent == ["user-b"]
+        finally:
+            waiting.cancel()
+            await asyncio.gather(waiting, return_exceptions=True)
+    assert await first.zcard(f"{own}:queue") == 6
+    assert await first.zcard(f"{own}:leases") == 6
+
+
+@pytest.mark.asyncio
+async def test_byok_inflight_isolated_but_completed_papers_shared_across_keys(queue_boundary):
+    first, _, namespace = queue_boundary
+    sent = []
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def handle(request):
+        sent.append(request.headers["x-api-key"])
+        if len(sent) == 2:
+            started.set()
+        await release.wait()
+        return httpx.Response(200, json=[{
+            "paperId": "a" * 40, "url": "https://s2.test/paper",
+            "externalIds": {"ArXiv": "2401.00001"}, "citationCount": 0,
+        }])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        cache = RedisPaperLookupCache(first, namespace)
+        runner = LookupRunner({"s2": LookupBinding(
+            S2Provider(S2Transport(http, first, "platform", namespace=namespace, max_queued_ahead=5)),
+            cache, PROVIDER_POLICIES["s2"],
+        )})
+        service = PaperLookupService(runner, pdf=make_pdf_service(), platform_credentials={"s2": "platform"})
+        query = PaperLookup(["2401.00001", "2401.00001"])
+        tasks = [asyncio.create_task(service.lookup(query, credentials={"s2": key})) for key in ("user-a", "user-a", "user-b")]
+        try:
+            await asyncio.wait_for(started.wait(), 3)
+            assert sorted(sent) == ["user-a", "user-b"]
+            release.set()
+            await asyncio.gather(*tasks)
+            cached = await service.lookup(query)
+            assert cached.execution[0].cache_hit is True
+            assert len(sent) == 2
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             await cache.invalidate([parse_identifier("2401.00001")])

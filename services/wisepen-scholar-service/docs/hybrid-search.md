@@ -55,14 +55,13 @@ deploy/offline/embeddings.py。续跑会复用指纹和模型签名均匹配的�
 CS 来源为 `[arxiv, huggingface]`，默认顺序回退，多源模式均执行。HF 搜索保留上游顺序，保留 AI 摘要、关键词、摘要模型以及渠道产物。HF
 日期过滤处理前 100 个候选。
 
-OpenAlex、HF 优先使用请求 BYOK，没有提供时使用 Nacos 的 `OPENALEX_API_KEY`、`HF_TOKEN`。平台返回 429
-时沿既有来源回退处理，不在同来源内更换密钥。S2 只使用平台密钥与共享限流队列。
+OpenAlex/HF 搜索和 HF 发现仅允许用户 BYOK；缺 key 时在缓存读取前跳过该搜索来源。lookup 和富化使用用户 key 优先、平台 key 其次。S2 同样支持用户 BYOK，用户队列按 key 隔离且不设准入阈值；平台队列仍受在线阈值保护。上游拒绝或限流不触发同来源的平台 key 重试。
 
-HTTP 的 `X-OpenAlex-Api-Key`、`X-HuggingFace-Api-Key` 承载 BYOK；Chat 工具配置分别使用 `api_key`、`huggingface_api_key`
+HTTP 的 `X-OpenAlex-Api-Key`、`X-HuggingFace-Api-Key`、`X-S2-Api-Key` 承载 BYOK；Chat 工具配置分别使用 `openalex_api_key`、`huggingface_api_key`、`s2_api_key`
 ，均不进入模型参数。
 
 来源请求批量获取候选：本地 arXiv 和 OpenAlex 各 200，HF 搜索/发现 100。候选缓存键不包含用户
-limit，应用层在本次请求融合和返回时裁剪；日期、领域、排序和模型/检索版本参与缓存身份，用户标识和凭证不参与。search、discover、lookup 均跨 BYOK、平台凭证及无凭证请求共享缓存，未命中时才使用当前凭证访问上游。富化只对本次返回论文执行。
+limit，应用层在本次请求融合和返回时裁剪；日期、领域、排序和模型/检索版本参与缓存身份，用户标识和凭证不参与。论文事实缓存继续跨凭证共享；HF/OpenAlex 搜索和 HF 发现即使命中缓存也必须先提供 BYOK。不同有效 key 的在途 I/O 分别去重。富化只对本次返回论文执行。
 
 离线命令与恢复操作见 [维护文档](../deploy/README.md)。真实 ES/GPU 小集验收 62 篇：DeepSeek-R1 原论文第 2，Attention Is All
 You Need 第 1，过滤、增量保留向量及 alias 回滚已通过。全量迁移验收由迁移日志记录。

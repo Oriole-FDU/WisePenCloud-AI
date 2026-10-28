@@ -10,6 +10,7 @@ import orjson
 
 from common.core.exceptions import ServiceException
 from scholar.application.field_policies import FieldPolicy
+from scholar.application.services.pdf_recover import PaperPdfRecoverService
 from scholar.domain.errors import ScholarErrorCode
 from scholar.domain.interfaces.paper_discoverer import (
     DiscoveryPeriod,
@@ -50,12 +51,12 @@ class PaperDiscoveryService:
         discoverers: dict[str, PaperDiscoverer],
         policies: dict[AcademicField, FieldPolicy],
         cache: DiscoveryCacheRepository,
-        platform_credentials: dict[str, str] | None = None,
+        pdf: PaperPdfRecoverService,
     ):
-        self.platform_credentials = platform_credentials or {}
         self.discoverers = discoverers
         self.policies = policies
         self.cache = cache
+        self.pdf = pdf
 
     async def discover(
         self, query: PaperDiscoveryQuery, *, credentials: dict[str, str] | None = None
@@ -64,8 +65,9 @@ class PaperDiscoveryService:
         if source is None or source not in self.discoverers:
             raise ServiceException(ScholarErrorCode.CAPABILITY_UNAVAILABLE)
 
-        credentials = self.platform_credentials | (credentials or {})
-        api_key = credentials.get(source)
+        api_key = (credentials or {}).get(source)
+        if not api_key:
+            raise ServiceException(ScholarErrorCode.CAPABILITY_UNAVAILABLE, f"{source} discovery requires user BYOK")
         cache_key = self._cache_key(source, query)
         discovery = await self.cache.get(cache_key)
         cache_hit = discovery is not None
@@ -79,17 +81,15 @@ class PaperDiscoveryService:
             )
             await self.cache.put(cache_key, discovery)
 
+        papers, pdf_execution = await self.pdf.recover(discovery.papers[: query.limit])
+        execution = [SourceExecution(source, cache_hit, SourceExecutionStatus.COMPLETED)]
+        if pdf_execution is not None:
+            execution.append(pdf_execution)
         return DiscoveryResult(
-            papers=[project_paper(paper) for paper in discovery.papers[: query.limit]],
+            papers=[project_paper(paper) for paper in papers],
             window_start=discovery.window_start,
             window_end=discovery.window_end,
-            execution=[
-                SourceExecution(
-                    source=source,
-                    cache_hit=cache_hit,
-                    status=SourceExecutionStatus.COMPLETED,
-                )
-            ],
+            execution=execution,
         )
 
     @staticmethod

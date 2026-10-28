@@ -1,6 +1,7 @@
 """Scholar HTTP 合同：认证、检索投影、缓存和逐项标识结果。"""
 
 from datetime import date
+from copy import deepcopy
 
 import httpx
 import pytest
@@ -15,6 +16,7 @@ from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_discoverer import PaperDiscovery
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
+from scholar.domain.models.paper import Paper
 from scholar.main import setup_exception_handlers
 
 FROM_SOURCE_SECRET = "scholar-test-secret"
@@ -165,6 +167,7 @@ def scholar_client():
             "HF_TOKEN": None,
             "OPENALEX_API_KEY": None,
             "S2_API_KEY": "test-s2-key",
+            "UNPAYWALL_EMAIL": "jzsun24@m.fudan.edu.cn",
             "SCHOLAR_HF_CONCURRENCY": 4,
             "SCHOLAR_S2_MAX_QUEUED_AHEAD": 5,
             "SCHOLAR_PAPER_CACHE_TTL_SECONDS": 86400,
@@ -187,12 +190,15 @@ def scholar_client():
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=[]))
     )
     container.huggingface_http.override(providers.Object(huggingface_http))
+    unpaywall_http = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(404)))
+    container.unpaywall_http.override(providers.Object(unpaywall_http))
     container.wire(modules=[health, papers])
     try:
         with TestClient(create_app(from_source_secret=FROM_SOURCE_SECRET)) as client:
             yield client, es, redis
             client.portal.call(openalex_http.aclose)
             client.portal.call(huggingface_http.aclose)
+            client.portal.call(unpaywall_http.aclose)
     finally:
         container.unwire()
         container.embedding_client.reset_override()
@@ -201,6 +207,7 @@ def scholar_client():
         container.s2_provider.reset_override()
         container.openalex_http.reset_override()
         container.huggingface_http.reset_override()
+        container.unpaywall_http.reset_override()
         container.reset_singletons()
 
 
@@ -412,7 +419,7 @@ def test_multisource_without_openalex_key_keeps_arxiv_success(scholar_client):
     data = response.json()["data"]
     assert data["papers"] == []  # 正常空召回仍是来源成功。
     assert {e["source"]: e["status"] for e in data["execution"]} == {
-        "openalex": "failed",
+        "openalex": "not_executed",
         "arxiv": "completed",
     }
 
@@ -535,7 +542,6 @@ def test_lookup_preserves_selected_offline_s2_facts(scholar_client):
         "corpus_id": "1001",
         "citation_count": 0,
         "influential_citation_count": 0,
-        "is_open_access": False,
     }
     assert es.lookup_documents[("arxiv_id", "2201.00001")][0]["metadata"]["s2"] == s2
 
@@ -607,9 +613,12 @@ def test_search_and_lookup_share_redis_cache_across_users_and_credentials(schola
 
     assert first.status_code == 200
     assert first.json()["data"]["execution"][0]["cache_hit"] is False
-    for response in (repeated, another_user, changed_key, without_key):
+    for response in (repeated, another_user, changed_key):
         assert response.status_code == 200
         assert response.json()["data"]["execution"][0]["cache_hit"] is True
+    assert without_key.status_code == 503
+    assert without_key.json()["code"] == 503
+    assert "BYOK" in without_key.json()["msg"]
     assert len(searcher.calls) == 1
     assert searcher.calls[0]["api_key"] == "user-secret"
     assert searcher.calls[0]["field"].value == "medicine"
@@ -660,12 +669,131 @@ def test_discovery_shares_redis_cache_across_credentials_and_preserves_window(sc
 
     assert first.status_code == 200
     assert first.json()["data"]["window_start"] == "2026-10-26"
-    for response in (changed_key, repeated):
+    for response in (changed_key,):
         assert response.status_code == 200
         assert response.json()["data"]["window_start"] == "2026-10-26"
         assert response.json()["data"]["execution"][0]["cache_hit"]
+    assert repeated.status_code == 503
+    assert "BYOK" in repeated.json()["msg"]
     assert len(provider.calls) == 1
     assert provider.calls[0]["api_key"] == "user-secret"
     assert "user-secret" not in str(redis.values)
     assert "another-secret" not in str(redis.values)
     assert invalid.status_code == 400
+
+
+@pytest.mark.parametrize("operation", ["search", "lookup", "discover"])
+@pytest.mark.parametrize("pdf_url", ["https://repository.test/paper.pdf", None])
+def test_pdf_recovery_is_shared_by_public_exits_and_preserves_cached_candidates(scholar_client, operation, pdf_url):
+    client, _, redis = scholar_client
+    candidates = [Paper(
+        arxiv_id=None, doi=f"10.1234/paper{i}", title=f"Paper {i}", abstract="Abstract",
+        authors=["First", "Second"], publication_date=None, year=2026,
+        url=f"https://publisher.test/paper{i}", pdf_url=None, source="s2",
+        metadata={"s2": {"citation_count": 0, "is_open_access": False}},
+    ) for i in range(3)]
+    original = deepcopy(candidates)
+
+    class Papers:
+        async def search(self, **kwargs):
+            assert kwargs["api_key"] == "user-oa"
+            return PaperSearchBatch(candidates)
+
+        async def lookup(self, ids, *, api_key=None):
+            return [PaperLookupMatch([candidates[0]]) for _ in ids]
+
+        async def discover(self, **kwargs):
+            assert kwargs["api_key"] == "user-hf"
+            return PaperDiscovery(candidates, None, None)
+
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json={"best_oa_location": {"url_for_pdf": pdf_url}, "oa_locations": []})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    upstream = providers.Object(Papers())
+    payload = {
+        "search": {"query": "clinical", "field": "medicine", "limit": 1},
+        "lookup": {"identifiers": ["10.1234/paper0", "10.1234/paper0"]},
+        "discover": {"field": "computer_science", "limit": 1},
+    }[operation]
+    headers = {**AUTHORIZED, "X-OpenAlex-Api-Key": "user-oa", "X-HuggingFace-Api-Key": "user-hf"}
+    with container.openalex_searcher.override(upstream), container.s2_provider.override(upstream), container.huggingface_provider.override(upstream), container.unpaywall_http.override(providers.Object(http)):
+        first = client.post(f"/scholar/papers/{operation}", headers=headers, json=payload)
+        repeated = client.post(f"/scholar/papers/{operation}", headers=headers, json=payload)
+        client.portal.call(http.aclose)
+
+    assert first.status_code == repeated.status_code == 200
+    data = first.json()["data"]
+    papers = [item["paper"] for item in data["items"]] if operation == "lookup" else data["papers"]
+    assert all(paper["pdf_url"] == pdf_url for paper in papers)
+    assert all(paper["metadata"] == {"s2": {"citation_count": 0}} for paper in papers)
+    assert len(requests) == 1
+    assert requests[0].url.path == "/v2/10.1234/paper0"
+    executions = repeated.json()["data"]["enrichment_execution" if operation == "search" else "execution"]
+    assert executions[-1]["source"] == "unpaywall"
+    assert executions[-1]["cache_hit"] is True
+    assert candidates == original
+    assert len([key for key in redis.values if key.startswith("scholar:pdf:")]) == 1
+
+
+def test_s2_byok_overrides_platform_only_for_current_http_call(scholar_client):
+    client, _, _ = scholar_client
+    keys = []
+
+    class Details:
+        async def lookup(self, ids, *, api_key=None):
+            keys.append(api_key)
+            return [PaperLookupMatch([Paper(
+                arxiv_id=identity.value, doi=None, title="Found paper", abstract=None,
+                authors=[], publication_date=None, year=None, url="https://s2.test/paper",
+                pdf_url=None, source="s2", metadata={"s2": {"citation_count": 0}},
+            )]) for identity in ids]
+
+    with container.s2_provider.override(providers.Object(Details())):
+        for value, headers in [
+            ("2401.00001", {**AUTHORIZED, "X-S2-Api-Key": "user-s2"}),
+            ("2401.00002", AUTHORIZED),
+        ]:
+            response = client.post("/scholar/papers/lookup", headers=headers, json={"identifiers": [value]})
+            assert response.status_code == 200
+    assert keys == ["user-s2", "test-s2-key"]
+
+
+@pytest.mark.parametrize("user_key", [None, "user-hf"])
+def test_hf_search_requires_byok_while_local_results_can_use_platform_enrichment(scholar_client, user_key):
+    client, _, _ = scholar_client
+    local = Paper("2401.00001", None, "Local paper", "Abstract", ["Author"], None, 2026,
+                  "https://arxiv.org/abs/2401.00001", None, "arxiv", {"arxiv": {"categories": ["cs.AI"]}})
+    search_keys, detail_keys = [], []
+
+    class Local:
+        cache_revision = "test"
+
+        async def search(self, **kwargs):
+            return PaperSearchBatch([local])
+
+    class HuggingFace:
+        async def search(self, **kwargs):
+            search_keys.append(kwargs["api_key"])
+            return PaperSearchBatch([])
+
+        async def lookup(self, ids, *, api_key=None):
+            detail_keys.append(api_key)
+            result = deepcopy(local)
+            result.metadata = {"huggingface": {"upvotes": 11}}
+            return [PaperLookupMatch([result]) for _ in ids]
+
+    headers = {**AUTHORIZED, **({"X-HuggingFace-Api-Key": user_key} if user_key else {})}
+    with container.arxiv_searcher.override(providers.Object(Local())), container.huggingface_provider.override(providers.Object(HuggingFace())), container.platform_credentials.override(providers.Object({"huggingface": "platform-hf"})):
+        response = client.post("/scholar/papers/search", headers=headers, json={
+            "query": "attention", "field": "computer_science", "source_scope": "multi_source",
+        })
+
+    assert response.status_code == 200
+    assert search_keys == (["user-hf"] if user_key else [])
+    assert detail_keys == ([] if user_key else ["platform-hf"])
+    execution = {item["source"]: item["status"] for item in response.json()["data"]["execution"]}
+    assert execution["huggingface"] == ("completed" if user_key else "not_executed")

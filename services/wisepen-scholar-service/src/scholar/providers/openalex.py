@@ -24,7 +24,7 @@ from scholar.domain.models.paper import Paper, PaperSource
 # 统一请求的字段集合：一次拿全，避免多次往返。
 _FIELDS = (
     "id,doi,primary_location,best_oa_location,locations,updated_date,ids,"
-    "cited_by_count,primary_topic,open_access,is_retracted,mesh,study_designs,"
+    "cited_by_count,primary_topic,is_retracted,mesh,study_designs,"
     "title,abstract_inverted_index,authorships,publication_date,publication_year"
 )
 
@@ -58,8 +58,7 @@ def has_signals(metadata: dict) -> bool:
 
     两组 OR：
 
-    - 宏观标量：``cited_by_count`` / ``primary_topic`` /
-      ``open_access`` / ``is_retracted`` 任一非 None。
+    - 宏观标量：``cited_by_count`` / ``primary_topic`` / ``is_retracted`` 任一非 None。
     - 结构化字段：``mesh`` / ``study_designs`` 任一存在（医学专用字段）。
     """
     values = metadata.get("openalex", {})
@@ -68,10 +67,14 @@ def has_signals(metadata: dict) -> bool:
         for name in (
             "cited_by_count",
             "primary_topic",
-            "open_access",
             "is_retracted",
         )
     ) or bool(values.get("mesh") or values.get("study_designs"))
+
+
+def pdf_url(paper: Paper) -> str | None:
+    location = paper.metadata.get("openalex", {}).get("best_oa_location")
+    return location.get("pdf_url") if location else None
 
 
 def project_metadata(paper: Paper) -> dict:
@@ -104,21 +107,16 @@ def project_metadata(paper: Paper) -> dict:
         value for value in values.get("arxiv_ids") or [] if value != paper.arxiv_id
     ]
 
-    # 同一入口只保留一次；版本信息即便链接已去重仍有阅读价值。
+    # 只保留独立阅读链接，不展示 OA 状态和版本说明。
     seen_urls = {paper.url, paper.pdf_url}
     location = values.get("best_oa_location") or {}
-    best_oa = {"version": location.get("version")}
+    best_oa = {}
     for key in ("landing_page_url", "pdf_url"):
         url = location.get(key)
         if url and url not in seen_urls:
             best_oa[key] = url
             seen_urls.add(url)
     result["best_oa_location"] = best_oa
-
-    oa = values.get("open_access") or {}
-    result["open_access"] = {key: oa.get(key) for key in ("is_oa", "oa_status")}
-    if oa.get("oa_url") not in seen_urls:
-        result["open_access"]["oa_url"] = oa.get("oa_url")
 
     return result
 
@@ -300,7 +298,6 @@ class OpenAlexProvider:
                 "updated_date",
                 "cited_by_count",
                 "primary_topic",
-                "open_access",
                 "is_retracted",
                 "mesh",
                 "study_designs",
@@ -319,7 +316,7 @@ class OpenAlexProvider:
                     if oa is None
                     else {
                         key: oa.get(key)
-                        for key in ("landing_page_url", "pdf_url", "license", "version")
+                        for key in ("landing_page_url", "pdf_url")
                     }
                 ),
             }

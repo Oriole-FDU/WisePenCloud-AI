@@ -6,8 +6,9 @@ CPU 查询编码模型并同时提供论文 API 与 `/v1/embeddings`。HTTP 进�
 业务配置来自 `DEFAULT_GROUP / wisepen-scholar-service-{PROFILE}.yaml`。`NACOS_ENABLED=false` 时关闭配置拉取和注册，从服务
 `.env` 与进程环境读取相同配置。
 
-平台凭证配置为 `S2_API_KEY`、`OPENALEX_API_KEY`、`HF_TOKEN`。OpenAlex 与 HF 支持请求 BYOK 优先；S2 使用平台密钥和 Redis
-共享队列。模型位置由 `SCHOLAR_EMBEDDING_MODELS_PATH` 指定。
+平台凭证为 `S2_API_KEY`、`OPENALEX_API_KEY`、`HF_TOKEN`，仅用于 lookup 和富化，用户 BYOK 优先。HF/OpenAlex 搜索及 HF 发现必须使用用户 BYOK，缺 key 时不读取该来源搜索缓存，也不回退平台 key。S2 用户 key 使用独立 Redis FIFO，平台 key 继续与离线同步共享队列。模型位置由 `SCHOLAR_EMBEDDING_MODELS_PATH` 指定。
+
+PDF 补救使用 `UNPAYWALL_EMAIL`，默认 `jzsun24@m.fudan.edu.cn`；单次请求超时 5 秒、并发 4，结果使用独立 DOI 缓存。
 
 HTTP 请求使用内部来源请求头；`/scholar/health` 检查 ES、Redis、alias，模型启动完成后 `/health` 返回查询编码就绪。MCP 入口由
 wisepen-mcp-service 提供。

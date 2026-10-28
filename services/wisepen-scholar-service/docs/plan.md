@@ -8,10 +8,10 @@
   AppSettings/Nacos 控制。离线 SQL 输入指纹继续负责向量续跑复用和增量失效判断。
 - Scholar main 一次启动 HTTP 与 CPU 查询编码，使用工作区依赖；NACOS_ENABLED 可关闭 Nacos。没有额外启动入口。
 - CS 检索来源为 `[arxiv, huggingface]`。通用富化链保持 arxiv → s2 → openalex；CS 的领域增量为 HF。
-- OpenAlex/HF 允许 BYOK 优先，否则使用平台配置；429 按普通来源失败回退。S2 不允许 BYOK，继续共享 Redis FIFO 和全局 1 RPS。
-- 搜索候选缓存区分日期、领域与模型版本，用户 limit 只裁剪返回结果。search/discover 以 candidates-v2 保存投影前候选；完整论文 lookup 缓存版本不变，仍按来源和稳定身份共享。所有论文缓存均跨用户、BYOK、平台凭证及无凭证请求共享，凭证只用于未命中时访问上游。
+- OpenAlex/HF 搜索和 HF 发现仅使用用户 BYOK，缺 key 时在缓存读取前禁用来源；无可用来源返回 503。lookup/富化仍允许平台 key，用户 key 优先。S2 支持 BYOK，用户 FIFO 按 key 隔离且不设排队阈值，平台 FIFO 继续与离线共享 1 RPS。
+- 搜索候选缓存区分日期、领域与模型版本，用户 limit 只裁剪返回结果。search/discover 以 candidates-v2 保存投影前候选；完整论文 lookup 缓存版本不变，仍按来源和稳定身份共享。论文事实缓存跨凭证共享，但搜索和发现必须先通过 BYOK 可用性判断；在途 I/O 按有效 key 隔离。
 - lookup 统一返回基础论文和调研 metadata，删除 purpose、重复的 item.metadata 及 enrichment_status；metadata 只出现在 paper 内。HF 可独立提供基础论文。
-- 各 provider 实现信号、别名、TTL 及字段投影，由 providers/policies/enrichment 注册层统一组装。search、lookup、discover 最终出口统一投影；具体字段合同见 [README](../README.md#模型可见-metadata)。
+- 各 provider 实现信号、别名、TTL 及字段投影，由 providers/policies.py 中的 ProviderPolicy 注册层统一组装。search、lookup、discover 最终出口统一投影；具体字段合同见 [README](../README.md#模型可见-metadata)。
 - 本次 GPU FP16 只负责存量灌库。后续每日 arXiv OAI + S2 Graph batch，必须请求 `embedding.specter_v2`；不使用 S2 diff，不下载
   release 大包。离线代码移出 src，位于 deploy/offline。
 - 分期交付：HF 搜索；查询编码与同进程启动；存量向量持久化及每日 API 同步；混合检索与版本索引切换。每期维护稳定接口，向量不进入
@@ -215,9 +215,9 @@ API，并遵循[官方 HfApi 源码](https://raw.githubusercontent.com/huggingfa
 
 身份字段为 paperId、corpusId、externalIds、url、title；基础字段为 abstract、authors、year、publicationDate、venue。每次 lookup 获取相同字段集。
 
-富化字段请求 tldr、citationCount、influentialCitationCount、isOpenAccess、openAccessPdf。停止请求 citationStyles，BibTeX 不再作为有效信号。
+富化字段请求 tldr、citationCount、influentialCitationCount、openAccessPdf。停止请求 citationStyles，BibTeX 不再作为有效信号。
 
-出口保留 corpus_id、citation_count、influential_citation_count、is_open_access、venue、tldr 文本和独立阅读入口。paper_id、observed_at、TLDR model 及离线 release/文件路径/行号保留在内部事实中，不返回模型。
+出口保留 corpus_id、citation_count、influential_citation_count、venue、tldr 文本和独立阅读入口。paper_id、observed_at、TLDR model 及离线 release/文件路径/行号保留在内部事实中，不返回模型。
 
 不请求作者画像、embedding、referenceCount、fieldsOfStudy、s2FieldsOfStudy 或额外出版实体。authors 只填充 Paper 姓名，不逐作者补查。
 
@@ -229,12 +229,12 @@ API，并遵循[官方 HfApi 源码](https://raw.githubusercontent.com/huggingfa
 - 不复制实验脚本的固定代理、硬编码密钥或关闭 TLS 校验设置；代理通过部署环境配置。
 - 批量请求遵守供应商最多 500 IDs、响应不超过 10 MB 的限制；ETL 默认每批 100 项。用户 lookup 仍最多 20 项。
 - `openAccessPdf.url` 的空字符串在接入处转换为无可用链接；`publicationDate` 可以为空，保留独立 year，不补造月份或日期。
-- `isOpenAccess` 与 PDF 子对象的状态可能不一致，分别忠实读取来源，不推导访问许可、不用其中一个改写另一个，也不新增一致性校验阻塞结果。
+- 不请求或使用 `isOpenAccess`；有明确 PDF URL 即作为阅读入口。
 - 真实边界解析后信任内部数据，不重复逐字段校验，不为未知内部破坏状态增加回退。供应商参数错误应明确暴露，不静默裁剪字段或吞错。
 
 ### 4.3 OpenAlex 精选富化投影
 
-保留 id、cited_by_count、venue、is_retracted；primary_topic 和 study_designs 只输出名称。MeSH 保留 descriptor_name、qualifier_name、is_major_topic 并去重。开放获取信息保留状态、独立入口和文档版本，删除许可、分类编码、层级、记录更新时间和 ids 字典。
+保留 id、cited_by_count、venue、is_retracted；primary_topic 和 study_designs 只输出名称。MeSH 保留 descriptor_name、qualifier_name、is_major_topic 并去重。阅读信息只保留独立 landing_page_url/pdf_url，删除 OA 状态、文档版本、许可、分类编码、层级、记录更新时间和 ids 字典。
 
 search 与 lookup 使用相同最终投影；来源缓存保留内部完整事实。字段结构见 [README](../README.md#模型可见-metadata)。
 

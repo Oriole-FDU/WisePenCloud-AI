@@ -1,3 +1,5 @@
+
+from pdf_fakes import make_pdf_service
 import asyncio
 from copy import deepcopy
 from datetime import UTC, date, datetime
@@ -87,7 +89,7 @@ def service_for(field, source, discoverer, cache):
         discoverers={source: discoverer},
         policies={field: FieldPolicy(searchers=[], discoverer=source)},
         cache=cache,
-    )
+    pdf=make_pdf_service())
 
 
 class FixedDateTime(datetime):
@@ -115,9 +117,9 @@ async def test_discovery_projects_cold_and_cached_results_without_changing_facts
     )
     query = PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE)
 
-    first = await service.discover(query)
+    first = await service.discover(query, credentials={'huggingface': 'user-key'})
     first.papers[0].metadata["huggingface"]["ai_keywords"].append("Changed by caller")
-    repeated = await service.discover(query)
+    repeated = await service.discover(query, credentials={'huggingface': 'user-key'})
 
     assert repeated.papers[0].authors == ["First Author et al."]
     assert repeated.papers[0].metadata == {"huggingface": {
@@ -149,7 +151,7 @@ async def test_configured_policy_routes_and_returns_actual_window(monkeypatch):
             sort=DiscoverySort.RECENT,
             limit=1,
         )
-    )
+    , credentials={'configured-channel': 'user-key'})
 
     assert [paper.arxiv_id for paper in result.papers] == ["2401.00001"]
     assert (result.window_start, result.window_end) == (
@@ -214,7 +216,7 @@ async def test_cache_tracks_daily_weekly_and_monthly_utc_windows(monkeypatch):
             PaperDiscoveryQuery(
                 AcademicField.LAW, period=period, sort=sort, limit=limit
             )
-        )
+        , credentials={'configured-channel': 'user-key'})
 
     first_daily = await run()
     repeated_daily = await run()
@@ -282,10 +284,10 @@ async def test_provider_error_propagates_and_failed_discovery_is_not_cached():
     query = PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE)
 
     with pytest.raises(ProviderError, match="Too Many Requests"):
-        await service.discover(query)
+        await service.discover(query, credentials={'huggingface': 'user-key'})
     assert cache.put_calls == []
 
-    result = await service.discover(query)
+    result = await service.discover(query, credentials={'huggingface': 'user-key'})
 
     assert result.papers[0].arxiv_id == "2401.00001"
     assert result.execution[0].cache_hit is False
@@ -312,10 +314,10 @@ async def test_missing_discovery_capability_fails_before_cache_read(
         discoverers=discoverers,
         policies={field: FieldPolicy(searchers=[], discoverer=registered_source)},
         cache=cache,
-    )
+    pdf=make_pdf_service())
 
     with pytest.raises(ServiceException):
-        await service.discover(PaperDiscoveryQuery(field))
+        await service.discover(PaperDiscoveryQuery(field), credentials={'huggingface': 'user-key'})
 
     assert cache.get_calls == []
 
@@ -331,7 +333,7 @@ async def test_discoverer_cancellation_propagates_without_writing_cache():
     )
 
     with pytest.raises(asyncio.CancelledError):
-        await service.discover(PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE))
+        await service.discover(PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE), credentials={'huggingface': 'user-key'})
 
     assert cache.put_calls == []
 
@@ -396,14 +398,13 @@ async def test_discovery_candidate_cache_reused_across_limits_and_credentials():
             )
         },
         cache,
-        platform_credentials={"huggingface": "platform"},
-    )
+    pdf=make_pdf_service())
     small = await service.discover(
         PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE, limit=2)
-    )
+    , credentials={'huggingface': 'user-key'})
     larger = await service.discover(
         PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE, limit=8)
-    )
+    , credentials={'huggingface': 'user-key'})
     assert len(small.papers) == 2
     assert len(larger.papers) == 8
     assert larger.execution[0].cache_hit
@@ -415,10 +416,10 @@ async def test_discovery_candidate_cache_reused_across_limits_and_credentials():
     without_credentials = service_for(
         AcademicField.COMPUTER_SCIENCE, "huggingface", channel, cache
     )
-    anonymous = await without_credentials.discover(
-        PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE, limit=8)
-    )
+    reads = len(cache.get_calls)
+    with pytest.raises(ServiceException, match="BYOK"):
+        await without_credentials.discover(PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE, limit=8))
+    assert len(cache.get_calls) == reads
     assert byok.execution[0].cache_hit
-    assert anonymous.execution[0].cache_hit
-    assert byok.papers == anonymous.papers == larger.papers
+    assert byok.papers == larger.papers
     assert len(channel.calls) == 1

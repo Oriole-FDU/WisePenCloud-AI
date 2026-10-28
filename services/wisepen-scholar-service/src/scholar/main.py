@@ -30,7 +30,7 @@ from scholar.api.router import api_router
 from scholar.container import container
 from scholar.core.config.app_settings import settings
 from scholar.core.config.nacos import nacos_client_manager
-from scholar.domain.errors import ProviderError
+from scholar.domain.errors import ProviderError, ScholarErrorCode
 from scholar.ml.specter import DEFAULT_MODELS, SpecterEncoder
 
 container.config.from_dict(settings.model_dump())
@@ -44,7 +44,8 @@ def setup_exception_handlers(app: FastAPI) -> None:
     async def business_error(request: Request, exc: ServiceException):
         # 保留能力不可用等实际业务码；Common 默认处理器会统一改写成 SYSTEM_ERROR。
         return JSONResponse(
-            status_code=200, content=R(code=exc.code, msg=exc.msg).model_dump()
+            status_code=503 if exc.code == ScholarErrorCode.CAPABILITY_UNAVAILABLE.code else 200,
+            content=R(code=exc.code, msg=exc.msg).model_dump(),
         )
 
     @app.exception_handler(RedisError)
@@ -76,6 +77,7 @@ async def lifespan(app):
     openalex_http = container.openalex_http()
     huggingface_http = container.huggingface_http()
     s2_http = container.s2_http()
+    unpaywall_http = container.unpaywall_http()
     # 同一启动入口加载一次查询模型；独立同步路由在线程池执行，异步 search 可调用本机 HTTP。
     app.state.encoder = SpecterEncoder(
         Path(settings.SCHOLAR_EMBEDDING_MODELS_PATH or DEFAULT_MODELS),
@@ -93,6 +95,7 @@ async def lifespan(app):
         await openalex_http.aclose()
         await huggingface_http.aclose()
         await s2_http.aclose()
+        await unpaywall_http.aclose()
         await container.embedding_api().close()
         await container.redis().aclose()
         await container.elasticsearch().close()

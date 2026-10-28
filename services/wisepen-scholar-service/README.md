@@ -16,9 +16,9 @@ P1 本地 arXiv、P3 配置驱动检索、P4 lookup 在线富化已验收；P2 �
 
 P6 已提供独立 OAI/S2 差分同步与恢复、Compose/Jenkins/systemd 模板；真实完整同步的剩余验收见 [P6 记录](docs/p6-acceptance.md)。部署交付仅包含配置和说明，本次不启动 Docker、不构建镜像、不做生产部署。
 
-单源检索按优先级回退，仅外部来源失败尝试下一项，正常空列表也结束。多源全部执行并报告实际成功和失败；全部失败抛原始异常。程序错误和取消直接传播。
+单源检索按领域配置顺序回退，正常空列表也结束；多源执行已启用来源并报告结果。HF/OpenAlex 搜索和 HF 发现必须携带用户 BYOK，平台 key 只用于富化。缺 key 的搜索来源在读取缓存前跳过并记为 not_executed；没有可用来源返回 503 并说明所需 BYOK。
 
-通用富化依次 arxiv→s2→openalex，每篇有有效信号即停止；领域增量全部执行，初始仅 CS 注册 HF。搜索成功来源包含任一通用来源时跳过通用富化，领域富化排除本次成功的同源 searcher。供应商规则在各 provider 实现，由 `providers.policies.enrichment.ENRICHMENT_RULES` 统一注册，新增临床增量只需 provider、注册和领域配置。平台不默认融合同名字段或做语义去重。
+通用富化依次 arxiv→s2→openalex，每篇有有效信号即停止；领域增量全部执行，初始仅 CS 注册 HF。搜索成功来源包含任一通用来源时跳过通用富化，领域富化排除本次成功的同源 searcher。供应商规则在各 provider 实现，由 `providers.policies.PROVIDER_POLICIES` 统一注册，新增临床增量只需 provider、注册和领域配置。平台不默认融合同名字段或做语义去重。
 
 ## 配置与启动
 
@@ -63,7 +63,7 @@ Lookup 统一取得基础论文及可用调研 metadata，不再接受 purpose�
 
 现有 MCP 服务的 search、lookup、discover 工具使用 Nacos RpcClient 调用这些 HTTP 接口，返回解包后的 data；来源路由和论文归一化不复制到 MCP。配置驱动的检索及医疗多源扩展验收见 [P3 记录](docs/p3-acceptance.md)。
 
-S2 在线请求使用 Redis FIFO 与离线步骤共享 1 RPS。Nacos `SCHOLAR_S2_MAX_QUEUED_AHEAD` 默认 5，前方超过 5 项立即跳过并回退 OpenAlex；离线不应用拥堵阈值。`execution.queued_ahead` 展示准入快照，缓存命中不携带旧排队信息。
+S2 支持用户 BYOK 覆盖平台 key。平台 Redis FIFO 与离线步骤共享 1 RPS，在线前方超过 `SCHOLAR_S2_MAX_QUEUED_AHEAD`（默认 5）则跳过；离线不应用阈值。用户 key 按 SHA-256 指纹隔离 FIFO，每 key 1 RPS，不设排队阈值，等待至现有工具超时。提供与平台相同的 key 仍归平台队列。`execution.queued_ahead` 展示准入快照，缓存命中不携带旧排队信息。
 
 ## 模型可见 metadata
 
@@ -72,16 +72,24 @@ search、lookup、discover 在最终出口统一调用 `application.paper_projec
 | 来源 | 保留内容 |
 |---|---|
 | arXiv | categories、updated_date、journal_ref、comments；versions 压缩为 latest_version；submitted_date 仅在不同于顶层 publication_date 时保留 |
-| S2 | corpus_id、citation_count、influential_citation_count、is_open_access、venue、tldr 文本字符串及独立的 open_access_pdf 入口 |
-| OpenAlex | id、cited_by_count、venue、is_retracted、primary_topic 名称、study_designs 名称列表、精简 MeSH、开放获取状态、独立阅读入口及文档版本、额外 arXiv 标识 |
+| S2 | corpus_id、citation_count、influential_citation_count、venue、tldr 文本字符串及独立的 open_access_pdf 入口 |
+| OpenAlex | id、cited_by_count、venue、is_retracted、primary_topic 名称、study_designs 名称列表、精简 MeSH、独立阅读入口、额外 arXiv 标识 |
 | Hugging Face | ai_keywords、upvotes、github_repo、github_stars、submitted_at、linked_models、linked_datasets；没有 abstract 时保留 ai_summary |
 
 - S2 TLDR 可结合摘要、引言和结论，保留文本；HF AI 摘要是 abstract 的一句话总结，已有 abstract 时省略。
 - OpenAlex MeSH 仅含 descriptor_name、非空 qualifier_name、is_major_topic，按完整条目去重并保留不同限定词。研究设计沿用上游自动分类含义。
-- OpenAlex open_access 只保留 is_oa、oa_status 和独立 oa_url；best_oa_location 只保留独立 landing_page_url、pdf_url 和 version。同一 URL 在该来源内只出现一次，与顶层 url/pdf_url 相同的链接省略。
+- 不展示或使用 OA 状态；OpenAlex best_oa_location 只保留独立 landing_page_url、pdf_url。同一 URL 在该来源内只出现一次，与顶层 url/pdf_url 相同的链接省略。
 - HF 关联模型和数据集是引用该论文的产物。列表维持上游预览内按 likes 排序最多三项，每项只保留 id、likes。
 - metadata 省略 None、空字符串、空列表和空字典，保留 0 和 false；各来源引用数保持独立口径。raw_id、许可、BibTeX、分类层级与编码、完整版本历史及离线溯源信息不进入模型输入。
 
+
+## PDF 补救与用户凭证
+
+search、lookup、discover 对最终返回论文调用 `PaperPdfRecoverService.recover`，随后统一投影。顺序为顶层 PDF、provider 注册的 PDF（S2 优先 OpenAlex）、确定 arXiv ID 对应的标准 PDF、Unpaywall DOI 补救。已有明确链接不发 HEAD、不下载验证；没有 DOI 不请求 Unpaywall。
+
+Unpaywall 仅取 `best_oa_location.url_for_pdf` 或其他 `oa_locations` 的 PDF，不使用落地页和 OA 状态。邮箱配置 `UNPAYWALL_EMAIL` 默认为 `jzsun24@m.fudan.edu.cn`，单次请求超时 5 秒、并发上限 4、不自动重试。独立 DOI 缓存的正 TTL 沿用论文缓存 TTL，确认无链接或 404 使用负 TTL；网络失败不写负缓存。补救失败保留论文并报告 `unpaywall` execution，结果只填顶层 `pdf_url`，不新增 metadata 命名空间。
+
+HTTP BYOK 请求头为 `X-OpenAlex-Api-Key`、`X-HuggingFace-Api-Key`、`X-S2-Api-Key`。MCP 从 `com.wisepen/tool_config` 的 `openalex_api_key`、`huggingface_api_key`、`s2_api_key` 读取，不进入模型参数或请求 JSON。没有搜索 BYOK 时，本地结果仍可使用平台 key 富化。
 
 ## 验证
 
@@ -91,4 +99,4 @@ uv run --no-sync python -m pytest tests -q
 
 [数据基线](docs/data-baseline.md)记录输入及样本验证范围；[阶段验收记录](docs/p0-p1-acceptance.md)记录真实基础设施与全量导入结果。单元测试中的外部依赖替身不替代真实 ES 验收。
 
-真实 Redis 队列验收使用独立随机命名空间，显式设置 `SCHOLAR_TEST_REDIS_URL` 后执行 `uv run --no-sync pytest tests/test_s2_queue.py -q`。未配置时这 5 项跳过，不连接默认服务命名空间。
+真实 Redis 队列验收使用独立随机命名空间，显式设置 `SCHOLAR_TEST_REDIS_URL` 后执行 `uv run --no-sync pytest tests/test_s2_queue.py -q`。未配置时队列验收跳过，不连接默认服务命名空间。

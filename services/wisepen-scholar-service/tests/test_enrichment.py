@@ -1,7 +1,9 @@
 """验证 lookup runner 的缓存、信号短路、错误和并发生命周期合同。"""
 
+from pdf_fakes import make_pdf_service
+
 from dataclasses import replace
-from scholar.providers.policies.enrichment import ENRICHMENT_RULES
+from scholar.providers.policies import PROVIDER_POLICIES
 
 import asyncio
 from datetime import date
@@ -146,7 +148,7 @@ def make_paper(
 
 def runner(provider, *, cache=None, extra_bindings=None):
     bindings = {
-        PaperSource.S2: LookupBinding(provider, cache, replace(ENRICHMENT_RULES["s2"], identifier_kinds=IdentifierKind.members(), has_signals=s2.has_signals, aliases=s2.aliases, short_lived=s2.short_lived))
+        PaperSource.S2: LookupBinding(provider, cache, replace(PROVIDER_POLICIES["s2"], identifier_kinds=IdentifierKind.members(), has_signals=s2.has_signals, aliases=s2.aliases, short_lived=s2.short_lived))
     }
     if extra_bindings:
         bindings.update(extra_bindings)
@@ -154,7 +156,7 @@ def runner(provider, *, cache=None, extra_bindings=None):
 
 
 def service(provider, *, cache=None):
-    return PaperLookupService(runner(provider, cache=cache))
+    return PaperLookupService(runner(provider, cache=cache), pdf=make_pdf_service())
 
 
 @pytest.mark.asyncio
@@ -196,7 +198,7 @@ async def test_negative_and_positive_lookup_results_use_distinct_ttls_and_cache_
         }
     )
     provider = FakeProvider({found: PaperLookupMatch([paper])})
-    lookup = PaperLookupService(runner(provider, cache=cache))
+    lookup = PaperLookupService(runner(provider, cache=cache), pdf=make_pdf_service())
 
     absent = await lookup.lookup(PaperLookup(["corpusid:404"]))
     present = await lookup.lookup(PaperLookup(["corpusid:123"]))
@@ -214,7 +216,7 @@ async def test_cache_read_failure_does_not_fall_through_to_provider():
     cache = FakeCache()
     cache.fail_get = True
     provider = FakeProvider({identifier: PaperLookupMatch([make_paper()])})
-    lookup = PaperLookupService(runner(provider, cache=cache))
+    lookup = PaperLookupService(runner(provider, cache=cache), pdf=make_pdf_service())
 
     with pytest.raises(RedisConnectionError, match="cache unavailable"):
         await lookup.lookup(PaperLookup(["corpusid:123"]))
@@ -259,6 +261,22 @@ async def test_zero_false_and_empty_summary_are_known_signals_but_observed_at_is
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["s2", "openalex"])
+async def test_legacy_oa_status_alone_does_not_stop_provider_recovery(source):
+    identity = parse_identifier("2401.00001")
+    metadata = {source: {"is_open_access": False} if source == "s2" else {"open_access": {"is_oa": True}}}
+    metric = "citation_count" if source == "s2" else "cited_by_count"
+    provider = FakeProvider({identity: PaperLookupMatch([make_paper(metadata={source: {metric: 0}})])})
+    run = LookupRunner({source: LookupBinding(provider, None, PROVIDER_POLICIES[source])})
+    target = run.target(identity, make_paper(metadata=metadata))
+
+    await run.run([target], common_sources=[source], domain_sources=[])
+
+    assert provider.calls == [([identity], None)]
+    assert target.general_found is True
+
+
+@pytest.mark.asyncio
 async def test_existing_common_signal_stops_common_chain_but_domain_provider_still_runs():
     identity = parse_identifier("2401.00001")
     offline = make_paper(
@@ -286,8 +304,8 @@ async def test_existing_common_signal_stops_common_chain_but_domain_provider_sti
     run = runner(
         unreachable,
         extra_bindings={
-            PaperSource.ARXIV: LookupBinding(FakeProvider(), None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
-            PaperSource.HUGGINGFACE: LookupBinding(hf, None, replace(ENRICHMENT_RULES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.ARXIV: LookupBinding(FakeProvider(), None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.HUGGINGFACE: LookupBinding(hf, None, replace(PROVIDER_POLICIES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV])),
         },
     )
     target = run.target(identity, offline)
@@ -319,12 +337,12 @@ async def test_base_paper_survives_failed_incremental_lookup_as_partial_result()
     s2 = FakeProvider(error=failure)
     run = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
-            PaperSource.S2: LookupBinding(s2, None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
+            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
         }
     )
 
-    result = await PaperLookupService(run).lookup(
+    result = await PaperLookupService(run, pdf=make_pdf_service()).lookup(
         PaperLookup([identity.value])
     )
 
@@ -358,12 +376,12 @@ async def test_conflicting_exact_identity_keeps_base_and_does_not_cache_provider
     cache = FakeCache()
     run = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(FakeProvider({identity: PaperLookupMatch([base])}), None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
-            PaperSource.S2: LookupBinding(FakeProvider({identity: PaperLookupMatch([contradictory])}), cache, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals, aliases=s2_aliases)),
+            PaperSource.ARXIV: LookupBinding(FakeProvider({identity: PaperLookupMatch([base])}), None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.S2: LookupBinding(FakeProvider({identity: PaperLookupMatch([contradictory])}), cache, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals, aliases=s2_aliases)),
         }
     )
 
-    result = await PaperLookupService(run).lookup(
+    result = await PaperLookupService(run, pdf=make_pdf_service()).lookup(
         PaperLookup([identity.value])
     )
 

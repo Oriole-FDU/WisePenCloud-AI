@@ -1,5 +1,7 @@
 """本地融合、有限先验和编码降级的公共来源/用例合同。"""
 
+from pdf_fakes import make_pdf_service
+
 from dataclasses import replace
 from datetime import date
 
@@ -130,7 +132,7 @@ async def test_encoder_failure_is_visible_not_cached_and_recovery_restores_hybri
         {AcademicField.GENERAL: FieldPolicy(["arxiv"])},
         cache,
         LookupRunner({}),
-    )
+    pdf=make_pdf_service())
     query = PaperSearch("reasoning")
     degraded = await service.search(query)
     assert [paper.arxiv_id for paper in degraded.papers] == [lexical.arxiv_id]

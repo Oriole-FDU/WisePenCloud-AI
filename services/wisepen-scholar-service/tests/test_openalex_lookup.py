@@ -1,7 +1,9 @@
 """验证 OpenAlex lookup 作为通用 Paper provider 接入查询链。"""
 
+from pdf_fakes import make_pdf_service
+
 from dataclasses import replace
-from scholar.providers.policies.enrichment import ENRICHMENT_RULES
+from scholar.providers.policies import PROVIDER_POLICIES
 
 from datetime import date
 
@@ -60,10 +62,10 @@ async def test_openalex_missing_key_fails_without_sending_a_request():
         lookup = PaperLookupService(
             LookupRunner(
                 {
-                    PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(ENRICHMENT_RULES["openalex"], identifier_kinds=[IdentifierKind.OPENALEX]))
+                    PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.OPENALEX]))
                 }
             )
-        )
+        , pdf=make_pdf_service())
 
         with pytest.raises(ProviderError, match="OpenAlex API key is required"):
             await lookup.lookup(
@@ -90,11 +92,11 @@ async def test_openalex_missing_key_does_not_discard_a_local_base_paper():
         lookup = PaperLookupService(
             LookupRunner(
                 {
-                    PaperSource.ARXIV: LookupBinding(LocalProvider(base), None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
-                    PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(ENRICHMENT_RULES["openalex"], identifier_kinds=[IdentifierKind.ARXIV])),
+                    PaperSource.ARXIV: LookupBinding(LocalProvider(base), None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
+                    PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.ARXIV])),
                 }
             )
-        )
+        , pdf=make_pdf_service())
 
         result = await lookup.lookup(
             PaperLookup([identity.value])
@@ -125,10 +127,10 @@ async def test_openalex_http_failure_keeps_status_url_and_excludes_user_key():
         lookup = PaperLookupService(
             LookupRunner(
                 {
-                    PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(ENRICHMENT_RULES["openalex"], identifier_kinds=[IdentifierKind.OPENALEX]))
+                    PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.OPENALEX]))
                 }
             )
-        )
+        , pdf=make_pdf_service())
         with pytest.raises(ProviderError) as caught:
             await lookup.lookup(
                 PaperLookup(["openalex:W123"]),

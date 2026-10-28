@@ -28,6 +28,7 @@ class AppSettings(BaseModel):
     S2_API_KEY: str = Field(repr=False)
     HF_TOKEN: str | None = Field(default=None, repr=False)
     OPENALEX_API_KEY: str | None = Field(default=None, repr=False)
+    UNPAYWALL_EMAIL: str = "jzsun24@m.fudan.edu.cn"
 
     # --- Embedding 服务 ---
     SCHOLAR_EMBEDDING_TIMEOUT_SECONDS: float = Field(default=2, gt=0)

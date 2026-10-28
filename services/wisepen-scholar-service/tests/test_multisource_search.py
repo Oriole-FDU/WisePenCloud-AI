@@ -1,4 +1,6 @@
-from scholar.providers.policies.enrichment import ENRICHMENT_RULES, EnrichmentRules
+
+from pdf_fakes import make_pdf_service
+from scholar.providers.policies import PROVIDER_POLICIES, ProviderPolicy
 from dataclasses import replace
 from datetime import date
 from unittest.mock import AsyncMock
@@ -6,6 +8,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from openai import APIConnectionError
+from common.core.exceptions import ServiceException
 from scholar.application.field_policies import FIELD_POLICIES, FieldPolicy
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.services.search import (
@@ -74,46 +77,51 @@ class FakeSearcher:
 
 @pytest.mark.asyncio
 async def test_bulk_candidates_reused_across_limits_and_byok_overrides_platform():
-    """候选跨 limit 和凭证共享；未命中时用户 key 优先于平台 key。"""
+    """持有 BYOK 才能使用共享搜索缓存；平台 key 不参与搜索。"""
     provider = FakeSearcher(
         [paper(PaperSource.OPENALEX, doi=f"10.1000/{index}") for index in range(12)]
     )
     cache = MemoryCache()
     search = PaperSearchService(
-        {"openalex": SearchBinding(provider, candidate_limit=200)},
+        {"openalex": SearchBinding(provider, candidate_limit=200, requires_byok=True)},
         {AcademicField.GENERAL: FieldPolicy(searchers=["openalex"])},
         cache,
         LookupRunner({}),
         platform_credentials={"openalex": "platform-key"},
-    )
-    small = await search.search(PaperSearch("same", limit=2))
-    larger = await search.search(PaperSearch("same", limit=10))
+    pdf=make_pdf_service())
+    with pytest.raises(ServiceException, match="BYOK"):
+        await search.search(PaperSearch("same"))
+    small = await search.search(PaperSearch("same", limit=2), credentials={"openalex": "user-a"})
+    larger = await search.search(PaperSearch("same", limit=10), credentials={"openalex": "user-a"})
     assert len(small.papers) == 2
     assert len(larger.papers) == 10
     assert larger.execution[0].cache_hit
-    assert [call["api_key"] for call in provider.calls] == ["platform-key"]
+    assert [call["api_key"] for call in provider.calls] == ["user-a"]
     assert provider.calls[0]["limit"] == 200
     shared = await search.search(
         PaperSearch("same"), credentials={"openalex": "user-key"}
     )
     assert shared.execution[0].cache_hit
     assert len(provider.calls) == 1
+    with pytest.raises(ServiceException, match="BYOK"):
+        await search.search(PaperSearch("same"))
     await search.search(PaperSearch("new query"), credentials={"openalex": "user-key"})
-    assert [call["api_key"] for call in provider.calls] == ["platform-key", "user-key"]
+    assert [call["api_key"] for call in provider.calls] == ["user-a", "user-key"]
 
 
 @pytest.mark.asyncio
-async def test_platform_quota_failure_uses_normal_search_fallback():
+async def test_byok_quota_failure_uses_normal_search_fallback_without_platform_retry():
     quota = FakeSearcher(ProviderError("429 quota exhausted"))
     fallback = FakeSearcher([paper(PaperSource.ARXIV, arxiv_id="2501.12948")])
     search = PaperSearchService(
-        {"openalex": SearchBinding(quota), "arxiv": SearchBinding(fallback)},
+        {"openalex": SearchBinding(quota, requires_byok=True), "arxiv": SearchBinding(fallback)},
         {AcademicField.GENERAL: FieldPolicy(searchers=["openalex", "arxiv"])},
         MemoryCache(),
         LookupRunner({}),
         platform_credentials={"openalex": "platform-key"},
-    )
-    result = await search.search(PaperSearch("reasoning"))
+    pdf=make_pdf_service())
+    result = await search.search(PaperSearch("reasoning"), credentials={"openalex": "user-key"})
+    assert [call["api_key"] for call in quota.calls] == ["user-key"]
     assert result.papers[0].arxiv_id == "2501.12948"
     assert [item.status for item in result.execution] == [
         SourceExecutionStatus.FAILED,
@@ -150,8 +158,8 @@ def service(*, arxiv=None, openalex=None, huggingface=None, cache=None):
     return PaperSearchService(
         searchers={
             "arxiv": SearchBinding(arxiv or FakeSearcher()),
-            "huggingface": SearchBinding(huggingface or FakeSearcher()),
-            "openalex": SearchBinding(openalex or FakeSearcher()),
+            "huggingface": SearchBinding(huggingface or FakeSearcher(), requires_byok=True),
+            "openalex": SearchBinding(openalex or FakeSearcher(), requires_byok=True),
         },
         policies={
             field: replace(policy, field_enrichers=[])
@@ -159,7 +167,7 @@ def service(*, arxiv=None, openalex=None, huggingface=None, cache=None):
         },
         lookup=LookupRunner({}),
         query_cache=cache or MemoryCache(),
-    )
+    pdf=make_pdf_service())
 
 
 def test_all_openalex_domain_filters_and_default_routes_match_the_search_plan():
@@ -206,7 +214,7 @@ async def test_default_routing_uses_mapped_openalex_or_preserves_local_arxiv_ord
 
     assert oa.calls[0]["field"] == AcademicField.LAW
     assert oa.calls[0]["api_key"] == "law-key"
-    assert len(oa.calls) == 2
+    assert len(oa.calls) == 1
     assert arxiv.calls[0]["field"] == AcademicField.GENERAL
     assert [item.title for item in fallback_result.papers] == ["First", "Second"]
     assert openalex_result.execution[0].source == PaperSource.OPENALEX
@@ -250,10 +258,11 @@ async def test_multisource_missing_key_keeps_successful_local_source():
     )
     assert result.papers == []
     assert {e.source: e.status for e in result.execution} == {
-        "openalex": SourceExecutionStatus.FAILED,
+        "openalex": SourceExecutionStatus.NOT_EXECUTED,
         "arxiv": SourceExecutionStatus.COMPLETED,
     }
-    assert len(arxiv.calls) == len(openalex.calls) == 1
+    assert len(arxiv.calls) == 1
+    assert openalex.calls == []
     single = await search.search(
         PaperSearch(
             "law", field=AcademicField.LAW, source_scope=SourceScope.MULTI_SOURCE
@@ -264,7 +273,7 @@ async def test_multisource_missing_key_keeps_successful_local_source():
 
 
 @pytest.mark.asyncio
-async def test_openalex_cache_shared_across_credentials_and_without_key():
+async def test_openalex_cache_shared_only_when_user_supplies_byok():
     cache = MemoryCache()
     openalex = FakeSearcher(
         [paper(PaperSource.OPENALEX, doi="10.1000/shared", title="Shared paper")]
@@ -285,12 +294,14 @@ async def test_openalex_cache_shared_across_credentials_and_without_key():
 
     assert first_a.papers[0].title == "Shared paper"
     assert not first_a.execution[0].cache_hit
-    for result in (changed_key, without_key, cached_a):
+    for result in (changed_key, cached_a):
         assert result.papers == first_a.papers
         assert result.execution[0].cache_hit
     assert len(openalex.calls) == 1
     assert openalex.calls[0]["api_key"] == "key-a"
-    assert len(cache.put_calls) == 1
+    assert without_key.papers == []
+    assert without_key.execution[0].status == SourceExecutionStatus.NOT_EXECUTED
+    assert len(cache.put_calls) == 2
 
 
 @pytest.mark.asyncio
@@ -411,7 +422,7 @@ async def test_multisource_retains_success_and_reports_provider_failure(message)
         credentials={"openalex": "user-key"},
     )
 
-    assert result.papers == [arxiv_result]
+    assert result.papers == [replace(arxiv_result, pdf_url="https://arxiv.org/pdf/2401.00001")]
     assert {e.source: e.status for e in result.execution} == {
         "arxiv": SourceExecutionStatus.COMPLETED,
         "openalex": SourceExecutionStatus.FAILED,
@@ -449,7 +460,7 @@ class RecordingEnricher:
 @pytest.mark.asyncio
 async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_configuration(monkeypatch):
     for source in ("pubmed", "web_of_science", "clinical_trials"):
-        monkeypatch.setitem(ENRICHMENT_RULES, source, EnrichmentRules([IdentifierKind.DOI], lambda paper, source=source: paper.metadata[source]))
+        monkeypatch.setitem(PROVIDER_POLICIES, source, ProviderPolicy([IdentifierKind.DOI], lambda paper, source=source: paper.metadata[source]))
     shared = "10.1000/medicine"
     pubmed = FakeSearcher(
         [
@@ -476,7 +487,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
     )
     clinical = RecordingEnricher("clinical_trials")
     enrichment = {
-        "clinical_trials": LookupBinding(clinical, None, ENRICHMENT_RULES["clinical_trials"]),
+        "clinical_trials": LookupBinding(clinical, None, PROVIDER_POLICIES["clinical_trials"]),
     }
     bindings = {
         "pubmed": SearchBinding(pubmed),
@@ -492,7 +503,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
         {AcademicField.MEDICINE: policy},
         MemoryCache(),
         LookupRunner(enrichment),
-    )
+    pdf=make_pdf_service())
     single = await search.search(PaperSearch("cancer", field=AcademicField.MEDICINE))
     assert single.papers[0].source == "pubmed"
     assert len(pubmed.calls) == 1 and not wos.calls and not oa.calls
@@ -524,18 +535,18 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
         {AcademicField.MEDICINE: replace(policy, searchers=["web_of_science"])},
         MemoryCache(),
         LookupRunner(enrichment),
-    )
+    pdf=make_pdf_service())
     result = await changed.search(PaperSearch("cancer", field=AcademicField.MEDICINE))
     assert result.papers[0].source == "web_of_science"
 
 
 @pytest.mark.asyncio
 async def test_field_configuration_controls_enrichment_after_final_limit(monkeypatch):
-    monkeypatch.setitem(ENRICHMENT_RULES, "specialized", EnrichmentRules([IdentifierKind.ARXIV], lambda paper: paper.metadata["specialized"]))
+    monkeypatch.setitem(PROVIDER_POLICIES, "specialized", ProviderPolicy([IdentifierKind.ARXIV], lambda paper: paper.metadata["specialized"]))
     candidates = [paper("local", arxiv_id=f"2401.0000{i}") for i in (1, 2, 3)]
     searcher = FakeSearcher(candidates)
     specialized = RecordingEnricher("specialized")
-    enrich = {"specialized": LookupBinding(specialized, None, ENRICHMENT_RULES["specialized"])}
+    enrich = {"specialized": LookupBinding(specialized, None, PROVIDER_POLICIES["specialized"])}
     search = PaperSearchService(
         {"local": SearchBinding(searcher)},
         {
@@ -546,7 +557,7 @@ async def test_field_configuration_controls_enrichment_after_final_limit(monkeyp
         },
         MemoryCache(),
         LookupRunner(enrich),
-    )
+    pdf=make_pdf_service())
     general = await search.search(PaperSearch("same CS papers", limit=2))
     assert not specialized.calls
     cs = await search.search(
@@ -567,7 +578,7 @@ async def test_default_falls_back_only_on_provider_failure_and_stops_on_empty_re
         {AcademicField.GENERAL: FieldPolicy(["primary", "secondary"])},
         MemoryCache(),
         LookupRunner({}),
-    )
+    pdf=make_pdf_service())
     result = await search.search(PaperSearch("fallback"))
     assert result.papers[0].source == "secondary"
     assert [e.status for e in result.execution] == [

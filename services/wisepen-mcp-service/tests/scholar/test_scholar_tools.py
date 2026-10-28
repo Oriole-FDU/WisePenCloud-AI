@@ -262,8 +262,9 @@ async def test_byok_metadata_is_per_call_and_only_forwarded_in_http_headers(
             {"query": "test"},
             meta={
                 "com.wisepen/tool_config": {
-                    "api_key": "search-user-key",
+                    "openalex_api_key": "search-user-key",
                     "huggingface_api_key": "hf-search-user",
+                    "s2_api_key": "s2-search-user",
                 }
             },
         )
@@ -272,8 +273,9 @@ async def test_byok_metadata_is_per_call_and_only_forwarded_in_http_headers(
             {"identifiers": ["1706.03762"]},
             meta={
                 "com.wisepen/tool_config": {
-                    "api_key": "lookup-user-key",
+                    "openalex_api_key": "lookup-user-key",
                     "huggingface_api_key": "hf-lookup-user",
+                    "s2_api_key": "s2-lookup-user",
                 }
             },
         )
@@ -289,10 +291,12 @@ async def test_byok_metadata_is_per_call_and_only_forwarded_in_http_headers(
     assert rpc.calls[0][2]["headers"] == {
         "X-OpenAlex-Api-Key": "search-user-key",
         "X-HuggingFace-Api-Key": "hf-search-user",
+        "X-S2-Api-Key": "s2-search-user",
     }
     assert rpc.calls[1][2]["headers"] == {
         "X-OpenAlex-Api-Key": "lookup-user-key",
         "X-HuggingFace-Api-Key": "hf-lookup-user",
+        "X-S2-Api-Key": "s2-lookup-user",
     }
     assert "headers" not in rpc.calls[2][2]
     assert rpc.calls[3][2]["headers"] == {"X-HuggingFace-Api-Key": "hf-discover-user"}
