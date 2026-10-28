@@ -1,0 +1,7 @@
+# adapters 1.3.0 要求 Transformers ~=4.57.6；隔离于 workspace 的 5.x，不降级主环境。
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.11.0+cpu
+transformers==4.57.6
+adapters==1.3.0
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
