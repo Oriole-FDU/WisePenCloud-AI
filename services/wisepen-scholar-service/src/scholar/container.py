@@ -1,7 +1,9 @@
 """Scholar 的依赖装配；应用用例只依赖声明的领域端口。"""
 
 import httpx
+from common.utils.ai_clients.embedding import EmbeddingClient
 from dependency_injector import containers, providers
+from openai import AsyncOpenAI
 from redis.asyncio import Redis
 
 from scholar.application.discovery import PaperDiscoveryService
@@ -12,6 +14,8 @@ from scholar.application.search import (
     PaperSearchService,
     SearchBinding,
 )
+from scholar.core.config.bootstrap_settings import bootstrap_settings
+from scholar.core.embedding_runtime import DIMENSIONS, QUERY_MODEL
 from scholar.core.s2_transport import S2Transport
 from scholar.core.storage.elasticsearch.paper_repository import (
     ElasticsearchPaperRepository,
@@ -81,8 +85,31 @@ class Container(containers.DeclarativeContainer):
         namespace=config.SCHOLAR_INDEX_ALIAS,
         ttl=config.SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS,
     )
+    embedding_api = providers.Singleton(
+        AsyncOpenAI,
+        api_key="local",
+        base_url=f"http://127.0.0.1:{bootstrap_settings.SERVICE_PORT}/v1",
+        timeout=config.SCHOLAR_EMBEDDING_TIMEOUT_SECONDS,
+        max_retries=0,
+        default_headers=providers.Callable(
+            lambda secret: {"X-From-Source": secret}, config.FROM_SOURCE_SECRET
+        ),
+    )
+    embedding_client = providers.Singleton(
+        EmbeddingClient,
+        client=embedding_api,
+        model=QUERY_MODEL,
+        dimensions=DIMENSIONS,
+    )
     arxiv_searcher = providers.Singleton(
-        ArxivProvider, paper_repository=paper_repository
+        ArxivProvider,
+        paper_repository=paper_repository,
+        embedding_client=embedding_client,
+        candidate_limit=config.SCHOLAR_SEARCH_CANDIDATES,
+        num_candidates=config.SCHOLAR_SEARCH_NUM_CANDIDATES,
+        rrf_k=config.SCHOLAR_SEARCH_RRF_K,
+        citation_weight=config.SCHOLAR_SEARCH_CITATION_WEIGHT,
+        influential_weight=config.SCHOLAR_SEARCH_INFLUENTIAL_WEIGHT,
     )
     openalex_searcher = providers.Singleton(OpenAlexProvider, http=openalex_http)
     huggingface_provider = providers.Singleton(
@@ -112,22 +139,28 @@ class Container(containers.DeclarativeContainer):
             lambda alias: f"{alias}:huggingface", config.SCHOLAR_INDEX_ALIAS
         ),
     )
+    platform_credentials = providers.Callable(
+        lambda oa, hf: {
+            k: v for k, v in {"openalex": oa, "huggingface": hf}.items() if v
+        },
+        config.OPENALEX_API_KEY,
+        config.HF_TOKEN,
+    )
     search_bindings = providers.Dict(
         arxiv=providers.Factory(
             SearchBinding,
             searcher=arxiv_searcher,
-            coverage="arXiv 本地记录；按领域映射召回，不代表整个出版体系。",
+            cache_revision=arxiv_searcher.provided.cache_revision,
+            candidate_limit=config.SCHOLAR_SEARCH_CANDIDATES,
         ),
         openalex=providers.Factory(
             SearchBinding,
             searcher=openalex_searcher,
-            requires_api_key=True,
-            coverage="OpenAlex 按请求领域映射召回。",
+            candidate_limit=200,
         ),
         huggingface=providers.Factory(
             SearchBinding,
             searcher=huggingface_provider,
-            coverage="HF Papers 社区论文；日期过滤限于上游前 100 个候选，不代表全学科覆盖。",
         ),
     )
     enrichment_bindings = providers.Dict(
@@ -136,7 +169,6 @@ class Container(containers.DeclarativeContainer):
             enricher=arxiv_searcher,
             cache=None,
             identifier_kinds=[IdentifierKind.ARXIV, IdentifierKind.DOI],
-            coverage="已有本地论文事实及离线 S2 信号。",
             has_signals=arxiv_signals,
         ),
         s2=providers.Factory(
@@ -152,13 +184,11 @@ class Container(containers.DeclarativeContainer):
                 IdentifierKind.CORPUS_ID,
                 IdentifierKind.S2,
             ],
-            coverage="公共 S2 缓存和在线精确富化。",
         ),
         openalex=providers.Factory(
             EnrichmentBinding,
             enricher=openalex_searcher,
             cache=openalex_cache,
-            requires_api_key=True,
             identifier_kinds=[
                 IdentifierKind.OPENALEX,
                 IdentifierKind.DOI,
@@ -166,16 +196,17 @@ class Container(containers.DeclarativeContainer):
             ],
             has_signals=openalex_signals,
             aliases=openalex_aliases,
-            coverage="OpenAlex 精确身份富化，使用当前请求的用户密钥。",
         ),
         huggingface=providers.Factory(
             EnrichmentBinding,
             enricher=huggingface_provider,
             cache=huggingface_cache,
             identifier_kinds=[IdentifierKind.ARXIV],
-            coverage="HF 社区及研究产物事实。",
             has_signals=lambda metadata: bool(metadata.get("huggingface")),
             fields=[
+                "ai_summary",
+                "ai_keywords",
+                "ai_summary_model",
                 "upvotes",
                 "github_repo",
                 "github_stars",
@@ -196,6 +227,7 @@ class Container(containers.DeclarativeContainer):
         PaperSearchService,
         searchers=search_bindings,
         policies=providers.Object(FIELD_POLICIES),
+        platform_credentials=platform_credentials,
         query_cache=query_cache_repository,
         enrichment=enrichment_runner,
     )
@@ -205,11 +237,13 @@ class Container(containers.DeclarativeContainer):
         openalex_lookup=openalex_searcher.provided.lookup,
         enrichment=enrichment_runner,
         policies=providers.Object(FIELD_POLICIES),
+        platform_credentials=platform_credentials,
     )
     paper_discovery_service = providers.Singleton(
         PaperDiscoveryService,
         discoverers=providers.Dict(huggingface=huggingface_provider),
         policies=providers.Object(FIELD_POLICIES),
+        platform_credentials=platform_credentials,
         cache=discovery_cache_repository,
     )
 

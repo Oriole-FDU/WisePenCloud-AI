@@ -12,6 +12,7 @@ class ScholarBootstrapSettings(BootstrapSettings):
     APP_NAME: str = "WisePen Scholar Service"
     SERVICE_NAME: str = "wisepen-scholar-service"
     SERVICE_PORT: int = 19916
+    NACOS_ENABLED: bool = True
 
     model_config = SettingsConfigDict(
         env_file=SERVICE_ROOT / ".env", env_file_encoding="utf-8", extra="ignore"

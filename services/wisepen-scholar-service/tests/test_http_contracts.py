@@ -5,10 +5,13 @@ from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from datetime import date
 
 import pytest
+from common.web.middleware import SecurityHeaderMiddleware
 from dependency_injector import providers
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from scholar.api.app import create_app
+from scholar.api.app import setup_exception_handlers
 from scholar.api.endpoints import health, papers
+from scholar.api.router import api_router
 from scholar.container import container
 from scholar.domain.interfaces.paper_discoverer import PaperDiscovery
 from scholar.domain.interfaces.provider_error import ProviderError
@@ -46,6 +49,14 @@ PAPER_AMBIGUOUS_B = {
 }
 
 
+def create_app(*, from_source_secret):
+    app = FastAPI()
+    app.add_middleware(SecurityHeaderMiddleware, from_source_secret=from_source_secret)
+    setup_exception_handlers(app)
+    app.include_router(api_router, prefix="/scholar")
+    return app
+
+
 class FakeIndices:
     """模拟健康检查所需的索引别名查询。"""
 
@@ -78,7 +89,7 @@ class FakeElasticsearch:
         self.info_calls += 1
         return {"name": "fake"}
 
-    async def search(self, *, index, size, track_total_hits, query):
+    async def search(self, *, index, size, track_total_hits, query=None, **kwargs):
         self.search_calls.append({"index": index, "query": query})
         return {"hits": {"hits": []}}
 
@@ -127,6 +138,9 @@ def scholar_client():
     container.config.from_dict(
         {
             "SCHOLAR_INDEX_ALIAS": "test-scholar-papers",
+            "FROM_SOURCE_SECRET": FROM_SOURCE_SECRET,
+            "SCHOLAR_EMBEDDING_BASE_URL": "http://127.0.0.1:1/v1",
+            "SCHOLAR_EMBEDDING_TIMEOUT_SECONDS": 0.1,
             "SCHOLAR_QUERY_CACHE_TTL_SECONDS": 60,
             "SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS": 900,
             "SCHOLAR_REQUEST_TIMEOUT_SECONDS": 3,
@@ -138,6 +152,11 @@ def scholar_client():
             "SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS": 3600,
         }
     )
+    from unittest.mock import AsyncMock
+
+    container.embedding_client.override(
+        providers.Object(AsyncMock(embed=AsyncMock(return_value=[[0.0] * 768])))
+    )
     container.elasticsearch.override(providers.Object(es))
     container.redis.override(providers.Object(redis))
     container.wire(modules=[health, papers])
@@ -146,6 +165,7 @@ def scholar_client():
             yield client, es, redis
     finally:
         container.unwire()
+        container.embedding_client.reset_override()
         container.elasticsearch.reset_override()
         container.redis.reset_override()
         container.reset_singletons()
@@ -167,7 +187,6 @@ def test_search_sends_domain_and_inclusive_date_bounds_to_es(scholar_client):
     assert response.status_code == 200
     assert response.json()["data"]["papers"] == []
     query = es.search_calls[0]["query"]["bool"]
-    assert query["must"][0]["combined_fields"]["query"] == "graph models"
     assert {
         "bool": {
             "should": [{"wildcard": {"categories": "cs.*"}}],
@@ -230,7 +249,7 @@ def test_search_cache_reuses_identical_request_and_isolates_changed_inputs(
         )["cache_hit"]
         is False
     )
-    assert len(es.search_calls) == 3
+    assert len(es.search_calls) == 6
 
 
 def test_lookup_preserves_input_order_duplicates_and_per_identifier_status(

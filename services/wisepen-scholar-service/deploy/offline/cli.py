@@ -2,23 +2,22 @@
 
 import argparse
 import asyncio
+from pathlib import Path
 
 import httpx
 import orjson
 from redis.asyncio import Redis
-
 from scholar.core.config.bootstrap_settings import SERVICE_ROOT
 from scholar.core.s2_transport import S2Transport
 from scholar.core.storage.elasticsearch.paper_repository import create_elasticsearch
 from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
-from scholar.etl.arxiv import database_status, import_arxiv, open_database
-from scholar.etl.arxiv_oai import ArxivOaiHarvester
-from scholar.etl.arxiv_sync import sync_arxiv
-from scholar.etl.publish import publish_arxiv
-from scholar.etl.s2 import apply_s2_projection, import_s2
-from scholar.etl.s2_datasets import S2DatasetsClient
-from scholar.etl.s2_diff import sync_s2_diffs
-from scholar.providers.s2 import S2Provider
+
+from offline.arxiv import database_status, import_arxiv, open_database
+from offline.arxiv_oai import ArxivOaiHarvester
+from offline.arxiv_sync import sync_arxiv
+from offline.publish import publish_arxiv
+from offline.s2 import apply_s2_projection, import_s2
+from offline.s2_api import S2SyncClient
 
 
 async def run(args):
@@ -52,6 +51,23 @@ async def run(args):
                 "arxiv": database_status(db),
             }
         from scholar.core.config.app_settings import settings
+
+        if args.command == "encode-embeddings":
+            from scholar.core.embedding_runtime import DEFAULT_MODELS
+
+            from offline.embeddings import document_worker, generate_embeddings
+
+            async with document_worker(
+                Path(args.gpu_python or settings.SCHOLAR_EMBEDDING_GPU_PYTHON),
+                Path(
+                    args.models
+                    or settings.SCHOLAR_EMBEDDING_MODELS_PATH
+                    or DEFAULT_MODELS
+                ),
+            ) as worker:
+                return await generate_embeddings(
+                    db, worker, batch_size=args.batch_size, max_batches=args.max_batches
+                )
 
         if args.command == "publish":
             async with create_elasticsearch(
@@ -91,8 +107,7 @@ async def run(args):
                 ) as s2_http,
             ):
                 transport = S2Transport(s2_http, redis, settings.S2_API_KEY)
-                s2_provider = S2Provider(transport)
-                datasets = S2DatasetsClient(transport)
+                s2_provider = S2SyncClient(transport)
                 cache = RedisPaperEnrichmentCache(redis, namespace=f"{alias}:s2")
 
                 async def publish_pending():
@@ -112,21 +127,6 @@ async def run(args):
                             cache=cache,
                         )
 
-                async with httpx.AsyncClient(
-                    timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS
-                ) as download_http:
-                    return await sync_s2_diffs(
-                        db,
-                        datasets,
-                        download_http,
-                        args.workdir or SERVICE_ROOT / ".runtime" / "s2-diff-work",
-                        publish_pending=publish_pending,
-                        invalidate_aliases=cache.invalidate,
-                        base_release=args.base_release,
-                        target_release=args.target_release,
-                        tldr_model=args.tldr_model,
-                        batch_size=args.batch_size,
-                    )
         finally:
             await redis.aclose()
 
@@ -143,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
             "publish",
             "status",
             "sync-arxiv",
-            "sync-s2",
+            "encode-embeddings",
         ],
     )
     parser.add_argument(
@@ -156,6 +156,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--alias")
+    parser.add_argument("--gpu-python")
+    parser.add_argument("--models")
     parser.add_argument("--batch-size", type=int)
     s2_root = SERVICE_ROOT.parent.parent / "s2_download"
     parser.add_argument("--papers-dir", default=str(s2_root / "papers"))
@@ -167,9 +169,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-batches", type=int, help="本次批次预算；未完成不会切换别名"
     )
     parser.add_argument("--from", "--from-date", dest="from_date")
-    parser.add_argument("--base", "--base-release", dest="base_release")
-    parser.add_argument("--target", "--target-release", dest="target_release")
-    parser.add_argument("--workdir")
     return parser
 
 
@@ -178,10 +177,12 @@ def main():
     args = parser.parse_args()
     if args.batch_size is None:
         args.batch_size = (
-            100
+            8
+            if args.command == "encode-embeddings"
+            else 100
             if args.command == "sync-arxiv"
             else 50000
-            if args.command in ("import-s2", "sync-s2")
+            if args.command == "import-s2"
             else 5000
         )
     if args.batch_size < 1 or (args.max_batches is not None and args.max_batches < 1):
@@ -192,18 +193,18 @@ def main():
         parser.error("import-s2 requires --release-id")
     if args.command == "import-s2" and args.tldr_model is None:
         args.tldr_model = "tldr@v2.0.0"
-    if args.max_batches is not None and args.command not in ("import-arxiv", "publish"):
-        parser.error("--max-batches is only valid for import-arxiv and publish")
+    if args.max_batches is not None and args.command not in (
+        "import-arxiv",
+        "publish",
+        "encode-embeddings",
+    ):
+        parser.error(
+            "--max-batches is only valid for import-arxiv, publish and encode-embeddings"
+        )
     if args.from_date is not None and args.command != "sync-arxiv":
         parser.error("--from is only valid for sync-arxiv")
-    if (
-        args.base_release is not None or args.target_release is not None
-    ) and args.command != "sync-s2":
-        parser.error("--base and --target are only valid for sync-s2")
-    if args.workdir is not None and args.command != "sync-s2":
-        parser.error("--workdir is only valid for sync-s2")
-    if args.tldr_model is not None and args.command not in ("import-s2", "sync-s2"):
-        parser.error("--tldr-model is only valid for import-s2 and sync-s2")
+    if args.tldr_model is not None and args.command != "import-s2":
+        parser.error("--tldr-model is only valid for import-s2")
     print(orjson.dumps(asyncio.run(run(args))).decode())
 
 

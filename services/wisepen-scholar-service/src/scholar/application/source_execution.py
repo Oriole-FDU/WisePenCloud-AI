@@ -17,7 +17,6 @@ class SourceExecutionStatus(StrEnum):
 class SourceExecution:
     source: str
     cache_hit: bool
-    coverage: str
     status: SourceExecutionStatus = SourceExecutionStatus.COMPLETED
     error: str | None = None
     queued_ahead: int | None = None

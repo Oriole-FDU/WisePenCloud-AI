@@ -325,6 +325,8 @@ async def test_byok_enrichment_cache_and_inflight_do_not_cross_credentials():
             self.calls = []
 
         async def enrich(self, identifiers, *, include_details=False, api_key=None):
+            if not api_key:
+                raise ProviderError("OpenAlex API key is required")
             self.calls.append(api_key)
             return [
                 PaperEnrichment(
@@ -338,7 +340,7 @@ async def test_byok_enrichment_cache_and_inflight_do_not_cross_credentials():
         enrichment=EnrichmentRunner(
             {
                 "openalex": EnrichmentBinding(
-                    provider, cache, [IdentifierKind.OPENALEX], requires_api_key=True
+                    provider, cache, [IdentifierKind.OPENALEX]
                 ),
             }
         ),

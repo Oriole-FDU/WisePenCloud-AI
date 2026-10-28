@@ -1,7 +1,10 @@
 from dataclasses import replace
 from datetime import date
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from openai import APIConnectionError
 from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.field_policies import FIELD_POLICIES, FieldPolicy
 from scholar.application.search import (
@@ -71,6 +74,50 @@ class FakeSearcher:
         return PaperSearchBatch(self.search_result)
 
 
+@pytest.mark.asyncio
+async def test_bulk_candidates_reused_across_limits_and_byok_overrides_platform():
+    """小请求先缓存整批；不同 limit 不重查，用户 key 不读取平台缓存。"""
+    provider = FakeSearcher(
+        [paper(PaperSource.OPENALEX, doi=f"10.1000/{index}") for index in range(12)]
+    )
+    cache = MemoryCache()
+    search = PaperSearchService(
+        {"openalex": SearchBinding(provider, candidate_limit=200)},
+        {AcademicField.GENERAL: FieldPolicy(searchers=["openalex"])},
+        cache,
+        EnrichmentRunner({}),
+        platform_credentials={"openalex": "platform-key"},
+    )
+    small = await search.search(PaperSearch("same", limit=2))
+    larger = await search.search(PaperSearch("same", limit=10))
+    assert len(small.papers) == 2
+    assert len(larger.papers) == 10
+    assert larger.execution[0].cache_hit
+    assert [call["api_key"] for call in provider.calls] == ["platform-key"]
+    assert provider.calls[0]["limit"] == 200
+    await search.search(PaperSearch("same"), credentials={"openalex": "user-key"})
+    assert [call["api_key"] for call in provider.calls] == ["platform-key", "user-key"]
+
+
+@pytest.mark.asyncio
+async def test_platform_quota_failure_uses_normal_search_fallback():
+    quota = FakeSearcher(ProviderError("429 quota exhausted"))
+    fallback = FakeSearcher([paper(PaperSource.ARXIV, arxiv_id="2501.12948")])
+    search = PaperSearchService(
+        {"openalex": SearchBinding(quota), "arxiv": SearchBinding(fallback)},
+        {AcademicField.GENERAL: FieldPolicy(searchers=["openalex", "arxiv"])},
+        MemoryCache(),
+        EnrichmentRunner({}),
+        platform_credentials={"openalex": "platform-key"},
+    )
+    result = await search.search(PaperSearch("reasoning"))
+    assert result.papers[0].arxiv_id == "2501.12948"
+    assert [item.status for item in result.execution] == [
+        SourceExecutionStatus.FAILED,
+        SourceExecutionStatus.COMPLETED,
+    ]
+
+
 def paper(
     source,
     *,
@@ -101,9 +148,7 @@ def service(*, arxiv=None, openalex=None, huggingface=None, cache=None):
         searchers={
             "arxiv": SearchBinding(arxiv or FakeSearcher()),
             "huggingface": SearchBinding(huggingface or FakeSearcher()),
-            "openalex": SearchBinding(
-                openalex or FakeSearcher(), requires_api_key=True
-            ),
+            "openalex": SearchBinding(openalex or FakeSearcher()),
         },
         policies={
             field: replace(policy, field_enrichers=[])
@@ -174,11 +219,19 @@ async def test_cs_falls_back_to_hf_and_multisource_never_searches_openalex():
     hf = FakeSearcher([paper(PaperSource.HUGGINGFACE, arxiv_id="2501.12948")])
     oa = FakeSearcher()
     search = service(arxiv=arxiv, huggingface=hf, openalex=oa)
-    result = await search.search(PaperSearch("DeepSeek-R1", field=AcademicField.COMPUTER_SCIENCE))
+    result = await search.search(
+        PaperSearch("DeepSeek-R1", field=AcademicField.COMPUTER_SCIENCE)
+    )
     assert [e.source for e in result.execution] == ["arxiv", "huggingface"]
     assert result.papers[0].arxiv_id == "2501.12948"
     arxiv.search_result = []
-    result = await search.search(PaperSearch("other", field=AcademicField.COMPUTER_SCIENCE, source_scope=SourceScope.MULTI_SOURCE))
+    result = await search.search(
+        PaperSearch(
+            "other",
+            field=AcademicField.COMPUTER_SCIENCE,
+            source_scope=SourceScope.MULTI_SOURCE,
+        )
+    )
     assert [e.status for e in result.execution] == [SourceExecutionStatus.COMPLETED] * 2
     assert len(hf.calls) == 2
     assert oa.calls == []
@@ -187,7 +240,17 @@ async def test_cs_falls_back_to_hf_and_multisource_never_searches_openalex():
 @pytest.mark.asyncio
 async def test_arxiv_provider_maps_shared_field_and_does_not_forward_api_key():
     repository = FakePaperRepository()
-    provider = ArxivProvider(repository)
+    repository.search = AsyncMock(return_value=[])
+    provider = ArxivProvider(
+        repository,
+        AsyncMock(
+            embed=AsyncMock(
+                side_effect=APIConnectionError(
+                    request=httpx.Request("POST", "http://encoder")
+                )
+            )
+        ),
+    )
 
     await provider.search(
         query="genomics",
@@ -198,15 +261,8 @@ async def test_arxiv_provider_maps_shared_field_and_does_not_forward_api_key():
         api_key="ignored-by-arxiv",
     )
 
-    assert repository.calls == [
-        {
-            "query": "genomics",
-            "categories": ["q-bio.*"],
-            "published_after": None,
-            "published_before": None,
-            "limit": 5,
-        }
-    ]
+    assert repository.search.call_args.kwargs["categories"] == ["q-bio.*"]
+    assert "api_key" not in repository.search.call_args.kwargs
 
 
 @pytest.mark.asyncio
@@ -269,7 +325,7 @@ async def test_openalex_cache_isolated_by_user_and_key_fingerprint():
 
 
 @pytest.mark.asyncio
-async def test_openalex_cache_is_skipped_for_trusted_byok_without_user_id():
+async def test_openalex_cache_reuses_trusted_credential_without_user_id():
     openalex = FakeSearcher([paper(PaperSource.OPENALEX, doi="10.1000/trusted")])
     cache = MemoryCache()
     search = service(openalex=openalex, cache=cache)
@@ -281,9 +337,9 @@ async def test_openalex_cache_is_skipped_for_trusted_byok_without_user_id():
         PaperSearch("same query"), credentials={"openalex": "trusted-key"}
     )
 
-    assert len(openalex.calls) == 2
-    assert cache.get_calls == []
-    assert cache.put_calls == []
+    assert len(openalex.calls) == 1
+    assert len(cache.put_calls) == 1
+    assert "trusted-key" not in cache.put_calls[0][0]
 
 
 @pytest.mark.asyncio
@@ -461,7 +517,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
     bindings = {
         "pubmed": SearchBinding(pubmed),
         "web_of_science": SearchBinding(wos),
-        "openalex": SearchBinding(oa, requires_api_key=True),
+        "openalex": SearchBinding(oa),
     }
     policy = FieldPolicy(
         searchers=["pubmed", "web_of_science", "openalex"],

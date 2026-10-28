@@ -1,12 +1,15 @@
 """流式导入 arXiv；来源事实、投影及字节游标在同一 DuckDB 事务提交。"""
 
+from __future__ import annotations
+
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import duckdb
 import orjson
-
 from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
+
+from offline.embeddings import EMBEDDING_SCHEMA, reconcile_embeddings
 
 
 def open_database(path: str | Path) -> duckdb.DuckDBPyConnection:
@@ -29,6 +32,7 @@ def open_database(path: str | Path) -> duckdb.DuckDBPyConnection:
             target_index VARCHAR, published BOOLEAN DEFAULT false
         );
     """)
+    db.execute(EMBEDDING_SCHEMA)
     return db
 
 
@@ -144,6 +148,8 @@ def import_arxiv(
                         "INSERT OR IGNORE INTO pending_publish SELECT value->>'arxiv_id' FROM json_each(?)",
                         [payload],
                     )
+                if ids:
+                    reconcile_embeddings(db, ids)
                 db.execute(
                     "UPDATE import_state SET byte_offset=?,records=?,complete=?",
                     [offset, count, complete],

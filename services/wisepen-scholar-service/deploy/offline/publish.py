@@ -1,13 +1,20 @@
 """版本索引的逐项发布与恢复；完整检查通过前不修改线上别名。"""
 
+from __future__ import annotations
+
 from uuid import uuid4
 
 import duckdb
 import orjson
 from elasticsearch import AsyncElasticsearch
+from scholar.core.embedding_runtime import MODEL_SIGNATURE
+from scholar.core.storage.elasticsearch.paper_repository import (
+    ARXIV_INDEX_SETTINGS,
+    ARXIV_MAPPING,
+)
 
-from scholar.core.storage.elasticsearch.paper_repository import ARXIV_MAPPING
-from scholar.etl.arxiv import database_status
+from offline.arxiv import database_status
+from offline.embeddings import publication_documents
 
 
 def _publication_status(db: duckdb.DuckDBPyConnection) -> dict:
@@ -37,6 +44,11 @@ async def publish_arxiv(
     if published:
         if not target:
             raise ValueError("published arXiv state is missing its target index")
+        mappings = await es.indices.get_mapping(index=target)
+        vector_enabled = (
+            mappings[target]["mappings"].get("_meta", {}).get("embedding_signature")
+            == MODEL_SIGNATURE
+        )
         batches = 0
         while max_batches is None or batches < max_batches:
             rows = db.execute(
@@ -57,6 +69,14 @@ async def publish_arxiv(
             if not rows:
                 break
 
+            indexed = [
+                (arxiv_id, document)
+                for arxiv_id, action, document in rows
+                if action == "index"
+            ]
+            projected = iter(
+                publication_documents(db, indexed, vector_enabled=vector_enabled)
+            )
             operations = []
             for arxiv_id, action, document in rows:
                 if action == "delete":
@@ -65,7 +85,7 @@ async def publish_arxiv(
                     operations.extend(
                         [
                             {"index": {"_index": target, "_id": arxiv_id}},
-                            orjson.loads(document),
+                            next(projected),
                         ]
                     )
 
@@ -136,7 +156,9 @@ async def publish_arxiv(
     if not await es.indices.exists(index=target):
         # 创建失败可重试；已存在的目标索引绝不删除重建。
         await es.indices.create(
-            index=target, mappings=ARXIV_MAPPING, settings={"refresh_interval": "-1"}
+            index=target,
+            mappings=ARXIV_MAPPING,
+            settings={**ARXIV_INDEX_SETTINGS, "refresh_interval": "-1"},
         )
     else:
         # 离线富化沿用已发布论文 ID；先增加实际使用的字段，再重放受影响文档。
@@ -158,9 +180,11 @@ async def publish_arxiv(
         if not rows:
             break
         operations = []
-        for arxiv_id, document in rows:
+        for (arxiv_id, _), document in zip(
+            rows, publication_documents(db, rows, vector_enabled=True), strict=True
+        ):
             operations.extend(
-                [{"index": {"_index": target, "_id": arxiv_id}}, orjson.loads(document)]
+                [{"index": {"_index": target, "_id": arxiv_id}}, document]
             )
         response = await es.bulk(operations=operations)
         succeeded, failed = [], []
@@ -262,8 +286,12 @@ async def publish_arxiv(
         "SELECT arxiv_id,document FROM arxiv ORDER BY arxiv_id LIMIT 3"
     ).fetchall()
     result = await es.mget(index=target, ids=[r[0] for r in sample])
-    for (_, document), item in zip(sample, result["docs"], strict=True):
-        if not item["found"] or item["_source"] != orjson.loads(document):
+    for document, item in zip(
+        publication_documents(db, sample, vector_enabled=True),
+        result["docs"],
+        strict=True,
+    ):
+        if not item["found"] or item["_source"] != document:
             raise RuntimeError("index sample does not match DuckDB projection")
     await es.indices.put_settings(index=target, settings={"refresh_interval": "1s"})
     actions = [

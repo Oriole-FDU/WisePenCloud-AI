@@ -35,7 +35,7 @@ class RedisPaperEnrichmentCache:
         # 统一事务写入身份别名，避免部分更新把两个不同论文身份接在一起。
         async with self.redis.pipeline(transaction=True) as pipeline:
             for identifier in dict.fromkeys(identifiers):
-                pipeline.set(self._key(identifier, scope), payload, ex=ttl_seconds)
+                await pipeline.set(self._key(identifier, scope), payload, ex=ttl_seconds)
             await pipeline.execute()
 
     async def invalidate(self, identifiers: list[PaperIdentifier]) -> None:

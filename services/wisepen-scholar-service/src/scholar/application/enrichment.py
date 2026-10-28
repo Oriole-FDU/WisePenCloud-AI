@@ -34,12 +34,10 @@ class EnrichmentBinding:
     enricher: PaperEnricher | None
     cache: PaperEnrichmentCache | None
     identifier_kinds: list[IdentifierKind]
-    coverage: str = ""
     fields: list[str] = field(default_factory=list)
     has_signals: Callable[[dict[str, Any]], bool] | None = None
     aliases: Callable[[dict[str, Any]], list[PaperIdentifier]] | None = None
     short_lived: Callable[[CachedPaperEnrichment], bool] | None = None
-    requires_api_key: bool = False
 
 
 @dataclass
@@ -272,7 +270,6 @@ class EnrichmentRunner:
         return SourceExecution(
             source,
             cache_hits,
-            binding.coverage,
             status,
             str(first_error)
             if first_error is not None
@@ -342,18 +339,9 @@ class EnrichmentRunner:
     ) -> _SourceBatch:
         binding = self.bindings[source]
         batch = _SourceBatch()
-        # BYOK 的缓存和在途请求都按凭证隔离；缺 key 不能借他人的缓存绕过来源契约。
-        if binding.requires_api_key and not api_key:
-            if cache_only:
-                return batch
-            batch.errors.update(
-                dict.fromkeys(known_ids, ProviderError(f"{source} API key is required"))
-            )
-            return batch
+        # 用户凭证与平台凭证各自隔离；缺少凭证由来源适配器决定是否允许匿名请求。
         cache_options = (
-            {"scope": hashlib.sha256(api_key.encode()).hexdigest()}
-            if binding.requires_api_key
-            else {}
+            {"scope": hashlib.sha256(api_key.encode()).hexdigest()} if api_key else {}
         )
         pending = []
         for identifier, aliases in known_ids.items():

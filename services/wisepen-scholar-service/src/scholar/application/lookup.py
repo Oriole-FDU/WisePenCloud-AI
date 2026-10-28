@@ -89,15 +89,25 @@ class PaperLookupService:
         *,
         enrichment: EnrichmentRunner | None = None,
         policies: dict[AcademicField, FieldPolicy] | None = None,
+        platform_credentials: dict[str, str] | None = None,
     ):
+        self.platform_credentials = platform_credentials or {}
         self.paper_repository = paper_repository
         self.openalex_lookup = openalex_lookup
         self.enrichment = enrichment if enrichment is not None else EnrichmentRunner({})
         self.policies = FIELD_POLICIES if policies is None else policies
 
     async def lookup(
-        self, query: PaperLookup, *, api_key: str | None = None
+        self,
+        query: PaperLookup,
+        *,
+        api_key: str | None = None,
+        credentials: dict[str, str] | None = None,
     ) -> LookupResult:
+        credentials = self.platform_credentials | (credentials or {})
+        if api_key:
+            credentials[PaperSource.OPENALEX] = api_key
+        api_key = credentials.get(PaperSource.OPENALEX)
         items = []
         positions: dict[PaperIdentifier, list[int]] = {}
         for value in query.identifiers:
@@ -151,7 +161,6 @@ class PaperLookupService:
                 SourceExecution(
                     PaperSource.ARXIV,
                     False,
-                    "本地精确身份查询。",
                     SourceExecutionStatus.FAILED
                     if len(failures) == len(local_ids)
                     else SourceExecutionStatus.PARTIAL
@@ -204,7 +213,7 @@ class PaperLookupService:
                     domain_sources=cached_sources,
                     full=True,
                     cache_only=True,
-                    credentials={PaperSource.OPENALEX: api_key} if api_key else {},
+                    credentials=credentials,
                 )
             )
         else:
@@ -218,7 +227,7 @@ class PaperLookupService:
                         if source in self.enrichment.bindings
                     ],
                     domain_sources=policy.field_enrichers,
-                    credentials={PaperSource.OPENALEX: api_key} if api_key else {},
+                    credentials=credentials,
                     full=query.purpose == LookupPurpose.FULL,
                 )
             )
@@ -358,7 +367,6 @@ class PaperLookupService:
             SourceExecution(
                 PaperSource.OPENALEX,
                 False,
-                "按精确标识查询 OpenAlex。",
                 SourceExecutionStatus.FAILED
                 if failures == attempts
                 else SourceExecutionStatus.PARTIAL

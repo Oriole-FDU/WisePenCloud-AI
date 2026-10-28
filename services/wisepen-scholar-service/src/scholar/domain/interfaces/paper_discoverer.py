@@ -33,4 +33,5 @@ class PaperDiscoverer(Protocol):
         period: DiscoveryPeriod,
         sort: DiscoverySort,
         limit: int,
+        api_key: str | None = None,
     ) -> PaperDiscovery: ...

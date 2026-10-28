@@ -1,8 +1,7 @@
 import httpx
 import pytest
-
-from scholar.etl import arxiv_oai
-from scholar.etl.arxiv_oai import (
+from offline import arxiv_oai
+from offline.arxiv_oai import (
     ArxivOaiHarvester,
     ArxivOaiProtocolError,
 )

@@ -54,18 +54,21 @@ class S2Provider:
                 "graph/v1/paper/batch",
                 params={"fields": ",".join(fields)},
                 json={
-                    "ids": [self._serialize(identifier) for identifier in identifiers]
+                    "ids": [
+                        self.serialize_identifier(identifier)
+                        for identifier in identifiers
+                    ]
                 },
             )
         except (httpx.HTTPError, RedisError) as error:
             raise ProviderError(provider_error_message(error)) from error
         return [
-            None if item is None else self._project(item, include_details)
+            None if item is None else self.project(item, include_details)
             for item in response
         ]
 
     @staticmethod
-    def _serialize(identifier: PaperIdentifier) -> str:
+    def serialize_identifier(identifier: PaperIdentifier) -> str:
         if identifier.kind == IdentifierKind.ARXIV:
             return f"arxiv:{identifier.value}"
         if identifier.kind == IdentifierKind.DOI:
@@ -77,7 +80,7 @@ class S2Provider:
         raise ValueError(f"S2 does not accept {identifier.kind.value} identifiers")
 
     @classmethod
-    def _project(cls, payload: dict, include_details: bool) -> PaperEnrichment:
+    def project(cls, payload: dict, include_details: bool) -> PaperEnrichment:
         external_ids = payload.get("externalIds") or {}
         tldr = payload.get("tldr")
         pdf = payload.get("openAccessPdf")

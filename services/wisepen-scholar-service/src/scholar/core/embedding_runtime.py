@@ -1,24 +1,39 @@
-"""隔离环境中的常驻推理：CPU 查询 HTTP 进程，或 GPU 论文 JSONL 子进程。"""
+"""本地 SPECTER2 编码和 GPU 论文 worker；CPU 模型由 main 生命周期管理。"""
 
 from __future__ import annotations
 
 import argparse
-import base64
 import contextlib
+import hashlib
 import json
-import struct
 import sys
 import threading
 from pathlib import Path
 
-from scholar.core.embedding_profile import (
-    DEFAULT_MODELS,
-    DIMENSIONS,
-    MAX_LENGTH,
-    MODEL_SIGNATURE,
-    QUERY_MODEL,
-    model_paths,
-)
+# 模型修订、输入与精度共同决定向量身份，不能作为在线调参项独立变更。
+# 此模块仅在实例化编码器时导入 Torch，离线发布可直接复用这些常量。
+BASE_REVISION = "3447645e1def9117997203454fa4495937bfbd83"
+DOCUMENT_REVISION = "2081559630a80fc5851d8f798a05ba81e9468089"
+QUERY_REVISION = "3f4448817028388648a74349ece07af4518ec5bd"
+DIMENSIONS = 768
+MAX_LENGTH = 512
+DEFAULT_MODELS = Path(__file__).resolve().parents[3] / "models"
+MODEL_SIGNATURE = hashlib.sha256(
+    json.dumps(
+        {
+            "base": BASE_REVISION,
+            "document_adapter": DOCUMENT_REVISION,
+            "query_adapter": QUERY_REVISION,
+            "pooling": "cls",
+            "max_length": MAX_LENGTH,
+            "normalize": False,
+            "document_precision": "fp16",
+            "query_precision": "fp32",
+        },
+        sort_keys=True,
+    ).encode()
+).hexdigest()
+QUERY_MODEL = f"specter2-adhoc-{MODEL_SIGNATURE[:16]}"
 
 
 class SpecterEncoder:
@@ -37,7 +52,17 @@ class SpecterEncoder:
             raise RuntimeError(
                 "GPU document encoding requires CUDA; CPU fallback is disabled"
             )
-        base, adapter = model_paths(models, query=query)
+        base = models / "models--allenai--specter2_base" / "snapshots" / BASE_REVISION
+        adapter = (
+            models
+            / (
+                "models--allenai--specter2_adhoc_query"
+                if query
+                else "models--allenai--specter2"
+            )
+            / "snapshots"
+            / (QUERY_REVISION if query else DOCUMENT_REVISION)
+        )
         self.tokenizer = AutoTokenizer.from_pretrained(str(base), local_files_only=True)
         self.model = AutoAdapterModel.from_pretrained(str(base), local_files_only=True)
         self.model.load_adapter(str(adapter), load_as="active", set_active=True)
@@ -71,74 +96,21 @@ class SpecterEncoder:
             )
 
 
-def create_query_app(encoder):
-    """最小 OpenAI embeddings 协议；只接受当前固定模型、字符串及 768 维。"""
-    from fastapi import FastAPI, HTTPException
-
-    app = FastAPI(title="Scholar query embeddings")
-
-    @app.get("/health")
-    def health():
-        return {"status": "ready", "model": QUERY_MODEL, "signature": MODEL_SIGNATURE}
-
-    @app.post("/v1/embeddings")
-    def embeddings(payload: dict):
-        inputs = payload.get("input")
-        if isinstance(inputs, str):
-            inputs = [inputs]
-        if (
-            payload.get("model") != QUERY_MODEL
-            or payload.get("dimensions", DIMENSIONS) != DIMENSIONS
-            or payload.get("encoding_format", "float") not in ("float", "base64")
-            or not isinstance(inputs, list)
-            or not inputs
-            or any(not isinstance(text, str) or not text.strip() for text in inputs)
-        ):
-            raise HTTPException(
-                422, "Expected the fixed query model and non-empty text inputs"
-            )
-        vectors = encoder.encode(inputs)
-        if payload.get("encoding_format") == "base64":
-            # OpenAI SDK 默认请求 base64，公共 EmbeddingClient 会还原 float32。
-            vectors = [
-                base64.b64encode(struct.pack(f"<{len(v)}f", *v)).decode()
-                for v in vectors
-            ]
-        return {
-            "object": "list",
-            "model": QUERY_MODEL,
-            "data": [
-                {"object": "embedding", "index": i, "embedding": v}
-                for i, v in enumerate(vectors)
-            ],
-        }
-
-    return app
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["serve-query", "document-worker"])
+    parser.add_argument("mode", choices=["document-worker"])
     parser.add_argument("--models", type=Path, default=DEFAULT_MODELS)
     parser.add_argument("--threads", type=int, default=2)
-    parser.add_argument("--port", type=int, default=8013)
     args = parser.parse_args()
-    query = args.mode == "serve-query"
+    query = False
     # 模型库的启动输出不能污染 GPU worker 的 JSONL 协议。
     with contextlib.redirect_stdout(sys.stderr):
         encoder = SpecterEncoder(args.models, query=query, threads=args.threads)
         encoder.encode(["warmup"] if query else [{"title": "warmup", "abstract": ""}])
-    if query:
-        import uvicorn
-
-        uvicorn.run(
-            create_query_app(encoder), host="127.0.0.1", port=args.port, workers=1
-        )
-    else:
-        print(json.dumps({"ready": True, "signature": MODEL_SIGNATURE}), flush=True)
-        for line in sys.stdin:
-            batch = json.loads(line)
-            print(json.dumps({"vectors": encoder.encode(batch)}), flush=True)
+    print(json.dumps({"ready": True, "signature": MODEL_SIGNATURE}), flush=True)
+    for line in sys.stdin:
+        batch = json.loads(line)
+        print(json.dumps({"vectors": encoder.encode(batch)}), flush=True)
 
 
 if __name__ == "__main__":

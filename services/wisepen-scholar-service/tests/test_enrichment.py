@@ -116,7 +116,7 @@ class FakeRedisPipeline:
     async def __aexit__(self, exc_type, exc, traceback):
         return False
 
-    def set(self, key, value, *, ex):
+    async def set(self, key, value, *, ex):
         self.pending[key] = (value, ex)
 
     async def execute(self):

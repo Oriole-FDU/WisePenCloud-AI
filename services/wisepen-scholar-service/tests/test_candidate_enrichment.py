@@ -1,4 +1,5 @@
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
+
 """从公开搜索用例验证候选富化，并验证共享事实缓存的 alias 失效。"""
 
 import asyncio
@@ -135,7 +136,7 @@ class FakePaperRepository:
 def search_service(papers, bindings, sources):
     searcher = FakeSearcher(papers)
     service = PaperSearchService(
-        searchers={"base": SearchBinding(searcher, coverage="base papers")},
+        searchers={"base": SearchBinding(searcher)},
         policies={
             AcademicField.GENERAL: FieldPolicy(
                 searchers=["base"], field_enrichers=list(sources)
@@ -217,7 +218,6 @@ async def test_configured_hf_enrichment_preserves_order_values_and_caches_404():
                     enricher=provider,
                     cache=cache,
                     identifier_kinds=[IdentifierKind.ARXIV],
-                    coverage="computer science candidate signals",
                 )
             },
             ["huggingface"],
@@ -259,9 +259,7 @@ async def test_configured_hf_enrichment_preserves_order_values_and_caches_404():
         60 * 60,
     ]
     assert result.enrichment_execution[0].status == SourceExecutionStatus.COMPLETED
-    assert (
-        result.enrichment_execution[0].coverage == "computer science candidate signals"
-    )
+
     assert repeated.enrichment_execution[0].cache_hit is True
     assert len(requests) == 3
 
@@ -349,10 +347,9 @@ async def test_arxiv_enrichment_batches_repository_reads_and_projects_its_namesp
         candidates,
         {
             "arxiv": EnrichmentBinding(
-                enricher=ArxivProvider(repository),
+                enricher=ArxivProvider(repository, embedding_client=None),
                 cache=None,
                 identifier_kinds=[IdentifierKind.ARXIV],
-                coverage="local arXiv metadata",
             )
         },
         ["arxiv"],
@@ -710,7 +707,7 @@ class FakeRedisPipeline:
     async def __aexit__(self, exc_type, exc, traceback):
         return False
 
-    def set(self, key, value, *, ex):
+    async def set(self, key, value, *, ex):
         self.pending[key] = value
 
     async def execute(self):

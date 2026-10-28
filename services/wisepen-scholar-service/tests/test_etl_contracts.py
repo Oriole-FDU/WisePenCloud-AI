@@ -2,9 +2,8 @@
 
 import orjson
 import pytest
-
-from scholar.etl.arxiv import database_status, import_arxiv, open_database
-from scholar.etl.publish import publish_arxiv
+from offline.arxiv import database_status, import_arxiv, open_database
+from offline.publish import publish_arxiv
 
 
 @pytest.fixture
@@ -95,6 +94,11 @@ class FakeIndices:
 
     async def create(self, *, index, mappings, settings):
         self.es.documents[index] = {}
+
+    async def get_mapping(self, *, index):
+        from scholar.core.storage.elasticsearch.paper_repository import ARXIV_MAPPING
+
+        return {index: {"mappings": ARXIV_MAPPING}}
 
     async def put_mapping(self, *, index, properties):
         pass
@@ -401,3 +405,77 @@ async def test_duplicate_snapshot_ids_keep_latest_source_metadata(
             es.documents[result["import"]["target_index"]]["2201.00001"]["title"]
             == "Latest title"
         )
+
+
+@pytest.mark.asyncio
+async def test_embeddings_resume_reuse_input_and_survive_full_document_publication(
+    completed_database,
+):
+    from offline.embeddings import generate_embeddings
+
+    class Worker:
+        def __init__(self):
+            self.inputs = []
+
+        async def encode(self, documents):
+            self.inputs.extend(documents)
+            return [[1.0] * 768 for _ in documents]
+
+    worker, es = Worker(), FakeElasticsearch()
+    await generate_embeddings(completed_database, worker)
+    await publish_arxiv(completed_database, es, "papers")
+    index = completed_database.execute(
+        "SELECT target_index FROM import_state"
+    ).fetchone()[0]
+    assert all(len(doc["embedding"]) == 768 for doc in es.documents[index].values())
+    assert len(worker.inputs) == 2
+    assert (await generate_embeddings(completed_database, worker))["written"] == 0
+    # 模拟 S2 增量 writer 更新元数据；全文重发仍包含匹配输入的向量。
+    completed_database.execute(
+        'UPDATE arxiv SET document=json_merge_patch(document, \'{"metadata":{"s2":{"citation_count":0}}}\')'
+    )
+    completed_database.execute(
+        "INSERT OR IGNORE INTO pending_publish SELECT arxiv_id FROM arxiv"
+    )
+    await generate_embeddings(completed_database, worker)
+    await publish_arxiv(completed_database, es, "papers")
+    assert len(worker.inputs) == 2
+    assert all(
+        doc["metadata"]["s2"]["citation_count"] == 0 and "embedding" in doc
+        for doc in es.documents[index].values()
+    )
+    # 输入变化后，先发布基础事实时不得继续使用旧向量，随后只编码这一篇。
+    completed_database.execute(
+        "UPDATE arxiv SET document=json_merge_patch(document, '{\"title\":\"Changed title\"}') WHERE arxiv_id='2201.00001'"
+    )
+    completed_database.execute("INSERT INTO pending_publish VALUES ('2201.00001')")
+    await publish_arxiv(completed_database, es, "papers")
+    assert "embedding" not in es.documents[index]["2201.00001"]
+    await generate_embeddings(completed_database, worker)
+    await publish_arxiv(completed_database, es, "papers")
+    assert len(worker.inputs) == 3
+    assert list(es.documents[index]["2201.00001"]["embedding"]) == [1.0] * 768
+
+
+@pytest.mark.asyncio
+async def test_failed_gpu_batch_leaves_work_replayable(completed_database):
+    from offline.embeddings import generate_embeddings
+
+    class Worker:
+        async def encode(self, documents):
+            raise RuntimeError("GPU failure")
+
+    with pytest.raises(RuntimeError, match="GPU failure"):
+        await generate_embeddings(completed_database, Worker())
+    assert (
+        completed_database.execute("SELECT count(*) FROM paper_embeddings").fetchone()[
+            0
+        ]
+        == 0
+    )
+    assert (
+        completed_database.execute(
+            "SELECT count(*) FROM pending_embeddings"
+        ).fetchone()[0]
+        == 2
+    )

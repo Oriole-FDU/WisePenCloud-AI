@@ -8,7 +8,7 @@ from urllib.request import ProxyHandler, build_opener
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "offline_dashboard.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "deploy" / "offline_dashboard.py"
 
 
 @pytest.mark.parametrize("exit_code,status", [(0, "succeeded"), (7, "failed")])

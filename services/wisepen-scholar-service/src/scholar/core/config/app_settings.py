@@ -23,7 +23,18 @@ class AppSettings(BaseModel):
     REDIS_URL: str
     S2_API_KEY: str = Field(repr=False)
     HF_TOKEN: str | None = Field(default=None, repr=False)
+    OPENALEX_API_KEY: str | None = Field(default=None, repr=False)
+    SCHOLAR_EMBEDDING_TIMEOUT_SECONDS: float = Field(default=2, gt=0)
+    SCHOLAR_EMBEDDING_CPU_THREADS: int = Field(default=2, gt=0)
+    SCHOLAR_EMBEDDING_MODELS_PATH: str | None = None
+    SCHOLAR_EMBEDDING_GPU_PYTHON: str = "D:/Rag/.venv/Scripts/python.exe"
     SCHOLAR_INDEX_ALIAS: str = "wisepen-scholar-arxiv"
+    # 控制两路召回成本与排序先验；固定文本权重和模型身份随代码发布。
+    SCHOLAR_SEARCH_CANDIDATES: int = Field(default=200, gt=0)
+    SCHOLAR_SEARCH_NUM_CANDIDATES: int = Field(default=1000, gt=0)
+    SCHOLAR_SEARCH_RRF_K: int = Field(default=60, gt=0)
+    SCHOLAR_SEARCH_CITATION_WEIGHT: float = Field(default=0.20, ge=0)
+    SCHOLAR_SEARCH_INFLUENTIAL_WEIGHT: float = Field(default=0.10, ge=0)
     SCHOLAR_QUERY_CACHE_TTL_SECONDS: int = Field(default=600, gt=0)
     SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS: int = Field(default=900, gt=0)
     SCHOLAR_PAPER_CACHE_TTL_SECONDS: int = Field(default=86400, gt=0)
@@ -59,6 +70,14 @@ def _run_async(coroutine):
 
 
 def load_settings() -> AppSettings:
+    from scholar.core.config.bootstrap_settings import SERVICE_ROOT, bootstrap_settings
+
+    if not bootstrap_settings.NACOS_ENABLED:
+        import os
+
+        from dotenv import dotenv_values
+
+        return AppSettings(**{**dotenv_values(SERVICE_ROOT / ".env"), **os.environ})
     return AppSettings(**yaml.safe_load(_run_async(nacos_client_manager.pull_config())))
 
 

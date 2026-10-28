@@ -1,24 +1,19 @@
-"""HTTP 应用工厂；配置加载和客户端生命周期由 main 管理。"""
+"""Scholar 外部失败的 HTTP 映射；应用和路由统一在 main 装配。"""
 
 from common.core.domain import R, ResultCode
 from common.core.exceptions import ServiceException
 from common.web.exception_handlers import setup_global_exception_handlers
-from common.web.middleware import SecurityHeaderMiddleware
 from elastic_transport import TransportError
 from elasticsearch import ApiError
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
 
-from scholar.api.router import api_router
 from scholar.domain.interfaces.provider_error import ProviderError
 
 
-def create_app(*, from_source_secret: str, lifespan=None) -> FastAPI:
-    app = FastAPI(title="WisePen Scholar Service", lifespan=lifespan)
-    app.add_middleware(SecurityHeaderMiddleware, from_source_secret=from_source_secret)
+def setup_exception_handlers(app: FastAPI) -> None:
     setup_global_exception_handlers(app)
-    app.include_router(api_router, prefix="/scholar")
 
     @app.exception_handler(ServiceException)
     async def business_error(request: Request, exc: ServiceException):
@@ -48,5 +43,3 @@ def create_app(*, from_source_secret: str, lifespan=None) -> FastAPI:
                 "data": None,
             },
         )
-
-    return app

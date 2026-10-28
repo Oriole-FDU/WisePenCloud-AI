@@ -1,15 +1,11 @@
 [Unit]
-Description=WisePen Scholar offline daily synchronization
-After=docker.service network-online.target
-Requires=docker.service
+Description=WisePen Scholar daily arXiv OAI and S2 API synchronization
+After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/wisepen-cloud-ai
 EnvironmentFile=/etc/wisepen/scholar-sync.env
-# 两次调用使用同一持久卷，逐项发布完成后才推进各自的同步游标。
-ExecStart=/usr/bin/docker compose -f docker-compose-app.yml run --rm --no-deps scholar-service python -m scholar.etl.cli sync-arxiv
-ExecStart=/usr/bin/docker compose -f docker-compose-app.yml run --rm --no-deps scholar-service python -m scholar.etl.cli sync-s2 --base-release ${SCHOLAR_S2_BASE_RELEASE}
+ExecStart=/usr/local/bin/uv run --no-sync python services/wisepen-scholar-service/deploy/run.py sync-arxiv
 TimeoutStartSec=infinity
-

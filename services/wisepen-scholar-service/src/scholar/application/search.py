@@ -50,12 +50,11 @@ class SearchResult:
 
 @dataclass
 class SearchBinding:
-    """能力注册同时声明用户凭证前提与来源覆盖说明。"""
+    """注册来源能力及结果缓存版本。"""
 
     searcher: PaperSearcher
-    requires_api_key: bool = False
-    coverage: str = ""
-    cache_revision: str = "1"
+    cache_revision: str = "2"
+    candidate_limit: int = 100
 
 
 class PaperSearchService:
@@ -65,7 +64,9 @@ class PaperSearchService:
         policies: dict[AcademicField, FieldPolicy],
         query_cache: QueryCacheRepository,
         enrichment: EnrichmentRunner,
+        platform_credentials: dict[str, str] | None = None,
     ):
+        self.platform_credentials = platform_credentials or {}
         self.searchers = searchers
         self.policies = policies
         self.query_cache = query_cache
@@ -78,7 +79,7 @@ class PaperSearchService:
         credentials: dict[str, str] | None = None,
         user_id: str | None = None,
     ) -> SearchResult:
-        credentials = credentials or {}
+        credentials = self.platform_credentials | (credentials or {})
         policy = self.policies[query.field]
         plan = policy.searchers
         if query.source_scope == SourceScope.MULTI_SOURCE:
@@ -114,7 +115,6 @@ class PaperSearchService:
                     SourceExecution(
                         source,
                         False,
-                        self.searchers[source].coverage,
                         SourceExecutionStatus.FAILED,
                         str(result),
                     )
@@ -157,24 +157,27 @@ class PaperSearchService:
     ) -> tuple[list[Paper], SourceExecution]:
         binding = self.searchers[source]
         cache_key = self._cache_key(source, binding, query, api_key, user_id)
-        if cache_key is not None:
-            cached = await self.query_cache.get(cache_key)
-            if cached is not None:
-                return cached, SourceExecution(source, True, binding.coverage)
+        cached = await self.query_cache.get(cache_key)
+        if cached is not None:
+            return cached, SourceExecution(source, True)
+        # 缓存来源的一批候选；用户 limit 只在融合/返回时裁剪，避免改数量重新请求上游。
         batch = await binding.searcher.search(
             query=query.query,
             field=query.field,
             published_after=query.published_after,
             published_before=query.published_before,
-            limit=query.limit,
+            limit=binding.candidate_limit,
             api_key=api_key,
         )
         # 降级结果仍可返回，但不缓存为完整检索，避免编码恢复后继续命中旧降级结果。
-        if cache_key is not None and batch.partial_error is None:
+        if batch.partial_error is None:
             await self.query_cache.put(cache_key, batch.papers)
         return batch.papers, SourceExecution(
-            source, False, binding.coverage,
-            SourceExecutionStatus.PARTIAL if batch.partial_error else SourceExecutionStatus.COMPLETED,
+            source,
+            False,
+            SourceExecutionStatus.PARTIAL
+            if batch.partial_error
+            else SourceExecutionStatus.COMPLETED,
             batch.partial_error,
         )
 
@@ -185,9 +188,7 @@ class PaperSearchService:
         query: PaperSearch,
         api_key: str | None,
         user_id: str | None,
-    ) -> str | None:
-        if binding.requires_api_key and (user_id is None or api_key is None):
-            return None
+    ) -> str:
         identity = {
             "source": source,
             "revision": binding.cache_revision,
@@ -199,9 +200,9 @@ class PaperSearchService:
             "published_before": None
             if query.published_before is None
             else query.published_before.isoformat(),
-            "limit": query.limit,
+            "candidates": binding.candidate_limit,
         }
-        if binding.requires_api_key:
+        if api_key:
             identity["user_id"] = user_id
             identity["credential_fingerprint"] = hashlib.sha256(
                 api_key.encode()

@@ -9,6 +9,7 @@ from common.logger import warn
 from elastic_transport import ApiError, ConnectionError, ConnectionTimeout
 from elasticsearch import AsyncElasticsearch
 
+from scholar.core.embedding_runtime import DIMENSIONS, MODEL_SIGNATURE
 from scholar.domain.interfaces.provider_error import (
     ProviderError,
     provider_error_message,
@@ -21,6 +22,7 @@ from scholar.domain.repositories.paper_repository import (
 
 ARXIV_MAPPING = {
     "dynamic": "strict",
+    "_meta": {"embedding_signature": MODEL_SIGNATURE},
     "properties": {
         **{
             field: {"type": "keyword"}
@@ -75,6 +77,27 @@ ARXIV_MAPPING = {
     },
 }
 
+# 标题正文在两个 arXiv 写入入口均已归并空白；keyword normalizer 负责大小写。
+ARXIV_MAPPING["properties"]["title"]["fields"]["exact"] = {
+    "type": "keyword",
+    "normalizer": "scholar_title",
+    "ignore_above": 8191,
+}
+ARXIV_MAPPING["properties"]["embedding"] = {
+    "type": "dense_vector",
+    "dims": DIMENSIONS,
+    "index": True,
+    "similarity": "l2_norm",
+    "index_options": {"type": "int8_hnsw", "m": 16, "ef_construction": 100},
+}
+ARXIV_INDEX_SETTINGS = {
+    "analysis": {
+        "normalizer": {
+            "scholar_title": {"type": "custom", "filter": ["lowercase"]},
+        }
+    }
+}
+
 
 def create_elasticsearch(
     uris: str, username: str, password: str, timeout: float
@@ -98,7 +121,11 @@ def create_elasticsearch(
 class ElasticsearchPaperRepository:
     """本地全文召回和精确身份查询；不包含来源路由和缓存策略。"""
 
-    def __init__(self, es: AsyncElasticsearch, alias: str):
+    def __init__(
+        self,
+        es: AsyncElasticsearch,
+        alias: str,
+    ):
         self.es, self.alias = es, alias
 
     async def search(
@@ -110,6 +137,93 @@ class ElasticsearchPaperRepository:
         published_before: date | None,
         limit: int,
     ) -> list[Paper]:
+        fields = [
+            ("title", 3),
+            ("metadata.s2.tldr.text", 2),
+            ("abstract", 1),
+        ]
+        response = await self.es.search(
+            index=self.alias,
+            size=limit,
+            track_total_hits=False,
+            source_excludes=["embedding"],
+            query={
+                "bool": {
+                    # 每个逻辑字段只选原形/词干中的最高分；字段之间也不直接累加。
+                    "must": [
+                        {
+                            "dis_max": {
+                                "queries": [
+                                    {
+                                        "multi_match": {
+                                            "query": query,
+                                            "fields": [f"{field}.en", field],
+                                            "type": "best_fields",
+                                            "operator": "or",
+                                            "tie_breaker": 0,
+                                            "boost": weight,
+                                        }
+                                    }
+                                    for field, weight in fields
+                                ],
+                                "tie_breaker": 0.1,
+                            }
+                        }
+                    ],
+                    "should": [
+                        {
+                            "term": {
+                                "title.exact": {
+                                    "value": " ".join(query.split()).lower(),
+                                    "boost": 8,
+                                }
+                            }
+                        },
+                        {
+                            "match_phrase": {
+                                "title": {
+                                    "query": query,
+                                    "boost": 4,
+                                }
+                            }
+                        },
+                    ],
+                    "filter": self._filters(
+                        categories, published_after, published_before
+                    ),
+                }
+            },
+        )
+        return [self._to_paper(hit["_source"]) for hit in response["hits"]["hits"]]
+
+    async def search_vector(
+        self,
+        *,
+        vector: list[float],
+        categories: list[str],
+        published_after: date | None,
+        published_before: date | None,
+        limit: int,
+        num_candidates: int = 1000,
+    ) -> list[Paper]:
+        response = await self.es.search(
+            index=self.alias,
+            size=limit,
+            track_total_hits=False,
+            source_excludes=["embedding"],
+            knn={
+                "field": "embedding",
+                "query_vector": vector,
+                "k": limit,
+                "num_candidates": num_candidates,
+                # 必须是 kNN 预过滤；事后过滤会使有资格的候选提前被截断。
+                "filter": self._filters(categories, published_after, published_before),
+            },
+        )
+        return [self._to_paper(hit["_source"]) for hit in response["hits"]["hits"]]
+
+    @staticmethod
+    def _filters(categories, published_after, published_before):
         filters = []
         if categories:
             filters.append(
@@ -126,62 +240,13 @@ class ElasticsearchPaperRepository:
                 }
             )
         bounds = {}
-        if published_after:
+        if published_after is not None:
             bounds["gte"] = published_after.isoformat()
-        if published_before:
+        if published_before is not None:
             bounds["lte"] = published_before.isoformat()
         if bounds:
             filters.append({"range": {"submitted_date": bounds}})
-        response = await self.es.search(
-            index=self.alias,
-            size=limit,
-            track_total_hits=False,
-            query={
-                "bool": {
-                    "must": [
-                        {
-                            # BM25F 近似按词跨字段匹配，允许标题与摘要共同满足命中门槛。
-                            # 三个字段使用相同的 english analyzer，门槛不计英语停用词。
-                            "combined_fields": {
-                                "query": query,
-                                "fields": [
-                                    "title.en^3",
-                                    "metadata.s2.tldr.text.en^2",
-                                    "abstract.en",
-                                ],
-                                "minimum_should_match": "2<70%",
-                            }
-                        }
-                    ],
-                    # 原词形与短语只调整已召回论文的分数，不扩大召回或引入作者名命中。
-                    "should": [
-                        {
-                            "multi_match": {
-                                "query": query,
-                                "type": "most_fields",
-                                "fields": [
-                                    "title",
-                                    "metadata.s2.tldr.text^0.5",
-                                    "abstract^0.3",
-                                ],
-                            }
-                        },
-                        {"match_phrase": {"title.en": {"query": query, "boost": 2}}},
-                        {
-                            "match_phrase": {
-                                "abstract.en": {
-                                    "query": query,
-                                    "slop": 2,
-                                    "boost": 0.5,
-                                }
-                            }
-                        },
-                    ],
-                    "filter": filters,
-                }
-            },
-        )
-        return [self._to_paper(hit["_source"]) for hit in response["hits"]["hits"]]
+        return filters
 
     async def lookup(
         self, identifiers: list[PaperIdentifier]
@@ -194,7 +259,11 @@ class ElasticsearchPaperRepository:
             searches.extend(
                 [
                     {"index": self.alias},
-                    {"size": 2, "query": {"term": {field: identifier.value}}},
+                    {
+                        "size": 2,
+                        "_source": {"excludes": ["embedding"]},
+                        "query": {"term": {field: identifier.value}},
+                    },
                 ]
             )
         try:

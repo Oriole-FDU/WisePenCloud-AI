@@ -1,5 +1,7 @@
 """协调 OAI 基础事实、S2 待补充记录、缓存失效及整轮发布游标。"""
 
+from __future__ import annotations
+
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date
@@ -9,8 +11,8 @@ from xml.etree import ElementTree as ET
 
 import duckdb
 import orjson
-
-from scholar.domain.interfaces.paper_enricher import PaperEnricher, PaperEnrichment
+from scholar.core.embedding_runtime import MODEL_SIGNATURE
+from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.models.identifiers import (
     IdentifierKind,
     PaperIdentifier,
@@ -18,7 +20,10 @@ from scholar.domain.models.identifiers import (
     normalize_doi,
 )
 from scholar.domain.repositories.paper_enrichment_cache import PaperEnrichmentCache
-from scholar.etl.arxiv_oai import INITIAL_FROM, ArxivOaiHarvest, ArxivOaiRecord
+
+from offline.arxiv_oai import INITIAL_FROM, ArxivOaiHarvest, ArxivOaiRecord
+from offline.embeddings import INPUT_HASH_SQL, reconcile_embeddings
+from offline.s2_api import S2SyncClient
 
 _RAW_NS = "http://arxiv.org/OAI/arXivRaw/"
 
@@ -37,6 +42,7 @@ class _PendingS2Reason(StrEnum):
     NEW_PAPER = "new_paper"
     IDENTITY_CHANGED = "identity_changed"
     CORE_MISSING = "core_missing"
+    UPDATED_PAPER = "updated_paper"
 
 
 @dataclass
@@ -229,6 +235,8 @@ def _apply_deletion(
         else [PaperIdentifier(IdentifierKind.ARXIV, arxiv_id)]
     )
     db.execute("DELETE FROM arxiv WHERE arxiv_id=?", [arxiv_id])
+    db.execute("DELETE FROM paper_embeddings WHERE arxiv_id=?", [arxiv_id])
+    db.execute("DELETE FROM pending_embeddings WHERE arxiv_id=?", [arxiv_id])
     db.execute("DELETE FROM pending_publish WHERE arxiv_id=?", [arxiv_id])
     db.execute("DELETE FROM pending_s2 WHERE arxiv_id=?", [arxiv_id])
     db.execute(
@@ -307,6 +315,7 @@ def _apply_projection(
             orjson.dumps(document).decode(),
         ],
     )
+    reconcile_embeddings(db, [projection.arxiv_id])
     db.execute("DELETE FROM pending_delete WHERE arxiv_id=?", [projection.arxiv_id])
     if document != old_document:
         db.execute(
@@ -314,21 +323,26 @@ def _apply_projection(
             [projection.arxiv_id],
         )
 
-    if _core_s2_missing(document):
+    needs_vector = (
+        db.execute(
+            "SELECT 1 FROM pending_embeddings WHERE arxiv_id=?", [projection.arxiv_id]
+        ).fetchone()
+        is not None
+    )
+    if document != old_document or _core_s2_missing(document) or needs_vector:
         reason = (
             _PendingS2Reason.NEW_PAPER
             if row is None
             else _PendingS2Reason.IDENTITY_CHANGED
             if identity_changed
-            else _PendingS2Reason.CORE_MISSING
+            else _PendingS2Reason.UPDATED_PAPER
         )
         db.execute(
             """INSERT OR REPLACE INTO pending_s2(arxiv_id, reason)
             VALUES (?, ?)""",
             [projection.arxiv_id, reason.value],
         )
-    else:
-        db.execute("DELETE FROM pending_s2 WHERE arxiv_id=?", [projection.arxiv_id])
+    # 已排队的刷新由 S2 成功提交后移除；OAI 重放不能因旧信号齐全而丢弃待办。
 
     aliases = old_aliases + _identity_aliases(
         projection.arxiv_id, projection.doi, document
@@ -433,7 +447,7 @@ def _enrichment_conflicts(
 
 async def _enrich_pending(
     db: duckdb.DuckDBPyConnection,
-    enricher: PaperEnricher,
+    enricher: S2SyncClient,
     *,
     batch_size: int,
     response_date: str,
@@ -443,22 +457,9 @@ async def _enrich_pending(
         FROM pending_s2 p JOIN arxiv a USING(arxiv_id)
         ORDER BY a.arxiv_id
     """).fetchall()
-    pending = []
-    completed = []
-    for arxiv_id, doi, raw_document in rows:
-        document = orjson.loads(raw_document)
-        (pending if _core_s2_missing(document) else completed).append(
-            (arxiv_id, doi, document)
-        )
-    if completed:
-        db.begin()
-        try:
-            for arxiv_id, _, _ in completed:
-                db.execute("DELETE FROM pending_s2 WHERE arxiv_id=?", [arxiv_id])
-            db.commit()
-        except BaseException:
-            db.rollback()
-            raise
+    pending = [
+        (arxiv_id, doi, orjson.loads(document)) for arxiv_id, doi, document in rows
+    ]
 
     requested = 0
     enriched = 0
@@ -466,7 +467,8 @@ async def _enrich_pending(
     for offset in range(0, len(pending), batch_size):
         batch = pending[offset : offset + batch_size]
         identifiers = [PaperIdentifier(IdentifierKind.ARXIV, item[0]) for item in batch]
-        responses = await enricher.enrich(identifiers, include_details=False)
+        synced = await enricher.enrich(identifiers)
+        responses = [None if item is None else item.enrichment for item in synced]
         requested += len(identifiers)
         corpus_owners: dict[str, set[str]] = {}
         for (arxiv_id, _, _), response in zip(batch, responses, strict=True):
@@ -481,8 +483,8 @@ async def _enrich_pending(
             corpus_id for corpus_id, owners in corpus_owners.items() if len(owners) > 1
         }
 
-        for (arxiv_id, doi, old_document), response in zip(
-            batch, responses, strict=True
+        for (arxiv_id, doi, old_document), sync_result, response in zip(
+            batch, synced, responses, strict=True
         ):
             if response is None:
                 continue
@@ -521,7 +523,27 @@ async def _enrich_pending(
                         "INSERT OR IGNORE INTO pending_publish(arxiv_id) VALUES (?)",
                         [arxiv_id],
                     )
-                if _core_s2_missing(document):
+                # 向量和元数据同事务提交；未找到向量时保留待办，下一轮调用 S2 重试，不启动 GPU。
+                if sync_result.vector is not None:
+                    db.execute(
+                        f"""INSERT OR REPLACE INTO paper_embeddings
+                        SELECT a.arxiv_id, ?, {INPUT_HASH_SQL}, ?::FLOAT[768]
+                        FROM arxiv a WHERE a.arxiv_id=?""",
+                        [MODEL_SIGNATURE, sync_result.vector, arxiv_id],
+                    )
+                    db.execute(
+                        "DELETE FROM pending_embeddings WHERE arxiv_id=?", [arxiv_id]
+                    )
+                    db.execute(
+                        "INSERT OR IGNORE INTO pending_publish VALUES (?)", [arxiv_id]
+                    )
+                needs_vector = (
+                    db.execute(
+                        "SELECT 1 FROM pending_embeddings WHERE arxiv_id=?", [arxiv_id]
+                    ).fetchone()
+                    is not None
+                )
+                if _core_s2_missing(document) or needs_vector:
                     db.execute(
                         """INSERT OR REPLACE INTO pending_s2(arxiv_id, reason)
                         VALUES (?, ?)""",
@@ -547,7 +569,7 @@ async def _enrich_pending(
 async def sync_arxiv(
     db: duckdb.DuckDBPyConnection,
     harvester,
-    enricher: PaperEnricher,
+    enricher: S2SyncClient,
     *,
     from_date: str | None = None,
     batch_size: int = 100,

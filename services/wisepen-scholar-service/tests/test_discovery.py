@@ -3,10 +3,9 @@ from datetime import UTC, date, datetime
 
 import orjson
 import pytest
+import scholar.application.discovery as discovery_module
 from common.core.exceptions import ServiceException
 from pydantic import ValidationError
-
-import scholar.application.discovery as discovery_module
 from scholar.api.schemas.papers import DiscoveryRequest
 from scholar.application.discovery import PaperDiscoveryQuery, PaperDiscoveryService
 from scholar.application.field_policies import FieldPolicy
@@ -42,7 +41,7 @@ class FakeDiscoverer:
         self.outcomes = list(outcomes)
         self.calls = []
 
-    async def discover(self, *, period, sort, limit):
+    async def discover(self, *, period, sort, limit, api_key=None):
         self.calls.append((period, sort, limit))
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, BaseException):
@@ -123,7 +122,7 @@ async def test_configured_policy_routes_and_returns_actual_window(monkeypatch):
         date(2026, 10, 27),
         date(2026, 10, 27),
     )
-    assert channel.calls == [(DiscoveryPeriod.DAILY, DiscoverySort.RECENT, 1)]
+    assert channel.calls == [(DiscoveryPeriod.DAILY, DiscoverySort.RECENT, 100)]
     assert result.execution[0].source == "configured-channel"
     assert result.execution[0].cache_hit is False
     assert result.execution[0].status == SourceExecutionStatus.COMPLETED
@@ -277,9 +276,7 @@ async def test_missing_discovery_capability_fails_before_cache_read(
     )
     service = PaperDiscoveryService(
         discoverers=discoverers,
-        policies={
-            field: FieldPolicy(searchers=[], discoverer=registered_source)
-        },
+        policies={field: FieldPolicy(searchers=[], discoverer=registered_source)},
         cache=cache,
     )
 
@@ -344,3 +341,37 @@ def test_discovery_request_schema_has_only_registered_field_and_no_query():
         DiscoveryRequest.model_validate(
             {"field": "computer_science", "query": "not part of discovery"}
         )
+
+
+@pytest.mark.asyncio
+async def test_discovery_candidate_cache_reused_across_limits_and_credentials():
+    papers = [make_paper(f"2401.{index:05d}") for index in range(10)]
+    channel = FakeDiscoverer(
+        PaperDiscovery(papers, None, None), PaperDiscovery(papers, None, None)
+    )
+    cache = FakeDiscoveryCache()
+    service = PaperDiscoveryService(
+        {"huggingface": channel},
+        {
+            AcademicField.COMPUTER_SCIENCE: FieldPolicy(
+                searchers=[], discoverer="huggingface"
+            )
+        },
+        cache,
+        platform_credentials={"huggingface": "platform"},
+    )
+    small = await service.discover(
+        PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE, limit=2)
+    )
+    larger = await service.discover(
+        PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE, limit=8)
+    )
+    assert len(small.papers) == 2
+    assert len(larger.papers) == 8
+    assert larger.execution[0].cache_hit
+    assert len(channel.calls) == 1
+    await service.discover(
+        PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE),
+        credentials={"huggingface": "user"},
+    )
+    assert len(channel.calls) == 2

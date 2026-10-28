@@ -6,9 +6,8 @@ import os
 import duckdb
 import orjson
 import pytest
-
-from scholar.etl.arxiv import open_database
-from scholar.etl.s2 import apply_s2_projection, import_s2
+from offline.arxiv import open_database
+from offline.s2 import apply_s2_projection, import_s2
 
 
 def _write_gzip(path, records):

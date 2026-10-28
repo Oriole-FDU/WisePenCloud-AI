@@ -29,16 +29,24 @@ async def search(
         float, Depends(Provide[Container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS])
     ],
     x_openalex_api_key: Annotated[
-        str | None, Header(alias="X-OpenAlex-Api-Key")  # noqa: FA102 - @inject needs runtime Annotated metadata.
+        str | None, Header(alias="X-OpenAlex-Api-Key")
+    ] = None,
+    x_huggingface_api_key: Annotated[
+        str | None, Header(alias="X-HuggingFace-Api-Key")
     ] = None,
 ) -> R[SearchResult]:
     async with asyncio.timeout(timeout):
         return R.success(
             await service.search(
                 request.to_query(),
-                credentials={PaperSource.OPENALEX: x_openalex_api_key}
-                if x_openalex_api_key
-                else {},
+                credentials={
+                    key: value
+                    for key, value in {
+                        PaperSource.OPENALEX: x_openalex_api_key,
+                        PaperSource.HUGGINGFACE: x_huggingface_api_key,
+                    }.items()
+                    if value
+                },
                 user_id=SecurityContextHolder.get_user_id(),
             )
         )
@@ -55,12 +63,21 @@ async def lookup(
         float, Depends(Provide[Container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS])
     ],
     x_openalex_api_key: Annotated[
-        str | None, Header(alias="X-OpenAlex-Api-Key")  # noqa: FA102 - @inject needs runtime Annotated metadata.
+        str | None, Header(alias="X-OpenAlex-Api-Key")
+    ] = None,
+    x_huggingface_api_key: Annotated[
+        str | None, Header(alias="X-HuggingFace-Api-Key")
     ] = None,
 ) -> R[LookupResult]:
     async with asyncio.timeout(timeout):
         return R.success(
-            await service.lookup(request.to_query(), api_key=x_openalex_api_key)
+            await service.lookup(
+                request.to_query(),
+                api_key=x_openalex_api_key,
+                credentials={PaperSource.HUGGINGFACE: x_huggingface_api_key}
+                if x_huggingface_api_key
+                else {},
+            )
         )
 
 
@@ -74,6 +91,16 @@ async def discover(
     timeout: Annotated[
         float, Depends(Provide[Container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS])
     ],
+    x_huggingface_api_key: Annotated[
+        str | None, Header(alias="X-HuggingFace-Api-Key")
+    ] = None,
 ) -> R[DiscoveryResult]:
     async with asyncio.timeout(timeout):
-        return R.success(await service.discover(request.to_query()))
+        return R.success(
+            await service.discover(
+                request.to_query(),
+                credentials={PaperSource.HUGGINGFACE: x_huggingface_api_key}
+                if x_huggingface_api_key
+                else {},
+            )
+        )

@@ -9,19 +9,36 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 import duckdb
+from common.utils.ai_clients.embedding import EmbeddingClient
 from elastic_transport import ConnectionError, ConnectionTimeout
+from offline.embeddings import (
+    EMBEDDING_SCHEMA,
+    document_worker,
+    generate_embeddings,
+    publish_embeddings,
+)
+from openai import AsyncOpenAI
 from redis.asyncio import Redis
-
+from scholar.core.embedding_runtime import (
+    DEFAULT_MODELS,
+    DIMENSIONS,
+    MODEL_SIGNATURE,
+    QUERY_MODEL,
+)
 from scholar.core.storage.elasticsearch.paper_repository import (
+    ARXIV_INDEX_SETTINGS,
     ARXIV_MAPPING,
     ElasticsearchPaperRepository,
     create_elasticsearch,
 )
+from scholar.domain.models.fields import AcademicField
+from scholar.providers.arxiv import ArxivProvider
 
 
 def record(path: Path, state: dict, stage: str, **progress) -> None:
@@ -47,7 +64,9 @@ async def rollback(db, es, state: dict) -> None:
         )
     # 取消尚在执行的后台复制；目标索引保留，便于定位真实失败。
     if state.get("task_id"):
-        task = await es.tasks.get(task_id=state["task_id"])
+        task = await es.options(max_retries=3, retry_on_timeout=True).tasks.get(
+            task_id=state["task_id"]
+        )
         if not task["completed"]:
             await es.tasks.cancel(task_id=state["task_id"])
     if current == {new}:
@@ -70,8 +89,13 @@ async def migrate(
     *,
     poll_seconds: float = 15,
     resume: bool = False,
+    gpu_python: Path | None = None,
+    models: Path = DEFAULT_MODELS,
+    embedding_client: EmbeddingClient | None = None,
 ) -> dict:
     """复制期间服务仍可读旧索引；全部验收通过才执行短暂的双目标切换。"""
+    if embedding_client is None:
+        raise ValueError("hybrid migration requires a query embedding client")
     if journal.exists() and not resume:
         raise FileExistsError(
             f"journal already exists; use --resume or --rollback: {journal}"
@@ -120,6 +144,11 @@ async def migrate(
             "new_index": f"{alias}-{uuid4().hex}",
         }
         record(journal, state, "migration_prepare")
+    # journal 保存创建前设置，resume 不从被冻结的源重新推断恢复参数。
+    if not resume:
+        state["original_settings"] = original
+    restore_settings = state.get("original_settings", original)
+    db.execute(EMBEDDING_SCHEMA)
     try:
         # 恢复时重新取得本地写锁并核对冻结源，复用原任务，不重建或覆盖目标索引。
         if not resume:
@@ -136,6 +165,7 @@ async def migrate(
                 index=new,
                 mappings=ARXIV_MAPPING,
                 settings={
+                    **ARXIV_INDEX_SETTINGS,
                     "number_of_shards": original["index.number_of_shards"],
                     "number_of_replicas": 0,
                     "refresh_interval": "-1",
@@ -156,7 +186,9 @@ async def migrate(
             written=state.get("written", 0),
         )
         while True:
-            task = await es.tasks.get(task_id=state["task_id"])
+            task = await es.options(max_retries=3, retry_on_timeout=True).tasks.get(
+                task_id=state["task_id"]
+            )
             if task["completed"]:
                 if "error" in task:
                     raise RuntimeError(f"reindex failed: {task['error']}")
@@ -177,12 +209,29 @@ async def migrate(
             )
             await asyncio.sleep(poll_seconds)
 
+        def embedding_progress(event):
+            stage = event.pop("stage")
+            record(journal, state, stage, **event)
+
+        record(journal, state, "embedding_prepare", total=total)
+        # 本地向量可独立恢复；迁移期间只向 staging 写，不向旧线上索引排发布任务。
+        if gpu_python is None:
+            raise ValueError(
+                "hybrid migration requires an explicit GPU Python interpreter"
+            )
+        async with document_worker(gpu_python, models) as worker:
+            await generate_embeddings(
+                db, worker, progress=embedding_progress, mark_publish=False
+            )
+        await publish_embeddings(db, es, new, state, embedding_progress)
         record(journal, state, "migration_verify", written=total)
         await es.indices.put_settings(
             index=new,
             settings={
-                "refresh_interval": original.get("index.refresh_interval", "1s"),
-                "number_of_replicas": original["index.number_of_replicas"],
+                "refresh_interval": restore_settings.get(
+                    "index.refresh_interval", "1s"
+                ),
+                "number_of_replicas": restore_settings["index.number_of_replicas"],
             },
         )
         await es.indices.refresh(index=new)
@@ -194,6 +243,16 @@ async def migrate(
         if (await es.count(index=new))["count"] != total:
             raise RuntimeError(
                 "new index count differs from the offline paper database"
+            )
+        vector_count = (
+            await es.count(index=new, query={"exists": {"field": "embedding"}})
+        )["count"]
+        if vector_count != total:
+            raise RuntimeError(f"vector coverage incomplete: {vector_count}/{total}")
+        mapping = (await es.indices.get_mapping(index=new))[new]["mappings"]
+        if mapping["_meta"]["embedding_signature"] != MODEL_SIGNATURE:
+            raise RuntimeError(
+                "staging embedding model signature differs from query model"
             )
         # 检查附加事实完整性；reindex 的成功项数及统一 mapping 证明每个源文档均重新分析。
         facts = {}
@@ -207,10 +266,16 @@ async def migrate(
                 )
             facts[field] = after
         sample = await es.search(
-            index=old, size=3, sort=["arxiv_id"], query={"match_all": {}}
+            index=old,
+            size=3,
+            sort=["arxiv_id"],
+            source_excludes=["embedding"],
+            query={"match_all": {}},
         )
         hits = sample["hits"]["hits"]
-        copied = await es.mget(index=new, ids=[hit["_id"] for hit in hits])
+        copied = await es.mget(
+            index=new, ids=[hit["_id"] for hit in hits], source_excludes=["embedding"]
+        )
         for hit, item in zip(hits, copied["docs"], strict=True):
             if not item["found"] or item["_source"] != hit["_source"]:
                 raise RuntimeError("sample paper facts changed during reindex")
@@ -225,6 +290,25 @@ async def migrate(
         )
         if not papers:
             raise RuntimeError("new BM25F search returned no language-model papers")
+        provider = ArxivProvider(repo, embedding_client)
+        rankings = {}
+        for query, expected, cutoff in (
+            ("DeepSeek-R1", "2501.12948", 5),
+            ("Attention Is All You Need", "1706.03762", 1),
+        ):
+            result = await provider.search(
+                query=query,
+                field=AcademicField.COMPUTER_SCIENCE,
+                published_after=None,
+                published_before=None,
+                limit=10,
+            )
+            ids = [paper.arxiv_id for paper in result.papers]
+            rankings[query] = ids
+            if result.partial_error or expected not in ids[:cutoff]:
+                raise RuntimeError(
+                    f"hybrid acceptance failed for {query}: {ids}; {result.partial_error}"
+                )
         record(
             journal,
             state,
@@ -232,6 +316,9 @@ async def migrate(
             facts=facts,
             sample_ids=[hit["_id"] for hit in hits],
             search_titles=[p.title for p in papers],
+            vector_count=vector_count,
+            model_signature=MODEL_SIGNATURE,
+            rankings=rankings,
         )
         # DuckDB 写锁在整个过程中保持；异常时用 journal 恢复两端，旧索引从不删除。
         await es.indices.update_aliases(
@@ -260,7 +347,21 @@ async def migrate(
         # 复制/验收期断网并不代表 ES 任务失败；保留写屏障和任务，避免误取消后台成果。
         if isinstance(failure, (ConnectionError, ConnectionTimeout)) and state[
             "stage"
-        ] in ("migration_prepare", "migration_copy", "migration_verify"):
+        ] in (
+            "migration_prepare",
+            "migration_copy",
+            "migration_verify",
+            "embedding_prepare",
+            "embedding_encode",
+            "embedding_publish",
+        ):
+            record(journal, state, "migration_paused", error=str(failure))
+            raise
+        if state["stage"] in (
+            "embedding_prepare",
+            "embedding_encode",
+            "embedding_publish",
+        ):
             record(journal, state, "migration_paused", error=str(failure))
             raise
         # 校验或切换失败仍回滚；恢复也失败时同时报告，禁止伪称恢复完成。
@@ -281,7 +382,7 @@ async def migrate(
 
 async def main() -> None:
     from scholar.core.config.app_settings import settings
-    from scholar.core.config.bootstrap_settings import SERVICE_ROOT
+    from scholar.core.config.bootstrap_settings import SERVICE_ROOT, bootstrap_settings
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -290,7 +391,15 @@ async def main() -> None:
     parser.add_argument(
         "--journal",
         type=Path,
-        default=SERVICE_ROOT / ".runtime/search-index-migration.json",
+        default=SERVICE_ROOT / ".runtime/hybrid-index-migration.json",
+    )
+    parser.add_argument(
+        "--gpu-python", type=Path, default=Path(settings.SCHOLAR_EMBEDDING_GPU_PYTHON)
+    )
+    parser.add_argument(
+        "--models",
+        type=Path,
+        default=Path(settings.SCHOLAR_EMBEDDING_MODELS_PATH or DEFAULT_MODELS),
     )
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--rollback", action="store_true")
@@ -310,12 +419,51 @@ async def main() -> None:
                 180,
             ) as es,
             Redis.from_url(settings.REDIS_URL) as redis,
+            AsyncOpenAI(
+                api_key="local",
+                base_url=f"http://127.0.0.1:{bootstrap_settings.SERVICE_PORT}/v1",
+                default_headers={"X-From-Source": settings.FROM_SOURCE_SECRET},
+                timeout=settings.SCHOLAR_EMBEDDING_TIMEOUT_SECONDS,
+                max_retries=0,
+            ) as embedding_api,
         ):
             if args.rollback:
                 state = json.loads(args.journal.read_text(encoding="utf-8"))
                 await rollback(db, es, state)
                 record(args.journal, state, "migration_rolled_back", committed=False)
             else:
+                if not args.resume:
+                    version = tuple(
+                        int(part)
+                        for part in (await es.info())["version"]["number"].split(".")[
+                            :2
+                        ]
+                    )
+                    if not (8, 17) <= version < (9, 0):
+                        raise RuntimeError(
+                            "hybrid migration requires Elasticsearch 8.17 through 8.x"
+                        )
+                    count = db.execute("SELECT count(*) FROM arxiv").fetchone()[0]
+                    # 派生表约 float32×768；ES 同时保留旧/新索引及原始/量化向量。
+                    local_required = count * 768 * 4 * 2
+                    if shutil.disk_usage(args.db.parent).free < local_required:
+                        raise RuntimeError(
+                            f"insufficient local disk space; need at least {local_required} bytes free"
+                        )
+                    index = db.execute(
+                        "SELECT target_index FROM import_state"
+                    ).fetchone()[0]
+                    store = (await es.indices.stats(index=index, metric="store"))[
+                        "_all"
+                    ]["primaries"]["store"]["size_in_bytes"]
+                    nodes = (await es.nodes.stats(metric="fs"))["nodes"].values()
+                    remote_free = max(
+                        node["fs"]["total"]["available_in_bytes"] for node in nodes
+                    )
+                    if remote_free < store + local_required:
+                        raise RuntimeError(
+                            "insufficient Elasticsearch disk space for staging index and vectors"
+                        )
                 await migrate(
                     db,
                     es,
@@ -323,6 +471,11 @@ async def main() -> None:
                     settings.SCHOLAR_INDEX_ALIAS,
                     args.journal,
                     resume=args.resume,
+                    gpu_python=args.gpu_python,
+                    models=args.models,
+                    embedding_client=EmbeddingClient(
+                        embedding_api, model=QUERY_MODEL, dimensions=DIMENSIONS
+                    ),
                 )
 
 

@@ -42,7 +42,7 @@ class HuggingFaceProvider:
         concurrency: int = 4,
     ):
         self.http = http
-        self._headers = {"Authorization": f"Bearer {token}"} if token else {}
+        self._token = token
         self._request_limit = asyncio.Semaphore(concurrency)
 
     async def search(
@@ -60,18 +60,27 @@ class HuggingFaceProvider:
         response = await self._get(
             f"{_HF_ORIGIN}/api/papers/search",
             params={"q": query, "limit": 100 if dated else limit},
+            api_key=api_key,
         )
         observed_at = datetime.now(UTC).isoformat()
         papers = [
-            self._to_paper(row, self._metadata(row, observed_at=observed_at, partial=True))
+            self._to_paper(
+                row, self._metadata(row, observed_at=observed_at, partial=True)
+            )
             for row in response.json()
         ]
         if dated:
             papers = [
-                paper for paper in papers
+                paper
+                for paper in papers
                 if paper.publication_date is not None
-                and (published_after is None or paper.publication_date >= published_after)
-                and (published_before is None or paper.publication_date <= published_before)
+                and (
+                    published_after is None or paper.publication_date >= published_after
+                )
+                and (
+                    published_before is None
+                    or paper.publication_date <= published_before
+                )
             ]
         return PaperSearchBatch(papers[:limit])
 
@@ -84,18 +93,20 @@ class HuggingFaceProvider:
     ) -> list[PaperEnrichment | None]:
         return await asyncio.gather(
             *(
-                self._enrich_one(identifier, include_details=include_details)
+                self._enrich_one(
+                    identifier, include_details=include_details, api_key=api_key
+                )
                 for identifier in identifiers
             )
         )
 
     async def _enrich_one(
-        self, identifier: PaperIdentifier, *, include_details: bool
+        self, identifier: PaperIdentifier, *, include_details: bool, api_key: str | None
     ) -> PaperEnrichment | None:
         if identifier.kind != IdentifierKind.ARXIV:
             return None
 
-        payload = await self._paper_info(identifier.value)
+        payload = await self._paper_info(identifier.value, api_key=api_key)
         if payload is None:
             return None
 
@@ -114,6 +125,7 @@ class HuggingFaceProvider:
         period: DiscoveryPeriod,
         sort: DiscoverySort,
         limit: int,
+        api_key: str | None = None,
     ) -> PaperDiscovery:
         now = datetime.now(UTC)
         params: dict[str, str | int] = {
@@ -137,7 +149,9 @@ class HuggingFaceProvider:
             )
             params["month"] = f"{now.year:04d}-{now.month:02d}"
 
-        response = await self._get(f"{_HF_ORIGIN}/api/daily_papers", params=params)
+        response = await self._get(
+            f"{_HF_ORIGIN}/api/daily_papers", params=params, api_key=api_key
+        )
         rows = response.json()
         observed_at = datetime.now(UTC).isoformat()
         papers = [
@@ -153,9 +167,11 @@ class HuggingFaceProvider:
             window_end=window_end,
         )
 
-    async def _paper_info(self, arxiv_id: str) -> dict[str, Any] | None:
+    async def _paper_info(
+        self, arxiv_id: str, *, api_key: str | None = None
+    ) -> dict[str, Any] | None:
         response = await self._get(
-            f"{_HF_ORIGIN}/api/papers/{arxiv_id}", allow_not_found=True
+            f"{_HF_ORIGIN}/api/papers/{arxiv_id}", allow_not_found=True, api_key=api_key
         )
         if response.status_code == 404:
             return None
@@ -168,12 +184,17 @@ class HuggingFaceProvider:
         *,
         params: dict[str, str | int] | None = None,
         allow_not_found: bool = False,
+        api_key: str | None = None,
     ) -> httpx.Response:
         # 详情 404 是未找到；其他 HTTPX 边界失败保留原文和 cause。
         try:
             async with self._request_limit:
                 response = await self.http.get(
-                    url, params=params, headers=self._headers
+                    url,
+                    params=params,
+                    headers={"Authorization": f"Bearer {api_key or self._token}"}
+                    if (api_key or self._token)
+                    else {},
                 )
             if not allow_not_found or response.status_code != 404:
                 response.raise_for_status()
@@ -186,6 +207,10 @@ class HuggingFaceProvider:
         cls, payload: dict[str, Any], *, observed_at: str, partial: bool = False
     ) -> dict[str, Any]:
         result = {
+            # HF 的 AI 摘要是渠道增量，保留命名空间及模型名，不覆盖论文原摘要。
+            "ai_summary": cls._field(payload, "ai_summary"),
+            "ai_keywords": cls._field(payload, "ai_keywords"),
+            "ai_summary_model": cls._field(payload, "ai_summary_model"),
             "upvotes": cls._field(payload, "upvotes"),
             "github_repo": cls._field(payload, "githubRepo"),
             "github_stars": cls._field(payload, "githubStars"),
@@ -200,6 +225,9 @@ class HuggingFaceProvider:
             # 列表未提供的产物字段仍未查询；详情成功返回的空字段才是确认空事实。
             present = payload.keys() | payload.get("paper", {}).keys()
             for name, upstream in (
+                ("ai_summary", "ai_summary"),
+                ("ai_keywords", "ai_keywords"),
+                ("ai_summary_model", "ai_summary_model"),
                 ("upvotes", "upvotes"),
                 ("github_repo", "githubRepo"),
                 ("github_stars", "githubStars"),

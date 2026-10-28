@@ -2,12 +2,13 @@ from xml.etree import ElementTree as ET
 
 import orjson
 import pytest
+from offline.arxiv import open_database
+from offline.arxiv_oai import ArxivOaiHarvest, ArxivOaiRecord
+from offline.arxiv_sync import sync_arxiv
+from offline.s2_api import S2SyncPaper
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.repositories.paper_enrichment_cache import PaperEnrichmentCache
-from scholar.etl.arxiv import open_database
-from scholar.etl.arxiv_oai import ArxivOaiHarvest, ArxivOaiRecord
-from scholar.etl.arxiv_sync import sync_arxiv
 
 RAW_NS = "http://arxiv.org/OAI/arXivRaw/"
 
@@ -35,7 +36,9 @@ class FakeEnricher:
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
-        return outcome
+        return [
+            None if item is None else S2SyncPaper(item, [0.1] * 768) for item in outcome
+        ]
 
 
 class FakeCache(PaperEnrichmentCache):
@@ -262,7 +265,7 @@ async def test_two_oai_updates_preserve_s2_and_publish_tombstone_and_new_record(
             active_record(new_id, "2026-10-22", doi="10.1234/new"),
         ),
     )
-    enricher = FakeEnricher([None])
+    enricher = FakeEnricher([None], [None, None])
     cache = FakeCache()
     publish, publish_calls = publisher(db)
 
@@ -272,7 +275,16 @@ async def test_two_oai_updates_preserve_s2_and_publish_tombstone_and_new_record(
     assert harvester.from_dates == ["2026-10-18", "2026-10-22"]
     assert first["response_date"] == "2026-10-22T23:50:00Z"
     assert second["response_date"] == "2026-10-23T00:02:00Z"
-    assert enricher.calls == [([PaperIdentifier(IdentifierKind.ARXIV, new_id)], False)]
+    assert enricher.calls == [
+        ([PaperIdentifier(IdentifierKind.ARXIV, keep_id)], False),
+        (
+            [
+                PaperIdentifier(IdentifierKind.ARXIV, keep_id),
+                PaperIdentifier(IdentifierKind.ARXIV, new_id),
+            ],
+            False,
+        ),
+    ]
     updated = document_for(db, keep_id)
     assert updated["title"] == "Changed again"
     assert updated["abstract"] == "Changed abstract"
@@ -458,3 +470,28 @@ async def test_publish_failure_does_not_advance_cursor_and_replays_base_record(d
     assert cursor_for(db) == ("2026-10-26T00:02:00Z",)
     assert len(publish_calls) == 2
     assert publish_calls[0]["pending_publish"] == [(arxiv_id,)]
+
+
+@pytest.mark.asyncio
+async def test_failed_metadata_refresh_survives_oai_replay_with_valid_vector(db):
+    arxiv_id = "2501.12948"
+    harvester = FakeHarvester(
+        harvest("2026-10-26T00:00:00Z", active_record(arxiv_id, "2026-10-26")),
+        harvest("2026-10-27T00:00:00Z", active_record(arxiv_id, "2026-10-27")),
+        harvest("2026-10-27T00:00:00Z", active_record(arxiv_id, "2026-10-27")),
+    )
+    refreshed = enrichment(arxiv_id, None, "201", citation_count=7)
+    enricher = FakeEnricher(
+        [enrichment(arxiv_id, None, "201")], RuntimeError("429"), [refreshed]
+    )
+    publish, _ = publisher(db)
+    await sync_arxiv(db, harvester, enricher, publish=publish, cache=FakeCache())
+    with pytest.raises(RuntimeError):
+        await sync_arxiv(db, harvester, enricher, publish=publish, cache=FakeCache())
+    assert db.execute("SELECT count(*) FROM pending_s2").fetchone()[0] == 1
+    result = await sync_arxiv(
+        db, harvester, enricher, publish=publish, cache=FakeCache()
+    )
+    assert len(enricher.calls) == 3
+    assert result["pending_s2"] == 0
+    assert document_for(db, arxiv_id)["metadata"]["s2"]["citation_count"] == 7

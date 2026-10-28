@@ -1,5 +1,7 @@
 """按领域策略调用发现渠道，并缓存上游候选与显式请求范围。"""
 
+from __future__ import annotations
+
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -44,17 +46,23 @@ class PaperDiscoveryService:
         discoverers: dict[str, PaperDiscoverer],
         policies: dict[AcademicField, FieldPolicy],
         cache: DiscoveryCacheRepository,
+        platform_credentials: dict[str, str] | None = None,
     ):
+        self.platform_credentials = platform_credentials or {}
         self.discoverers = discoverers
         self.policies = policies
         self.cache = cache
 
-    async def discover(self, query: PaperDiscoveryQuery) -> DiscoveryResult:
+    async def discover(
+        self, query: PaperDiscoveryQuery, *, credentials: dict[str, str] | None = None
+    ) -> DiscoveryResult:
         source = self.policies[query.field].discoverer
         if source is None or source not in self.discoverers:
             raise ServiceException(ScholarErrorCode.CAPABILITY_UNAVAILABLE)
 
-        cache_key = self._cache_key(source, query)
+        credentials = self.platform_credentials | (credentials or {})
+        api_key = credentials.get(source)
+        cache_key = self._cache_key(source, query, api_key)
         discovery = await self.cache.get(cache_key)
         cache_hit = discovery is not None
         if discovery is None:
@@ -62,7 +70,8 @@ class PaperDiscoveryService:
             discovery = await self.discoverers[source].discover(
                 period=query.period,
                 sort=query.sort,
-                limit=query.limit,
+                limit=100,
+                api_key=api_key,
             )
             await self.cache.put(cache_key, discovery)
 
@@ -74,14 +83,15 @@ class PaperDiscoveryService:
                 SourceExecution(
                     source=source,
                     cache_hit=cache_hit,
-                    coverage="",
                     status=SourceExecutionStatus.COMPLETED,
                 )
             ],
         )
 
     @staticmethod
-    def _cache_key(source: str, query: PaperDiscoveryQuery) -> str:
+    def _cache_key(
+        source: str, query: PaperDiscoveryQuery, api_key: str | None = None
+    ) -> str:
         today = datetime.now(UTC).date()
         if query.period == DiscoveryPeriod.DAILY:
             window = today.isoformat()
@@ -97,7 +107,10 @@ class PaperDiscoveryService:
             "period": query.period.value,
             "window": window,
             "sort": query.sort.value,
-            "limit": query.limit,
+            "candidates": 100,
+            "credential": hashlib.sha256(api_key.encode()).hexdigest()
+            if api_key
+            else None,
         }
         digest = hashlib.sha256(
             orjson.dumps(identity, option=orjson.OPT_SORT_KEYS)
