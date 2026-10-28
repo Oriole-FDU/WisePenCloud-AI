@@ -1,7 +1,8 @@
 from fastapi import APIRouter
-from chat.api.endpoints import attachment, chat, memory, model, session, speech, tool
+from chat.api.endpoints import admin, attachment, chat, memory, model, session, speech, tool
 
 api_router = APIRouter()
+api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 
 api_router.include_router(chat.router, prefix="", tags=["chat"])
 api_router.include_router(attachment.router, prefix="/attachment", tags=["attachment"])

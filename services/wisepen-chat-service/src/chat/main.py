@@ -30,6 +30,7 @@ from chat.container import container  # noqa: F401 — 触发 dependency_injecto
 from chat.core.config.app_settings import settings
 from chat.api.router import api_router
 from chat.api.endpoints import attachment as attachment_endpoints
+from chat.api.endpoints import admin as admin_endpoints
 from chat.api.endpoints import chat as chat_endpoints
 from chat.api.endpoints import session as session_endpoints
 from chat.api.endpoints import memory as memory_endpoints
@@ -111,8 +112,10 @@ async def lifespan(app: FastAPI):
         await nacos_client_manager.deregister_instance()
     except Exception as e:
         error("nacos instance deregister failed.", exc=e)
+    await mongo_client.close()
 
 container.wire(modules=[
+    admin_endpoints,
     attachment_endpoints,
     chat_endpoints,
     session_endpoints,

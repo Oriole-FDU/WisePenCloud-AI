@@ -98,7 +98,7 @@ def to_model_response_with_mapping(
             provider=providers.get(str(mapping.provider_id), None),
             llm_provider_resolver=llm_provider_resolver,
         )
-        for mapping in model_info.mappings
+        for mapping in model_info.available_mappings(providers)
     ]
     return model_response
 
@@ -143,12 +143,12 @@ async def list_available_models(
         system_models=[
             to_model_response_with_mapping(model_info, {**system_providers, **user_providers}, llm_provider_resolver)
             for model_info in system_model_infos
-            if model_info.model.is_active
+            if model_info.model.is_active and model_info.available_mappings({**system_providers, **user_providers})
         ],
         user_models=[
             to_model_response_with_mapping(model_info, user_providers, llm_provider_resolver)
             for model_info in user_model_infos
-            if model_info.model.is_active
+            if model_info.model.is_active and model_info.available_mappings(user_providers)
         ],
     ))
 

@@ -70,6 +70,7 @@ class RpcClient:
         json: Any = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
+        retries: Optional[int] = None,
     ) -> Any:
         """
         发起到内部服务的 HTTP 调用并解包
@@ -82,6 +83,7 @@ class RpcClient:
             json=json,
             headers=headers,
             timeout=timeout,
+            retries=retries,
         )
         try:
             body = resp.json()
@@ -125,11 +127,12 @@ class RpcClient:
         json: Any = None,
         headers: Optional[Mapping[str, str]] = None,
         timeout: Optional[float] = None,
+        retries: Optional[int] = None,
     ) -> httpx.Response:
         """
         发起到内部服务的 HTTP 调用并返回原始响应。
         """
-        attempts = self._retries + 1
+        attempts = (self._retries if retries is None else max(0, int(retries))) + 1
         tried_instances: set[str] = set()
 
         last_status: Optional[int] = None
