@@ -28,10 +28,10 @@ class PaperDiscovery:
 
 class PaperDiscoverer(Protocol):
     async def discover(
-        self,
-        *,
-        period: DiscoveryPeriod,
-        sort: DiscoverySort,
-        limit: int,
-        api_key: str | None = None,
+            self,
+            *,
+            period: DiscoveryPeriod,
+            sort: DiscoverySort,
+            limit: int,
+            api_key: str | None = None,
     ) -> PaperDiscovery: ...

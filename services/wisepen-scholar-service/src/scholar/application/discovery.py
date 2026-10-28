@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 import orjson
-from common.core.exceptions import ServiceException
 
+from common.core.exceptions import ServiceException
 from scholar.application.field_policies import FieldPolicy
 from scholar.application.source_execution import SourceExecution, SourceExecutionStatus
 from scholar.domain.errors import ScholarErrorCode
@@ -42,11 +42,11 @@ class PaperDiscoveryService:
     """选择已登记的 discovery 能力，复用其候选结果并报告本次执行状态。"""
 
     def __init__(
-        self,
-        discoverers: dict[str, PaperDiscoverer],
-        policies: dict[AcademicField, FieldPolicy],
-        cache: DiscoveryCacheRepository,
-        platform_credentials: dict[str, str] | None = None,
+            self,
+            discoverers: dict[str, PaperDiscoverer],
+            policies: dict[AcademicField, FieldPolicy],
+            cache: DiscoveryCacheRepository,
+            platform_credentials: dict[str, str] | None = None,
     ):
         self.platform_credentials = platform_credentials or {}
         self.discoverers = discoverers
@@ -54,7 +54,7 @@ class PaperDiscoveryService:
         self.cache = cache
 
     async def discover(
-        self, query: PaperDiscoveryQuery, *, credentials: dict[str, str] | None = None
+            self, query: PaperDiscoveryQuery, *, credentials: dict[str, str] | None = None
     ) -> DiscoveryResult:
         source = self.policies[query.field].discoverer
         if source is None or source not in self.discoverers:
@@ -90,7 +90,7 @@ class PaperDiscoveryService:
 
     @staticmethod
     def _cache_key(
-        source: str, query: PaperDiscoveryQuery, api_key: str | None = None
+            source: str, query: PaperDiscoveryQuery, api_key: str | None = None
     ) -> str:
         today = datetime.now(UTC).date()
         if query.period == DiscoveryPeriod.DAILY:

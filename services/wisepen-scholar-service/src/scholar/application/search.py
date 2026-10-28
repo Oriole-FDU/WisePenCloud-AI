@@ -9,8 +9,8 @@ from datetime import date
 from enum import StrEnum
 
 import orjson
-from common.utils.retrieval import Candidate, RrfFusion
 
+from common.utils.retrieval import Candidate, RrfFusion
 from scholar.application.field_policies import COMMON_ENRICHERS, FieldPolicy
 from scholar.application.lookup_runner import LookupRunner
 from scholar.application.source_execution import SourceExecution, SourceExecutionStatus
@@ -59,12 +59,12 @@ class SearchBinding:
 
 class PaperSearchService:
     def __init__(
-        self,
-        searchers: dict[str, SearchBinding],
-        policies: dict[AcademicField, FieldPolicy],
-        query_cache: QueryCacheRepository,
-        lookup: LookupRunner,
-        platform_credentials: dict[str, str] | None = None,
+            self,
+            searchers: dict[str, SearchBinding],
+            policies: dict[AcademicField, FieldPolicy],
+            query_cache: QueryCacheRepository,
+            lookup: LookupRunner,
+            platform_credentials: dict[str, str] | None = None,
     ):
         self.platform_credentials = platform_credentials or {}
         self.searchers = searchers
@@ -73,11 +73,11 @@ class PaperSearchService:
         self.lookup_runner = lookup
 
     async def search(
-        self,
-        query: PaperSearch,
-        *,
-        credentials: dict[str, str] | None = None,
-        user_id: str | None = None,
+            self,
+            query: PaperSearch,
+            *,
+            credentials: dict[str, str] | None = None,
+            user_id: str | None = None,
     ) -> SearchResult:
         credentials = self.platform_credentials | (credentials or {})
         policy = self.policies[query.field]
@@ -153,7 +153,7 @@ class PaperSearchService:
         return SearchResult(enriched_papers, execution, conflicts, enrichment_execution)
 
     async def _search_source(
-        self, source: str, query: PaperSearch, api_key: str | None, user_id: str | None
+            self, source: str, query: PaperSearch, api_key: str | None, user_id: str | None
     ) -> tuple[list[Paper], SourceExecution]:
         binding = self.searchers[source]
         cache_key = self._cache_key(source, binding, query, api_key, user_id)
@@ -183,11 +183,11 @@ class PaperSearchService:
 
     @staticmethod
     def _cache_key(
-        source: str,
-        binding: SearchBinding,
-        query: PaperSearch,
-        api_key: str | None,
-        user_id: str | None,
+            source: str,
+            binding: SearchBinding,
+            query: PaperSearch,
+            api_key: str | None,
+            user_id: str | None,
     ) -> str:
         identity = {
             "source": source,
@@ -221,7 +221,7 @@ class PaperSearchService:
 
     @classmethod
     def _fuse_sources(
-        cls, ranked: dict[str, list[Paper]], *, limit: int
+            cls, ranked: dict[str, list[Paper]], *, limit: int
     ) -> tuple[list[Paper], list[str]]:
         """按精确身份关联任意来源数；歧义记录不通过 RRF 再次误合并。"""
         rows = [

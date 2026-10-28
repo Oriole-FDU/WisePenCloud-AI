@@ -54,14 +54,14 @@ class SpecterEncoder:
             )
         base = models / "models--allenai--specter2_base" / "snapshots" / BASE_REVISION
         adapter = (
-            models
-            / (
-                "models--allenai--specter2_adhoc_query"
-                if query
-                else "models--allenai--specter2"
-            )
-            / "snapshots"
-            / (QUERY_REVISION if query else DOCUMENT_REVISION)
+                models
+                / (
+                    "models--allenai--specter2_adhoc_query"
+                    if query
+                    else "models--allenai--specter2"
+                )
+                / "snapshots"
+                / (QUERY_REVISION if query else DOCUMENT_REVISION)
         )
         self.tokenizer = AutoTokenizer.from_pretrained(str(base), local_files_only=True)
         self.model = AutoAdapterModel.from_pretrained(str(base), local_files_only=True)

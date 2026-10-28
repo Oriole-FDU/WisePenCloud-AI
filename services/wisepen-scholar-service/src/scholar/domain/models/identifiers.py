@@ -57,9 +57,9 @@ def normalize_arxiv(value: str) -> str:
     if value.lower().startswith(("https://", "http://")):
         parsed = urlsplit(value)
         if parsed.hostname not in (
-            "arxiv.org",
-            "www.arxiv.org",
-            "export.arxiv.org",
+                "arxiv.org",
+                "www.arxiv.org",
+                "export.arxiv.org",
         ):
             raise ValueError("not an arXiv URL")
         value = re.sub(r"^/(abs|pdf)/", "", parsed.path)
@@ -119,9 +119,9 @@ def parse_identifier(value: str) -> PaperIdentifier:
 
     # 带命名空间前缀的标识：``openalex:`` / ``s2:`` / ``corpusid:``
     for prefix, kind, pattern in (
-        ("openalex:", IdentifierKind.OPENALEX, r"W[0-9]+"),
-        ("s2:", IdentifierKind.S2, r"[a-f0-9]{40}"),
-        ("corpusid:", IdentifierKind.CORPUS_ID, r"[0-9]+"),
+            ("openalex:", IdentifierKind.OPENALEX, r"W[0-9]+"),
+            ("s2:", IdentifierKind.S2, r"[a-f0-9]{40}"),
+            ("corpusid:", IdentifierKind.CORPUS_ID, r"[0-9]+"),
     ):
         if not value.lower().startswith(prefix):
             continue

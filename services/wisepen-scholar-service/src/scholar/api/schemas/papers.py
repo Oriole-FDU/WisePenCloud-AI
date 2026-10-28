@@ -35,9 +35,9 @@ class SearchRequest(BaseModel):
     @model_validator(mode="after")
     def date_range(self):
         if (
-            self.published_after
-            and self.published_before
-            and self.published_after > self.published_before
+                self.published_after
+                and self.published_before
+                and self.published_after > self.published_before
         ):
             raise ValueError("published_after must not exceed published_before")
         return self

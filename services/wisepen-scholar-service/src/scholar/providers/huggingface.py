@@ -39,25 +39,25 @@ class HuggingFaceProvider:
     """用官方 Papers HTTP endpoints 提供搜索、逐篇富化和周期发现。"""
 
     def __init__(
-        self,
-        http: httpx.AsyncClient,
-        *,
-        token: str | None = None,
-        concurrency: int = 4,
+            self,
+            http: httpx.AsyncClient,
+            *,
+            token: str | None = None,
+            concurrency: int = 4,
     ):
         self.http = http
         self._token = token
         self._request_limit = asyncio.Semaphore(concurrency)
 
     async def search(
-        self,
-        *,
-        query: str,
-        field: AcademicField,
-        published_after: date | None,
-        published_before: date | None,
-        limit: int,
-        api_key: str | None = None,
+            self,
+            *,
+            query: str,
+            field: AcademicField,
+            published_after: date | None,
+            published_before: date | None,
+            limit: int,
+            api_key: str | None = None,
     ) -> PaperSearchBatch:
         # 官方搜索只有 q/limit；日期在前 100 个候选内过滤，不伪称完整日期召回。
         dated = published_after is not None or published_before is not None
@@ -75,21 +75,21 @@ class HuggingFaceProvider:
                 paper
                 for paper in papers
                 if paper.publication_date is not None
-                and (
-                    published_after is None or paper.publication_date >= published_after
-                )
-                and (
-                    published_before is None
-                    or paper.publication_date <= published_before
-                )
+                   and (
+                           published_after is None or paper.publication_date >= published_after
+                   )
+                   and (
+                           published_before is None
+                           or paper.publication_date <= published_before
+                   )
             ]
         return PaperSearchBatch(papers[:limit])
 
     async def lookup(
-        self,
-        ids: list[PaperIdentifier],
-        *,
-        api_key: str | None = None,
+            self,
+            ids: list[PaperIdentifier],
+            *,
+            api_key: str | None = None,
     ) -> list[PaperLookupMatch]:
         async def resolve(identifier: PaperIdentifier) -> PaperLookupMatch:
             if identifier.kind != IdentifierKind.ARXIV:
@@ -115,12 +115,12 @@ class HuggingFaceProvider:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def discover(
-        self,
-        *,
-        period: DiscoveryPeriod,
-        sort: DiscoverySort,
-        limit: int,
-        api_key: str | None = None,
+            self,
+            *,
+            period: DiscoveryPeriod,
+            sort: DiscoverySort,
+            limit: int,
+            api_key: str | None = None,
     ) -> PaperDiscovery:
         now = datetime.now(UTC)
         params: dict[str, str | int] = {
@@ -160,7 +160,7 @@ class HuggingFaceProvider:
         )
 
     async def _paper_info(
-        self, arxiv_id: str, *, api_key: str | None = None
+            self, arxiv_id: str, *, api_key: str | None = None
     ) -> dict[str, Any] | None:
         response = await self._get(
             f"{_HF_ORIGIN}/api/papers/{arxiv_id}", allow_not_found=True, api_key=api_key
@@ -171,12 +171,12 @@ class HuggingFaceProvider:
         return response.json()
 
     async def _get(
-        self,
-        url: str,
-        *,
-        params: dict[str, str | int] | None = None,
-        allow_not_found: bool = False,
-        api_key: str | None = None,
+            self,
+            url: str,
+            *,
+            params: dict[str, str | int] | None = None,
+            allow_not_found: bool = False,
+            api_key: str | None = None,
     ) -> httpx.Response:
         # 详情 404 是未找到；其他 HTTPX 边界失败保留原文和 cause。
         try:
@@ -196,7 +196,7 @@ class HuggingFaceProvider:
 
     @classmethod
     def _metadata(
-        cls, payload: dict[str, Any], *, partial: bool = False
+            cls, payload: dict[str, Any], *, partial: bool = False
     ) -> dict[str, Any]:
         result = {
             # HF 的 AI 摘要是渠道增量，保留命名空间，不覆盖论文原摘要。
@@ -209,8 +209,8 @@ class HuggingFaceProvider:
         }
         # 点赞降序只保留前三项；Python 稳定排序保留同赞产物的上游次序。
         for name, upstream in (
-            ("linked_models", "linkedModels"),
-            ("linked_datasets", "linkedDatasets"),
+                ("linked_models", "linkedModels"),
+                ("linked_datasets", "linkedDatasets"),
         ):
             values = cls._field(payload, upstream)
             result[name] = (
@@ -229,13 +229,13 @@ class HuggingFaceProvider:
             # 列表未提供的产物字段仍未查询；详情成功返回的空字段才是确认空事实。
             present = payload.keys() | payload.get("paper", {}).keys()
             for name, upstream in (
-                ("ai_summary", "ai_summary"),
-                ("ai_keywords", "ai_keywords"),
-                ("upvotes", "upvotes"),
-                ("github_repo", "githubRepo"),
-                ("github_stars", "githubStars"),
-                ("linked_models", "linkedModels"),
-                ("linked_datasets", "linkedDatasets"),
+                    ("ai_summary", "ai_summary"),
+                    ("ai_keywords", "ai_keywords"),
+                    ("upvotes", "upvotes"),
+                    ("github_repo", "githubRepo"),
+                    ("github_stars", "githubStars"),
+                    ("linked_models", "linkedModels"),
+                    ("linked_datasets", "linkedDatasets"),
             ):
                 if upstream not in present:
                     result.pop(name)

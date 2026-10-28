@@ -78,11 +78,11 @@ class LookupRunner:
     """按来源批量回退，并在 search/lookup 之间共享缓存和在途 I/O。"""
 
     def __init__(
-        self,
-        bindings: dict[str, LookupBinding],
-        *,
-        positive_ttl_seconds: int = 86400,
-        negative_ttl_seconds: int = 3600,
+            self,
+            bindings: dict[str, LookupBinding],
+            *,
+            positive_ttl_seconds: int = 86400,
+            negative_ttl_seconds: int = 3600,
     ):
         self.bindings = bindings
         self.positive_ttl_seconds = positive_ttl_seconds
@@ -91,7 +91,7 @@ class LookupRunner:
         self._lock = asyncio.Lock()
 
     def target(
-        self, identifier: PaperIdentifier | None, paper: Paper | None = None
+            self, identifier: PaperIdentifier | None, paper: Paper | None = None
     ) -> LookupTarget:
         identifiers = [] if identifier is None else [identifier]
         metadata = deepcopy(paper.metadata) if paper is not None else {}
@@ -104,12 +104,12 @@ class LookupRunner:
         return rule(metadata) if rule is not None else bool(metadata.get(source))
 
     async def run(
-        self,
-        targets: list[LookupTarget],
-        *,
-        common_sources: list[str],
-        domain_sources: list[str],
-        credentials: dict[str, str] | None = None,
+            self,
+            targets: list[LookupTarget],
+            *,
+            common_sources: list[str],
+            domain_sources: list[str],
+            credentials: dict[str, str] | None = None,
     ) -> list[SourceExecution]:
         credentials = credentials or {}
         execution = []
@@ -144,7 +144,7 @@ class LookupRunner:
         return execution
 
     async def _apply(
-        self, source: str, targets: list[LookupTarget], api_key: str | None
+            self, source: str, targets: list[LookupTarget], api_key: str | None
     ) -> SourceExecution:
         binding = self.bindings[source]
         positions: dict[PaperIdentifier, list[LookupTarget]] = {}
@@ -244,10 +244,10 @@ class LookupRunner:
         )
 
     async def _shared(
-        self,
-        source: str,
-        known_ids: dict[PaperIdentifier, tuple[PaperIdentifier, ...]],
-        api_key: str | None,
+            self,
+            source: str,
+            known_ids: dict[PaperIdentifier, tuple[PaperIdentifier, ...]],
+            api_key: str | None,
     ) -> _SourceBatch:
         # 凭证仅用于首次访问上游；相同来源和身份的并发调用共享同一份完整事实。
         identities = tuple(
@@ -289,10 +289,10 @@ class LookupRunner:
             task.exception()
 
     async def _load(
-        self,
-        source: str,
-        known_ids: dict[PaperIdentifier, tuple[PaperIdentifier, ...]],
-        api_key: str | None,
+            self,
+            source: str,
+            known_ids: dict[PaperIdentifier, tuple[PaperIdentifier, ...]],
+            api_key: str | None,
     ) -> _SourceBatch:
         binding = self.bindings[source]
         batch = _SourceBatch()
@@ -309,8 +309,8 @@ class LookupRunner:
             if record is None:
                 pending.append(identifier)
             elif identifier not in record.cache_aliases or (
-                record.paper is not None
-                and self._conflicts(known_ids[identifier], self._aliases(record.paper))
+                    record.paper is not None
+                    and self._conflicts(known_ids[identifier], self._aliases(record.paper))
             ):
                 batch.errors[identifier] = ProviderError(
                     "Cached lookup conflicts with the requested paper identity"
@@ -352,7 +352,7 @@ class LookupRunner:
             )
             batch.records[identifier] = record
             short = paper is None or (
-                binding.short_lived is not None and binding.short_lived(record)
+                    binding.short_lived is not None and binding.short_lived(record)
             )
             writes.append(
                 (
@@ -380,7 +380,7 @@ class LookupRunner:
 
     @staticmethod
     def _conflicts(
-        known: tuple[PaperIdentifier, ...], actual: list[PaperIdentifier]
+            known: tuple[PaperIdentifier, ...], actual: list[PaperIdentifier]
     ) -> bool:
         return any(
             left.kind == right.kind and left.value != right.value

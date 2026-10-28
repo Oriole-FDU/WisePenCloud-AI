@@ -18,10 +18,10 @@ router = APIRouter(tags=["health"])
 @router.get("/health")
 @inject
 async def health(
-    es: AsyncElasticsearch = Depends(Provide[Container.elasticsearch]),
-    cache: Redis = Depends(Provide[Container.redis]),
-    alias: str = Depends(Provide[Container.config.SCHOLAR_INDEX_ALIAS]),
-    timeout: float = Depends(Provide[Container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS]),
+        es: AsyncElasticsearch = Depends(Provide[Container.elasticsearch]),
+        cache: Redis = Depends(Provide[Container.redis]),
+        alias: str = Depends(Provide[Container.config.SCHOLAR_INDEX_ALIAS]),
+        timeout: float = Depends(Provide[Container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS]),
 ):
     try:
         async with asyncio.timeout(timeout):

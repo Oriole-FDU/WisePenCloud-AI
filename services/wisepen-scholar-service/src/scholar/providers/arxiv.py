@@ -6,8 +6,6 @@ import hashlib
 import json
 from datetime import date
 
-from common.utils.ai_clients.embedding import EmbeddingClient
-from common.utils.retrieval import Candidate, RrfFusion
 from elastic_transport import (
     ApiError as ElasticApiError,
 )
@@ -19,6 +17,8 @@ from elastic_transport import (
 )
 from openai import APIConnectionError, APIStatusError
 
+from common.utils.ai_clients.embedding import EmbeddingClient
+from common.utils.retrieval import Candidate, RrfFusion
 from scholar.core.embedding_runtime import MODEL_SIGNATURE
 from scholar.domain.errors import (
     ProviderError,
@@ -78,15 +78,15 @@ def has_signals(metadata: dict) -> bool:
 
 class ArxivProvider:
     def __init__(
-        self,
-        paper_repository: PaperRepository,
-        embedding_client: EmbeddingClient,
-        *,
-        candidate_limit: int = 200,
-        num_candidates: int = 1000,
-        rrf_k: int = 60,
-        citation_weight: float = 0.20,
-        influential_weight: float = 0.10,
+            self,
+            paper_repository: PaperRepository,
+            embedding_client: EmbeddingClient,
+            *,
+            candidate_limit: int = 200,
+            num_candidates: int = 1000,
+            rrf_k: int = 60,
+            citation_weight: float = 0.20,
+            influential_weight: float = 0.10,
     ):
         self.paper_repository = paper_repository
         self.embedding_client = embedding_client
@@ -115,10 +115,10 @@ class ArxivProvider:
         ).hexdigest()
 
     async def lookup(
-        self,
-        ids: list[PaperIdentifier],
-        *,
-        api_key: str | None = None,
+            self,
+            ids: list[PaperIdentifier],
+            *,
+            api_key: str | None = None,
     ) -> list[PaperLookupMatch]:
         """按 arXiv/DOI 身份透传仓储结果，保留歧义与逐项失败。"""
         try:
@@ -129,14 +129,14 @@ class ArxivProvider:
             raise ProviderError(provider_error_message(error)) from error
 
     async def search(
-        self,
-        *,
-        query: str,
-        field: AcademicField,
-        published_after: date | None,
-        published_before: date | None,
-        limit: int,
-        api_key: str | None = None,
+            self,
+            *,
+            query: str,
+            field: AcademicField,
+            published_after: date | None,
+            published_before: date | None,
+            limit: int,
+            api_key: str | None = None,
     ) -> PaperSearchBatch:
         categories = ARXIV_CATEGORIES[field]
         if categories is None:
@@ -182,9 +182,9 @@ class ArxivProvider:
                 citations = metrics.get("citation_count") or 0
                 influential = metrics.get("influential_citation_count") or 0
                 return candidate.score * (
-                    1
-                    + self.citation_weight * citations / (citations + 100)
-                    + self.influential_weight * influential / (influential + 10)
+                        1
+                        + self.citation_weight * citations / (citations + 100)
+                        + self.influential_weight * influential / (influential + 10)
                 )
 
             ranked = sorted(fused, key=boosted_score, reverse=True)

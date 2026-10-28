@@ -1,11 +1,11 @@
 """Scholar 的依赖装配；应用用例只依赖声明的领域端口。"""
 
 import httpx
-from common.utils.ai_clients.embedding import EmbeddingClient
 from dependency_injector import containers, providers
 from openai import AsyncOpenAI
 from redis.asyncio import Redis
 
+from common.utils.ai_clients.embedding import EmbeddingClient
 from scholar.application.discovery import PaperDiscoveryService
 from scholar.application.field_policies import FIELD_POLICIES
 from scholar.application.lookup import PaperLookupService

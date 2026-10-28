@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import date
 
 import orjson
-from common.logger import warn
 from elastic_transport import ApiError, ConnectionError, ConnectionTimeout
 from elasticsearch import AsyncElasticsearch
 
+from common.logger import warn
 from scholar.core.embedding_runtime import DIMENSIONS, MODEL_SIGNATURE
 from scholar.domain.errors import (
     ProviderError,
@@ -98,7 +98,7 @@ ARXIV_INDEX_SETTINGS = {
 
 
 def create_elasticsearch(
-    uris: str, username: str, password: str, timeout: float
+        uris: str, username: str, password: str, timeout: float
 ) -> AsyncElasticsearch:
     import json
 
@@ -120,20 +120,20 @@ class ElasticsearchPaperRepository:
     """本地全文召回和精确身份查询；不包含来源路由和缓存策略。"""
 
     def __init__(
-        self,
-        es: AsyncElasticsearch,
-        alias: str,
+            self,
+            es: AsyncElasticsearch,
+            alias: str,
     ):
         self.es, self.alias = es, alias
 
     async def search(
-        self,
-        *,
-        query: str,
-        categories: list[str],
-        published_after: date | None,
-        published_before: date | None,
-        limit: int,
+            self,
+            *,
+            query: str,
+            categories: list[str],
+            published_after: date | None,
+            published_before: date | None,
+            limit: int,
     ) -> list[Paper]:
         fields = [
             ("title", 3),
@@ -195,14 +195,14 @@ class ElasticsearchPaperRepository:
         return [self._to_paper(hit["_source"]) for hit in response["hits"]["hits"]]
 
     async def search_vector(
-        self,
-        *,
-        vector: list[float],
-        categories: list[str],
-        published_after: date | None,
-        published_before: date | None,
-        limit: int,
-        num_candidates: int = 1000,
+            self,
+            *,
+            vector: list[float],
+            categories: list[str],
+            published_after: date | None,
+            published_before: date | None,
+            limit: int,
+            num_candidates: int = 1000,
     ) -> list[Paper]:
         response = await self.es.search(
             index=self.alias,
@@ -247,7 +247,7 @@ class ElasticsearchPaperRepository:
         return filters
 
     async def lookup(
-        self, identifiers: list[PaperIdentifier]
+            self, identifiers: list[PaperIdentifier]
     ) -> list[PaperLookupMatch]:
         if not identifiers:
             return []

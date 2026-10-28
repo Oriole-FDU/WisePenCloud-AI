@@ -19,7 +19,7 @@ class PaperLookupMatch:
 
 class PaperLookupProvider(Protocol):
     async def lookup(
-        self, ids: list[PaperIdentifier], *, api_key: str | None = None
+            self, ids: list[PaperIdentifier], *, api_key: str | None = None
     ) -> list[PaperLookupMatch]:
         """按输入顺序返回完整基础信息和来源 metadata，不做出口裁剪。"""
         ...

@@ -20,12 +20,12 @@ class PaperSearchBatch:
 
 class PaperSearcher(Protocol):
     async def search(
-        self,
-        *,
-        query: str,
-        field: AcademicField,
-        published_after: date | None,
-        published_before: date | None,
-        limit: int,
-        api_key: str | None = None,
+            self,
+            *,
+            query: str,
+            field: AcademicField,
+            published_after: date | None,
+            published_before: date | None,
+            limit: int,
+            api_key: str | None = None,
     ) -> PaperSearchBatch: ...
