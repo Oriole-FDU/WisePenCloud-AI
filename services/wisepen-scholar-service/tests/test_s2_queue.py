@@ -10,21 +10,21 @@ import httpx
 import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
-from scholar.application.lookup import (
+from scholar.application.lookup_runner import LookupBinding, LookupRunner
+from scholar.application.services.lookup import (
     EnrichmentStatus,
     LookupPurpose,
     PaperLookup,
     PaperLookupService,
 )
-from scholar.application.lookup_runner import LookupBinding, LookupRunner
-from scholar.application.source_execution import SourceExecutionStatus
-from scholar.providers.s2 import S2Transport
 from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
 from scholar.domain.errors import ProviderBusy
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.providers.s2 import S2Provider, has_signals as s2_signals
+from scholar.domain.models.source_execution import SourceExecutionStatus
+from scholar.providers.s2 import S2Provider, S2Transport
+from scholar.providers.s2 import has_signals as s2_signals
 
 
 @pytest_asyncio.fixture

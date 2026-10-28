@@ -17,12 +17,12 @@ from offline.embeddings import document_worker, generate_embeddings
 from offline.publish import publish_arxiv
 from openai import AsyncOpenAI
 from redis.asyncio import Redis
-from scholar.core.embedding_runtime import DEFAULT_MODELS, DIMENSIONS, QUERY_MODEL
 from scholar.core.storage.elasticsearch.paper_repository import (
     ElasticsearchPaperRepository,
     create_elasticsearch,
 )
 from scholar.domain.models.fields import AcademicField
+from scholar.ml.specter import DEFAULT_MODELS, DIMENSIONS, QUERY_MODEL
 from scholar.providers.arxiv import ArxivProvider
 
 pytestmark = pytest.mark.skipif(

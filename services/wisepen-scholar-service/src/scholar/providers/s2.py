@@ -41,8 +41,8 @@ for _, member in ipairs(redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', now)) do
 end
 """
 _ADMIT = (
-        _PRUNE
-        + """
+    _PRUNE
+    + """
 local ahead = redis.call('ZCARD', KEYS[1])
 if tonumber(ARGV[2]) >= 0 and ahead > tonumber(ARGV[2]) then
     return {0, ahead}
@@ -54,8 +54,8 @@ return {1, ahead}
 """
 )
 _PERMIT = (
-        _PRUNE
-        + """
+    _PRUNE
+    + """
 if not redis.call('ZSCORE', KEYS[1], ARGV[1]) then return -1 end
 redis.call('ZADD', KEYS[2], now + 15000, ARGV[1])
 local head = redis.call('ZRANGE', KEYS[1], 0, 0)[1]
@@ -78,13 +78,13 @@ return 0
 
 class S2Transport:
     def __init__(
-            self,
-            http: httpx.AsyncClient,
-            redis: Redis,
-            api_key: str,
-            *,
-            max_queued_ahead: int | None = None,
-            namespace: str = "scholar:s2",
+        self,
+        http: httpx.AsyncClient,
+        redis: Redis,
+        api_key: str,
+        *,
+        max_queued_ahead: int | None = None,
+        namespace: str = "scholar:s2",
     ):
         self.http, self.redis, self._api_key = http, redis, api_key
         # None 用于离线调用：参与同一配额，但不应用在线拥堵准入阈值。
@@ -168,16 +168,16 @@ def has_signals(metadata: dict) -> bool:
     values = metadata.get("s2", {})
     tldr = values.get("tldr")
     return (
-            any(
-                values.get(key) is not None
-                for key in (
-                    "citation_count",
-                    "influential_citation_count",
-                    "is_open_access",
-                )
+        any(
+            values.get(key) is not None
+            for key in (
+                "citation_count",
+                "influential_citation_count",
+                "is_open_access",
             )
-            or bool(tldr and tldr.get("text"))
-            or bool(values.get("open_access_pdf") or values.get("bibtex"))
+        )
+        or bool(tldr and tldr.get("text"))
+        or bool(values.get("open_access_pdf") or values.get("bibtex"))
     )
 
 
@@ -212,10 +212,10 @@ def short_lived(record: CachedPaperLookup) -> bool:
     values = record.paper.metadata.get("s2", {})
     tldr = values.get("tldr")
     return (
-            values.get("citation_count") is None
-            or values.get("influential_citation_count") is None
-            or not tldr
-            or not tldr.get("text")
+        values.get("citation_count") is None
+        or values.get("influential_citation_count") is None
+        or not tldr
+        or not tldr.get("text")
     )
 
 
@@ -224,10 +224,10 @@ class S2Provider:
         self.transport = transport
 
     async def lookup(
-            self,
-            ids: list[PaperIdentifier],
-            *,
-            api_key: str | None = None,
+        self,
+        ids: list[PaperIdentifier],
+        *,
+        api_key: str | None = None,
     ) -> list[PaperLookupMatch]:
         fields = IDENTITY_FIELDS + ENRICHMENT_FIELDS + DETAIL_FIELDS
         try:

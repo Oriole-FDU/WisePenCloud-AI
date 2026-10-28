@@ -7,9 +7,9 @@ from pathlib import Path
 
 import duckdb
 import orjson
-from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
-
 from offline.embeddings import EMBEDDING_SCHEMA, reconcile_embeddings
+
+from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
 
 
 def open_database(path: str | Path) -> duckdb.DuckDBPyConnection:
@@ -17,21 +17,54 @@ def open_database(path: str | Path) -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
     db = duckdb.connect(str(path))
     db.execute("""
-        CREATE TABLE IF NOT EXISTS arxiv (
-            arxiv_id VARCHAR PRIMARY KEY, doi VARCHAR, source JSON, document JSON
-        );
-        CREATE TABLE IF NOT EXISTS pending_publish (arxiv_id VARCHAR PRIMARY KEY);
-        CREATE TABLE IF NOT EXISTS pending_delete (
-            arxiv_id VARCHAR PRIMARY KEY,
-            datestamp VARCHAR NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS import_state (
-            singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK(singleton),
-            source_path VARCHAR, source_size BIGINT, source_mtime_ns BIGINT,
-            byte_offset BIGINT, records BIGINT, complete BOOLEAN,
-            target_index VARCHAR, published BOOLEAN DEFAULT false
-        );
-    """)
+               CREATE TABLE IF NOT EXISTS arxiv
+               (
+                   arxiv_id
+                   VARCHAR
+                   PRIMARY
+                   KEY,
+                   doi
+                   VARCHAR,
+                   source
+                   JSON,
+                   document
+                   JSON
+               );
+               CREATE TABLE IF NOT EXISTS pending_publish
+               (
+                   arxiv_id
+                   VARCHAR
+                   PRIMARY
+                   KEY
+               );
+               CREATE TABLE IF NOT EXISTS pending_delete
+               (
+                   arxiv_id
+                   VARCHAR
+                   PRIMARY
+                   KEY,
+                   datestamp
+                   VARCHAR
+                   NOT
+                   NULL
+               );
+               CREATE TABLE IF NOT EXISTS import_state
+               (
+                   singleton
+                   BOOLEAN
+                   PRIMARY
+                   KEY
+                   DEFAULT
+                   true
+                   CHECK
+               (
+                   singleton
+               ),
+                   source_path VARCHAR, source_size BIGINT, source_mtime_ns BIGINT,
+                   byte_offset BIGINT, records BIGINT, complete BOOLEAN,
+                   target_index VARCHAR, published BOOLEAN DEFAULT false
+                   );
+               """)
     db.execute(EMBEDDING_SCHEMA)
     return db
 
@@ -120,8 +153,8 @@ def import_arxiv(
                         [
                             {"arxiv_id": i, "doi": d, "source": s, "document": p}
                             for i, d, s, p in zip(
-                                ids, dois, raw, documents, strict=True
-                            )
+                            ids, dois, raw, documents, strict=True
+                        )
                         ]
                     ).decode()
                     # 实际快照含重复 ID：按来源更新日期保留最新记录，同日以文件后出现的记录为准。

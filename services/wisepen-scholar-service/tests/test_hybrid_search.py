@@ -8,10 +8,14 @@ import pytest
 from openai import APIConnectionError
 from scholar.application.field_policies import FieldPolicy
 from scholar.application.lookup_runner import LookupRunner
-from scholar.application.search import PaperSearch, PaperSearchService, SearchBinding
-from scholar.application.source_execution import SourceExecutionStatus
+from scholar.application.services.search import (
+    PaperSearch,
+    PaperSearchService,
+    SearchBinding,
+)
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.paper import Paper
+from scholar.domain.models.source_execution import SourceExecutionStatus
 from scholar.providers.arxiv import ArxivProvider
 
 

@@ -11,7 +11,10 @@ from xml.etree import ElementTree as ET
 
 import duckdb
 import orjson
-from scholar.core.embedding_runtime import MODEL_SIGNATURE
+from offline.arxiv_oai import ArxivOaiHarvest, ArxivOaiRecord, INITIAL_FROM
+from offline.embeddings import INPUT_HASH_SQL, reconcile_embeddings
+from offline.s2_api import S2SyncClient, S2SyncPaper
+
 from scholar.domain.models.identifiers import (
     IdentifierKind,
     PaperIdentifier,
@@ -19,10 +22,7 @@ from scholar.domain.models.identifiers import (
     normalize_doi,
 )
 from scholar.domain.repositories.paper_lookup_cache import PaperLookupCache
-
-from offline.arxiv_oai import INITIAL_FROM, ArxivOaiHarvest, ArxivOaiRecord
-from offline.embeddings import INPUT_HASH_SQL, reconcile_embeddings
-from offline.s2_api import S2SyncClient, S2SyncPaper
+from scholar.ml.specter import MODEL_SIGNATURE
 
 _RAW_NS = "http://arxiv.org/OAI/arXivRaw/"
 
@@ -55,27 +55,71 @@ class _Projection:
 
 def _create_sync_schema(db: duckdb.DuckDBPyConnection) -> None:
     db.execute("""
-        CREATE TABLE IF NOT EXISTS arxiv_sync_state (
-            singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK(singleton),
-            last_response_date VARCHAR
-        );
-        CREATE TABLE IF NOT EXISTS pending_s2 (
-            arxiv_id VARCHAR PRIMARY KEY,
-            reason VARCHAR NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS pending_arxiv_cache_invalidation (
-            arxiv_id VARCHAR PRIMARY KEY,
-            identifiers JSON NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS arxiv_sync_diagnostics (
-            response_date VARCHAR NOT NULL,
-            oai_identifier VARCHAR NOT NULL,
-            arxiv_id VARCHAR,
-            reason VARCHAR NOT NULL,
-            detail JSON NOT NULL,
-            PRIMARY KEY(response_date, oai_identifier, reason)
-        );
-    """)
+               CREATE TABLE IF NOT EXISTS arxiv_sync_state
+               (
+                   singleton
+                   BOOLEAN
+                   PRIMARY
+                   KEY
+                   DEFAULT
+                   true
+                   CHECK
+               (
+                   singleton
+               ),
+                   last_response_date VARCHAR
+                   );
+               CREATE TABLE IF NOT EXISTS pending_s2
+               (
+                   arxiv_id
+                   VARCHAR
+                   PRIMARY
+                   KEY,
+                   reason
+                   VARCHAR
+                   NOT
+                   NULL
+               );
+               CREATE TABLE IF NOT EXISTS pending_arxiv_cache_invalidation
+               (
+                   arxiv_id
+                   VARCHAR
+                   PRIMARY
+                   KEY,
+                   identifiers
+                   JSON
+                   NOT
+                   NULL
+               );
+               CREATE TABLE IF NOT EXISTS arxiv_sync_diagnostics
+               (
+                   response_date
+                   VARCHAR
+                   NOT
+                   NULL,
+                   oai_identifier
+                   VARCHAR
+                   NOT
+                   NULL,
+                   arxiv_id
+                   VARCHAR,
+                   reason
+                   VARCHAR
+                   NOT
+                   NULL,
+                   detail
+                   JSON
+                   NOT
+                   NULL,
+                   PRIMARY
+                   KEY
+               (
+                   response_date,
+                   oai_identifier,
+                   reason
+               )
+                   );
+               """)
 
 
 def _normalize_oai_identifier(identifier: str) -> str:
@@ -181,14 +225,15 @@ def _pending_invalidation_aliases(
     db: duckdb.DuckDBPyConnection,
 ) -> list[PaperIdentifier]:
     rows = db.execute("""
-        SELECT a.arxiv_id, a.doi, a.document
-        FROM arxiv a JOIN (
-            SELECT arxiv_id FROM pending_s2
-            UNION
-            SELECT arxiv_id FROM pending_publish
-        ) p USING(arxiv_id)
-        ORDER BY a.arxiv_id
-    """).fetchall()
+                      SELECT a.arxiv_id, a.doi, a.document
+                      FROM arxiv a
+                               JOIN (SELECT arxiv_id
+                                     FROM pending_s2
+                                     UNION
+                                     SELECT arxiv_id
+                                     FROM pending_publish) p USING (arxiv_id)
+                      ORDER BY a.arxiv_id
+                      """).fetchall()
     aliases = [
         identifier
         for arxiv_id, doi, raw_document in rows
@@ -215,9 +260,9 @@ def _record_arxiv_cache_invalidation(
     ).fetchone()
     if row is not None:
         identifiers = [
-            PaperIdentifier(IdentifierKind(kind), value)
-            for kind, value in orjson.loads(row[0])
-        ] + identifiers
+                          PaperIdentifier(IdentifierKind(kind), value)
+                          for kind, value in orjson.loads(row[0])
+                      ] + identifiers
     encoded = orjson.dumps(
         [
             [identifier.kind.value, identifier.value]
@@ -460,10 +505,11 @@ def _s2_lookup_conflicts(
                 )
             )
         owners = db.execute(
-            """SELECT arxiv_id FROM arxiv
-            WHERE arxiv_id<>?
-                AND json_extract_string(document, '$.metadata.s2.corpus_id')=?
-            ORDER BY arxiv_id""",
+            """SELECT arxiv_id
+               FROM arxiv
+               WHERE arxiv_id <> ?
+                 AND json_extract_string(document, '$.metadata.s2.corpus_id') = ?
+               ORDER BY arxiv_id""",
             [arxiv_id, corpus_id],
         ).fetchall()
         if owners:
@@ -484,10 +530,11 @@ async def _enrich_pending(
     response_date: str,
 ) -> tuple[int, int, list[PaperIdentifier]]:
     rows = db.execute("""
-        SELECT a.arxiv_id, a.doi, a.document
-        FROM pending_s2 p JOIN arxiv a USING(arxiv_id)
-        ORDER BY a.arxiv_id
-    """).fetchall()
+                      SELECT a.arxiv_id, a.doi, a.document
+                      FROM pending_s2 p
+                               JOIN arxiv a USING (arxiv_id)
+                      ORDER BY a.arxiv_id
+                      """).fetchall()
     pending = [
         (arxiv_id, doi, orjson.loads(document)) for arxiv_id, doi, document in rows
     ]
@@ -496,7 +543,7 @@ async def _enrich_pending(
     enriched = 0
     invalidations = []
     for offset in range(0, len(pending), batch_size):
-        batch = pending[offset : offset + batch_size]
+        batch = pending[offset: offset + batch_size]
         identifiers = [PaperIdentifier(IdentifierKind.ARXIV, item[0]) for item in batch]
         synced = await client.lookup(identifiers)
         requested += len(identifiers)

@@ -3,14 +3,14 @@
 from datetime import date
 
 import pytest
-from scholar.application.lookup import (
+from scholar.application.lookup_runner import LookupBinding, LookupRunner
+from scholar.application.services.lookup import (
     EnrichmentStatus,
     LookupPurpose,
     LookupStatus,
     PaperLookup,
     PaperLookupService,
 )
-from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import (
     IdentifierKind,

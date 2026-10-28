@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import orjson
@@ -9,14 +10,11 @@ from elastic_transport import ApiError, ConnectionError, ConnectionTimeout
 from elasticsearch import AsyncElasticsearch
 
 from common.logger import warn
-from scholar.core.embedding_runtime import DIMENSIONS, MODEL_SIGNATURE
-from scholar.domain.errors import (
-    ProviderError,
-    provider_error_message,
-)
+from scholar.domain.errors import ProviderError, provider_error_message
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.models.paper import Paper, PaperSource
+from scholar.ml.specter import DIMENSIONS, MODEL_SIGNATURE
 
 ARXIV_MAPPING = {
     "dynamic": "strict",
@@ -35,14 +33,17 @@ ARXIV_MAPPING = {
             )
         },
         **{
-            # 原字段保留未词干的词项；.en 去停用词并归并英语词形，用于概念召回。
+            # 原字段保留未词干词项；.en 去停用词并归并词形，用于概念召回。
             field: {
                 "type": "text",
                 "fields": {"en": {"type": "text", "analyzer": "english"}},
             }
             for field in ("title", "abstract")
         },
-        **{field: {"type": "text"} for field in ("authors", "journal_ref", "comments")},
+        **{
+            field: {"type": "text"}
+            for field in ("authors", "journal_ref", "comments")
+        },
         "submitted_date": {"type": "date"},
         "updated_date": {"type": "date"},
         "versions": {"type": "object", "enabled": False},
@@ -60,7 +61,10 @@ ARXIV_MAPPING = {
                                 "text": {
                                     "type": "text",
                                     "fields": {
-                                        "en": {"type": "text", "analyzer": "english"}
+                                        "en": {
+                                            "type": "text",
+                                            "analyzer": "english",
+                                        }
                                     },
                                 },
                             }
@@ -98,10 +102,11 @@ ARXIV_INDEX_SETTINGS = {
 
 
 def create_elasticsearch(
-        uris: str, username: str, password: str, timeout: float
+    uris: str,
+    username: str,
+    password: str,
+    timeout: float,
 ) -> AsyncElasticsearch:
-    import json
-
     hosts = (
         json.loads(uris)
         if uris.strip().startswith("[")
@@ -117,23 +122,23 @@ def create_elasticsearch(
 
 
 class ElasticsearchPaperRepository:
-    """本地全文召回和精确身份查询；不包含来源路由和缓存策略。"""
+    """本地全文召回和精确身份查询；不含来源路由与缓存策略。"""
 
     def __init__(
-            self,
-            es: AsyncElasticsearch,
-            alias: str,
+        self,
+        es: AsyncElasticsearch,
+        alias: str,
     ):
         self.es, self.alias = es, alias
 
     async def search(
-            self,
-            *,
-            query: str,
-            categories: list[str],
-            published_after: date | None,
-            published_before: date | None,
-            limit: int,
+        self,
+        *,
+        query: str,
+        categories: list[str],
+        published_after: date | None,
+        published_before: date | None,
+        limit: int,
     ) -> list[Paper]:
         fields = [
             ("title", 3),
@@ -147,7 +152,7 @@ class ElasticsearchPaperRepository:
             source_excludes=["embedding"],
             query={
                 "bool": {
-                    # 每个逻辑字段只选原形/词干中的最高分；字段之间也不直接累加。
+                    # 每个逻辑字段只取原形/词干中的最高分；字段之间不直接累加。
                     "must": [
                         {
                             "dis_max": {
@@ -195,14 +200,14 @@ class ElasticsearchPaperRepository:
         return [self._to_paper(hit["_source"]) for hit in response["hits"]["hits"]]
 
     async def search_vector(
-            self,
-            *,
-            vector: list[float],
-            categories: list[str],
-            published_after: date | None,
-            published_before: date | None,
-            limit: int,
-            num_candidates: int = 1000,
+        self,
+        *,
+        vector: list[float],
+        categories: list[str],
+        published_after: date | None,
+        published_before: date | None,
+        limit: int,
+        num_candidates: int = 1000,
     ) -> list[Paper]:
         response = await self.es.search(
             index=self.alias,
@@ -214,8 +219,10 @@ class ElasticsearchPaperRepository:
                 "query_vector": vector,
                 "k": limit,
                 "num_candidates": num_candidates,
-                # 必须是 kNN 预过滤；事后过滤会使有资格的候选提前被截断。
-                "filter": self._filters(categories, published_after, published_before),
+                # 必须用 kNN 预过滤；事后过滤会提前截断合格候选。
+                "filter": self._filters(
+                    categories, published_after, published_before
+                ),
             },
         )
         return [self._to_paper(hit["_source"]) for hit in response["hits"]["hits"]]
@@ -247,7 +254,7 @@ class ElasticsearchPaperRepository:
         return filters
 
     async def lookup(
-            self, identifiers: list[PaperIdentifier]
+        self, identifiers: list[PaperIdentifier]
     ) -> list[PaperLookupMatch]:
         if not identifiers:
             return []
@@ -267,13 +274,15 @@ class ElasticsearchPaperRepository:
         try:
             response = await self.es.msearch(searches=searches)
         except (ApiError, ConnectionError, ConnectionTimeout) as error:
-            # 网络失败在存储接入边界转换；lookup 可据此回退，程序错误继续传播。
+            # 网络/API 失败在存储边界转换；lookup 可据此回退，其余异常继续上抛。
             raise ProviderError(provider_error_message(error)) from error
         results = []
         for result in response["responses"]:
             if "error" in result:
                 warn(
-                    "paper lookup source failed.", source="arxiv", error=result["error"]
+                    "paper lookup source failed.",
+                    source="arxiv",
+                    error=result["error"],
                 )
                 results.append(
                     PaperLookupMatch(
@@ -281,11 +290,12 @@ class ElasticsearchPaperRepository:
                     )
                 )
                 continue
-            # 两个结果足以证明身份歧义；不能任意取其中一个 DOI 候选。
+            # 两条结果即可证明身份歧义，不能任意取其中一个候选。
             results.append(
                 PaperLookupMatch(
                     papers=[
-                        self._to_paper(hit["_source"]) for hit in result["hits"]["hits"]
+                        self._to_paper(hit["_source"])
+                        for hit in result["hits"]["hits"]
                     ]
                 )
             )

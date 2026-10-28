@@ -123,12 +123,12 @@ def run_job(args: argparse.Namespace) -> int:
                         (
                             event[k]
                             for k in (
-                                "staged_changed",
-                                "written",
-                                "scanned",
-                                "pending",
-                                "pending_publish",
-                            )
+                            "staged_changed",
+                            "written",
+                            "scanned",
+                            "pending",
+                            "pending_publish",
+                        )
                             if isinstance(event.get(k), int)
                         ),
                         None,

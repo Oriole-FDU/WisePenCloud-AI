@@ -30,8 +30,8 @@ from scholar.api.router import api_router
 from scholar.container import container
 from scholar.core.config.app_settings import settings
 from scholar.core.config.nacos import nacos_client_manager
-from scholar.core.embedding_runtime import DEFAULT_MODELS, SpecterEncoder
 from scholar.domain.errors import ProviderError
+from scholar.ml.specter import DEFAULT_MODELS, SpecterEncoder
 
 container.config.from_dict(settings.model_dump())
 container.wire(modules=[health, papers])

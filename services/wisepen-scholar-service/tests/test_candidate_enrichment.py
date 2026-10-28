@@ -6,7 +6,11 @@ import httpx
 import pytest
 from scholar.application.field_policies import FieldPolicy
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
-from scholar.application.search import PaperSearch, PaperSearchService, SearchBinding
+from scholar.application.services.search import (
+    PaperSearch,
+    PaperSearchService,
+    SearchBinding,
+)
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier

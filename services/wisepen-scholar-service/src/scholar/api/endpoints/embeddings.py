@@ -9,7 +9,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from scholar.core.embedding_runtime import QUERY_MODEL
+from scholar.ml.specter import QUERY_MODEL
 
 router = APIRouter(tags=["embeddings"])
 

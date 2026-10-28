@@ -17,7 +17,7 @@ class RedisPaperLookupCache:
         self.redis, self.namespace = redis, f"{LOOKUP_CACHE_REVISION}:{namespace}"
 
     async def get_many(
-            self, ids: list[PaperIdentifier]
+        self, ids: list[PaperIdentifier]
     ) -> list[CachedPaperLookup | None]:
         if not ids:
             return []

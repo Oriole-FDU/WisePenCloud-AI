@@ -10,211 +10,215 @@
 
 * `General`
 
-  * 涵盖学科与专业范围：跨学科、通识课程、未定领域
+    * 涵盖学科与专业范围：跨学科、通识课程、未定领域
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`—`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`—`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`—`
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`—`
 
-  * arxiv 分类参数（`cat`）：`—`
+    * arxiv 分类参数（`cat`）：`—`
 
-  * 对齐策略与映射说明：**零过滤兜底**：最大化召回。
+    * 对齐策略与映射说明： **零过滤兜底**：最大化召回。
 
 * `Computer Science`
 
-  * 涵盖学科与专业范围：计算机、人工智能、软件工程、数据科学
+    * 涵盖学科与专业范围：计算机、人工智能、软件工程、数据科学
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Computer Science`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Computer Science`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`17`（`Computer Science`）
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`17`（`Computer Science`）
 
-  * arxiv 分类参数（`cat`）：`cs.*`
+    * arxiv 分类参数（`cat`）：`cs.*`
 
-  * 对齐策略与映射说明：三端 1:1 精确对齐。
+    * 对齐策略与映射说明：三端 1:1 精确对齐。
 
 * `Medicine`
 
-  * 涵盖学科与专业范围：临床医学、基础医学、药学、护理、口腔
+    * 涵盖学科与专业范围：临床医学、基础医学、药学、护理、口腔
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Medicine`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Medicine`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`27|29|30|35|36`
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`27|29|30|35|36`
 
-    * 27：Medicine
+        * 27：Medicine
 
-    * 29：Nursing
+        * 29：Nursing
 
-    * 30：Pharmacology, Toxicology and Pharmaceutics
+        * 30：Pharmacology, Toxicology and Pharmaceutics
 
-    * 35：Dentistry
+        * 35：Dentistry
 
-    * 36：Health Professions
+        * 36：Health Professions
 
-  * arxiv 分类参数（`cat`）：`—`
+    * arxiv 分类参数（`cat`）：`—`
 
-  * 对齐策略与映射说明：arxiv 不设临床医学预印本门类（主要分布于 medRxiv/PubMed）。
+    * 对齐策略与映射说明：arxiv 不设临床医学预印本门类（主要分布于 medRxiv/PubMed）。
 
 * `Biology`
 
-  * 涵盖学科与专业范围：生物科学、遗传学、神经科学、农学生命
+    * 涵盖学科与专业范围：生物科学、遗传学、神经科学、农学生命
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Biology,Agricultural and Food Sciences`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Biology,Agricultural and Food Sciences`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`11|13|24|28|34`
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`11|13|24|28|34`
 
-    * 11：Agricultural and Biological Sciences
+        * 11：Agricultural and Biological Sciences
 
-    * 13：Biochemistry, Genetics and Molecular Biology
+        * 13：Biochemistry, Genetics and Molecular Biology
 
-    * 24：Immunology and Microbiology
+        * 24：Immunology and Microbiology
 
-    * 28：Neuroscience
+        * 28：Neuroscience
 
-    * 34：Veterinary
+        * 34：Veterinary
 
-  * arxiv 分类参数（`cat`）：`q-bio.*`
+    * arxiv 分类参数（`cat`）：`q-bio.*`
 
-  * 对齐策略与映射说明：arxiv 仅支持定量生物学（`q-bio`），涵盖计算生物、基因组学与神经回路等分支；湿实验生物学主要分布在 bioRxiv。
+    * 对齐策略与映射说明：arxiv 仅支持定量生物学（`q-bio`），涵盖计算生物、基因组学与神经回路等分支；湿实验生物学主要分布在
+      bioRxiv。
 
 * `Engineering`
 
-  * 涵盖学科与专业范围：机械、电气电子、土木、化工、能源控制
+    * 涵盖学科与专业范围：机械、电气电子、土木、化工、能源控制
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Engineering`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Engineering`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`15|21|22`
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`15|21|22`
 
-    * 15：Chemical Engineering
+        * 15：Chemical Engineering
 
-    * 21：Energy
+        * 21：Energy
 
-    * 22：Engineering
+        * 22：Engineering
 
-  * arxiv 分类参数（`cat`）：`eess.*`
+    * arxiv 分类参数（`cat`）：`eess.*`
 
-  * 对齐策略与映射说明：arxiv 涵盖电气工程与系统科学（`eess`，含信号处理、图像音视频、控制系统）；机械土木等传统工科在 arxiv 缺乏独立大类。
+    * 对齐策略与映射说明：arxiv 涵盖电气工程与系统科学（`eess`，含信号处理、图像音视频、控制系统）；机械土木等传统工科在 arxiv
+      缺乏独立大类。
 
 * `Economics & Business`
 
-  * 涵盖学科与专业范围：经济学、金融、管理学、工商会计
+    * 涵盖学科与专业范围：经济学、金融、管理学、工商会计
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Economics,Business`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Economics,Business`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`14|20`
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`14|20`
 
-    * 14：Business, Management and Accounting
+        * 14：Business, Management and Accounting
 
-    * 20：Economics, Econometrics and Finance
+        * 20：Economics, Econometrics and Finance
 
-  * arxiv 分类参数（`cat`）：`econ.*,q-fin.*`
+    * arxiv 分类参数（`cat`）：`econ.*,q-fin.*`
 
-  * 对齐策略与映射说明：arxiv 拆分为通用经济学（`econ`）与定量金融学（`q-fin`），通过联合查询匹配商业与宏微观经济。
+    * 对齐策略与映射说明：arxiv 拆分为通用经济学（`econ`）与定量金融学（`q-fin`），通过联合查询匹配商业与宏微观经济。
 
 * `Mathematics`
 
-  * 涵盖学科与专业范围：纯数、应用数学、数理统计、运筹优化
+    * 涵盖学科与专业范围：纯数、应用数学、数理统计、运筹优化
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Mathematics`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Mathematics`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`26|18`
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`26|18`
 
-    * 26：Mathematics
+        * 26：Mathematics
 
-    * 18：Decision Sciences
+        * 18：Decision Sciences
 
-  * arxiv 分类参数（`cat`）：`math.*,stat.*`
+    * arxiv 分类参数（`cat`）：`math.*,stat.*`
 
-  * 对齐策略与映射说明：arxiv 将数学与统计学独立建类，合并 `math` 与 `stat` 以完整覆盖纯数、数理统计及运筹决策分支。
+    * 对齐策略与映射说明：arxiv 将数学与统计学独立建类，合并 `math` 与 `stat` 以完整覆盖纯数、数理统计及运筹决策分支。
 
 * `Physics`
 
-  * 涵盖学科与专业范围：理论物理、天文学、凝聚态、光学
+    * 涵盖学科与专业范围：理论物理、天文学、凝聚态、光学
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Physics`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Physics`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`31`（`Physics and Astronomy`）
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`31`（`Physics and Astronomy`）
 
-  * arxiv 分类参数（`cat`）：`physics.*,astro-ph.*,cond-mat.*,gr-qc,hep-ex,hep-lat,hep-ph,hep-th,math-ph,nlin.*,nucl-ex,nucl-th,quant-ph`
+    * arxiv 分类参数（`cat`）：
+      `physics.*,astro-ph.*,cond-mat.*,gr-qc,hep-ex,hep-lat,hep-ph,hep-th,math-ph,nlin.*,nucl-ex,nucl-th,quant-ph`
 
-  * 对齐策略与映射说明：arxiv 的核心发源领域，需汇聚天体物理、凝聚态、高能粒子、量子物理及交叉物理等全部子类。
+    * 对齐策略与映射说明：arxiv 的核心发源领域，需汇聚天体物理、凝聚态、高能粒子、量子物理及交叉物理等全部子类。
 
 * `Chemistry`
 
-  * 涵盖学科与专业范围：有机/无机化学、物理化学、分析化学
+    * 涵盖学科与专业范围：有机/无机化学、物理化学、分析化学
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Chemistry`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Chemistry`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`16`（`Chemistry`）
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`16`（`Chemistry`）
 
-  * arxiv 分类参数（`cat`）：`physics.chem-ph`
+    * arxiv 分类参数（`cat`）：`physics.chem-ph`
 
-  * 对齐策略与映射说明：arxiv 无独立化学一级学科，仅收录化学物理（`physics.chem-ph`）；纯化学预印本通常在 ChemRxiv。
+    * 对齐策略与映射说明：arxiv 无独立化学一级学科，仅收录化学物理（`physics.chem-ph`）；纯化学预印本通常在 ChemRxiv。
 
 * `Psychology`
 
-  * 涵盖学科与专业范围：认知心理、应用心理、脑与认知科学
+    * 涵盖学科与专业范围：认知心理、应用心理、脑与认知科学
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Psychology`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Psychology`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`32`（`Psychology`）
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`32`（`Psychology`）
 
-  * arxiv 分类参数（`cat`）：`—`
+    * arxiv 分类参数（`cat`）：`—`
 
-  * 对齐策略与映射说明：arxiv 无心理学独立分类（少部分计算认知多并入 `q-bio.NC` 或 `cs.AI`，不作强制映射）。
+    * 对齐策略与映射说明：arxiv 无心理学独立分类（少部分计算认知多并入 `q-bio.NC` 或 `cs.AI`，不作强制映射）。
 
 * `Social Sciences`
 
-  * 涵盖学科与专业范围：社会学、政治学、公共管理、传播学、教育
+    * 涵盖学科与专业范围：社会学、政治学、公共管理、传播学、教育
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Sociology,Political Science,Education`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Sociology,Political Science,Education`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`33`（`Social Sciences`）
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`33`（`Social Sciences`）
 
-  * arxiv 分类参数（`cat`）：`physics.soc-ph`
+    * arxiv 分类参数（`cat`）：`physics.soc-ph`
 
-  * 对齐策略与映射说明：arxiv 仅包含计算社会学与社会物理学（`physics.soc-ph`），传统社科领域在 arxiv 无对应大类。
+    * 对齐策略与映射说明：arxiv 仅包含计算社会学与社会物理学（`physics.soc-ph`），传统社科领域在 arxiv 无对应大类。
 
 * `Arts & Humanities`
 
-  * 涵盖学科与专业范围：文学、历史、哲学、艺术、语言学
+    * 涵盖学科与专业范围：文学、历史、哲学、艺术、语言学
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Art,History,Philosophy,Linguistics`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Art,History,Philosophy,Linguistics`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`12`（`Arts and Humanities`）
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`12`（`Arts and Humanities`）
 
-  * arxiv 分类参数（`cat`）：`—`
+    * arxiv 分类参数（`cat`）：`—`
 
-  * 对齐策略与映射说明：arxiv 不覆盖人文艺术类学科。
+    * 对齐策略与映射说明：arxiv 不覆盖人文艺术类学科。
 
 * `Law`
 
-  * 涵盖学科与专业范围：法学理论、民商法、国际法、刑法
+    * 涵盖学科与专业范围：法学理论、民商法、国际法、刑法
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Law`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Law`
 
-  * OpenAlex API 参数：`topics.subfield.id:3308`（降级备用：`topics.field.id:33`）
+    * OpenAlex API 参数：`topics.subfield.id:3308`（降级备用：`topics.field.id:33`）
 
-  * arxiv 分类参数（`cat`）：`—`
+    * arxiv 分类参数（`cat`）：`—`
 
-  * 对齐策略与映射说明：arxiv 无独立法学大类（计算法学论文多偶见于 `cs.CY`）。
+    * 对齐策略与映射说明：arxiv 无独立法学大类（计算法学论文多偶见于 `cs.CY`）。
 
 * `Materials & Environmental Sciences`
 
-  * 涵盖学科与专业范围：材料科学、地学、环境生态、气象地理
+    * 涵盖学科与专业范围：材料科学、地学、环境生态、气象地理
 
-  * Semantic Scholar API 参数（`fieldsOfStudy`）：`Materials Science,Environmental Science,Geology,Geography`
+    * Semantic Scholar API 参数（`fieldsOfStudy`）：`Materials Science,Environmental Science,Geology,Geography`
 
-  * OpenAlex API 参数（`filter=topics.field.id:...`）：`19|23|25`
+    * OpenAlex API 参数（`filter=topics.field.id:...`）：`19|23|25`
 
-    * 19：Earth and Planetary Sciences
+        * 19：Earth and Planetary Sciences
 
-    * 23：Environmental Science
+        * 23：Environmental Science
 
-    * 25：Materials Science
+        * 25：Materials Science
 
-  * arxiv 分类参数（`cat`）：`cond-mat.mtrl-sci,physics.ao-ph,physics.geo-ph`
+    * arxiv 分类参数（`cat`）：`cond-mat.mtrl-sci,physics.ao-ph,physics.geo-ph`
 
-  * 对齐策略与映射说明：利用 arxiv 的交叉物理分类，抓取材料物理（`cond-mat.mtrl-sci`）、大气海洋物理（`physics.ao-ph`）与地球物理（`physics.geo-ph`）。
+    * 对齐策略与映射说明：利用 arxiv 的交叉物理分类，抓取材料物理（`cond-mat.mtrl-sci`）、大气海洋物理（`physics.ao-ph`）与地球物理（
+      `physics.geo-ph`）。
 
 ## 渠道定位与策略分流
 
@@ -224,11 +228,14 @@ Tips: 以下涉及代码均为示例性伪代码，真实实现时不应当直�
 
 系统根据数据源的覆盖范围、调用成本及独特能力，将其划分为主要召回源、补充召回源和富化源。
 
-* **arxiv 本地索引：** 高吞吐、低延迟的本地预印本文献检索能力。支持按关键词、分类和时间范围组合查询，是未启用 OpenAlex BYOK 时的默认召回渠道。其覆盖范围受学科分类体系限制。
+* **arxiv 本地索引：** 高吞吐、低延迟的本地预印本文献检索能力。支持按关键词、分类和时间范围组合查询，是未启用 OpenAlex BYOK
+  时的默认召回渠道。其覆盖范围受学科分类体系限制。
 
-* **OpenAlex：** 跨学科的通用学术检索源，负责覆盖传统学术出版体系及 arxiv 未充分覆盖的领域。产品仅在用户配置有效的 OpenAlex API Key（BYOK）后启用，不默认依赖公共额度。
+* **OpenAlex：** 跨学科的通用学术检索源，负责覆盖传统学术出版体系及 arxiv 未充分覆盖的领域。产品仅在用户配置有效的 OpenAlex
+  API Key（BYOK）后启用，不默认依赖公共额度。
 
-* **Semantic Scholar（S2）：** 提供语义检索、引用影响力、TLDR 等能力。考虑到其 API 的速率限制，默认以高价值字段富化为主；只有领域策略或当前任务明确要求时，才执行独立的 S2 搜索。
+* **Semantic Scholar（S2）：** 提供语义检索、引用影响力、TLDR 等能力。考虑到其 API 的速率限制，默认以高价值字段富化为主；只有领域策略或当前任务明确要求时，才执行独立的
+  S2 搜索。
 
 * **领域专用来源：** 根据真实增量价值接入。例如，Hugging Face Papers 可以为 AI/CS 提供趋势发现及社区信号，也可以为已有论文补充模型、数据集和代码关联信息。
 
@@ -244,7 +251,8 @@ Tips: 以下涉及代码均为示例性伪代码，真实实现时不应当直�
 
 2. 指定了明确领域，且该领域存在 arxiv 分类映射：按照映射查询相应分类。
 
-3. 指定了明确领域，但该领域没有 arxiv 分类映射：返回明确的能力提示，不自动退化为无分类过滤的 arxiv 全库检索，以免将不匹配的结果伪装成该领域的有效覆盖。
+3. 指定了明确领域，但该领域没有 arxiv 分类映射：返回明确的能力提示，不自动退化为无分类过滤的 arxiv
+   全库检索，以免将不匹配的结果伪装成该领域的有效覆盖。
 
 4. 不调用 OpenAlex，也不通过未经配置的其他来源绕过上述规则。
 
@@ -264,7 +272,8 @@ OpenAlex BYOK 的启用状态决定来源是否可用，但不自动决定每次
 
 ### 3. 领域策略配置
 
-领域配置需要同时表达默认检索计划、可选的多源检索计划、arxiv 分类映射及富化需求。不能只记录一个 `primary_source`，再把多源检索留给执行器中的临时分支处理。
+领域配置需要同时表达默认检索计划、可选的多源检索计划、arxiv 分类映射及富化需求。不能只记录一个 `primary_source`
+，再把多源检索留给执行器中的临时分支处理。
 
 建议采用以下声明式结构：
 
@@ -356,9 +365,11 @@ AI_CS = DomainPolicy(
 )
 ```
 
-默认情况下，AI/CS 查询本地 arxiv。启用 OpenAlex BYOK 后，也不会因此自动调用 OpenAlex；只有明确要求多源检索时，才执行配置好的 arxiv + OpenAlex 计划。
+默认情况下，AI/CS 查询本地 arxiv。启用 OpenAlex BYOK 后，也不会因此自动调用 OpenAlex；只有明确要求多源检索时，才执行配置好的
+arxiv + OpenAlex 计划。
 
-S2 负责按需补充高价值学术信号，HF 除了可以富化已有候选，还通过独立的 `discover_papers` 工具提供趋势发现能力。若某次多源检索已从 S2 获取了所需字段，则不再重复请求这些字段。
+S2 负责按需补充高价值学术信号，HF 除了可以富化已有候选，还通过独立的 `discover_papers` 工具提供趋势发现能力。若某次多源检索已从
+S2 获取了所需字段，则不再重复请求这些字段。
 
 **社会科学：OpenAlex 优先，arxiv 作为可选补充。**
 
@@ -385,9 +396,11 @@ SOCIAL_SCIENCES = DomainPolicy(
 )
 ```
 
-启用 OpenAlex BYOK 后，社会科学默认只查询 OpenAlex，不自动叠加 `physics.soc-ph`。只有明确要求多源检索时，才同时查询 OpenAlex 和该 arxiv 分类。
+启用 OpenAlex BYOK 后，社会科学默认只查询 OpenAlex，不自动叠加 `physics.soc-ph`。只有明确要求多源检索时，才同时查询 OpenAlex
+和该 arxiv 分类。
 
-未启用 OpenAlex BYOK 时，明确指定社会科学领域的请求按照映射查询 `physics.soc-ph`，并应提示用户：该分类主要覆盖社会物理学及相关计算方向，不代表传统社会科学的完整文献覆盖。
+未启用 OpenAlex BYOK 时，明确指定社会科学领域的请求按照映射查询 `physics.soc-ph`
+，并应提示用户：该分类主要覆盖社会物理学及相关计算方向，不代表传统社会科学的完整文献覆盖。
 
 **医学：OpenAlex 优先，不默认叠加 arxiv。**
 
@@ -410,7 +423,8 @@ MEDICINE = DomainPolicy(
 
 启用 OpenAlex BYOK 后，医学默认只查询 OpenAlex，并在需要时通过 S2 补充高价值字段。
 
-未启用 OpenAlex BYOK 时，医学没有可用的 arxiv 分类映射，因此返回明确提示，要求用户启用 OpenAlex BYOK 或调整检索范围。系统不应为了保证工具始终返回论文而查询整个 arxiv 库。
+未启用 OpenAlex BYOK 时，医学没有可用的 arxiv 分类映射，因此返回明确提示，要求用户启用 OpenAlex BYOK
+或调整检索范围。系统不应为了保证工具始终返回论文而查询整个 arxiv 库。
 
 医学目前没有注册多源检索计划。未来如果接入 PubMed、临床试验注册库等具有明确增量价值的来源，再根据真实需求配置多源计划，而不是预先假设所有医学查询都应调用多个来源。
 
@@ -475,9 +489,11 @@ async def search_papers(request):
     return build_search_result(papers)
 ```
 
-以上代码为控制流示意。实际实现中，`validate_source_availability` 应明确区分必需来源与可选来源：若必需来源不可用，应拒绝完整执行或返回标记清晰的部分结果；不能把降级执行伪装成完整的多源检索。
+以上代码为控制流示意。实际实现中，`validate_source_availability`
+应明确区分必需来源与可选来源：若必需来源不可用，应拒绝完整执行或返回标记清晰的部分结果；不能把降级执行伪装成完整的多源检索。
 
-富化阶段独立于召回计划执行。它优先使用缓存，对缺失且有实际价值的字段进行批量获取；所有 S2 请求统一经过全局 Gateway，遵守已确认的 1 RPS 限流。
+富化阶段独立于召回计划执行。它优先使用缓存，对缺失且有实际价值的字段进行批量获取；所有 S2 请求统一经过全局 Gateway，遵守已确认的
+1 RPS 限流。
 
 ### 6. 明确的设计边界
 
@@ -487,13 +503,15 @@ async def search_papers(request):
 
 3. **多源检索必须可执行、可验证。** 请求通过 `source_scope="multi_source"` 表达明确意图，领域配置提供实际的来源计划，执行结果报告实际调用的来源。
 
-4. **没有 arxiv 分类时不进行无过滤回退。** 未启用 OpenAlex 的情况下，如果明确领域没有 arxiv 分类映射，返回能力提示，不用 General 检索结果冒充该领域结果。
+4. **没有 arxiv 分类时不进行无过滤回退。** 未启用 OpenAlex 的情况下，如果明确领域没有 arxiv 分类映射，返回能力提示，不用
+   General 检索结果冒充该领域结果。
 
 5. **S2 富化与搜索相互独立。** 默认先复用缓存，再按需富化；只有明确的检索计划才触发 S2 搜索。
 
 6. **专用来源按增量价值接入。** 只有当来源能够补充现有渠道无法充分提供的覆盖、字段或发现能力时，才为对应领域注册新计划。
 
-这套规则将领域映射、默认来源、显式多源检索和富化策略分开管理。新增领域时，可以独立定义其默认策略和可选多源计划；新增 Provider 时，只需要注册能力及更新相关计划，不需要改写通用执行器。
+这套规则将领域映射、默认来源、显式多源检索和富化策略分开管理。新增领域时，可以独立定义其默认策略和可选多源计划；新增 Provider
+时，只需要注册能力及更新相关计划，不需要改写通用执行器。
 
 ## 工具设计
 
@@ -501,15 +519,16 @@ async def search_papers(request):
 
 学术检索能力对 Agent 暴露三个工具，分别对应相关文献检索、已知论文解析和趋势发现三种不同的任务意图。
 
-| 工具                | 核心职责               | 输入起点           | 典型场景                 |
-| ----------------- | ------------------ | -------------- | -------------------- |
-| `search_papers`   | 根据研究问题召回相关论文       | 查询文本           | 搜索某个研究方向的相关工作        |
-| `lookup_papers`   | 根据精确标识符获取论文记录及所需字段 | DOI、arXiv ID 等 | 获取指定论文的引用信息、摘要或其他元数据 |
-| `discover_papers` | 从可用的专用发现渠道获取趋势论文   | 发现领域及趋势条件      | 了解社区近期关注的研究          |
+| 工具              | 核心职责                             | 输入起点           | 典型场景                                 |
+|-------------------|--------------------------------------|--------------------|------------------------------------------|
+| `search_papers`   | 根据研究问题召回相关论文             | 查询文本           | 搜索某个研究方向的相关工作               |
+| `lookup_papers`   | 根据精确标识符获取论文记录及所需字段 | DOI、arXiv ID 等   | 获取指定论文的引用信息、摘要或其他元数据 |
+| `discover_papers` | 从可用的专用发现渠道获取趋势论文     | 发现领域及趋势条件 | 了解社区近期关注的研究                   |
 
 三个工具共享统一的论文实体模型、数据源适配器、缓存和信号富化基础设施，但不强制使用相同的执行流程。
 
-其中，`search_papers` 和 `lookup_papers` 是通用学术能力；`discover_papers` 是按领域注册的可选能力。V1 仅为具备明确趋势发现渠道的领域开放相应能力。
+其中，`search_papers` 和 `lookup_papers` 是通用学术能力；`discover_papers` 是按领域注册的可选能力。V1
+仅为具备明确趋势发现渠道的领域开放相应能力。
 
 工具职责遵循以下原则：
 
@@ -531,16 +550,16 @@ async def search_papers(request):
 
 工具支持关键词、领域和时间范围等常规检索条件。时间过滤直接通过参数表达，不设置固定的经典、前沿或热门分桶。
 
-建议参数如下(也可以考虑额外提供 recency 参数路由，覆盖常见的一周内，一月内，一年内，优先级低于显式published_after/before)：
+建议参数如下 (也可以考虑额外提供 recency 参数路由，覆盖常见的一周内，一月内，一年内，优先级低于显式published_after/before)：
 
-| 参数                 | 类型      | 必需 | 说明                |
-| ------------------ | ------- | -- | ----------------- |
-| `query`            | string  | 是  | 研究问题或检索关键词        |
-| `field`            | enum    | 否  | 领域标签，默认 `general` |
-| `published_after`  | date    | 否  | 发表日期下界            |
-| `published_before` | date    | 否  | 发表日期上界            |
-| `limit`            | integer | 否  | 期望返回数量            |
-| `source_scope`     | enum    | 否  | 检索范围，默认 `default` |
+| 参数               | 类型    | 必需 | 说明                     |
+|--------------------|---------|------|--------------------------|
+| `query`            | string  | 是   | 研究问题或检索关键词     |
+| `field`            | enum    | 否   | 领域标签，默认 `general` |
+| `published_after`  | date    | 否   | 发表日期下界             |
+| `published_before` | date    | 否   | 发表日期上界             |
+| `limit`            | integer | 否   | 期望返回数量             |
+| `source_scope`     | enum    | 否   | 检索范围，默认 `default` |
 
 `source_scope` 提供两个取值：
 
@@ -550,7 +569,8 @@ async def search_papers(request):
 
 `multi_source` 不是简单地把所有可用 Provider 并发调用，而是执行预先声明的来源组合。该组合可以包含多个并发来源，也可以在未来扩展为分阶段调用。
 
-例如，AI/CS 的默认计划可以仅查询本地 arXiv；当 Agent 明确需要跨来源覆盖时，使用 `source_scope="multi_source"` 执行配置好的 arXiv 与 OpenAlex 组合。是否额外调用 S2 搜索，由该计划的声明及当前任务的实际需求决定。
+例如，AI/CS 的默认计划可以仅查询本地 arXiv；当 Agent 明确需要跨来源覆盖时，使用 `source_scope="multi_source"` 执行配置好的
+arXiv 与 OpenAlex 组合。是否额外调用 S2 搜索，由该计划的声明及当前任务的实际需求决定。
 
 #### 2.2 返回内容
 
@@ -568,9 +588,9 @@ async def search_papers(request):
 
 建议采用以下接口：
 
-| 参数            | 类型            | 必需 | 默认值 | 说明         |
-| ------------- | ------------- | -- | --- | ---------- |
-| `identifiers` | array[string] | 是  | —   | 一个或多个论文标识符 |
+| 参数          | 类型          | 必需 | 默认值 | 说明                 |
+|---------------|---------------|------|--------|----------------------|
+| `identifiers` | array[string] | 是   | —      | 一个或多个论文标识符 |
 
 #### 3.3 具体执行策略
 
@@ -586,19 +606,21 @@ V1 可以先为 AI/CS 开放该工具，使用 Hugging Face Papers 作为发现�
 
 建议参数如下：
 
-| 参数       | 类型      | 必需 | 说明                                         |
-| -------- | ------- | -- | ------------------------------------------ |
-| `field`  | enum    | 是  | 当前支持发现能力的领域                                |
-| `period` | enum    | 否  | 趋势窗口：`daily`、`weekly`、`monthly`、`all_time` |
-| `sort`   | enum    | 否  | 排序意图：`trending`、`popular`、`recent`         |
-| `query`  | string  | 否  | 可选的主题限定词                                   |
-| `limit`  | integer | 否  | 返回数量，建议最大 15                               |
+| 参数     | 类型    | 必需 | 说明                                               |
+|----------|---------|------|----------------------------------------------------|
+| `field`  | enum    | 是   | 当前支持发现能力的领域                             |
+| `period` | enum    | 否   | 趋势窗口：`daily`、`weekly`、`monthly`、`all_time` |
+| `sort`   | enum    | 否   | 排序意图：`trending`、`popular`、`recent`          |
+| `query`  | string  | 否   | 可选的主题限定词                                   |
+| `limit`  | integer | 否   | 返回数量，建议最大 15                              |
 
 `field` 只允许选择当前已注册发现能力的领域。V1 可以只开放 `computer_science`，后续增加其他领域时再扩展枚举。
 
-`period` 和 `sort` 的具体组合由能力注册表校验。不同来源可能不支持完全相同的窗口或排序方式；系统应将统一语义映射到 Provider 支持的参数，并在不支持时返回明确提示，不应静默改变排序含义。
+`period` 和 `sort` 的具体组合由能力注册表校验。不同来源可能不支持完全相同的窗口或排序方式；系统应将统一语义映射到 Provider
+支持的参数，并在不支持时返回明确提示，不应静默改变排序含义。
 
-发现结果应尽可能保留来源排名、热度指标、观测时间及可用的关联模型、数据集和代码链接。这些信号用于辅助 Agent 判断论文的近期关注度和研究产物情况，不直接等同于学术质量。
+发现结果应尽可能保留来源排名、热度指标、观测时间及可用的关联模型、数据集和代码链接。这些信号用于辅助 Agent
+判断论文的近期关注度和研究产物情况，不直接等同于学术质量。
 
 #### 4.2 与其他工具的协作
 
@@ -614,21 +636,22 @@ V1 可以先为 AI/CS 开放该工具，使用 Hugging Face Papers 作为发现�
 
 ### 5. 三个工具共享的执行基础设施
 
-三个工具可以复用以下内部组件(这里以类的形式表达，实际实现时可能为函数，有些也可能不实现)，但不要求具有相同的调用流程。
+三个工具可以复用以下内部组件 (这里以类的形式表达，实际实现时可能为函数，有些也可能不实现)，但不要求具有相同的调用流程。
 
-| 组件                     | 职责                         |
-| ---------------------- | -------------------------- |
+| 组件                   | 职责                                             |
+|------------------------|--------------------------------------------------|
 | `DomainPolicyRegistry` | 提供领域分类映射、默认检索计划和多源检索计划     |
-| `ProviderRegistry`     | 注册各来源实现的搜索、解析、发现和富化能力      |
-| `PaperResolver`        | 解析标识符并归并同一论文的跨源记录          |
-| `QueryCache`           | 缓存查询候选和来源排序                |
-| `PaperCache`           | 缓存论文元数据及研究信号               |
-| `EnrichmentService`    | 读取缓存、批量获取缺失字段并合并信号         |
+| `ProviderRegistry`     | 注册各来源实现的搜索、解析、发现和富化能力       |
+| `PaperResolver`        | 解析标识符并归并同一论文的跨源记录               |
+| `QueryCache`           | 缓存查询候选和来源排序                           |
+| `PaperCache`           | 缓存论文元数据及研究信号                         |
+| `EnrichmentService`    | 读取缓存、批量获取缺失字段并合并信号             |
 | `S2Gateway`            | 统一管理 S2 的全局限流、请求去重、排队和失败退避 |
 
 论文实体统一使用规范标识符关联多个来源的数据。各来源的引用量和其他异构信号应保留来源及观测时间，不直接覆盖成单一数值。
 
-对于 S2，所有搜索、解析和富化请求必须经过同一 Gateway。查询缓存和论文实体缓存相互独立，缓存命中时不消耗新的 API 请求；发生限流或来源故障时，工具应报告实际状态，而不是把部分结果伪装为完整结果。
+对于 S2，所有搜索、解析和富化请求必须经过同一 Gateway。查询缓存和论文实体缓存相互独立，缓存命中时不消耗新的 API
+请求；发生限流或来源故障时，工具应报告实际状态，而不是把部分结果伪装为完整结果。
 
 ### 6. 工具设计的约束
 
@@ -638,7 +661,8 @@ V1 可以先为 AI/CS 开放该工具，使用 Hugging Face Papers 作为发现�
 
 3. **多源需求显式化**：通过 `source_scope="multi_source"` 请求真实的多源计划，不能只在文档中声明支持多源检索。
 
-4. **领域能力受约束**：没有 arXiv 分类映射时，不将无过滤的 arXiv 全库检索冒充该领域的有效覆盖；没有发现能力的领域不出现在 `discover_papers` 的可选枚举中。
+4. **领域能力受约束**：没有 arXiv 分类映射时，不将无过滤的 arXiv 全库检索冒充该领域的有效覆盖；没有发现能力的领域不出现在
+   `discover_papers` 的可选枚举中。
 
 5. **BYOK 边界明确**：OpenAlex 仅在 BYOK 启用时调用，不依赖公共额度。
 
@@ -646,13 +670,15 @@ V1 可以先为 AI/CS 开放该工具，使用 Hugging Face Papers 作为发现�
 
 7. **结果可追溯**：返回论文来源、信号来源和执行状态，使 Agent 能够判断结果覆盖范围及信息缺口。
 
-这三个工具构成学术调研的基础能力层。Agent 负责研究问题拆解、工具选择及结果综合；工具负责执行清晰、可验证的检索和信息获取任务。通过领域策略和能力注册表，系统可以在不增加通用工具复杂度的前提下，逐步扩展更多数据源和专用能力。
+这三个工具构成学术调研的基础能力层。Agent
+负责研究问题拆解、工具选择及结果综合；工具负责执行清晰、可验证的检索和信息获取任务。通过领域策略和能力注册表，系统可以在不增加通用工具复杂度的前提下，逐步扩展更多数据源和专用能力。
 
 ## arXiv 本地镜像与 S2 离线富化入库方案
 
 ### 1. 目标与设计边界
 
-本方案用于完成 arXiv 元数据的本地镜像初始化、Semantic Scholar（S2）开源数据集的离线富化，以及富化结果向 Elasticsearch（ES）的批量发布，并支持后续定时增量更新。
+本方案用于完成 arXiv 元数据的本地镜像初始化、Semantic Scholar（S2）开源数据集的离线富化，以及富化结果向
+Elasticsearch（ES）的批量发布，并支持后续定时增量更新。
 
 整体采用以下架构：
 
@@ -664,7 +690,8 @@ V1 可以先为 AI/CS 开放该工具，使用 Hugging Face Papers 作为发现�
 
 * **Elasticsearch：在线检索与服务层。** 保存统一的论文文档，为在线检索提供关键词、分类、时间和原始学术信号过滤能力。
 
-数据流水线不预生成经典、热门、高影响力等派生标签，不计算综合排名分数，也不把不同来源的引用数据合并为单一数值。所有论文事实以来源记录为准，未获得的字段使用 `null`。
+数据流水线不预生成经典、热门、高影响力等派生标签，不计算综合排名分数，也不把不同来源的引用数据合并为单一数值。所有论文事实以来源记录为准，未获得的字段使用
+`null`。
 
 本方案不引入 OpenAlex、Hugging Face 等其他富化来源，也不下载完整引用图、全文语料或向量数据集。后续若增加其他来源，应作为独立的数据接入需求评估，不影响当前基础数据契约。
 
@@ -700,12 +727,13 @@ V1 可以先为 AI/CS 开放该工具，使用 Hugging Face Papers 作为发现�
 
 优先使用同一个 S2AG release 中的以下数据集：
 
-| 数据集      | 用途                                | 处理方式                          |
-| -------- | --------------------------------- | ----------------------------- |
-| `papers` | S2 标识符、外部 ID、引用量、影响力引用量及其他可用论文元数据 | 提取具有 arXiv 外部标识符的记录及需要的字段     |
-| `tldrs`  | 论文的简短自然语言概括                       | 依据 `corpusId` 与已关联的 S2 论文记录连接 |
+| 数据集   | 用途                                                         | 处理方式                                    |
+|----------|--------------------------------------------------------------|---------------------------------------------|
+| `papers` | S2 标识符、外部 ID、引用量、影响力引用量及其他可用论文元数据 | 提取具有 arXiv 外部标识符的记录及需要的字段 |
+| `tldrs`  | 论文的简短自然语言概括                                       | 依据 `corpusId` 与已关联的 S2 论文记录连接  |
 
-S2AG 提供按 release 发布的完整数据集，并支持通过 release 之间的差分更新本地副本。具体字段、文件数量和使用条款应以当前 release 的数据集说明为准。[S2AG Datasets API 官方文档](https://api.semanticscholar.org/api-docs/datasets)
+S2AG 提供按 release 发布的完整数据集，并支持通过 release 之间的差分更新本地副本。具体字段、文件数量和使用条款应以当前
+release 的数据集说明为准。[S2AG Datasets API 官方文档](https://api.semanticscholar.org/api-docs/datasets)
 
 V1 暂不需要：
 
@@ -719,7 +747,8 @@ V1 暂不需要：
 
 这里的原则是只处理实际需要的字段，而不是将 S2 全量数据集直接镜像到本地。
 
-S2 的 `paperId` 与 `corpusId` 必须区别保存：前者是 API 使用的主要论文标识符，后者是数据集及跨数据集关联中使用的重要标识符。二者不能互相替代。[S2 Academic Graph API 官方文档](https://api.semanticscholar.org/api-docs/)
+S2 的 `paperId` 与 `corpusId` 必须区别保存：前者是 API
+使用的主要论文标识符，后者是数据集及跨数据集关联中使用的重要标识符。二者不能互相替代。[S2 Academic Graph API 官方文档](https://api.semanticscholar.org/api-docs/)
 
 #### 2.3 推荐目录结构
 
@@ -745,7 +774,8 @@ academic-data/
     └── sync/
 ```
 
-`raw/` 保存原始快照或下载的压缩分片；`staging/` 保存按需转换后的中间文件；`warehouse/` 保存 DuckDB 数据库；`exports/` 保存待发布的 ES 批次。
+`raw/` 保存原始快照或下载的压缩分片；`staging/` 保存按需转换后的中间文件；`warehouse/` 保存 DuckDB 数据库；`exports/`
+保存待发布的 ES 批次。
 
 如果磁盘空间有限，解压后的临时文件和中间 Parquet 可以在校验通过后清理。原始快照、release 标识和处理清单应保留，以便故障恢复和追溯。
 
@@ -757,19 +787,19 @@ DuckDB 不需要保存完整的 S2 论文库。只需要保留 arXiv 基础数�
 
 每篇 arXiv 论文一行，以规范化的 arXiv ID 作为主键。
 
-| 字段                | 含义             |
-| ----------------- | -------------- |
+| 字段              | 含义                |
+|-------------------|---------------------|
 | `arxiv_id`        | 规范化后的 arXiv ID |
-| `arxiv_id_raw`    | 原始 ID，便于追溯     |
-| `title`           | 标题             |
-| `abstract`        | 原始摘要           |
-| `authors`         | 作者信息           |
-| `categories`      | arXiv 分类列表     |
-| `doi`             | DOI            |
-| `journal_ref`     | 出版引用信息         |
-| `submitted_date`  | 首次提交日期         |
-| `updated_date`    | 可获得的更新日期       |
-| `source_snapshot` | 来源快照标识         |
+| `arxiv_id_raw`    | 原始 ID，便于追溯   |
+| `title`           | 标题                |
+| `abstract`        | 原始摘要            |
+| `authors`         | 作者信息            |
+| `categories`      | arXiv 分类列表      |
+| `doi`             | DOI                 |
+| `journal_ref`     | 出版引用信息        |
+| `submitted_date`  | 首次提交日期        |
+| `updated_date`    | 可获得的更新日期    |
+| `source_snapshot` | 来源快照标识        |
 
 规范化后的 ID 用于关联，原始字段用于追溯。其他基础元数据可以根据 Kaggle 快照的实际字段继续保留，但不应在这一阶段计算学术评价指标。
 
@@ -777,17 +807,17 @@ DuckDB 不需要保存完整的 S2 论文库。只需要保留 arXiv 基础数�
 
 该表只保存 S2 `papers` 数据集中与 arXiv 关联有关的记录及所需字段。
 
-| 字段                           | 含义                |
-| ---------------------------- | ----------------- |
-| `s2_paper_id`                | S2 API 论文 ID      |
-| `s2_corpus_id`               | S2 数据集关联 ID       |
-| `arxiv_id_norm`              | 规范化的外部 arXiv ID   |
-| `doi_norm`                   | 规范化的 DOI          |
-| `citation_count`             | S2 引用量            |
-| `influential_citation_count` | S2 影响力引用量         |
-| `is_open_access`             | S2 开放获取状态         |
+| 字段                         | 含义                       |
+|------------------------------|----------------------------|
+| `s2_paper_id`                | S2 API 论文 ID             |
+| `s2_corpus_id`               | S2 数据集关联 ID           |
+| `arxiv_id_norm`              | 规范化的外部 arXiv ID      |
+| `doi_norm`                   | 规范化的 DOI               |
+| `citation_count`             | S2 引用量                  |
+| `influential_citation_count` | S2 影响力引用量            |
+| `is_open_access`             | S2 开放获取状态            |
 | `open_access_pdf_url`        | S2 提供的开放获取 PDF 链接 |
-| `source_release`             | S2 数据集 release    |
+| `source_release`             | S2 数据集 release          |
 
 实际可用字段以所下载的 `papers` schema 为准。对于数据集没有提供的字段，不从其他字段推断，也不自行计算替代值。
 
@@ -807,13 +837,13 @@ DuckDB 不需要保存完整的 S2 论文库。只需要保留 arXiv 基础数�
 
 该表用于维护 arXiv 论文与 S2 记录之间的实际关联，供后续富化及增量更新使用。
 
-| 字段               | 含义                          |
-| ---------------- | --------------------------- |
-| `arxiv_id`       | arXiv 论文 ID                 |
-| `s2_corpus_id`   | S2 数据集关联 ID                 |
-| `s2_paper_id`    | S2 API 论文 ID                |
+| 字段             | 含义                                     |
+|------------------|------------------------------------------|
+| `arxiv_id`       | arXiv 论文 ID                            |
+| `s2_corpus_id`   | S2 数据集关联 ID                         |
+| `s2_paper_id`    | S2 API 论文 ID                           |
 | `match_method`   | 使用的关联依据，例如精确 arXiv ID 或 DOI |
-| `source_release` | 关联所依据的数据集版本                 |
+| `source_release` | 关联所依据的数据集版本                   |
 
 这里的 `match_method` 是数据关联的技术追溯信息，不是对论文的学术评价标签。它可以留在内部关联表，不必暴露为 ES 文档中的排序字段。
 
@@ -880,7 +910,8 @@ for record in read_arxiv_snapshot():
 
 从 S2 数据集下载接口获取指定 release 的 `papers` 分片及其 schema、README 和使用条款。
 
-建议采用流式解压与处理，不要将整个 S2 数据集一次性加载到 Python 内存。可以将压缩 JSONL 转换为按字段裁剪的 Parquet，再由 DuckDB 进行批量扫描与关联。
+建议采用流式解压与处理，不要将整个 S2 数据集一次性加载到 Python 内存。可以将压缩 JSONL 转换为按字段裁剪的 Parquet，再由
+DuckDB 进行批量扫描与关联。
 
 处理逻辑：
 
@@ -914,13 +945,15 @@ FROM s2_papers_raw
 WHERE external_arxiv_id IS NOT NULL;
 ```
 
-以上 SQL 使用的是规范化后的逻辑字段名，实际实现必须先根据当前 release 的 JSON schema 建立字段映射。不要假设不同 release 的字段大小写、嵌套结构和类型永远不变。
+以上 SQL 使用的是规范化后的逻辑字段名，实际实现必须先根据当前 release 的 JSON schema 建立字段映射。不要假设不同 release
+的字段大小写、嵌套结构和类型永远不变。
 
 不需要保留全部 S2 论文的所有字段。只要保留当前富化需要的内容，以及未来增量更新所需的关联键和来源信息即可。
 
 #### 4.3 导入 S2 `tldrs`
 
-`tldrs` 通过 S2 Corpus ID 与论文关联。处理时先从 `s2_papers_stage` 提取已保留的 `s2_corpus_id`，再扫描 `tldrs` 分片，只保留这些 ID 对应的摘要。
+`tldrs` 通过 S2 Corpus ID 与论文关联。处理时先从 `s2_papers_stage` 提取已保留的 `s2_corpus_id`，再扫描 `tldrs` 分片，只保留这些
+ID 对应的摘要。
 
 ```sql
 CREATE TABLE s2_tldrs_stage AS
@@ -969,7 +1002,8 @@ JOIN s2_papers_stage AS s
     ON a.arxiv_id = s.arxiv_id_norm;
 ```
 
-DOI 匹配作为单独的补充步骤执行，并且只接受精确、唯一、无冲突的匹配结果。关联结果应经过唯一性与歧义检查，不能简单地依靠 `DISTINCT` 隐藏冲突。
+DOI 匹配作为单独的补充步骤执行，并且只接受精确、唯一、无冲突的匹配结果。关联结果应经过唯一性与歧义检查，不能简单地依靠
+`DISTINCT` 隐藏冲突。
 
 #### 4.5 生成富化结果
 
@@ -1010,7 +1044,8 @@ LEFT JOIN s2_tldrs_stage AS t
 
 该 SQL 为结构示意。正式实现前应保证关联表与暂存表的键唯一，避免连接操作产生重复论文行。对于有歧义的匹配，不应将任意一个候选的字段写入最终文档。
 
-**没有对应 S2 记录，或者 S2 没有提供某个字段时，该字段为&#x20;**`null`**。** 不生成 `has_s2_match`、`has_tldr` 等额外标签，也不以 `0` 或 `false` 代替未知值。
+**没有对应 S2 记录，或者 S2 没有提供某个字段时，该字段为&#x20;**`null`**。** 不生成 `has_s2_match`、`has_tldr` 等额外标签，也不以
+`0` 或 `false` 代替未知值。
 
 ### 5. 富化数据的客观性与缺失值规范
 
@@ -1048,14 +1083,14 @@ S2 的引用量和影响力引用量应以原始字段保存，例如：
 
 对于没有可用值的字段，统一记录为 `null`：
 
-| 情况                | 保存方式            |
-| ----------------- | --------------- |
-| S2 未匹配到该 arXiv 论文 | S2 富化字段为 `null` |
-| S2 明确提供引用量为零      | 引用量为 `0`        |
-| S2 未提供引用量         | 引用量为 `null`     |
-| S2 明确提供非开放获取状态    | `false`         |
-| S2 未提供开放获取状态      | `null`          |
-| 没有可用 TLDR         | `null`          |
+| 情况                      | 保存方式             |
+|---------------------------|----------------------|
+| S2 未匹配到该 arXiv 论文  | S2 富化字段为 `null` |
+| S2 明确提供引用量为零     | 引用量为 `0`         |
+| S2 未提供引用量           | 引用量为 `null`      |
+| S2 明确提供非开放获取状态 | `false`              |
+| S2 未提供开放获取状态     | `null`               |
+| 没有可用 TLDR             | `null`               |
 
 `null` 表示当前没有可用的事实值，不代表对应事实为否。
 
@@ -1140,7 +1175,8 @@ Kaggle 快照只用于首次初始化。后续应使用 arXiv 官方支持的元
 
 #### 7.2 S2 更新
 
-S2AG Datasets API 支持获取不同 release 之间的差分。更新流程应读取目标 release 的 `papers` 与 `tldrs` 差分，按数据集的主键执行新增或替换，并对删除记录执行相应删除操作。[S2AG Datasets API：增量更新说明](https://api.semanticscholar.org/api-docs/datasets)
+S2AG Datasets API 支持获取不同 release 之间的差分。更新流程应读取目标 release 的 `papers` 与 `tldrs`
+差分，按数据集的主键执行新增或替换，并对删除记录执行相应删除操作。[S2AG Datasets API：增量更新说明](https://api.semanticscholar.org/api-docs/datasets)
 
 每次任务：
 
@@ -1158,7 +1194,8 @@ S2AG Datasets API 支持获取不同 release 之间的差分。更新流程应�
 
 7. 所有阶段成功后，才更新本地的已完成 release 标记。
 
-若数据集版本提供删除记录，应按其真实语义处理删除，不能把删除记录当成空值更新。若 S2 记录被删除，应重新计算对应论文的可用关联；如果不再存在有效的 S2 记录，相关富化字段恢复为 `null`。
+若数据集版本提供删除记录，应按其真实语义处理删除，不能把删除记录当成空值更新。若 S2 记录被删除，应重新计算对应论文的可用关联；如果不再存在有效的
+S2 记录，相关富化字段恢复为 `null`。
 
 对于跨多个 release 的差分，必须按官方提供的版本链顺序处理，不能跳过中间变更而假定最新分片可以直接替代本地状态。
 
@@ -1168,7 +1205,8 @@ S2AG Datasets API 支持获取不同 release 之间的差分。更新流程应�
 
 任务中断后，从最后一个已完成的阶段或批次恢复。对相同数据重复执行应保持幂等，不重复生成论文文档、不累计引用量，也不重复添加任何数据。
 
-ES 发布失败时保留待重试批次；只有在确认目标数据已成功写入后，才将对应发布状态标记为完成。涉及多阶段数据更新时，应先在 DuckDB 中完成变更与校验，再统一发布，避免将未完成的中间状态暴露给在线服务。
+ES 发布失败时保留待重试批次；只有在确认目标数据已成功写入后，才将对应发布状态标记为完成。涉及多阶段数据更新时，应先在 DuckDB
+中完成变更与校验，再统一发布，避免将未完成的中间状态暴露给在线服务。
 
 ### 8. 数据质量与验收
 
@@ -1196,7 +1234,8 @@ ES 发布失败时保留待重试批次；只有在确认目标数据已成功�
 
 * 每条富化数据均可追溯至对应的 S2 release。
 
-还应保留 S2 数据集随附的使用条款、版本说明及必要的来源引用。S2AG 数据集与 S2ORC 全文语料并非同一数据产品，不能将某个数据集的许可条件直接套用到其他数据集。可参阅 [S2ORC 官方说明](https://github.com/allenai/s2orc)。
+还应保留 S2 数据集随附的使用条款、版本说明及必要的来源引用。S2AG 数据集与 S2ORC
+全文语料并非同一数据产品，不能将某个数据集的许可条件直接套用到其他数据集。可参阅 [S2ORC 官方说明](https://github.com/allenai/s2orc)。
 
 ### 9. V1 实施顺序
 
@@ -1220,7 +1259,8 @@ ES 发布失败时保留待重试批次；只有在确认目标数据已成功�
 
 9. 增加任务清单、失败恢复和幂等性验证。
 
-V1 的验收目标是形成一份**来源清晰、字段客观、可重复构建、可增量更新的 arXiv 本地论文库**。S2 在其中只承担离线元数据富化职责，不改变论文库的基础覆盖，也不在入库阶段预先决定论文的学术价值。
+V1 的验收目标是形成一份 **来源清晰、字段客观、可重复构建、可增量更新的 arXiv 本地论文库**。S2
+在其中只承担离线元数据富化职责，不改变论文库的基础覆盖，也不在入库阶段预先决定论文的学术价值。
 
 ## S2 限流
 

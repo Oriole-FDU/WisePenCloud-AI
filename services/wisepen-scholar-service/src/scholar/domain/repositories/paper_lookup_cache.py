@@ -19,7 +19,7 @@ class CachedPaperLookup:
 
 class PaperLookupCache(Protocol):
     async def get_many(
-            self, ids: list[PaperIdentifier]
+        self, ids: list[PaperIdentifier]
     ) -> list[CachedPaperLookup | None]: ...
 
     async def put_many(self, entries: list[tuple[CachedPaperLookup, int]]) -> None:

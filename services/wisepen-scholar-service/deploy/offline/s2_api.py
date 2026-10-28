@@ -3,10 +3,10 @@
 from dataclasses import dataclass
 from math import isfinite
 
-from scholar.core.embedding_runtime import DIMENSIONS
-from scholar.providers.s2 import S2Transport
 from scholar.domain.models.identifiers import PaperIdentifier
+from scholar.ml.specter import DIMENSIONS
 from scholar.providers.s2 import ENRICHMENT_FIELDS, IDENTITY_FIELDS, S2Provider
+from scholar.providers.s2 import S2Transport
 
 
 @dataclass

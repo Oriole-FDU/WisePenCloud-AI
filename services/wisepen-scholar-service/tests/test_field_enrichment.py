@@ -5,15 +5,14 @@ from datetime import date
 import pytest
 from elastic_transport import ConnectionError as ElasticConnectionError
 from scholar.application.field_policies import FieldPolicy
-from scholar.application.lookup import (
+from scholar.application.lookup_runner import LookupBinding, LookupRunner
+from scholar.application.services.lookup import (
     EnrichmentStatus,
     LookupPurpose,
     LookupStatus,
     PaperLookup,
     PaperLookupService,
 )
-from scholar.application.lookup_runner import LookupBinding, LookupRunner
-from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.storage.elasticsearch.paper_repository import (
     ElasticsearchPaperRepository,
 )
@@ -22,9 +21,12 @@ from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.providers.arxiv import ArxivProvider, has_signals as arxiv_signals
+from scholar.domain.models.source_execution import SourceExecutionStatus
+from scholar.providers.arxiv import ArxivProvider
+from scholar.providers.arxiv import has_signals as arxiv_signals
 from scholar.providers.openalex import has_signals as openalex_signals
-from scholar.providers.s2 import aliases as s2_aliases, has_signals as s2_signals
+from scholar.providers.s2 import aliases as s2_aliases
+from scholar.providers.s2 import has_signals as s2_signals
 
 
 class FakeProvider:

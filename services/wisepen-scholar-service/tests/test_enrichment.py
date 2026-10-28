@@ -5,23 +5,24 @@ from datetime import date
 
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
-from scholar.application.lookup import (
+from scholar.application.lookup_runner import LookupBinding, LookupRunner
+from scholar.application.services.lookup import (
     EnrichmentStatus,
     LookupPurpose,
     LookupStatus,
     PaperLookup,
     PaperLookupService,
 )
-from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
 from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
-from scholar.providers.arxiv import has_signals as arxiv_signals
 from scholar.providers import s2
-from scholar.providers.s2 import aliases as s2_aliases, has_signals as s2_signals
+from scholar.providers.arxiv import has_signals as arxiv_signals
+from scholar.providers.s2 import aliases as s2_aliases
+from scholar.providers.s2 import has_signals as s2_signals
 
 
 class FakeRedisPipeline:

@@ -3,22 +3,25 @@ from datetime import UTC, date, datetime
 
 import orjson
 import pytest
-import scholar.application.discovery as discovery_module
+import scholar.application.services.discovery as discovery_module
 from common.core.exceptions import ServiceException
 from pydantic import ValidationError
 from scholar.api.schemas.papers import DiscoveryRequest
-from scholar.application.discovery import PaperDiscoveryQuery, PaperDiscoveryService
 from scholar.application.field_policies import FieldPolicy
-from scholar.application.source_execution import SourceExecutionStatus
+from scholar.application.services.discovery import (
+    PaperDiscoveryQuery,
+    PaperDiscoveryService,
+)
 from scholar.core.storage.redis.discovery_cache import RedisDiscoveryCacheRepository
+from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_discoverer import (
     DiscoveryPeriod,
     DiscoverySort,
     PaperDiscovery,
 )
-from scholar.domain.errors import ProviderError
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.paper import Paper, PaperSource
+from scholar.domain.models.source_execution import SourceExecutionStatus
 
 
 class FakeDiscoveryCache:

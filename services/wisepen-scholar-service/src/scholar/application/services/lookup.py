@@ -13,10 +13,10 @@ from scholar.application.field_policies import (
     FieldPolicy,
 )
 from scholar.application.lookup_runner import LookupRunner
-from scholar.application.source_execution import SourceExecution
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
 from scholar.domain.models.paper import Paper
+from scholar.domain.models.source_execution import SourceExecution
 
 
 class LookupPurpose(StrEnum):
@@ -70,21 +70,21 @@ class PaperLookupService:
     """保留输入位置、身份歧义和部分成功；不依赖仓储或单独的来源后门。"""
 
     def __init__(
-            self,
-            lookup: LookupRunner,
-            *,
-            policies: dict[AcademicField, FieldPolicy] | None = None,
-            platform_credentials: dict[str, str] | None = None,
+        self,
+        lookup: LookupRunner,
+        *,
+        policies: dict[AcademicField, FieldPolicy] | None = None,
+        platform_credentials: dict[str, str] | None = None,
     ):
         self.lookup_runner = lookup
         self.policies = FIELD_POLICIES if policies is None else policies
         self.platform_credentials = platform_credentials or {}
 
     async def lookup(
-            self,
-            query: PaperLookup,
-            *,
-            credentials: dict[str, str] | None = None,
+        self,
+        query: PaperLookup,
+        *,
+        credentials: dict[str, str] | None = None,
     ) -> LookupResult:
         credentials = self.platform_credentials | (credentials or {})
         positions: dict[PaperIdentifier, list[int]] = {}
@@ -178,9 +178,9 @@ class PaperLookupService:
 
         # 可用性基于裁剪前的查询状态；enrich 不再因隐藏 Paper 而把部分成功变成整批失败。
         if first_error is not None and not any(
-                item.status
-                in (LookupStatus.FOUND, LookupStatus.NOT_FOUND, LookupStatus.AMBIGUOUS)
-                for item in items
+            item.status
+            in (LookupStatus.FOUND, LookupStatus.NOT_FOUND, LookupStatus.AMBIGUOUS)
+            for item in items
         ):
             raise first_error
         return LookupResult(items, execution)

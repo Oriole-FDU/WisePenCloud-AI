@@ -6,18 +6,18 @@ from pathlib import Path
 
 import httpx
 import orjson
-from redis.asyncio import Redis
-from scholar.core.config.bootstrap_settings import SERVICE_ROOT
-from scholar.providers.s2 import S2Transport
-from scholar.core.storage.elasticsearch.paper_repository import create_elasticsearch
-from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
-
 from offline.arxiv import database_status, import_arxiv, open_database
 from offline.arxiv_oai import ArxivOaiHarvester
 from offline.arxiv_sync import sync_arxiv
 from offline.publish import publish_arxiv
 from offline.s2 import apply_s2_projection, import_s2
 from offline.s2_api import S2SyncClient
+from redis.asyncio import Redis
+
+from scholar.core.config.bootstrap_settings import SERVICE_ROOT
+from scholar.core.storage.elasticsearch.paper_repository import create_elasticsearch
+from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
+from scholar.providers.s2 import S2Transport
 
 
 async def run(args):
@@ -53,7 +53,7 @@ async def run(args):
         from scholar.core.config.app_settings import settings
 
         if args.command == "encode-embeddings":
-            from scholar.core.embedding_runtime import DEFAULT_MODELS
+            from scholar.ml.specter import DEFAULT_MODELS
 
             from offline.embeddings import document_worker, generate_embeddings
 
@@ -196,9 +196,9 @@ def main():
     if args.command == "import-s2" and args.tldr_model is None:
         args.tldr_model = "tldr@v2.0.0"
     if args.max_batches is not None and args.command not in (
-        "import-arxiv",
-        "publish",
-        "encode-embeddings",
+            "import-arxiv",
+            "publish",
+            "encode-embeddings",
     ):
         parser.error(
             "--max-batches is only valid for import-arxiv, publish and encode-embeddings"

@@ -6,16 +6,15 @@ from openai import AsyncOpenAI
 from redis.asyncio import Redis
 
 from common.utils.ai_clients.embedding import EmbeddingClient
-from scholar.application.discovery import PaperDiscoveryService
 from scholar.application.field_policies import FIELD_POLICIES
-from scholar.application.lookup import PaperLookupService
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
-from scholar.application.search import (
+from scholar.application.services.discovery import PaperDiscoveryService
+from scholar.application.services.lookup import PaperLookupService
+from scholar.application.services.search import (
     PaperSearchService,
     SearchBinding,
 )
 from scholar.core.config.bootstrap_settings import bootstrap_settings
-from scholar.core.embedding_runtime import DIMENSIONS, QUERY_MODEL
 from scholar.core.storage.elasticsearch.paper_repository import (
     ElasticsearchPaperRepository,
     create_elasticsearch,
@@ -24,6 +23,7 @@ from scholar.core.storage.redis.discovery_cache import RedisDiscoveryCacheReposi
 from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
 from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
 from scholar.domain.models.identifiers import IdentifierKind
+from scholar.ml.specter import DIMENSIONS, QUERY_MODEL
 from scholar.providers import arxiv, huggingface, openalex, s2
 from scholar.providers.arxiv import ArxivProvider
 from scholar.providers.huggingface import HuggingFaceProvider

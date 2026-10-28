@@ -7,15 +7,12 @@ import pytest
 from openai import APIConnectionError
 from scholar.application.field_policies import FIELD_POLICIES, FieldPolicy
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
-from scholar.application.search import (
+from scholar.application.services.search import (
     PaperSearch,
     PaperSearchService,
     SearchBinding,
     SearchResult,
     SourceScope,
-)
-from scholar.application.source_execution import (
-    SourceExecutionStatus,
 )
 from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
@@ -23,8 +20,10 @@ from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.providers.arxiv import ArxivProvider
-from scholar.providers.arxiv import ARXIV_CATEGORIES
+from scholar.domain.models.source_execution import (
+    SourceExecutionStatus,
+)
+from scholar.providers.arxiv import ARXIV_CATEGORIES, ArxivProvider
 from scholar.providers.openalex import OPENALEX_FILTERS
 
 

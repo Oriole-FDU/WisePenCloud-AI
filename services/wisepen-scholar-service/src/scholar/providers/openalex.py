@@ -84,14 +84,14 @@ class OpenAlexProvider:
         self._slots = asyncio.Semaphore(4)
 
     async def search(
-            self,
-            *,
-            query: str,
-            field: AcademicField,
-            published_after: date | None,
-            published_before: date | None,
-            limit: int,
-            api_key: str | None = None,
+        self,
+        *,
+        query: str,
+        field: AcademicField,
+        published_after: date | None,
+        published_before: date | None,
+        limit: int,
+        api_key: str | None = None,
     ) -> PaperSearchBatch:
         if not api_key:
             raise ProviderError("OpenAlex API key is required")
@@ -118,10 +118,10 @@ class OpenAlexProvider:
         )
 
     async def lookup(
-            self,
-            ids: list[PaperIdentifier],
-            *,
-            api_key: str | None = None,
+        self,
+        ids: list[PaperIdentifier],
+        *,
+        api_key: str | None = None,
     ) -> list[PaperLookupMatch]:
         """批量精确读取完整 Work，保持输入顺序并约束并发。"""
         if not api_key:
@@ -145,7 +145,7 @@ class OpenAlexProvider:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _fetch_work(
-            self, identifier: PaperIdentifier, *, api_key: str
+        self, identifier: PaperIdentifier, *, api_key: str
     ) -> dict | None:
         # 单篇 endpoint 按 DOI 解析 work，不依赖列表中被截断的位置数组；
         # 适配器限制单篇 HTTP 并发，应用用例负责来源之间的回退和失败隔离。
@@ -227,7 +227,7 @@ class OpenAlexProvider:
 
     @staticmethod
     def metadata(
-            work: dict, primary: dict | None, oa: dict | None, arxiv_ids: set[str]
+        work: dict, primary: dict | None, oa: dict | None, arxiv_ids: set[str]
     ) -> dict:
         """仅投影有消费价值的字段；空值不补造，研究设计保留其自动分类语义。"""
         values = {

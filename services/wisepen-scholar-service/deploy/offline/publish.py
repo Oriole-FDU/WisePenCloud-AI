@@ -7,14 +7,14 @@ from uuid import uuid4
 import duckdb
 import orjson
 from elasticsearch import AsyncElasticsearch
-from scholar.core.embedding_runtime import MODEL_SIGNATURE
+from offline.arxiv import database_status
+from offline.embeddings import publication_documents
+
 from scholar.core.storage.elasticsearch.paper_repository import (
     ARXIV_INDEX_SETTINGS,
     ARXIV_MAPPING,
 )
-
-from offline.arxiv import database_status
-from offline.embeddings import publication_documents
+from scholar.ml.specter import MODEL_SIGNATURE
 
 
 def _publication_status(db: duckdb.DuckDBPyConnection) -> dict:
@@ -53,16 +53,17 @@ async def publish_arxiv(
         while max_batches is None or batches < max_batches:
             rows = db.execute(
                 """WITH pending AS MATERIALIZED (
-                    SELECT arxiv_id FROM pending_publish
-                    UNION
-                    SELECT arxiv_id FROM pending_delete
-                )
+                SELECT arxiv_id
+                FROM pending_publish
+                UNION
+                SELECT arxiv_id
+                FROM pending_delete )
                 SELECT p.arxiv_id,
-                    CASE WHEN d.arxiv_id IS NULL THEN 'index' ELSE 'delete' END,
-                    a.document
+                       CASE WHEN d.arxiv_id IS NULL THEN 'index' ELSE 'delete' END,
+                       a.document
                 FROM pending p
-                LEFT JOIN pending_delete d USING(arxiv_id)
-                LEFT JOIN arxiv a USING(arxiv_id)
+                         LEFT JOIN pending_delete d USING (arxiv_id)
+                         LEFT JOIN arxiv a USING (arxiv_id)
                 ORDER BY p.arxiv_id LIMIT ?""",
                 [batch_size],
             ).fetchall()
@@ -170,10 +171,15 @@ async def publish_arxiv(
         # 先限定待发布 ID，再按范围读取完整文档，避免每一批都排序整库 JSON。
         rows = db.execute(
             """WITH batch AS MATERIALIZED (
-                SELECT arxiv_id FROM pending_publish ORDER BY arxiv_id LIMIT ?
-            ) SELECT a.arxiv_id,a.document FROM arxiv a JOIN batch USING(arxiv_id)
+            SELECT arxiv_id
+            FROM pending_publish
+            ORDER BY arxiv_id LIMIT ?
+            )
+            SELECT a.arxiv_id, a.document
+            FROM arxiv a
+                     JOIN batch USING (arxiv_id)
             WHERE a.arxiv_id BETWEEN (SELECT min(arxiv_id) FROM batch)
-                AND (SELECT max(arxiv_id) FROM batch)
+                      AND (SELECT max(arxiv_id) FROM batch)
             ORDER BY a.arxiv_id""",
             [batch_size],
         ).fetchall()

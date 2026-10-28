@@ -6,12 +6,11 @@ from datetime import date, datetime
 import httpx
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
-from scholar.providers.s2 import S2Transport
 from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import parse_identifier
 from scholar.domain.models.paper import PaperSource
-from scholar.providers.s2 import S2Provider
+from scholar.providers.s2 import S2Provider, S2Transport
 
 
 class Permits:

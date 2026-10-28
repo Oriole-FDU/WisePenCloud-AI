@@ -4,6 +4,8 @@
 分类过滤规则仍由 ``各 provider 内部`` 统一维护。
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from scholar.domain.models.fields import AcademicField

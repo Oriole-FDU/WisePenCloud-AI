@@ -6,7 +6,7 @@ from common.utils.ai_clients.embedding import EmbeddingClient
 from fastapi import FastAPI
 from openai import AsyncOpenAI
 from scholar.api.endpoints.embeddings import router
-from scholar.core.embedding_runtime import QUERY_MODEL
+from scholar.ml.specter import QUERY_MODEL
 
 
 class Encoder:

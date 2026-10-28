@@ -15,21 +15,16 @@ from pathlib import Path
 from uuid import uuid4
 
 import duckdb
-from common.utils.ai_clients.embedding import EmbeddingClient
 from elastic_transport import ConnectionError, ConnectionTimeout
+from openai import AsyncOpenAI
+from redis.asyncio import Redis
+
+from common.utils.ai_clients.embedding import EmbeddingClient
 from offline.embeddings import (
     EMBEDDING_SCHEMA,
     document_worker,
     generate_embeddings,
     publish_embeddings,
-)
-from openai import AsyncOpenAI
-from redis.asyncio import Redis
-from scholar.core.embedding_runtime import (
-    DEFAULT_MODELS,
-    DIMENSIONS,
-    MODEL_SIGNATURE,
-    QUERY_MODEL,
 )
 from scholar.core.storage.elasticsearch.paper_repository import (
     ARXIV_INDEX_SETTINGS,
@@ -39,6 +34,12 @@ from scholar.core.storage.elasticsearch.paper_repository import (
 )
 from scholar.core.storage.redis import CACHE_REVISION
 from scholar.domain.models.fields import AcademicField
+from scholar.ml.specter import (
+    DEFAULT_MODELS,
+    DIMENSIONS,
+    MODEL_SIGNATURE,
+    QUERY_MODEL,
+)
 from scholar.providers.arxiv import ArxivProvider
 
 
@@ -294,8 +295,8 @@ async def migrate(
         provider = ArxivProvider(repo, embedding_client)
         rankings = {}
         for query, expected, cutoff in (
-            ("DeepSeek-R1", "2501.12948", 5),
-            ("Attention Is All You Need", "1706.03762", 1),
+                ("DeepSeek-R1", "2501.12948", 5),
+                ("Attention Is All You Need", "1706.03762", 1),
         ):
             result = await provider.search(
                 query=query,
@@ -331,8 +332,8 @@ async def migrate(
         db.execute("UPDATE import_state SET target_index=?", [new])
         removed = 0
         for pattern in (
-            f"scholar:search:{CACHE_REVISION}:{alias}:*",
-            f"scholar:search:{alias}:*",
+                f"scholar:search:{CACHE_REVISION}:{alias}:*",
+                f"scholar:search:{alias}:*",
         ):
             async for key in redis.scan_iter(match=pattern, count=500):
                 removed += await redis.unlink(key)
@@ -353,19 +354,19 @@ async def migrate(
         if isinstance(failure, (ConnectionError, ConnectionTimeout)) and state[
             "stage"
         ] in (
-            "migration_prepare",
-            "migration_copy",
-            "migration_verify",
-            "embedding_prepare",
-            "embedding_encode",
-            "embedding_publish",
+                "migration_prepare",
+                "migration_copy",
+                "migration_verify",
+                "embedding_prepare",
+                "embedding_encode",
+                "embedding_publish",
         ):
             record(journal, state, "migration_paused", error=str(failure))
             raise
         if state["stage"] in (
-            "embedding_prepare",
-            "embedding_encode",
-            "embedding_publish",
+                "embedding_prepare",
+                "embedding_encode",
+                "embedding_publish",
         ):
             record(journal, state, "migration_paused", error=str(failure))
             raise

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import duckdb
 import orjson
+
 from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
 
 _DEFAULT_TLDR_MODEL = "tldr@v2.0.0"
@@ -16,58 +17,205 @@ _PROJECTION_TARGET_BATCH_SIZE = 5_000
 
 def _create_schema(db: duckdb.DuckDBPyConnection) -> None:
     db.execute("""
-        CREATE TABLE IF NOT EXISTS s2_releases (
-            release_id VARCHAR PRIMARY KEY,
-            tldr_model VARCHAR NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS s2_shards (
-            release_id VARCHAR NOT NULL,
-            dataset VARCHAR NOT NULL,
-            source_path VARCHAR NOT NULL,
-            source_size BIGINT NOT NULL,
-            source_mtime_ns BIGINT NOT NULL,
-            complete BOOLEAN NOT NULL DEFAULT false,
-            scanned BIGINT NOT NULL DEFAULT 0,
-            retained BIGINT NOT NULL DEFAULT 0,
-            matched BIGINT NOT NULL DEFAULT 0,
-            ambiguous BIGINT NOT NULL DEFAULT 0,
-            conflicts BIGINT NOT NULL DEFAULT 0,
-            missing BIGINT NOT NULL DEFAULT 0,
-            filtered_model BIGINT NOT NULL DEFAULT 0,
-            PRIMARY KEY (release_id, dataset, source_path)
-        );
-        CREATE TABLE IF NOT EXISTS s2_papers (
-            release_id VARCHAR NOT NULL,
-            arxiv_id VARCHAR NOT NULL,
-            corpus_id VARCHAR,
-            doi VARCHAR,
-            citation_count BIGINT,
-            influential_citation_count BIGINT,
-            is_open_access BOOLEAN,
-            source_path VARCHAR NOT NULL,
-            source_line BIGINT NOT NULL,
-            PRIMARY KEY (release_id, source_path, source_line)
-        );
-        CREATE TABLE IF NOT EXISTS s2_tldrs (
-            release_id VARCHAR NOT NULL,
-            corpus_id VARCHAR NOT NULL,
-            model VARCHAR NOT NULL,
-            text VARCHAR,
-            source_path VARCHAR NOT NULL,
-            source_line BIGINT NOT NULL,
-            PRIMARY KEY (release_id, source_path, source_line)
-        );
-        CREATE TABLE IF NOT EXISTS s2_diagnostics (
-            release_id VARCHAR NOT NULL,
-            dataset VARCHAR NOT NULL,
-            source_path VARCHAR NOT NULL,
-            source_line BIGINT NOT NULL,
-            reason VARCHAR NOT NULL,
-            subject VARCHAR NOT NULL,
-            detail JSON NOT NULL,
-            PRIMARY KEY (release_id, dataset, source_path, source_line, reason, subject)
-        );
-    """)
+               CREATE TABLE IF NOT EXISTS s2_releases
+               (
+                   release_id
+                   VARCHAR
+                   PRIMARY
+                   KEY,
+                   tldr_model
+                   VARCHAR
+                   NOT
+                   NULL
+               );
+               CREATE TABLE IF NOT EXISTS s2_shards
+               (
+                   release_id
+                   VARCHAR
+                   NOT
+                   NULL,
+                   dataset
+                   VARCHAR
+                   NOT
+                   NULL,
+                   source_path
+                   VARCHAR
+                   NOT
+                   NULL,
+                   source_size
+                   BIGINT
+                   NOT
+                   NULL,
+                   source_mtime_ns
+                   BIGINT
+                   NOT
+                   NULL,
+                   complete
+                   BOOLEAN
+                   NOT
+                   NULL
+                   DEFAULT
+                   false,
+                   scanned
+                   BIGINT
+                   NOT
+                   NULL
+                   DEFAULT
+                   0,
+                   retained
+                   BIGINT
+                   NOT
+                   NULL
+                   DEFAULT
+                   0,
+                   matched
+                   BIGINT
+                   NOT
+                   NULL
+                   DEFAULT
+                   0,
+                   ambiguous
+                   BIGINT
+                   NOT
+                   NULL
+                   DEFAULT
+                   0,
+                   conflicts
+                   BIGINT
+                   NOT
+                   NULL
+                   DEFAULT
+                   0,
+                   missing
+                   BIGINT
+                   NOT
+                   NULL
+                   DEFAULT
+                   0,
+                   filtered_model
+                   BIGINT
+                   NOT
+                   NULL
+                   DEFAULT
+                   0,
+                   PRIMARY
+                   KEY
+               (
+                   release_id,
+                   dataset,
+                   source_path
+               )
+                   );
+               CREATE TABLE IF NOT EXISTS s2_papers
+               (
+                   release_id
+                   VARCHAR
+                   NOT
+                   NULL,
+                   arxiv_id
+                   VARCHAR
+                   NOT
+                   NULL,
+                   corpus_id
+                   VARCHAR,
+                   doi
+                   VARCHAR,
+                   citation_count
+                   BIGINT,
+                   influential_citation_count
+                   BIGINT,
+                   is_open_access
+                   BOOLEAN,
+                   source_path
+                   VARCHAR
+                   NOT
+                   NULL,
+                   source_line
+                   BIGINT
+                   NOT
+                   NULL,
+                   PRIMARY
+                   KEY
+               (
+                   release_id,
+                   source_path,
+                   source_line
+               )
+                   );
+               CREATE TABLE IF NOT EXISTS s2_tldrs
+               (
+                   release_id
+                   VARCHAR
+                   NOT
+                   NULL,
+                   corpus_id
+                   VARCHAR
+                   NOT
+                   NULL,
+                   model
+                   VARCHAR
+                   NOT
+                   NULL,
+                   text
+                   VARCHAR,
+                   source_path
+                   VARCHAR
+                   NOT
+                   NULL,
+                   source_line
+                   BIGINT
+                   NOT
+                   NULL,
+                   PRIMARY
+                   KEY
+               (
+                   release_id,
+                   source_path,
+                   source_line
+               )
+                   );
+               CREATE TABLE IF NOT EXISTS s2_diagnostics
+               (
+                   release_id
+                   VARCHAR
+                   NOT
+                   NULL,
+                   dataset
+                   VARCHAR
+                   NOT
+                   NULL,
+                   source_path
+                   VARCHAR
+                   NOT
+                   NULL,
+                   source_line
+                   BIGINT
+                   NOT
+                   NULL,
+                   reason
+                   VARCHAR
+                   NOT
+                   NULL,
+                   subject
+                   VARCHAR
+                   NOT
+                   NULL,
+                   detail
+                   JSON
+                   NOT
+                   NULL,
+                   PRIMARY
+                   KEY
+               (
+                   release_id,
+                   dataset,
+                   source_path,
+                   source_line,
+                   reason,
+                   subject
+               )
+                   );
+               """)
 
 
 def _inventory(directory: str | Path, dataset: str) -> list[tuple]:
@@ -130,14 +278,16 @@ def _create_temp_tables(
     if include_doi_map:
         # DOI 候选在一次导入中只扫描基础 arXiv 表一次；各批次关联仍由 DuckDB 完成。
         db.execute("""
-            CREATE OR REPLACE TEMP TABLE _s2_local_doi AS
-            SELECT doi, count(*)::BIGINT AS candidate_count, min(arxiv_id) AS candidate_arxiv_id
-            FROM arxiv
-            WHERE doi IS NOT NULL
-            GROUP BY doi;
-        """)
+                   CREATE
+                   OR REPLACE TEMP TABLE _s2_local_doi AS
+                   SELECT doi, count(*)::BIGINT AS candidate_count, min(arxiv_id) AS candidate_arxiv_id
+                   FROM arxiv
+                   WHERE doi IS NOT NULL
+                   GROUP BY doi;
+                   """)
     db.execute("""
-        CREATE TEMP TABLE IF NOT EXISTS _s2_paper_batch (
+               CREATE
+               TEMP TABLE IF NOT EXISTS _s2_paper_batch (
             source_line BIGINT,
             corpus_id VARCHAR,
             arxiv_id VARCHAR,
@@ -146,12 +296,13 @@ def _create_temp_tables(
             influential_citation_count BIGINT,
             is_open_access BOOLEAN
         );
-        CREATE TEMP TABLE IF NOT EXISTS _s2_tldr_batch (
+        CREATE
+               TEMP TABLE IF NOT EXISTS _s2_tldr_batch (
             source_line BIGINT,
             corpus_id VARCHAR,
             text VARCHAR
         );
-    """)
+               """)
 
 
 def _normalized_or_none(value, normalizer) -> str | None:
@@ -198,12 +349,9 @@ def _stage_paper_batch(db: duckdb.DuckDBPyConnection, batch: list[dict]) -> None
     # 一个有界 JSON 批次只绑定一次，避免 DuckDB Python 驱动逐行适配每个字段。
     db.execute(
         """INSERT INTO _s2_paper_batch
-        SELECT CAST(value->>'source_line' AS BIGINT), value->>'corpus_id',
-            value->>'arxiv_id', value->>'doi',
-            CAST(value->>'citation_count' AS BIGINT),
-            CAST(value->>'influential_citation_count' AS BIGINT),
-            CAST(value->>'is_open_access' AS BOOLEAN)
-        FROM json_each(?)""",
+           SELECT CAST(value ->>'source_line' AS BIGINT),
+                  value ->>'corpus_id', value ->>'arxiv_id', value ->>'doi', CAST (value ->>'citation_count' AS BIGINT), CAST (value ->>'influential_citation_count' AS BIGINT), CAST (value ->>'is_open_access' AS BOOLEAN)
+           FROM json_each(?)""",
         [orjson.dumps(batch).decode()],
     )
 
@@ -211,9 +359,9 @@ def _stage_paper_batch(db: duckdb.DuckDBPyConnection, batch: list[dict]) -> None
 def _stage_tldr_batch(db: duckdb.DuckDBPyConnection, batch: list[dict]) -> None:
     db.execute(
         """INSERT INTO _s2_tldr_batch
-        SELECT CAST(value->>'source_line' AS BIGINT),
-            value->>'corpus_id', value->>'text'
-        FROM json_each(?)""",
+           SELECT CAST(value ->>'source_line' AS BIGINT),
+                  value ->>'corpus_id', value ->>'text'
+           FROM json_each(?)""",
         [orjson.dumps(batch).decode()],
     )
 
@@ -223,10 +371,12 @@ def _create_corpus_candidate_map(
 ) -> None:
     # papers 已全量到 EOF；缓存本 release 的 CorpusId 候选，避免每批重聚合事实表。
     db.execute(
-        """CREATE OR REPLACE TEMP TABLE _s2_corpus_candidates AS
-        SELECT corpus_id, count(DISTINCT arxiv_id)::BIGINT AS candidate_count
+        """CREATE
+        OR REPLACE TEMP TABLE _s2_corpus_candidates AS
+        SELECT corpus_id, count(DISTINCT arxiv_id) ::BIGINT AS candidate_count
         FROM s2_papers
-        WHERE release_id=? AND corpus_id IS NOT NULL
+        WHERE release_id = ?
+          AND corpus_id IS NOT NULL
         GROUP BY corpus_id""",
         [release_id],
     )
@@ -261,64 +411,91 @@ def _process_paper_batch(
 ) -> tuple[int, int, int, int]:
     # arXiv 是强匹配；仅缺少可用 arXiv ID 时才允许唯一 DOI 回退。
     db.execute("""
-        CREATE OR REPLACE TEMP TABLE _s2_paper_resolution AS
-        SELECT s.*,
-            direct.arxiv_id AS direct_id,
-            doi.candidate_count AS doi_candidate_count,
-            doi.candidate_arxiv_id AS doi_candidate_id,
-            CASE
-                WHEN direct.arxiv_id IS NOT NULL THEN direct.arxiv_id
-                WHEN s.arxiv_id IS NULL AND doi.candidate_count=1 THEN doi.candidate_arxiv_id
-            END AS resolved_id,
-            CASE
-                WHEN direct.arxiv_id IS NOT NULL THEN 'matched_arxiv'
-                WHEN s.arxiv_id IS NULL AND doi.candidate_count=1 THEN 'matched_doi'
-                WHEN s.arxiv_id IS NULL AND doi.candidate_count>1 THEN 'ambiguous'
-                WHEN s.arxiv_id IS NOT NULL AND doi.candidate_count>0 THEN 'conflict'
-                ELSE 'missing'
-            END AS outcome
-        FROM _s2_paper_batch s
-        LEFT JOIN arxiv direct ON direct.arxiv_id=s.arxiv_id
-        LEFT JOIN _s2_local_doi doi ON doi.doi=s.doi;
-    """)
+               CREATE
+               OR REPLACE TEMP TABLE _s2_paper_resolution AS
+               SELECT s.*,
+                      direct.arxiv_id        AS direct_id,
+                      doi.candidate_count    AS doi_candidate_count,
+                      doi.candidate_arxiv_id AS doi_candidate_id,
+                      CASE
+                          WHEN direct.arxiv_id IS NOT NULL THEN direct.arxiv_id
+                          WHEN s.arxiv_id IS NULL AND doi.candidate_count = 1 THEN doi.candidate_arxiv_id
+                          END                AS resolved_id,
+                      CASE
+                          WHEN direct.arxiv_id IS NOT NULL THEN 'matched_arxiv'
+                          WHEN s.arxiv_id IS NULL AND doi.candidate_count = 1 THEN 'matched_doi'
+                          WHEN s.arxiv_id IS NULL AND doi.candidate_count > 1 THEN 'ambiguous'
+                          WHEN s.arxiv_id IS NOT NULL AND doi.candidate_count > 0 THEN 'conflict'
+                          ELSE 'missing'
+                          END                AS outcome
+               FROM _s2_paper_batch s
+                        LEFT JOIN arxiv direct ON direct.arxiv_id = s.arxiv_id
+                        LEFT JOIN _s2_local_doi doi ON doi.doi = s.doi;
+               """)
     db.execute(
         """INSERT INTO s2_papers
-        SELECT ?, resolved_id, corpus_id, doi, citation_count,
-            influential_citation_count, is_open_access, ?, source_line
+           SELECT ?,
+                  resolved_id,
+                  corpus_id,
+                  doi,
+                  citation_count,
+                  influential_citation_count,
+                  is_open_access,
+                  ?,
+                  source_line
+           FROM _s2_paper_resolution
+           WHERE resolved_id IS NOT NULL""",
+        [release_id, source_path],
+    )
+    db.execute(
+        """INSERT
+        OR IGNORE INTO s2_diagnostics
+        SELECT ?,
+               'papers',
+               ?,
+               source_line,
+               'doi_ambiguous',
+               coalesce(corpus_id, ''),
+               to_json(struct_pack(source_arxiv := arxiv_id, source_doi := doi,
+                                   doi_candidate_count := doi_candidate_count))
         FROM _s2_paper_resolution
-        WHERE resolved_id IS NOT NULL""",
+        WHERE outcome = 'ambiguous'""",
         [release_id, source_path],
     )
     db.execute(
-        """INSERT OR IGNORE INTO s2_diagnostics
-        SELECT ?, 'papers', ?, source_line, 'doi_ambiguous', coalesce(corpus_id,''),
-            to_json(struct_pack(source_arxiv := arxiv_id, source_doi := doi,
-                doi_candidate_count := doi_candidate_count))
-        FROM _s2_paper_resolution WHERE outcome='ambiguous'""",
-        [release_id, source_path],
-    )
-    db.execute(
-        """INSERT OR IGNORE INTO s2_diagnostics
-        SELECT ?, 'papers', ?, source_line, 'arxiv_doi_conflict', coalesce(corpus_id,''),
-            to_json(struct_pack(source_arxiv := arxiv_id, source_doi := doi,
-                doi_candidate_count := doi_candidate_count, resolved_arxiv := resolved_id))
+        """INSERT
+        OR IGNORE INTO s2_diagnostics
+        SELECT ?,
+               'papers',
+               ?,
+               source_line,
+               'arxiv_doi_conflict',
+               coalesce(corpus_id, ''),
+               to_json(struct_pack(source_arxiv := arxiv_id, source_doi := doi,
+                                   doi_candidate_count := doi_candidate_count, resolved_arxiv := resolved_id))
         FROM _s2_paper_resolution r
-        WHERE r.outcome='conflict' OR (r.direct_id IS NOT NULL AND r.doi IS NOT NULL
-            AND EXISTS (SELECT 1 FROM arxiv candidate
-                WHERE candidate.doi=r.doi AND candidate.arxiv_id<>r.direct_id))""",
+        WHERE r.outcome = 'conflict'
+           OR (r.direct_id IS NOT NULL AND r.doi IS NOT NULL
+            AND EXISTS (SELECT 1
+                        FROM arxiv candidate
+                        WHERE candidate.doi = r.doi
+                          AND candidate.arxiv_id <> r.direct_id))""",
         [release_id, source_path],
     )
     metrics = db.execute("""
-        SELECT
-            sum(CASE WHEN resolved_id IS NOT NULL THEN 1 ELSE 0 END),
-            sum(CASE WHEN outcome='ambiguous' THEN 1 ELSE 0 END),
-            sum(CASE WHEN outcome='conflict' OR (direct_id IS NOT NULL AND doi IS NOT NULL
-                AND EXISTS (SELECT 1 FROM arxiv candidate
-                    WHERE candidate.doi=_s2_paper_resolution.doi
-                        AND candidate.arxiv_id<>_s2_paper_resolution.direct_id)) THEN 1 ELSE 0 END),
-            sum(CASE WHEN outcome='missing' THEN 1 ELSE 0 END)
-        FROM _s2_paper_resolution
-    """).fetchone()
+                         SELECT sum(CASE WHEN resolved_id IS NOT NULL THEN 1 ELSE 0 END),
+                                sum(CASE WHEN outcome = 'ambiguous' THEN 1 ELSE 0 END),
+                                sum(CASE
+                                        WHEN outcome = 'conflict' OR (direct_id IS NOT NULL AND doi IS NOT NULL
+                                            AND EXISTS (SELECT 1
+                                                        FROM arxiv candidate
+                                                        WHERE candidate.doi = _s2_paper_resolution.doi
+                                                          AND candidate.arxiv_id <> _s2_paper_resolution.direct_id))
+                                            THEN 1
+                                        ELSE 0 END),
+                                sum(CASE WHEN outcome = 'missing' THEN 1 ELSE 0 END)
+                         FROM _s2_paper_resolution
+                         """).fetchone()
     db.execute("DELETE FROM _s2_paper_batch")
     return tuple(int(value or 0) for value in metrics)
 
@@ -330,32 +507,40 @@ def _process_tldr_batch(
     source_path: str,
 ) -> tuple[int, int, int, int]:
     db.execute(
-        """CREATE OR REPLACE TEMP TABLE _s2_tldr_resolution AS
+        """CREATE
+        OR REPLACE TEMP TABLE _s2_tldr_resolution AS
         SELECT s.*, papers.candidate_count
         FROM _s2_tldr_batch s
-        LEFT JOIN _s2_corpus_candidates papers USING(corpus_id)"""
+                 LEFT JOIN _s2_corpus_candidates papers USING (corpus_id)"""
     )
     db.execute(
         """INSERT INTO s2_tldrs
-        SELECT ?, corpus_id, ?, text, ?, source_line
-        FROM _s2_tldr_resolution WHERE candidate_count>0""",
+           SELECT ?, corpus_id, ?, text, ?, source_line
+           FROM _s2_tldr_resolution
+           WHERE candidate_count > 0""",
         [release_id, model, source_path],
     )
     db.execute(
-        """INSERT OR IGNORE INTO s2_diagnostics
-        SELECT ?, 'tldrs', ?, source_line, 'corpus_id_ambiguous', corpus_id,
-            to_json(struct_pack(corpus_id := corpus_id, paper_candidate_count := candidate_count))
-        FROM _s2_tldr_resolution WHERE candidate_count>1""",
+        """INSERT
+        OR IGNORE INTO s2_diagnostics
+        SELECT ?,
+               'tldrs',
+               ?,
+               source_line,
+               'corpus_id_ambiguous',
+               corpus_id,
+               to_json(struct_pack(corpus_id := corpus_id, paper_candidate_count := candidate_count))
+        FROM _s2_tldr_resolution
+        WHERE candidate_count > 1""",
         [release_id, source_path],
     )
     metrics = db.execute("""
-        SELECT
-            sum(CASE WHEN candidate_count>0 THEN 1 ELSE 0 END),
-            sum(CASE WHEN candidate_count=1 THEN 1 ELSE 0 END),
-            sum(CASE WHEN candidate_count>1 THEN 1 ELSE 0 END),
-            sum(CASE WHEN candidate_count IS NULL THEN 1 ELSE 0 END)
-        FROM _s2_tldr_resolution
-    """).fetchone()
+                         SELECT sum(CASE WHEN candidate_count > 0 THEN 1 ELSE 0 END),
+                                sum(CASE WHEN candidate_count = 1 THEN 1 ELSE 0 END),
+                                sum(CASE WHEN candidate_count > 1 THEN 1 ELSE 0 END),
+                                sum(CASE WHEN candidate_count IS NULL THEN 1 ELSE 0 END)
+                         FROM _s2_tldr_resolution
+                         """).fetchone()
     db.execute("DELETE FROM _s2_tldr_batch")
     return tuple(int(value or 0) for value in metrics)
 
@@ -420,9 +605,17 @@ def _import_paper_shard(
         if (current.st_size, current.st_mtime_ns) != (expected_size, expected_mtime_ns):
             raise ValueError("S2 shard changed while it was being imported")
         db.execute(
-            """UPDATE s2_shards SET complete=true, scanned=?, retained=?, matched=?,
-                ambiguous=?, conflicts=?, missing=?
-            WHERE release_id=? AND dataset='papers' AND source_path=?""",
+            """UPDATE s2_shards
+               SET complete= true,
+                   scanned=?,
+                   retained=?,
+                   matched=?,
+                   ambiguous=?,
+                   conflicts=?,
+                   missing=?
+               WHERE release_id = ?
+                 AND dataset = 'papers'
+                 AND source_path = ?""",
             [
                 counters["scanned"],
                 counters["retained"],
@@ -524,9 +717,17 @@ def _import_tldr_shard(
         if (current.st_size, current.st_mtime_ns) != (expected_size, expected_mtime_ns):
             raise ValueError("S2 shard changed while it was being imported")
         db.execute(
-            """UPDATE s2_shards SET complete=true, scanned=?, retained=?, matched=?,
-                ambiguous=?, missing=?, filtered_model=?
-            WHERE release_id=? AND dataset='tldrs' AND source_path=?""",
+            """UPDATE s2_shards
+               SET complete= true,
+                   scanned=?,
+                   retained=?,
+                   matched=?,
+                   ambiguous=?,
+                   missing=?,
+                   filtered_model=?
+               WHERE release_id = ?
+                 AND dataset = 'tldrs'
+                 AND source_path = ?""",
             [
                 counters["scanned"],
                 counters["retained"],
@@ -571,10 +772,19 @@ def _status(db: duckdb.DuckDBPyConnection, release_id: str) -> dict:
         for dataset in ("papers", "tldrs")
     }
     rows = db.execute(
-        """SELECT dataset, count(*), sum(CASE WHEN complete THEN 1 ELSE 0 END),
-            sum(scanned), sum(retained), sum(matched), sum(ambiguous),
-            sum(conflicts), sum(missing), sum(filtered_model)
-        FROM s2_shards WHERE release_id=? GROUP BY dataset""",
+        """SELECT dataset,
+                  count(*),
+                  sum(CASE WHEN complete THEN 1 ELSE 0 END),
+                  sum(scanned),
+                  sum(retained),
+                  sum(matched),
+                  sum(ambiguous),
+                  sum(conflicts),
+                  sum(missing),
+                  sum(filtered_model)
+           FROM s2_shards
+           WHERE release_id = ?
+           GROUP BY dataset""",
         [release_id],
     ).fetchall()
     for row in rows:
@@ -659,8 +869,8 @@ def import_s2(
 
     processed = 0
     for dataset, directory in (
-        ("papers", Path(papers_dir)),
-        ("tldrs", Path(tldrs_dir)),
+            ("papers", Path(papers_dir)),
+            ("tldrs", Path(tldrs_dir)),
     ):
         if dataset == "tldrs":
             pending_tldrs = db.execute(
@@ -672,8 +882,11 @@ def import_s2(
                     return _status(db, release_id)
                 _create_corpus_candidate_map(db, release_id)
         for source_path, size, mtime_ns, complete in db.execute(
-            """SELECT source_path,source_size,source_mtime_ns,complete FROM s2_shards
-            WHERE release_id=? AND dataset=? ORDER BY source_path""",
+            """SELECT source_path, source_size, source_mtime_ns, complete
+               FROM s2_shards
+               WHERE release_id = ?
+                 AND dataset = ?
+               ORDER BY source_path""",
             [release_id, dataset],
         ).fetchall():
             if complete:
@@ -737,123 +950,168 @@ def apply_s2_projection(
             [release_id],
         )
         db.execute(
-            """CREATE OR REPLACE TEMP TABLE _s2_paper_conflicts AS
-            SELECT arxiv_id FROM s2_papers WHERE release_id=?
+            """CREATE
+            OR REPLACE TEMP TABLE _s2_paper_conflicts AS
+            SELECT arxiv_id
+            FROM s2_papers
+            WHERE release_id = ?
             GROUP BY arxiv_id
             HAVING count(DISTINCT to_json(struct_pack(
-                corpus_id := corpus_id, doi := doi,
-                citation_count := citation_count,
-                influential_citation_count := influential_citation_count,
-                is_open_access := is_open_access))) > 1""",
+                    corpus_id := corpus_id, doi := doi,
+                    citation_count := citation_count,
+                    influential_citation_count := influential_citation_count,
+                    is_open_access := is_open_access))) > 1""",
             [release_id],
         )
         db.execute(
-            """CREATE OR REPLACE TEMP TABLE _s2_corpus_conflicts AS
-            SELECT corpus_id FROM s2_papers
-            WHERE release_id=? AND corpus_id IS NOT NULL
-            GROUP BY corpus_id HAVING count(DISTINCT arxiv_id)>1""",
+            """CREATE
+            OR REPLACE TEMP TABLE _s2_corpus_conflicts AS
+            SELECT corpus_id
+            FROM s2_papers
+            WHERE release_id = ?
+              AND corpus_id IS NOT NULL
+            GROUP BY corpus_id
+            HAVING count(DISTINCT arxiv_id) > 1""",
             [release_id],
         )
         db.execute(
-            """INSERT OR IGNORE INTO s2_diagnostics
-            SELECT p.release_id,'papers',p.source_path,p.source_line,
-                'paper_fact_conflict',p.arxiv_id,
-                to_json(struct_pack(arxiv_id := p.arxiv_id, corpus_id := p.corpus_id,
-                    doi := p.doi, citation_count := p.citation_count,
-                    influential_citation_count := p.influential_citation_count,
-                    is_open_access := p.is_open_access))
-            FROM s2_papers p JOIN _s2_paper_conflicts c USING(arxiv_id)
-            WHERE p.release_id=?""",
+            """INSERT
+            OR IGNORE INTO s2_diagnostics
+            SELECT p.release_id,
+                   'papers',
+                   p.source_path,
+                   p.source_line,
+                   'paper_fact_conflict',
+                   p.arxiv_id,
+                   to_json(struct_pack(arxiv_id := p.arxiv_id, corpus_id := p.corpus_id,
+                                       doi := p.doi, citation_count := p.citation_count,
+                                       influential_citation_count := p.influential_citation_count,
+                                       is_open_access := p.is_open_access))
+            FROM s2_papers p
+                     JOIN _s2_paper_conflicts c USING (arxiv_id)
+            WHERE p.release_id = ?""",
             [release_id],
         )
         db.execute(
-            """INSERT OR IGNORE INTO s2_diagnostics
-            SELECT p.release_id,'papers',p.source_path,p.source_line,
-                'corpus_id_conflict',p.corpus_id,
-                to_json(struct_pack(corpus_id := p.corpus_id, arxiv_id := p.arxiv_id))
-            FROM s2_papers p JOIN _s2_corpus_conflicts c USING(corpus_id)
-            WHERE p.release_id=?""",
+            """INSERT
+            OR IGNORE INTO s2_diagnostics
+            SELECT p.release_id,
+                   'papers',
+                   p.source_path,
+                   p.source_line,
+                   'corpus_id_conflict',
+                   p.corpus_id,
+                   to_json(struct_pack(corpus_id := p.corpus_id, arxiv_id := p.arxiv_id))
+            FROM s2_papers p
+                     JOIN _s2_corpus_conflicts c USING (corpus_id)
+            WHERE p.release_id = ?""",
             [release_id],
         )
         db.execute(
             """
-            CREATE OR REPLACE TEMP TABLE _s2_invalid_arxiv AS
-            SELECT arxiv_id FROM _s2_paper_conflicts
+            CREATE
+            OR REPLACE TEMP TABLE _s2_invalid_arxiv AS
+            SELECT arxiv_id
+            FROM _s2_paper_conflicts
             UNION
-            SELECT DISTINCT p.arxiv_id FROM s2_papers p
-            JOIN _s2_corpus_conflicts c USING(corpus_id)
-            WHERE p.release_id=?;
-        """,
+            SELECT DISTINCT p.arxiv_id
+            FROM s2_papers p
+                     JOIN _s2_corpus_conflicts c USING (corpus_id)
+            WHERE p.release_id = ?;
+            """,
             [release_id],
         )
         db.execute(
-            """CREATE OR REPLACE TEMP TABLE _s2_tldr_conflicts AS
-            SELECT corpus_id FROM s2_tldrs
-            WHERE release_id=? AND model=?
+            """CREATE
+            OR REPLACE TEMP TABLE _s2_tldr_conflicts AS
+            SELECT corpus_id
+            FROM s2_tldrs
+            WHERE release_id = ?
+              AND model = ?
             GROUP BY corpus_id
-            HAVING count(DISTINCT to_json(struct_pack(text := text)))>1""",
+            HAVING count(DISTINCT to_json(struct_pack(text := text))) > 1""",
             [release_id, tldr_model],
         )
         db.execute(
-            """INSERT OR IGNORE INTO s2_diagnostics
-            SELECT t.release_id,'tldrs',t.source_path,t.source_line,
-                'tldr_conflict',t.corpus_id,
-                to_json(struct_pack(corpus_id := t.corpus_id, model := t.model, text := t.text))
-            FROM s2_tldrs t JOIN _s2_tldr_conflicts c USING(corpus_id)
-            WHERE t.release_id=? AND t.model=?""",
+            """INSERT
+            OR IGNORE INTO s2_diagnostics
+            SELECT t.release_id,
+                   'tldrs',
+                   t.source_path,
+                   t.source_line,
+                   'tldr_conflict',
+                   t.corpus_id,
+                   to_json(struct_pack(corpus_id := t.corpus_id, model := t.model, text := t.text))
+            FROM s2_tldrs t
+                     JOIN _s2_tldr_conflicts c USING (corpus_id)
+            WHERE t.release_id = ?
+              AND t.model = ?""",
             [release_id, tldr_model],
         )
         db.execute(
-            """CREATE OR REPLACE TEMP TABLE _s2_canonical_papers AS
-            SELECT p.release_id,p.arxiv_id,p.corpus_id,p.citation_count,
-                p.influential_citation_count,p.is_open_access,p.source_path,p.source_line
+            """CREATE
+            OR REPLACE TEMP TABLE _s2_canonical_papers AS
+            SELECT p.release_id,
+                   p.arxiv_id,
+                   p.corpus_id,
+                   p.citation_count,
+                   p.influential_citation_count,
+                   p.is_open_access,
+                   p.source_path,
+                   p.source_line
             FROM s2_papers p
-            WHERE p.release_id=?
-                AND NOT EXISTS (SELECT 1 FROM _s2_invalid_arxiv bad WHERE bad.arxiv_id=p.arxiv_id)
-            QUALIFY row_number() OVER (
+            WHERE p.release_id = ?
+              AND NOT EXISTS (SELECT 1 FROM _s2_invalid_arxiv bad WHERE bad.arxiv_id = p.arxiv_id) QUALIFY row_number() OVER (
                 PARTITION BY p.arxiv_id ORDER BY p.source_path,p.source_line
             )=1""",
             [release_id],
         )
         db.execute(
-            """CREATE OR REPLACE TEMP TABLE _s2_canonical_tldrs AS
-            SELECT t.corpus_id,t.model,t.text,t.source_path,t.source_line
+            """CREATE
+            OR REPLACE TEMP TABLE _s2_canonical_tldrs AS
+            SELECT t.corpus_id, t.model, t.text, t.source_path, t.source_line
             FROM s2_tldrs t
-            WHERE t.release_id=? AND t.model=?
-                AND NOT EXISTS (SELECT 1 FROM _s2_tldr_conflicts bad
-                    WHERE bad.corpus_id=t.corpus_id)
-                AND EXISTS (SELECT 1 FROM _s2_canonical_papers p
-                    WHERE p.corpus_id=t.corpus_id)
-            QUALIFY row_number() OVER (
+            WHERE t.release_id = ?
+              AND t.model = ?
+              AND NOT EXISTS (SELECT 1
+                              FROM _s2_tldr_conflicts bad
+                              WHERE bad.corpus_id = t.corpus_id)
+              AND EXISTS (SELECT 1
+                          FROM _s2_canonical_papers p
+                          WHERE p.corpus_id = t.corpus_id)
+                QUALIFY row_number() OVER (
                 PARTITION BY t.corpus_id ORDER BY t.source_path,t.source_line
             )=1""",
             [release_id, tldr_model],
         )
         db.execute(
-            """CREATE OR REPLACE TEMP TABLE _s2_projection AS
+            """CREATE
+            OR REPLACE TEMP TABLE _s2_projection AS
             SELECT p.arxiv_id,
-                to_json(struct_pack(
-                    corpus_id := p.corpus_id,
-                    citation_count := p.citation_count,
-                    influential_citation_count := p.influential_citation_count,
-                    is_open_access := p.is_open_access,
-                    tldr := CASE WHEN t.source_line IS NULL THEN NULL::JSON
+                   to_json(struct_pack(
+                           corpus_id := p.corpus_id,
+                           citation_count := p.citation_count,
+                           influential_citation_count := p.influential_citation_count,
+                           is_open_access := p.is_open_access,
+                           tldr := CASE WHEN t.source_line IS NULL THEN NULL::JSON
                         ELSE to_json(struct_pack(model := t.model, text := t.text)) END,
-                    release := ?,
-                    paper_source := to_json(struct_pack(
+                           release := ?,
+                           paper_source := to_json(struct_pack(
                         release := ?, path := p.source_path, line := p.source_line)),
-                    tldr_source := CASE WHEN t.source_line IS NULL THEN NULL::JSON
+                           tldr_source := CASE WHEN t.source_line IS NULL THEN NULL::JSON
                         ELSE to_json(struct_pack(
                             release := ?, path := t.source_path, line := t.source_line)) END
-                )) AS s2_document
+                           )) AS s2_document
             FROM _s2_canonical_papers p
-            LEFT JOIN _s2_canonical_tldrs t USING(corpus_id)""",
+                     LEFT JOIN _s2_canonical_tldrs t USING (corpus_id)""",
             [release_id, release_id, release_id],
         )
         db.execute("""
-            CREATE OR REPLACE TEMP TABLE _s2_projection_targets AS
-            SELECT arxiv_id FROM _s2_projection
-        """)
+                   CREATE
+                   OR REPLACE TEMP TABLE _s2_projection_targets AS
+                   SELECT arxiv_id
+                   FROM _s2_projection
+                   """)
         changed = _write_s2_document_changes(db)
         db.commit()
     except BaseException:
@@ -873,32 +1131,31 @@ def apply_s2_projection(
 def _write_s2_document_changes(db: duckdb.DuckDBPyConnection) -> int:
     """按有序 ID 范围重建文档；调用方事务统一提交事实与待发布集合。"""
     db.execute("""
-        CREATE OR REPLACE TEMP TABLE _s2_changed (
+               CREATE
+               OR REPLACE TEMP TABLE _s2_changed (
             arxiv_id VARCHAR,
             new_document JSON
         )
-    """)
+               """)
     # 全量 JSON UPDATE 的旧行版本会保留在事务 undo buffers；完整快照改用新表写入后原子换名。
     replacement_ranges = db.execute(
-        """SELECT min(arxiv_id),max(arxiv_id)
-        FROM (
-            SELECT arxiv_id,
-                (row_number() OVER (ORDER BY arxiv_id)-1) // ? AS batch_number
-            FROM arxiv
-        )
-        GROUP BY batch_number ORDER BY batch_number""",
+        """SELECT min(arxiv_id), max(arxiv_id)
+           FROM (SELECT arxiv_id,
+                        (row_number() OVER (ORDER BY arxiv_id)-1) // ? AS batch_number
+                 FROM arxiv)
+           GROUP BY batch_number
+           ORDER BY batch_number""",
         [_PROJECTION_TARGET_BATCH_SIZE],
     ).fetchall()
 
     # 只保存每 5000 个有序 target 的边界；范围内非 target 仍由 SQL JOIN 排除。
     ranges = db.execute(
-        """SELECT min(arxiv_id),max(arxiv_id)
-        FROM (
-            SELECT arxiv_id,
-                (row_number() OVER (ORDER BY arxiv_id)-1) // ? AS batch_number
-            FROM _s2_projection_targets
-        )
-        GROUP BY batch_number ORDER BY batch_number""",
+        """SELECT min(arxiv_id), max(arxiv_id)
+           FROM (SELECT arxiv_id,
+                        (row_number() OVER (ORDER BY arxiv_id)-1) // ? AS batch_number
+                 FROM _s2_projection_targets)
+           GROUP BY batch_number
+           ORDER BY batch_number""",
         [_PROJECTION_TARGET_BATCH_SIZE],
     ).fetchall()
 
@@ -907,54 +1164,52 @@ def _write_s2_document_changes(db: duckdb.DuckDBPyConnection) -> int:
         # 先筛掉 S2 JSON 未变化的论文，再展开并重建其余 metadata map。
         inserted = db.execute(
             """INSERT INTO _s2_changed
-            WITH changed_targets AS MATERIALIZED (
-                SELECT a.arxiv_id,a.document,p.s2_document
-                FROM arxiv a
-                JOIN _s2_projection_targets target USING(arxiv_id)
-                LEFT JOIN _s2_projection p USING(arxiv_id)
-                WHERE a.arxiv_id BETWEEN ? AND ?
-                    AND json_extract(a.document,'$.metadata.s2')
-                        IS DISTINCT FROM p.s2_document
-            ), updated AS (
-                SELECT c.arxiv_id,c.document,c.s2_document,
+               WITH changed_targets AS MATERIALIZED (
+            SELECT a.arxiv_id, a.document, p.s2_document
+            FROM arxiv a
+                     JOIN _s2_projection_targets target USING (arxiv_id)
+                     LEFT JOIN _s2_projection p USING (arxiv_id)
+            WHERE a.arxiv_id BETWEEN ? AND ?
+              AND json_extract(a.document, '$.metadata.s2')
+                IS
+                DISTINCT
+            FROM p.s2_document
+                ), updated AS (
+            SELECT c.arxiv_id, c.document, c.s2_document, (
+                SELECT map_from_entries(
+                list(struct_pack(key := d.key, value := d.value))
+                )
+                FROM json_each(c.document) d
+                WHERE d.key <> 'metadata'
+                ) AS base_fields, coalesce (
                 (
-                    SELECT map_from_entries(
-                        list(struct_pack(key := d.key, value := d.value))
-                    )
-                    FROM json_each(c.document) d
-                    WHERE d.key <> 'metadata'
-                ) AS base_fields,
-                coalesce(
-                    (
-                        SELECT map_from_entries(
-                            list(struct_pack(key := m.key, value := m.value))
-                        )
-                        FROM json_each(
-                            coalesce(json_extract(c.document,'$.metadata'),'{}'::JSON)
-                        ) m
-                        WHERE m.key <> 's2'
-                    ),
-                    map([]::VARCHAR[], []::JSON[])
+                SELECT map_from_entries(
+                list(struct_pack(key := m.key, value := m.value))
+                )
+                FROM json_each(
+                coalesce (json_extract(c.document, '$.metadata'), '{}'::JSON)
+                ) m
+                WHERE m.key <> 's2'
+                ), map ([]:: VARCHAR [], []::JSON[])
                 ) AS other_metadata
-                FROM changed_targets c
-            ), rebuilt AS (
-                SELECT arxiv_id,
-                    CASE
-                        WHEN s2_document IS NULL AND len(map_keys(other_metadata))=0
-                            THEN to_json(base_fields)
-                        ELSE to_json(map_concat(
-                            base_fields,
-                            map(['metadata'], [to_json(
-                                CASE WHEN s2_document IS NULL THEN other_metadata
-                                    ELSE map_concat(other_metadata, map(['s2'], [s2_document]))
-                                END
-                            )])
-                        ))
-                    END AS new_document
-                FROM updated
-            )
-            SELECT arxiv_id,new_document FROM rebuilt ORDER BY arxiv_id
-            RETURNING arxiv_id""",
+            FROM changed_targets c
+                ), rebuilt AS (
+            SELECT arxiv_id, CASE
+                WHEN s2_document IS NULL AND len(map_keys(other_metadata))=0
+                THEN to_json(base_fields)
+                ELSE to_json(map_concat(
+                base_fields, map (['metadata'], [to_json(
+                CASE WHEN s2_document IS NULL THEN other_metadata
+                ELSE map_concat(other_metadata, map (['s2'], [s2_document]))
+                END
+                )])
+                ))
+                END AS new_document
+            FROM updated
+                )
+            SELECT arxiv_id, new_document
+            FROM rebuilt
+            ORDER BY arxiv_id RETURNING arxiv_id""",
             [range_start, range_end],
         ).fetchall()
         staged_changed += len(inserted)
@@ -976,25 +1231,24 @@ def _write_s2_document_changes(db: duckdb.DuckDBPyConnection) -> int:
         written = 0
         # INSERT 只追加到新表，不为旧 document 建立事务 undo；分批限制单条 INSERT 的工作集。
         db.execute(
-            """CREATE TABLE _arxiv_s2_replacement (
-                arxiv_id VARCHAR PRIMARY KEY,
-                doi VARCHAR,
-                source JSON,
-                document JSON
-            )"""
+            """CREATE TABLE _arxiv_s2_replacement
+               (
+                   arxiv_id VARCHAR PRIMARY KEY,
+                   doi      VARCHAR,
+                   source   JSON,
+                   document JSON
+               )"""
         )
         for range_start, range_end in replacement_ranges:
             inserted = db.execute(
                 """INSERT INTO _arxiv_s2_replacement
-                SELECT a.arxiv_id,a.doi,a.source,coalesce(c.new_document,a.document)
-                FROM arxiv a
-                LEFT JOIN (
-                    SELECT arxiv_id,new_document FROM _s2_changed
-                    WHERE arxiv_id BETWEEN ? AND ?
-                ) c USING(arxiv_id)
-                WHERE a.arxiv_id BETWEEN ? AND ?
-                ORDER BY a.arxiv_id
-                RETURNING arxiv_id""",
+                   SELECT a.arxiv_id, a.doi, a.source, coalesce(c.new_document, a.document)
+                   FROM arxiv a
+                            LEFT JOIN (SELECT arxiv_id, new_document
+                                       FROM _s2_changed
+                                       WHERE arxiv_id BETWEEN ? AND ?) c USING (arxiv_id)
+                   WHERE a.arxiv_id BETWEEN ? AND ?
+                   ORDER BY a.arxiv_id RETURNING arxiv_id""",
                 [range_start, range_end, range_start, range_end],
             ).fetchall()
             written += len(inserted)
@@ -1016,8 +1270,10 @@ def _write_s2_document_changes(db: duckdb.DuckDBPyConnection) -> int:
         db.execute("DROP TABLE _arxiv_s2_previous")
         for range_start, range_end in ranges:
             db.execute(
-                """INSERT OR IGNORE INTO pending_publish
-                SELECT arxiv_id FROM _s2_changed
+                """INSERT
+                OR IGNORE INTO pending_publish
+                SELECT arxiv_id
+                FROM _s2_changed
                 WHERE arxiv_id BETWEEN ? AND ?""",
                 [range_start, range_end],
             )

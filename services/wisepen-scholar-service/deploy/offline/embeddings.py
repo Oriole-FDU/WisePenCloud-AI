@@ -9,19 +9,41 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import orjson
-from scholar.core.embedding_runtime import DEFAULT_MODELS, MODEL_SIGNATURE
+
+from scholar.ml.specter import DEFAULT_MODELS, MODEL_SIGNATURE
 
 # 指纹直接在 DuckDB 计算，供续跑、增量失效判断和发布复用；只包含标题与摘要。
 INPUT_HASH_SQL = "sha256((a.document->>'title') || chr(0) || (a.document->>'abstract'))"
 EMBEDDING_SCHEMA = """
-    CREATE TABLE IF NOT EXISTS paper_embeddings (
-        arxiv_id VARCHAR PRIMARY KEY,
-        model_signature VARCHAR NOT NULL,
-        input_fingerprint VARCHAR NOT NULL,
-        vector FLOAT[768] NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS pending_embeddings (arxiv_id VARCHAR PRIMARY KEY);
-"""
+                   CREATE TABLE IF NOT EXISTS paper_embeddings
+                   (
+                       arxiv_id
+                       VARCHAR
+                       PRIMARY
+                       KEY,
+                       model_signature
+                       VARCHAR
+                       NOT
+                       NULL,
+                       input_fingerprint
+                       VARCHAR
+                       NOT
+                       NULL,
+                       vector
+                       FLOAT
+                   [
+                       768]
+                       NOT
+                       NULL
+                   );
+                   CREATE TABLE IF NOT EXISTS pending_embeddings
+                   (
+                       arxiv_id
+                       VARCHAR
+                       PRIMARY
+                       KEY
+                   ); \
+                   """
 
 
 def reconcile_embeddings(db, arxiv_ids: list[str] | None = None):
@@ -88,7 +110,7 @@ async def document_worker(python: Path, models: Path = DEFAULT_MODELS):
         str(python),
         "-u",
         "-m",
-        "scholar.core.embedding_runtime",
+        "scholar.ml.specter",
         "document-worker",
         "--models",
         str(models),
@@ -136,7 +158,7 @@ async def generate_embeddings(
         ).fetchall()
         encoded = []
         for offset in range(0, len(rows), batch_size):
-            inputs = rows[offset : offset + batch_size]
+            inputs = rows[offset: offset + batch_size]
             vectors = await worker.encode(
                 [{"title": row[1], "abstract": row[2]} for row in inputs]
             )
@@ -194,13 +216,18 @@ async def publish_embeddings(db, es, index: str, state: dict, progress):
         rows = db.execute(
             """
             WITH ids AS MATERIALIZED (
-                SELECT arxiv_id FROM paper_embeddings WHERE arxiv_id>? AND model_signature=?
-                ORDER BY arxiv_id LIMIT 500
+            SELECT arxiv_id
+            FROM paper_embeddings
+            WHERE arxiv_id > ?
+              AND model_signature = ?
+            ORDER BY arxiv_id LIMIT 500
             )
-            SELECT e.arxiv_id,e.vector FROM paper_embeddings e JOIN ids USING(arxiv_id)
+            SELECT e.arxiv_id, e.vector
+            FROM paper_embeddings e
+                     JOIN ids USING (arxiv_id)
             WHERE e.arxiv_id BETWEEN (SELECT min(arxiv_id) FROM ids) AND (SELECT max(arxiv_id) FROM ids)
             ORDER BY e.arxiv_id
-        """,
+            """,
             [after, MODEL_SIGNATURE],
         ).fetchall()
         if not rows:
