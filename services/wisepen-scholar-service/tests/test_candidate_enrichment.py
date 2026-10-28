@@ -1,3 +1,4 @@
+from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 """从公开搜索用例验证候选富化，并验证共享事实缓存的 alias 失效。"""
 
 import asyncio
@@ -67,7 +68,7 @@ class FakeSearcher:
 
     async def search(self, **kwargs):
         self.calls.append(kwargs)
-        return list(self.papers)
+        return PaperSearchBatch(list(self.papers))
 
 
 class FailingSearcher:
@@ -137,7 +138,7 @@ def search_service(papers, bindings, sources):
         searchers={"base": SearchBinding(searcher, coverage="base papers")},
         policies={
             AcademicField.GENERAL: FieldPolicy(
-                searchers=["base"], enrichers=list(sources)
+                searchers=["base"], field_enrichers=list(sources)
             )
         },
         query_cache=FakeQueryCache(),

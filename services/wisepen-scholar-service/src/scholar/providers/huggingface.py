@@ -15,10 +15,12 @@ from scholar.domain.interfaces.paper_discoverer import (
     PaperDiscovery,
 )
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
+from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.interfaces.provider_error import (
     ProviderError,
     provider_error_message,
 )
+from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import (
     IdentifierKind,
     PaperIdentifier,
@@ -30,7 +32,7 @@ _HF_ORIGIN = "https://huggingface.co"
 
 
 class HuggingFaceProvider:
-    """用官方 Papers HTTP endpoints 提供逐篇 HF 富化和周期发现。"""
+    """用官方 Papers HTTP endpoints 提供搜索、逐篇富化和周期发现。"""
 
     def __init__(
         self,
@@ -42,6 +44,36 @@ class HuggingFaceProvider:
         self.http = http
         self._headers = {"Authorization": f"Bearer {token}"} if token else {}
         self._request_limit = asyncio.Semaphore(concurrency)
+
+    async def search(
+        self,
+        *,
+        query: str,
+        field: AcademicField,
+        published_after: date | None,
+        published_before: date | None,
+        limit: int,
+        api_key: str | None = None,
+    ) -> PaperSearchBatch:
+        # 官方搜索只有 q/limit；日期在前 100 个候选内过滤，不伪称完整日期召回。
+        dated = published_after is not None or published_before is not None
+        response = await self._get(
+            f"{_HF_ORIGIN}/api/papers/search",
+            params={"q": query, "limit": 100 if dated else limit},
+        )
+        observed_at = datetime.now(UTC).isoformat()
+        papers = [
+            self._to_paper(row, self._metadata(row, observed_at=observed_at, partial=True))
+            for row in response.json()
+        ]
+        if dated:
+            papers = [
+                paper for paper in papers
+                if paper.publication_date is not None
+                and (published_after is None or paper.publication_date >= published_after)
+                and (published_before is None or paper.publication_date <= published_before)
+            ]
+        return PaperSearchBatch(papers[:limit])
 
     async def enrich(
         self,

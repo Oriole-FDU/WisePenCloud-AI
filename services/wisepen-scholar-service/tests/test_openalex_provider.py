@@ -59,7 +59,7 @@ async def test_search_sends_inclusive_filters_and_current_user_bearer_only(work)
     assert requests[0].url.params["filter"] == (
         "topics.field.id:17,from_publication_date:2023-01-01,to_publication_date:2023-12-31"
     )
-    paper = papers[0]
+    paper = papers.papers[0]
     assert paper.abstract == "repeated word repeated"
     assert paper.arxiv_id == "2310.08560"
     assert paper.doi == "10.1234/example"

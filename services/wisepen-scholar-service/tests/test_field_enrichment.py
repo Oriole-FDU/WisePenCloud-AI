@@ -144,7 +144,7 @@ async def test_s2_identity_alias_enables_hf_and_medicine_clinical_without_core_c
     )
     policies = {
         AcademicField.MEDICINE: FieldPolicy(
-            [], enrichers=["huggingface", "clinical_trials"]
+            [], field_enrichers=["huggingface", "clinical_trials"]
         )
     }
     result = await PaperLookupService(

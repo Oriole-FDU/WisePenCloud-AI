@@ -1,3 +1,5 @@
+from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
+
 """Scholar HTTP 合同：认证、检索投影、缓存和逐项标识结果。"""
 
 from datetime import date
@@ -411,7 +413,7 @@ def test_search_uses_openalex_header_and_user_scoped_cache(scholar_client):
 
         async def search(self, **kwargs):
             self.calls.append(kwargs)
-            return []
+            return PaperSearchBatch([])
 
         async def lookup(self, identifier, *, api_key):
             self.lookup_calls.append((identifier, api_key))

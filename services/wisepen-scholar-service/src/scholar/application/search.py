@@ -55,6 +55,7 @@ class SearchBinding:
     searcher: PaperSearcher
     requires_api_key: bool = False
     coverage: str = ""
+    cache_revision: str = "1"
 
 
 class PaperSearchService:
@@ -144,7 +145,7 @@ class PaperSearchService:
                 if source in self.enrichment.bindings
             ],
             domain_sources=[
-                source for source in policy.enrichers if source not in succeeded
+                source for source in policy.field_enrichers if source not in succeeded
             ],
             credentials=credentials,
         )
@@ -160,7 +161,7 @@ class PaperSearchService:
             cached = await self.query_cache.get(cache_key)
             if cached is not None:
                 return cached, SourceExecution(source, True, binding.coverage)
-        papers = await binding.searcher.search(
+        batch = await binding.searcher.search(
             query=query.query,
             field=query.field,
             published_after=query.published_after,
@@ -168,9 +169,14 @@ class PaperSearchService:
             limit=query.limit,
             api_key=api_key,
         )
-        if cache_key is not None:
-            await self.query_cache.put(cache_key, papers)
-        return papers, SourceExecution(source, False, binding.coverage)
+        # 降级结果仍可返回，但不缓存为完整检索，避免编码恢复后继续命中旧降级结果。
+        if cache_key is not None and batch.partial_error is None:
+            await self.query_cache.put(cache_key, batch.papers)
+        return batch.papers, SourceExecution(
+            source, False, binding.coverage,
+            SourceExecutionStatus.PARTIAL if batch.partial_error else SourceExecutionStatus.COMPLETED,
+            batch.partial_error,
+        )
 
     @staticmethod
     def _cache_key(
@@ -184,6 +190,7 @@ class PaperSearchService:
             return None
         identity = {
             "source": source,
+            "revision": binding.cache_revision,
             "query": query.query,
             "field": query.field.value,
             "published_after": None

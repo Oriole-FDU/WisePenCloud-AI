@@ -15,6 +15,7 @@ from scholar.application.source_execution import (
     SourceExecutionStatus,
 )
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
+from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.interfaces.provider_error import ProviderError
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind
@@ -51,7 +52,7 @@ class FakePaperRepository:
         self.calls.append(kwargs)
         if self.error:
             raise self.error
-        return self.papers
+        return PaperSearchBatch(self.papers)
 
 
 class FakeSearcher:
@@ -66,8 +67,8 @@ class FakeSearcher:
         if isinstance(self.search_result, Exception):
             raise self.search_result
         if callable(self.search_result):
-            return self.search_result(kwargs)
-        return self.search_result
+            return PaperSearchBatch(self.search_result(kwargs))
+        return PaperSearchBatch(self.search_result)
 
 
 def paper(
@@ -93,18 +94,19 @@ def paper(
     )
 
 
-def service(*, arxiv=None, openalex=None, cache=None):
+def service(*, arxiv=None, openalex=None, huggingface=None, cache=None):
     openalex = openalex or FakeSearcher()
     openalex.requires_key = True
     return PaperSearchService(
         searchers={
             "arxiv": SearchBinding(arxiv or FakeSearcher()),
+            "huggingface": SearchBinding(huggingface or FakeSearcher()),
             "openalex": SearchBinding(
                 openalex or FakeSearcher(), requires_api_key=True
             ),
         },
         policies={
-            field: replace(policy, enrichers=[])
+            field: replace(policy, field_enrichers=[])
             for field, policy in FIELD_POLICIES.items()
         },
         enrichment=EnrichmentRunner({}),
@@ -164,6 +166,22 @@ async def test_default_routing_uses_mapped_openalex_or_preserves_local_arxiv_ord
     assert [item.title for item in fallback_result.papers] == ["First", "Second"]
     assert cs_result.execution[0].source == PaperSource.ARXIV
     assert openalex_result.execution[0].source == PaperSource.OPENALEX
+
+
+@pytest.mark.asyncio
+async def test_cs_falls_back_to_hf_and_multisource_never_searches_openalex():
+    arxiv = FakeSearcher(ProviderError("ES unavailable"))
+    hf = FakeSearcher([paper(PaperSource.HUGGINGFACE, arxiv_id="2501.12948")])
+    oa = FakeSearcher()
+    search = service(arxiv=arxiv, huggingface=hf, openalex=oa)
+    result = await search.search(PaperSearch("DeepSeek-R1", field=AcademicField.COMPUTER_SCIENCE))
+    assert [e.source for e in result.execution] == ["arxiv", "huggingface"]
+    assert result.papers[0].arxiv_id == "2501.12948"
+    arxiv.search_result = []
+    result = await search.search(PaperSearch("other", field=AcademicField.COMPUTER_SCIENCE, source_scope=SourceScope.MULTI_SOURCE))
+    assert [e.status for e in result.execution] == [SourceExecutionStatus.COMPLETED] * 2
+    assert len(hf.calls) == 2
+    assert oa.calls == []
 
 
 @pytest.mark.asyncio
@@ -447,7 +465,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
     }
     policy = FieldPolicy(
         searchers=["pubmed", "web_of_science", "openalex"],
-        enrichers=["clinical_trials"],
+        field_enrichers=["clinical_trials"],
     )
     search = PaperSearchService(
         bindings,
@@ -505,7 +523,7 @@ async def test_field_configuration_controls_enrichment_after_final_limit():
         {
             AcademicField.GENERAL: FieldPolicy(["local"]),
             AcademicField.COMPUTER_SCIENCE: FieldPolicy(
-                ["local"], enrichers=["specialized"]
+                ["local"], field_enrichers=["specialized"]
             ),
         },
         MemoryCache(),

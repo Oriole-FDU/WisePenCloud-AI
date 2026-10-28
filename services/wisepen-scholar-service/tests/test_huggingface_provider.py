@@ -3,7 +3,6 @@ from datetime import UTC, date, datetime
 
 import httpx
 import pytest
-
 import scholar.providers.huggingface as huggingface_provider
 from scholar.domain.interfaces.paper_discoverer import (
     DiscoveryPeriod,
@@ -11,6 +10,7 @@ from scholar.domain.interfaces.paper_discoverer import (
 )
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.interfaces.provider_error import ProviderError
+from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import (
     IdentifierKind,
     PaperIdentifier,
@@ -45,6 +45,50 @@ def paper_info_payload(arxiv_id="2401.00001"):
 
 def client_for(handler):
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_upstream_order_and_plain_text_without_detail_requests():
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json=[
+            {"paper": {"id": "2501.12948", "title": "DeepSeek-R1", "summary": "Plain abstract", "upvotes": 0}, "highlightedTitle": "<em>DeepSeek</em>-R1"},
+            {"paper": {"id": "2501.18438", "title": "Comparison", "summary": "Analysis"}},
+        ])
+
+    async with client_for(handle) as http:
+        result = await HuggingFaceProvider(http, token="test-token").search(
+            query="DeepSeek-R1", field=AcademicField.COMPUTER_SCIENCE,
+            published_after=None, published_before=None, limit=2,
+        )
+    assert [p.arxiv_id for p in result.papers] == ["2501.12948", "2501.18438"]
+    assert result.papers[0].title == "DeepSeek-R1"
+    assert result.papers[0].metadata["huggingface"]["upvotes"] == 0
+    assert len(requests) == 1
+    assert requests[0].url.path == "/api/papers/search"
+    assert dict(requests[0].url.params) == {"q": "DeepSeek-R1", "limit": "2"}
+    assert requests[0].headers["authorization"] == "Bearer test-token"
+
+
+@pytest.mark.asyncio
+async def test_search_filters_bounded_candidates_by_inclusive_paper_dates():
+    def handle(request):
+        assert request.url.params["limit"] == "100"
+        return httpx.Response(200, json=[
+            {"paper": {"id": "2501.12948", "title": "Start", "publishedAt": "2025-01-22T00:00:00Z"}},
+            {"paper": {"id": "2501.18438", "title": "End", "publishedAt": "2025-01-31T00:00:00Z"}},
+            {"paper": {"id": "2401.00001", "title": "Old", "publishedAt": "2024-01-01T00:00:00Z"}},
+            {"paper": {"id": "2401.00002", "title": "Undated"}},
+        ])
+
+    async with client_for(handle) as http:
+        result = await HuggingFaceProvider(http).search(
+            query="reasoning", field=AcademicField.COMPUTER_SCIENCE,
+            published_after=date(2025, 1, 22), published_before=date(2025, 1, 31), limit=10,
+        )
+    assert [p.title for p in result.papers] == ["Start", "End"]
 
 
 @pytest.mark.asyncio

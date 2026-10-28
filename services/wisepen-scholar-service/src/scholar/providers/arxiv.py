@@ -15,13 +15,13 @@ from elastic_transport import (
 )
 
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
+from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.interfaces.provider_error import (
     ProviderError,
     provider_error_message,
 )
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
-from scholar.domain.models.paper import Paper
 from scholar.domain.repositories.paper_repository import PaperRepository
 from scholar.providers.field_mapping import ARXIV_CATEGORIES
 
@@ -77,19 +77,20 @@ class ArxivProvider:
         published_before: date | None,
         limit: int,
         api_key: str | None = None,
-    ) -> list[Paper]:
+    ) -> PaperSearchBatch:
         categories = ARXIV_CATEGORIES[field]
         if categories is None:
             raise ValueError(f"arXiv search is not mapped for {field.value}")
 
         try:
-            return await self.paper_repository.search(
+            papers = await self.paper_repository.search(
                 query=query,
                 categories=categories,
                 published_after=published_after,
                 published_before=published_before,
                 limit=limit,
             )
+            return PaperSearchBatch(papers)
         except ElasticApiError as error:
             raise ProviderError(provider_error_message(error)) from error
         except (ElasticConnectionError, ElasticConnectionTimeout) as error:

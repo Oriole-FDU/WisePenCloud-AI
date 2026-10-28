@@ -12,7 +12,7 @@ class FieldPolicy:
 
     searchers: list[str]
     # 平台不融合同名字段、不做语义去重；provider 应保证键唯一并提供增量价值。
-    enrichers: list[str] = field(default_factory=list)
+    field_enrichers: list[str] = field(default_factory=list)
     discoverer: str | None = None
 
 
@@ -22,8 +22,8 @@ COMMON_ENRICHERS = [PaperSource.ARXIV, PaperSource.S2, PaperSource.OPENALEX]
 FIELD_POLICIES = {
     AcademicField.GENERAL: FieldPolicy([PaperSource.OPENALEX, PaperSource.ARXIV]),
     AcademicField.COMPUTER_SCIENCE: FieldPolicy(
-        [PaperSource.ARXIV, PaperSource.OPENALEX],
-        enrichers=[PaperSource.HUGGINGFACE],
+        [PaperSource.ARXIV, PaperSource.HUGGINGFACE],
+        field_enrichers=[PaperSource.HUGGINGFACE],
         discoverer=PaperSource.HUGGINGFACE,
     ),
     AcademicField.MEDICINE: FieldPolicy([PaperSource.OPENALEX]),

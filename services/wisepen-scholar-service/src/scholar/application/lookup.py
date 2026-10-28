@@ -217,7 +217,7 @@ class PaperLookupService:
                         for source in COMMON_ENRICHERS
                         if source in self.enrichment.bindings
                     ],
-                    domain_sources=policy.enrichers,
+                    domain_sources=policy.field_enrichers,
                     credentials={PaperSource.OPENALEX: api_key} if api_key else {},
                     full=query.purpose == LookupPurpose.FULL,
                 )

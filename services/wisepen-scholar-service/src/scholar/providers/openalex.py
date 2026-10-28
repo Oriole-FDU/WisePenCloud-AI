@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from scholar.domain.interfaces.paper_enricher import PaperEnrichment
+from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.interfaces.provider_error import (
     ProviderError,
     provider_error_message,
@@ -47,7 +48,7 @@ class OpenAlexProvider:
         published_before: date | None,
         limit: int,
         api_key: str | None = None,
-    ) -> list[Paper]:
+    ) -> PaperSearchBatch:
         if not api_key:
             raise ProviderError("OpenAlex API key is required")
         field_filter = OPENALEX_FILTERS[field]
@@ -68,7 +69,7 @@ class OpenAlexProvider:
         except httpx.HTTPError as error:
             # 异常文本保留状态码与 URL；凭证仅在请求头中，不进入异常文本。
             raise ProviderError(provider_error_message(error)) from error
-        return [self.to_paper(work) for work in response.json()["results"]]
+        return PaperSearchBatch([self.to_paper(work) for work in response.json()["results"]])
 
     async def enrich(
         self,

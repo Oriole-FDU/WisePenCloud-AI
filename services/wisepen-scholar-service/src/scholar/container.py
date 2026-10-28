@@ -124,6 +124,11 @@ class Container(containers.DeclarativeContainer):
             requires_api_key=True,
             coverage="OpenAlex 按请求领域映射召回。",
         ),
+        huggingface=providers.Factory(
+            SearchBinding,
+            searcher=huggingface_provider,
+            coverage="HF Papers 社区论文；日期过滤限于上游前 100 个候选，不代表全学科覆盖。",
+        ),
     )
     enrichment_bindings = providers.Dict(
         arxiv=providers.Factory(
