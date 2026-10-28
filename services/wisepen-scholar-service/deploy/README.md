@@ -18,6 +18,22 @@ uv run --no-sync python services/wisepen-scholar-service/deploy/migrate_search_i
 
 回滚会恢复旧 alias 和 DuckDB 发布目标，解除旧索引写屏障，保留新索引与已有向量。
 
+## Redis 缓存键升级
+
+查询、发现和论文富化缓存现在使用 `compact-v1` 命名空间。旧键不会再被读取；索引迁移会清理当前 alias 的新旧搜索缓存。需要一次性删除旧缓存时，先确认 `index_alias` 与当前 `SCHOLAR_INDEX_ALIAS` 一致、`REDIS_URL` 指向服务使用的 Redis 数据库，再执行以下命令。富化模式会覆盖该索引下所有来源及 BYOK 凭证 scope；不执行 `FLUSHDB`。
+
+```bash
+index_alias="${SCHOLAR_INDEX_ALIAS:-wisepen-scholar-arxiv}"
+for pattern in \
+  "scholar:search:${index_alias}:*" \
+  "scholar:discovery:${index_alias}:*" \
+  "scholar:enrichment:${index_alias}:*"
+do
+  redis-cli -u "$REDIS_URL" --scan --pattern "$pattern" |
+    xargs -r -n 200 redis-cli -u "$REDIS_URL" UNLINK
+done
+```
+
 新环境从原始文件初始化时依次运行：
 
 ```powershell

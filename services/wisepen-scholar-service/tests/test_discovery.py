@@ -16,7 +16,7 @@ from scholar.domain.interfaces.paper_discoverer import (
     DiscoverySort,
     PaperDiscovery,
 )
-from scholar.domain.interfaces.provider_error import ProviderError
+from scholar.domain.errors import ProviderError
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.paper import Paper, PaperSource
 
@@ -309,14 +309,23 @@ async def test_redis_discovery_cache_preserves_windows_and_uses_configured_ttl()
     discovery = PaperDiscovery(
         [make_paper("2401.00001")], date(2026, 10, 26), date(2026, 11, 1)
     )
+    redis.values["scholar:discovery:scholar-index:weekly-key"] = orjson.dumps(
+        discovery
+    )
+
+    assert await cache.get("weekly-key") is None
 
     await cache.put("weekly-key", discovery)
     restored = await cache.get("weekly-key")
+    other_index = RedisDiscoveryCacheRepository(redis, "other-index", ttl=900)
 
     assert restored == discovery
-    assert redis.set_calls[0][0] == "scholar:discovery:scholar-index:weekly-key"
+    assert redis.set_calls[0][0] == (
+        "scholar:discovery:compact-v1:scholar-index:weekly-key"
+    )
     assert redis.set_calls[0][2] == 900
     assert orjson.loads(redis.set_calls[0][1])["window_start"] == "2026-10-26"
+    assert await other_index.get("weekly-key") is None
 
 
 def test_discovery_request_schema_has_only_registered_field_and_no_query():

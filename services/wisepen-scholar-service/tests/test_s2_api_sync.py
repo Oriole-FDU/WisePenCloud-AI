@@ -40,7 +40,14 @@ async def test_daily_sync_requests_v2_and_persists_vector_for_publication(db):
         harvest("2026-10-28T00:00:00Z", active_record("2501.12948", "2026-10-28"))
     )
     publish, _ = publisher(db)
-    result = await sync_arxiv(db, harvester, client, publish=publish, cache=FakeCache())
+    result = await sync_arxiv(
+        db,
+        harvester,
+        client,
+        publish=publish,
+        cache=FakeCache(),
+        arxiv_cache=FakeCache(),
+    )
     assert "embedding.specter_v2" in requests[0][2]["params"]["fields"].split(",")
     assert "embedding" not in requests[0][2]["params"]["fields"].split(",")
     assert result["pending_s2"] == 0
@@ -49,6 +56,8 @@ async def test_daily_sync_requests_v2_and_persists_vector_for_publication(db):
     assert document["embedding"] == [0.25] * 768
     assert document["metadata"]["s2"]["citation_count"] == 0
     assert document["metadata"]["s2"]["is_open_access"] is False
+    assert document["metadata"]["s2"]["tldr"] == {"text": "summary", "model": "tldr"}
+    assert document["metadata"]["s2"]["observed_at"]
     assert "embedding" not in document["metadata"]["s2"]
     assert db.execute("SELECT count(*) FROM pending_embeddings").fetchone()[0] == 0
 
@@ -73,6 +82,7 @@ async def test_missing_s2_vector_keeps_daily_retry_without_gpu(db):
         S2SyncClient(AsyncMock(request=request)),
         publish=publish,
         cache=FakeCache(),
+        arxiv_cache=FakeCache(),
     )
     assert result["pending_s2"] == 1
     assert db.execute("SELECT count(*) FROM pending_embeddings").fetchone()[0] == 1
@@ -90,4 +100,4 @@ async def test_v1_response_is_rejected_instead_of_mixing_vector_spaces():
         )
     )
     with pytest.raises(ValueError):
-        await client.enrich([parse_identifier("2501.12948")])
+        await client.lookup([parse_identifier("2501.12948")])

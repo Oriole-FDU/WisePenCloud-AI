@@ -20,16 +20,17 @@ from elastic_transport import (
 from openai import APIConnectionError, APIStatusError
 
 from scholar.core.embedding_runtime import MODEL_SIGNATURE
-from scholar.domain.interfaces.paper_enricher import PaperEnrichment
-from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
-from scholar.domain.interfaces.provider_error import (
+from scholar.domain.errors import (
     ProviderError,
     provider_error_message,
 )
+from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
+from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
-from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
+from scholar.domain.models.identifiers import PaperIdentifier
 from scholar.domain.repositories.paper_repository import PaperRepository
 from scholar.providers.field_mapping import ARXIV_CATEGORIES
+from scholar.providers.projection import project_paper
 
 
 class ArxivProvider:
@@ -70,43 +71,19 @@ class ArxivProvider:
             ).encode()
         ).hexdigest()
 
-    async def enrich(
+    async def lookup(
         self,
-        identifiers: list[PaperIdentifier],
+        ids: list[PaperIdentifier],
         *,
-        include_details: bool = False,
         api_key: str | None = None,
-    ) -> list[PaperEnrichment | None]:
-        """按 arXiv/DOI 精确身份批量投影仓储已有事实，不触发外部请求。"""
+    ) -> list[PaperLookupMatch]:
+        """按 arXiv/DOI 身份透传仓储结果，保留歧义与逐项失败。"""
         try:
-            matches = await self.paper_repository.lookup(identifiers)
+            return await self.paper_repository.lookup(ids)
         except ElasticApiError as error:
             raise ProviderError(provider_error_message(error)) from error
         except (ElasticConnectionError, ElasticConnectionTimeout) as error:
             raise ProviderError(provider_error_message(error)) from error
-
-        enrichments = []
-        for identifier, match in zip(identifiers, matches, strict=True):
-            if match.error is not None:
-                raise ProviderError(match.error)
-            if len(match.papers) != 1:
-                enrichments.append(None)
-                continue
-
-            paper = match.papers[0]
-            aliases = [identifier]
-            if paper.arxiv_id is not None:
-                aliases.append(parse_identifier(paper.arxiv_id))
-            if paper.doi is not None:
-                aliases.append(parse_identifier(paper.doi))
-            enrichments.append(
-                PaperEnrichment(
-                    identifiers=list(dict.fromkeys(aliases)),
-                    metadata=paper.metadata,
-                    paper=paper if include_details else None,
-                )
-            )
-        return enrichments
 
     async def search(
         self,
@@ -169,7 +146,8 @@ class ArxivProvider:
 
             ranked = sorted(fused, key=boosted_score, reverse=True)
             return PaperSearchBatch(
-                [candidate.payload for candidate in ranked[:limit]], partial_error
+                [project_paper(candidate.payload) for candidate in ranked[:limit]],
+                partial_error,
             )
         except ElasticApiError as error:
             raise ProviderError(provider_error_message(error)) from error

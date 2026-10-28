@@ -4,31 +4,36 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any
 
 import requests
-from dotenv import load_dotenv
 from tqdm import tqdm
 
 # ==================== 官方核心配置 ====================
-# 从 Scholar 服务目录读取配置，不依赖调用脚本时的工作目录。
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
-API_KEY = os.environ["S2_API_KEY"]
+API_KEY = "s2k-oZgVDnMLhY9ZZJxLS52nuEDL3gHSfDhRTbxgYkzZ"
 RELEASE_ID = "2026-10-20"  # 指定官方发布的快照日期
-DATASETS = ["papers", "tldrs"]  # 同时同步的两个核心包
+DATASETS = ["embeddings-specter_v2"]  # 同时同步的两个核心包
 SAVE_DIR = "./s2_download"
 
+# === 新增：显式代理（默认 7897，可用 PROXY_PORT 环境变量覆盖） ===
+_proxy_port = os.getenv("PROXY_PORT", "7897")
+PROXIES = {
+    "http":  f"http://127.0.0.1:{_proxy_port}",
+    "https": f"http://127.0.0.1:{_proxy_port}",
+}
+print(f"[*] 已启用显式代理: {PROXIES['https']}")
+
 # 1. 频控与并发设置
-MAX_WORKERS = 5  # 切片下载并发数（建议 2-4）
-MAX_RETRIES = 6  # 偶发断流最大重试次数
-CHUNK_SIZE = 1024 * 1024  # 1MB 读写缓冲区
-API_DELAY_SECONDS = 1.0  # 官方 API 接口间隔冷却
+MAX_WORKERS = 5
+MAX_RETRIES = 6
+CHUNK_SIZE = 1024 * 1024
+API_DELAY_SECONDS = 1.0
 
 # ====================================================
 
-# 官方规范接口根路径
 BASE_URL = "https://api.semanticscholar.org/datasets/v1/release"
 
-COMMON_UA = "curl/8.21.0"
+COMMON_UA = "WisePen@Fudan"
 API_HEADERS = {
     "x-api-key": API_KEY,
 }
@@ -36,10 +41,11 @@ API_HEADERS = {
 api_session = requests.Session()
 # requests.Session 默认添加 User-Agent；Scholar 的 S2 API 约定要求省略该请求头。
 api_session.headers.pop("User-Agent")
+# === 新增：Session 级代理，之后所有 api_session 请求自动走代理 ===
+api_session.proxies.update(PROXIES)
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-# 终端进度条槽位调度锁
 position_lock = threading.Lock()
 available_positions = list(range(MAX_WORKERS))
 
@@ -55,13 +61,14 @@ def release_position(pos):
         available_positions.sort()
 
 
-def fetch_dataset_files(dataset_name: str, release_id: str) -> list[str]:
+def fetch_dataset_files(dataset_name: str, release_id: str) -> Any | None:
     """完全遵循官方示例：获取指定 Release 下指定数据集的 S3 预签名直链清单"""
     time.sleep(API_DELAY_SECONDS)
     target_url = f"{BASE_URL}/{release_id}/dataset/{dataset_name}"
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
+            # api_session 已在 Session 级别设置 proxies，此处无需再传
             res = api_session.get(
                 target_url,
                 headers=API_HEADERS,
@@ -85,7 +92,7 @@ def fetch_dataset_files(dataset_name: str, release_id: str) -> list[str]:
 
 
 def download_chunk_with_resume(url: str, save_path: str, desc: str):
-    """基于 HTTP Range 请求的 S3 分片流式断点续传下载"""
+    """基于 HTTP Range 请求的 S3 分片流式断点续传下载（经由代理）"""
     pos = acquire_position()
     try:
         for attempt in range(1, MAX_RETRIES + 1):
@@ -97,13 +104,14 @@ def download_chunk_with_resume(url: str, save_path: str, desc: str):
                 if existing_size > 0:
                     req_headers["Range"] = f"bytes={existing_size}-"
 
+                # === 修改：流式下载显式加 proxies ===
                 with requests.get(
                         url,
                         headers=req_headers,
                         stream=True,
+                        proxies=PROXIES,
                         timeout=60,
                 ) as response:
-                    # 416 表示请求的字节范围已超出文件大小，即本地切片已完整
                     if response.status_code == 416:
                         tqdm.write(f"[{desc}] 文件校验通过，已为完整切片。")
                         return
@@ -115,7 +123,6 @@ def download_chunk_with_resume(url: str, save_path: str, desc: str):
 
                     response.raise_for_status()
 
-                    # 206 代表命中断点续传追加，200 代表新任务覆盖重写
                     if response.status_code == 206:
                         content_len = int(response.headers.get("content-length", 0))
                         total_size = existing_size + content_len
@@ -157,7 +164,6 @@ def download_s2_datasets():
     print(f"目标快照版本: {RELEASE_ID}")
     tasks = []
 
-    # 1. 顺序读取两个包的分片链接
     for dataset_name in DATASETS:
         dataset_dir = os.path.join(SAVE_DIR, dataset_name)
         os.makedirs(dataset_dir, exist_ok=True)
@@ -175,7 +181,6 @@ def download_s2_datasets():
     print(f"\n任务汇总完成，共有 {len(tasks)} 个切片等待下载。")
     print(f"并发数: {MAX_WORKERS} | 断点续传已开启\n")
 
-    # 2. 线程池并发下载并维持断点续传
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_task = {
             executor.submit(download_chunk_with_resume, url, path, desc): desc

@@ -1,10 +1,8 @@
-"""lookup 的 purpose、身份路由和 OpenAlex/S2 组合合同。"""
+"""从 lookup 公共入口验证完整论文查询、缓存复用和逐项结果。"""
 
-from dataclasses import replace
 from datetime import date
 
 import pytest
-from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.lookup import (
     EnrichmentStatus,
     LookupPurpose,
@@ -12,11 +10,13 @@ from scholar.application.lookup import (
     PaperLookup,
     PaperLookupService,
 )
-from scholar.domain.interfaces.paper_enricher import PaperEnrichment
-from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
+from scholar.application.lookup_runner import LookupBinding, LookupRunner
+from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
+from scholar.domain.models.identifiers import (
+    IdentifierKind,
+    parse_identifier,
+)
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.domain.repositories.paper_repository import PaperLookupMatch
-from scholar.providers.enrichment_rules import arxiv_signals, s2_aliases, s2_signals
 
 
 def make_paper(
@@ -24,229 +24,264 @@ def make_paper(
     *,
     arxiv_id="2401.00001",
     doi=None,
-    title="Offline title",
+    title="Lookup title",
+    authors=None,
     metadata=None,
 ):
     return Paper(
         arxiv_id=arxiv_id,
         doi=doi,
         title=title,
-        abstract="Offline abstract",
-        authors=["Offline author"],
+        abstract="Lookup abstract",
+        authors=["Ada Researcher"] if authors is None else authors,
         publication_date=date(2024, 1, 2),
         year=2024,
         url="https://example.test/paper",
-        pdf_url=None,
+        pdf_url="https://example.test/paper.pdf",
         source=source,
         metadata={} if metadata is None else metadata,
     )
 
 
-class FakePaperRepository:
+class FakeProvider:
+    """按公开 lookup 端口返回每个身份的完整基础论文或单项失败。"""
+
     def __init__(self, matches=None):
         self.matches = matches or {}
         self.calls = []
 
-    async def lookup(self, identifiers):
-        self.calls.append(list(identifiers))
-        return [
-            self.matches.get(identifier, PaperLookupMatch([]))
-            for identifier in identifiers
-        ]
+    async def lookup(self, ids, *, api_key=None):
+        ids = list(ids)
+        self.calls.append((ids, api_key))
+        return [self.matches.get(identity, PaperLookupMatch([])) for identity in ids]
 
 
 class FakeCache:
-    def __init__(self, values=None):
-        self.values = values or {}
+    """按论文身份共享完整 Paper，并记录正负缓存的 TTL。"""
+
+    def __init__(self):
+        self.values = {}
         self.puts = []
 
-    async def get(self, identifiers):
-        return next(
-            (
-                self.values[identifier]
-                for identifier in identifiers
-                if identifier in self.values
-            ),
-            None,
-        )
+    async def get_many(self, ids):
+        return [self.values.get(identity) for identity in ids]
 
-    async def put(self, identifiers, value, *, ttl_seconds):
-        self.puts.append((list(identifiers), value, ttl_seconds))
-        for identifier in identifiers:
-            self.values[identifier] = value
+    async def put_many(self, entries):
+        self.puts.extend(entries)
+        for record, _ttl_seconds in entries:
+            for identity in record.cache_aliases:
+                self.values[identity] = record
+
+    async def invalidate(self, identifiers):
+        for identity in identifiers:
+            self.values.pop(identity, None)
 
 
-class FakeEnricher:
-    def __init__(self, responses=None, *, error=None):
-        self.responses = responses or {}
-        self.error = error
-        self.calls = []
-
-    async def enrich(self, identifiers, *, include_details=False, api_key=None):
-        identifiers = list(identifiers)
-        self.calls.append((identifiers, include_details))
-        if self.error is not None:
-            raise self.error
-        responses = [self.responses.get(identifier) for identifier in identifiers]
-        return (
-            responses
-            if include_details
-            else [
-                None if response is None else replace(response, paper=None)
-                for response in responses
-            ]
-        )
-
-
-def s2_result(
-    *,
-    arxiv_id="2403.00003",
-    doi="10.5555/resolved",
-    s2_id="b" * 40,
-    corpus_id=77,
-    full_paper=True,
-):
-    identifiers = [parse_identifier("s2:" + s2_id)]
-    if arxiv_id is not None:
-        identifiers.append(parse_identifier(arxiv_id))
-    if doi is not None:
-        identifiers.append(parse_identifier(doi))
-    if corpus_id is not None:
-        identifiers.append(parse_identifier(f"corpusid:{corpus_id}"))
-    metadata = {
-        "s2": {
-            "corpus_id": None if corpus_id is None else str(corpus_id),
-            "paper_id": s2_id,
-            "citation_count": 4,
-            "influential_citation_count": 1,
-            "is_open_access": False,
-            "tldr": {"model": "tldr@v2", "text": "Contribution"},
-        }
-    }
-    paper = (
-        make_paper(
-            PaperSource.S2,
-            arxiv_id=arxiv_id,
-            doi=doi,
-            title="S2 details",
-            metadata=metadata,
-        )
-        if full_paper
-        else None
+def binding(provider, *, cache=None, identifier_kinds=None, **kwargs):
+    return LookupBinding(
+        provider,
+        cache,
+        identifier_kinds or list(IdentifierKind),
+        **kwargs,
     )
-    return PaperEnrichment(identifiers, metadata, paper)
 
 
-def lookup_service(
-    repository, openalex_lookup=None, *, s2_enricher=None, s2_cache=None
-):
+def service(bindings, *, platform_credentials=None):
     return PaperLookupService(
-        repository,
-        openalex_lookup,
-        enrichment=EnrichmentRunner(
-            {
-                "arxiv": EnrichmentBinding(
-                    None,
-                    None,
-                    [IdentifierKind.ARXIV, IdentifierKind.DOI],
-                    has_signals=arxiv_signals,
-                ),
-                "s2": EnrichmentBinding(
-                    s2_enricher,
-                    s2_cache,
-                    [
-                        IdentifierKind.ARXIV,
-                        IdentifierKind.DOI,
-                        IdentifierKind.S2,
-                        IdentifierKind.CORPUS_ID,
-                    ],
-                    has_signals=s2_signals,
-                    aliases=s2_aliases,
-                ),
-            }
-        ),
+        LookupRunner(bindings), platform_credentials=platform_credentials
     )
 
 
 @pytest.mark.asyncio
-async def test_details_never_calls_s2_and_cache_only_miss_is_not_found():
+async def test_lookup_batches_normalized_ids_and_preserves_order_ambiguity_and_item_error():
     arxiv = parse_identifier("2401.00001")
-    local = make_paper()
-    repository = FakePaperRepository({arxiv: PaperLookupMatch([local])})
-    enricher = FakeEnricher()
-    cache = FakeCache()
+    doi = parse_identifier("10.5555/ambiguous")
+    failed = parse_identifier("2401.00002")
+    missing = parse_identifier("2401.00003")
+    local = make_paper(arxiv_id=arxiv.value)
+    provider = FakeProvider(
+        {
+            arxiv: PaperLookupMatch([local]),
+            doi: PaperLookupMatch(
+                [
+                    make_paper(doi=doi.value, title="First"),
+                    make_paper(doi=doi.value, title="Second"),
+                ]
+            ),
+            failed: PaperLookupMatch([], error="msearch item rejected"),
+        }
+    )
+    lookup = service(
+        {
+            PaperSource.ARXIV: binding(
+                provider,
+                identifier_kinds=[IdentifierKind.ARXIV, IdentifierKind.DOI],
+            )
+        }
+    )
 
-    result = await lookup_service(
-        repository, s2_enricher=enricher, s2_cache=cache
-    ).lookup(
+    result = await lookup.lookup(
         PaperLookup(
-            ["arxiv:2401.00001", "s2:" + "a" * 40],
-            purpose=LookupPurpose.DETAILS,
+            [
+                "https://arxiv.org/abs/2401.00001v2",
+                "arxiv:2401.00001v1",
+                doi.value,
+                failed.value,
+                missing.value,
+            ]
         )
     )
 
     assert [item.status for item in result.items] == [
         LookupStatus.FOUND,
+        LookupStatus.FOUND,
+        LookupStatus.AMBIGUOUS,
+        LookupStatus.FAILED,
         LookupStatus.NOT_FOUND,
     ]
-    assert result.items[0].paper == local
-    assert result.items[1].paper is None
-    assert enricher.calls == []
+    assert [item.paper for item in result.items[:2]] == [local, local]
+    assert result.items[3].error == "msearch item rejected"
+    assert provider.calls == [([arxiv, doi, failed, missing], None)]
 
 
 @pytest.mark.asyncio
-async def test_enrich_uses_local_paper_without_openalex_or_full_paper_projection():
-    arxiv = parse_identifier("2402.00002")
-    local_paper = make_paper(arxiv_id=arxiv.value)
-    repository = FakePaperRepository({arxiv: PaperLookupMatch([local_paper])})
-    enricher = FakeEnricher({arxiv: s2_result(arxiv_id=arxiv.value, full_paper=True)})
-    openalex_calls = []
+async def test_local_miss_falls_through_to_s2_and_returns_its_complete_paper():
+    identity = parse_identifier("2401.00001")
+    arxiv = FakeProvider()
+    paper = make_paper(
+        PaperSource.S2,
+        arxiv_id=identity.value,
+        title="Semantic Scholar title",
+        authors=["First Author", "Second Author"],
+        metadata={
+            "s2": {
+                "paper_id": "a" * 40,
+                "corpus_id": "123",
+                "citation_count": 4,
+                "tldr": {"text": "Contribution"},
+            }
+        },
+    )
+    s2 = FakeProvider({identity: PaperLookupMatch([paper])})
+    lookup = service(
+        {
+            PaperSource.ARXIV: binding(arxiv, identifier_kinds=[IdentifierKind.ARXIV]),
+            PaperSource.S2: binding(s2, identifier_kinds=[IdentifierKind.ARXIV]),
+        }
+    )
 
-    async def openalex_lookup(identifier, *, api_key):
-        openalex_calls.append((identifier, api_key))
-
-    result = await lookup_service(
-        repository,
-        openalex_lookup=openalex_lookup,
-        s2_enricher=enricher,
-        s2_cache=FakeCache(),
-    ).lookup(
-        PaperLookup([arxiv.value], purpose=LookupPurpose.ENRICH),
-        api_key="request-key",
+    result = await lookup.lookup(
+        PaperLookup([identity.value], purpose=LookupPurpose.FULL)
     )
 
     assert result.items[0].status == LookupStatus.FOUND
-    assert result.items[0].paper is None
-    assert result.items[0].metadata["s2"]["citation_count"] == 4
-    assert result.items[0].enrichment_status == EnrichmentStatus.COMPLETE
-    assert openalex_calls == []
-    assert enricher.calls == [([arxiv], False)]
+    assert result.items[0].paper.authors == ["First Author et al."]
+    assert result.items[0].paper.metadata["s2"]["citation_count"] == 4
+    assert arxiv.calls == [([identity], None)]
+    assert s2.calls == [([identity], None)]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind,value", [("s2", "c" * 40), ("corpusid", "215416146")])
-async def test_enrich_and_full_accept_semanticscholar_identity_kinds(kind, value):
-    identifier = parse_identifier(f"{kind}:{value}")
-    response = s2_result(
-        arxiv_id=None,
-        doi=None,
-        s2_id=value if kind == "s2" else "b" * 40,
-        corpus_id=value if kind == "corpusid" else None,
+async def test_same_complete_paper_cache_serves_enrich_and_full_purposes():
+    identity = parse_identifier("s2:" + "b" * 40)
+    paper = make_paper(
+        PaperSource.S2,
+        arxiv_id="2402.00002",
+        title="Complete cached title",
+        authors=["Author One", "Author Two"],
+        metadata={
+            "s2": {
+                "citation_count": 8,
+                "observed_at": "2026-10-28T00:00:00Z",
+                "tldr": {"model": "tldr@v2", "text": "Summary"},
+            }
+        },
     )
-    enricher = FakeEnricher({identifier: response})
-    service = lookup_service(
-        FakePaperRepository(), s2_enricher=enricher, s2_cache=FakeCache()
+    provider = FakeProvider({identity: PaperLookupMatch([paper])})
+    cache = FakeCache()
+    lookup = service(
+        {
+            PaperSource.S2: binding(
+                provider,
+                cache=cache,
+                identifier_kinds=[IdentifierKind.S2],
+            )
+        }
     )
 
-    enriched = await service.lookup(
-        PaperLookup([f"{kind}:{value}"], purpose=LookupPurpose.ENRICH)
+    query_id = f"s2:{identity.value}"
+    enriched = await lookup.lookup(
+        PaperLookup([query_id], purpose=LookupPurpose.ENRICH)
     )
-    complete = await service.lookup(
-        PaperLookup([f"{kind}:{value}"], purpose=LookupPurpose.FULL)
-    )
+    full = await lookup.lookup(PaperLookup([query_id], purpose=LookupPurpose.FULL))
 
     assert enriched.items[0].status == LookupStatus.FOUND
     assert enriched.items[0].paper is None
-    assert complete.items[0].status == LookupStatus.FOUND
-    assert complete.items[0].paper.source == PaperSource.S2
-    assert [details for _, details in enricher.calls] == [False, True]
+    assert enriched.items[0].metadata["s2"]["citation_count"] == 8
+    assert enriched.items[0].enrichment_status == EnrichmentStatus.COMPLETE
+    assert full.items[0].paper.authors == ["Author One et al."]
+    assert "observed_at" not in full.items[0].paper.metadata["s2"]
+    assert "model" not in full.items[0].paper.metadata["s2"]["tldr"]
+    cached = cache.values[identity]
+    assert cached.paper.authors == ["Author One", "Author Two"]
+    assert cached.paper.metadata["s2"]["observed_at"] == "2026-10-28T00:00:00Z"
+    assert cached.paper.metadata["s2"]["tldr"]["model"] == "tldr@v2"
+    assert len(provider.calls) == 1
+    assert len(cache.puts) == 1
+
+
+@pytest.mark.asyncio
+async def test_lookup_cache_is_shared_across_credentials_without_storing_them():
+    identity = parse_identifier("openalex:W123")
+    paper = make_paper(
+        PaperSource.OPENALEX,
+        arxiv_id=None,
+        title="First credential result",
+        metadata={"openalex": {"id": "https://openalex.org/W123"}},
+    )
+    provider = FakeProvider({identity: PaperLookupMatch([paper])})
+    cache = FakeCache()
+    lookup = service(
+        {
+            PaperSource.OPENALEX: binding(
+                provider,
+                cache=cache,
+                identifier_kinds=[IdentifierKind.OPENALEX],
+            )
+        }
+    )
+    query = PaperLookup([f"openalex:{identity.value}"], purpose=LookupPurpose.FULL)
+
+    first = await lookup.lookup(query, credentials={PaperSource.OPENALEX: "key-a"})
+    second = await lookup.lookup(query, credentials={PaperSource.OPENALEX: "key-b"})
+
+    assert first.items[0].paper.title == second.items[0].paper.title
+    assert provider.calls == [([identity], "key-a")]
+    assert all(
+        "key-a" not in repr(record) and "key-b" not in repr(record)
+        for record, _ttl_seconds in cache.puts
+    )
+
+
+@pytest.mark.asyncio
+async def test_later_ambiguous_match_does_not_return_a_previously_found_paper():
+    identity = parse_identifier("2401.00001")
+    base = make_paper()
+    local = FakeProvider({identity: PaperLookupMatch([base])})
+    ambiguous = FakeProvider(
+        {identity: PaperLookupMatch([base, make_paper(title="Other")])}
+    )
+    lookup = service(
+        {
+            "arxiv": binding(local, has_signals=lambda metadata: False),
+            "s2": binding(ambiguous),
+        }
+    )
+
+    result = await lookup.lookup(PaperLookup([identity.value], LookupPurpose.FULL))
+
+    item = result.items[0]
+    assert item.status == LookupStatus.AMBIGUOUS
+    assert item.paper is None
+    assert item.metadata is None
+    assert item.enrichment_status is None

@@ -5,10 +5,9 @@ import pytest
 from offline.arxiv import open_database
 from offline.arxiv_oai import ArxivOaiHarvest, ArxivOaiRecord
 from offline.arxiv_sync import sync_arxiv
+from offline.embeddings import publication_documents
 from offline.s2_api import S2SyncPaper
-from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
-from scholar.domain.repositories.paper_enrichment_cache import PaperEnrichmentCache
 
 RAW_NS = "http://arxiv.org/OAI/arXivRaw/"
 
@@ -23,25 +22,23 @@ class FakeHarvester:
         return self.harvests.pop(0)
 
 
-class FakeEnricher:
+class FakeS2Client:
     def __init__(self, *outcomes, events=None):
         self.outcomes = list(outcomes)
         self.calls = []
         self.events = events
 
-    async def enrich(self, identifiers, *, include_details=False, api_key=None):
+    async def lookup(self, identifiers):
         if self.events is not None:
-            self.events.append("enrich")
-        self.calls.append((identifiers, include_details))
+            self.events.append("lookup")
+        self.calls.append(identifiers)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
-        return [
-            None if item is None else S2SyncPaper(item, [0.1] * 768) for item in outcome
-        ]
+        return outcome
 
 
-class FakeCache(PaperEnrichmentCache):
+class FakeCache:
     def __init__(self, *, fail_count=0, events=None):
         self.invalidations = []
         self.fail_count = fail_count
@@ -54,6 +51,21 @@ class FakeCache(PaperEnrichmentCache):
         if self.fail_count:
             self.fail_count -= 1
             raise RuntimeError("simulated cache invalidation failure")
+
+
+class FakeArxivCache:
+    def __init__(self, *, fail_count=0, events=None):
+        self.invalidations = []
+        self.fail_count = fail_count
+        self.events = events
+
+    async def invalidate(self, identifiers):
+        if self.events is not None:
+            self.events.append("arxiv_invalidate")
+        self.invalidations.append(list(identifiers))
+        if self.fail_count:
+            self.fail_count -= 1
+            raise RuntimeError("simulated arXiv cache invalidation failure")
 
 
 @pytest.fixture
@@ -111,12 +123,12 @@ def harvest(response_date, *records):
     return ArxivOaiHarvest(response_date, tuple(records))
 
 
-def enrichment(arxiv_id, doi, corpus_id, *, citation_count=5):
+def s2_lookup(arxiv_id, doi, corpus_id, *, citation_count=5):
     identifiers = [PaperIdentifier(IdentifierKind.ARXIV, arxiv_id)]
     if doi is not None:
         identifiers.append(PaperIdentifier(IdentifierKind.DOI, doi))
     identifiers.append(PaperIdentifier(IdentifierKind.CORPUS_ID, corpus_id))
-    return PaperEnrichment(
+    return S2SyncPaper(
         identifiers=identifiers,
         metadata={
             "s2": {
@@ -131,6 +143,7 @@ def enrichment(arxiv_id, doi, corpus_id, *, citation_count=5):
                 "observed_at": "2026-10-22T00:00:00+00:00",
             }
         },
+        vector=[0.1] * 768,
     )
 
 
@@ -227,11 +240,16 @@ async def test_oai_update_requests_missing_tldr_even_when_offline_timestamp_is_p
             active_record(arxiv_id, "2026-10-21", doi="10.1234/keep"),
         )
     )
-    enricher = FakeEnricher([enrichment(arxiv_id, "10.1234/keep", "101")])
+    enricher = FakeS2Client([s2_lookup(arxiv_id, "10.1234/keep", "101")])
     publish, _ = publisher(db)
 
     result = await sync_arxiv(
-        db, harvester, enricher, publish=publish, cache=FakeCache()
+        db,
+        harvester,
+        enricher,
+        publish=publish,
+        cache=FakeCache(),
+        arxiv_cache=FakeArxivCache(),
     )
 
     assert result["s2_requested"] == 1
@@ -265,25 +283,37 @@ async def test_two_oai_updates_preserve_s2_and_publish_tombstone_and_new_record(
             active_record(new_id, "2026-10-22", doi="10.1234/new"),
         ),
     )
-    enricher = FakeEnricher([None], [None, None])
+    enricher = FakeS2Client([None], [None, None])
     cache = FakeCache()
+    arxiv_cache = FakeArxivCache()
     publish, publish_calls = publisher(db)
 
-    first = await sync_arxiv(db, harvester, enricher, publish=publish, cache=cache)
-    second = await sync_arxiv(db, harvester, enricher, publish=publish, cache=cache)
+    first = await sync_arxiv(
+        db,
+        harvester,
+        enricher,
+        publish=publish,
+        cache=cache,
+        arxiv_cache=arxiv_cache,
+    )
+    second = await sync_arxiv(
+        db,
+        harvester,
+        enricher,
+        publish=publish,
+        cache=cache,
+        arxiv_cache=arxiv_cache,
+    )
 
     assert harvester.from_dates == ["2026-10-18", "2026-10-22"]
     assert first["response_date"] == "2026-10-22T23:50:00Z"
     assert second["response_date"] == "2026-10-23T00:02:00Z"
     assert enricher.calls == [
-        ([PaperIdentifier(IdentifierKind.ARXIV, keep_id)], False),
-        (
-            [
-                PaperIdentifier(IdentifierKind.ARXIV, keep_id),
-                PaperIdentifier(IdentifierKind.ARXIV, new_id),
-            ],
-            False,
-        ),
+        [PaperIdentifier(IdentifierKind.ARXIV, keep_id)],
+        [
+            PaperIdentifier(IdentifierKind.ARXIV, keep_id),
+            PaperIdentifier(IdentifierKind.ARXIV, new_id),
+        ],
     ]
     updated = document_for(db, keep_id)
     assert updated["title"] == "Changed again"
@@ -307,6 +337,13 @@ async def test_two_oai_updates_preserve_s2_and_publish_tombstone_and_new_record(
     invalidated = {identifier for call in cache.invalidations for identifier in call}
     assert PaperIdentifier(IdentifierKind.DOI, "10.1234/keep") in invalidated
     assert PaperIdentifier(IdentifierKind.CORPUS_ID, "102") in invalidated
+    assert {
+        PaperIdentifier(IdentifierKind.ARXIV, deleted_id),
+        PaperIdentifier(IdentifierKind.DOI, "10.1234/delete"),
+        PaperIdentifier(IdentifierKind.CORPUS_ID, "102"),
+        PaperIdentifier(IdentifierKind.ARXIV, new_id),
+        PaperIdentifier(IdentifierKind.DOI, "10.1234/new"),
+    } <= set(arxiv_cache.invalidations[1])
 
 
 @pytest.mark.asyncio
@@ -324,16 +361,21 @@ async def test_doi_identity_change_removes_old_s2_and_revalidates_exact_arxiv_id
             active_record(arxiv_id, "2026-10-23", doi="10.1234/new"),
         )
     )
-    enricher = FakeEnricher([enrichment(arxiv_id, "10.1234/new", "202")])
+    enricher = FakeS2Client([s2_lookup(arxiv_id, "10.1234/new", "202")])
     cache = FakeCache()
     publish, _ = publisher(db)
 
-    result = await sync_arxiv(db, harvester, enricher, publish=publish, cache=cache)
+    result = await sync_arxiv(
+        db,
+        harvester,
+        enricher,
+        publish=publish,
+        cache=cache,
+        arxiv_cache=FakeArxivCache(),
+    )
 
     assert result["s2_enriched"] == 1
-    assert enricher.calls == [
-        ([PaperIdentifier(IdentifierKind.ARXIV, arxiv_id)], False)
-    ]
+    assert enricher.calls == [[PaperIdentifier(IdentifierKind.ARXIV, arxiv_id)]]
     document = document_for(db, arxiv_id)
     assert document["doi"] == "10.1234/new"
     assert document["metadata"]["s2"]["corpus_id"] == "202"
@@ -359,16 +401,23 @@ async def test_strong_s2_identity_conflicts_are_diagnostic_and_not_projected(db)
         active_record(ids[3], "2026-10-23", doi="10.1234/corpus"),
     ]
     results = [
-        enrichment(ids[0], "10.1234/duplicate", "302"),
-        enrichment(ids[1], "10.1234/wrong", "303"),
-        enrichment("2403.99999", "10.1234/arxiv", "304"),
-        enrichment(ids[3], "10.1234/corpus", "301"),
+        s2_lookup(ids[0], "10.1234/duplicate", "302"),
+        s2_lookup(ids[1], "10.1234/wrong", "303"),
+        s2_lookup("2403.99999", "10.1234/arxiv", "304"),
+        s2_lookup(ids[3], "10.1234/corpus", "301"),
     ]
     harvester = FakeHarvester(harvest("2026-10-24T00:02:00Z", *records))
-    enricher = FakeEnricher(results)
+    enricher = FakeS2Client(results)
     publish, _ = publisher(db)
 
-    await sync_arxiv(db, harvester, enricher, publish=publish, cache=FakeCache())
+    await sync_arxiv(
+        db,
+        harvester,
+        enricher,
+        publish=publish,
+        cache=FakeCache(),
+        arxiv_cache=FakeArxivCache(),
+    )
 
     for arxiv_id in ids:
         document = document_for(db, arxiv_id)
@@ -391,28 +440,42 @@ async def test_strong_s2_identity_conflicts_are_diagnostic_and_not_projected(db)
 @pytest.mark.asyncio
 async def test_s2_failure_replays_from_unadvanced_cursor(db):
     arxiv_id = "2404.00001"
-    result = enrichment(arxiv_id, "10.1234/replay", "401")
+    result = s2_lookup(arxiv_id, "10.1234/replay", "401")
     same_harvest = harvest(
         "2026-10-25T00:02:00Z",
         active_record(arxiv_id, "2026-10-24", doi="10.1234/replay"),
     )
     harvester = FakeHarvester(same_harvest, same_harvest)
     events = []
-    enricher = FakeEnricher(
+    enricher = FakeS2Client(
         RuntimeError("simulated S2 failure"), [result], events=events
     )
     publish, publish_calls = publisher(db)
     cache = FakeCache(events=events)
 
     with pytest.raises(RuntimeError, match="simulated S2 failure"):
-        await sync_arxiv(db, harvester, enricher, publish=publish, cache=cache)
-    assert events == ["invalidate", "enrich"]
+        await sync_arxiv(
+            db,
+            harvester,
+            enricher,
+            publish=publish,
+            cache=cache,
+            arxiv_cache=FakeArxivCache(),
+        )
+    assert events == ["invalidate", "lookup"]
     assert cursor_for(db) is None
     assert document_for(db, arxiv_id) is not None
     assert db.execute("SELECT count(*) FROM pending_s2").fetchone()[0] == 1
     assert publish_calls == []
 
-    await sync_arxiv(db, harvester, enricher, publish=publish, cache=cache)
+    await sync_arxiv(
+        db,
+        harvester,
+        enricher,
+        publish=publish,
+        cache=cache,
+        arxiv_cache=FakeArxivCache(),
+    )
 
     assert harvester.from_dates == ["2026-10-18", "2026-10-18"]
     assert document_for(db, arxiv_id)["metadata"]["s2"]["corpus_id"] == "401"
@@ -421,7 +484,7 @@ async def test_s2_failure_replays_from_unadvanced_cursor(db):
 
 
 @pytest.mark.asyncio
-async def test_cache_invalidation_failure_replays_before_enrichment(db):
+async def test_s2_cache_invalidation_failure_replays_before_lookup(db):
     arxiv_id = "2404.00002"
     same_harvest = harvest(
         "2026-10-25T00:02:00Z",
@@ -429,19 +492,33 @@ async def test_cache_invalidation_failure_replays_before_enrichment(db):
     )
     harvester = FakeHarvester(same_harvest, same_harvest)
     events = []
-    enricher = FakeEnricher([None], events=events)
+    enricher = FakeS2Client([None], events=events)
     cache = FakeCache(fail_count=1, events=events)
     publish, _ = publisher(db)
 
     with pytest.raises(RuntimeError, match="simulated cache invalidation failure"):
-        await sync_arxiv(db, harvester, enricher, publish=publish, cache=cache)
+        await sync_arxiv(
+            db,
+            harvester,
+            enricher,
+            publish=publish,
+            cache=cache,
+            arxiv_cache=FakeArxivCache(),
+        )
     assert events == ["invalidate"]
     assert cursor_for(db) is None
     assert enricher.calls == []
 
-    await sync_arxiv(db, harvester, enricher, publish=publish, cache=cache)
+    await sync_arxiv(
+        db,
+        harvester,
+        enricher,
+        publish=publish,
+        cache=cache,
+        arxiv_cache=FakeArxivCache(),
+    )
 
-    assert events == ["invalidate", "invalidate", "enrich"]
+    assert events == ["invalidate", "invalidate", "lookup"]
     assert harvester.from_dates == ["2026-10-18", "2026-10-18"]
     assert cursor_for(db) == ("2026-10-25T00:02:00Z",)
     assert PaperIdentifier(IdentifierKind.ARXIV, arxiv_id) in cache.invalidations[1]
@@ -455,21 +532,168 @@ async def test_publish_failure_does_not_advance_cursor_and_replays_base_record(d
         active_record(arxiv_id, "2026-10-25", doi="10.1234/publish"),
     )
     harvester = FakeHarvester(same_harvest, same_harvest)
-    enricher = FakeEnricher([None], [None])
+    enricher = FakeS2Client([None], [None])
     publish, publish_calls = publisher(db, fail_count=1)
     cache = FakeCache()
 
     with pytest.raises(RuntimeError, match="simulated publish failure"):
-        await sync_arxiv(db, harvester, enricher, publish=publish, cache=cache)
+        await sync_arxiv(
+            db,
+            harvester,
+            enricher,
+            publish=publish,
+            cache=cache,
+            arxiv_cache=FakeArxivCache(),
+        )
     assert cursor_for(db) is None
     assert db.execute("SELECT count(*) FROM pending_publish").fetchone()[0] == 1
 
-    await sync_arxiv(db, harvester, enricher, publish=publish, cache=cache)
+    await sync_arxiv(
+        db,
+        harvester,
+        enricher,
+        publish=publish,
+        cache=cache,
+        arxiv_cache=FakeArxivCache(),
+    )
 
     assert harvester.from_dates == ["2026-10-18", "2026-10-18"]
     assert cursor_for(db) == ("2026-10-26T00:02:00Z",)
     assert len(publish_calls) == 2
     assert publish_calls[0]["pending_publish"] == [(arxiv_id,)]
+
+
+@pytest.mark.asyncio
+async def test_arxiv_cache_failure_after_publish_replays_aliases_before_checkpoint(db):
+    arxiv_id = "2405.00002"
+    seed_paper(db, arxiv_id, "10.1234/old-cache", s2=full_s2("501"))
+    same_harvest = harvest(
+        "2026-10-26T00:02:00Z",
+        active_record(
+            arxiv_id, "2026-10-25", title="Updated title", doi="10.1234/new-cache"
+        ),
+    )
+    harvester = FakeHarvester(same_harvest, same_harvest)
+    events = []
+    client = FakeS2Client([None], [None], events=events)
+    s2_cache = FakeCache(events=events)
+    arxiv_cache = FakeArxivCache(fail_count=1, events=events)
+    publish, publish_calls = publisher(db)
+
+    async def publish_with_event():
+        events.append("publish")
+        await publish()
+
+    with pytest.raises(
+        RuntimeError, match="simulated arXiv cache invalidation failure"
+    ):
+        await sync_arxiv(
+            db,
+            harvester,
+            client,
+            publish=publish_with_event,
+            cache=s2_cache,
+            arxiv_cache=arxiv_cache,
+        )
+
+    assert events == ["invalidate", "lookup", "publish", "arxiv_invalidate"]
+    assert cursor_for(db) is None
+    assert db.execute("SELECT count(*) FROM pending_publish").fetchone()[0] == 0
+    assert len(publish_calls) == 1
+
+    await sync_arxiv(
+        db,
+        harvester,
+        client,
+        publish=publish_with_event,
+        cache=s2_cache,
+        arxiv_cache=arxiv_cache,
+    )
+
+    expected_aliases = {
+        PaperIdentifier(IdentifierKind.ARXIV, arxiv_id),
+        PaperIdentifier(IdentifierKind.DOI, "10.1234/old-cache"),
+        PaperIdentifier(IdentifierKind.DOI, "10.1234/new-cache"),
+        PaperIdentifier(IdentifierKind.CORPUS_ID, "501"),
+    }
+    assert expected_aliases <= set(arxiv_cache.invalidations[0])
+    assert arxiv_cache.invalidations[0] == arxiv_cache.invalidations[1]
+    assert events == [
+        "invalidate",
+        "lookup",
+        "publish",
+        "arxiv_invalidate",
+        "invalidate",
+        "lookup",
+        "arxiv_invalidate",
+    ]
+    assert len(publish_calls) == 1
+    assert harvester.from_dates == ["2026-10-18", "2026-10-18"]
+    assert cursor_for(db) == ("2026-10-26T00:02:00Z",)
+
+
+@pytest.mark.asyncio
+async def test_s2_retry_without_oai_records_invalidates_arxiv_cache_after_publish(db):
+    arxiv_id = "2501.12949"
+    harvester = FakeHarvester(
+        harvest("2026-10-28T00:00:00Z", active_record(arxiv_id, "2026-10-28")),
+        harvest("2026-10-29T00:00:00Z"),
+    )
+    events = []
+    client = FakeS2Client([None], [s2_lookup(arxiv_id, None, "701")], events=events)
+    s2_cache = FakeCache(events=events)
+    arxiv_cache = FakeArxivCache(events=events)
+    publish, publish_calls = publisher(db)
+
+    async def publish_with_event():
+        events.append("publish")
+        await publish()
+
+    first = await sync_arxiv(
+        db,
+        harvester,
+        client,
+        publish=publish_with_event,
+        cache=s2_cache,
+        arxiv_cache=arxiv_cache,
+    )
+    second = await sync_arxiv(
+        db,
+        harvester,
+        client,
+        publish=publish_with_event,
+        cache=s2_cache,
+        arxiv_cache=arxiv_cache,
+    )
+
+    assert first["pending_s2"] == 1
+    assert first["response_date"] == "2026-10-28T00:00:00Z"
+    assert second["harvested"] == 0
+    assert second["s2_enriched"] == 1
+    assert second["pending_s2"] == 0
+    assert second["response_date"] == "2026-10-29T00:00:00Z"
+    assert events == [
+        "invalidate",
+        "lookup",
+        "publish",
+        "arxiv_invalidate",
+        "invalidate",
+        "lookup",
+        "invalidate",
+        "publish",
+        "arxiv_invalidate",
+    ]
+    assert (
+        PaperIdentifier(IdentifierKind.CORPUS_ID, "701") in arxiv_cache.invalidations[1]
+    )
+    assert cursor_for(db) == ("2026-10-29T00:00:00Z",)
+    assert len(publish_calls) == 2
+    row = db.execute(
+        "SELECT arxiv_id,document FROM arxiv WHERE arxiv_id=?", [arxiv_id]
+    ).fetchall()
+    document = publication_documents(db, row, vector_enabled=True)[0]
+    assert document["metadata"]["s2"]["corpus_id"] == "701"
+    assert document["embedding"] == pytest.approx([0.1] * 768)
 
 
 @pytest.mark.asyncio
@@ -480,17 +704,36 @@ async def test_failed_metadata_refresh_survives_oai_replay_with_valid_vector(db)
         harvest("2026-10-27T00:00:00Z", active_record(arxiv_id, "2026-10-27")),
         harvest("2026-10-27T00:00:00Z", active_record(arxiv_id, "2026-10-27")),
     )
-    refreshed = enrichment(arxiv_id, None, "201", citation_count=7)
-    enricher = FakeEnricher(
-        [enrichment(arxiv_id, None, "201")], RuntimeError("429"), [refreshed]
+    refreshed = s2_lookup(arxiv_id, None, "201", citation_count=7)
+    enricher = FakeS2Client(
+        [s2_lookup(arxiv_id, None, "201")], RuntimeError("429"), [refreshed]
     )
     publish, _ = publisher(db)
-    await sync_arxiv(db, harvester, enricher, publish=publish, cache=FakeCache())
+    await sync_arxiv(
+        db,
+        harvester,
+        enricher,
+        publish=publish,
+        cache=FakeCache(),
+        arxiv_cache=FakeArxivCache(),
+    )
     with pytest.raises(RuntimeError):
-        await sync_arxiv(db, harvester, enricher, publish=publish, cache=FakeCache())
+        await sync_arxiv(
+            db,
+            harvester,
+            enricher,
+            publish=publish,
+            cache=FakeCache(),
+            arxiv_cache=FakeArxivCache(),
+        )
     assert db.execute("SELECT count(*) FROM pending_s2").fetchone()[0] == 1
     result = await sync_arxiv(
-        db, harvester, enricher, publish=publish, cache=FakeCache()
+        db,
+        harvester,
+        enricher,
+        publish=publish,
+        cache=FakeCache(),
+        arxiv_cache=FakeArxivCache(),
     )
     assert len(enricher.calls) == 3
     assert result["pending_s2"] == 0

@@ -6,8 +6,8 @@ from datetime import date
 import httpx
 import pytest
 from openai import APIConnectionError
-from scholar.application.enrichment import EnrichmentRunner
 from scholar.application.field_policies import FieldPolicy
+from scholar.application.lookup_runner import LookupRunner
 from scholar.application.search import PaperSearch, PaperSearchService, SearchBinding
 from scholar.application.source_execution import SourceExecutionStatus
 from scholar.domain.models.fields import AcademicField
@@ -120,7 +120,7 @@ async def test_encoder_failure_is_visible_not_cached_and_recovery_restores_hybri
         {"arxiv": binding},
         {AcademicField.GENERAL: FieldPolicy(["arxiv"])},
         cache,
-        EnrichmentRunner({}),
+        LookupRunner({}),
     )
     query = PaperSearch("reasoning")
     degraded = await service.search(query)

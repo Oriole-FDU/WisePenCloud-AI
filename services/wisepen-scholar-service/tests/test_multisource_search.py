@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from openai import APIConnectionError
-from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.field_policies import FIELD_POLICIES, FieldPolicy
+from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.search import (
     PaperSearch,
     PaperSearchService,
@@ -17,9 +17,9 @@ from scholar.application.search import (
 from scholar.application.source_execution import (
     SourceExecutionStatus,
 )
-from scholar.domain.interfaces.paper_enricher import PaperEnrichment
+from scholar.domain.errors import ProviderError
+from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
-from scholar.domain.interfaces.provider_error import ProviderError
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind
 from scholar.domain.models.paper import Paper, PaperSource
@@ -85,7 +85,7 @@ async def test_bulk_candidates_reused_across_limits_and_byok_overrides_platform(
         {"openalex": SearchBinding(provider, candidate_limit=200)},
         {AcademicField.GENERAL: FieldPolicy(searchers=["openalex"])},
         cache,
-        EnrichmentRunner({}),
+        LookupRunner({}),
         platform_credentials={"openalex": "platform-key"},
     )
     small = await search.search(PaperSearch("same", limit=2))
@@ -107,7 +107,7 @@ async def test_platform_quota_failure_uses_normal_search_fallback():
         {"openalex": SearchBinding(quota), "arxiv": SearchBinding(fallback)},
         {AcademicField.GENERAL: FieldPolicy(searchers=["openalex", "arxiv"])},
         MemoryCache(),
-        EnrichmentRunner({}),
+        LookupRunner({}),
         platform_credentials={"openalex": "platform-key"},
     )
     result = await search.search(PaperSearch("reasoning"))
@@ -154,7 +154,7 @@ def service(*, arxiv=None, openalex=None, huggingface=None, cache=None):
             field: replace(policy, field_enrichers=[])
             for field, policy in FIELD_POLICIES.items()
         },
-        enrichment=EnrichmentRunner({}),
+        lookup=LookupRunner({}),
         query_cache=cache or MemoryCache(),
     )
 
@@ -188,7 +188,12 @@ async def test_default_routing_uses_mapped_openalex_or_preserves_local_arxiv_ord
     ]
     arxiv = FakePaperRepository(arxiv_papers)
     cache = MemoryCache()
-    search = service(arxiv=arxiv, openalex=oa, cache=cache)
+    search = service(
+        arxiv=arxiv,
+        openalex=oa,
+        huggingface=FakeSearcher(ProviderError("HF unavailable")),
+        cache=cache,
+    )
 
     openalex_result = await search.search(
         PaperSearch("law", field=AcademicField.LAW),
@@ -209,12 +214,19 @@ async def test_default_routing_uses_mapped_openalex_or_preserves_local_arxiv_ord
     assert arxiv.calls[1]["field"] == AcademicField.GENERAL
     assert [item.title for item in cs_result.papers] == ["First", "Second"]
     assert [item.title for item in fallback_result.papers] == ["First", "Second"]
-    assert cs_result.execution[0].source == PaperSource.ARXIV
+    assert [item.source for item in cs_result.execution] == [
+        PaperSource.HUGGINGFACE,
+        PaperSource.ARXIV,
+    ]
+    assert [item.status for item in cs_result.execution] == [
+        SourceExecutionStatus.FAILED,
+        SourceExecutionStatus.COMPLETED,
+    ]
     assert openalex_result.execution[0].source == PaperSource.OPENALEX
 
 
 @pytest.mark.asyncio
-async def test_cs_falls_back_to_hf_and_multisource_never_searches_openalex():
+async def test_cs_prefers_hf_and_multisource_uses_only_mapped_sources():
     arxiv = FakeSearcher(ProviderError("ES unavailable"))
     hf = FakeSearcher([paper(PaperSource.HUGGINGFACE, arxiv_id="2501.12948")])
     oa = FakeSearcher()
@@ -222,8 +234,9 @@ async def test_cs_falls_back_to_hf_and_multisource_never_searches_openalex():
     result = await search.search(
         PaperSearch("DeepSeek-R1", field=AcademicField.COMPUTER_SCIENCE)
     )
-    assert [e.source for e in result.execution] == ["arxiv", "huggingface"]
+    assert [e.source for e in result.execution] == ["huggingface"]
     assert result.papers[0].arxiv_id == "2501.12948"
+    assert arxiv.calls == []
     arxiv.search_result = []
     result = await search.search(
         PaperSearch(
@@ -476,10 +489,24 @@ class RecordingEnricher:
         self.source = source
         self.calls = []
 
-    async def enrich(self, identifiers, *, include_details=False, api_key=None):
-        self.calls.append(identifiers)
+    async def lookup(self, identifiers, *, api_key=None):
+        identifiers = list(identifiers)
+        self.calls.append((identifiers, api_key))
         return [
-            PaperEnrichment([identifier], {self.source: {"available": True}})
+            PaperLookupMatch(
+                [
+                    paper(
+                        self.source,
+                        arxiv_id=identifier.value
+                        if identifier.kind == IdentifierKind.ARXIV
+                        else None,
+                        doi=identifier.value
+                        if identifier.kind == IdentifierKind.DOI
+                        else None,
+                        metadata={self.source: {"available": True}},
+                    )
+                ]
+            )
             for identifier in identifiers
         ]
 
@@ -512,7 +539,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
     )
     clinical = RecordingEnricher("clinical_trials")
     enrichment = {
-        "clinical_trials": EnrichmentBinding(clinical, None, [IdentifierKind.DOI]),
+        "clinical_trials": LookupBinding(clinical, None, [IdentifierKind.DOI]),
     }
     bindings = {
         "pubmed": SearchBinding(pubmed),
@@ -527,7 +554,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
         bindings,
         {AcademicField.MEDICINE: policy},
         MemoryCache(),
-        EnrichmentRunner(enrichment),
+        LookupRunner(enrichment),
     )
     single = await search.search(PaperSearch("cancer", field=AcademicField.MEDICINE))
     assert single.papers[0].source == "pubmed"
@@ -560,7 +587,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
         bindings,
         {AcademicField.MEDICINE: replace(policy, searchers=["web_of_science"])},
         MemoryCache(),
-        EnrichmentRunner(enrichment),
+        LookupRunner(enrichment),
     )
     result = await changed.search(PaperSearch("cancer", field=AcademicField.MEDICINE))
     assert result.papers[0].source == "web_of_science"
@@ -571,9 +598,7 @@ async def test_field_configuration_controls_enrichment_after_final_limit():
     candidates = [paper("local", arxiv_id=f"2401.0000{i}") for i in (1, 2, 3)]
     searcher = FakeSearcher(candidates)
     specialized = RecordingEnricher("specialized")
-    enrich = {
-        "specialized": EnrichmentBinding(specialized, None, [IdentifierKind.ARXIV])
-    }
+    enrich = {"specialized": LookupBinding(specialized, None, [IdentifierKind.ARXIV])}
     search = PaperSearchService(
         {"local": SearchBinding(searcher)},
         {
@@ -583,14 +608,14 @@ async def test_field_configuration_controls_enrichment_after_final_limit():
             ),
         },
         MemoryCache(),
-        EnrichmentRunner(enrich),
+        LookupRunner(enrich),
     )
     general = await search.search(PaperSearch("same CS papers", limit=2))
     assert not specialized.calls
     cs = await search.search(
         PaperSearch("same CS papers", field=AcademicField.COMPUTER_SCIENCE, limit=2)
     )
-    assert len(specialized.calls[0]) == 2
+    assert len(specialized.calls[0][0]) == 2
     assert [p.arxiv_id for p in general.papers] == [p.arxiv_id for p in cs.papers]
     assert all("specialized" not in p.metadata for p in general.papers)
     assert all(p.metadata["specialized"]["available"] for p in cs.papers)
@@ -604,7 +629,7 @@ async def test_default_falls_back_only_on_provider_failure_and_stops_on_empty_re
         {"primary": SearchBinding(primary), "secondary": SearchBinding(secondary)},
         {AcademicField.GENERAL: FieldPolicy(["primary", "secondary"])},
         MemoryCache(),
-        EnrichmentRunner({}),
+        LookupRunner({}),
     )
     result = await search.search(PaperSearch("fallback"))
     assert result.papers[0].source == "secondary"

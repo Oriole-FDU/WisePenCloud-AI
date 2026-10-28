@@ -12,18 +12,17 @@ from xml.etree import ElementTree as ET
 import duckdb
 import orjson
 from scholar.core.embedding_runtime import MODEL_SIGNATURE
-from scholar.domain.interfaces.paper_enricher import PaperEnrichment
 from scholar.domain.models.identifiers import (
     IdentifierKind,
     PaperIdentifier,
     normalize_arxiv,
     normalize_doi,
 )
-from scholar.domain.repositories.paper_enrichment_cache import PaperEnrichmentCache
+from scholar.domain.repositories.paper_lookup_cache import PaperLookupCache
 
 from offline.arxiv_oai import INITIAL_FROM, ArxivOaiHarvest, ArxivOaiRecord
 from offline.embeddings import INPUT_HASH_SQL, reconcile_embeddings
-from offline.s2_api import S2SyncClient
+from offline.s2_api import S2SyncClient, S2SyncPaper
 
 _RAW_NS = "http://arxiv.org/OAI/arXivRaw/"
 
@@ -63,6 +62,10 @@ def _create_sync_schema(db: duckdb.DuckDBPyConnection) -> None:
         CREATE TABLE IF NOT EXISTS pending_s2 (
             arxiv_id VARCHAR PRIMARY KEY,
             reason VARCHAR NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS pending_arxiv_cache_invalidation (
+            arxiv_id VARCHAR PRIMARY KEY,
+            identifiers JSON NOT NULL
         );
         CREATE TABLE IF NOT EXISTS arxiv_sync_diagnostics (
             response_date VARCHAR NOT NULL,
@@ -198,6 +201,34 @@ def _pending_invalidation_aliases(
         ).fetchall()
     )
     return list(dict.fromkeys(aliases))
+
+
+def _record_arxiv_cache_invalidation(
+    db: duckdb.DuckDBPyConnection,
+    arxiv_id: str,
+    identifiers: list[PaperIdentifier],
+) -> None:
+    """合并同篇论文的旧、新别名，保留发布后失效失败时的重放依据。"""
+    row = db.execute(
+        "SELECT identifiers FROM pending_arxiv_cache_invalidation WHERE arxiv_id=?",
+        [arxiv_id],
+    ).fetchone()
+    if row is not None:
+        identifiers = [
+            PaperIdentifier(IdentifierKind(kind), value)
+            for kind, value in orjson.loads(row[0])
+        ] + identifiers
+    encoded = orjson.dumps(
+        [
+            [identifier.kind.value, identifier.value]
+            for identifier in dict.fromkeys(identifiers)
+        ]
+    ).decode()
+    db.execute(
+        """INSERT OR REPLACE INTO pending_arxiv_cache_invalidation
+        VALUES (?, ?::JSON)""",
+        [arxiv_id, encoded],
+    )
 
 
 def _write_diagnostic(
@@ -350,28 +381,28 @@ def _apply_projection(
     return document != old_document, list(dict.fromkeys(aliases))
 
 
-def _enrichment_conflicts(
+def _s2_lookup_conflicts(
     db: duckdb.DuckDBPyConnection,
     arxiv_id: str,
     doi: str | None,
-    enrichment: PaperEnrichment,
+    response: S2SyncPaper,
     duplicate_corpus_ids: set[str],
 ) -> list[tuple[_DiagnosticReason, dict]]:
-    s2 = enrichment.metadata["s2"]
+    s2 = response.metadata["s2"]
     response_arxiv_ids = {
         identifier.value
-        for identifier in enrichment.identifiers
+        for identifier in response.identifiers
         if identifier.kind == IdentifierKind.ARXIV
     }
     response_dois = {
         identifier.value
-        for identifier in enrichment.identifiers
+        for identifier in response.identifiers
         if identifier.kind == IdentifierKind.DOI
     }
     corpus_id = s2.get("corpus_id")
     response_corpus_ids = {
         identifier.value
-        for identifier in enrichment.identifiers
+        for identifier in response.identifiers
         if identifier.kind == IdentifierKind.CORPUS_ID
     }
     conflicts = []
@@ -447,7 +478,7 @@ def _enrichment_conflicts(
 
 async def _enrich_pending(
     db: duckdb.DuckDBPyConnection,
-    enricher: S2SyncClient,
+    client: S2SyncClient,
     *,
     batch_size: int,
     response_date: str,
@@ -467,11 +498,10 @@ async def _enrich_pending(
     for offset in range(0, len(pending), batch_size):
         batch = pending[offset : offset + batch_size]
         identifiers = [PaperIdentifier(IdentifierKind.ARXIV, item[0]) for item in batch]
-        synced = await enricher.enrich(identifiers)
-        responses = [None if item is None else item.enrichment for item in synced]
+        synced = await client.lookup(identifiers)
         requested += len(identifiers)
         corpus_owners: dict[str, set[str]] = {}
-        for (arxiv_id, _, _), response in zip(batch, responses, strict=True):
+        for (arxiv_id, _, _), response in zip(batch, synced, strict=True):
             if (
                 response is not None
                 and response.metadata["s2"].get("corpus_id") is not None
@@ -483,13 +513,13 @@ async def _enrich_pending(
             corpus_id for corpus_id, owners in corpus_owners.items() if len(owners) > 1
         }
 
-        for (arxiv_id, doi, old_document), sync_result, response in zip(
-            batch, synced, responses, strict=True
+        for (arxiv_id, doi, old_document), sync_result in zip(
+            batch, synced, strict=True
         ):
-            if response is None:
+            if sync_result is None:
                 continue
-            conflicts = _enrichment_conflicts(
-                db, arxiv_id, doi, response, duplicate_corpus_ids
+            conflicts = _s2_lookup_conflicts(
+                db, arxiv_id, doi, sync_result, duplicate_corpus_ids
             )
             if conflicts:
                 db.begin()
@@ -510,7 +540,7 @@ async def _enrich_pending(
                 continue
 
             metadata = dict(old_document.get("metadata") or {})
-            metadata.update(response.metadata)
+            metadata.update(sync_result.metadata)
             document = {**old_document, "metadata": metadata}
             db.begin()
             try:
@@ -551,6 +581,14 @@ async def _enrich_pending(
                     )
                 else:
                     db.execute("DELETE FROM pending_s2 WHERE arxiv_id=?", [arxiv_id])
+                if document != old_document or sync_result.vector is not None:
+                    # S2 待办可在空 OAI 响应中单独发布，仍需留下发布后的缓存失效依据。
+                    _record_arxiv_cache_invalidation(
+                        db,
+                        arxiv_id,
+                        _identity_aliases(arxiv_id, doi, old_document)
+                        + _identity_aliases(arxiv_id, doi, document),
+                    )
                 db.commit()
             except BaseException:
                 db.rollback()
@@ -569,14 +607,15 @@ async def _enrich_pending(
 async def sync_arxiv(
     db: duckdb.DuckDBPyConnection,
     harvester,
-    enricher: S2SyncClient,
+    client: S2SyncClient,
     *,
     from_date: str | None = None,
     batch_size: int = 100,
     publish: Callable[[], Awaitable[object]],
-    cache: PaperEnrichmentCache,
+    cache: PaperLookupCache,
+    arxiv_cache: PaperLookupCache,
 ) -> dict:
-    """按 OAI 服务端游标重放；只有缓存失效与待发布工作成功后才确认响应日期。"""
+    """同步 OAI 与 S2 投影，并在两类缓存处理成功后确认响应日期。"""
     _create_sync_schema(db)
     state = db.execute(
         "SELECT last_response_date FROM arxiv_sync_state WHERE singleton=true"
@@ -611,7 +650,9 @@ async def sync_arxiv(
                 continue
 
             if record.deleted:
-                invalidations.extend(_apply_deletion(db, record, arxiv_id))
+                aliases = _apply_deletion(db, record, arxiv_id)
+                _record_arxiv_cache_invalidation(db, arxiv_id, aliases)
+                invalidations.extend(aliases)
                 deleted += 1
             else:
                 projection = _project_record(record, arxiv_id)
@@ -624,6 +665,7 @@ async def sync_arxiv(
                 )
                 if not has_identity_conflict:
                     updated += int(changed)
+                    _record_arxiv_cache_invalidation(db, arxiv_id, aliases)
                     invalidations.extend(aliases)
             db.commit()
         except BaseException:
@@ -636,7 +678,7 @@ async def sync_arxiv(
         await cache.invalidate(list(dict.fromkeys(invalidations)))
 
     requested, enriched, s2_invalidations = await _enrich_pending(
-        db, enricher, batch_size=batch_size, response_date=harvest.response_date
+        db, client, batch_size=batch_size, response_date=harvest.response_date
     )
     if s2_invalidations:
         await cache.invalidate(s2_invalidations)
@@ -652,8 +694,22 @@ async def sync_arxiv(
         ):
             raise RuntimeError("arXiv publication returned with pending records")
 
+    pending_aliases = db.execute(
+        "SELECT identifiers FROM pending_arxiv_cache_invalidation ORDER BY arxiv_id"
+    ).fetchall()
+    arxiv_cache_aliases = list(
+        dict.fromkeys(
+            PaperIdentifier(IdentifierKind(kind), value)
+            for (raw_identifiers,) in pending_aliases
+            for kind, value in orjson.loads(raw_identifiers)
+        )
+    )
+    if arxiv_cache_aliases:
+        # pending_publish 会由发布器清理；此 journal 需等缓存失效成功后再清理，保证失败可重放。
+        await arxiv_cache.invalidate(arxiv_cache_aliases)
     db.begin()
     try:
+        db.execute("DELETE FROM pending_arxiv_cache_invalidation")
         db.execute(
             """INSERT OR REPLACE INTO arxiv_sync_state(singleton, last_response_date)
             VALUES (true, ?)""",

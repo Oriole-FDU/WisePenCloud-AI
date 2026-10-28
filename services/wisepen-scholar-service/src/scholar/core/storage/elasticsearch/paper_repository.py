@@ -10,15 +10,13 @@ from elastic_transport import ApiError, ConnectionError, ConnectionTimeout
 from elasticsearch import AsyncElasticsearch
 
 from scholar.core.embedding_runtime import DIMENSIONS, MODEL_SIGNATURE
-from scholar.domain.interfaces.provider_error import (
+from scholar.domain.errors import (
     ProviderError,
     provider_error_message,
 )
+from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.domain.repositories.paper_repository import (
-    PaperLookupMatch,
-)
 
 ARXIV_MAPPING = {
     "dynamic": "strict",

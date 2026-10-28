@@ -8,9 +8,9 @@ import httpx
 import orjson
 from redis.asyncio import Redis
 from scholar.core.config.bootstrap_settings import SERVICE_ROOT
-from scholar.core.s2_transport import S2Transport
+from scholar.providers.s2 import S2Transport
 from scholar.core.storage.elasticsearch.paper_repository import create_elasticsearch
-from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
+from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
 
 from offline.arxiv import database_status, import_arxiv, open_database
 from offline.arxiv_oai import ArxivOaiHarvester
@@ -108,7 +108,8 @@ async def run(args):
             ):
                 transport = S2Transport(s2_http, redis, settings.S2_API_KEY)
                 s2_provider = S2SyncClient(transport)
-                cache = RedisPaperEnrichmentCache(redis, namespace=f"{alias}:s2")
+                s2_cache = RedisPaperLookupCache(redis, namespace=f"{alias}:s2")
+                arxiv_cache = RedisPaperLookupCache(redis, namespace=f"{alias}:arxiv")
 
                 async def publish_pending():
                     return await publish_arxiv(db, es, alias)
@@ -124,7 +125,8 @@ async def run(args):
                             from_date=args.from_date,
                             batch_size=args.batch_size,
                             publish=publish_pending,
-                            cache=cache,
+                            cache=s2_cache,
+                            arxiv_cache=arxiv_cache,
                         )
 
         finally:

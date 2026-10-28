@@ -124,7 +124,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         field: Annotated[
             SearchField,
             Field(
-                description="Field selecting domain enrichment; details is unchanged."
+                description="Field selecting domain lookup sources for every purpose."
             ),
         ] = SearchField.GENERAL,
     ) -> dict[str, Any]:

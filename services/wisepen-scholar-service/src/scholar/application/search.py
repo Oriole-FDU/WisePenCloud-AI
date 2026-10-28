@@ -11,18 +11,19 @@ from enum import StrEnum
 import orjson
 from common.utils.retrieval import Candidate, RrfFusion
 
-from scholar.application.enrichment import EnrichmentRunner
 from scholar.application.field_policies import COMMON_ENRICHERS, FieldPolicy
+from scholar.application.lookup_runner import LookupRunner
 from scholar.application.source_execution import SourceExecution, SourceExecutionStatus
+from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_searcher import PaperSearcher
-from scholar.domain.interfaces.provider_error import ProviderError
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import (
     normalize_arxiv,
     normalize_doi,
 )
 from scholar.domain.models.paper import Paper
-from scholar.domain.repositories.query_cache_repository import QueryCacheRepository
+from scholar.domain.repositories.query_cache import QueryCacheRepository
+from scholar.providers.projection import project_paper
 
 
 class SourceScope(StrEnum):
@@ -63,14 +64,14 @@ class PaperSearchService:
         searchers: dict[str, SearchBinding],
         policies: dict[AcademicField, FieldPolicy],
         query_cache: QueryCacheRepository,
-        enrichment: EnrichmentRunner,
+        lookup: LookupRunner,
         platform_credentials: dict[str, str] | None = None,
     ):
         self.platform_credentials = platform_credentials or {}
         self.searchers = searchers
         self.policies = policies
         self.query_cache = query_cache
-        self.enrichment = enrichment
+        self.lookup_runner = lookup
 
     async def search(
         self,
@@ -134,22 +135,22 @@ class PaperSearchService:
             for source, result in zip(plan, results)
             if not isinstance(result, BaseException)
         }
-        targets = [self.enrichment.target(None, paper) for paper in papers]
-        enrichment_execution = await self.enrichment.run(
+        targets = [self.lookup_runner.target(None, paper) for paper in papers]
+        enrichment_execution = await self.lookup_runner.run(
             targets,
             common_sources=[]
             if succeeded.intersection(COMMON_ENRICHERS)
             else [
                 source
                 for source in COMMON_ENRICHERS
-                if source in self.enrichment.bindings
+                if source in self.lookup_runner.bindings
             ],
             domain_sources=[
                 source for source in policy.field_enrichers if source not in succeeded
             ],
             credentials=credentials,
         )
-        enriched_papers = [target.paper for target in targets]
+        enriched_papers = [project_paper(target.paper) for target in targets]
         return SearchResult(enriched_papers, execution, conflicts, enrichment_execution)
 
     async def _search_source(

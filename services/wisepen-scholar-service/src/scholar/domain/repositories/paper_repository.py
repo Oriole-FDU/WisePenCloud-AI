@@ -2,20 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
 
+from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import PaperIdentifier
 from scholar.domain.models.paper import Paper
-
-
-@dataclass
-class PaperLookupMatch:
-    """每个精确标识的读取结果；来源失败不能等同于已确认未找到。"""
-
-    papers: list[Paper]
-    error: str | None = None
 
 
 class PaperRepository(Protocol):

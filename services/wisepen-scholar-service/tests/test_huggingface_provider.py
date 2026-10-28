@@ -4,16 +4,13 @@ from datetime import UTC, date, datetime
 import httpx
 import pytest
 import scholar.providers.huggingface as huggingface_provider
+from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_discoverer import (
     DiscoveryPeriod,
     DiscoverySort,
 )
-from scholar.domain.interfaces.paper_enricher import PaperEnrichment
-from scholar.domain.interfaces.provider_error import ProviderError
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import (
-    IdentifierKind,
-    PaperIdentifier,
     parse_identifier,
 )
 from scholar.domain.models.paper import PaperSource
@@ -48,7 +45,7 @@ def client_for(handler):
 
 
 @pytest.mark.asyncio
-async def test_hf_byok_is_request_scoped_for_search_enrichment_and_discovery():
+async def test_hf_byok_is_request_scoped_for_search_lookup_and_discovery():
     seen = []
     payload = paper_info_payload()
     payload.update(
@@ -73,7 +70,7 @@ async def test_hf_byok_is_request_scoped_for_search_enrichment_and_discovery():
             limit=5,
             api_key="user-token",
         )
-        enriched = await provider.enrich(
+        matches = await provider.lookup(
             [parse_identifier("2401.00001")], api_key="user-token"
         )
         discovered = await provider.discover(
@@ -82,12 +79,17 @@ async def test_hf_byok_is_request_scoped_for_search_enrichment_and_discovery():
     assert seen == ["Bearer user-token", "Bearer user-token", "Bearer platform-token"]
     for metadata in (
         result.papers[0].metadata["huggingface"],
-        enriched[0].metadata["huggingface"],
+        matches[0].papers[0].metadata["huggingface"],
         discovered.papers[0].metadata["huggingface"],
     ):
         assert metadata["ai_summary"] == "Quick summary"
         assert metadata["ai_keywords"] == ["reasoning"]
-        assert metadata["ai_summary_model"] == "model-name"
+        assert not {
+            "ai_summary_model",
+            "observed_at",
+            "num_total_models",
+            "num_total_datasets",
+        }.intersection(metadata)
 
 
 @pytest.mark.asyncio
@@ -104,6 +106,7 @@ async def test_search_preserves_upstream_order_and_plain_text_without_detail_req
                         "id": "2501.12948",
                         "title": "DeepSeek-R1",
                         "summary": "Plain abstract",
+                        "authors": [{"name": "First"}, {"name": "Second"}],
                         "upvotes": 0,
                     },
                     "highlightedTitle": "<em>DeepSeek</em>-R1",
@@ -128,6 +131,7 @@ async def test_search_preserves_upstream_order_and_plain_text_without_detail_req
         )
     assert [p.arxiv_id for p in result.papers] == ["2501.12948", "2501.18438"]
     assert result.papers[0].title == "DeepSeek-R1"
+    assert result.papers[0].authors == ["First et al."]
     assert result.papers[0].metadata["huggingface"]["upvotes"] == 0
     assert len(requests) == 1
     assert requests[0].url.path == "/api/papers/search"
@@ -179,72 +183,122 @@ async def test_search_filters_bounded_candidates_by_inclusive_paper_dates():
 
 
 @pytest.mark.asyncio
-async def test_enrich_uses_exact_hf_endpoint_and_preserves_selected_json_values():
+async def test_lookup_uses_exact_hf_endpoint_and_preserves_selected_json_values():
     requests = []
+    payload = paper_info_payload()
+    payload.update(
+        ai_summary_model="model-name",
+        linkedModels=[
+            {"id": "model-zero", "likes": 0},
+            {"id": "model-tie-first", "likes": 3},
+            {"id": "model-top", "likes": 8},
+            {"id": "model-tie-second", "likes": 3},
+            {"id": "model-missing"},
+            {"id": "model-none", "likes": None},
+        ],
+        numTotalModels=6,
+        linkedDatasets=[
+            {"id": "dataset-missing"},
+            {"id": "dataset-none", "likes": None},
+            {"id": "dataset-zero", "likes": 0},
+            {"id": "dataset-top", "likes": 2},
+        ],
+        numTotalDatasets=4,
+    )
 
     async def handle(request):
         requests.append(request)
-        return httpx.Response(200, json=paper_info_payload())
+        return httpx.Response(200, json=payload)
 
     async with client_for(handle) as http:
         provider = HuggingFaceProvider(http, token="hf-test-token")
-        results = await provider.enrich(
+        results = await provider.lookup(
             [
                 parse_identifier("arxiv:2401.00001"),
                 parse_identifier("doi:10.1234/not-supported-by-hf"),
             ]
         )
 
-    result = results[0]
-    assert isinstance(result, PaperEnrichment)
-    assert results[1] is None
+    result = results[0].papers[0]
+    assert results[1].papers == []
     assert len(requests) == 1
     assert requests[0].url == "https://huggingface.co/api/papers/2401.00001"
     assert dict(requests[0].url.params) == {}
     assert requests[0].headers["authorization"] == "Bearer hf-test-token"
     assert "hf-test-token" not in str(requests[0].url)
-    assert result.identifiers == [PaperIdentifier(IdentifierKind.ARXIV, "2401.00001")]
-    assert result.paper is None
+    assert result.arxiv_id == "2401.00001"
     metadata = result.metadata["huggingface"]
     assert metadata["upvotes"] == 0
     assert metadata["github_repo"] == ""
     assert metadata["github_stars"] is False
-    assert metadata["linked_models"] == [{"id": "org/model", "likes": 0}]
-    assert metadata["num_total_models"] == 1
-    assert metadata["linked_datasets"] == []
-    assert metadata["num_total_datasets"] is None
+    # likes 降序取前三；缺失、None 与 0 按零分处理，同分保持上游顺序。
+    assert metadata["linked_models"] == [
+        {"id": "model-top", "likes": 8},
+        {"id": "model-tie-first", "likes": 3},
+        {"id": "model-tie-second", "likes": 3},
+    ]
+    assert metadata["linked_datasets"] == [
+        {"id": "dataset-top", "likes": 2},
+        {"id": "dataset-missing", "likes": None},
+        {"id": "dataset-none", "likes": None},
+    ]
+    assert not {
+        "ai_summary_model",
+        "observed_at",
+        "num_total_models",
+        "num_total_datasets",
+    }.intersection(metadata)
     assert metadata["submitted_at"] == "2026-10-26T00:00:00Z"
-    datetime.fromisoformat(metadata["observed_at"])
 
 
 @pytest.mark.asyncio
-async def test_enrich_details_maps_hf_response_to_arxiv_paper():
+async def test_lookup_maps_hf_response_to_complete_arxiv_paper():
     async def handle(request):
         return httpx.Response(200, json=paper_info_payload())
 
     async with client_for(handle) as http:
         result = (
-            await HuggingFaceProvider(http).enrich(
-                [parse_identifier("arxiv:2401.00001")], include_details=True
+            await HuggingFaceProvider(http).lookup(
+                [parse_identifier("arxiv:2401.00001")]
             )
-        )[0]
+        )[0].papers[0]
 
-    assert result is not None
-    assert result.paper is not None
-    assert result.paper.source == PaperSource.HUGGINGFACE
-    assert result.paper.arxiv_id == "2401.00001"
-    assert result.paper.title == "A research paper"
-    assert result.paper.abstract == ""
-    assert result.paper.authors == ["A. Researcher"]
-    assert result.paper.publication_date == date(2020, 1, 2)
-    assert result.paper.year == 2020
-    assert result.paper.url == "https://arxiv.org/abs/2401.00001"
-    assert result.paper.pdf_url == "https://arxiv.org/pdf/2401.00001"
-    assert result.paper.metadata == result.metadata
+    assert result.source == PaperSource.HUGGINGFACE
+    assert result.arxiv_id == "2401.00001"
+    assert result.title == "A research paper"
+    assert result.abstract == ""
+    assert result.authors == ["A. Researcher"]
+    assert result.publication_date == date(2020, 1, 2)
+    assert result.year == 2020
+    assert result.url == "https://arxiv.org/abs/2401.00001"
+    assert result.pdf_url == "https://arxiv.org/pdf/2401.00001"
+    assert result.metadata["huggingface"]
+
+
+@pytest.mark.parametrize(
+    ("authors", "expected"),
+    [([], []), ([{"name": "First"}, {"name": "Second"}], ["First", "Second"])],
+)
+@pytest.mark.asyncio
+async def test_lookup_preserves_empty_and_all_authors(authors, expected):
+    payload = paper_info_payload()
+    payload["paper"]["authors"] = authors
+
+    async def handle(request):
+        return httpx.Response(200, json=payload)
+
+    async with client_for(handle) as http:
+        result = (
+            await HuggingFaceProvider(http).lookup(
+                [parse_identifier("arxiv:2401.00001")]
+            )
+        )[0].papers[0]
+
+    assert result.authors == expected
 
 
 @pytest.mark.asyncio
-async def test_enrich_returns_none_only_for_404_and_unsupported_identifiers():
+async def test_lookup_returns_empty_for_404_and_unsupported_identifiers():
     requests = []
 
     async def handle(request):
@@ -252,67 +306,61 @@ async def test_enrich_returns_none_only_for_404_and_unsupported_identifiers():
         return httpx.Response(404)
 
     async with client_for(handle) as http:
-        results = await HuggingFaceProvider(http).enrich(
+        results = await HuggingFaceProvider(http).lookup(
             [
                 parse_identifier("arxiv:2401.00001"),
                 parse_identifier("doi:10.1234/no-arxiv-id"),
             ]
         )
 
-    assert results == [None, None]
+    assert all(result.papers == [] and result.error is None for result in results)
     assert len(requests) == 1
 
 
 @pytest.mark.parametrize("status_code", [401, 429, 503])
 @pytest.mark.asyncio
-async def test_enrich_propagates_non_404_http_errors(status_code):
+async def test_lookup_records_non_404_http_errors_on_the_item(status_code):
     async def handle(request):
         return httpx.Response(status_code)
 
     async with client_for(handle) as http:
-        with pytest.raises(ProviderError) as error:
-            await HuggingFaceProvider(http, token="hf-test-token").enrich(
-                [parse_identifier("arxiv:2401.00001")]
-            )
+        result = await HuggingFaceProvider(http, token="hf-test-token").lookup(
+            [parse_identifier("arxiv:2401.00001")]
+        )
 
-    assert str(error.value) == str(error.value.__cause__)
-    assert isinstance(error.value.__cause__, httpx.HTTPStatusError)
-    assert error.value.__cause__.response.status_code == status_code
-    assert "https://huggingface.co/api/papers/2401.00001" in str(error.value)
-    assert "hf-test-token" not in str(error.value)
+    assert result[0].papers == []
+    assert str(status_code) in result[0].error
+    assert "https://huggingface.co/api/papers/2401.00001" in result[0].error
+    assert "hf-test-token" not in result[0].error
 
 
 @pytest.mark.asyncio
-async def test_enrich_propagates_network_errors():
+async def test_lookup_records_network_errors_on_the_item():
     async def handle(request):
         raise httpx.ConnectError("connection failed", request=request)
 
     async with client_for(handle) as http:
-        with pytest.raises(ProviderError) as error:
-            await HuggingFaceProvider(http).enrich(
-                [parse_identifier("arxiv:2401.00001")]
-            )
+        result = await HuggingFaceProvider(http).lookup(
+            [parse_identifier("arxiv:2401.00001")]
+        )
 
-    assert str(error.value.__cause__) in str(error.value)
-    assert "connection failed" in str(error.value)
-    assert "https://huggingface.co/api/papers/2401.00001" in str(error.value)
-    assert isinstance(error.value.__cause__, httpx.ConnectError)
+    assert result[0].papers == []
+    assert "connection failed" in result[0].error
+    assert "https://huggingface.co/api/papers/2401.00001" in result[0].error
 
 
 @pytest.mark.asyncio
-async def test_enrich_timeout_keeps_request_url_and_original_cause():
+async def test_lookup_timeout_is_recorded_on_the_item():
     async def timeout(request):
         raise httpx.ReadTimeout("read timed out", request=request)
 
     async with client_for(timeout) as http:
-        with pytest.raises(ProviderError) as error:
-            await HuggingFaceProvider(http).enrich(
-                [parse_identifier("arxiv:2401.00001")]
-            )
+        result = await HuggingFaceProvider(http).lookup(
+            [parse_identifier("arxiv:2401.00001")]
+        )
 
-    assert "read timed out" in str(error.value)
-    assert "https://huggingface.co/api/papers/2401.00001" in str(error.value)
-    assert isinstance(error.value.__cause__, httpx.ReadTimeout)
+    assert "read timed out" in result[0].error
+    assert "https://huggingface.co/api/papers/2401.00001" in result[0].error
 
 
 @pytest.mark.asyncio
@@ -335,7 +383,63 @@ async def test_discover_propagates_http_status_with_original_error_cause():
 
 
 @pytest.mark.asyncio
-async def test_enrich_bounds_concurrent_requests_and_preserves_input_order():
+async def test_lookup_keeps_success_beside_item_http_failure():
+    async def handle(request):
+        if request.url.path.endswith("2401.00002"):
+            return httpx.Response(503, request=request)
+        return httpx.Response(200, json=paper_info_payload("2401.00001"))
+
+    identifiers = [
+        parse_identifier("arxiv:2401.00001"),
+        parse_identifier("arxiv:2401.00002"),
+    ]
+    async with client_for(handle) as http:
+        results = await HuggingFaceProvider(http).lookup(identifiers)
+
+    assert results[0].papers[0].arxiv_id == "2401.00001"
+    assert results[0].error is None
+    assert results[1].papers == []
+    assert "503" in results[1].error
+
+
+@pytest.mark.asyncio
+async def test_lookup_propagates_invalid_response_and_cleans_up_on_cancellation():
+    async def invalid_response(request):
+        return httpx.Response(200, text="not-json")
+
+    async with client_for(invalid_response) as http:
+        with pytest.raises(ValueError):
+            await HuggingFaceProvider(http).lookup(
+                [parse_identifier("arxiv:2401.00001")]
+            )
+
+    active = 0
+    started = asyncio.Event()
+
+    async def wait_forever(request):
+        nonlocal active
+        active += 1
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            active -= 1
+
+    identifiers = [parse_identifier(f"arxiv:2401.{index:05d}") for index in range(1, 5)]
+    async with client_for(wait_forever) as http:
+        batch = asyncio.create_task(
+            HuggingFaceProvider(http, concurrency=2).lookup(identifiers)
+        )
+        await started.wait()
+        batch.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await batch
+
+    assert active == 0
+
+
+@pytest.mark.asyncio
+async def test_lookup_bounds_concurrent_requests_and_preserves_input_order():
     active = 0
     peak = 0
 
@@ -350,10 +454,12 @@ async def test_enrich_bounds_concurrent_requests_and_preserves_input_order():
 
     identifiers = [parse_identifier(f"arxiv:2401.{index:05d}") for index in range(1, 6)]
     async with client_for(handle) as http:
-        results = await HuggingFaceProvider(http, concurrency=2).enrich(identifiers)
+        results = await HuggingFaceProvider(http, concurrency=2).lookup(identifiers)
 
     assert peak == 2
-    assert [result.identifiers[0] for result in results] == identifiers
+    assert [result.papers[0].arxiv_id for result in results] == [
+        identifier.value for identifier in identifiers
+    ]
 
 
 class FixedDateTime(datetime):

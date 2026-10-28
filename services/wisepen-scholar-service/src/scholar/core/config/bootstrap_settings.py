@@ -2,8 +2,9 @@
 
 from pathlib import Path
 
-from common.core.config.bootstrap_settings import BootstrapSettings
 from pydantic_settings import SettingsConfigDict
+
+from common.core.config.bootstrap_settings import BootstrapSettings
 
 SERVICE_ROOT = Path(__file__).resolve().parents[4]
 

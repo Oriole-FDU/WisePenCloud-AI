@@ -3,27 +3,29 @@
 import asyncio
 import os
 import time
+from itertools import pairwise
 from uuid import uuid4
 
 import httpx
 import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
-from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.lookup import (
     EnrichmentStatus,
     LookupPurpose,
     PaperLookup,
     PaperLookupService,
 )
+from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.source_execution import SourceExecutionStatus
-from scholar.core.s2_transport import S2Transport
-from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
-from scholar.domain.interfaces.provider_error import ProviderBusy
+from scholar.providers.s2 import S2Transport
+from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
+from scholar.domain.errors import ProviderBusy
+from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
+from scholar.domain.models.paper import Paper
 from scholar.providers.enrichment_rules import s2_signals
 from scholar.providers.s2 import S2Provider
-from test_enrichment import FakeEnricher, FakePaperRepository, s2_enrichment
 
 
 @pytest_asyncio.fixture
@@ -94,7 +96,7 @@ async def test_fifo_across_clients_and_offline_shares_one_second_quota(queue_bou
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
     assert [path for path, _ in sent] == ["/test/0", "/test/1", "/test/2"]
-    assert all(after[1] - before[1] >= 0.95 for before, after in zip(sent, sent[1:]))
+    assert all(after[1] - before[1] >= 0.95 for before, after in pairwise(sent))
     assert await first.zcard(f"{namespace}:queue") == 0
     assert await first.zcard(f"{namespace}:leases") == 0
 
@@ -161,6 +163,30 @@ async def test_timeout_cleans_waiter_and_expired_process_lease_is_pruned(
     assert await first.zcard(f"{namespace}:leases") == 0
 
 
+class FallbackProvider:
+    async def lookup(self, ids, *, api_key=None):
+        return [
+            PaperLookupMatch(
+                [
+                    Paper(
+                        arxiv_id=identity.value,
+                        doi=None,
+                        title="Fallback paper",
+                        abstract=None,
+                        authors=[],
+                        publication_date=None,
+                        year=None,
+                        url="https://example.test/paper",
+                        pdf_url=None,
+                        source="openalex",
+                        metadata={"s2": {"citation_count": 0}},
+                    )
+                ]
+            )
+            for identity in ids
+        ]
+
+
 @pytest.mark.asyncio
 async def test_busy_is_not_executed_and_openalex_fallback_is_complete(queue_boundary):
     first, _, namespace = queue_boundary
@@ -171,9 +197,9 @@ async def test_busy_is_not_executed_and_openalex_fallback_is_complete(queue_boun
         raise AssertionError("busy S2 must not send")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
-        runner = EnrichmentRunner(
+        runner = LookupRunner(
             {
-                "s2": EnrichmentBinding(
+                "s2": LookupBinding(
                     S2Provider(
                         S2Transport(
                             http, first, "key", namespace=namespace, max_queued_ahead=5
@@ -183,17 +209,17 @@ async def test_busy_is_not_executed_and_openalex_fallback_is_complete(queue_boun
                     [IdentifierKind.ARXIV],
                     has_signals=s2_signals,
                 ),
-                "openalex": EnrichmentBinding(
-                    FakeEnricher({identity: s2_enrichment()}),
+                "openalex": LookupBinding(
+                    FallbackProvider(),
                     None,
                     [IdentifierKind.ARXIV],
                     has_signals=s2_signals,
                 ),
             }
         )
-        result = await PaperLookupService(
-            FakePaperRepository(), enrichment=runner
-        ).lookup(PaperLookup([identity.value], LookupPurpose.ENRICH))
+        result = await PaperLookupService(runner).lookup(
+            PaperLookup([identity.value], LookupPurpose.ENRICH)
+        )
     execution = next(e for e in result.execution if e.source == "s2")
     assert execution.status == SourceExecutionStatus.NOT_EXECUTED
     assert execution.queued_ahead == 6
@@ -214,6 +240,7 @@ async def test_cache_and_identical_inflight_batch_use_one_queue_task(queue_bound
             json=[
                 {
                     "paperId": "a" * 40,
+                    "url": "https://www.semanticscholar.org/paper/" + "a" * 40,
                     "externalIds": {"ArXiv": "2401.00001"},
                     "citationCount": 0,
                 }
@@ -221,10 +248,10 @@ async def test_cache_and_identical_inflight_batch_use_one_queue_task(queue_bound
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
-        cache = RedisPaperEnrichmentCache(first, namespace)
-        runner = EnrichmentRunner(
+        cache = RedisPaperLookupCache(first, namespace)
+        runner = LookupRunner(
             {
-                "s2": EnrichmentBinding(
+                "s2": LookupBinding(
                     S2Provider(
                         S2Transport(
                             http, first, "key", namespace=namespace, max_queued_ahead=5
@@ -236,7 +263,7 @@ async def test_cache_and_identical_inflight_batch_use_one_queue_task(queue_bound
                 )
             }
         )
-        service = PaperLookupService(FakePaperRepository(), enrichment=runner)
+        service = PaperLookupService(runner)
         query = PaperLookup(["2401.00001", "2401.00001"], LookupPurpose.ENRICH)
         seconds, micros = await first.time()
         await first.set(f"{namespace}:send-permit", seconds * 1000 + micros // 1000)

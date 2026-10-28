@@ -180,7 +180,7 @@ class DocumentReading:
         ]
 
 
-def _section_locations(
+def  _section_locations(
         documents: list[Document],
 ) -> dict[str, tuple[Document, Section]]:
     """仅为已通过共享 Reader 检查的事实建立章节索引。"""

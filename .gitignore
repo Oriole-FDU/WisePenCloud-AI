@@ -21,6 +21,7 @@ logs/
 /s2_full_fields.json
 /s2_batch_results.json
 /services/wisepen-scholar-service/third_party_data/
+/services/wisepen-scholar-service/models/
 /services/wisepen-scholar-service/data/
 /services/wisepen-scholar-service/logs/
 /services/wisepen-scholar-service/runs/

@@ -4,23 +4,27 @@ from dataclasses import dataclass
 from math import isfinite
 
 from scholar.core.embedding_runtime import DIMENSIONS
-from scholar.core.s2_transport import S2Transport
-from scholar.domain.interfaces.paper_enricher import PaperEnrichment
+from scholar.providers.s2 import S2Transport
 from scholar.domain.models.identifiers import PaperIdentifier
 from scholar.providers.s2 import ENRICHMENT_FIELDS, IDENTITY_FIELDS, S2Provider
 
 
 @dataclass
 class S2SyncPaper:
-    enrichment: PaperEnrichment
+    """离线同步的 S2 投影，仅保留来源元数据、身份和可持久化向量。"""
+
+    identifiers: list[PaperIdentifier]
+    metadata: dict
     vector: list[float] | None
 
 
 class S2SyncClient:
+    """通过 Graph batch 查询 S2 元数据及同空间的 SPECTER v2 向量。"""
+
     def __init__(self, transport: S2Transport):
         self.transport = transport
 
-    async def enrich(
+    async def lookup(
         self, identifiers: list[PaperIdentifier]
     ) -> list[S2SyncPaper | None]:
         # 裸 embedding 默认为 v1；必须显式请求 v2，与本地 proximity 灌库处于同一空间。
@@ -51,5 +55,11 @@ class S2SyncClient:
                     or not all(isfinite(value) for value in vector)
                 ):
                     raise ValueError("S2 returned an invalid specter_v2 embedding")
-            results.append(S2SyncPaper(S2Provider.project(payload, False), vector))
+            results.append(
+                S2SyncPaper(
+                    S2Provider.identifiers(payload),
+                    S2Provider.metadata(payload),
+                    vector,
+                )
+            )
         return results

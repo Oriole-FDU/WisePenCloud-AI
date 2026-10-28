@@ -9,17 +9,17 @@ from typing import Any
 
 import httpx
 
+from scholar.domain.errors import (
+    ProviderError,
+    provider_error_message,
+)
 from scholar.domain.interfaces.paper_discoverer import (
     DiscoveryPeriod,
     DiscoverySort,
     PaperDiscovery,
 )
-from scholar.domain.interfaces.paper_enricher import PaperEnrichment
+from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
-from scholar.domain.interfaces.provider_error import (
-    ProviderError,
-    provider_error_message,
-)
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import (
     IdentifierKind,
@@ -27,6 +27,7 @@ from scholar.domain.models.identifiers import (
     parse_identifier,
 )
 from scholar.domain.models.paper import Paper, PaperSource
+from scholar.providers.projection import project_paper
 
 _HF_ORIGIN = "https://huggingface.co"
 
@@ -62,11 +63,8 @@ class HuggingFaceProvider:
             params={"q": query, "limit": 100 if dated else limit},
             api_key=api_key,
         )
-        observed_at = datetime.now(UTC).isoformat()
         papers = [
-            self._to_paper(
-                row, self._metadata(row, observed_at=observed_at, partial=True)
-            )
+            project_paper(self._to_paper(row, self._metadata(row, partial=True)))
             for row in response.json()
         ]
         if dated:
@@ -84,40 +82,34 @@ class HuggingFaceProvider:
             ]
         return PaperSearchBatch(papers[:limit])
 
-    async def enrich(
+    async def lookup(
         self,
-        identifiers: list[PaperIdentifier],
+        ids: list[PaperIdentifier],
         *,
-        include_details: bool = False,
         api_key: str | None = None,
-    ) -> list[PaperEnrichment | None]:
-        return await asyncio.gather(
-            *(
-                self._enrich_one(
-                    identifier, include_details=include_details, api_key=api_key
-                )
-                for identifier in identifiers
-            )
-        )
+    ) -> list[PaperLookupMatch]:
+        async def resolve(identifier: PaperIdentifier) -> PaperLookupMatch:
+            if identifier.kind != IdentifierKind.ARXIV:
+                return PaperLookupMatch([])
+            try:
+                payload = await self._paper_info(identifier.value, api_key=api_key)
+            except ProviderError as error:
+                # _paper_info 的来源请求失败按论文隔离；取消和程序错误不会被包装。
+                return PaperLookupMatch([], str(error))
+            if payload is None:
+                return PaperLookupMatch([])
+            metadata = self._metadata(payload)
+            return PaperLookupMatch([self._to_paper(payload, metadata)])
 
-    async def _enrich_one(
-        self, identifier: PaperIdentifier, *, include_details: bool, api_key: str | None
-    ) -> PaperEnrichment | None:
-        if identifier.kind != IdentifierKind.ARXIV:
-            return None
-
-        payload = await self._paper_info(identifier.value, api_key=api_key)
-        if payload is None:
-            return None
-
-        observed_at = datetime.now(UTC).isoformat()
-        metadata = self._metadata(payload, observed_at=observed_at)
-        resolved_identifier = parse_identifier(f"arxiv:{self._paper_id(payload)}")
-        return PaperEnrichment(
-            identifiers=[resolved_identifier],
-            metadata={"huggingface": metadata},
-            paper=self._to_paper(payload, metadata) if include_details else None,
-        )
+        tasks = [asyncio.create_task(resolve(identifier)) for identifier in ids]
+        try:
+            return list(await asyncio.gather(*tasks))
+        finally:
+            # 批次取消时同步结束已创建任务，避免 HTTP 请求脱离当前用例生命周期。
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def discover(
         self,
@@ -153,11 +145,8 @@ class HuggingFaceProvider:
             f"{_HF_ORIGIN}/api/daily_papers", params=params, api_key=api_key
         )
         rows = response.json()
-        observed_at = datetime.now(UTC).isoformat()
         papers = [
-            self._to_paper(
-                row, self._metadata(row, observed_at=observed_at, partial=True)
-            )
+            project_paper(self._to_paper(row, self._metadata(row, partial=True)))
             for row in rows
         ]
 
@@ -204,37 +193,46 @@ class HuggingFaceProvider:
 
     @classmethod
     def _metadata(
-        cls, payload: dict[str, Any], *, observed_at: str, partial: bool = False
+        cls, payload: dict[str, Any], *, partial: bool = False
     ) -> dict[str, Any]:
         result = {
-            # HF 的 AI 摘要是渠道增量，保留命名空间及模型名，不覆盖论文原摘要。
+            # HF 的 AI 摘要是渠道增量，保留命名空间，不覆盖论文原摘要。
             "ai_summary": cls._field(payload, "ai_summary"),
             "ai_keywords": cls._field(payload, "ai_keywords"),
-            "ai_summary_model": cls._field(payload, "ai_summary_model"),
             "upvotes": cls._field(payload, "upvotes"),
             "github_repo": cls._field(payload, "githubRepo"),
             "github_stars": cls._field(payload, "githubStars"),
-            "linked_models": cls._linked(payload, "linkedModels"),
-            "num_total_models": cls._field(payload, "numTotalModels"),
-            "linked_datasets": cls._linked(payload, "linkedDatasets"),
-            "num_total_datasets": cls._field(payload, "numTotalDatasets"),
-            "observed_at": observed_at,
             "submitted_at": cls._submitted_at(payload),
         }
+        # 点赞降序只保留前三项；Python 稳定排序保留同赞产物的上游次序。
+        for name, upstream in (
+            ("linked_models", "linkedModels"),
+            ("linked_datasets", "linkedDatasets"),
+        ):
+            values = cls._field(payload, upstream)
+            result[name] = (
+                None
+                if values is None
+                else [
+                    {"id": item["id"], "likes": item.get("likes")}
+                    for item in sorted(
+                        values,
+                        key=lambda item: item.get("likes") or 0,
+                        reverse=True,
+                    )[:3]
+                ]
+            )
         if partial:
             # 列表未提供的产物字段仍未查询；详情成功返回的空字段才是确认空事实。
             present = payload.keys() | payload.get("paper", {}).keys()
             for name, upstream in (
                 ("ai_summary", "ai_summary"),
                 ("ai_keywords", "ai_keywords"),
-                ("ai_summary_model", "ai_summary_model"),
                 ("upvotes", "upvotes"),
                 ("github_repo", "githubRepo"),
                 ("github_stars", "githubStars"),
                 ("linked_models", "linkedModels"),
-                ("num_total_models", "numTotalModels"),
                 ("linked_datasets", "linkedDatasets"),
-                ("num_total_datasets", "numTotalDatasets"),
             ):
                 if upstream not in present:
                     result.pop(name)
@@ -244,13 +242,6 @@ class HuggingFaceProvider:
     def _field(payload: dict[str, Any], key: str) -> Any:
         nested = payload.get("paper", {})
         return nested[key] if key in nested else payload.get(key)
-
-    @classmethod
-    def _linked(cls, payload: dict[str, Any], key: str) -> list[dict[str, Any]] | None:
-        values = cls._field(payload, key)
-        if values is None:
-            return None
-        return [{"id": item["id"], "likes": item.get("likes")} for item in values]
 
     @staticmethod
     def _paper_id(payload: dict[str, Any]) -> str:

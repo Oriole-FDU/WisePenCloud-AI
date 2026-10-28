@@ -4,6 +4,7 @@ import orjson
 from pydantic import TypeAdapter
 from redis.asyncio import Redis
 
+from scholar.core.storage.redis import CACHE_REVISION
 from scholar.domain.interfaces.paper_discoverer import PaperDiscovery
 
 _DISCOVERIES = TypeAdapter(PaperDiscovery)
@@ -12,7 +13,7 @@ _DISCOVERIES = TypeAdapter(PaperDiscovery)
 class RedisDiscoveryCacheRepository:
     def __init__(self, redis: Redis, namespace: str, ttl: int = 900):
         self.redis = redis
-        self.namespace = namespace
+        self.namespace = f"{CACHE_REVISION}:{namespace}"
         self.ttl = ttl
 
     async def get(self, key: str) -> PaperDiscovery | None:

@@ -7,22 +7,21 @@ from openai import AsyncOpenAI
 from redis.asyncio import Redis
 
 from scholar.application.discovery import PaperDiscoveryService
-from scholar.application.enrichment import EnrichmentBinding, EnrichmentRunner
 from scholar.application.field_policies import FIELD_POLICIES
 from scholar.application.lookup import PaperLookupService
+from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.search import (
     PaperSearchService,
     SearchBinding,
 )
 from scholar.core.config.bootstrap_settings import bootstrap_settings
 from scholar.core.embedding_runtime import DIMENSIONS, QUERY_MODEL
-from scholar.core.s2_transport import S2Transport
 from scholar.core.storage.elasticsearch.paper_repository import (
     ElasticsearchPaperRepository,
     create_elasticsearch,
 )
 from scholar.core.storage.redis.discovery_cache import RedisDiscoveryCacheRepository
-from scholar.core.storage.redis.paper_cache import RedisPaperEnrichmentCache
+from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
 from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
 from scholar.domain.models.identifiers import IdentifierKind
 from scholar.providers.arxiv import ArxivProvider
@@ -36,7 +35,7 @@ from scholar.providers.enrichment_rules import (
 )
 from scholar.providers.huggingface import HuggingFaceProvider
 from scholar.providers.openalex import OpenAlexProvider
-from scholar.providers.s2 import S2Provider
+from scholar.providers.s2 import S2Provider, S2Transport
 
 
 class Container(containers.DeclarativeContainer):
@@ -118,22 +117,29 @@ class Container(containers.DeclarativeContainer):
         token=config.HF_TOKEN,
         concurrency=config.SCHOLAR_HF_CONCURRENCY,
     )
+    arxiv_cache = providers.Singleton(
+        RedisPaperLookupCache,
+        redis=redis,
+        namespace=providers.Callable(
+            lambda alias: f"{alias}:arxiv", config.SCHOLAR_INDEX_ALIAS
+        ),
+    )
     s2_cache = providers.Singleton(
-        RedisPaperEnrichmentCache,
+        RedisPaperLookupCache,
         redis=redis,
         namespace=providers.Callable(
             lambda alias: f"{alias}:s2", config.SCHOLAR_INDEX_ALIAS
         ),
     )
     openalex_cache = providers.Singleton(
-        RedisPaperEnrichmentCache,
+        RedisPaperLookupCache,
         redis=redis,
         namespace=providers.Callable(
             lambda alias: f"{alias}:openalex", config.SCHOLAR_INDEX_ALIAS
         ),
     )
     huggingface_cache = providers.Singleton(
-        RedisPaperEnrichmentCache,
+        RedisPaperLookupCache,
         redis=redis,
         namespace=providers.Callable(
             lambda alias: f"{alias}:huggingface", config.SCHOLAR_INDEX_ALIAS
@@ -163,17 +169,17 @@ class Container(containers.DeclarativeContainer):
             searcher=huggingface_provider,
         ),
     )
-    enrichment_bindings = providers.Dict(
+    lookup_bindings = providers.Dict(
         arxiv=providers.Factory(
-            EnrichmentBinding,
-            enricher=arxiv_searcher,
-            cache=None,
+            LookupBinding,
+            provider=arxiv_searcher,
+            cache=arxiv_cache,
             identifier_kinds=[IdentifierKind.ARXIV, IdentifierKind.DOI],
             has_signals=arxiv_signals,
         ),
         s2=providers.Factory(
-            EnrichmentBinding,
-            enricher=s2_provider,
+            LookupBinding,
+            provider=s2_provider,
             cache=s2_cache,
             has_signals=s2_signals,
             aliases=s2_aliases,
@@ -186,8 +192,8 @@ class Container(containers.DeclarativeContainer):
             ],
         ),
         openalex=providers.Factory(
-            EnrichmentBinding,
-            enricher=openalex_searcher,
+            LookupBinding,
+            provider=openalex_searcher,
             cache=openalex_cache,
             identifier_kinds=[
                 IdentifierKind.OPENALEX,
@@ -198,28 +204,25 @@ class Container(containers.DeclarativeContainer):
             aliases=openalex_aliases,
         ),
         huggingface=providers.Factory(
-            EnrichmentBinding,
-            enricher=huggingface_provider,
+            LookupBinding,
+            provider=huggingface_provider,
             cache=huggingface_cache,
             identifier_kinds=[IdentifierKind.ARXIV],
             has_signals=lambda metadata: bool(metadata.get("huggingface")),
             fields=[
                 "ai_summary",
                 "ai_keywords",
-                "ai_summary_model",
                 "upvotes",
                 "github_repo",
                 "github_stars",
                 "linked_models",
-                "num_total_models",
                 "linked_datasets",
-                "num_total_datasets",
             ],
         ),
     )
-    enrichment_runner = providers.Singleton(
-        EnrichmentRunner,
-        bindings=enrichment_bindings,
+    lookup_runner = providers.Singleton(
+        LookupRunner,
+        bindings=lookup_bindings,
         positive_ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
         negative_ttl_seconds=config.SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS,
     )
@@ -229,13 +232,11 @@ class Container(containers.DeclarativeContainer):
         policies=providers.Object(FIELD_POLICIES),
         platform_credentials=platform_credentials,
         query_cache=query_cache_repository,
-        enrichment=enrichment_runner,
+        lookup=lookup_runner,
     )
     paper_lookup_service = providers.Singleton(
         PaperLookupService,
-        paper_repository=paper_repository,
-        openalex_lookup=openalex_searcher.provided.lookup,
-        enrichment=enrichment_runner,
+        lookup=lookup_runner,
         policies=providers.Object(FIELD_POLICIES),
         platform_credentials=platform_credentials,
     )

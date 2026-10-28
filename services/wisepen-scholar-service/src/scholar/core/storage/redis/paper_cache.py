@@ -1,60 +1,54 @@
-"""Redis 共享论文富化缓存；公共来源按身份共享，BYOK 来源按凭证指纹隔离。"""
+"""完整论文查询缓存；来源命名空间内的身份别名共享同一份载荷。"""
 
 from __future__ import annotations
 
 from pydantic import TypeAdapter
 from redis.asyncio import Redis
 
+from scholar.core.storage.redis import LOOKUP_CACHE_REVISION
 from scholar.domain.models.identifiers import PaperIdentifier
-from scholar.domain.repositories.paper_enrichment_cache import CachedPaperEnrichment
+from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
 
-_ENRICHMENT = TypeAdapter(CachedPaperEnrichment)
+_LOOKUP = TypeAdapter(CachedPaperLookup)
 
 
-class RedisPaperEnrichmentCache:
+class RedisPaperLookupCache:
     def __init__(self, redis: Redis, namespace: str):
-        self.redis, self.namespace = redis, namespace
+        self.redis, self.namespace = redis, f"{LOOKUP_CACHE_REVISION}:{namespace}"
 
-    async def get(
-        self, identifiers: list[PaperIdentifier], *, scope: str | None = None
-    ) -> CachedPaperEnrichment | None:
-        keys = [self._key(identifier, scope) for identifier in identifiers]
-        values = await self.redis.mget(keys)
-        cached = next((value for value in values if value is not None), None)
-        return None if cached is None else _ENRICHMENT.validate_json(cached)
+    async def get_many(
+        self, ids: list[PaperIdentifier]
+    ) -> list[CachedPaperLookup | None]:
+        if not ids:
+            return []
+        values = await self.redis.mget([self._key(identifier) for identifier in ids])
+        return [
+            None if value is None else _LOOKUP.validate_json(value) for value in values
+        ]
 
-    async def put(
-        self,
-        identifiers: list[PaperIdentifier],
-        value: CachedPaperEnrichment,
-        *,
-        ttl_seconds: int,
-        scope: str | None = None,
-    ) -> None:
-        payload = _ENRICHMENT.dump_json(value)
-        # 统一事务写入身份别名，避免部分更新把两个不同论文身份接在一起。
+    async def put_many(self, entries: list[tuple[CachedPaperLookup, int]]) -> None:
+        if not entries:
+            return
+        # 一个批次的完整记录和全部别名一起写入，避免同篇论文的别名只发布一部分。
         async with self.redis.pipeline(transaction=True) as pipeline:
-            for identifier in dict.fromkeys(identifiers):
-                await pipeline.set(self._key(identifier, scope), payload, ex=ttl_seconds)
+            for record, ttl_seconds in entries:
+                payload = _LOOKUP.dump_json(record)
+                for identifier in record.cache_aliases:
+                    await pipeline.set(self._key(identifier), payload, ex=ttl_seconds)
             await pipeline.execute()
 
     async def invalidate(self, identifiers: list[PaperIdentifier]) -> None:
-        """删除请求身份及其缓存记录声明的全部别名。"""
+        """同时删除已知身份和缓存中声明的全部别名。"""
         if not identifiers:
             return
-        keys = [self._key(identifier) for identifier in dict.fromkeys(identifiers)]
-        values = await self.redis.mget(keys)
         aliases = list(dict.fromkeys(identifiers))
-        for value in values:
-            if value is not None:
-                record = _ENRICHMENT.validate_json(value)
+        records = await self.get_many(aliases)
+        for record in records:
+            if record is not None:
                 aliases.extend(record.cache_aliases)
         await self.redis.delete(
             *(self._key(identifier) for identifier in dict.fromkeys(aliases))
         )
 
-    def _key(self, identifier: PaperIdentifier, scope: str | None = None) -> str:
-        return (
-            f"scholar:enrichment:{self.namespace}{':' + scope if scope else ''}:"
-            f"{identifier.kind.value}:{identifier.value}"
-        )
+    def _key(self, identifier: PaperIdentifier) -> str:
+        return f"scholar:lookup:{self.namespace}:{identifier.kind.value}:{identifier.value}"

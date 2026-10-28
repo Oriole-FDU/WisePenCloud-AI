@@ -37,6 +37,7 @@ from scholar.core.storage.elasticsearch.paper_repository import (
     ElasticsearchPaperRepository,
     create_elasticsearch,
 )
+from scholar.core.storage.redis import CACHE_REVISION
 from scholar.domain.models.fields import AcademicField
 from scholar.providers.arxiv import ArxivProvider
 
@@ -329,8 +330,12 @@ async def migrate(
         )
         db.execute("UPDATE import_state SET target_index=?", [new])
         removed = 0
-        async for key in redis.scan_iter(match=f"scholar:search:{alias}:*", count=500):
-            removed += await redis.unlink(key)
+        for pattern in (
+            f"scholar:search:{CACHE_REVISION}:{alias}:*",
+            f"scholar:search:{alias}:*",
+        ):
+            async for key in redis.scan_iter(match=pattern, count=500):
+                removed += await redis.unlink(key)
         if set(await es.indices.get_alias(name=alias)) != {new}:
             raise RuntimeError("alias verification failed after cutover")
         if db.execute("SELECT target_index FROM import_state").fetchone()[0] != new:

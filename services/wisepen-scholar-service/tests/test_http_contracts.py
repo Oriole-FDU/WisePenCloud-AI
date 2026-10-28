@@ -1,20 +1,21 @@
-from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
-
 """Scholar HTTP 合同：认证、检索投影、缓存和逐项标识结果。"""
 
 from datetime import date
 
+import httpx
 import pytest
 from common.web.middleware import SecurityHeaderMiddleware
 from dependency_injector import providers
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from scholar.api.app import setup_exception_handlers
 from scholar.api.endpoints import health, papers
 from scholar.api.router import api_router
 from scholar.container import container
+from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_discoverer import PaperDiscovery
-from scholar.domain.interfaces.provider_error import ProviderError
+from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
+from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
+from scholar.main import setup_exception_handlers
 
 FROM_SOURCE_SECRET = "scholar-test-secret"
 AUTHORIZED = {"X-From-Source": FROM_SOURCE_SECRET}
@@ -130,6 +131,23 @@ class FakeRedis:
         self.ping_calls += 1
         return True
 
+    def pipeline(self, *, transaction):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def execute(self):
+        return []
+
+
+class MissingPapers:
+    async def lookup(self, ids, *, api_key=None):
+        return [PaperLookupMatch([]) for _ in ids]
+
 
 @pytest.fixture
 def scholar_client():
@@ -145,6 +163,7 @@ def scholar_client():
             "SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS": 900,
             "SCHOLAR_REQUEST_TIMEOUT_SECONDS": 3,
             "HF_TOKEN": None,
+            "OPENALEX_API_KEY": None,
             "S2_API_KEY": "test-s2-key",
             "SCHOLAR_HF_CONCURRENCY": 4,
             "SCHOLAR_S2_MAX_QUEUED_AHEAD": 5,
@@ -159,15 +178,29 @@ def scholar_client():
     )
     container.elasticsearch.override(providers.Object(es))
     container.redis.override(providers.Object(redis))
+    container.s2_provider.override(providers.Object(MissingPapers()))
+    openalex_http = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(404))
+    )
+    container.openalex_http.override(providers.Object(openalex_http))
+    huggingface_http = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=[]))
+    )
+    container.huggingface_http.override(providers.Object(huggingface_http))
     container.wire(modules=[health, papers])
     try:
         with TestClient(create_app(from_source_secret=FROM_SOURCE_SECRET)) as client:
             yield client, es, redis
+            client.portal.call(openalex_http.aclose)
+            client.portal.call(huggingface_http.aclose)
     finally:
         container.unwire()
         container.embedding_client.reset_override()
         container.elasticsearch.reset_override()
         container.redis.reset_override()
+        container.s2_provider.reset_override()
+        container.openalex_http.reset_override()
+        container.huggingface_http.reset_override()
         container.reset_singletons()
 
 
@@ -179,6 +212,7 @@ def test_search_sends_domain_and_inclusive_date_bounds_to_es(scholar_client):
         json={
             "query": "  graph models  ",
             "field": "computer_science",
+            "source_scope": "multi_source",
             "published_after": "2023-01-01",
             "published_before": "2023-12-31",
         },
@@ -212,7 +246,11 @@ def test_search_cache_reuses_identical_request_and_isolates_changed_inputs(
     changed_field = client.post(
         "/scholar/papers/search",
         headers=AUTHORIZED,
-        json={"query": "transformer", "field": "computer_science"},
+        json={
+            "query": "transformer",
+            "field": "computer_science",
+            "source_scope": "multi_source",
+        },
     )
 
     assert [
@@ -258,7 +296,7 @@ def test_lookup_preserves_input_order_duplicates_and_per_identifier_status(
     client, es, _ = scholar_client
     response = client.post(
         "/scholar/papers/lookup",
-        headers=AUTHORIZED,
+        headers={**AUTHORIZED, "X-OpenAlex-Api-Key": "lookup-key"},
         json={
             "identifiers": [
                 "https://arxiv.org/abs/2201.00001v2",
@@ -288,7 +326,7 @@ def test_lookup_preserves_input_order_duplicates_and_per_identifier_status(
         "found",
         "found",
         "invalid_identifier",
-        "missing_api_key",
+        "not_found",
         "ambiguous",
         "not_found",
     ]
@@ -341,11 +379,11 @@ def test_full_lookup_keeps_base_facts_or_raises_when_s2_fails(
 ):
     client, _, _ = scholar_client
 
-    class LimitedEnricher:
-        async def enrich(self, identifiers, *, include_details=False, api_key=None):
+    class LimitedProvider:
+        async def lookup(self, ids, *, api_key=None):
             raise ProviderError("429 Too Many Requests from Semantic Scholar")
 
-    with container.s2_provider.override(providers.Object(LimitedEnricher())):
+    with container.s2_provider.override(providers.Object(LimitedProvider())):
         response = client.post(
             "/scholar/papers/lookup",
             headers=AUTHORIZED,
@@ -378,6 +416,68 @@ def test_multisource_without_openalex_key_keeps_arxiv_success(scholar_client):
         "openalex": "failed",
         "arxiv": "completed",
     }
+
+
+def test_hf_supplies_paper_when_general_sources_fail_for_every_purpose(scholar_client):
+    client, _, _ = scholar_client
+    requests = []
+
+    class LimitedProvider:
+        async def lookup(self, ids, *, api_key=None):
+            raise ProviderError("429 Too Many Requests from Semantic Scholar")
+
+    def hf_response(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "2501.12948",
+                "title": "HF fallback title",
+                "summary": "The original abstract",
+                "authors": [{"name": "First Author"}, {"name": "Second Author"}],
+                "publishedAt": "2025-01-22T00:00:00Z",
+                "ai_summary": "HF summary",
+                "upvotes": 0,
+            },
+        )
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(hf_response))
+    with (
+        container.s2_provider.override(providers.Object(LimitedProvider())),
+        container.huggingface_http.override(providers.Object(http)),
+    ):
+        responses = [
+            client.post(
+                "/scholar/papers/lookup",
+                headers=AUTHORIZED,
+                json={
+                    "identifiers": ["2501.12948"],
+                    "field": "computer_science",
+                    "purpose": purpose,
+                },
+            )
+            for purpose in ("details", "enrich", "full")
+        ]
+        client.portal.call(http.aclose)
+
+    assert [response.status_code for response in responses] == [200, 200, 200]
+    detail, enrich, full = [response.json()["data"] for response in responses]
+    for result in (detail, enrich, full):
+        item = result["items"][0]
+        assert item["status"] == "found"
+        assert item["metadata"]["huggingface"]["ai_summary"] == "HF summary"
+        assert {entry["source"]: entry["status"] for entry in result["execution"]} == {
+            "arxiv": "completed",
+            "s2": "failed",
+            "openalex": "failed",
+            "huggingface": "completed",
+        }
+    assert detail["items"][0]["paper"]["title"] == "HF fallback title"
+    assert full["items"][0]["paper"]["authors"] == ["First Author et al."]
+    assert enrich["items"][0]["paper"] is None
+    assert full["items"][0]["enrichment_status"] == "partial"
+    assert len(requests) == 1
+    assert requests[0].url.path == "/api/papers/2501.12948"
 
 
 def test_health_reports_503_until_alias_is_published(scholar_client):
@@ -419,7 +519,11 @@ def test_lookup_preserves_selected_offline_s2_facts(scholar_client):
         headers=AUTHORIZED,
         json={"identifiers": ["arxiv:2201.00001"]},
     )
-    assert response.json()["data"]["items"][0]["paper"]["metadata"]["s2"] == s2
+    assert response.json()["data"]["items"][0]["paper"]["metadata"]["s2"] == {
+        **s2,
+        "tldr": {"text": ""},
+    }
+    assert es.lookup_documents[("arxiv_id", "2201.00001")][0]["metadata"]["s2"] == s2
 
 
 def test_search_uses_openalex_header_and_user_scoped_cache(scholar_client):
@@ -434,8 +538,9 @@ def test_search_uses_openalex_header_and_user_scoped_cache(scholar_client):
             self.calls.append(kwargs)
             return PaperSearchBatch([])
 
-        async def lookup(self, identifier, *, api_key):
-            self.lookup_calls.append((identifier, api_key))
+        async def lookup(self, ids, *, api_key=None):
+            self.lookup_calls.append((ids, api_key))
+            return [PaperLookupMatch([]) for _ in ids]
 
     searcher = RecordingSearcher()
     request = {"query": "clinical trials", "field": "medicine"}
@@ -461,6 +566,11 @@ def test_search_uses_openalex_header_and_user_scoped_cache(scholar_client):
             headers={**headers, "X-User-Id": "user-a"},
             json={"identifiers": ["openalex:W123"]},
         )
+        shared_lookup = client.post(
+            "/scholar/papers/lookup",
+            headers={**AUTHORIZED, "X-OpenAlex-Api-Key": "another-secret"},
+            json={"identifiers": ["openalex:W123"], "purpose": "full"},
+        )
 
     assert [first.status_code, repeated.status_code, another_user.status_code] == [
         200,
@@ -475,6 +585,8 @@ def test_search_uses_openalex_header_and_user_scoped_cache(scholar_client):
     assert all(call["field"].value == "medicine" for call in searcher.calls)
     assert lookup.status_code == 200
     assert lookup.json()["data"]["items"][0]["status"] == "not_found"
+    assert shared_lookup.json()["data"]["items"][0]["status"] == "not_found"
+    assert shared_lookup.json()["data"]["execution"][-1]["cache_hit"] is True
     assert len(searcher.lookup_calls) == 1
     assert searcher.lookup_calls[0][1] == "user-secret"
     assert "user-secret" not in str(redis.values)

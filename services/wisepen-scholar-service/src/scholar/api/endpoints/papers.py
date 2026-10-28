@@ -73,10 +73,14 @@ async def lookup(
         return R.success(
             await service.lookup(
                 request.to_query(),
-                api_key=x_openalex_api_key,
-                credentials={PaperSource.HUGGINGFACE: x_huggingface_api_key}
-                if x_huggingface_api_key
-                else {},
+                credentials={
+                    key: value
+                    for key, value in {
+                        PaperSource.OPENALEX: x_openalex_api_key,
+                        PaperSource.HUGGINGFACE: x_huggingface_api_key,
+                    }.items()
+                    if value
+                },
             )
         )
 
