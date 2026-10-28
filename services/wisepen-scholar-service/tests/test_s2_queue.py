@@ -1,5 +1,8 @@
 """在独立 Redis 命名空间验证跨客户端 FIFO，不访问 S2 或现有任务键。"""
 
+from dataclasses import replace
+from scholar.providers.policies.enrichment import ENRICHMENT_RULES
+
 import asyncio
 import os
 import time
@@ -12,8 +15,6 @@ import pytest_asyncio
 from redis.asyncio import Redis
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.services.lookup import (
-    EnrichmentStatus,
-    LookupPurpose,
     PaperLookup,
     PaperLookupService,
 )
@@ -198,32 +199,21 @@ async def test_busy_is_not_executed_and_openalex_fallback_is_complete(queue_boun
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         runner = LookupRunner(
             {
-                "s2": LookupBinding(
-                    S2Provider(
+                "s2": LookupBinding(S2Provider(
                         S2Transport(
                             http, first, "key", namespace=namespace, max_queued_ahead=5
                         )
-                    ),
-                    None,
-                    [IdentifierKind.ARXIV],
-                    has_signals=s2_signals,
-                ),
-                "openalex": LookupBinding(
-                    FallbackProvider(),
-                    None,
-                    [IdentifierKind.ARXIV],
-                    has_signals=s2_signals,
-                ),
+                    ), None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+                "openalex": LookupBinding(FallbackProvider(), None, replace(ENRICHMENT_RULES["openalex"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
             }
         )
         result = await PaperLookupService(runner).lookup(
-            PaperLookup([identity.value], LookupPurpose.ENRICH)
+            PaperLookup([identity.value])
         )
     execution = next(e for e in result.execution if e.source == "s2")
     assert execution.status == SourceExecutionStatus.NOT_EXECUTED
     assert execution.queued_ahead == 6
     assert "queue busy" in execution.error
-    assert result.items[0].enrichment_status == EnrichmentStatus.COMPLETE
     assert result.items[0].error is None
 
 
@@ -250,20 +240,15 @@ async def test_cache_and_identical_inflight_batch_use_one_queue_task(queue_bound
         cache = RedisPaperLookupCache(first, namespace)
         runner = LookupRunner(
             {
-                "s2": LookupBinding(
-                    S2Provider(
+                "s2": LookupBinding(S2Provider(
                         S2Transport(
                             http, first, "key", namespace=namespace, max_queued_ahead=5
                         )
-                    ),
-                    cache,
-                    [IdentifierKind.ARXIV],
-                    has_signals=s2_signals,
-                )
+                    ), cache, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals))
             }
         )
         service = PaperLookupService(runner)
-        query = PaperLookup(["2401.00001", "2401.00001"], LookupPurpose.ENRICH)
+        query = PaperLookup(["2401.00001", "2401.00001"])
         seconds, micros = await first.time()
         await first.set(f"{namespace}:send-permit", seconds * 1000 + micros // 1000)
         one = asyncio.create_task(service.lookup(query))

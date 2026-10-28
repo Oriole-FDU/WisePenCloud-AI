@@ -71,7 +71,6 @@ class ScholarClient:
         self,
         *,
         identifiers: list[str],
-        purpose: str,
         field: str = "general",
         openalex_api_key: str | None = None,
         huggingface_api_key: str | None = None,
@@ -90,7 +89,6 @@ class ScholarClient:
                 _LOOKUP_PAPERS_PATH,
                 json={
                     "identifiers": identifiers,
-                    "purpose": purpose,
                     "field": field,
                 },
                 timeout=self._timeout,

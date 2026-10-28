@@ -8,10 +8,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from scholar.domain.errors import (
-    ProviderError,
-    provider_error_message,
-)
+from scholar.domain.errors import ProviderError, provider_error_message
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
@@ -24,13 +21,14 @@ from scholar.domain.models.identifiers import (
 )
 from scholar.domain.models.paper import Paper, PaperSource
 
+# 统一请求的字段集合：一次拿全，避免多次往返。
 _FIELDS = (
     "id,doi,primary_location,best_oa_location,locations,updated_date,ids,"
     "cited_by_count,primary_topic,open_access,is_retracted,mesh,study_designs,"
     "title,abstract_inverted_index,authorships,publication_date,publication_year"
 )
 
-# OpenAlex 同字段多个 ID 用 OR；general 不添加领域过滤。
+# 领域过滤：同一 field 的多个 ID 用 ``|`` 表示 OR；general 不加领域过滤。
 OPENALEX_FILTERS: dict[AcademicField, str | None] = {
     AcademicField.GENERAL: None,
     AcademicField.COMPUTER_SCIENCE: "topics.field.id:17",
@@ -76,6 +74,55 @@ def has_signals(metadata: dict) -> bool:
     ) or bool(values.get("mesh") or values.get("study_designs"))
 
 
+def project_metadata(paper: Paper) -> dict:
+    """保留筛选和阅读信息；分类只输出名称，MeSH 保留限定词并去重。"""
+    values = paper.metadata["openalex"]
+    result = {
+        name: values.get(name)
+        for name in ("id", "cited_by_count", "venue", "is_retracted")
+    }
+
+    topic = values.get("primary_topic")
+    result["primary_topic"] = topic.get("display_name") if topic is not None else None
+    result["study_designs"] = [
+        item["display_name"] for item in values.get("study_designs") or []
+    ]
+
+    # MeSH：剔除空字段，同一组 descriptor/qualifier/major 组合只保留一次。
+    mesh = []
+    for item in values.get("mesh") or []:
+        compact = {
+            key: item[key]
+            for key in ("descriptor_name", "qualifier_name", "is_major_topic")
+            if item.get(key) is not None and item[key] != ""
+        }
+        if compact not in mesh:
+            mesh.append(compact)
+    result["mesh"] = mesh
+
+    result["arxiv_ids"] = [
+        value for value in values.get("arxiv_ids") or [] if value != paper.arxiv_id
+    ]
+
+    # 同一入口只保留一次；版本信息即便链接已去重仍有阅读价值。
+    seen_urls = {paper.url, paper.pdf_url}
+    location = values.get("best_oa_location") or {}
+    best_oa = {"version": location.get("version")}
+    for key in ("landing_page_url", "pdf_url"):
+        url = location.get(key)
+        if url and url not in seen_urls:
+            best_oa[key] = url
+            seen_urls.add(url)
+    result["best_oa_location"] = best_oa
+
+    oa = values.get("open_access") or {}
+    result["open_access"] = {key: oa.get(key) for key in ("is_oa", "oa_status")}
+    if oa.get("oa_url") not in seen_urls:
+        result["open_access"]["oa_url"] = oa.get("oa_url")
+
+    return result
+
+
 class OpenAlexProvider:
     """将统一搜索能力和精确 lookup 请求映射到 OpenAlex HTTP API。"""
 
@@ -95,26 +142,32 @@ class OpenAlexProvider:
     ) -> PaperSearchBatch:
         if not api_key:
             raise ProviderError("OpenAlex API key is required")
+
+        # 组装 filter：领域过滤 + 可选时间范围。
         field_filter = OPENALEX_FILTERS[field]
         filters = [field_filter] if field_filter else []
         if published_after:
             filters.append(f"from_publication_date:{published_after.isoformat()}")
         if published_before:
             filters.append(f"to_publication_date:{published_before.isoformat()}")
+
         params = {"search": query, "per_page": limit, "select": _FIELDS}
         if filters:
             params["filter"] = ",".join(filters)
-        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        headers = {"Authorization": f"Bearer {api_key}"}
         try:
             response = await self.http.get(
-                "https://api.openalex.org/works", params=params, headers=headers
+                "https://api.openalex.org/works",
+                params=params,
+                headers=headers,
             )
             response.raise_for_status()
         except httpx.HTTPError as error:
             # 异常文本保留状态码与 URL；凭证仅在请求头中，不进入异常文本。
             raise ProviderError(provider_error_message(error)) from error
+
         return PaperSearchBatch(
-            [self.to_paper(work).project() for work in response.json()["results"]]
+            [self.to_paper(work) for work in response.json()["results"]]
         )
 
     async def lookup(
@@ -138,7 +191,7 @@ class OpenAlexProvider:
         try:
             return list(await asyncio.gather(*tasks))
         finally:
-            # 一个请求失败或调用者取消时，批次的其余 HTTP 不得游离在用例生命周期之外。
+            # 任一请求失败或调用者取消时，其余 HTTP 不得游离在用例生命周期之外。
             for task in tasks:
                 if not task.done():
                     task.cancel()
@@ -147,17 +200,18 @@ class OpenAlexProvider:
     async def _fetch_work(
         self, identifier: PaperIdentifier, *, api_key: str
     ) -> dict | None:
-        # 单篇 endpoint 按 DOI 解析 work，不依赖列表中被截断的位置数组；
-        # 适配器限制单篇 HTTP 并发，应用用例负责来源之间的回退和失败隔离。
+        # 用单篇 endpoint 精确读取：不依赖列表接口中被截断的 locations 数组。
+        # 单篇 HTTP 并发受 self._slots 限制；来源之间的回退由用例层负责。
         if identifier.kind == IdentifierKind.OPENALEX:
             key = identifier.value
         elif identifier.kind == IdentifierKind.DOI:
             key = f"https://doi.org/{identifier.value}"
         elif identifier.kind == IdentifierKind.ARXIV:
-            # arXiv 官方为每篇论文定义 10.48550/arXiv.<ID>，并非由标题猜测 DOI。
+            # arXiv 官方为每篇论文定义 10.48550/arXiv.<ID>，而非按标题猜 DOI。
             key = f"https://doi.org/10.48550/arxiv.{identifier.value}"
         else:
             raise ValueError("OpenAlex does not resolve this identifier kind")
+
         try:
             response = await self.http.get(
                 f"https://api.openalex.org/works/{key}",
@@ -173,29 +227,34 @@ class OpenAlexProvider:
 
     @staticmethod
     def to_paper(work: dict) -> Paper:
-        abstract_index = work["abstract_inverted_index"]
         abstract = None
+        abstract_index = work["abstract_inverted_index"]
         if abstract_index is not None:
+            # inverted index 还原：按 (位置, 词) 排序后拼接。
             words = sorted(
                 (position, word)
                 for word, positions in abstract_index.items()
                 for position in positions
             )
             abstract = " ".join(word for _, word in words)
+
         doi = normalize_doi(work["doi"]) if work["doi"] else None
         arxiv_ids = OpenAlexProvider._arxiv_ids(work, doi)
         arxiv_id = OpenAlexProvider._arxiv_id(arxiv_ids)
         primary = work["primary_location"]
         oa = work["best_oa_location"]
+
         return Paper(
             arxiv_id=arxiv_id,
             doi=doi,
             title=work["title"],
             abstract=abstract,
             authors=[entry["author"]["display_name"] for entry in work["authorships"]],
-            publication_date=date.fromisoformat(work["publication_date"])
-            if work["publication_date"]
-            else None,
+            publication_date=(
+                date.fromisoformat(work["publication_date"])
+                if work["publication_date"]
+                else None
+            ),
             year=work["publication_year"],
             url=(primary["landing_page_url"] if primary else None) or work["id"],
             pdf_url=oa["pdf_url"] if oa else None,
@@ -211,9 +270,9 @@ class OpenAlexProvider:
         for location in work["locations"]:
             landing = location["landing_page_url"]
             if landing and urlsplit(landing).hostname in (
-                    "arxiv.org",
-                    "www.arxiv.org",
-                    "export.arxiv.org",
+                "arxiv.org",
+                "www.arxiv.org",
+                "export.arxiv.org",
             ):
                 arxiv_ids.add(normalize_arxiv(landing))
         if doi and doi.startswith("10.48550/arxiv."):
@@ -222,14 +281,17 @@ class OpenAlexProvider:
 
     @staticmethod
     def _arxiv_id(arxiv_ids: set[str]) -> str | None:
-        # 上游一个 work 若包含不同 arXiv 身份，不任意选一个用于跨源合并。
+        # 一个 work 若含多个不同 arXiv 身份，不任意选一个用于跨源合并。
         return next(iter(arxiv_ids)) if len(arxiv_ids) == 1 else None
 
     @staticmethod
     def metadata(
-        work: dict, primary: dict | None, oa: dict | None, arxiv_ids: set[str]
+        work: dict,
+        primary: dict | None,
+        oa: dict | None,
+        arxiv_ids: set[str],
     ) -> dict:
-        """仅投影有消费价值的字段；空值不补造，研究设计保留其自动分类语义。"""
+        """仅投影有消费价值的字段；空值不补造，研究设计保留自动分类语义。"""
         values = {
             name: work.get(name)
             for name in (
@@ -246,16 +308,20 @@ class OpenAlexProvider:
         }
         values.update(
             {
-                "venue": primary["source"]["display_name"]
-                if primary and primary["source"]
-                else None,
+                "venue": (
+                    primary["source"]["display_name"]
+                    if primary and primary["source"]
+                    else None
+                ),
                 "arxiv_ids": sorted(arxiv_ids),
-                "best_oa_location": None
-                if oa is None
-                else {
-                    key: oa.get(key)
-                    for key in ("landing_page_url", "pdf_url", "license", "version")
-                },
+                "best_oa_location": (
+                    None
+                    if oa is None
+                    else {
+                        key: oa.get(key)
+                        for key in ("landing_page_url", "pdf_url", "license", "version")
+                    }
+                ),
             }
         )
         return values

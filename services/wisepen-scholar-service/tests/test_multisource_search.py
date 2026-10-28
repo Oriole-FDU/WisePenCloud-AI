@@ -1,3 +1,4 @@
+from scholar.providers.policies.enrichment import ENRICHMENT_RULES, EnrichmentRules
 from dataclasses import replace
 from datetime import date
 from unittest.mock import AsyncMock
@@ -73,7 +74,7 @@ class FakeSearcher:
 
 @pytest.mark.asyncio
 async def test_bulk_candidates_reused_across_limits_and_byok_overrides_platform():
-    """小请求先缓存整批；不同 limit 不重查，用户 key 不读取平台缓存。"""
+    """候选跨 limit 和凭证共享；未命中时用户 key 优先于平台 key。"""
     provider = FakeSearcher(
         [paper(PaperSource.OPENALEX, doi=f"10.1000/{index}") for index in range(12)]
     )
@@ -92,7 +93,12 @@ async def test_bulk_candidates_reused_across_limits_and_byok_overrides_platform(
     assert larger.execution[0].cache_hit
     assert [call["api_key"] for call in provider.calls] == ["platform-key"]
     assert provider.calls[0]["limit"] == 200
-    await search.search(PaperSearch("same"), credentials={"openalex": "user-key"})
+    shared = await search.search(
+        PaperSearch("same"), credentials={"openalex": "user-key"}
+    )
+    assert shared.execution[0].cache_hit
+    assert len(provider.calls) == 1
+    await search.search(PaperSearch("new query"), credentials={"openalex": "user-key"})
     assert [call["api_key"] for call in provider.calls] == ["platform-key", "user-key"]
 
 
@@ -195,56 +201,15 @@ async def test_default_routing_uses_mapped_openalex_or_preserves_local_arxiv_ord
     openalex_result = await search.search(
         PaperSearch("law", field=AcademicField.LAW),
         credentials={"openalex": "law-key"},
-        user_id="user-1",
-    )
-    cs_result = await search.search(
-        PaperSearch("transformers", field=AcademicField.COMPUTER_SCIENCE),
-        credentials={"openalex": "cs-key"},
-        user_id="user-1",
     )
     fallback_result = await search.search(PaperSearch("general terms"))
 
     assert oa.calls[0]["field"] == AcademicField.LAW
     assert oa.calls[0]["api_key"] == "law-key"
     assert len(oa.calls) == 2
-    assert arxiv.calls[0]["field"] == AcademicField.COMPUTER_SCIENCE
-    assert arxiv.calls[1]["field"] == AcademicField.GENERAL
-    assert [item.title for item in cs_result.papers] == ["First", "Second"]
+    assert arxiv.calls[0]["field"] == AcademicField.GENERAL
     assert [item.title for item in fallback_result.papers] == ["First", "Second"]
-    assert [item.source for item in cs_result.execution] == [
-        PaperSource.HUGGINGFACE,
-        PaperSource.ARXIV,
-    ]
-    assert [item.status for item in cs_result.execution] == [
-        SourceExecutionStatus.FAILED,
-        SourceExecutionStatus.COMPLETED,
-    ]
     assert openalex_result.execution[0].source == PaperSource.OPENALEX
-
-
-@pytest.mark.asyncio
-async def test_cs_prefers_hf_and_multisource_uses_only_mapped_sources():
-    arxiv = FakeSearcher(ProviderError("ES unavailable"))
-    hf = FakeSearcher([paper(PaperSource.HUGGINGFACE, arxiv_id="2501.12948")])
-    oa = FakeSearcher()
-    search = service(arxiv=arxiv, huggingface=hf, openalex=oa)
-    result = await search.search(
-        PaperSearch("DeepSeek-R1", field=AcademicField.COMPUTER_SCIENCE)
-    )
-    assert [e.source for e in result.execution] == ["huggingface"]
-    assert result.papers[0].arxiv_id == "2501.12948"
-    assert arxiv.calls == []
-    arxiv.search_result = []
-    result = await search.search(
-        PaperSearch(
-            "other",
-            field=AcademicField.COMPUTER_SCIENCE,
-            source_scope=SourceScope.MULTI_SOURCE,
-        )
-    )
-    assert [e.status for e in result.execution] == [SourceExecutionStatus.COMPLETED] * 2
-    assert len(hf.calls) == 2
-    assert oa.calls == []
 
 
 @pytest.mark.asyncio
@@ -299,57 +264,33 @@ async def test_multisource_missing_key_keeps_successful_local_source():
 
 
 @pytest.mark.asyncio
-async def test_openalex_cache_isolated_by_user_and_key_fingerprint():
+async def test_openalex_cache_shared_across_credentials_and_without_key():
     cache = MemoryCache()
-
-    def result_for_key(arguments):
-        title = {"key-a": "User A", "key-b": "User B"}[arguments["api_key"]]
-        return [paper(PaperSource.OPENALEX, doi="10.1000/shared", title=title)]
-
-    openalex = FakeSearcher(search=result_for_key)
+    openalex = FakeSearcher(
+        [paper(PaperSource.OPENALEX, doi="10.1000/shared", title="Shared paper")]
+    )
     search = service(openalex=openalex, cache=cache)
     query = PaperSearch("same query")
 
     first_a = await search.search(
-        query, credentials={"openalex": "key-a"}, user_id="user-a"
+        query, credentials={"openalex": "key-a"}
     )
-    user_b = await search.search(
-        query, credentials={"openalex": "key-b"}, user_id="user-a"
+    changed_key = await search.search(
+        query, credentials={"openalex": "key-b"}
     )
-    another_user = await search.search(
-        query, credentials={"openalex": "key-a"}, user_id="user-b"
-    )
+    without_key = await search.search(query)
     cached_a = await search.search(
-        query, credentials={"openalex": "key-a"}, user_id="user-a"
+        query, credentials={"openalex": "key-a"}
     )
 
-    assert first_a.papers[0].title == "User A"
-    assert user_b.papers[0].title == "User B"
-    assert another_user.papers[0].title == "User A"
-    assert cached_a.papers[0].title == "User A"
-    assert len(openalex.calls) == 3
-    assert len(cache.put_calls) == 3
-    assert len({key for key, _ in cache.put_calls}) == 3
-    assert all("key-a" not in key and "key-b" not in key for key, _ in cache.put_calls)
-    assert cached_a.execution[0].cache_hit
-
-
-@pytest.mark.asyncio
-async def test_openalex_cache_reuses_trusted_credential_without_user_id():
-    openalex = FakeSearcher([paper(PaperSource.OPENALEX, doi="10.1000/trusted")])
-    cache = MemoryCache()
-    search = service(openalex=openalex, cache=cache)
-
-    await search.search(
-        PaperSearch("same query"), credentials={"openalex": "trusted-key"}
-    )
-    await search.search(
-        PaperSearch("same query"), credentials={"openalex": "trusted-key"}
-    )
-
+    assert first_a.papers[0].title == "Shared paper"
+    assert not first_a.execution[0].cache_hit
+    for result in (changed_key, without_key, cached_a):
+        assert result.papers == first_a.papers
+        assert result.execution[0].cache_hit
     assert len(openalex.calls) == 1
+    assert openalex.calls[0]["api_key"] == "key-a"
     assert len(cache.put_calls) == 1
-    assert "trusted-key" not in cache.put_calls[0][0]
 
 
 @pytest.mark.asyncio
@@ -358,9 +299,9 @@ async def test_multisource_fuses_by_exact_ids_and_keeps_identifier_conflicts_vis
         paper(
             PaperSource.ARXIV,
             arxiv_id="1706.03762",
-            doi="10.1000/arxiv-doi",
+            doi="10.48550/arxiv.1706.03762",
             title="arXiv facts",
-            metadata={"arxiv": {"raw_id": "1706.03762"}},
+            metadata={"arxiv": {"categories": ["cs.CL"]}},
         ),
         paper(
             PaperSource.ARXIV,
@@ -403,7 +344,6 @@ async def test_multisource_fuses_by_exact_ids_and_keeps_identifier_conflicts_vis
     result = await search.search(
         PaperSearch("question", source_scope=SourceScope.MULTI_SOURCE),
         credentials={"openalex": "user-key"},
-        user_id="user-1",
     )
 
     assert isinstance(result, SearchResult)
@@ -411,7 +351,7 @@ async def test_multisource_fuses_by_exact_ids_and_keeps_identifier_conflicts_vis
     assert result.papers[0].doi == "10.1000/openalex-doi"
     assert result.papers[0].metadata == {
         "openalex": {"id": "W1"},
-        "arxiv": {"raw_id": "1706.03762"},
+        "arxiv": {"categories": ["cs.CL"]},
     }
     assert len(result.papers) == 5
     assert len([paper for paper in result.papers if paper.title == "same title"]) == 2
@@ -446,7 +386,6 @@ async def test_multisource_keeps_records_separate_when_one_doi_matches_many():
     result = await search.search(
         PaperSearch("shared DOI", source_scope=SourceScope.MULTI_SOURCE),
         credentials={"openalex": "user-key"},
-        user_id="user-1",
     )
 
     assert sorted(item.title for item in result.papers) == [
@@ -470,7 +409,6 @@ async def test_multisource_retains_success_and_reports_provider_failure(message)
     result = await search.search(
         PaperSearch("question", source_scope=SourceScope.MULTI_SOURCE),
         credentials={"openalex": "user-key"},
-        user_id="user-1",
     )
 
     assert result.papers == [arxiv_result]
@@ -509,7 +447,9 @@ class RecordingEnricher:
 
 
 @pytest.mark.asyncio
-async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_configuration():
+async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_configuration(monkeypatch):
+    for source in ("pubmed", "web_of_science", "clinical_trials"):
+        monkeypatch.setitem(ENRICHMENT_RULES, source, EnrichmentRules([IdentifierKind.DOI], lambda paper, source=source: paper.metadata[source]))
     shared = "10.1000/medicine"
     pubmed = FakeSearcher(
         [
@@ -536,7 +476,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
     )
     clinical = RecordingEnricher("clinical_trials")
     enrichment = {
-        "clinical_trials": LookupBinding(clinical, None, [IdentifierKind.DOI]),
+        "clinical_trials": LookupBinding(clinical, None, ENRICHMENT_RULES["clinical_trials"]),
     }
     bindings = {
         "pubmed": SearchBinding(pubmed),
@@ -563,7 +503,6 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
             source_scope=SourceScope.MULTI_SOURCE,
         ),
         credentials={"openalex": "user-key"},
-        user_id="user",
     )
     assert [item.source for item in combined.execution] == [
         "pubmed",
@@ -591,11 +530,12 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
 
 
 @pytest.mark.asyncio
-async def test_field_configuration_controls_enrichment_after_final_limit():
+async def test_field_configuration_controls_enrichment_after_final_limit(monkeypatch):
+    monkeypatch.setitem(ENRICHMENT_RULES, "specialized", EnrichmentRules([IdentifierKind.ARXIV], lambda paper: paper.metadata["specialized"]))
     candidates = [paper("local", arxiv_id=f"2401.0000{i}") for i in (1, 2, 3)]
     searcher = FakeSearcher(candidates)
     specialized = RecordingEnricher("specialized")
-    enrich = {"specialized": LookupBinding(specialized, None, [IdentifierKind.ARXIV])}
+    enrich = {"specialized": LookupBinding(specialized, None, ENRICHMENT_RULES["specialized"])}
     search = PaperSearchService(
         {"local": SearchBinding(searcher)},
         {

@@ -374,7 +374,7 @@ def test_lookup_whole_failure_exposes_original_error_to_the_caller(scholar_clien
 
 
 @pytest.mark.parametrize("identifier", ["2201.00001", "corpusid:123"])
-def test_full_lookup_keeps_base_facts_or_raises_when_s2_fails(
+def test_lookup_keeps_base_facts_or_raises_when_s2_fails(
     scholar_client, identifier
 ):
     client, _, _ = scholar_client
@@ -387,14 +387,13 @@ def test_full_lookup_keeps_base_facts_or_raises_when_s2_fails(
         response = client.post(
             "/scholar/papers/lookup",
             headers=AUTHORIZED,
-            json={"identifiers": [identifier], "purpose": "full"},
+            json={"identifiers": [identifier]},
         )
 
     if identifier == "2201.00001":
         assert response.status_code == 200
         item = response.json()["data"]["items"][0]
         assert item["paper"]["title"] == "First paper"
-        assert item["enrichment_status"] == "partial"
         assert "429" in item["error"]
     else:
         assert response.status_code == 503
@@ -418,7 +417,8 @@ def test_multisource_without_openalex_key_keeps_arxiv_success(scholar_client):
     }
 
 
-def test_hf_supplies_paper_when_general_sources_fail_for_every_purpose(scholar_client):
+@pytest.mark.parametrize("abstract", ["The original abstract", None])
+def test_hf_supplies_paper_when_general_sources_fail_and_reuses_cache(scholar_client, abstract):
     client, _, _ = scholar_client
     requests = []
 
@@ -433,7 +433,12 @@ def test_hf_supplies_paper_when_general_sources_fail_for_every_purpose(scholar_c
             json={
                 "id": "2501.12948",
                 "title": "HF fallback title",
-                "summary": "The original abstract",
+                "summary": abstract,
+                "ai_keywords": ["reinforcement learning", "multi-stage training", "cold-start data", "Qwen", "Llama"],
+                "githubRepo": "https://github.com/deepseek-ai/deepseek-r1",
+                "githubStars": 91977,
+                "linkedModels": [{"id": "deepseek-ai/DeepSeek-R1", "likes": 14415}],
+                "linkedDatasets": [{"id": "evaluation/reasoning", "likes": 0}],
                 "authors": [{"name": "First Author"}, {"name": "Second Author"}],
                 "publishedAt": "2025-01-22T00:00:00Z",
                 "ai_summary": "HF summary",
@@ -453,29 +458,36 @@ def test_hf_supplies_paper_when_general_sources_fail_for_every_purpose(scholar_c
                 json={
                     "identifiers": ["2501.12948"],
                     "field": "computer_science",
-                    "purpose": purpose,
                 },
             )
-            for purpose in ("details", "enrich", "full")
+            for _ in range(2)
         ]
         client.portal.call(http.aclose)
 
-    assert [response.status_code for response in responses] == [200, 200, 200]
-    detail, enrich, full = [response.json()["data"] for response in responses]
-    for result in (detail, enrich, full):
+    assert [response.status_code for response in responses] == [200, 200]
+    for response in responses:
+        result = response.json()["data"]
         item = result["items"][0]
+        assert set(item) == {"identifier", "status", "paper", "error"}
         assert item["status"] == "found"
-        assert item["metadata"]["huggingface"]["ai_summary"] == "HF summary"
+        expected_metadata = {
+            "upvotes": 0, "ai_keywords": ["reinforcement learning", "multi-stage training", "cold-start data", "Qwen", "Llama"],
+            "github_repo": "https://github.com/deepseek-ai/deepseek-r1", "github_stars": 91977,
+            "linked_models": [{"id": "deepseek-ai/DeepSeek-R1", "likes": 14415}],
+            "linked_datasets": [{"id": "evaluation/reasoning", "likes": 0}],
+        }
+        if abstract is None:
+            expected_metadata["ai_summary"] = "HF summary"
+        assert item["paper"]["metadata"]["huggingface"] == expected_metadata
+        assert item["paper"]["title"] == "HF fallback title"
+        assert item["paper"]["abstract"] == abstract
+        assert item["paper"]["authors"] == ["First Author et al."]
         assert {entry["source"]: entry["status"] for entry in result["execution"]} == {
             "arxiv": "completed",
             "s2": "failed",
             "openalex": "failed",
             "huggingface": "completed",
         }
-    assert detail["items"][0]["paper"]["title"] == "HF fallback title"
-    assert full["items"][0]["paper"]["authors"] == ["First Author et al."]
-    assert enrich["items"][0]["paper"] is None
-    assert full["items"][0]["enrichment_status"] == "partial"
     assert len(requests) == 1
     assert requests[0].url.path == "/api/papers/2501.12948"
 
@@ -520,13 +532,15 @@ def test_lookup_preserves_selected_offline_s2_facts(scholar_client):
         json={"identifiers": ["arxiv:2201.00001"]},
     )
     assert response.json()["data"]["items"][0]["paper"]["metadata"]["s2"] == {
-        **s2,
-        "tldr": {"text": ""},
+        "corpus_id": "1001",
+        "citation_count": 0,
+        "influential_citation_count": 0,
+        "is_open_access": False,
     }
     assert es.lookup_documents[("arxiv_id", "2201.00001")][0]["metadata"]["s2"] == s2
 
 
-def test_search_uses_openalex_header_and_user_scoped_cache(scholar_client):
+def test_search_and_lookup_share_redis_cache_across_users_and_credentials(scholar_client):
     client, _, redis = scholar_client
 
     class RecordingSearcher:
@@ -561,6 +575,20 @@ def test_search_uses_openalex_header_and_user_scoped_cache(scholar_client):
             headers={**headers, "X-User-Id": "user-b"},
             json=request,
         )
+        changed_key = client.post(
+            "/scholar/papers/search",
+            headers={
+                **AUTHORIZED,
+                "X-OpenAlex-Api-Key": "another-secret",
+                "X-User-Id": "user-a",
+            },
+            json=request,
+        )
+        without_key = client.post(
+            "/scholar/papers/search",
+            headers={**AUTHORIZED, "X-User-Id": "user-c"},
+            json=request,
+        )
         lookup = client.post(
             "/scholar/papers/lookup",
             headers={**headers, "X-User-Id": "user-a"},
@@ -569,31 +597,36 @@ def test_search_uses_openalex_header_and_user_scoped_cache(scholar_client):
         shared_lookup = client.post(
             "/scholar/papers/lookup",
             headers={**AUTHORIZED, "X-OpenAlex-Api-Key": "another-secret"},
-            json={"identifiers": ["openalex:W123"], "purpose": "full"},
+            json={"identifiers": ["openalex:W123"]},
+        )
+        lookup_without_key = client.post(
+            "/scholar/papers/lookup",
+            headers=AUTHORIZED,
+            json={"identifiers": ["openalex:W123"]},
         )
 
-    assert [first.status_code, repeated.status_code, another_user.status_code] == [
-        200,
-        200,
-        200,
-    ]
+    assert first.status_code == 200
     assert first.json()["data"]["execution"][0]["cache_hit"] is False
-    assert repeated.json()["data"]["execution"][0]["cache_hit"] is True
-    assert another_user.json()["data"]["execution"][0]["cache_hit"] is False
-    assert len(searcher.calls) == 2
-    assert all(call["api_key"] == "user-secret" for call in searcher.calls)
-    assert all(call["field"].value == "medicine" for call in searcher.calls)
+    for response in (repeated, another_user, changed_key, without_key):
+        assert response.status_code == 200
+        assert response.json()["data"]["execution"][0]["cache_hit"] is True
+    assert len(searcher.calls) == 1
+    assert searcher.calls[0]["api_key"] == "user-secret"
+    assert searcher.calls[0]["field"].value == "medicine"
     assert lookup.status_code == 200
     assert lookup.json()["data"]["items"][0]["status"] == "not_found"
-    assert shared_lookup.json()["data"]["items"][0]["status"] == "not_found"
-    assert shared_lookup.json()["data"]["execution"][-1]["cache_hit"] is True
+    for response in (shared_lookup, lookup_without_key):
+        assert response.status_code == 200
+        assert response.json()["data"]["items"][0]["status"] == "not_found"
+        assert response.json()["data"]["execution"][-1]["cache_hit"] is True
     assert len(searcher.lookup_calls) == 1
     assert searcher.lookup_calls[0][1] == "user-secret"
     assert "user-secret" not in str(redis.values)
+    assert "another-secret" not in str(redis.values)
 
 
-def test_discovery_uses_registered_provider_and_caches_real_window(scholar_client):
-    client, _, _ = scholar_client
+def test_discovery_shares_redis_cache_across_credentials_and_preserves_window(scholar_client):
+    client, _, redis = scholar_client
 
     class DailyPapers:
         def __init__(self):
@@ -607,7 +640,14 @@ def test_discovery_uses_registered_provider_and_caches_real_window(scholar_clien
     payload = {"field": "computer_science", "limit": 2}
     with container.huggingface_provider.override(providers.Object(provider)):
         first = client.post(
-            "/scholar/papers/discover", headers=AUTHORIZED, json=payload
+            "/scholar/papers/discover",
+            headers={**AUTHORIZED, "X-HuggingFace-Api-Key": "user-secret"},
+            json=payload,
+        )
+        changed_key = client.post(
+            "/scholar/papers/discover",
+            headers={**AUTHORIZED, "X-HuggingFace-Api-Key": "another-secret"},
+            json=payload,
         )
         repeated = client.post(
             "/scholar/papers/discover", headers=AUTHORIZED, json=payload
@@ -618,8 +658,14 @@ def test_discovery_uses_registered_provider_and_caches_real_window(scholar_clien
             json={**payload, "query": "LLM"},
         )
 
-    assert first.status_code == repeated.status_code == 200
+    assert first.status_code == 200
     assert first.json()["data"]["window_start"] == "2026-10-26"
-    assert repeated.json()["data"]["execution"][0]["cache_hit"]
+    for response in (changed_key, repeated):
+        assert response.status_code == 200
+        assert response.json()["data"]["window_start"] == "2026-10-26"
+        assert response.json()["data"]["execution"][0]["cache_hit"]
     assert len(provider.calls) == 1
+    assert provider.calls[0]["api_key"] == "user-secret"
+    assert "user-secret" not in str(redis.values)
+    assert "another-secret" not in str(redis.values)
     assert invalid.status_code == 400

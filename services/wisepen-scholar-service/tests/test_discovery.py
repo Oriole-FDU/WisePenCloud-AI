@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from datetime import UTC, date, datetime
 
 import orjson
@@ -95,6 +96,36 @@ class FixedDateTime(datetime):
     @classmethod
     def now(cls, tz=None):
         return cls.current
+
+
+@pytest.mark.asyncio
+async def test_discovery_projects_cold_and_cached_results_without_changing_facts():
+    paper = make_paper("2501.12948")
+    paper.authors = ["First Author", "Second Author"]
+    paper.metadata["huggingface"].update({
+        "ai_summary": "A compressed abstract",
+        "ai_keywords": ["reinforcement learning"],
+        "upvotes": 0,
+        "github_repo": None,
+    })
+    original = deepcopy(paper)
+    channel = FakeDiscoverer(PaperDiscovery([paper], None, None))
+    service = service_for(
+        AcademicField.COMPUTER_SCIENCE, "huggingface", channel, FakeDiscoveryCache()
+    )
+    query = PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE)
+
+    first = await service.discover(query)
+    first.papers[0].metadata["huggingface"]["ai_keywords"].append("Changed by caller")
+    repeated = await service.discover(query)
+
+    assert repeated.papers[0].authors == ["First Author et al."]
+    assert repeated.papers[0].metadata == {"huggingface": {
+        "upvotes": 0, "ai_keywords": ["reinforcement learning"],
+    }}
+    assert repeated.execution[0].cache_hit is True
+    assert len(channel.calls) == 1
+    assert paper == original
 
 
 @pytest.mark.asyncio
@@ -312,7 +343,7 @@ async def test_redis_discovery_cache_preserves_windows_and_uses_configured_ttl()
     discovery = PaperDiscovery(
         [make_paper("2401.00001")], date(2026, 10, 26), date(2026, 11, 1)
     )
-    redis.values["scholar:discovery:scholar-index:weekly-key"] = orjson.dumps(
+    redis.values["scholar:discovery:compact-v1:scholar-index:weekly-key"] = orjson.dumps(
         discovery
     )
 
@@ -323,9 +354,6 @@ async def test_redis_discovery_cache_preserves_windows_and_uses_configured_ttl()
     other_index = RedisDiscoveryCacheRepository(redis, "other-index", ttl=900)
 
     assert restored == discovery
-    assert redis.set_calls[0][0] == (
-        "scholar:discovery:compact-v1:scholar-index:weekly-key"
-    )
     assert redis.set_calls[0][2] == 900
     assert orjson.loads(redis.set_calls[0][1])["window_start"] == "2026-10-26"
     assert await other_index.get("weekly-key") is None
@@ -358,9 +386,7 @@ def test_discovery_request_schema_has_only_registered_field_and_no_query():
 @pytest.mark.asyncio
 async def test_discovery_candidate_cache_reused_across_limits_and_credentials():
     papers = [make_paper(f"2401.{index:05d}") for index in range(10)]
-    channel = FakeDiscoverer(
-        PaperDiscovery(papers, None, None), PaperDiscovery(papers, None, None)
-    )
+    channel = FakeDiscoverer(PaperDiscovery(papers, None, None))
     cache = FakeDiscoveryCache()
     service = PaperDiscoveryService(
         {"huggingface": channel},
@@ -382,8 +408,17 @@ async def test_discovery_candidate_cache_reused_across_limits_and_credentials():
     assert len(larger.papers) == 8
     assert larger.execution[0].cache_hit
     assert len(channel.calls) == 1
-    await service.discover(
-        PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE),
+    byok = await service.discover(
+        PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE, limit=8),
         credentials={"huggingface": "user"},
     )
-    assert len(channel.calls) == 2
+    without_credentials = service_for(
+        AcademicField.COMPUTER_SCIENCE, "huggingface", channel, cache
+    )
+    anonymous = await without_credentials.discover(
+        PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE, limit=8)
+    )
+    assert byok.execution[0].cache_hit
+    assert anonymous.execution[0].cache_hit
+    assert byok.papers == anonymous.papers == larger.papers
+    assert len(channel.calls) == 1

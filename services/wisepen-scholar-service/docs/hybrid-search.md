@@ -62,7 +62,7 @@ HTTP 的 `X-OpenAlex-Api-Key`、`X-HuggingFace-Api-Key` 承载 BYOK；Chat 工�
 ，均不进入模型参数。
 
 来源请求批量获取候选：本地 arXiv 和 OpenAlex 各 200，HF 搜索/发现 100。候选缓存键不包含用户
-limit，应用层在本次请求融合和返回时裁剪；日期、领域、排序、模型/检索版本与凭证指纹仍参与隔离。富化只对本次返回论文执行。
+limit，应用层在本次请求融合和返回时裁剪；日期、领域、排序和模型/检索版本参与缓存身份，用户标识和凭证不参与。search、discover、lookup 均跨 BYOK、平台凭证及无凭证请求共享缓存，未命中时才使用当前凭证访问上游。富化只对本次返回论文执行。
 
 离线命令与恢复操作见 [维护文档](../deploy/README.md)。真实 ES/GPU 小集验收 62 篇：DeepSeek-R1 原论文第 2，Attention Is All
 You Need 第 1，过滤、增量保留向量及 alias 回滚已通过。全量迁移验收由迁移日志记录。

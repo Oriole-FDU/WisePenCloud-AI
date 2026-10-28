@@ -1,0 +1,1032 @@
+{
+  "sample": "s2_batch",
+  "http_status": 200,
+  "raw_response_bytes": 24444,
+  "papers": [
+    {
+      "title": "Attention is All you Need",
+      "raw_keys": [
+        "paperId",
+        "externalIds",
+        "corpusId",
+        "url",
+        "title",
+        "venue",
+        "year",
+        "citationCount",
+        "influentialCitationCount",
+        "isOpenAccess",
+        "openAccessPdf",
+        "tldr",
+        "publicationDate",
+        "citationStyles",
+        "authors",
+        "abstract"
+      ],
+      "arxiv_id": "1706.03762",
+      "doi": null,
+      "url": "https://www.semanticscholar.org/paper/204e3073870fae3d05bcbc2f6a8e263d9b72e776",
+      "pdf_url": null,
+      "metadata": {
+        "s2": {
+          "corpus_id": "13756489",
+          "paper_id": "204e3073870fae3d05bcbc2f6a8e263d9b72e776",
+          "citation_count": 199000,
+          "influential_citation_count": 21110,
+          "is_open_access": false,
+          "tldr": {
+            "text": "A new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely is proposed, which generalizes well to other tasks by applying it successfully to English constituency parsing both with large and limited training data."
+          },
+          "open_access_pdf": null,
+          "bibtex": "@Article{Vaswani2017AttentionIA,\n author = {Ashish Vaswani and Noam Shazeer and N. Parmar and J. Uszkoreit and Llion Jones and Aidan N. Gomez and Lukasz Kaiser and I. Polosukhin},\n booktitle = {Neural Information Processing Systems},\n pages = {5998-6008},\n title = {Attention is All you Need},\n year = {2017}\n}\n",
+          "venue": "Neural Information Processing Systems"
+        }
+      },
+      "metadata_bytes": 883
+    },
+    {
+      "title": "DeepSeek-R1 incentivizes reasoning in LLMs through reinforcement learning",
+      "raw_keys": [
+        "paperId",
+        "externalIds",
+        "corpusId",
+        "url",
+        "title",
+        "venue",
+        "year",
+        "citationCount",
+        "influentialCitationCount",
+        "isOpenAccess",
+        "openAccessPdf",
+        "tldr",
+        "publicationDate",
+        "citationStyles",
+        "authors",
+        "abstract"
+      ],
+      "arxiv_id": "2501.12948",
+      "doi": "10.1038/s41586-025-09422-z",
+      "url": "https://www.semanticscholar.org/paper/2eed1fad9bbf887d4395de40f20144c4fafefd7f",
+      "pdf_url": "https://www.nature.com/articles/s41586-025-09422-z.pdf",
+      "metadata": {
+        "s2": {
+          "corpus_id": "275789950",
+          "paper_id": "2eed1fad9bbf887d4395de40f20144c4fafefd7f",
+          "citation_count": 5958,
+          "influential_citation_count": 954,
+          "is_open_access": true,
+          "tldr": {
+            "text": "A new artificial intelligence model, DeepSeek-R1, is introduced, demonstrating that the reasoning abilities of large language models can be incentivized through pure reinforcement learning, removing the need for human-annotated demonstrations."
+          },
+          "open_access_pdf": "https://www.nature.com/articles/s41586-025-09422-z.pdf",
+          "bibtex": "@Article{DeepSeek-AI2025DeepSeekR1IR,\n author = {DeepSeek-AI and Daya Guo and De-Jian Yang and Hao-Wei Zhang and Jun-Mei Song and Ruoyu Zhang and Runxin Xu and Qi-Hao Zhu and Shi-Rong Ma and Pei-Yi Wang and Xiaoling Bi and Xiaokang Zhang and Xing-Kai Yu and Yu Wu and Z. Wu and Zhibin Gou and Zhihong Shao and Zhuo-Shu Li and Zi-Yi Gao and Ai-Xin Liu and Bing Xue and Bing-Li Wang and Bochao Wu and B. Feng and Cheng-Da Lu and Cheng-Gang Zhao and C. Deng and Chen-Yu Zhang and Chong Ruan and Da-Mai Dai and De-Li Chen and Dong-Li Ji and Erhang Li and Fangyun Lin and Fucong Dai and Fu-Li Luo and Guangbo Hao and Guan-Ting Chen and Guo-Wei Li and H. Zhang and Han Bao and Han-Wei Xu and Hao-Cheng Wang and Honghui Ding and Huajian Xin and Hua-Zuo Gao and Hui Qu and Hui Li and Jianzhong Guo and Jia-Shi Li and Jia-Wei Wang and Jing-Chang Chen and Jing-Yang Yuan and Jun-Jie Qiu and Jun-Long Li and J. Cai and J. Ni and Jian Liang and Jin Chen and Kai Dong and Kai Hu and Kaige Gao and Kang Guan and Kexin Huang and Kuai Yu and Le-An Wang and Lecong Zhang and Liang Zhao and Li-Tong Wang and Li-Yue Zhang and Lei Xu and Leyi Xia and Ming-Chuan Zhang and Ming-Hua Zhang and M. Tang and Meng Li and Miaojun Wang and Ming-Ming Li and Ning Tian and Pan-Pan Huang and Peng Zhang and Qiancheng Wang and Qin-Yu Chen and Qiu-Shi Du and Ruiqi Ge and Rui-Song Zhang and Rui-Zhe Pan and Runji Wang and R. J. Chen and R. Jin and Ru-Yi Chen and Shanghao Lu and Shang-Yan Zhou and Shanhuang Chen and Shengfeng Ye and Shi-Yu Wang and Shuiping Yu and Shun-Feng Zhou and Shuting Pan and S. Li and Shuang Zhou and Shao-Kang Wu and Tao Yun and Tian Pei and T. Sun and T. Wang and Wang-Ding Zeng and Wanjia Zhao and Wen Liu and W. Liang and Wen-Jun Gao and Wen-Xia Yu and Wentao Zhang and W. Xiao and Wei An and Xiaodong Liu and Xiao-Han Wang and Xiao-Kang Chen and X. Nie and Xin Cheng and Xin Liu and Xin Xie and Xing-Chao Liu and Xin-Yu Yang and Xin-Yuan Li and Xuecheng Su and Xuheng Lin and X. Q. Li and Xiang-Yu Jin and Xiaojin Shen and Xiaosha Chen and Xiaowen Sun and Xiaoxiang Wang and Xinnan Song and Xinyi Zhou and Xianzu Wang and Xinxia Shan and Y. K. Li and Y. Q. Wang and Y. Wei and Yang Zhang and Yan-Hong Xu and Yao Li and Yao Zhao and Yao-Feng Sun and Yao-Hui Wang and Yi Yu and Yichao Zhang and Yi-Fan Shi and Yi Xiong and Ying He and Y. Piao and Yi-Song Wang and Yi-Xuan Tan and Yi-Yang Ma and Yiyuan Liu and Yong-Qiang Guo and Y. Ou and Yuduan Wang and Yue Gong and Yu-Jing Zou and Yujia He and Yun-Fan Xiong and Yu-Wei Luo and Yu-Mei You and Yuxuan Liu and Yu-Yang Zhou and Y. X. Zhu and Yan-Ping Huang and Yao Li and Yi Zheng and Yu-Chen Zhu and Yun-Xiang Ma and Ying Tang and Yukun Zha and Yuting Yan and Z. Ren and Zehui Ren and Zhangli Sha and Zhe Fu and Zhe-An Xu and Zhen-Da Xie and Zhengyan Zhang and Zhewen Hao and Zhicheng Ma and Zhi-Gang Yan and Zhi-Yu Wu and Zihui Gu and Zi-jia Zhu and Zijun Liu and Zi-Long Li and Zi-Wei Xie and Ziyang Song and Zi-Zheng Pan and Zhen Huang and Zhi-Peng Xu and Zhongyu Zhang and Zhen Zhang},\n booktitle = {Nature},\n journal = {Nature},\n pages = {633 - 638},\n title = {DeepSeek-R1 incentivizes reasoning in LLMs through reinforcement learning},\n volume = {645},\n year = {2025}\n}\n",
+          "venue": "Nature"
+        }
+      },
+      "metadata_bytes": 3760
+    },
+    {
+      "title": "Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine",
+      "raw_keys": [
+        "paperId",
+        "externalIds",
+        "corpusId",
+        "url",
+        "title",
+        "venue",
+        "year",
+        "citationCount",
+        "influentialCitationCount",
+        "isOpenAccess",
+        "openAccessPdf",
+        "tldr",
+        "publicationDate",
+        "citationStyles",
+        "authors",
+        "abstract"
+      ],
+      "arxiv_id": null,
+      "doi": "10.1056/nejmoa2034577",
+      "url": "https://www.semanticscholar.org/paper/b47e6e19e7c459210316ee02b830253fe8a6e904",
+      "pdf_url": "https://www.ncbi.nlm.nih.gov/pmc/articles/7745181",
+      "metadata": {
+        "s2": {
+          "corpus_id": "228087117",
+          "paper_id": "b47e6e19e7c459210316ee02b830253fe8a6e904",
+          "citation_count": 11478,
+          "influential_citation_count": 642,
+          "is_open_access": true,
+          "tldr": {
+            "text": "A two-dose regimen of BNT162b2 conferred 95% protection against Covid-19 in persons 16 years of age or older and safety over a median of 2 months was similar to that of other viral vaccines."
+          },
+          "open_access_pdf": "https://www.ncbi.nlm.nih.gov/pmc/articles/7745181",
+          "bibtex": "@Article{Polack2020SafetyAE,\n author = {F. Polack and Stephen J. Thomas and N. Kitchin and J. Absalon and A. Gurtman and S. Lockhart and J. Perez and Gonzalo Pérez Marc and E. Moreira and C. Zerbini and R. Bailey and K. Swanson and Satrajit Roychoudhury and K. Koury and Ping Li and W. Kalina and David Cooper and R. Frenck and L. Hammitt and O. Türeci and H. Nell and A. Schaefer and S. Ünal and D. Tresnan and Susan H. Mather and P. Dormitzer and U. Şahin and K. Jansen and W. Gruber},\n booktitle = {New England Journal of Medicine},\n journal = {The New England Journal of Medicine},\n title = {Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine},\n year = {2020}\n}\n",
+          "venue": "New England Journal of Medicine"
+        }
+      },
+      "metadata_bytes": 1181
+    }
+  ]
+}
+{
+  "sample": "openalex_transformer",
+  "http_status": 200,
+  "raw_response_bytes": 15917,
+  "title": "Attention Is All You Need",
+  "raw_keys": [
+    "id",
+    "doi",
+    "primary_location",
+    "best_oa_location",
+    "locations",
+    "updated_date",
+    "ids",
+    "cited_by_count",
+    "primary_topic",
+    "open_access",
+    "is_retracted",
+    "mesh",
+    "study_designs",
+    "title",
+    "abstract_inverted_index",
+    "authorships",
+    "publication_date",
+    "publication_year"
+  ],
+  "arxiv_id": "1706.03762",
+  "doi": "10.65215/2q58a426",
+  "url": "https://doi.org/10.65215/2q58a426",
+  "pdf_url": "https://langtaosha.org.cn/lts/en/preprint/download/49/231",
+  "metadata": {
+    "openalex": {
+      "id": "https://openalex.org/W2626778328",
+      "ids": {
+        "openalex": "https://openalex.org/W2626778328",
+        "doi": "https://doi.org/10.65215/2q58a426",
+        "mag": "2626778328"
+      },
+      "updated_date": "2026-10-28T10:33:24.094632",
+      "cited_by_count": 78422,
+      "primary_topic": {
+        "id": "https://openalex.org/T10181",
+        "display_name": "Natural Language Processing Techniques",
+        "score": 0.7821999788284302,
+        "subfield": {
+          "id": "https://openalex.org/subfields/1702",
+          "display_name": "Artificial Intelligence"
+        },
+        "field": {
+          "id": "https://openalex.org/fields/17",
+          "display_name": "Computer Science"
+        },
+        "domain": {
+          "id": "https://openalex.org/domains/3",
+          "display_name": "Physical Sciences"
+        }
+      },
+      "open_access": {
+        "is_oa": true,
+        "oa_status": "green",
+        "oa_url": "https://langtaosha.org.cn/lts/en/preprint/download/49/231",
+        "any_repository_has_fulltext": true
+      },
+      "is_retracted": false,
+      "mesh": [],
+      "study_designs": [],
+      "venue": null,
+      "arxiv_ids": [
+        "1706.03762"
+      ],
+      "best_oa_location": {
+        "landing_page_url": "https://doi.org/10.65215/ne77pf66",
+        "pdf_url": "https://langtaosha.org.cn/lts/en/preprint/download/49/231",
+        "license": null,
+        "version": "acceptedVersion"
+      }
+    }
+  },
+  "metadata_bytes": 1067,
+  "metadata_field_bytes": {
+    "id": 34,
+    "ids": 108,
+    "updated_date": 28,
+    "cited_by_count": 5,
+    "primary_topic": 382,
+    "open_access": 138,
+    "is_retracted": 5,
+    "mesh": 2,
+    "study_designs": 2,
+    "venue": 4,
+    "arxiv_ids": 14,
+    "best_oa_location": 169
+  }
+}
+{
+  "sample": "openalex_clinical",
+  "http_status": 200,
+  "raw_response_bytes": 223371,
+  "title": "Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine",
+  "raw_keys": [
+    "id",
+    "doi",
+    "primary_location",
+    "best_oa_location",
+    "locations",
+    "updated_date",
+    "ids",
+    "cited_by_count",
+    "primary_topic",
+    "open_access",
+    "is_retracted",
+    "mesh",
+    "study_designs",
+    "title",
+    "abstract_inverted_index",
+    "authorships",
+    "publication_date",
+    "publication_year"
+  ],
+  "arxiv_id": null,
+  "doi": "10.1056/nejmoa2034577",
+  "url": "https://doi.org/10.1056/nejmoa2034577",
+  "pdf_url": null,
+  "metadata": {
+    "openalex": {
+      "id": "https://openalex.org/W3111255098",
+      "ids": {
+        "openalex": "https://openalex.org/W3111255098",
+        "doi": "https://doi.org/10.1056/nejmoa2034577",
+        "mag": "3111255098",
+        "pmid": "https://pubmed.ncbi.nlm.nih.gov/33301246",
+        "pmcid": "https://www.ncbi.nlm.nih.gov/pmc/articles/7745181"
+      },
+      "updated_date": "2026-10-28T10:33:24.094632",
+      "cited_by_count": 14585,
+      "primary_topic": {
+        "id": "https://openalex.org/T10118",
+        "display_name": "SARS-CoV-2 and COVID-19 Research",
+        "score": 1.0,
+        "subfield": {
+          "id": "https://openalex.org/subfields/2725",
+          "display_name": "Infectious Diseases"
+        },
+        "field": {
+          "id": "https://openalex.org/fields/27",
+          "display_name": "Medicine"
+        },
+        "domain": {
+          "id": "https://openalex.org/domains/4",
+          "display_name": "Health Sciences"
+        }
+      },
+      "open_access": {
+        "is_oa": true,
+        "oa_status": "green",
+        "oa_url": "https://www.ncbi.nlm.nih.gov/pmc/articles/7745181",
+        "any_repository_has_fulltext": true
+      },
+      "is_retracted": false,
+      "mesh": [
+        {
+          "descriptor_ui": "D000086382",
+          "descriptor_name": "COVID-19",
+          "qualifier_ui": "Q000276",
+          "qualifier_name": "immunology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086382",
+          "descriptor_name": "COVID-19",
+          "qualifier_ui": "Q000276",
+          "qualifier_name": "immunology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086382",
+          "descriptor_name": "COVID-19",
+          "qualifier_ui": "Q000276",
+          "qualifier_name": "immunology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086382",
+          "descriptor_name": "COVID-19",
+          "qualifier_ui": "Q000276",
+          "qualifier_name": "immunology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086382",
+          "descriptor_name": "COVID-19",
+          "qualifier_ui": "Q000517",
+          "qualifier_name": "prevention & control",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086382",
+          "descriptor_name": "COVID-19",
+          "qualifier_ui": "Q000517",
+          "qualifier_name": "prevention & control",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086382",
+          "descriptor_name": "COVID-19",
+          "qualifier_ui": "Q000517",
+          "qualifier_name": "prevention & control",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086382",
+          "descriptor_name": "COVID-19",
+          "qualifier_ui": "Q000517",
+          "qualifier_name": "prevention & control",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086402",
+          "descriptor_name": "SARS-CoV-2",
+          "qualifier_ui": "Q000235",
+          "qualifier_name": "genetics",
+          "is_major_topic": true
+        },
+        {
+          "descriptor_ui": "D000086402",
+          "descriptor_name": "SARS-CoV-2",
+          "qualifier_ui": "Q000235",
+          "qualifier_name": "genetics",
+          "is_major_topic": true
+        },
+        {
+          "descriptor_ui": "D000086402",
+          "descriptor_name": "SARS-CoV-2",
+          "qualifier_ui": "Q000235",
+          "qualifier_name": "genetics",
+          "is_major_topic": true
+        },
+        {
+          "descriptor_ui": "D000086402",
+          "descriptor_name": "SARS-CoV-2",
+          "qualifier_ui": "Q000235",
+          "qualifier_name": "genetics",
+          "is_major_topic": true
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000008",
+          "qualifier_name": "administration & dosage",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000008",
+          "qualifier_name": "administration & dosage",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000008",
+          "qualifier_name": "administration & dosage",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000008",
+          "qualifier_name": "administration & dosage",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000009",
+          "qualifier_name": "adverse effects",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000009",
+          "qualifier_name": "adverse effects",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000009",
+          "qualifier_name": "adverse effects",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000009",
+          "qualifier_name": "adverse effects",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000276",
+          "qualifier_name": "immunology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000276",
+          "qualifier_name": "immunology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000276",
+          "qualifier_name": "immunology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000086663",
+          "descriptor_name": "COVID-19 Vaccines",
+          "qualifier_ui": "Q000276",
+          "qualifier_name": "immunology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000087503",
+          "descriptor_name": "mRNA Vaccines",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000087503",
+          "descriptor_name": "mRNA Vaccines",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000087503",
+          "descriptor_name": "mRNA Vaccines",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000087503",
+          "descriptor_name": "mRNA Vaccines",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000090982",
+          "descriptor_name": "BNT162 Vaccine",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000090982",
+          "descriptor_name": "BNT162 Vaccine",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000090982",
+          "descriptor_name": "BNT162 Vaccine",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000090982",
+          "descriptor_name": "BNT162 Vaccine",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000293",
+          "descriptor_name": "Adolescent",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000293",
+          "descriptor_name": "Adolescent",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000293",
+          "descriptor_name": "Adolescent",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000293",
+          "descriptor_name": "Adolescent",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000328",
+          "descriptor_name": "Adult",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000328",
+          "descriptor_name": "Adult",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000328",
+          "descriptor_name": "Adult",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000328",
+          "descriptor_name": "Adult",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000368",
+          "descriptor_name": "Aged",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000368",
+          "descriptor_name": "Aged",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000368",
+          "descriptor_name": "Aged",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D000368",
+          "descriptor_name": "Aged",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D005221",
+          "descriptor_name": "Fatigue",
+          "qualifier_ui": "Q000209",
+          "qualifier_name": "etiology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D005221",
+          "descriptor_name": "Fatigue",
+          "qualifier_ui": "Q000209",
+          "qualifier_name": "etiology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D005221",
+          "descriptor_name": "Fatigue",
+          "qualifier_ui": "Q000209",
+          "qualifier_name": "etiology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D005221",
+          "descriptor_name": "Fatigue",
+          "qualifier_ui": "Q000209",
+          "qualifier_name": "etiology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D005260",
+          "descriptor_name": "Female",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D005260",
+          "descriptor_name": "Female",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D005260",
+          "descriptor_name": "Female",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D005260",
+          "descriptor_name": "Female",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D006261",
+          "descriptor_name": "Headache",
+          "qualifier_ui": "Q000209",
+          "qualifier_name": "etiology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D006261",
+          "descriptor_name": "Headache",
+          "qualifier_ui": "Q000209",
+          "qualifier_name": "etiology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D006261",
+          "descriptor_name": "Headache",
+          "qualifier_ui": "Q000209",
+          "qualifier_name": "etiology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D006261",
+          "descriptor_name": "Headache",
+          "qualifier_ui": "Q000209",
+          "qualifier_name": "etiology",
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D006801",
+          "descriptor_name": "Humans",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D006801",
+          "descriptor_name": "Humans",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D006801",
+          "descriptor_name": "Humans",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D006801",
+          "descriptor_name": "Humans",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D007117",
+          "descriptor_name": "Immunization, Secondary",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D007117",
+          "descriptor_name": "Immunization, Secondary",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D007117",
+          "descriptor_name": "Immunization, Secondary",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D007117",
+          "descriptor_name": "Immunization, Secondary",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D008297",
+          "descriptor_name": "Male",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D008297",
+          "descriptor_name": "Male",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D008297",
+          "descriptor_name": "Male",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D008297",
+          "descriptor_name": "Male",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D008875",
+          "descriptor_name": "Middle Aged",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D008875",
+          "descriptor_name": "Middle Aged",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D008875",
+          "descriptor_name": "Middle Aged",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D008875",
+          "descriptor_name": "Middle Aged",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D014614",
+          "descriptor_name": "Vaccines, Synthetic",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D014614",
+          "descriptor_name": "Vaccines, Synthetic",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D014614",
+          "descriptor_name": "Vaccines, Synthetic",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D014614",
+          "descriptor_name": "Vaccines, Synthetic",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D016037",
+          "descriptor_name": "Single-Blind Method",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D016037",
+          "descriptor_name": "Single-Blind Method",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D016037",
+          "descriptor_name": "Single-Blind Method",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D016037",
+          "descriptor_name": "Single-Blind Method",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D016896",
+          "descriptor_name": "Treatment Outcome",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D016896",
+          "descriptor_name": "Treatment Outcome",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D016896",
+          "descriptor_name": "Treatment Outcome",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D016896",
+          "descriptor_name": "Treatment Outcome",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D055815",
+          "descriptor_name": "Young Adult",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D055815",
+          "descriptor_name": "Young Adult",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D055815",
+          "descriptor_name": "Young Adult",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        },
+        {
+          "descriptor_ui": "D055815",
+          "descriptor_name": "Young Adult",
+          "qualifier_ui": null,
+          "qualifier_name": null,
+          "is_major_topic": false
+        }
+      ],
+      "study_designs": [
+        {
+          "id": "https://openalex.org/study-designs/randomized-controlled-trial",
+          "display_name": "Randomized Controlled Trial"
+        },
+        {
+          "id": "https://openalex.org/study-designs/clinical-trial",
+          "display_name": "Clinical Trial"
+        }
+      ],
+      "venue": "New England Journal of Medicine",
+      "arxiv_ids": [],
+      "best_oa_location": {
+        "landing_page_url": "https://www.ncbi.nlm.nih.gov/pmc/articles/7745181",
+        "pdf_url": null,
+        "license": null,
+        "version": "publishedVersion"
+      }
+    }
+  },
+  "metadata_bytes": 12967,
+  "metadata_field_bytes": {
+    "id": 34,
+    "ids": 222,
+    "updated_date": 28,
+    "cited_by_count": 5,
+    "primary_topic": 347,
+    "open_access": 130,
+    "is_retracted": 5,
+    "mesh": 11645,
+    "study_designs": 209,
+    "venue": 33,
+    "arxiv_ids": 2,
+    "best_oa_location": 131
+  }
+}
+{
+  "sample": "huggingface_deepseek",
+  "http_status": 200,
+  "raw_response_bytes": 29641,
+  "title": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via\n  Reinforcement Learning",
+  "raw_keys": [
+    "id",
+    "authors",
+    "publishedAt",
+    "submittedOnDailyAt",
+    "title",
+    "submittedOnDailyBy",
+    "summary",
+    "upvotes",
+    "discussionId",
+    "githubRepo",
+    "githubRepoAddedBy",
+    "ai_summary",
+    "ai_keywords",
+    "ai_summary_model",
+    "githubStars",
+    "organization",
+    "linkedModels",
+    "numTotalModels",
+    "linkedDatasets",
+    "numTotalDatasets",
+    "linkedSpaces",
+    "numTotalSpaces"
+  ],
+  "raw_paper_keys": [],
+  "url": "https://arxiv.org/abs/2501.12948",
+  "pdf_url": "https://arxiv.org/pdf/2501.12948",
+  "metadata": {
+    "huggingface": {
+      "ai_summary": "DeepSeek-R1-Zero and DeepSeek-R1 utilize reinforcement learning and multi-stage training to enhance reasoning capabilities, with DeepSeek-R1 achieving performance comparable to OpenAI-o1-1217.",
+      "ai_keywords": [
+        "reinforcement learning",
+        "multi-stage training",
+        "cold-start data",
+        "Qwen",
+        "Llama"
+      ],
+      "upvotes": 465,
+      "github_repo": "https://github.com/deepseek-ai/deepseek-r1",
+      "github_stars": 91977,
+      "submitted_at": "2025-01-23T00:00:00.000Z",
+      "linked_models": [
+        {
+          "id": "deepseek-ai/DeepSeek-R1",
+          "likes": 14415
+        },
+        {
+          "id": "deepseek-ai/DeepSeek-R1-0528",
+          "likes": 2492
+        },
+        {
+          "id": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+          "likes": 1664
+        }
+      ],
+      "linked_datasets": [
+        {
+          "id": "hejun0180-pixel/Wait-Phenomenon-Evidence-Gemini-DeepSeek",
+          "likes": 2
+        },
+        {
+          "id": "CTCT-CT2/ChangeMore-prompt-injection-eval",
+          "likes": 2
+        },
+        {
+          "id": "gjoelbye/cot-hidden-state-trajectories",
+          "likes": 0
+        }
+      ]
+    }
+  },
+  "metadata_bytes": 852,
+  "metadata_field_bytes": {
+    "ai_summary": 194,
+    "ai_keywords": 82,
+    "upvotes": 3,
+    "github_repo": 44,
+    "github_stars": 5,
+    "submitted_at": 26,
+    "linked_models": 162,
+    "linked_datasets": 196
+  },
+  "raw_linked_models_count": 4,
+  "raw_linked_datasets_count": 4
+}

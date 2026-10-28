@@ -17,6 +17,7 @@ from scholar.domain.interfaces.paper_discoverer import (
     PaperDiscoverer,
 )
 from scholar.domain.models.fields import AcademicField
+from scholar.application.paper_projection import project_paper
 from scholar.domain.models.paper import Paper
 from scholar.domain.models.source_execution import (
     SourceExecution,
@@ -65,7 +66,7 @@ class PaperDiscoveryService:
 
         credentials = self.platform_credentials | (credentials or {})
         api_key = credentials.get(source)
-        cache_key = self._cache_key(source, query, api_key)
+        cache_key = self._cache_key(source, query)
         discovery = await self.cache.get(cache_key)
         cache_hit = discovery is not None
         if discovery is None:
@@ -79,7 +80,7 @@ class PaperDiscoveryService:
             await self.cache.put(cache_key, discovery)
 
         return DiscoveryResult(
-            papers=discovery.papers[: query.limit],
+            papers=[project_paper(paper) for paper in discovery.papers[: query.limit]],
             window_start=discovery.window_start,
             window_end=discovery.window_end,
             execution=[
@@ -92,9 +93,7 @@ class PaperDiscoveryService:
         )
 
     @staticmethod
-    def _cache_key(
-        source: str, query: PaperDiscoveryQuery, api_key: str | None = None
-    ) -> str:
+    def _cache_key(source: str, query: PaperDiscoveryQuery) -> str:
         today = datetime.now(UTC).date()
         if query.period == DiscoveryPeriod.DAILY:
             window = today.isoformat()
@@ -104,6 +103,7 @@ class PaperDiscoveryService:
         else:
             window = f"{today.year:04d}-{today.month:02d}"
 
+        # 同一来源和发现窗口共享候选，调用凭证不参与缓存身份。
         identity = {
             "source": source,
             "field": query.field.value,
@@ -111,9 +111,6 @@ class PaperDiscoveryService:
             "window": window,
             "sort": query.sort.value,
             "candidates": 100,
-            "credential": hashlib.sha256(api_key.encode()).hexdigest()
-            if api_key
-            else None,
         }
         digest = hashlib.sha256(
             orjson.dumps(identity, option=orjson.OPT_SORT_KEYS)

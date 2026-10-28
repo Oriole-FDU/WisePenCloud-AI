@@ -1,3 +1,5 @@
+from scholar.providers.policies.enrichment import ENRICHMENT_RULES, EnrichmentRules
+from dataclasses import replace
 """验证公共来源回退、身份别名接力和学科增量查询。"""
 
 from datetime import date
@@ -7,8 +9,6 @@ from elastic_transport import ConnectionError as ElasticConnectionError
 from scholar.application.field_policies import FieldPolicy
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.services.lookup import (
-    EnrichmentStatus,
-    LookupPurpose,
     LookupStatus,
     PaperLookup,
     PaperLookupService,
@@ -67,7 +67,9 @@ def make_paper(
 
 
 @pytest.mark.asyncio
-async def test_s2_aliases_route_domain_providers_without_changing_core_identity():
+async def test_s2_aliases_route_domain_providers_without_changing_core_identity(monkeypatch):
+    rules = EnrichmentRules([IdentifierKind.DOI], lambda paper: paper.metadata["clinical_trials"])
+    monkeypatch.setitem(ENRICHMENT_RULES, "clinical_trials", rules)
     corpus = parse_identifier("corpusid:123")
     arxiv = parse_identifier("2401.00001")
     doi = parse_identifier("10.5555/clinical")
@@ -118,21 +120,15 @@ async def test_s2_aliases_route_domain_providers_without_changing_core_identity(
     }
     runner = LookupRunner(
         {
-            PaperSource.S2: LookupBinding(
-                s2,
-                None,
-                [IdentifierKind.CORPUS_ID],
-                has_signals=s2_signals,
-                aliases=s2_aliases,
-            ),
-            PaperSource.HUGGINGFACE: LookupBinding(hf, None, [IdentifierKind.ARXIV]),
-            "clinical_trials": LookupBinding(clinical, None, [IdentifierKind.DOI]),
+            PaperSource.S2: LookupBinding(s2, None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.CORPUS_ID], has_signals=s2_signals, aliases=s2_aliases)),
+            PaperSource.HUGGINGFACE: LookupBinding(hf, None, replace(ENRICHMENT_RULES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV])),
+            "clinical_trials": LookupBinding(clinical, None, rules),
         }
     )
 
     result = await PaperLookupService(runner, policies=policies).lookup(
         PaperLookup(
-            [f"corpusid:{corpus.value}"], LookupPurpose.FULL, AcademicField.MEDICINE
+            [f"corpusid:{corpus.value}"], AcademicField.MEDICINE
         )
     )
 
@@ -170,24 +166,17 @@ async def test_only_unresolved_targets_advance_to_the_next_common_source():
     )
     runner = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(
-                arxiv,
-                None,
-                [IdentifierKind.ARXIV],
-                has_signals=arxiv_signals,
-            ),
-            PaperSource.S2: LookupBinding(
-                s2, None, [IdentifierKind.ARXIV], has_signals=s2_signals
-            ),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
+            PaperSource.S2: LookupBinding(s2, None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
         }
     )
 
     result = await PaperLookupService(runner).lookup(
-        PaperLookup([first.value, second.value, second.value], LookupPurpose.ENRICH)
+        PaperLookup([first.value, second.value, second.value])
     )
 
     assert [item.status for item in result.items] == [LookupStatus.FOUND] * 3
-    assert result.items[1].metadata == result.items[2].metadata
+    assert result.items[1].paper.metadata == result.items[2].paper.metadata
     assert arxiv.calls == [([first, second], None)]
     assert s2.calls == [([second], None)]
 
@@ -207,19 +196,10 @@ async def test_general_fallback_success_is_complete_but_domain_failure_is_partia
     hf = FakeProvider(error=ProviderError("HF unavailable"))
     runner = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(
-                arxiv, None, [IdentifierKind.ARXIV], has_signals=arxiv_signals
-            ),
-            PaperSource.S2: LookupBinding(
-                s2, None, [IdentifierKind.ARXIV], has_signals=s2_signals
-            ),
-            PaperSource.OPENALEX: LookupBinding(
-                openalex,
-                None,
-                [IdentifierKind.ARXIV],
-                has_signals=openalex_signals,
-            ),
-            PaperSource.HUGGINGFACE: LookupBinding(hf, None, [IdentifierKind.ARXIV]),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
+            PaperSource.S2: LookupBinding(s2, None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+            PaperSource.OPENALEX: LookupBinding(openalex, None, replace(ENRICHMENT_RULES["openalex"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=openalex_signals)),
+            PaperSource.HUGGINGFACE: LookupBinding(hf, None, replace(ENRICHMENT_RULES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV])),
         }
     )
     policies = {
@@ -228,13 +208,12 @@ async def test_general_fallback_success_is_complete_but_domain_failure_is_partia
 
     result = await PaperLookupService(runner, policies=policies).lookup(
         PaperLookup(
-            [identity.value], LookupPurpose.FULL, AcademicField.COMPUTER_SCIENCE
+            [identity.value], AcademicField.COMPUTER_SCIENCE
         ),
         credentials={PaperSource.OPENALEX: "user-key"},
     )
 
     assert result.items[0].status == LookupStatus.FOUND
-    assert result.items[0].enrichment_status == EnrichmentStatus.PARTIAL
     assert result.items[0].paper.metadata["openalex"]["cited_by_count"] == 0
     assert result.items[0].error == "HF unavailable"
     assert [(item.source, item.status) for item in result.execution] == [
@@ -266,24 +245,16 @@ async def test_real_elasticsearch_lookup_error_is_visible_while_s2_fallback_succ
     s2 = FakeProvider({identity: PaperLookupMatch([s2_paper])})
     runner = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(
-                arxiv,
-                None,
-                [IdentifierKind.ARXIV],
-                has_signals=arxiv_signals,
-            ),
-            PaperSource.S2: LookupBinding(
-                s2, None, [IdentifierKind.ARXIV], has_signals=s2_signals
-            ),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
+            PaperSource.S2: LookupBinding(s2, None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
         }
     )
 
     result = await PaperLookupService(runner).lookup(
-        PaperLookup([identity.value], LookupPurpose.ENRICH)
+        PaperLookup([identity.value])
     )
 
     assert result.items[0].status == LookupStatus.FOUND
-    assert result.items[0].enrichment_status == EnrichmentStatus.COMPLETE
-    assert result.items[0].metadata["s2"]["citation_count"] == 4
+    assert result.items[0].paper.metadata["s2"]["citation_count"] == 4
     assert result.execution[0].status == SourceExecutionStatus.FAILED
     assert "Connection error" in result.execution[0].error

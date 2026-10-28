@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
 from typing import Any
@@ -33,14 +32,3 @@ class Paper:
     pdf_url: str | None
     source: str
     metadata: dict[str, Any] = field(default_factory=dict)
-
-    def project(self) -> Paper:
-        """制作紧凑出口副本；压缩作者列表并剔除 S2 内部观测字段。"""
-        metadata = deepcopy(self.metadata)
-        s2 = metadata.get("s2")
-        if s2 is not None:
-            s2.pop("observed_at", None)
-            if s2.get("tldr") is not None:
-                s2["tldr"].pop("model", None)
-        compact_authors = [f"{self.authors[0]} et al."] if len(self.authors) > 1 else self.authors[:]
-        return replace(self, authors=compact_authors, metadata=metadata)

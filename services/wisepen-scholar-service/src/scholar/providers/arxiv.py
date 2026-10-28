@@ -4,33 +4,31 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import date
 
-from elastic_transport import (
-    ApiError as ElasticApiError,
-)
-from elastic_transport import (
-    ConnectionError as ElasticConnectionError,
-)
-from elastic_transport import (
-    ConnectionTimeout as ElasticConnectionTimeout,
-)
+from elastic_transport import ApiError as ElasticApiError
+from elastic_transport import ConnectionError as ElasticConnectionError
+from elastic_transport import ConnectionTimeout as ElasticConnectionTimeout
 from openai import APIConnectionError, APIStatusError
 
 from common.utils.ai_clients.embedding import EmbeddingClient
 from common.utils.retrieval import Candidate, RrfFusion
-from scholar.domain.errors import (
-    ProviderError,
-    provider_error_message,
-)
+from scholar.domain.errors import ProviderError, provider_error_message
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
-from scholar.domain.models.identifiers import PaperIdentifier
+from scholar.domain.models.identifiers import (
+    IdentifierKind,
+    PaperIdentifier,
+    normalize_arxiv,
+)
+from scholar.domain.models.paper import Paper
 from scholar.domain.repositories.paper_repository import PaperRepository
 from scholar.ml.specter import MODEL_SIGNATURE
 from scholar.providers.s2 import has_signals as s2_has_signals
 
+# 领域 → arXiv 分类映射；None 表示该领域不支持 arXiv 搜索，空列表表示不限分类。
 ARXIV_CATEGORIES: dict[AcademicField, list[str] | None] = {
     AcademicField.GENERAL: [],
     AcademicField.COMPUTER_SCIENCE: ["cs.*"],
@@ -68,12 +66,30 @@ ARXIV_CATEGORIES: dict[AcademicField, list[str] | None] = {
 
 
 def has_signals(metadata: dict) -> bool:
-    """判定本地仓储（arXiv/DOI）是否已含足够富化信号。
-
-    本地基础元信息只算检索底库，不算外部增量；只有离线同步注入过 S2 字段
-    才算真正富化，故直接复用 ``s2.has_signals``。
-    """
+    """本地基础元信息只算检索底库，不算增量；仅当同步注入了 S2 字段才算富化。"""
     return s2_has_signals(metadata)
+
+
+def project_metadata(paper: Paper) -> dict:
+    """保留分类、发表线索与最新修订；仅当提交日期不同于顶层日期时补入。"""
+    values = paper.metadata["arxiv"]
+    result = {
+        name: values.get(name)
+        for name in ("categories", "updated_date", "journal_ref", "comments")
+    }
+
+    versions = values.get("versions")
+    if versions:
+        result["latest_version"] = versions[-1]["version"]
+
+    publication_date = (
+        paper.publication_date.isoformat()
+        if paper.publication_date is not None
+        else None
+    )
+    if values.get("submitted_date") != publication_date:
+        result["submitted_date"] = values.get("submitted_date")
+    return result
 
 
 class ArxivProvider:
@@ -98,7 +114,7 @@ class ArxivProvider:
 
     @property
     def cache_revision(self) -> str:
-        """平台调参或模型版本变化后不复用旧排名；固定文本规则变化时递增算法版本。"""
+        """调参、模型或算法版本变化时使旧排名缓存失效。"""
         return hashlib.sha256(
             json.dumps(
                 {
@@ -122,11 +138,16 @@ class ArxivProvider:
     ) -> list[PaperLookupMatch]:
         """按 arXiv/DOI 身份透传仓储结果，保留歧义与逐项失败。"""
         try:
-            return await self.paper_repository.lookup(ids)
-        except ElasticApiError as error:
+            matches = await self.paper_repository.lookup(self._normalize_ids(ids))
+        except (ElasticApiError, ElasticConnectionError, ElasticConnectionTimeout) as error:
             raise ProviderError(provider_error_message(error)) from error
-        except (ElasticConnectionError, ElasticConnectionTimeout) as error:
-            raise ProviderError(provider_error_message(error)) from error
+        return [
+            replace(
+                match,
+                papers=[self._with_arxiv_doi(paper) for paper in match.papers],
+            )
+            for match in matches
+        ]
 
     async def search(
         self,
@@ -150,11 +171,12 @@ class ArxivProvider:
                 published_before=published_before,
                 limit=self.candidate_limit,
             )
+
+            # 语义召回：编码服务边界失败时降级为仅关键词结果，其余异常继续上抛。
             partial_error = None
             try:
                 vector = (await self.embedding_client.embed(texts=[query]))[0]
             except (APIConnectionError, APIStatusError) as error:
-                # 只允许已知编码服务边界失败降级；无效响应、程序错误和取消直接传播。
                 semantic = []
                 partial_error = provider_error_message(error)
             else:
@@ -166,10 +188,16 @@ class ArxivProvider:
                     limit=self.candidate_limit,
                     num_candidates=self.num_candidates,
                 )
+
+            # 两路召回用 RRF 融合：同一身份跨路排序靠前者得分更高。
             fused = RrfFusion(k=self.rrf_k).fuse(
                 [
                     [
-                        Candidate(candidate_id=paper.arxiv_id, payload=paper, rank=rank)
+                        Candidate(
+                            candidate_id=paper.arxiv_id,
+                            payload=paper,
+                            rank=rank,
+                        )
                         for rank, paper in enumerate(result, 1)
                     ]
                     for result in (papers, semantic)
@@ -189,10 +217,32 @@ class ArxivProvider:
 
             ranked = sorted(fused, key=boosted_score, reverse=True)
             return PaperSearchBatch(
-                [candidate.payload.project() for candidate in ranked[:limit]],
+                [
+                    self._with_arxiv_doi(candidate.payload)
+                    for candidate in ranked[:limit]
+                ],
                 partial_error,
             )
-        except ElasticApiError as error:
+        except (ElasticApiError, ElasticConnectionError, ElasticConnectionTimeout) as error:
             raise ProviderError(provider_error_message(error)) from error
-        except (ElasticConnectionError, ElasticConnectionTimeout) as error:
-            raise ProviderError(provider_error_message(error)) from error
+
+    @staticmethod
+    def _normalize_ids(ids: list[PaperIdentifier]) -> list[PaperIdentifier]:
+        """预印本 DOI 可由 arXiv ID 反推，本地仓储只以 arXiv ID 保存该身份。"""
+        return [
+            PaperIdentifier(
+                IdentifierKind.ARXIV,
+                normalize_arxiv(identifier.value.removeprefix("10.48550/arxiv.")),
+            )
+            if identifier.kind == IdentifierKind.DOI
+            and identifier.value.startswith("10.48550/arxiv.")
+            else identifier
+            for identifier in ids
+        ]
+
+    @staticmethod
+    def _with_arxiv_doi(paper: Paper) -> Paper:
+        """为仅有 arXiv ID 的论文补全官方 DOI（``10.48550/arXiv.<ID>``）。"""
+        if paper.arxiv_id is None or paper.doi is not None:
+            return paper
+        return replace(paper, doi=f"10.48550/arxiv.{paper.arxiv_id}")

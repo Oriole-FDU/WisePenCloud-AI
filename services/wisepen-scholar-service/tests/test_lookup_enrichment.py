@@ -1,12 +1,14 @@
 """从 lookup 公共入口验证完整论文查询、缓存复用和逐项结果。"""
 
+from dataclasses import replace
+from copy import deepcopy
 from datetime import date
+
+from scholar.providers.policies.enrichment import ENRICHMENT_RULES
 
 import pytest
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.services.lookup import (
-    EnrichmentStatus,
-    LookupPurpose,
     LookupStatus,
     PaperLookup,
     PaperLookupService,
@@ -81,8 +83,7 @@ def binding(provider, *, cache=None, identifier_kinds=None, **kwargs):
     return LookupBinding(
         provider,
         cache,
-        identifier_kinds or IdentifierKind.members(),
-        **kwargs,
+        replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=identifier_kinds or IdentifierKind.members(), **({"has_signals": None} | kwargs)),
     )
 
 
@@ -171,7 +172,7 @@ async def test_local_miss_falls_through_to_s2_and_returns_its_complete_paper():
     )
 
     result = await lookup.lookup(
-        PaperLookup([identity.value], purpose=LookupPurpose.FULL)
+        PaperLookup([identity.value])
     )
 
     assert result.items[0].status == LookupStatus.FOUND
@@ -182,7 +183,7 @@ async def test_local_miss_falls_through_to_s2_and_returns_its_complete_paper():
 
 
 @pytest.mark.asyncio
-async def test_same_complete_paper_cache_serves_enrich_and_full_purposes():
+async def test_lookup_projects_complete_cached_facts_without_mutating_them():
     identity = parse_identifier("s2:" + "b" * 40)
     paper = make_paper(
         PaperSource.S2,
@@ -211,17 +212,16 @@ async def test_same_complete_paper_cache_serves_enrich_and_full_purposes():
 
     query_id = f"s2:{identity.value}"
     enriched = await lookup.lookup(
-        PaperLookup([query_id], purpose=LookupPurpose.ENRICH)
+        PaperLookup([query_id])
     )
-    full = await lookup.lookup(PaperLookup([query_id], purpose=LookupPurpose.FULL))
+    full = await lookup.lookup(PaperLookup([query_id]))
 
     assert enriched.items[0].status == LookupStatus.FOUND
-    assert enriched.items[0].paper is None
-    assert enriched.items[0].metadata["s2"]["citation_count"] == 8
-    assert enriched.items[0].enrichment_status == EnrichmentStatus.COMPLETE
+    assert enriched.items[0].paper.title == "Complete cached title"
+    assert enriched.items[0].paper.metadata["s2"]["citation_count"] == 8
     assert full.items[0].paper.authors == ["Author One et al."]
     assert "observed_at" not in full.items[0].paper.metadata["s2"]
-    assert "model" not in full.items[0].paper.metadata["s2"]["tldr"]
+    assert full.items[0].paper.metadata["s2"]["tldr"] == "Summary"
     cached = cache.values[identity]
     assert cached.paper.authors == ["Author One", "Author Two"]
     assert cached.paper.metadata["s2"]["observed_at"] == "2026-10-28T00:00:00Z"
@@ -250,12 +250,13 @@ async def test_lookup_cache_is_shared_across_credentials_without_storing_them():
             )
         }
     )
-    query = PaperLookup([f"openalex:{identity.value}"], purpose=LookupPurpose.FULL)
+    query = PaperLookup([f"openalex:{identity.value}"])
 
     first = await lookup.lookup(query, credentials={PaperSource.OPENALEX: "key-a"})
     second = await lookup.lookup(query, credentials={PaperSource.OPENALEX: "key-b"})
+    without_key = await lookup.lookup(query)
 
-    assert first.items[0].paper.title == second.items[0].paper.title
+    assert first.items[0].paper == second.items[0].paper == without_key.items[0].paper
     assert provider.calls == [([identity], "key-a")]
     assert all(
         "key-a" not in repr(record) and "key-b" not in repr(record)
@@ -278,13 +279,11 @@ async def test_later_ambiguous_match_does_not_return_a_previously_found_paper():
         }
     )
 
-    result = await lookup.lookup(PaperLookup([identity.value], LookupPurpose.FULL))
+    result = await lookup.lookup(PaperLookup([identity.value]))
 
     item = result.items[0]
     assert item.status == LookupStatus.AMBIGUOUS
     assert item.paper is None
-    assert item.metadata is None
-    assert item.enrichment_status is None
 
 
 def test_identifier_kind_values_and_members():
@@ -296,3 +295,121 @@ def test_identifier_kind_values_and_members():
         IdentifierKind.S2,
         IdentifierKind.CORPUS_ID,
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("publication_date", "reading_url", "extra_arxiv", "extra_s2"),
+    [
+        (date(2017, 6, 12), "https://example.test/paper.pdf", {}, {}),
+        (
+            date(2018, 1, 1), "https://publisher.test/accepted.pdf",
+            {"submitted_date": "2017-06-12"},
+            {"open_access_pdf": "https://publisher.test/accepted.pdf"},
+        ),
+    ],
+)
+async def test_transformer_lookup_preserves_research_signals_and_removes_internal_data(
+    publication_date, reading_url, extra_arxiv, extra_s2
+):
+    """使用实际 arXiv/S2 字段，保护研读信号与内部溯源的出口边界。"""
+    identity = parse_identifier("1706.03762")
+    paper = make_paper(
+        arxiv_id=identity.value,
+        metadata={
+            "internal": {"cache_note": "not a registered metadata source"},
+            "arxiv": {
+                "raw_id": "1706.03762", "categories": ["cs.CL", "cs.LG"],
+                "submitted_date": "2017-06-12", "updated_date": "2023-08-03",
+                "versions": [
+                    {"version": "v1", "created": "Mon, 12 Jun 2017 17:57:34 GMT"},
+                    {"version": "v7", "created": "Wed, 2 Aug 2023 00:41:18 GMT"},
+                ],
+                "journal_ref": None, "comments": "15 pages, 5 figures",
+                "license": "http://arxiv.org/licenses/nonexclusive-distrib/1.0/",
+            },
+            "s2": {
+                "corpus_id": "13756489", "paper_id": "a" * 40,
+                "citation_count": 197480, "influential_citation_count": 20998,
+                "is_open_access": False,
+                "tldr": {"model": "tldr@v2.0.0", "text": "The Transformer uses attention instead of recurrence and convolutions."},
+                "open_access_pdf": reading_url,
+                "release": "2026-10-20", "observed_at": "2026-10-29",
+                "paper_source": {"path": "papers_part_0000.json.gz", "line": 1237438},
+                "tldr_source": {"path": "tldrs_part_0026.json.gz", "line": 2200713},
+                "bibtex": "Repeated bibliography",
+            },
+        },
+    )
+    paper.publication_date = publication_date
+    original = deepcopy(paper)
+    lookup = service({"arxiv": binding(FakeProvider({identity: PaperLookupMatch([paper])}))})
+
+    result = await lookup.lookup(PaperLookup([identity.value]))
+
+    assert result.items[0].paper.metadata == {
+        "arxiv": {
+            "categories": ["cs.CL", "cs.LG"], "updated_date": "2023-08-03",
+            "comments": "15 pages, 5 figures", "latest_version": "v7",
+            **extra_arxiv,
+        },
+        "s2": {
+            "corpus_id": "13756489", "citation_count": 197480,
+            "influential_citation_count": 20998, "is_open_access": False,
+            "tldr": "The Transformer uses attention instead of recurrence and convolutions.",
+            **extra_s2,
+        },
+    }
+    assert paper == original
+
+
+@pytest.mark.asyncio
+async def test_medical_lookup_compacts_mesh_and_preserves_distinct_reading_entries():
+    identity = parse_identifier("10.1056/nejmoa2034577")
+    mesh = {
+        "descriptor_ui": "D000086382", "descriptor_name": "COVID-19",
+        "qualifier_ui": "Q000276", "qualifier_name": "immunology",
+        "is_major_topic": False,
+    }
+    paper = make_paper(
+        source="openalex", arxiv_id=None, doi=identity.value,
+        metadata={"openalex": {
+            "id": "https://openalex.org/W3111255098",
+            "ids": {"pmid": "https://pubmed.ncbi.nlm.nih.gov/33301246"},
+            "updated_date": "2026-10-29", "cited_by_count": 0,
+            "venue": "The New England Journal of Medicine", "is_retracted": False,
+            "primary_topic": {"id": "T1", "display_name": "SARS-CoV-2 and COVID-19 Research", "score": 1, "domain": {"id": "D1"}},
+            "study_designs": [
+                {"id": "randomized-controlled-trial", "display_name": "Randomized Controlled Trial"},
+                {"id": "clinical-trial", "display_name": "Clinical Trial"},
+            ],
+            "mesh": [mesh, dict(mesh), {**mesh, "qualifier_name": "prevention & control"}],
+            "arxiv_ids": [],
+            "best_oa_location": {
+                "landing_page_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7745181/",
+                "pdf_url": "https://example.test/paper.pdf",
+                "license": "cc-by", "version": "acceptedVersion",
+            },
+            "open_access": {
+                "is_oa": True, "oa_status": "green",
+                "oa_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7745181/",
+                "any_repository_has_fulltext": True,
+            },
+        }},
+    )
+    lookup = service({"arxiv": binding(FakeProvider({identity: PaperLookupMatch([paper])}))})
+
+    result = await lookup.lookup(PaperLookup([identity.value]))
+
+    assert result.items[0].paper.metadata == {"openalex": {
+        "id": "https://openalex.org/W3111255098", "cited_by_count": 0,
+        "venue": "The New England Journal of Medicine", "is_retracted": False,
+        "primary_topic": "SARS-CoV-2 and COVID-19 Research",
+        "study_designs": ["Randomized Controlled Trial", "Clinical Trial"],
+        "mesh": [
+            {"descriptor_name": "COVID-19", "qualifier_name": "immunology", "is_major_topic": False},
+            {"descriptor_name": "COVID-19", "qualifier_name": "prevention & control", "is_major_topic": False},
+        ],
+        "best_oa_location": {"landing_page_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7745181/", "version": "acceptedVersion"},
+        "open_access": {"is_oa": True, "oa_status": "green"},
+    }}

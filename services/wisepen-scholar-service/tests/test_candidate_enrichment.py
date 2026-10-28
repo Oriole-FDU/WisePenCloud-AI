@@ -1,5 +1,7 @@
 """从 provider 与公开搜索入口验证候选论文的完整 lookup 结果。"""
 
+from copy import deepcopy
+from dataclasses import replace
 from datetime import date
 
 import httpx
@@ -15,6 +17,7 @@ from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
+from scholar.providers.policies.enrichment import ENRICHMENT_RULES
 from scholar.providers.huggingface import HuggingFaceProvider
 
 
@@ -137,11 +140,17 @@ async def test_search_merges_hf_facts_in_place_and_reuses_positive_and_negative_
         return httpx.Response(200, json=hf_payload(arxiv_id))
 
     candidates = [
-        make_paper("2401.00001"),
+        make_paper("2401.00001", metadata={"arxiv": {
+            "categories": ["cs.CL"], "raw_id": "2401.00001",
+            "license": "internal license fact",
+            "versions": [{"version": "v1"}, {"version": "v2"}],
+        }}),
         make_paper("2401.00003"),
         make_paper(None),
     ]
+    candidates[0].authors.append("Another Author")
     candidates[2].doi = "10.5555/no-arxiv"
+    original = deepcopy(candidates)
     query_cache = FakeQueryCache()
     lookup_cache = FakeLookupCache()
     searcher = FakeSearcher(candidates)
@@ -150,11 +159,7 @@ async def test_search_merges_hf_facts_in_place_and_reuses_positive_and_negative_
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         lookup = LookupRunner(
             {
-                PaperSource.HUGGINGFACE: LookupBinding(
-                    HuggingFaceProvider(http),
-                    lookup_cache,
-                    [IdentifierKind.ARXIV],
-                )
+                PaperSource.HUGGINGFACE: LookupBinding(HuggingFaceProvider(http), lookup_cache, replace(ENRICHMENT_RULES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV]))
             }
         )
         service = PaperSearchService(
@@ -174,9 +179,16 @@ async def test_search_merges_hf_facts_in_place_and_reuses_positive_and_negative_
     assert first.papers[0].title == "Candidate 2401.00001"
     assert first.papers[0].metadata["huggingface"]["upvotes"] == 0
     assert first.papers[0].metadata["huggingface"]["github_stars"] is False
+    assert first.papers[0].metadata["arxiv"] == {
+        "categories": ["cs.CL"], "latest_version": "v2",
+    }
+    assert first.papers[0].authors == ["Candidate Author et al."]
+    assert repeated.papers == first.papers
     assert first.papers[1].metadata == {}
     assert first.papers[2].metadata == {}
-    assert candidates[0].metadata == {}
+    # 冷查询与命中缓存共用出口投影，缓存及 provider 候选仍保留完整事实。
+    assert candidates == original
+    assert next(iter(query_cache.values.values())) == original
     assert len(searcher.calls) == 1
     assert {request.url.path.rsplit("/", 1)[-1] for request in requests} == {
         "2401.00001",

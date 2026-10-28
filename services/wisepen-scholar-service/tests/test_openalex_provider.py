@@ -71,7 +71,7 @@ async def test_search_sends_inclusive_filters_and_current_user_bearer_only(work)
     assert paper.arxiv_id == "2310.08560"
     assert paper.doi == "10.1234/example"
     assert paper.metadata["openalex"]["id"] == work["id"]
-    assert paper.authors == ["First et al."]
+    assert paper.authors == ["First", "Second"]
     assert not {
         "authorships",
         "fwci",

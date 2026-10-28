@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from scholar.application.field_policies import FIELD_POLICIES
 from scholar.application.services.discovery import PaperDiscoveryQuery
-from scholar.application.services.lookup import LookupPurpose, PaperLookup
+from scholar.application.services.lookup import PaperLookup
 from scholar.application.services.search import PaperSearch, SourceScope
 from scholar.domain.interfaces.paper_discoverer import DiscoveryPeriod, DiscoverySort
 from scholar.domain.models.fields import AcademicField
@@ -49,7 +49,6 @@ class SearchRequest(BaseModel):
 class LookupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     identifiers: list[str] = Field(min_length=1, max_length=20)
-    purpose: LookupPurpose = LookupPurpose.DETAILS
     field: AcademicField = AcademicField.GENERAL
 
     def to_query(self) -> PaperLookup:

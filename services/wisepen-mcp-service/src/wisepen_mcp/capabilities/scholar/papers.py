@@ -33,12 +33,6 @@ class SearchSourceScope(StrEnum):
     MULTI_SOURCE = "multi_source"
 
 
-class LookupPurpose(StrEnum):
-    DETAILS = "details"
-    ENRICH = "enrich"
-    FULL = "full"
-
-
 class DiscoveryField(StrEnum):
     COMPUTER_SCIENCE = "computer_science"
 
@@ -59,7 +53,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         name="search_papers",
         description=(
             "Search papers through Scholar. The field and source scope specify the requested operation; Scholar "
-            "owns query normalization, routing, and capability availability. The response data is returned directly."
+            "owns query normalization, routing, and capability availability. Papers include research metadata; Hugging Face linked models and datasets cite the paper."
         ),
     )
     async def search_papers(
@@ -96,7 +90,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             published_before=published_before,
             limit=limit,
             source_scope=source_scope.value,
-            openalex_api_key=_secret(ctx, "api_key"),
+            openalex_api_key=_secret(ctx, "openalex_api_key"),
             huggingface_api_key=_secret(ctx, "huggingface_api_key"),
         )
 
@@ -104,7 +98,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         name="lookup_papers",
         description=(
             "Look up 1 to 20 paper identifiers through Scholar. Scholar owns identifier normalization and "
-            "determines whether the requested purpose is available. The response data is returned directly."
+            "returns paper details with research metadata. Hugging Face linked models and datasets cite the paper."
         ),
     )
     async def lookup_papers(
@@ -117,22 +111,17 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
                 description="DOI, arXiv ID, or another Scholar-supported paper identifier.",
             ),
         ],
-        purpose: Annotated[
-            LookupPurpose,
-            Field(description="Requested Scholar lookup purpose."),
-        ] = LookupPurpose.DETAILS,
         field: Annotated[
             SearchField,
             Field(
-                description="Field selecting domain lookup sources for every purpose."
+                description="Research field selecting domain lookup sources."
             ),
         ] = SearchField.GENERAL,
     ) -> dict[str, Any]:
         return await scholar_client.lookup_papers(
             identifiers=identifiers,
-            purpose=purpose.value,
             field=field.value,
-            openalex_api_key=_secret(ctx, "api_key"),
+            openalex_api_key=_secret(ctx, "openalex_api_key"),
             huggingface_api_key=_secret(ctx, "huggingface_api_key"),
         )
 

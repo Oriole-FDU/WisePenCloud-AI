@@ -131,7 +131,7 @@ async def test_search_preserves_upstream_order_and_plain_text_without_detail_req
         )
     assert [p.arxiv_id for p in result.papers] == ["2501.12948", "2501.18438"]
     assert result.papers[0].title == "DeepSeek-R1"
-    assert result.papers[0].authors == ["First et al."]
+    assert result.papers[0].authors == ["First", "Second"]
     assert result.papers[0].metadata["huggingface"]["upvotes"] == 0
     assert len(requests) == 1
     assert requests[0].url.path == "/api/papers/search"

@@ -97,16 +97,10 @@ async def test_mcp_scholar_schemas_expose_declared_contracts(scholar_server):
     ]
 
     lookup = tools["lookup_papers"].inputSchema
-    assert set(lookup["properties"]) == {"identifiers", "purpose", "field"}
+    assert set(lookup["properties"]) == {"identifiers", "field"}
     assert lookup["required"] == ["identifiers"]
     assert lookup["properties"]["identifiers"]["minItems"] == 1
     assert lookup["properties"]["identifiers"]["maxItems"] == 20
-    assert lookup["properties"]["purpose"]["default"] == "details"
-    assert lookup["$defs"]["LookupPurpose"]["enum"] == [
-        "details",
-        "enrich",
-        "full",
-    ]
 
     discovery = tools["discover_papers"].inputSchema
     assert set(discovery["properties"]) == {"field", "period", "sort", "limit"}
@@ -167,7 +161,7 @@ async def test_search_papers_call_passes_http_contract_and_returns_scholar_data(
 
 
 @pytest.mark.asyncio
-async def test_lookup_papers_passes_identifiers_purpose_and_field(scholar_server):
+async def test_lookup_papers_passes_identifiers_and_field(scholar_server):
     mcp, rpc = scholar_server
     response = {"items": [{"id": "doi:10.1000/example"}]}
     rpc.response = response
@@ -186,7 +180,7 @@ async def test_lookup_papers_passes_identifiers_purpose_and_field(scholar_server
             {
                 "json": {
                     "identifiers": [" DOI:10.1000/example "],
-                    "purpose": "details",
+
                     "field": "medicine",
                 },
                 "timeout": 30.0,
@@ -245,7 +239,7 @@ async def test_scholar_total_timeout_cancels_slow_calls():
             source_scope="default",
         )
     with pytest.raises(TimeoutError):
-        await client.lookup_papers(identifiers=["arxiv:2401.00001"], purpose="details")
+        await client.lookup_papers(identifiers=["arxiv:2401.00001"])
     with pytest.raises(TimeoutError):
         await client.discover_papers(
             field="computer_science",

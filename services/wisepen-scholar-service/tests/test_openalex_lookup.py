@@ -1,13 +1,14 @@
 """验证 OpenAlex lookup 作为通用 Paper provider 接入查询链。"""
 
+from dataclasses import replace
+from scholar.providers.policies.enrichment import ENRICHMENT_RULES
+
 from datetime import date
 
 import httpx
 import pytest
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.services.lookup import (
-    EnrichmentStatus,
-    LookupPurpose,
     LookupStatus,
     PaperLookup,
     PaperLookupService,
@@ -59,18 +60,14 @@ async def test_openalex_missing_key_fails_without_sending_a_request():
         lookup = PaperLookupService(
             LookupRunner(
                 {
-                    PaperSource.OPENALEX: LookupBinding(
-                        OpenAlexProvider(http),
-                        None,
-                        [IdentifierKind.OPENALEX],
-                    )
+                    PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(ENRICHMENT_RULES["openalex"], identifier_kinds=[IdentifierKind.OPENALEX]))
                 }
             )
         )
 
         with pytest.raises(ProviderError, match="OpenAlex API key is required"):
             await lookup.lookup(
-                PaperLookup(["openalex:W123"], purpose=LookupPurpose.FULL)
+                PaperLookup(["openalex:W123"])
             )
 
     assert requests == []
@@ -82,7 +79,7 @@ async def test_openalex_missing_key_does_not_discard_a_local_base_paper():
     identity = parse_identifier("2401.00001")
     base = make_paper(
         PaperSource.ARXIV,
-        metadata={"arxiv": {"license": "CC-BY"}},
+        metadata={"arxiv": {"comments": "Accepted at a conference"}},
     )
 
     async def handle(request):
@@ -93,29 +90,19 @@ async def test_openalex_missing_key_does_not_discard_a_local_base_paper():
         lookup = PaperLookupService(
             LookupRunner(
                 {
-                    PaperSource.ARXIV: LookupBinding(
-                        LocalProvider(base),
-                        None,
-                        [IdentifierKind.ARXIV],
-                        has_signals=arxiv_signals,
-                    ),
-                    PaperSource.OPENALEX: LookupBinding(
-                        OpenAlexProvider(http),
-                        None,
-                        [IdentifierKind.ARXIV],
-                    ),
+                    PaperSource.ARXIV: LookupBinding(LocalProvider(base), None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
+                    PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(ENRICHMENT_RULES["openalex"], identifier_kinds=[IdentifierKind.ARXIV])),
                 }
             )
         )
 
         result = await lookup.lookup(
-            PaperLookup([identity.value], purpose=LookupPurpose.FULL)
+            PaperLookup([identity.value])
         )
 
     assert result.items[0].status == LookupStatus.FOUND
-    assert result.items[0].enrichment_status == EnrichmentStatus.PARTIAL
     assert result.items[0].paper.title == "Local base paper"
-    assert result.items[0].paper.metadata["arxiv"]["license"] == "CC-BY"
+    assert result.items[0].paper.metadata["arxiv"]["comments"] == "Accepted at a conference"
     assert result.items[0].error == "OpenAlex API key is required"
     assert (
         next(
@@ -138,17 +125,13 @@ async def test_openalex_http_failure_keeps_status_url_and_excludes_user_key():
         lookup = PaperLookupService(
             LookupRunner(
                 {
-                    PaperSource.OPENALEX: LookupBinding(
-                        OpenAlexProvider(http),
-                        None,
-                        [IdentifierKind.OPENALEX],
-                    )
+                    PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(ENRICHMENT_RULES["openalex"], identifier_kinds=[IdentifierKind.OPENALEX]))
                 }
             )
         )
         with pytest.raises(ProviderError) as caught:
             await lookup.lookup(
-                PaperLookup(["openalex:W123"], purpose=LookupPurpose.FULL),
+                PaperLookup(["openalex:W123"]),
                 credentials={PaperSource.OPENALEX: "user-key"},
             )
 

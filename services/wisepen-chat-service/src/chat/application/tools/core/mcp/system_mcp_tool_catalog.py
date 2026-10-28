@@ -44,7 +44,7 @@ _SCHOLAR_API_KEY_CONFIG = ToolConfigSpec(
     schema={
         "type": "object",
         "properties": {
-            "api_key": {
+            "openalex_api_key": {
                 "type": "string",
                 "title": "OpenAlex API Key",
                 "description": "可选；优先使用此密钥，未配置时使用平台密钥。",
@@ -59,7 +59,7 @@ _SCHOLAR_API_KEY_CONFIG = ToolConfigSpec(
         },
         "additionalProperties": False,
     },
-    secret_keys=("api_key", "huggingface_api_key"),
+    secret_keys=("openalex_api_key", "huggingface_api_key"),
 )
 
 _SCHOLAR_HF_API_KEY_CONFIG = ToolConfigSpec(

@@ -13,13 +13,11 @@ import orjson
 from common.utils.retrieval import Candidate, RrfFusion
 from scholar.application.field_policies import COMMON_ENRICHERS, FieldPolicy
 from scholar.application.lookup_runner import LookupRunner
+from scholar.application.paper_projection import project_paper
 from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_searcher import PaperSearcher
 from scholar.domain.models.fields import AcademicField
-from scholar.domain.models.identifiers import (
-    normalize_arxiv,
-    normalize_doi,
-)
+from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
 from scholar.domain.models.paper import Paper
 from scholar.domain.models.source_execution import (
     SourceExecution,
@@ -80,32 +78,33 @@ class PaperSearchService:
         query: PaperSearch,
         *,
         credentials: dict[str, str] | None = None,
-        user_id: str | None = None,
     ) -> SearchResult:
         credentials = self.platform_credentials | (credentials or {})
         policy = self.policies[query.field]
         plan = policy.searchers
+
+        # 多源：并发请求；单源：按优先级回退，空结果也视为成功。
         if query.source_scope == SourceScope.MULTI_SOURCE:
             results = await asyncio.gather(
                 *(
-                    self._search_source(source, query, credentials.get(source), user_id)
+                    self._search_source(source, query, credentials.get(source))
                     for source in plan
                 ),
                 return_exceptions=True,
             )
         else:
-            # 正常空列表也代表请求成功；仅外部来源失败触发下一个优先级。
             results = []
             for source in plan:
                 try:
                     result = await self._search_source(
-                        source, query, credentials.get(source), user_id
+                        source, query, credentials.get(source)
                     )
                 except ProviderError as error:
                     results.append(error)
                 else:
                     results.append(result)
                     break
+
         ranked, execution, failures = {}, [], []
         for source, result in zip(plan[: len(results)], results, strict=True):
             if isinstance(result, BaseException):
@@ -125,12 +124,17 @@ class PaperSearchService:
             else:
                 ranked[source] = result[0]
                 execution.append(result[1])
+
+        # 全部来源失败时抛出首个错误。
         if len(failures) == len(results):
             raise failures[0]
+
         if query.source_scope == SourceScope.DEFAULT:
+            # 单源只取最后一个被尝试来源的结果（即首个成功来源）。
             papers, conflicts = ranked[plan[len(results) - 1]][: query.limit], []
         else:
             papers, conflicts = self._fuse_sources(ranked, limit=query.limit)
+
         # 只排除本次成功来源；注册过但未执行或失败的来源仍可提供增量。
         succeeded = {
             source
@@ -140,29 +144,37 @@ class PaperSearchService:
         targets = [self.lookup_runner.target(None, paper) for paper in papers]
         enrichment_execution = await self.lookup_runner.run(
             targets,
-            common_sources=[]
-            if succeeded.intersection(COMMON_ENRICHERS)
-            else [
-                source
-                for source in COMMON_ENRICHERS
-                if source in self.lookup_runner.bindings
-            ],
+            # 通用来源中已有成功者则跳过通用富化链，否则补跑尚未执行的通用来源。
+            common_sources=(
+                []
+                if succeeded.intersection(COMMON_ENRICHERS)
+                else [
+                    source
+                    for source in COMMON_ENRICHERS
+                    if source in self.lookup_runner.bindings
+                ]
+            ),
             domain_sources=[
                 source for source in policy.field_enrichers if source not in succeeded
             ],
             credentials=credentials,
         )
-        enriched_papers = [target.paper.project() for target in targets]
+        enriched_papers = [project_paper(target.paper) for target in targets]
         return SearchResult(enriched_papers, execution, conflicts, enrichment_execution)
 
     async def _search_source(
-        self, source: str, query: PaperSearch, api_key: str | None, user_id: str | None
+        self,
+        source: str,
+        query: PaperSearch,
+        api_key: str | None,
     ) -> tuple[list[Paper], SourceExecution]:
         binding = self.searchers[source]
-        cache_key = self._cache_key(source, binding, query, api_key, user_id)
+        cache_key = self._cache_key(source, binding, query)
+
         cached = await self.query_cache.get(cache_key)
         if cached is not None:
             return cached, SourceExecution(source, True)
+
         # 缓存来源的一批候选；用户 limit 只在融合/返回时裁剪，避免改数量重新请求上游。
         batch = await binding.searcher.search(
             query=query.query,
@@ -178,9 +190,11 @@ class PaperSearchService:
         return batch.papers, SourceExecution(
             source,
             False,
-            SourceExecutionStatus.PARTIAL
-            if batch.partial_error
-            else SourceExecutionStatus.COMPLETED,
+            (
+                SourceExecutionStatus.PARTIAL
+                if batch.partial_error
+                else SourceExecutionStatus.COMPLETED
+            ),
             batch.partial_error,
         )
 
@@ -189,27 +203,25 @@ class PaperSearchService:
         source: str,
         binding: SearchBinding,
         query: PaperSearch,
-        api_key: str | None,
-        user_id: str | None,
     ) -> str:
+        # 来源候选按查询条件共享；凭证只用于缓存未命中时的上游请求。
         identity = {
             "source": source,
             "revision": binding.cache_revision,
             "query": query.query,
             "field": query.field.value,
-            "published_after": None
-            if query.published_after is None
-            else query.published_after.isoformat(),
-            "published_before": None
-            if query.published_before is None
-            else query.published_before.isoformat(),
+            "published_after": (
+                None
+                if query.published_after is None
+                else query.published_after.isoformat()
+            ),
+            "published_before": (
+                None
+                if query.published_before is None
+                else query.published_before.isoformat()
+            ),
             "candidates": binding.candidate_limit,
         }
-        if api_key:
-            identity["user_id"] = user_id
-            identity["credential_fingerprint"] = hashlib.sha256(
-                api_key.encode()
-            ).hexdigest()
         digest = hashlib.sha256(
             orjson.dumps(identity, option=orjson.OPT_SORT_KEYS)
         ).hexdigest()
@@ -224,7 +236,10 @@ class PaperSearchService:
 
     @classmethod
     def _fuse_sources(
-        cls, ranked: dict[str, list[Paper]], *, limit: int
+        cls,
+        ranked: dict[str, list[Paper]],
+        *,
+        limit: int,
     ) -> tuple[list[Paper], list[str]]:
         """按精确身份关联任意来源数；歧义记录不通过 RRF 再次误合并。"""
         rows = [
@@ -233,6 +248,8 @@ class PaperSearchService:
             for rank, paper in enumerate(papers)
         ]
         identities = [cls._paper_identity(paper) for _, _, paper in rows]
+
+        # 1) 构建跨来源的精确身份关联图。
         neighbors = [set() for _ in rows]
         conflicts = []
         for left, (left_source, _, _) in enumerate(rows):
@@ -246,12 +263,14 @@ class PaperSearchService:
                 if same_arxiv:
                     if left_doi and right_doi and left_doi != right_doi:
                         conflicts.append(
-                            f"arXiv {left_arxiv} has conflicting DOIs; merged by arXiv identity."
+                            f"arXiv {left_arxiv} has conflicting DOIs; "
+                            "merged by arXiv identity."
                         )
                 elif same_doi:
                     if left_arxiv and right_arxiv and left_arxiv != right_arxiv:
                         conflicts.append(
-                            f"DOI {left_doi} has conflicting arXiv identities; records kept separate."
+                            f"DOI {left_doi} has conflicting arXiv identities; "
+                            "records kept separate."
                         )
                         continue
                 else:
@@ -259,6 +278,7 @@ class PaperSearchService:
                 neighbors[left].add(right)
                 neighbors[right].add(left)
 
+        # 2) 按连通分量合并；同一来源重复出现或 arXiv 身份不唯一时记录冲突。
         candidates, seen = {}, set()
         for index in range(len(rows)):
             if index in seen:
@@ -274,30 +294,49 @@ class PaperSearchService:
             members = sorted(component)
             sources = [rows[member][0] for member in members]
             arxiv_ids = {
-                identities[member][0] for member in members if identities[member][0]
+                identities[member][0]
+                for member in members
+                if identities[member][0]
             }
             if len(set(sources)) != len(sources) or len(arxiv_ids) > 1:
                 conflicts.append(
-                    "An exact identifier is ambiguous across sources; records kept separate."
+                    "An exact identifier is ambiguous across sources; "
+                    "records kept separate."
                 )
                 for member in members:
                     candidates[member] = (f"record:{member}", rows[member][2])
                 continue
+
             # 计划中先登记的来源提供基础事实，融合器不识别供应商。
             first, metadata = rows[members[0]][2], {}
             for member in members:
                 for key, value in rows[member][2].metadata.items():
                     metadata.setdefault(key, value)
+
+            arxiv_id = next(
+                (identities[m][0] for m in members if identities[m][0]),
+                None,
+            )
+            # 生成值只标识 arXiv 预印本；其他来源给出的正式出版 DOI 优先。
+            dois = [identities[m][1] for m in members if identities[m][1]]
+            doi = next(
+                (
+                    value
+                    for value in dois
+                    if value != f"10.48550/arxiv.{arxiv_id}"
+                ),
+                next(iter(dois), None),
+            )
             merged = replace(
                 first,
-                arxiv_id=next(
-                    (identities[m][0] for m in members if identities[m][0]), None
-                ),
-                doi=next((identities[m][1] for m in members if identities[m][1]), None),
+                arxiv_id=arxiv_id,
+                doi=doi,
                 metadata=metadata,
             )
             for member in members:
                 candidates[member] = (f"record:{members[0]}", merged)
+
+        # 3) 按融合器要求组织为来源列表，再交给 RRF。
         lists = {source: [] for source in ranked}
         for index, (source, rank, _) in enumerate(rows):
             identity, paper = candidates[index]
@@ -305,6 +344,7 @@ class PaperSearchService:
                 Candidate(candidate_id=identity, payload=paper, rank=rank + 1)
             )
         fused = RrfFusion[Paper]().fuse(list(lists.values()))
-        return [candidate.payload for candidate in fused[:limit]], list(
-            dict.fromkeys(conflicts)
+        return (
+            [candidate.payload for candidate in fused[:limit]],
+            list(dict.fromkeys(conflicts)),
         )

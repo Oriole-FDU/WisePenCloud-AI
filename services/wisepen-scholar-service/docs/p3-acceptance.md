@@ -28,7 +28,7 @@ P4 S2 purpose 富化、P5 论文发现或 P6 同步和部署已完成。
 
 | 测试文件                             | 覆盖的可观察行为                                                                                                                                                          |
 |--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `tests/test_multisource_search.py`   | 默认与无凭证路由、OpenAlex BYOK 缓存隔离、精确身份融合及冲突、多源部分失败、最终 limit 后富化；医疗 mock 策略注册 PubMed、Web of Science 与专有富化器，不改核心搜索流程。 |
+| `tests/test_multisource_search.py`   | 默认与无凭证路由、OpenAlex 跨凭证及无凭证缓存复用、精确身份融合及冲突、多源部分失败、最终 limit 后富化；医疗 mock 策略注册 PubMed、Web of Science 与专有富化器，不改核心搜索流程。 |
 | `tests/test_openalex_lookup.py`      | 本地优先精确查询、重复项与顺序、歧义和未找到、BYOK 要求、批次部分成功、全失败传播、程序错误和取消传播。                                                                   |
 | `tests/test_candidate_enrichment.py` | 可选富化发生 provider I/O 失败时保留基础论文；单源及全来源搜索失败传播。                                                                                                  |
 | `tests/test_openalex_provider.py`    | OpenAlex 请求映射、用户级 Bearer 凭证、精确标识查询，以及外部 HTTP/网络错误的 cause 保留。                                                                                |

@@ -9,10 +9,7 @@ from typing import Any
 
 import httpx
 
-from scholar.domain.errors import (
-    ProviderError,
-    provider_error_message,
-)
+from scholar.domain.errors import ProviderError, provider_error_message
 from scholar.domain.interfaces.paper_discoverer import (
     DiscoveryPeriod,
     DiscoverySort,
@@ -32,7 +29,31 @@ _HF_ORIGIN = "https://huggingface.co"
 
 
 def has_signals(metadata: dict) -> bool:
+    """只要存在 ``huggingface`` 命名空间即视为已富化。"""
     return bool(metadata.get("huggingface"))
+
+
+def project_metadata(paper: Paper) -> dict:
+    """保留关键词、社区反馈与关联产物；仅当 abstract 缺失时补入 ai_summary。"""
+    values = paper.metadata["huggingface"]
+    result = {
+        name: values.get(name)
+        for name in (
+            "ai_keywords",
+            "upvotes",
+            "github_repo",
+            "github_stars",
+            "submitted_at",
+        )
+    }
+    for name in ("linked_models", "linked_datasets"):
+        result[name] = [
+            {"id": item["id"], "likes": item.get("likes")}
+            for item in values.get(name) or []
+        ]
+    if not paper.abstract:
+        result["ai_summary"] = values.get("ai_summary")
+    return result
 
 
 class HuggingFaceProvider:
@@ -59,7 +80,7 @@ class HuggingFaceProvider:
         limit: int,
         api_key: str | None = None,
     ) -> PaperSearchBatch:
-        # 官方搜索只有 q/limit；日期在前 100 个候选内过滤，不伪称完整日期召回。
+        # 官方搜索只支持 q/limit；日期在前 100 个候选中过滤，不承诺完整日期召回。
         dated = published_after is not None or published_before is not None
         response = await self._get(
             f"{_HF_ORIGIN}/api/papers/search",
@@ -67,7 +88,7 @@ class HuggingFaceProvider:
             api_key=api_key,
         )
         papers = [
-            self._to_paper(row, self._metadata(row, partial=True)).project()
+            self._to_paper(row, self._metadata(row, partial=True))
             for row in response.json()
         ]
         if dated:
@@ -75,13 +96,14 @@ class HuggingFaceProvider:
                 paper
                 for paper in papers
                 if paper.publication_date is not None
-                   and (
-                       published_after is None or paper.publication_date >= published_after
-                   )
-                   and (
-                       published_before is None
-                       or paper.publication_date <= published_before
-                   )
+                and (
+                    published_after is None
+                    or paper.publication_date >= published_after
+                )
+                and (
+                    published_before is None
+                    or paper.publication_date <= published_before
+                )
             ]
         return PaperSearchBatch(papers[:limit])
 
@@ -97,7 +119,7 @@ class HuggingFaceProvider:
             try:
                 payload = await self._paper_info(identifier.value, api_key=api_key)
             except ProviderError as error:
-                # _paper_info 的来源请求失败按论文隔离；取消和程序错误不会被包装。
+                # 单篇失败按论文隔离；取消与程序错误不在此包装。
                 return PaperLookupMatch([], str(error))
             if payload is None:
                 return PaperLookupMatch([])
@@ -108,7 +130,7 @@ class HuggingFaceProvider:
         try:
             return list(await asyncio.gather(*tasks))
         finally:
-            # 批次取消时同步结束已创建任务，避免 HTTP 请求脱离当前用例生命周期。
+            # 批次取消时结束已创建任务，避免 HTTP 请求脱离当前用例生命周期。
             for task in tasks:
                 if not task.done():
                     task.cancel()
@@ -126,7 +148,7 @@ class HuggingFaceProvider:
         params: dict[str, str | int] = {
             "p": 0,
             "limit": limit,
-            # 与官方 HfApi.list_daily_papers 一致：透传筛选与排序，按上游顺序接收结果。
+            # 与官方 HfApi.list_daily_papers 一致：透传筛选与排序，按上游顺序接收。
             "sort": "publishedAt" if sort == DiscoverySort.RECENT else "trending",
         }
         window_start = None
@@ -147,10 +169,9 @@ class HuggingFaceProvider:
         response = await self._get(
             f"{_HF_ORIGIN}/api/daily_papers", params=params, api_key=api_key
         )
-        rows = response.json()
         papers = [
-            self._to_paper(row, self._metadata(row, partial=True)).project()
-            for row in rows
+            self._to_paper(row, self._metadata(row, partial=True))
+            for row in response.json()
         ]
 
         return PaperDiscovery(
@@ -160,10 +181,15 @@ class HuggingFaceProvider:
         )
 
     async def _paper_info(
-        self, arxiv_id: str, *, api_key: str | None = None
+        self,
+        arxiv_id: str,
+        *,
+        api_key: str | None = None,
     ) -> dict[str, Any] | None:
         response = await self._get(
-            f"{_HF_ORIGIN}/api/papers/{arxiv_id}", allow_not_found=True, api_key=api_key
+            f"{_HF_ORIGIN}/api/papers/{arxiv_id}",
+            allow_not_found=True,
+            api_key=api_key,
         )
         if response.status_code == 404:
             return None
@@ -178,15 +204,17 @@ class HuggingFaceProvider:
         allow_not_found: bool = False,
         api_key: str | None = None,
     ) -> httpx.Response:
-        # 详情 404 是未找到；其他 HTTPX 边界失败保留原文和 cause。
+        # 详情 404 表示未找到；其余 HTTPX 失败包装为 ProviderError 并保留 cause。
         try:
             async with self._request_limit:
                 response = await self.http.get(
                     url,
                     params=params,
-                    headers={"Authorization": f"Bearer {api_key or self._token}"}
-                    if (api_key or self._token)
-                    else {},
+                    headers=(
+                        {"Authorization": f"Bearer {api_key or self._token}"}
+                        if (api_key or self._token)
+                        else {}
+                    ),
                 )
             if not allow_not_found or response.status_code != 404:
                 response.raise_for_status()
@@ -196,10 +224,13 @@ class HuggingFaceProvider:
 
     @classmethod
     def _metadata(
-        cls, payload: dict[str, Any], *, partial: bool = False
+        cls,
+        payload: dict[str, Any],
+        *,
+        partial: bool = False,
     ) -> dict[str, Any]:
         result = {
-            # HF 的 AI 摘要是渠道增量，保留命名空间，不覆盖论文原摘要。
+            # AI 摘要先统一保留；出口由 project_metadata 按 abstract 是否缺失选择。
             "ai_summary": cls._field(payload, "ai_summary"),
             "ai_keywords": cls._field(payload, "ai_keywords"),
             "upvotes": cls._field(payload, "upvotes"),
@@ -209,8 +240,8 @@ class HuggingFaceProvider:
         }
         # 点赞降序只保留前三项；Python 稳定排序保留同赞产物的上游次序。
         for name, upstream in (
-                ("linked_models", "linkedModels"),
-                ("linked_datasets", "linkedDatasets"),
+            ("linked_models", "linkedModels"),
+            ("linked_datasets", "linkedDatasets"),
         ):
             values = cls._field(payload, upstream)
             result[name] = (
@@ -226,16 +257,17 @@ class HuggingFaceProvider:
                 ]
             )
         if partial:
-            # 列表未提供的产物字段仍未查询；详情成功返回的空字段才是确认空事实。
+            # partial 模式下，列表未返回的字段视为未查询，从结果剔除；
+            # 只有详情成功返回的空字段才是确认的空事实。
             present = payload.keys() | payload.get("paper", {}).keys()
             for name, upstream in (
-                    ("ai_summary", "ai_summary"),
-                    ("ai_keywords", "ai_keywords"),
-                    ("upvotes", "upvotes"),
-                    ("github_repo", "githubRepo"),
-                    ("github_stars", "githubStars"),
-                    ("linked_models", "linkedModels"),
-                    ("linked_datasets", "linkedDatasets"),
+                ("ai_summary", "ai_summary"),
+                ("ai_keywords", "ai_keywords"),
+                ("upvotes", "upvotes"),
+                ("github_repo", "githubRepo"),
+                ("github_stars", "githubStars"),
+                ("linked_models", "linkedModels"),
+                ("linked_datasets", "linkedDatasets"),
             ):
                 if upstream not in present:
                     result.pop(name)
@@ -259,12 +291,16 @@ class HuggingFaceProvider:
 
     @staticmethod
     def _submitted_at(payload: dict[str, Any]) -> str | None:
-        # Daily Papers 的渠道分发时间由 submittedOnDailyAt 表示，publishedAt 是论文日期。
+        # Daily Papers 的渠道分发时间由 submittedOnDailyAt 表示；publishedAt 是论文日期。
         nested = payload.get("paper", {})
         return nested.get("submittedOnDailyAt") or payload.get("submittedOnDailyAt")
 
     @classmethod
-    def _to_paper(cls, payload: dict[str, Any], metadata: dict[str, Any]) -> Paper:
+    def _to_paper(
+        cls,
+        payload: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> Paper:
         arxiv_id = parse_identifier(f"arxiv:{cls._paper_id(payload)}").value
         authors = cls._field(payload, "authors")
         publication_date = cls._parse_date(cls._published_at(payload))

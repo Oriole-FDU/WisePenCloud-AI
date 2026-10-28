@@ -34,7 +34,7 @@ async def test_query_cache_versions_index_namespace_and_roundtrips_papers():
         pdf_url=None,
         source=PaperSource.ARXIV,
     )
-    redis.values["scholar:search:scholar-index:query-key"] = orjson.dumps([paper])
+    redis.values["scholar:search:compact-v1:scholar-index:query-key"] = orjson.dumps([paper])
     cache = RedisQueryCacheRepository(redis, "scholar-index", ttl=600)
 
     assert await cache.get("query-key") is None
@@ -44,7 +44,4 @@ async def test_query_cache_versions_index_namespace_and_roundtrips_papers():
 
     assert await cache.get("query-key") == [paper]
     assert await other_index.get("query-key") is None
-    assert redis.set_calls[0][0] == (
-        "scholar:search:compact-v1:scholar-index:query-key"
-    )
     assert redis.set_calls[0][2] == 600

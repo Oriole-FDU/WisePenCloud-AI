@@ -40,7 +40,6 @@ def paper_response():
         "isOpenAccess": False,
         "tldr": {"model": "tldr@v2", "text": ""},
         "openAccessPdf": {"url": "https://example.test/paper.pdf"},
-        "citationStyles": {"bibtex": "@article{example}"},
     }
 
 
@@ -76,7 +75,6 @@ async def test_lookup_requests_fixed_fields_and_returns_complete_paper():
         "influentialCitationCount",
         "isOpenAccess",
         "openAccessPdf",
-        "citationStyles",
         "abstract",
         "authors",
         "year",
@@ -97,7 +95,7 @@ async def test_lookup_requests_fixed_fields_and_returns_complete_paper():
     assert paper.metadata["s2"]["is_open_access"] is False
     assert paper.metadata["s2"]["tldr"] == {"model": "tldr@v2", "text": ""}
     assert paper.metadata["s2"]["open_access_pdf"] == "https://example.test/paper.pdf"
-    assert paper.metadata["s2"]["bibtex"] == "@article{example}"
+    assert "citationStyles" not in fields
     assert paper.metadata["s2"]["venue"] == "Example Conference"
     datetime.fromisoformat(paper.metadata["s2"]["observed_at"])
     assert paper.source == PaperSource.S2

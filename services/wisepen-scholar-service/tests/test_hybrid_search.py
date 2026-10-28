@@ -91,14 +91,19 @@ async def test_citation_bonus_preserves_zero_missing_and_cannot_overturn_large_r
         "2501.00002", {"citation_count": 100, "influential_citation_count": 10}
     )
     result = await search(ArxivProvider(Repository([plain], [important]), Encoder()))
-    assert result.papers == [important, plain]
+    assert [paper.arxiv_id for paper in result.papers] == [
+        important.arxiv_id,
+        plain.arxiv_id,
+    ]
     zero = replace(
         important,
         metadata={"s2": {"citation_count": 0, "influential_citation_count": 0}},
     )
-    assert (
-        await search(ArxivProvider(Repository([plain], [zero]), Encoder()))
-    ).papers == [plain, zero]
+    zero_result = await search(ArxivProvider(Repository([plain], [zero]), Encoder()))
+    assert [paper.arxiv_id for paper in zero_result.papers] == [
+        plain.arxiv_id,
+        zero.arxiv_id,
+    ]
     crowd = [paper(f"2502.{i:05d}") for i in range(1, 20)]
     huge = replace(
         important,
@@ -107,7 +112,7 @@ async def test_citation_bonus_preserves_zero_missing_and_cannot_overturn_large_r
     result = await search(
         ArxivProvider(Repository([plain, *crowd, huge], []), Encoder())
     )
-    assert result.papers[0] == plain
+    assert result.papers[0].arxiv_id == plain.arxiv_id
 
 
 @pytest.mark.asyncio
@@ -128,7 +133,7 @@ async def test_encoder_failure_is_visible_not_cached_and_recovery_restores_hybri
     )
     query = PaperSearch("reasoning")
     degraded = await service.search(query)
-    assert degraded.papers == [lexical]
+    assert [paper.arxiv_id for paper in degraded.papers] == [lexical.arxiv_id]
     assert degraded.execution[0].status == SourceExecutionStatus.PARTIAL
     assert degraded.execution[0].error
     encoder.error = None

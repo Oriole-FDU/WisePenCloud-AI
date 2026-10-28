@@ -22,10 +22,9 @@ from scholar.core.storage.elasticsearch.paper_repository import (
 from scholar.core.storage.redis.discovery_cache import RedisDiscoveryCacheRepository
 from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
 from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
-from scholar.domain.models.identifiers import IdentifierKind
 from scholar.ml.specter import DIMENSIONS, QUERY_MODEL
-from scholar.providers import arxiv, huggingface, openalex, s2
 from scholar.providers.arxiv import ArxivProvider
+from scholar.providers.policies.enrichment import ENRICHMENT_POLICIES
 from scholar.providers.huggingface import HuggingFaceProvider
 from scholar.providers.openalex import OpenAlexProvider
 from scholar.providers.s2 import S2Provider, S2Transport
@@ -163,55 +162,13 @@ class Container(containers.DeclarativeContainer):
         ),
     )
     lookup_bindings = providers.Dict(
-        arxiv=providers.Factory(
-            LookupBinding,
-            provider=arxiv_searcher,
-            cache=arxiv_cache,
-            identifier_kinds=[IdentifierKind.ARXIV, IdentifierKind.DOI],
-            has_signals=arxiv.has_signals,
-        ),
-        s2=providers.Factory(
-            LookupBinding,
-            provider=s2_provider,
-            cache=s2_cache,
-            identifier_kinds=[
-                IdentifierKind.ARXIV,
-                IdentifierKind.DOI,
-                IdentifierKind.CORPUS_ID,
-                IdentifierKind.S2,
-            ],
-            has_signals=s2.has_signals,
-            aliases=s2.aliases,
-            short_lived=s2.short_lived,
-        ),
-        openalex=providers.Factory(
-            LookupBinding,
-            provider=openalex_searcher,
-            cache=openalex_cache,
-            identifier_kinds=[
-                IdentifierKind.OPENALEX,
-                IdentifierKind.DOI,
-                IdentifierKind.ARXIV,
-            ],
-            has_signals=openalex.has_signals,
-            aliases=openalex.aliases,
-        ),
-        huggingface=providers.Factory(
-            LookupBinding,
-            provider=huggingface_provider,
-            cache=huggingface_cache,
-            identifier_kinds=[IdentifierKind.ARXIV],
-            fields=[
-                "ai_summary",
-                "ai_keywords",
-                "upvotes",
-                "github_repo",
-                "github_stars",
-                "linked_models",
-                "linked_datasets",
-            ],
-            has_signals=huggingface.has_signals,
-        ),
+        arxiv=providers.Factory(LookupBinding, provider=arxiv_searcher, cache=arxiv_cache,
+                                rules=ENRICHMENT_POLICIES["arxiv"]),
+        s2=providers.Factory(LookupBinding, provider=s2_provider, cache=s2_cache, rules=ENRICHMENT_POLICIES["s2"]),
+        openalex=providers.Factory(LookupBinding, provider=openalex_searcher, cache=openalex_cache,
+                                   rules=ENRICHMENT_POLICIES["openalex"]),
+        huggingface=providers.Factory(LookupBinding, provider=huggingface_provider, cache=huggingface_cache,
+                                      rules=ENRICHMENT_POLICIES["huggingface"]),
     )
     lookup_runner = providers.Singleton(
         LookupRunner,

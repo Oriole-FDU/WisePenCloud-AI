@@ -7,7 +7,6 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, Header
 
 from common.core.domain import R
-from common.security import SecurityContextHolder
 from scholar.api.schemas.papers import DiscoveryRequest, LookupRequest, SearchRequest
 from scholar.application.services.discovery import (
     DiscoveryResult,
@@ -50,7 +49,6 @@ async def search(
                     }.items()
                     if value
                 },
-                user_id=SecurityContextHolder.get_user_id(),
             )
         )
 

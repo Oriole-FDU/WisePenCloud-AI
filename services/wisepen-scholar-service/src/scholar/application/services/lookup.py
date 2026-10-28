@@ -1,11 +1,10 @@
-"""精确批量 lookup 用例；统一获取完整事实，purpose 仅控制返回投影。"""
+"""精确批量 lookup 用例；统一获取完整事实，返回基础信息及调研 metadata。"""
 
 from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
 
 from scholar.application.field_policies import (
     COMMON_ENRICHERS,
@@ -13,16 +12,11 @@ from scholar.application.field_policies import (
     FieldPolicy,
 )
 from scholar.application.lookup_runner import LookupRunner
+from scholar.application.paper_projection import project_paper
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
 from scholar.domain.models.paper import Paper
 from scholar.domain.models.source_execution import SourceExecution
-
-
-class LookupPurpose(StrEnum):
-    DETAILS = "details"
-    ENRICH = "enrich"
-    FULL = "full"
 
 
 class LookupStatus(StrEnum):
@@ -35,18 +29,9 @@ class LookupStatus(StrEnum):
     FAILED = "failed"
 
 
-class EnrichmentStatus(StrEnum):
-    COMPLETE = "complete"
-    PARTIAL = "partial"
-    NOT_FOUND = "not_found"
-    FAILED = "failed"
-    UNSUPPORTED = "unsupported"
-
-
 @dataclass
 class PaperLookup:
     identifiers: list[str]
-    purpose: LookupPurpose = LookupPurpose.DETAILS
     field: AcademicField = AcademicField.GENERAL
 
 
@@ -55,8 +40,6 @@ class LookupItem:
     identifier: str
     status: LookupStatus
     paper: Paper | None = None
-    metadata: dict[str, Any] | None = None
-    enrichment_status: EnrichmentStatus | None = None
     error: str | None = None
 
 
@@ -116,7 +99,7 @@ class PaperLookupService:
             if target.errors:
                 first_error = first_error or target.errors[0]
             supported = any(
-                alias.kind in self.lookup_runner.bindings[source].identifier_kinds
+                alias.kind in self.lookup_runner.bindings[source].rules.identifier_kinds
                 for source in [*sources, *policy.field_enrichers]
                 for alias in target.identifiers
             )
@@ -133,22 +116,6 @@ class PaperLookupService:
                     else LookupStatus.UNSUPPORTED_IDENTIFIER
                 )
 
-            if target.has_signals:
-                enrichment_status = (
-                    EnrichmentStatus.COMPLETE
-                    if target.general_found and not target.domain_errors
-                    else EnrichmentStatus.PARTIAL
-                )
-            elif target.paper is not None:
-                enrichment_status = EnrichmentStatus.PARTIAL
-            elif target.errors:
-                enrichment_status = EnrichmentStatus.FAILED
-            else:
-                enrichment_status = (
-                    EnrichmentStatus.NOT_FOUND
-                    if supported
-                    else EnrichmentStatus.UNSUPPORTED
-                )
             # 已成功回退的通用错误保留在 execution；仍影响增量的错误也放在论文项上。
             error = (
                 target.domain_errors[0]
@@ -159,7 +126,7 @@ class PaperLookupService:
             )
             # 歧义属于整个身份查询的结果，不把此前的基础论文作为已确认匹配返回。
             paper = (
-                target.paper.project()
+                project_paper(target.paper)
                 if target.paper is not None and not target.ambiguous
                 else None
             )
@@ -167,16 +134,9 @@ class PaperLookupService:
                 item = items[index]
                 item.status = status
                 item.error = str(error) if error is not None else None
-                item.metadata = (
-                    deepcopy(paper.metadata) or None if paper is not None else None
-                )
-                item.paper = (
-                    deepcopy(paper) if query.purpose != LookupPurpose.ENRICH else None
-                )
-                if query.purpose != LookupPurpose.DETAILS and not target.ambiguous:
-                    item.enrichment_status = enrichment_status
+                item.paper = deepcopy(paper)
 
-        # 可用性基于裁剪前的查询状态；enrich 不再因隐藏 Paper 而把部分成功变成整批失败。
+        # 可用性基于查询结果；保留找到的论文和身份歧义，只有整批失败才传播错误。
         if first_error is not None and not any(
             item.status
             in (LookupStatus.FOUND, LookupStatus.NOT_FOUND, LookupStatus.AMBIGUOUS)

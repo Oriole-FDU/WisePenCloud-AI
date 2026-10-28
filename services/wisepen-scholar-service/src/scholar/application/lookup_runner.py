@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,6 +25,7 @@ from scholar.domain.repositories.paper_lookup_cache import (
     CachedPaperLookup,
     PaperLookupCache,
 )
+from scholar.providers.policies.enrichment import EnrichmentPolicy
 from scholar.providers.s2 import s2_queued_ahead
 
 
@@ -35,11 +35,7 @@ class LookupBinding:
 
     provider: PaperLookupProvider
     cache: PaperLookupCache | None
-    identifier_kinds: list[IdentifierKind]
-    fields: list[str] = field(default_factory=list)
-    has_signals: Callable[[dict[str, Any]], bool] | None = None
-    aliases: Callable[[dict[str, Any]], list[PaperIdentifier]] | None = None
-    short_lived: Callable[[CachedPaperLookup], bool] | None = None
+    rules: EnrichmentPolicy
 
 
 @dataclass
@@ -51,14 +47,9 @@ class LookupTarget:
     metadata: dict[str, Any] = field(default_factory=dict)
     observed_sources: set[str] = field(default_factory=set)
     general_found: bool = False
-    domain_found: bool = False
     ambiguous: bool = False
     errors: list[Exception] = field(default_factory=list)
     domain_errors: list[Exception] = field(default_factory=list)
-
-    @property
-    def has_signals(self) -> bool:
-        return self.general_found or self.domain_found
 
 
 @dataclass
@@ -94,16 +85,21 @@ class LookupRunner:
         self._lock = asyncio.Lock()
 
     def target(
-        self, identifier: PaperIdentifier | None, paper: Paper | None = None
+        self,
+        identifier: PaperIdentifier | None,
+        paper: Paper | None = None,
     ) -> LookupTarget:
+        """构造查询目标；已有 paper 时合并其身份别名。"""
         identifiers = [] if identifier is None else [identifier]
         metadata = deepcopy(paper.metadata) if paper is not None else {}
         if paper is not None:
             identifiers.extend(self._aliases(paper))
-        return LookupTarget(list(dict.fromkeys(identifiers)), deepcopy(paper), metadata)
+        return LookupTarget(
+            list(dict.fromkeys(identifiers)), deepcopy(paper), metadata
+        )
 
     def _has_signals(self, source: str, metadata: dict) -> bool:
-        rule = self.bindings[source].has_signals
+        rule = self.bindings[source].rules.has_signals
         return rule(metadata) if rule is not None else bool(metadata.get(source))
 
     async def run(
@@ -116,7 +112,10 @@ class LookupRunner:
     ) -> list[SourceExecution]:
         credentials = credentials or {}
         execution = []
+
+        # 通用来源：任一命中即短路，未命中才继续下一个来源。
         for source in common_sources:
+            # 入场前先根据已有 metadata 标记命中，避免重复调用。
             for target in targets:
                 if self._has_signals(source, target.metadata):
                     target.general_found = True
@@ -142,12 +141,13 @@ class LookupRunner:
             )
             for target, offset in zip(targets, before, strict=True):
                 target.domain_errors.extend(target.errors[offset:])
-                if self._has_signals(source, target.metadata):
-                    target.domain_found = True
         return execution
 
     async def _apply(
-        self, source: str, targets: list[LookupTarget], api_key: str | None
+        self,
+        source: str,
+        targets: list[LookupTarget],
+        api_key: str | None,
     ) -> SourceExecution:
         binding = self.bindings[source]
         positions: dict[PaperIdentifier, list[LookupTarget]] = {}
@@ -156,14 +156,20 @@ class LookupRunner:
             if target.ambiguous or source in target.observed_sources:
                 continue
             known = target.metadata.get(source, {})
-            if binding.fields and all(name in known for name in binding.fields):
+            # 必填字段齐全即代表已具备完整详情（即使值为 None 也算已确认事实），
+            # 跳过冗余请求。
+            if binding.rules.required_fields and all(
+                name in known for name in binding.rules.required_fields
+            ):
                 continue
+            # 按 binding 声明的 kind 顺序，挑首个可用身份。
             identifier = next(
                 (
                     identity
                     for kind in IdentifierKind.members()
                     for identity in target.identifiers
-                    if identity.kind == kind and kind in binding.identifier_kinds
+                    if identity.kind == kind
+                    and kind in binding.rules.identifier_kinds
                 ),
                 None,
             )
@@ -171,6 +177,7 @@ class LookupRunner:
                 unsupported = True
             else:
                 positions.setdefault(identifier, []).append(target)
+
         if not positions:
             return SourceExecution(
                 source,
@@ -190,6 +197,7 @@ class LookupRunner:
             for identity, entries in positions.items()
         }
         batch = await self._shared(source, known_ids, api_key)
+
         failures = 0
         first_error = None
         for identifier, entries in positions.items():
@@ -213,31 +221,27 @@ class LookupRunner:
                 # 命名空间整体替换，不融合不同来源的同名指标；基础信息取首个成功来源。
                 target.metadata.update(deepcopy(record.paper.metadata))
                 target.identifiers = list(
-                    dict.fromkeys(
-                        [
-                            *target.identifiers,
-                            *record.cache_aliases,
-                        ]
-                    )
+                    dict.fromkeys([*target.identifiers, *record.cache_aliases])
                 )
                 if target.paper is None:
                     target.paper = deepcopy(record.paper)
                 target.paper.metadata = deepcopy(target.metadata)
+
         for error in batch.cache_errors:
             first_error = first_error or error
             for entries in positions.values():
                 for target in entries:
                     target.errors.append(error)
+
         successes = len(batch.records) + len(batch.ambiguous)
-        status = (
-            SourceExecutionStatus.PARTIAL
-            if successes and first_error
-            else SourceExecutionStatus.COMPLETED
-            if successes
-            else SourceExecutionStatus.FAILED
-            if failures
-            else SourceExecutionStatus.NOT_EXECUTED
-        )
+        if successes and first_error:
+            status = SourceExecutionStatus.PARTIAL
+        elif successes:
+            status = SourceExecutionStatus.COMPLETED
+        elif failures:
+            status = SourceExecutionStatus.FAILED
+        else:
+            status = SourceExecutionStatus.NOT_EXECUTED
         return SourceExecution(
             source,
             bool(batch.cache_hits),
@@ -252,14 +256,18 @@ class LookupRunner:
         known_ids: dict[PaperIdentifier, tuple[PaperIdentifier, ...]],
         api_key: str | None,
     ) -> _SourceBatch:
-        # 凭证仅用于首次访问上游；相同来源和身份的并发调用共享同一份完整事实。
+        """相同来源与身份的并发调用共享同一份完整事实（在途去重）。"""
+        # 构造稳定 key：来源 + 排序后的 (身份, 别名元组) 序列。
         identities = tuple(
             sorted(
                 (
                     (
                         identifier,
                         tuple(
-                            sorted(aliases, key=lambda item: (item.kind, item.value))
+                            sorted(
+                                aliases,
+                                key=lambda item: (item.kind, item.value),
+                            )
                         ),
                     )
                     for identifier, aliases in known_ids.items()
@@ -271,7 +279,9 @@ class LookupRunner:
         async with self._lock:
             entry = self._inflight.get(key)
             if entry is None:
-                task = asyncio.create_task(self._load(source, known_ids, api_key))
+                task = asyncio.create_task(
+                    self._load(source, known_ids, api_key)
+                )
                 task.add_done_callback(self._consume_exception)
                 entry = self._inflight[key] = _InFlight(task)
             entry.waiters += 1
@@ -307,13 +317,16 @@ class LookupRunner:
             except RedisError as error:
                 batch.errors.update(dict.fromkeys(ids, error))
                 return batch
+
         pending = []
         for identifier, record in zip(ids, cached, strict=True):
             if record is None:
                 pending.append(identifier)
             elif identifier not in record.cache_aliases or (
                 record.paper is not None
-                and self._conflicts(known_ids[identifier], self._aliases(record.paper))
+                and self._conflicts(
+                    known_ids[identifier], self._aliases(record.paper)
+                )
             ):
                 batch.errors[identifier] = ProviderError(
                     "Cached lookup conflicts with the requested paper identity"
@@ -334,13 +347,14 @@ class LookupRunner:
         finally:
             batch.queued_ahead = s2_queued_ahead.get()
             s2_queued_ahead.reset(token)
+
         writes = []
         for identifier, match in zip(pending, matches, strict=True):
             if match.error is not None:
                 batch.errors[identifier] = ProviderError(match.error)
                 continue
             if len(match.papers) > 1:
-                # 歧义不产生缓存别名，也不让后续来源基于任一候选继续关联。
+                # 歧义：不产生缓存别名，也不让后续来源基于任一候选继续关联。
                 batch.ambiguous.add(identifier)
                 continue
             paper = match.papers[0] if match.papers else None
@@ -355,7 +369,8 @@ class LookupRunner:
             )
             batch.records[identifier] = record
             short = paper is None or (
-                binding.short_lived is not None and binding.short_lived(record)
+                binding.rules.short_lived is not None
+                and binding.rules.short_lived(record)
             )
             writes.append(
                 (
@@ -377,13 +392,14 @@ class LookupRunner:
         if paper.doi is not None:
             aliases.append(parse_identifier(paper.doi))
         for binding in self.bindings.values():
-            if binding.aliases is not None:
-                aliases.extend(binding.aliases(paper.metadata))
+            if binding.rules.aliases is not None:
+                aliases.extend(binding.rules.aliases(paper.metadata))
         return list(dict.fromkeys(aliases))
 
     @staticmethod
     def _conflicts(
-        known: tuple[PaperIdentifier, ...], actual: list[PaperIdentifier]
+        known: tuple[PaperIdentifier, ...],
+        actual: list[PaperIdentifier],
     ) -> bool:
         return any(
             left.kind == right.kind and left.value != right.value

@@ -1,5 +1,8 @@
 """验证 lookup runner 的缓存、信号短路、错误和并发生命周期合同。"""
 
+from dataclasses import replace
+from scholar.providers.policies.enrichment import ENRICHMENT_RULES
+
 import asyncio
 from datetime import date
 
@@ -7,8 +10,6 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.services.lookup import (
-    EnrichmentStatus,
-    LookupPurpose,
     LookupStatus,
     PaperLookup,
     PaperLookupService,
@@ -145,14 +146,7 @@ def make_paper(
 
 def runner(provider, *, cache=None, extra_bindings=None):
     bindings = {
-        PaperSource.S2: LookupBinding(
-            provider,
-            cache,
-            IdentifierKind.members(),
-            has_signals=s2.has_signals,
-            aliases=s2.aliases,
-            short_lived=s2.short_lived,
-        )
+        PaperSource.S2: LookupBinding(provider, cache, replace(ENRICHMENT_RULES["s2"], identifier_kinds=IdentifierKind.members(), has_signals=s2.has_signals, aliases=s2.aliases, short_lived=s2.short_lived))
     }
     if extra_bindings:
         bindings.update(extra_bindings)
@@ -204,9 +198,9 @@ async def test_negative_and_positive_lookup_results_use_distinct_ttls_and_cache_
     provider = FakeProvider({found: PaperLookupMatch([paper])})
     lookup = PaperLookupService(runner(provider, cache=cache))
 
-    absent = await lookup.lookup(PaperLookup(["corpusid:404"], LookupPurpose.ENRICH))
-    present = await lookup.lookup(PaperLookup(["corpusid:123"], LookupPurpose.FULL))
-    repeated = await lookup.lookup(PaperLookup(["corpusid:123"], LookupPurpose.FULL))
+    absent = await lookup.lookup(PaperLookup(["corpusid:404"]))
+    present = await lookup.lookup(PaperLookup(["corpusid:123"]))
+    repeated = await lookup.lookup(PaperLookup(["corpusid:123"]))
 
     assert absent.items[0].status == LookupStatus.NOT_FOUND
     assert present.items[0].paper.title == repeated.items[0].paper.title
@@ -223,7 +217,7 @@ async def test_cache_read_failure_does_not_fall_through_to_provider():
     lookup = PaperLookupService(runner(provider, cache=cache))
 
     with pytest.raises(RedisConnectionError, match="cache unavailable"):
-        await lookup.lookup(PaperLookup(["corpusid:123"], LookupPurpose.FULL))
+        await lookup.lookup(PaperLookup(["corpusid:123"]))
 
     assert provider.calls == []
 
@@ -292,10 +286,8 @@ async def test_existing_common_signal_stops_common_chain_but_domain_provider_sti
     run = runner(
         unreachable,
         extra_bindings={
-            PaperSource.ARXIV: LookupBinding(
-                FakeProvider(), None, [IdentifierKind.ARXIV]
-            ),
-            PaperSource.HUGGINGFACE: LookupBinding(hf, None, [IdentifierKind.ARXIV]),
+            PaperSource.ARXIV: LookupBinding(FakeProvider(), None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.HUGGINGFACE: LookupBinding(hf, None, replace(ENRICHMENT_RULES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV])),
         },
     )
     target = run.target(identity, offline)
@@ -321,31 +313,23 @@ async def test_existing_common_signal_stops_common_chain_but_domain_provider_sti
 @pytest.mark.asyncio
 async def test_base_paper_survives_failed_incremental_lookup_as_partial_result():
     identity = parse_identifier("2401.00001")
-    base = make_paper(metadata={"arxiv": {"license": "CC-BY"}})
+    base = make_paper(metadata={"arxiv": {"comments": "Accepted at a conference"}})
     arxiv = FakeProvider({identity: PaperLookupMatch([base])})
     failure = ProviderError("S2 request timed out")
     s2 = FakeProvider(error=failure)
     run = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(
-                arxiv,
-                None,
-                [IdentifierKind.ARXIV],
-                has_signals=arxiv_signals,
-            ),
-            PaperSource.S2: LookupBinding(
-                s2, None, [IdentifierKind.ARXIV], has_signals=s2_signals
-            ),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
+            PaperSource.S2: LookupBinding(s2, None, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
         }
     )
 
     result = await PaperLookupService(run).lookup(
-        PaperLookup([identity.value], LookupPurpose.ENRICH)
+        PaperLookup([identity.value])
     )
 
     assert result.items[0].status == LookupStatus.FOUND
-    assert result.items[0].enrichment_status == EnrichmentStatus.PARTIAL
-    assert result.items[0].metadata["arxiv"]["license"] == "CC-BY"
+    assert result.items[0].paper.metadata["arxiv"]["comments"] == "Accepted at a conference"
     assert result.items[0].error == "S2 request timed out"
     assert s2.calls == [([identity], None)]
 
@@ -357,7 +341,7 @@ async def test_all_provider_failures_reraise_the_original_error_object():
     lookup = service(provider)
 
     with pytest.raises(ProviderError) as caught:
-        await lookup.lookup(PaperLookup(["corpusid:123"], purpose=LookupPurpose.ENRICH))
+        await lookup.lookup(PaperLookup(["corpusid:123"]))
 
     assert caught.value is failure
 
@@ -374,48 +358,38 @@ async def test_conflicting_exact_identity_keeps_base_and_does_not_cache_provider
     cache = FakeCache()
     run = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(
-                FakeProvider({identity: PaperLookupMatch([base])}),
-                None,
-                [IdentifierKind.ARXIV],
-            ),
-            PaperSource.S2: LookupBinding(
-                FakeProvider({identity: PaperLookupMatch([contradictory])}),
-                cache,
-                [IdentifierKind.ARXIV],
-                has_signals=s2_signals,
-                aliases=s2_aliases,
-            ),
+            PaperSource.ARXIV: LookupBinding(FakeProvider({identity: PaperLookupMatch([base])}), None, replace(ENRICHMENT_RULES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.S2: LookupBinding(FakeProvider({identity: PaperLookupMatch([contradictory])}), cache, replace(ENRICHMENT_RULES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals, aliases=s2_aliases)),
         }
     )
 
     result = await PaperLookupService(run).lookup(
-        PaperLookup([identity.value], LookupPurpose.FULL)
+        PaperLookup([identity.value])
     )
 
     assert result.items[0].paper.arxiv_id == base.arxiv_id
     assert result.items[0].paper.doi == base.doi
-    assert result.items[0].metadata["s2"] == {"corpus_id": "111"}
+    assert result.items[0].paper.metadata["s2"] == {"corpus_id": "111"}
     assert "conflicts" in result.items[0].error
     assert cache.puts == []
 
 
 @pytest.mark.asyncio
-async def test_simultaneous_purposes_and_credentials_share_one_inflight_lookup():
+async def test_simultaneous_credentials_share_one_inflight_lookup():
     identity = parse_identifier("corpusid:123")
     provider = FakeProvider({identity: PaperLookupMatch([make_paper()])})
     provider.block = True
     lookup = service(provider)
     first = asyncio.create_task(
         lookup.lookup(
-            PaperLookup(["corpusid:123"], LookupPurpose.ENRICH),
+            PaperLookup(["corpusid:123"]),
             credentials={PaperSource.S2: "key-a"},
         )
     )
     await provider.entered.wait()
     second = asyncio.create_task(
         lookup.lookup(
-            PaperLookup(["corpusid:123"], LookupPurpose.FULL),
+            PaperLookup(["corpusid:123"]),
             credentials={PaperSource.S2: "key-b"},
         )
     )
@@ -425,7 +399,7 @@ async def test_simultaneous_purposes_and_credentials_share_one_inflight_lookup()
     provider.release.set()
     enriched, full = await asyncio.gather(first, second)
 
-    assert enriched.items[0].paper is None
+    assert enriched.items[0].paper.title == "Offline title"
     assert full.items[0].paper.title == "Offline title"
     assert provider.cancelled.is_set() is False
 
@@ -437,11 +411,11 @@ async def test_cancelling_one_shared_waiter_keeps_provider_alive_for_the_other()
     provider.block = True
     lookup = service(provider)
     first = asyncio.create_task(
-        lookup.lookup(PaperLookup(["corpusid:123"], LookupPurpose.FULL))
+        lookup.lookup(PaperLookup(["corpusid:123"]))
     )
     await provider.entered.wait()
     second = asyncio.create_task(
-        lookup.lookup(PaperLookup(["corpusid:123"], LookupPurpose.FULL))
+        lookup.lookup(PaperLookup(["corpusid:123"]))
     )
     await asyncio.sleep(0)
     first.cancel()
@@ -461,7 +435,7 @@ async def test_cancelling_last_waiter_cancels_provider_request():
     provider.block = True
     lookup = service(provider)
     request = asyncio.create_task(
-        lookup.lookup(PaperLookup(["corpusid:123"], LookupPurpose.ENRICH))
+        lookup.lookup(PaperLookup(["corpusid:123"]))
     )
     await provider.entered.wait()
     request.cancel()
@@ -478,7 +452,7 @@ async def test_programming_errors_propagate_without_provider_fallback():
 
     with pytest.raises(TypeError) as caught:
         await service(provider).lookup(
-            PaperLookup(["corpusid:123"], LookupPurpose.FULL)
+            PaperLookup(["corpusid:123"])
         )
 
     assert caught.value is failure
