@@ -96,7 +96,8 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             published_before=published_before,
             limit=limit,
             source_scope=source_scope.value,
-            openalex_api_key=_openalex_key(ctx),
+            openalex_api_key=_secret(ctx, "api_key"),
+            huggingface_api_key=_secret(ctx, "huggingface_api_key"),
         )
 
     @mcp.tool(
@@ -131,7 +132,8 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             identifiers=identifiers,
             purpose=purpose.value,
             field=field.value,
-            openalex_api_key=_openalex_key(ctx),
+            openalex_api_key=_secret(ctx, "api_key"),
+            huggingface_api_key=_secret(ctx, "huggingface_api_key"),
         )
 
     @mcp.tool(
@@ -141,6 +143,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         ),
     )
     async def discover_papers(
+        ctx: Context,
         field: Annotated[
             DiscoveryField,
             Field(description="A field with a registered discovery capability."),
@@ -163,12 +166,13 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             period=period.value,
             sort=sort.value,
             limit=limit,
+            huggingface_api_key=_secret(ctx, "huggingface_api_key"),
         )
 
 
-def _openalex_key(ctx: Context) -> str | None:
+def _secret(ctx: Context, key: str) -> str | None:
     # 用户秘密配置经 MCP 元数据传递，不能成为模型可见的工具参数。
-    value = get_tool_config_value(ctx, "api_key")
+    value = get_tool_config_value(ctx, key)
     return value.strip() or None if isinstance(value, str) else None
 
 

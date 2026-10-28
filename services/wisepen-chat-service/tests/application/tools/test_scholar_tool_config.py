@@ -2,7 +2,6 @@ import json
 from types import SimpleNamespace
 
 import pytest
-
 from chat.api.tool_response_converter import build_tool_response
 from chat.application.tools.core import ToolDispatcher, ToolInvocation, ToolRegistry
 from chat.application.tools.core.mcp.system_mcp_tool_catalog import SystemMcpToolCatalog
@@ -127,7 +126,12 @@ async def test_optional_scholar_config_keeps_local_tools_callable(scholar_tools)
     discovery_response = build_tool_response(scope.get("system_discover_papers"), None)
     assert discovery_response.requires_config is False
     assert discovery_response.enabled is True
-    assert discovery_response.config_schema == {}
+    assert set(discovery_response.config_schema["properties"]) == {
+        "huggingface_api_key"
+    }
+    assert discovery_response.config_schema["properties"]["huggingface_api_key"][
+        "writeOnly"
+    ]
     results = await ToolDispatcher().dispatch(
         [
             ToolInvocation("search", "system_search_papers", {"query": "retrieval"}),

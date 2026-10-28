@@ -266,18 +266,42 @@ async def test_byok_metadata_is_per_call_and_only_forwarded_in_http_headers(
         await session.call_tool(
             "search_papers",
             {"query": "test"},
-            meta={"com.wisepen/tool_config": {"api_key": "search-user-key"}},
+            meta={
+                "com.wisepen/tool_config": {
+                    "api_key": "search-user-key",
+                    "huggingface_api_key": "hf-search-user",
+                }
+            },
         )
         await session.call_tool(
             "lookup_papers",
             {"identifiers": ["1706.03762"]},
-            meta={"com.wisepen/tool_config": {"api_key": "lookup-user-key"}},
+            meta={
+                "com.wisepen/tool_config": {
+                    "api_key": "lookup-user-key",
+                    "huggingface_api_key": "hf-lookup-user",
+                }
+            },
         )
         await session.call_tool("search_papers", {"query": "test"})
+        await session.call_tool(
+            "discover_papers",
+            {"field": "computer_science"},
+            meta={
+                "com.wisepen/tool_config": {"huggingface_api_key": "hf-discover-user"}
+            },
+        )
 
-    assert rpc.calls[0][2]["headers"] == {"X-OpenAlex-Api-Key": "search-user-key"}
-    assert rpc.calls[1][2]["headers"] == {"X-OpenAlex-Api-Key": "lookup-user-key"}
+    assert rpc.calls[0][2]["headers"] == {
+        "X-OpenAlex-Api-Key": "search-user-key",
+        "X-HuggingFace-Api-Key": "hf-search-user",
+    }
+    assert rpc.calls[1][2]["headers"] == {
+        "X-OpenAlex-Api-Key": "lookup-user-key",
+        "X-HuggingFace-Api-Key": "hf-lookup-user",
+    }
     assert "headers" not in rpc.calls[2][2]
+    assert rpc.calls[3][2]["headers"] == {"X-HuggingFace-Api-Key": "hf-discover-user"}
     assert all("api_key" not in call[2]["json"] for call in rpc.calls)
 
 

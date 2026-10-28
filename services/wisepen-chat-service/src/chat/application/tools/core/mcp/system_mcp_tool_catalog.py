@@ -40,20 +40,39 @@ _WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
     secret_keys=("api_key",),
 )
 
-_SCHOLAR_OPENALEX_API_KEY_CONFIG = ToolConfigSpec(
+_SCHOLAR_API_KEY_CONFIG = ToolConfigSpec(
     schema={
         "type": "object",
         "properties": {
             "api_key": {
                 "type": "string",
                 "title": "OpenAlex API Key",
-                "description": "可选；未配置时 Scholar 仍可使用本地论文数据。",
+                "description": "可选；优先使用此密钥，未配置时使用平台密钥。",
+                "writeOnly": True,
+            },
+            "huggingface_api_key": {
+                "type": "string",
+                "title": "Hugging Face Token",
+                "description": "可选；优先使用此 Token，未配置时使用平台 Token。",
                 "writeOnly": True,
             },
         },
         "additionalProperties": False,
     },
-    secret_keys=("api_key",),
+    secret_keys=("api_key", "huggingface_api_key"),
+)
+
+_SCHOLAR_HF_API_KEY_CONFIG = ToolConfigSpec(
+    schema={
+        "type": "object",
+        "properties": {
+            "huggingface_api_key": _SCHOLAR_API_KEY_CONFIG.schema["properties"][
+                "huggingface_api_key"
+            ]
+        },
+        "additionalProperties": False,
+    },
+    secret_keys=("huggingface_api_key",),
 )
 
 _WEB_SEARCH_POLICY = ToolPolicy(
@@ -245,16 +264,17 @@ _SYSTEM_TOOL_CONFIGS: list[dict[str, Any]] = [{
         "tool_name": "search_papers",
         "ui_spec": ToolUISpec(display_name="搜索论文"),
         "policy": _SCHOLAR_POLICY,
-        "config_spec": _SCHOLAR_OPENALEX_API_KEY_CONFIG,
+        "config_spec": _SCHOLAR_API_KEY_CONFIG,
         "failure_reason": "Scholar Paper Search Failed",
     },{
         "tool_name": "lookup_papers",
         "ui_spec": ToolUISpec(display_name="查询论文"),
         "policy": _SCHOLAR_POLICY,
-        "config_spec": _SCHOLAR_OPENALEX_API_KEY_CONFIG,
+        "config_spec": _SCHOLAR_API_KEY_CONFIG,
         "failure_reason": "Scholar Paper Lookup Failed",
     },{
         "tool_name": "discover_papers",
+        "config_spec": _SCHOLAR_HF_API_KEY_CONFIG,
         "ui_spec": ToolUISpec(display_name="发现论文"),
         "policy": _SCHOLAR_POLICY,
         "failure_reason": "Scholar Paper Discovery Failed",

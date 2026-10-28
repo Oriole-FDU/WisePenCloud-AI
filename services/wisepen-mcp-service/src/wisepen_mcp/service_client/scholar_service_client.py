@@ -36,7 +36,16 @@ class ScholarClient:
         limit: int,
         source_scope: str,
         openalex_api_key: str | None = None,
+        huggingface_api_key: str | None = None,
     ) -> dict[str, Any]:
+        headers = {
+            k: v
+            for k, v in {
+                "X-OpenAlex-Api-Key": openalex_api_key,
+                "X-HuggingFace-Api-Key": huggingface_api_key,
+            }.items()
+            if v
+        }
         # MCP 用 date 生成日期 Schema；HTTP JSON 使用 Scholar 约定的 ISO 日期字符串。
         async with asyncio.timeout(self._timeout):
             return await self._rpc.post(
@@ -55,11 +64,7 @@ class ScholarClient:
                     "source_scope": source_scope,
                 },
                 timeout=self._timeout,
-                **(
-                    {"headers": {"X-OpenAlex-Api-Key": openalex_api_key}}
-                    if openalex_api_key
-                    else {}
-                ),
+                **({"headers": headers} if headers else {}),
             )
 
     async def lookup_papers(
@@ -69,7 +74,16 @@ class ScholarClient:
         purpose: str,
         field: str = "general",
         openalex_api_key: str | None = None,
+        huggingface_api_key: str | None = None,
     ) -> dict[str, Any]:
+        headers = {
+            k: v
+            for k, v in {
+                "X-OpenAlex-Api-Key": openalex_api_key,
+                "X-HuggingFace-Api-Key": huggingface_api_key,
+            }.items()
+            if v
+        }
         async with asyncio.timeout(self._timeout):
             return await self._rpc.post(
                 self._service_name,
@@ -80,11 +94,7 @@ class ScholarClient:
                     "field": field,
                 },
                 timeout=self._timeout,
-                **(
-                    {"headers": {"X-OpenAlex-Api-Key": openalex_api_key}}
-                    if openalex_api_key
-                    else {}
-                ),
+                **({"headers": headers} if headers else {}),
             )
 
     async def discover_papers(
@@ -94,6 +104,7 @@ class ScholarClient:
         period: str,
         sort: str,
         limit: int,
+        huggingface_api_key: str | None = None,
     ) -> dict[str, Any]:
         async with asyncio.timeout(self._timeout):
             return await self._rpc.post(
@@ -106,6 +117,11 @@ class ScholarClient:
                     "limit": limit,
                 },
                 timeout=self._timeout,
+                **(
+                    {"headers": {"X-HuggingFace-Api-Key": huggingface_api_key}}
+                    if huggingface_api_key
+                    else {}
+                ),
             )
 
 
