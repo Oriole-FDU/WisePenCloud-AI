@@ -42,7 +42,7 @@ class FileStorageClient:
         scene: str,
         biz_tag: str,
         expected_size: int,
-        config_id: int | None = None,
+        provider_code: str | None = None,
     ) -> UploadInitResponse:
         data = await self._rpc.post(
             self._service_name,
@@ -52,7 +52,7 @@ class FileStorageClient:
                 "extension": extension,
                 "scene": scene,
                 "bizTag": biz_tag,
-                "configId": config_id,
+                "providerCode": provider_code,
                 "expectedSize": expected_size,
                 "isNeedCallback": True,
             },

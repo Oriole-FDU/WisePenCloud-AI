@@ -51,7 +51,7 @@ async def init_temp_attachment_upload(
         extension=req.extension,
         scene="PRIVATE_AI_ATTACHMENT",
         biz_tag=biz_tag,
-        config_id=None,
+        provider_code=None,
         expected_size=req.file_size,
     )
 

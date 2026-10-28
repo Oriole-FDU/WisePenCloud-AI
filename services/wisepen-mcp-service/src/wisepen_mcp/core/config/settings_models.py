@@ -50,7 +50,7 @@ class WebSearchProvidersSettings(ConfigModel):
 
 
 class WebSearchRerankerSettings(ConfigModel):
-    zero_entropy_api_key: str = ""
+    zero_entropy_api_key: str = Field(min_length=1)
     model: str = "zerank-2"
 
 
@@ -59,9 +59,7 @@ class WebSearchSettings(ConfigModel):
     providers: WebSearchProvidersSettings = Field(
         default_factory=WebSearchProvidersSettings
     )
-    reranker: WebSearchRerankerSettings = Field(
-        default_factory=WebSearchRerankerSettings
-    )
+    reranker: WebSearchRerankerSettings
 
 
 class McpServiceSettings(ConfigModel):
@@ -70,4 +68,4 @@ class McpServiceSettings(ConfigModel):
     service_discovery: ServiceDiscoverySettings = Field(
         default_factory=ServiceDiscoverySettings
     )
-    web_search: WebSearchSettings = Field(default_factory=WebSearchSettings)
+    web_search: WebSearchSettings

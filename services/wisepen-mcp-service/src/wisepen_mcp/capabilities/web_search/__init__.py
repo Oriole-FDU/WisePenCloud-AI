@@ -44,7 +44,7 @@ def register_web_search_tools(
     web_search_zero_entropy_reranker = ZeroEntropyReranker(
         client=AsyncZeroEntropy(api_key=settings.web_search.reranker.zero_entropy_api_key),
         config=ZeroEntropyRerankerConfig(model=settings.web_search.reranker.model),
-    ) if settings.web_search.reranker.zero_entropy_api_key else None
+    )
 
     web_search_ranking_pipeline = RankingPipeline(
         scorers=(web_search_fielded_bm25_scorer,),
