@@ -5,6 +5,7 @@ from pathlib import Path
 
 from common.logger import info, setup_logging_intercept
 from common.observability import setup_observability
+
 from scholar.core.config.bootstrap_settings import bootstrap_settings
 
 # BYOK 密钥会进入请求栈，异常日志保留错误和回溯，但不展开局部变量。

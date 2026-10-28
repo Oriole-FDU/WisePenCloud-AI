@@ -20,16 +20,61 @@ from scholar.domain.models.identifiers import (
     PaperIdentifier,
     normalize_arxiv,
     normalize_doi,
+    parse_identifier,
 )
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.providers.field_mapping import OPENALEX_FILTERS
-from scholar.providers.projection import project_paper
 
 _FIELDS = (
     "id,doi,primary_location,best_oa_location,locations,updated_date,ids,"
     "cited_by_count,primary_topic,open_access,is_retracted,mesh,study_designs,"
     "title,abstract_inverted_index,authorships,publication_date,publication_year"
 )
+
+
+# OpenAlex 同字段多个 ID 用 OR；general 不添加领域过滤。
+OPENALEX_FILTERS: dict[AcademicField, str | None] = {
+    AcademicField.GENERAL: None,
+    AcademicField.COMPUTER_SCIENCE: "topics.field.id:17",
+    AcademicField.MEDICINE: "topics.field.id:27|29|30|35|36",
+    AcademicField.BIOLOGY: "topics.field.id:11|13|24|28|34",
+    AcademicField.ENGINEERING: "topics.field.id:15|21|22",
+    AcademicField.ECONOMICS_BUSINESS: "topics.field.id:14|20",
+    AcademicField.MATHEMATICS: "topics.field.id:26|18",
+    AcademicField.PHYSICS: "topics.field.id:31",
+    AcademicField.CHEMISTRY: "topics.field.id:16",
+    AcademicField.PSYCHOLOGY: "topics.field.id:32",
+    AcademicField.SOCIAL_SCIENCES: "topics.field.id:33",
+    AcademicField.ARTS_HUMANITIES: "topics.field.id:12",
+    AcademicField.LAW: "topics.subfield.id:3308",
+    AcademicField.MATERIALS_ENVIRONMENTAL_SCIENCES: "topics.field.id:19|23|25",
+}
+
+
+def aliases(metadata: dict) -> list[PaperIdentifier]:
+    """从 OpenAlex 响应中提取 Work URI（如 ``https://openalex.org/W...``）。"""
+    value = metadata.get("openalex", {}).get("id")
+    return [] if value is None else [parse_identifier(value)]
+
+
+def has_signals(metadata: dict) -> bool:
+    """判定 OpenAlex 元数据是否含有效富化信号。
+
+    两组 OR：
+
+    - 宏观标量：``cited_by_count`` / ``primary_topic`` /
+      ``open_access`` / ``is_retracted`` 任一非 None。
+    - 结构化字段：``mesh`` / ``study_designs`` 任一存在（医学专用字段）。
+    """
+    values = metadata.get("openalex", {})
+    return any(
+        values.get(name) is not None
+        for name in (
+            "cited_by_count",
+            "primary_topic",
+            "open_access",
+            "is_retracted",
+        )
+    ) or bool(values.get("mesh") or values.get("study_designs"))
 
 
 class OpenAlexProvider:
@@ -70,7 +115,7 @@ class OpenAlexProvider:
             # 异常文本保留状态码与 URL；凭证仅在请求头中，不进入异常文本。
             raise ProviderError(provider_error_message(error)) from error
         return PaperSearchBatch(
-            [project_paper(self.to_paper(work)) for work in response.json()["results"]]
+            [self.to_paper(work).project() for work in response.json()["results"]]
         )
 
     async def lookup(

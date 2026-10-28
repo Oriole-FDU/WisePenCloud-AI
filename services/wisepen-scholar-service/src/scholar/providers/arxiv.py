@@ -29,8 +29,51 @@ from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import PaperIdentifier
 from scholar.domain.repositories.paper_repository import PaperRepository
-from scholar.providers.field_mapping import ARXIV_CATEGORIES
-from scholar.providers.projection import project_paper
+from scholar.providers.s2 import has_signals as s2_has_signals
+
+ARXIV_CATEGORIES: dict[AcademicField, list[str] | None] = {
+    AcademicField.GENERAL: [],
+    AcademicField.COMPUTER_SCIENCE: ["cs.*"],
+    AcademicField.MEDICINE: None,
+    AcademicField.BIOLOGY: ["q-bio.*"],
+    AcademicField.ENGINEERING: ["eess.*"],
+    AcademicField.ECONOMICS_BUSINESS: ["econ.*", "q-fin.*"],
+    AcademicField.MATHEMATICS: ["math.*", "stat.*"],
+    AcademicField.PHYSICS: [
+        "physics.*",
+        "astro-ph.*",
+        "cond-mat.*",
+        "gr-qc",
+        "hep-ex",
+        "hep-lat",
+        "hep-ph",
+        "hep-th",
+        "math-ph",
+        "nlin.*",
+        "nucl-ex",
+        "nucl-th",
+        "quant-ph",
+    ],
+    AcademicField.CHEMISTRY: ["physics.chem-ph"],
+    AcademicField.PSYCHOLOGY: None,
+    AcademicField.SOCIAL_SCIENCES: ["physics.soc-ph"],
+    AcademicField.ARTS_HUMANITIES: None,
+    AcademicField.LAW: None,
+    AcademicField.MATERIALS_ENVIRONMENTAL_SCIENCES: [
+        "cond-mat.mtrl-sci",
+        "physics.ao-ph",
+        "physics.geo-ph",
+    ],
+}
+
+
+def has_signals(metadata: dict) -> bool:
+    """判定本地仓储（arXiv/DOI）是否已含足够富化信号。
+
+    本地基础元信息只算检索底库，不算外部增量；只有离线同步注入过 S2 字段
+    才算真正富化，故直接复用 ``s2.has_signals``。
+    """
+    return s2_has_signals(metadata)
 
 
 class ArxivProvider:
@@ -146,7 +189,7 @@ class ArxivProvider:
 
             ranked = sorted(fused, key=boosted_score, reverse=True)
             return PaperSearchBatch(
-                [project_paper(candidate.payload) for candidate in ranked[:limit]],
+                [candidate.payload.project() for candidate in ranked[:limit]],
                 partial_error,
             )
         except ElasticApiError as error:

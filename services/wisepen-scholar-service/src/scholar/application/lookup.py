@@ -17,7 +17,6 @@ from scholar.application.source_execution import SourceExecution
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.providers.projection import project_paper
 
 
 class LookupPurpose(StrEnum):
@@ -160,7 +159,7 @@ class PaperLookupService:
             )
             # 歧义属于整个身份查询的结果，不把此前的基础论文作为已确认匹配返回。
             paper = (
-                project_paper(target.paper)
+                target.paper.project()
                 if target.paper is not None and not target.ambiguous
                 else None
             )

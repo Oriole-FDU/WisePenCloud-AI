@@ -22,13 +22,9 @@ from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.providers.arxiv import ArxivProvider
-from scholar.providers.enrichment_rules import (
-    arxiv_signals,
-    openalex_signals,
-    s2_aliases,
-    s2_signals,
-)
+from scholar.providers.arxiv import ArxivProvider, has_signals as arxiv_signals
+from scholar.providers.openalex import has_signals as openalex_signals
+from scholar.providers.s2 import aliases as s2_aliases, has_signals as s2_signals
 
 
 class FakeProvider:

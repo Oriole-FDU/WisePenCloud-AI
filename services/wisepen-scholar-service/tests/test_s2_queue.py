@@ -24,8 +24,7 @@ from scholar.domain.errors import ProviderBusy
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.providers.enrichment_rules import s2_signals
-from scholar.providers.s2 import S2Provider
+from scholar.providers.s2 import S2Provider, has_signals as s2_signals
 
 
 @pytest_asyncio.fixture

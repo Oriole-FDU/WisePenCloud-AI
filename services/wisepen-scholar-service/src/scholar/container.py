@@ -24,15 +24,8 @@ from scholar.core.storage.redis.discovery_cache import RedisDiscoveryCacheReposi
 from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
 from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
 from scholar.domain.models.identifiers import IdentifierKind
+from scholar.providers import arxiv, huggingface, openalex, s2
 from scholar.providers.arxiv import ArxivProvider
-from scholar.providers.enrichment_rules import (
-    arxiv_signals,
-    openalex_aliases,
-    openalex_signals,
-    s2_aliases,
-    s2_short_lived,
-    s2_signals,
-)
 from scholar.providers.huggingface import HuggingFaceProvider
 from scholar.providers.openalex import OpenAlexProvider
 from scholar.providers.s2 import S2Provider, S2Transport
@@ -175,21 +168,21 @@ class Container(containers.DeclarativeContainer):
             provider=arxiv_searcher,
             cache=arxiv_cache,
             identifier_kinds=[IdentifierKind.ARXIV, IdentifierKind.DOI],
-            has_signals=arxiv_signals,
+            has_signals=arxiv.has_signals,
         ),
         s2=providers.Factory(
             LookupBinding,
             provider=s2_provider,
             cache=s2_cache,
-            has_signals=s2_signals,
-            aliases=s2_aliases,
-            short_lived=s2_short_lived,
             identifier_kinds=[
                 IdentifierKind.ARXIV,
                 IdentifierKind.DOI,
                 IdentifierKind.CORPUS_ID,
                 IdentifierKind.S2,
             ],
+            has_signals=s2.has_signals,
+            aliases=s2.aliases,
+            short_lived=s2.short_lived,
         ),
         openalex=providers.Factory(
             LookupBinding,
@@ -200,15 +193,14 @@ class Container(containers.DeclarativeContainer):
                 IdentifierKind.DOI,
                 IdentifierKind.ARXIV,
             ],
-            has_signals=openalex_signals,
-            aliases=openalex_aliases,
+            has_signals=openalex.has_signals,
+            aliases=openalex.aliases,
         ),
         huggingface=providers.Factory(
             LookupBinding,
             provider=huggingface_provider,
             cache=huggingface_cache,
             identifier_kinds=[IdentifierKind.ARXIV],
-            has_signals=lambda metadata: bool(metadata.get("huggingface")),
             fields=[
                 "ai_summary",
                 "ai_keywords",
@@ -218,6 +210,7 @@ class Container(containers.DeclarativeContainer):
                 "linked_models",
                 "linked_datasets",
             ],
+            has_signals=huggingface.has_signals,
         ),
     )
     lookup_runner = providers.Singleton(

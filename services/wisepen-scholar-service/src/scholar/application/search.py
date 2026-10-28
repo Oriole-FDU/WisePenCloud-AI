@@ -23,7 +23,6 @@ from scholar.domain.models.identifiers import (
 )
 from scholar.domain.models.paper import Paper
 from scholar.domain.repositories.query_cache import QueryCacheRepository
-from scholar.providers.projection import project_paper
 
 
 class SourceScope(StrEnum):
@@ -150,7 +149,7 @@ class PaperSearchService:
             ],
             credentials=credentials,
         )
-        enriched_papers = [project_paper(target.paper) for target in targets]
+        enriched_papers = [target.paper.project() for target in targets]
         return SearchResult(enriched_papers, execution, conflicts, enrichment_execution)
 
     async def _search_source(

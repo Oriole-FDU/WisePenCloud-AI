@@ -30,6 +30,16 @@ class IdentifierKind(StrEnum):
     S2 = "s2"
     CORPUS_ID = "corpus_id"
 
+    @classmethod
+    def values(cls) -> list[str]:
+        """返回所有枚举值的字符串列表"""
+        return [item.value for item in cls]
+
+    @classmethod
+    def members(cls) -> list["IdentifierKind"]:
+        """返回所有枚举成员本身的列表"""
+        return list(cls)
+
 
 @dataclass(frozen=True)
 class PaperIdentifier:

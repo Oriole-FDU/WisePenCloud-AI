@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 import orjson
-
 from common.core.exceptions import ServiceException
+
 from scholar.application.field_policies import FieldPolicy
 from scholar.application.source_execution import SourceExecution, SourceExecutionStatus
 from scholar.domain.errors import ScholarErrorCode

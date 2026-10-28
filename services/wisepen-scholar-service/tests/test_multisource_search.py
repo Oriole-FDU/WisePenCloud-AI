@@ -24,10 +24,8 @@ from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.providers.arxiv import ArxivProvider
-from scholar.providers.field_mapping import (
-    ARXIV_CATEGORIES,
-    OPENALEX_FILTERS,
-)
+from scholar.providers.arxiv import ARXIV_CATEGORIES
+from scholar.providers.openalex import OPENALEX_FILTERS
 
 
 class MemoryCache:

@@ -1,7 +1,7 @@
 """领域能力配置。
 
 按学术领域声明检索来源与领域专用富化能力；
-分类过滤规则仍由 ``providers/field_mapping.py`` 统一维护。
+分类过滤规则仍由 ``各 provider 内部`` 统一维护。
 """
 
 from dataclasses import dataclass, field

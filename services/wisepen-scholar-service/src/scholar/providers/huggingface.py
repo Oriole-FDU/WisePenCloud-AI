@@ -27,9 +27,12 @@ from scholar.domain.models.identifiers import (
     parse_identifier,
 )
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.providers.projection import project_paper
 
 _HF_ORIGIN = "https://huggingface.co"
+
+
+def has_signals(metadata: dict) -> bool:
+    return bool(metadata.get("huggingface"))
 
 
 class HuggingFaceProvider:
@@ -64,7 +67,7 @@ class HuggingFaceProvider:
             api_key=api_key,
         )
         papers = [
-            project_paper(self._to_paper(row, self._metadata(row, partial=True)))
+            self._to_paper(row, self._metadata(row, partial=True)).project()
             for row in response.json()
         ]
         if dated:
@@ -146,7 +149,7 @@ class HuggingFaceProvider:
         )
         rows = response.json()
         papers = [
-            project_paper(self._to_paper(row, self._metadata(row, partial=True)))
+            self._to_paper(row, self._metadata(row, partial=True)).project()
             for row in rows
         ]
 

@@ -10,7 +10,6 @@ from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import parse_identifier
 from scholar.domain.models.paper import Paper
 from scholar.providers.arxiv import ArxivProvider
-from scholar.providers.projection import project_paper
 
 
 @pytest.fixture
@@ -93,7 +92,7 @@ def test_project_paper_compacts_copy_without_mutating_source(
     local_paper.authors = authors
     original = deepcopy(local_paper)
 
-    projected = project_paper(local_paper)
+    projected = local_paper.project()
 
     assert projected.authors == expected
     assert projected.metadata["s2"]["tldr"] == {"text": "Summary"}

@@ -11,7 +11,6 @@ from typing import Any
 from redis.exceptions import RedisError
 
 from scholar.application.source_execution import SourceExecution, SourceExecutionStatus
-from scholar.providers.s2 import s2_queued_ahead
 from scholar.domain.errors import ProviderBusy, ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupProvider
 from scholar.domain.models.identifiers import (
@@ -24,6 +23,7 @@ from scholar.domain.repositories.paper_lookup_cache import (
     CachedPaperLookup,
     PaperLookupCache,
 )
+from scholar.providers.s2 import s2_queued_ahead
 
 
 @dataclass
@@ -158,13 +158,7 @@ class LookupRunner:
             identifier = next(
                 (
                     identity
-                    for kind in (
-                        IdentifierKind.ARXIV,
-                        IdentifierKind.DOI,
-                        IdentifierKind.OPENALEX,
-                        IdentifierKind.S2,
-                        IdentifierKind.CORPUS_ID,
-                    )
+                    for kind in IdentifierKind.members()
                     for identity in target.identifiers
                     if identity.kind == kind and kind in binding.identifier_kinds
                 ),

@@ -81,7 +81,7 @@ def binding(provider, *, cache=None, identifier_kinds=None, **kwargs):
     return LookupBinding(
         provider,
         cache,
-        identifier_kinds or list(IdentifierKind),
+        identifier_kinds or IdentifierKind.members(),
         **kwargs,
     )
 
@@ -285,3 +285,14 @@ async def test_later_ambiguous_match_does_not_return_a_previously_found_paper():
     assert item.paper is None
     assert item.metadata is None
     assert item.enrichment_status is None
+
+
+def test_identifier_kind_values_and_members():
+    assert IdentifierKind.values() == ["arxiv", "doi", "openalex", "s2", "corpus_id"]
+    assert IdentifierKind.members() == [
+        IdentifierKind.ARXIV,
+        IdentifierKind.DOI,
+        IdentifierKind.OPENALEX,
+        IdentifierKind.S2,
+        IdentifierKind.CORPUS_ID,
+    ]

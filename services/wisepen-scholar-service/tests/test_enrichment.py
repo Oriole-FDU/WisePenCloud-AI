@@ -19,7 +19,9 @@ from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
-from scholar.providers.enrichment_rules import arxiv_signals, s2_aliases, s2_signals
+from scholar.providers.arxiv import has_signals as arxiv_signals
+from scholar.providers import s2
+from scholar.providers.s2 import aliases as s2_aliases, has_signals as s2_signals
 
 
 class FakeRedisPipeline:
@@ -145,12 +147,10 @@ def runner(provider, *, cache=None, extra_bindings=None):
         PaperSource.S2: LookupBinding(
             provider,
             cache,
-            list(IdentifierKind),
-            has_signals=s2_signals,
-            aliases=s2_aliases,
-            short_lived=lambda record: (
-                record.paper is None or not s2_signals(record.paper.metadata)
-            ),
+            IdentifierKind.members(),
+            has_signals=s2.has_signals,
+            aliases=s2.aliases,
+            short_lived=s2.short_lived,
         )
     }
     if extra_bindings:
