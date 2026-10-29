@@ -18,6 +18,10 @@ class ResourceSnapshot:
         default_factory=dict, init=False, repr=False, compare=False
     )  # None 缓存不可见决定；不保存正文或额外拒绝原因。
 
+    @property
+    def revisions(self):
+        return self._revisions
+
 
 class ResourceSnapshotReader:
     """共享读取服务只保存固定依赖；请求决定显式传入并保存在 snapshot。"""
@@ -82,7 +86,7 @@ class ResourceSnapshotReader:
 
     async def _resolve(
         self, resource_ids: list[str], *, snapshot: ResourceSnapshot
-    ) -> dict[str, ContentRevision]:
+    ) -> dict[str, ContentRevision | None]:
         """只解析尚未观察的资源；不可见也缓存，I/O 失败不写入决定。"""
         unique_ids = list(dict.fromkeys(resource_ids))
         pending = [
@@ -107,7 +111,7 @@ class ResourceSnapshotReader:
                 revision = applied.get(resource_id)
                 acl = acls.get(resource_id)
                 # 子操作交错解析时也保留已完成的首次决定，不覆盖已有 revision。
-                snapshot._revisions.setdefault(
+                snapshot.revisions.setdefault(
                     resource_id,
                     revision
                     if revision is not None
@@ -119,9 +123,9 @@ class ResourceSnapshotReader:
                 )
 
         return {
-            resource_id: snapshot._revisions[resource_id]
+            resource_id: snapshot.revisions[resource_id]
             for resource_id in unique_ids
-            if snapshot._revisions[resource_id] is not None
+            if snapshot.revisions[resource_id] is not None
         }
 
 

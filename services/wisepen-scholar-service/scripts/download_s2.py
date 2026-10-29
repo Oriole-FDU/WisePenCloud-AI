@@ -10,8 +10,8 @@ import requests
 from tqdm import tqdm
 
 # ==================== 官方核心配置 ====================
-API_KEY = "s2k-oZgVDnMLhY9ZZJxLS52nuEDL3gHSfDhRTbxgYkzZ"
-RELEASE_ID = "2026-10-20"  # 指定官方发布的快照日期
+API_KEY = "your_api_key"
+RELEASE_ID = "latest"  # 指定官方发布的快照日期
 DATASETS = ["embeddings-specter_v2"]  # 同时同步的两个核心包
 SAVE_DIR = "./s2_download"
 
