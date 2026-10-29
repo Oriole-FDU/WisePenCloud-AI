@@ -17,7 +17,7 @@ from rag.application.publication import (
     PublicationEventConsumer,
     ResourceDestroyedEvent,
 )
-from rag.core.messaging import DeliveryHeader, KafkaConsumerClient, RetryPolicy
+from rag.core.kafka import DeliveryHeader, KafkaConsumerClient, RetryPolicy
 from rag.domain.models import ContentRevision
 from rag.domain.models.content import rag_section_id
 

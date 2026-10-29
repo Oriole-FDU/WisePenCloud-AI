@@ -96,7 +96,7 @@ traceback。不撤销 ready，不限定为 I/O，不加连续失败阈值。
 
 ## B05：进程内快速重试、DLQ 与人工重放
 
-代码：[KafkaConsumerClient](../src/rag/core/messaging/kafka.py)（实现 [MessageConsumer](../src/rag/domain/messaging/consumer.py)）、[手动脚本](../scripts/replay_dlq.py)
+代码：[KafkaConsumerClient](../src/rag/core/messaging/kafka.py)（实现 [MessageConsumer](../src/rag/domain/interfaces/consumer.py)）、[手动脚本](../scripts/replay_dlq.py)
 。测试：[Kafka](../tests/backends/kafka/test_kafka_consumer.py)、[发布](../tests/application/publication/test_consumer.py)、[脚本](../tests/scripts/test_replay_dlq.py)。
 
 **当前选择与设计意图**：删延迟 topic、relay、可用时间 header 和跨消息重试计数。默认首次处理加 1/2/4 秒三次重试，共四次业务执行；ValueError

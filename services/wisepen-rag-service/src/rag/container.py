@@ -19,7 +19,7 @@ from rag.application.graph import GraphRetrieval, GraphTraversal
 from rag.application.publication import DocumentPublication, PublicationEventConsumer
 from rag.application.reading import DocumentReading
 from rag.application.retrieval import VectorRetrieval
-from rag.core.messaging import KafkaConsumerClient
+from rag.core.kafka import KafkaConsumerClient
 from rag.core.persistence.mongo.acl import MongoResourceAclRepository
 from rag.core.persistence.mongo.content import MongoContentStorage
 from rag.core.persistence.mongo.publication import MongoPublicationStore

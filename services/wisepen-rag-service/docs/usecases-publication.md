@@ -86,7 +86,7 @@ RAG 使用自身 [Kafka adapter](../src/rag/core/messaging/kafka.py)：进程内
 
 `PublicationEventConsumer` 注入 `MessageConsumer` 实例并把各自的业务 handler 传给 `run(handler=..., started=...)`。Container
 构造 Kafka adapter 时提供 bootstrap servers、topic、group 和 retry policy；协议定义于
-[domain/messaging/consumer.py](../src/rag/domain/messaging/consumer.py)，实现见
+[domain/messaging/consumer.py](../src/rag/domain/interfaces/consumer.py)，实现见
 [core/messaging/kafka.py](../src/rag/core/messaging/kafka.py)。此职责拆分不改变下述重试、DLQ 确认和 offset 提交语义。
 
 坏 JSON/字段、身份错误、版本冲突和其他 ValueError（包括 ContentIncompleteError）直接 DLQ；其他 handler 异常只快速重试，不加异常白名单。发送

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from common.logger import error
 from common.utils.markdown import MarkdownChunker
-from rag.domain.messaging import MessageConsumer
+from rag.domain.interfaces import MessageConsumer
 from rag.domain.models import ContentRevision, Document, DocumentStructure
 from rag.domain.models.content import rag_section_id
 from rag.domain.models.publication import PublicationAction

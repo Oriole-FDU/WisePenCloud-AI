@@ -7,7 +7,7 @@ from contextlib import AsyncExitStack
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 
 from common.logger import info
-from rag.core.messaging import DeliveryHeader
+from rag.core.kafka import DeliveryHeader
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

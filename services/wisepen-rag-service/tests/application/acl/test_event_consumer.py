@@ -9,7 +9,7 @@ import pytest
 from aiokafka import TopicPartition
 
 from rag.application.acl import AclEventConsumer, AuthoritativeAclError
-from rag.core.messaging import KafkaConsumerClient, RetryPolicy
+from rag.core.kafka import KafkaConsumerClient, RetryPolicy
 
 
 @pytest.mark.parametrize("failure", [None, "temporary", "permanent"])

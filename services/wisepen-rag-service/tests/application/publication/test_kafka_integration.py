@@ -11,7 +11,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 
 from rag.application.publication import PublicationEventConsumer
-from rag.core.messaging import DeliveryHeader, KafkaConsumerClient, RetryPolicy
+from rag.core.kafka import DeliveryHeader, KafkaConsumerClient, RetryPolicy
 
 pytestmark = pytest.mark.kafka_integration
 

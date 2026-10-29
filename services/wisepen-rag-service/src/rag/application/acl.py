@@ -8,7 +8,7 @@ from typing import Any
 from bson import ObjectId
 from pydantic import BaseModel, ConfigDict, Field
 
-from rag.domain.messaging import MessageConsumer
+from rag.domain.interfaces import MessageConsumer
 from rag.domain.models.acl import GroupResourceAcl, ResourceAcl
 from rag.domain.storage.acl import ResourceAclRepository
 

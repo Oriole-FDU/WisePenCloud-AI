@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from aiokafka import TopicPartition
 
-from rag.core.messaging import (
+from rag.core.kafka import (
     DeliveryHeader,
     KafkaConsumerClient,
     RetryPolicy,

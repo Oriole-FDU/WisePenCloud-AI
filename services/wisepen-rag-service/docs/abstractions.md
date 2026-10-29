@@ -118,7 +118,7 @@ Mongo 实体位于 `domain/entities`，由 Beanie 管理日常实体操作：普
 状态通过实体实例的 `insert()` 创建。需要保留批量与条件原子语义的写入使用对应实体的 `get_pymongo_collection()`：内容批量
 ReplaceOne、ACL revision 条件 upsert、publication CAS。存储端口不暴露 Beanie 或 PyMongo 类型。
 
-Kafka adapter 位于 [core/messaging/kafka.py](../src/rag/core/messaging/kafka.py)，实现 [MessageConsumer](../src/rag/domain/messaging/consumer.py)。
+Kafka adapter 位于 [core/messaging/kafka.py](../src/rag/core/kafka.py)，实现 [MessageConsumer](../src/rag/domain/interfaces/consumer.py)。
 协议签名为 `async run(handler: Callable[[dict[str, object]], Awaitable[object]], *, started: asyncio.Event | None = None) -> None`。
 Container 注入已配置连接、topic、group 和 retry policy 的 adapter；application 在 `run(handler=..., started=...)` 传入业务 handler。
 
