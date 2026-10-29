@@ -52,9 +52,12 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
     @mcp.tool(
         name="search_papers",
         description=(
-            "Search papers through Scholar. The field and source scope specify the requested operation; Scholar "
-            "owns query normalization, routing, and capability availability. Papers include research metadata; Hugging Face linked models and datasets cite the paper."
-            " OpenAlex and Hugging Face search require user BYOK; platform keys are reserved for enrichment."
+            "Search academic papers across scholarly providers. "
+            "Use this tool when you already have a clear research topic, specific technical concepts, or scholarly keywords. "
+            "If you need to explore or clarify an unfamiliar research direction first, use web_search before calling this tool. "
+            "Sources: Built upon three general platforms (arXiv is always available without keys; OpenAlex and Semantic Scholar platform keys are reserved for metadata enrichment, so direct searching on them requires user BYOK) "
+            "plus domain-specific sources (some require user BYOK for search). "
+            "Scholar handles query normalization, multi-source routing, and metadata fusion."
         ),
     )
     async def search_papers(
@@ -63,25 +66,49 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             str,
             Field(
                 min_length=1,
-                description="Non-empty research question or search phrase.",
+                description=(
+                    "Targeted academic search query or research topic. "
+                    "Use precise scholarly terms or keywords rather than vague conversational questions."
+                ),
             ),
         ],
         field: Annotated[
             SearchField,
-            Field(description="Research field used by Scholar for local search."),
+            Field(
+                description=(
+                    "Academic discipline used for routing and domain-specific sources "
+                    "(e.g., 'computer_science', 'medicine', 'physics'). Defaults to 'general'."
+                )
+            ),
         ] = SearchField.GENERAL,
         published_after: Annotated[
-            date | None, Field(description="Inclusive publication date lower bound.")
+            date | None,
+            Field(
+                description="Inclusive lower bound for publication date (YYYY-MM-DD)."
+            ),
         ] = None,
         published_before: Annotated[
-            date | None, Field(description="Inclusive publication date upper bound.")
+            date | None,
+            Field(
+                description="Inclusive upper bound for publication date (YYYY-MM-DD)."
+            ),
         ] = None,
         limit: Annotated[
-            int, Field(ge=1, le=20, description="Maximum number of papers to return.")
+            int,
+            Field(
+                ge=1,
+                le=20,
+                description="Maximum number of papers to retrieve (1 to 20, default 10).",
+            ),
         ] = 10,
         source_scope: Annotated[
             SearchSourceScope,
-            Field(description="Requested Scholar source scope."),
+            Field(
+                description=(
+                    "Source execution scope: 'default' queries the primary source with fallback; "
+                    "'multi_source' queries multiple sources concurrently and fuses/deduplicates results."
+                )
+            ),
         ] = SearchSourceScope.DEFAULT,
     ) -> dict[str, Any]:
         return await scholar_client.search_papers(
@@ -99,8 +126,10 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
     @mcp.tool(
         name="lookup_papers",
         description=(
-            "Look up 1 to 20 paper identifiers through Scholar. Scholar owns identifier normalization and "
-            "returns paper details with research metadata. Hugging Face linked models and datasets cite the paper."
+            "Fetch comprehensive metadata and citation signals for 1 to 20 papers by their identifiers (DOI, arXiv ID, etc.). "
+            "IMPORTANT: Batch as many identifiers as possible in a single call (up to 20) instead of calling this tool one-by-one in a loop, "
+            "to minimize network roundtrips and avoid rate-limiting by scholarly providers. "
+            "Scholar normalizes identifiers and cascades enrichment across general platforms and domain-specific sources."
         ),
     )
     async def lookup_papers(
@@ -110,13 +139,19 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             Field(
                 min_length=1,
                 max_length=20,
-                description="DOI, arXiv ID, or another Scholar-supported paper identifier.",
+                description=(
+                    "List of 1 to 20 paper identifiers (e.g., DOI like '10.1145/...', arXiv ID like '2301.12345' or 'arxiv:2301.12345'). "
+                    "Always batch all known identifiers into a single request."
+                ),
             ),
         ],
         field: Annotated[
             SearchField,
             Field(
-                description="Research field selecting domain lookup sources."
+                description=(
+                    "Academic field to enable relevant domain-specific source enrichment "
+                    "(e.g., linking domain assets or specialized metadata). Defaults to 'general'."
+                )
             ),
         ] = SearchField.GENERAL,
     ) -> dict[str, Any]:
@@ -131,27 +166,39 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
     @mcp.tool(
         name="discover_papers",
         description=(
-            "Discover papers by field and time window. Scholar returns the actual window and execution result."
-            " Hugging Face discovery requires user BYOK; linked models and datasets cite the paper."
+            "Discover recent or trending papers within a specific academic field over a given time window (daily/weekly/monthly). "
+            "Designed exclusively for temporal exploration, tracking research community buzz, and radar feeds. "
+            "DO NOT use for targeted or goal-oriented literature retrieval — use search_papers instead when searching for specific topics or keywords. "
+            "Discovery is powered by domain-specific sources (which may require user-configured API keys)."
         ),
     )
     async def discover_papers(
         ctx: Context,
         field: Annotated[
             DiscoveryField,
-            Field(description="A field with a registered discovery capability."),
+            Field(
+                description="Academic field with registered discovery feed support (e.g., 'computer_science')."
+            ),
         ],
         period: Annotated[
-            DiscoveryPeriod, Field(description="Daily, natural week, or natural month.")
+            DiscoveryPeriod,
+            Field(
+                description="Time window for the discovery feed: 'daily', 'weekly', or 'monthly'."
+            ),
         ] = DiscoveryPeriod.DAILY,
         sort: Annotated[
             DiscoverySort,
             Field(
-                description="Request recent or trending order within the selected channel period."
+                description="Ranking criterion: 'trending' (community interest/activity) or 'recent' (latest publication date)."
             ),
         ] = DiscoverySort.TRENDING,
         limit: Annotated[
-            int, Field(ge=1, le=15, description="Maximum number of papers to return.")
+            int,
+            Field(
+                ge=1,
+                le=15,
+                description="Maximum number of papers to return (1 to 15, default 10).",
+            ),
         ] = 10,
     ) -> dict[str, Any]:
         return await scholar_client.discover_papers(

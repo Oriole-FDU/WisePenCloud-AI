@@ -28,7 +28,7 @@ from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper
 from scholar.domain.models.source_execution import SourceExecutionStatus
 from scholar.core.providers import S2Provider, S2Transport
-from scholar.core.providers import has_signals as s2_signals
+from scholar.core.providers.s2 import has_signals as s2_signals
 
 
 @pytest_asyncio.fixture

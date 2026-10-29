@@ -19,7 +19,7 @@ from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.core.providers import has_signals as arxiv_signals
+from scholar.core.providers.arxiv import has_signals as arxiv_signals
 from scholar.core.providers import OpenAlexProvider
 
 

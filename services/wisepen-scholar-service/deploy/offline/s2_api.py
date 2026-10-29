@@ -5,8 +5,8 @@ from math import isfinite
 
 from scholar.domain.models.identifiers import PaperIdentifier
 from scholar.ml.specter import DIMENSIONS
-from scholar.core.providers import ENRICHMENT_FIELDS, IDENTITY_FIELDS, S2Provider
-from scholar.core.providers import S2Transport
+from scholar.core.providers.s2 import ENRICHMENT_FIELDS, IDENTITY_FIELDS, S2Provider
+from scholar.core.providers.s2 import S2Transport
 
 
 @dataclass

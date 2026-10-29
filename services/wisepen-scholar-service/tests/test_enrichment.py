@@ -23,9 +23,9 @@ from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
 from scholar.core.providers import s2
-from scholar.core.providers import has_signals as arxiv_signals
-from scholar.core.providers import aliases as s2_aliases
-from scholar.core.providers import has_signals as s2_signals
+from scholar.core.providers.arxiv import has_signals as arxiv_signals
+from scholar.core.providers.s2 import aliases as s2_aliases
+from scholar.core.providers.s2 import has_signals as s2_signals
 
 
 class FakeRedisPipeline:

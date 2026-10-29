@@ -27,8 +27,8 @@ from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.models.source_execution import (
     SourceExecutionStatus,
 )
-from scholar.core.providers import ARXIV_CATEGORIES, ArxivProvider
-from scholar.core.providers import OPENALEX_FILTERS
+from scholar.core.providers.arxiv import ARXIV_CATEGORIES, ArxivProvider
+from scholar.core.providers.openalex import OPENALEX_FILTERS
 
 
 class MemoryCache:
