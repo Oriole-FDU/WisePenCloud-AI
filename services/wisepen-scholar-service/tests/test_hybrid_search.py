@@ -10,7 +10,7 @@ import pytest
 from openai import APIConnectionError
 from scholar.application.field_policies import FieldPolicy
 from scholar.application.lookup_runner import LookupRunner
-from scholar.application.services.search import (
+from scholar.application.search import (
     PaperSearch,
     PaperSearchService,
     SearchBinding,

@@ -13,7 +13,7 @@ from scholar.application.field_policies import (
 )
 from scholar.application.lookup_runner import LookupRunner
 from scholar.application.paper_projection import project_paper
-from scholar.application.services.pdf_recover import PaperPdfRecoverService
+from scholar.application.pdf_recover import PaperPdfRecoverService
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
 from scholar.domain.models.paper import Paper

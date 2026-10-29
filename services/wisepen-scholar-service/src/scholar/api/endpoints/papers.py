@@ -8,12 +8,12 @@ from fastapi import APIRouter, Depends, Header
 
 from common.core.domain import R
 from scholar.api.schemas.papers import DiscoveryRequest, LookupRequest, SearchRequest
-from scholar.application.services.discovery import (
+from scholar.application.discovery import (
     DiscoveryResult,
     PaperDiscoveryService,
 )
-from scholar.application.services.lookup import LookupResult, PaperLookupService
-from scholar.application.services.search import PaperSearchService, SearchResult
+from scholar.application.lookup import LookupResult, PaperLookupService
+from scholar.application.search import PaperSearchService, SearchResult
 from scholar.container import Container
 from scholar.domain.models.paper import PaperSource
 

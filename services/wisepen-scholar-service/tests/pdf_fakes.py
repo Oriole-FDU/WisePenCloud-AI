@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock
 
-from scholar.application.services.pdf_recover import PaperPdfRecoverService
+from scholar.application.pdf_recover import PaperPdfRecoverService
 
 
 class MemoryPdfCache:

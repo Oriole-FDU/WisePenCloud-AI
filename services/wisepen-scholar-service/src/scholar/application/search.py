@@ -15,7 +15,7 @@ from common.core.exceptions import ServiceException
 from scholar.application.field_policies import COMMON_ENRICHERS, FieldPolicy
 from scholar.application.lookup_runner import LookupRunner
 from scholar.application.paper_projection import project_paper
-from scholar.application.services.pdf_recover import PaperPdfRecoverService
+from scholar.application.pdf_recover import PaperPdfRecoverService
 from scholar.domain.errors import ProviderError, ScholarErrorCode
 from scholar.domain.interfaces.paper_searcher import PaperSearcher
 from scholar.domain.models.fields import AcademicField

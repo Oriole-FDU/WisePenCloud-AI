@@ -9,10 +9,10 @@ from qdrant_client import AsyncQdrantClient
 from common.utils.ai_clients.embedding import EmbeddingClient
 from scholar.application.field_policies import FIELD_POLICIES
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
-from scholar.application.services.discovery import PaperDiscoveryService
-from scholar.application.services.lookup import PaperLookupService
-from scholar.application.services.pdf_recover import PaperPdfRecoverService
-from scholar.application.services.search import (
+from scholar.application.discovery import PaperDiscoveryService
+from scholar.application.lookup import PaperLookupService
+from scholar.application.pdf_recover import PaperPdfRecoverService
+from scholar.application.search import (
     PaperSearchService,
     SearchBinding,
 )

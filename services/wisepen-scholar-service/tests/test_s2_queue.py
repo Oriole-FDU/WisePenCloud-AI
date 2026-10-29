@@ -17,7 +17,7 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
-from scholar.application.services.lookup import (
+from scholar.application.lookup import (
     PaperLookup,
     PaperLookupService,
 )

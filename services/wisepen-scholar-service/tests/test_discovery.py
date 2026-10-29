@@ -6,12 +6,12 @@ from datetime import UTC, date, datetime
 
 import orjson
 import pytest
-import scholar.application.services.discovery as discovery_module
+import scholar.application.discovery as discovery_module
 from common.core.exceptions import ServiceException
 from pydantic import ValidationError
 from scholar.api.schemas.papers import DiscoveryRequest
 from scholar.application.field_policies import FieldPolicy
-from scholar.application.services.discovery import (
+from scholar.application.discovery import (
     PaperDiscoveryQuery,
     PaperDiscoveryService,
 )

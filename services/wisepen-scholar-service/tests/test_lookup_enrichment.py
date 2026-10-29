@@ -10,7 +10,7 @@ from scholar.core.providers import PROVIDER_POLICIES
 
 import pytest
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
-from scholar.application.services.lookup import (
+from scholar.application.lookup import (
     LookupStatus,
     PaperLookup,
     PaperLookupService,

@@ -8,9 +8,9 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from scholar.application.field_policies import FIELD_POLICIES
-from scholar.application.services.discovery import PaperDiscoveryQuery
-from scholar.application.services.lookup import PaperLookup
-from scholar.application.services.search import PaperSearch, SourceScope
+from scholar.application.discovery import PaperDiscoveryQuery
+from scholar.application.lookup import PaperLookup
+from scholar.application.search import PaperSearch, SourceScope
 from scholar.domain.interfaces.paper_discoverer import DiscoveryPeriod, DiscoverySort
 from scholar.domain.models.fields import AcademicField
 

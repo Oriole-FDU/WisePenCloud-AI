@@ -11,7 +11,7 @@ from openai import APIConnectionError
 from common.core.exceptions import ServiceException
 from scholar.application.field_policies import FIELD_POLICIES, FieldPolicy
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
-from scholar.application.services.search import (
+from scholar.application.search import (
     PaperSearch,
     PaperSearchService,
     SearchBinding,

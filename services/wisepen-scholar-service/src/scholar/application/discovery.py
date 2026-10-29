@@ -10,7 +10,7 @@ import orjson
 
 from common.core.exceptions import ServiceException
 from scholar.application.field_policies import FieldPolicy
-from scholar.application.services.pdf_recover import PaperPdfRecoverService
+from scholar.application.pdf_recover import PaperPdfRecoverService
 from scholar.domain.errors import ScholarErrorCode
 from scholar.domain.interfaces.paper_discoverer import (
     DiscoveryPeriod,

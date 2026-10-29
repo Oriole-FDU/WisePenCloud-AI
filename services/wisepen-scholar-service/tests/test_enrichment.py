@@ -11,7 +11,7 @@ from datetime import date
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
-from scholar.application.services.lookup import (
+from scholar.application.lookup import (
     LookupStatus,
     PaperLookup,
     PaperLookupService,
