@@ -6,9 +6,9 @@ from dataclasses import replace
 import pytest
 
 from common.core.domain import GroupRoleType
-from rag.application.acl.models import GroupResourceAcl, PermissionScope, ResourceAcl
+from rag.domain.models.acl import GroupResourceAcl, PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
-from rag.core.schema import ContentRevision
+from rag.domain.models import ContentRevision
 
 
 @pytest.mark.parametrize("offer_version", [1, 2])

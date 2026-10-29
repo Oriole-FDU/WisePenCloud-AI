@@ -6,14 +6,8 @@ import pytest
 from pydantic import ValidationError
 from pymongo.errors import DuplicateKeyError
 
-from rag.application.publication import (
-    ContentConflictError,
-    PublicationAction,
-    PublicationStateChangedError,
-    ResourcePublicationState,
-    RevisionNotStagedError,
-)
-from rag.core.schema import ContentRevision
+from rag.domain.models.publication import ContentConflictError, PublicationAction, PublicationStateChangedError, ResourcePublicationState, RevisionNotStagedError
+from rag.domain.models import ContentRevision
 
 
 def revision(version=1, text="正文", resource_id="resource"):
@@ -130,22 +124,14 @@ async def test_state_batch_read_is_scoped_deduplicated_and_ordered(publication_s
            ]
 
 
-async def test_empty_batches_have_no_io_and_indexes_are_explicit(
+async def test_empty_batches_have_no_io(
         publication_store, publication_collection
 ):
     assert await publication_store.get_states([]) == []
     assert await publication_store.destroy_resources([]) is None
     publication_collection.find.assert_not_called()
     publication_collection.bulk_write.assert_not_awaited()
-    publication_collection.create_indexes.assert_not_awaited()
-    await publication_store.stage_revision(revision())
-    publication_collection.create_indexes.assert_not_awaited()
-    await publication_store.ensure_indexes()
-    indexes = publication_collection.create_indexes.call_args.args[0]
-    assert len(indexes) == 2
-    assert dict(indexes[0].document["key"]) == {"resource_id": 1}
-    assert indexes[0].document["unique"] is True
-    assert dict(indexes[1].document["key"]) == {"destroyed": 1, "resource_id": 1}
+
 
 
 async def test_destroy_is_permanent_idempotent_scoped_and_can_precede_stage(

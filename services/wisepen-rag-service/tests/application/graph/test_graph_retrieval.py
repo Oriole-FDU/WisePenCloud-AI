@@ -9,15 +9,15 @@ import pytest
 from pydantic import TypeAdapter
 
 from common.utils.retrieval import ModelReranker
-from rag.application.acl.models import ResourceAcl
+from rag.domain.models.acl import ResourceAcl
 from rag.application.graph import (
     GraphRetrieval,
     GraphRetrievalResult,
     GraphTraversalResult,
 )
 from rag.application.retrieval import VectorRetrieval
-from rag.core.schema import EntitySpec, Ontology, RelationSpec
-from rag.core.schema.filters import (
+from rag.domain.models import EntitySpec, Ontology, RelationSpec
+from rag.core.filters import (
     FilterCondition,
     FilterOperator,
     MetadataFilter,
@@ -25,8 +25,8 @@ from rag.core.schema.filters import (
 )
 from rag.ingestion.indexers import GraphIndexer
 from rag.retrievers.graph import GraphRetrievalMode
-from rag.storage.graph import GraphDirection, GraphVectorKind
-from rag.storage.vector import VectorMatch
+from rag.domain.storage.graph import GraphDirection, GraphVectorKind
+from rag.domain.storage.vector import VectorMatch
 
 
 @pytest.mark.parametrize("mode", ["local", "global", "hybrid", "traversal"])

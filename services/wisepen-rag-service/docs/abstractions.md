@@ -2,7 +2,7 @@
 
 先读[中立数据模型](models.md)。本文定义组件职责和装配合同；完整业务流程属于 application，见[用例导航](README.md)。
 
-## 1. 五类抽象
+## 1. 六类抽象
 
 | 抽象        | 输入/输出                               | 拥有的职责                                               |
 |-------------|-----------------------------------------|----------------------------------------------------------|
@@ -11,16 +11,18 @@
 | Indexer     | 最终 Chunk 列表 → None                  | 保存内容事实或生成投影，等待必需写入确认                 |
 | Storage     | 明确身份/过滤条件 → 原始事实或投影      | 数据库存取原语；不选择当前版本，不判权限                 |
 | Retriever   | query: str → list[Candidate[T]]         | 构造查询、召回候选、融合；不接收请求快照，不回查授权正文 |
+| MessageConsumer | handler + 可选 started event → None | 运行已绑定 topic/group 的消息处理；不解释业务 payload    |
 
-Pipeline 是顺序编排器。application 才拥有资源发布、授权准备、章节读取、证据组装和响应；共享组件不保存用户请求状态。
+Pipeline 是顺序编排器，其接口定义在 domain、实现与编排仍在 ingestion。application 才拥有资源发布、授权准备、章节读取、
+证据组装和响应；消息业务 handler 留在 application，Container 注入 MessageConsumer；共享组件不保存用户请求状态。
 
 ### 摄入接口
 
-定义见 [Chunker](../src/rag/ingestion/chunkers/base.py)、[Transformer](../src/rag/ingestion/transformers/base.py)、[Indexer](../src/rag/ingestion/indexers/base.py)。
+定义见 [Chunker](../src/rag/domain/interfaces/chunker.py)、[Transformer](../src/rag/domain/interfaces/transformer.py)、[Indexer](../src/rag/domain/interfaces/indexer.py)。
 
 ```python
 from typing import Protocol
-from rag.core.schema import Chunk, Document
+from rag.domain.models.content import Chunk, Document
 
 
 class Chunker(Protocol):
@@ -102,15 +104,23 @@ metadata，见[示例](employment.md)。更改 metadata/type 的摄入效果要�
 
 | 端口                                                  | 关键方法                                                                 | 合同                                                                     |
 |-------------------------------------------------------|--------------------------------------------------------------------------|--------------------------------------------------------------------------|
-| [ContentReader/Writer](../src/rag/storage/content.py) | get_documents、get_chunks、get_revision_chunks、upsert_*、delete_*       | 读写完整事实；批量去重保序、缺失省略；revision Chunk 按 chunk_index 升序 |
-| [VectorReader/Writer](../src/rag/storage/vector.py)   | query、upsert、delete                                                    | 候选投影；写/删确认后返回 None，删除要求非空条件                         |
+| [ContentReader/Writer](../src/rag/domain/storage/content.py) | get_documents、get_chunks、get_revision_chunks、upsert_*、delete_*       | 读写完整事实；批量去重保序、缺失省略；revision Chunk 按 chunk_index 升序 |
+| [VectorReader/Writer](../src/rag/domain/storage/vector.py)   | query、upsert、delete                                                    | 候选投影；写/删确认后返回 None，删除要求非空条件                         |
 | VectorStorage                                         | collection、ensure_collection(metadata_index_fields)                     | 实例绑定集合；必填 list[IndexableField]，空列表仍初始化/核对向量配置     |
-| [GraphReader/Writer](../src/rag/storage/graph.py)     | get_nodes、get_relations、get_neighbors、replace_sources、delete_sources | 来源描述独立；replace_sources 只替换传入来源，含空事实；写入返回 None    |
+| [GraphReader/Writer](../src/rag/domain/storage/graph.py) | get_nodes、get_relations、get_neighbors、replace_sources、delete_sources | 来源描述独立；replace_sources 只替换传入来源，含空事实；写入返回 None    |
 | GraphStorage                                          | ensure_schema()                                                          | 组合图读写端口；必须实现显式 schema 初始化，可重复调用，失败传播         |
 
-Mongo、Qdrant、Neo4j 的 SDK 转换在 [backends](../src/rag/backends/__init__.py)。业务扩展使用 IndexKind，不导入数据库 SDK
+Mongo、Qdrant、Neo4j 的 SDK 转换在 [core/persistence](../src/rag/core/persistence/__init__.py)。业务扩展使用 IndexKind，不导入数据库 SDK
 索引类型。Qdrant 普通集合 named vectors 为 dense/sparse，sparse 使用服务端 qdrant/bm25 与 cloud_inference；全部必需向量成功才返回，不降级
 dense-only。
+
+Mongo 实体位于 `domain/entities`，由 Beanie 管理日常实体操作：普通读取使用 `find`/`find_one`，删除使用 query `delete`，新建 publication
+状态通过实体实例的 `insert()` 创建。需要保留批量与条件原子语义的写入使用对应实体的 `get_pymongo_collection()`：内容批量
+ReplaceOne、ACL revision 条件 upsert、publication CAS。存储端口不暴露 Beanie 或 PyMongo 类型。
+
+Kafka adapter 位于 [core/messaging/kafka.py](../src/rag/core/messaging/kafka.py)，实现 [MessageConsumer](../src/rag/domain/messaging/consumer.py)。
+协议签名为 `async run(handler: Callable[[dict[str, object]], Awaitable[object]], *, started: asyncio.Event | None = None) -> None`。
+Container 注入已配置连接、topic、group 和 retry policy 的 adapter；application 在 `run(handler=..., started=...)` 传入业务 handler。
 
 GraphStorage.ensure_schema 是存储协议的一部分，由 main 在启用图存储时、图 repair
 在启用拓扑投影时显式调用。后端负责所需约束/索引的具体初始化；只读或只写消费方仍依赖 GraphReader/GraphWriter。

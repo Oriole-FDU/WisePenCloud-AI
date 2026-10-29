@@ -4,8 +4,8 @@ from itertools import product
 import pytest
 
 from common.core.domain import GroupRoleType
-from rag.application.acl.models import PermissionScope, ResourceAcl
-from rag.application.acl.synchronizer import (
+from rag.domain.models.acl import PermissionScope, ResourceAcl
+from rag.application.acl import (
     AclSynchronizer,
     AuthoritativeAclError,
 )

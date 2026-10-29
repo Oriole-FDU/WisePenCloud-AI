@@ -37,7 +37,7 @@ FIELD_POLICIES = {
     AcademicField.GENERAL: FieldPolicy([PaperSource.OPENALEX, PaperSource.ARXIV]),
     # 计算机科学：HuggingFace 同时承担检索、富化与发现
     AcademicField.COMPUTER_SCIENCE: FieldPolicy(
-        [ PaperSource.ARXIV, PaperSource.HUGGINGFACE],
+        [PaperSource.ARXIV, PaperSource.HUGGINGFACE],
         field_enrichers=[PaperSource.HUGGINGFACE],
         discoverer=PaperSource.HUGGINGFACE,
     ),

@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from rag.core.schema import GraphEdge, GraphNode
+from rag.domain.models import GraphEdge, GraphNode
 
 
 def test_graph_node_identity_is_normalized_and_source_independent():

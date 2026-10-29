@@ -5,15 +5,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.application.acl.models import ResourceAcl
+from rag.domain.models.acl import ResourceAcl
 from rag.application.graph import GraphEntity, GraphRelationship, GraphTraversalResult
-from rag.core.schema.filters import (
+from rag.core.filters import (
     FilterCondition,
     FilterOperator,
     MetadataFilter,
     MetadataFilters,
 )
-from rag.storage.graph import GraphDirection
+from rag.domain.storage.graph import GraphDirection
 
 
 @pytest.mark.parametrize(

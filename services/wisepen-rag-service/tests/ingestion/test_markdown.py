@@ -5,8 +5,8 @@ import pytest
 from common.utils.markdown import (
     MarkdownChunker as CommonMarkdownChunker,
 )
-from rag.core.schema import Document, DocumentStructure
-from rag.core.schema.content import rag_section_id
+from rag.domain.models import Document, DocumentStructure
+from rag.domain.models.content import rag_section_id
 from rag.ingestion.chunkers import MarkdownChunker
 
 

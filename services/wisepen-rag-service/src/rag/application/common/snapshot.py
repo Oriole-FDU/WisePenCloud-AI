@@ -2,11 +2,11 @@
 
 from dataclasses import dataclass, field
 
-from rag.application.acl.models import PermissionScope
-from rag.application.acl.store import ResourceAclRepository
-from rag.application.publication.store import PublicationStore
-from rag.core.schema import Chunk, ContentRevision, Document
-from rag.storage.content import ContentReader
+from rag.domain.models import Chunk, ContentRevision, Document
+from rag.domain.models.acl import PermissionScope
+from rag.domain.storage.acl import ResourceAclRepository
+from rag.domain.storage.content import ContentReader
+from rag.domain.storage.publication import PublicationStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,18 +23,18 @@ class ResourceSnapshotReader:
     """共享读取服务只保存固定依赖；请求决定显式传入并保存在 snapshot。"""
 
     def __init__(
-            self,
-            *,
-            store: PublicationStore,
-            resource_acls: ResourceAclRepository,
-            reader: ContentReader,
+        self,
+        *,
+        store: PublicationStore,
+        resource_acls: ResourceAclRepository,
+        reader: ContentReader,
     ) -> None:
         self._store = store
         self._resource_acls = resource_acls
         self._reader = reader
 
     async def read_documents(
-            self, resource_ids: list[str], *, snapshot: ResourceSnapshot
+        self, resource_ids: list[str], *, snapshot: ResourceSnapshot
     ) -> list[Document]:
         """先授权并固定版本，再批量读取；身份不符或缺失只影响该对象。"""
         revisions = await self._resolve(resource_ids, snapshot=snapshot)
@@ -49,7 +49,7 @@ class ResourceSnapshotReader:
         return _visible_documents(documents, revisions)
 
     async def read_documents_by_section_ids(
-            self, section_ids: list[str], *, snapshot: ResourceSnapshot
+        self, section_ids: list[str], *, snapshot: ResourceSnapshot
     ) -> list[Document]:
         """先批量定位，再按首次版本与资源授权过滤；内部正文不提前交给用例。"""
         unique_ids = list(dict.fromkeys(section_ids))
@@ -63,7 +63,7 @@ class ResourceSnapshotReader:
         return _visible_documents(documents, revisions)
 
     async def read_chunks(
-            self, chunk_ids: list[str], *, snapshot: ResourceSnapshot
+        self, chunk_ids: list[str], *, snapshot: ResourceSnapshot
     ) -> list[Chunk]:
         """批量定位所属资源，Chunk 继承 Document 级授权并匹配已选 revision。"""
         if not chunk_ids:
@@ -81,7 +81,7 @@ class ResourceSnapshotReader:
         ]
 
     async def _resolve(
-            self, resource_ids: list[str], *, snapshot: ResourceSnapshot
+        self, resource_ids: list[str], *, snapshot: ResourceSnapshot
     ) -> dict[str, ContentRevision]:
         """只解析尚未观察的资源；不可见也缓存，I/O 失败不写入决定。"""
         unique_ids = list(dict.fromkeys(resource_ids))
@@ -126,7 +126,7 @@ class ResourceSnapshotReader:
 
 
 def _visible_documents(
-        documents: list[Document], revisions: dict[str, ContentRevision]
+    documents: list[Document], revisions: dict[str, ContentRevision]
 ) -> list[Document]:
     """所有 Document 读取路径共用完整正文身份检查。"""
     visible = []

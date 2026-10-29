@@ -1,9 +1,8 @@
 """通过内容 Writer 保存加工后的 Chunk 事实，不构建检索投影。"""
 
-from rag.core.schema import Chunk
-from rag.storage.content import ContentWriter
-
-from .base import Indexer
+from rag.domain.interfaces import Indexer
+from rag.domain.models import Chunk
+from rag.domain.storage.content import ContentWriter
 
 
 class ChunkFactsIndexer(Indexer):

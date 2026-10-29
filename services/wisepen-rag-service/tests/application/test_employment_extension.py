@@ -13,12 +13,13 @@ from dependency_injector import providers
 from fastapi import FastAPI
 from pydantic import ValidationError
 
-from rag.application.acl.models import PermissionScope, ResourceAcl
+from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.graph import GraphTraversalResult
-from rag.application.publication import DocumentReadyEvent, PublicationAction
+from rag.application.publication import DocumentReadyEvent
+from rag.domain.models.publication import PublicationAction
 from rag.container import Container
-from rag.core.schema.filters import FilterOperator
+from rag.core.filters import FilterOperator
 from rag.extensions import register_extensions
 from rag.extensions.employment import EmploymentContainer
 from rag.extensions.employment.api import (
@@ -32,8 +33,8 @@ from rag.extensions.employment.metadata import (
 )
 from rag.ingestion.chunkers.markdown import MarkdownChunker
 from rag.ingestion.transformers.graph import GraphExtraction
-from rag.storage.graph import GraphDirection
-from rag.storage.vector import VectorMatch
+from rag.domain.storage.graph import GraphDirection
+from rag.domain.storage.vector import VectorMatch
 
 PACKAGE = Path(__file__).resolve().parents[2] / "src/rag/extensions/employment"
 
@@ -407,7 +408,7 @@ async def test_authoritative_prepare_rejects_stale_or_hidden(employment_env, cha
         new = DocumentReadyEvent.model_validate(
             {"resourceId": chunk.resource_id, "version": 2, "content": "新合同"}
         ).to_document()
-        from rag.core.schema import ContentRevision
+        from rag.domain.models import ContentRevision
 
         rev = ContentRevision.create(
             resource_id=new.resource_id,

@@ -12,7 +12,7 @@ from dependency_injector import providers
 from fastapi import FastAPI
 
 from rag.container import Container
-from rag.storage.vector import IndexableField, IndexKind, VectorCollection
+from rag.domain.storage.vector import IndexableField, IndexKind, VectorCollection
 
 
 @pytest.fixture
@@ -46,7 +46,9 @@ def runtime(monkeypatch, platform_settings):
     monkeypatch.setenv("no_proxy", "")
     monkeypatch.delitem(sys.modules, "rag.main", raising=False)
     main = importlib.import_module("rag.main")
+    monkeypatch.setattr(main, "init_beanie", AsyncMock())
     container = Container(settings=platform_settings)
+    container.database.override(providers.Object(object()))
     mongo = SimpleNamespace(
         close=AsyncMock(), admin=SimpleNamespace(command=AsyncMock())
     )
@@ -75,7 +77,6 @@ def runtime(monkeypatch, platform_settings):
             "graph_storage",
     ):
         storage = SimpleNamespace(
-            ensure_indexes=AsyncMock(),
             ensure_collection=AsyncMock(),
             ensure_schema=AsyncMock(),
         )
@@ -157,8 +158,6 @@ async def test_kafka_off_gc_always_starts_and_ready_does_not_wait_for_first_roun
         client.close.assert_awaited_once()
     for client in env.clients[3:]:
         client.close.assert_not_awaited()
-    for name in ("content_storage", "publication_store", "acl_repository"):
-        env.stores[name].ensure_indexes.assert_awaited_once()
     env.stores["vector_storage"].ensure_collection.assert_awaited_once_with(
         [IndexableField("resource_id", IndexKind.KEYWORD)]
     )
@@ -241,9 +240,7 @@ async def test_consumer_exit_revokes_ready_and_cancels_other_tasks(runtime, when
     "stage",
     [
         "mongo",
-        "content_storage",
-        "publication_store",
-        "acl_repository",
+        "mongo_indexes",
         "vector_storage",
         "entity_vector_storage",
         "relationship_vector_storage",
@@ -256,17 +253,14 @@ async def test_initialization_failure_cleans_created_clients_and_never_ready(
     env = runtime
     if stage == "mongo":
         env.clients[0].admin.command.side_effect = OSError("init")
+    elif stage == "mongo_indexes":
+        env.main.init_beanie.side_effect = OSError("init")
     elif stage == "pipeline":
         env.container.pipeline.override(
             providers.Callable(Mock(side_effect=OSError("init")))
         )
     else:
-        method = (
-            "ensure_indexes"
-            if stage in ("content_storage", "publication_store", "acl_repository")
-            else "ensure_collection"
-        )
-        getattr(env.stores[stage], method).side_effect = OSError("init")
+        env.stores[stage].ensure_collection.side_effect = OSError("init")
     with pytest.raises(OSError):
         async with env.main.lifespan(env.app):
             pytest.fail("must not yield")

@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 from pydantic import ValidationError
 
-from rag.application.publication.publish import DocumentReadyEvent
+from rag.application.publication import DocumentReadyEvent
 
 
 def make_document(resource_id, version):
@@ -37,9 +37,9 @@ async def test_lookup_batches_deduplicates_documents_and_restores_request_order(
         other.structure.sections[1].section_id,
     ]
     assert await storage.get_documents_by_section_ids(ids) == [other, first, newer]
-    collections[0].find.assert_called_once_with(
-        {"structure.sections.section_id": {"$in": list(dict.fromkeys(ids))}}
-    )
+    assert collections[0].find.call_args.kwargs["filter"] == {
+        "structure.sections.section_id": {"$in": list(dict.fromkeys(ids))}
+    }
 
 
 async def test_lookup_missing_sections_returns_no_documents(storage, collections):

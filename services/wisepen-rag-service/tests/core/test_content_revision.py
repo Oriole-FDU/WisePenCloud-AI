@@ -1,6 +1,6 @@
 from hashlib import sha256
 
-from rag.core.schema import ContentRevision
+from rag.domain.models import ContentRevision
 
 
 def test_revision_uses_the_exact_text_digest_and_scopes_identity():

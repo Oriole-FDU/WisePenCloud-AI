@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from aiokafka import TopicPartition
 
-from rag.application.acl.synchronizer import AclEventConsumer, AuthoritativeAclError
-from rag.backends.kafka import RetryPolicy
+from rag.application.acl import AclEventConsumer, AuthoritativeAclError
+from rag.core.messaging import KafkaConsumerClient, RetryPolicy
 
 
 @pytest.mark.parametrize("failure", [None, "temporary", "permanent"])
@@ -35,10 +35,10 @@ async def test_acl_uses_shared_backend_and_correct_confirmation_policy(
         start=AsyncMock(), stop=AsyncMock(), send_and_wait=AsyncMock()
     )
     monkeypatch.setattr(
-        "rag.backends.kafka.consumer.AIOKafkaConsumer", Mock(return_value=driver)
+        "rag.core.messaging.kafka.AIOKafkaConsumer", Mock(return_value=driver)
     )
     monkeypatch.setattr(
-        "rag.backends.kafka.consumer.AIOKafkaProducer", Mock(return_value=producer)
+        "rag.core.messaging.kafka.AIOKafkaProducer", Mock(return_value=producer)
     )
     projection = SimpleNamespace(handle_event=AsyncMock())
     if failure == "temporary":
@@ -65,10 +65,12 @@ async def test_acl_uses_shared_backend_and_correct_confirmation_policy(
     driver.commit.side_effect = commit
     consumer = AclEventConsumer(
         projection=projection,
-        bootstrap_servers="localhost:9092",
-        topic="acl",
-        group_id="rag-acl",
-        retry_policy=RetryPolicy(backoff_seconds=[0]),
+        consumer=KafkaConsumerClient(
+            bootstrap_servers="localhost:9092",
+            topic="acl",
+            group_id="rag-acl",
+            retry_policy=RetryPolicy(backoff_seconds=[0]),
+        ),
     )
     with pytest.raises(asyncio.CancelledError):
         await consumer.run()

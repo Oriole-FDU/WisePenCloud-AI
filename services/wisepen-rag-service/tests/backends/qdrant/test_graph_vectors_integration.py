@@ -8,8 +8,8 @@ import pytest
 
 from rag.ingestion.indexers import GraphIndexer
 from rag.retrievers import GraphRetrievalMode, GraphRetriever
-from rag.storage.graph import GraphVectorKind
-from rag.storage.vector import VectorQuery
+from rag.domain.storage.graph import GraphVectorKind, graph_fact_sha256
+from rag.domain.storage.vector import VectorQuery
 
 pytestmark = pytest.mark.qdrant_integration
 
@@ -28,7 +28,13 @@ async def test_real_source_replacement_fact_reduction_empty_and_other_source_pre
     entities, relationships, _ = real_graph_vectors
     make_graph_facts(chunk)
     second = replace(chunk, chunk_id="second", metadata={})
-    make_graph_facts(second, description="第二份描述")
+    second_nodes, _ = make_graph_facts(second, description="第二份描述")
+    second.metadata["graph_version"] = "second-graph-version"
+    second_nodes_by_id = {node.id: node for node in second_nodes}
+    expected_fact_hashes = {
+        node_id: graph_fact_sha256(node, second_nodes_by_id)
+        for node_id, node in second_nodes_by_id.items()
+    }
     indexer = GraphIndexer(
         ontology=graph_ontology,
         embedding_client=embedding,
@@ -56,15 +62,12 @@ async def test_real_source_replacement_fact_reduction_empty_and_other_source_pre
     matches = await entities.query(VectorQuery(embedding=[1.0, 0.0], top_k=100))
     assert all(match.metadata["chunk_id"] == "second" for match in matches)
     assert all(
-        set(match.metadata)
-        == {
-            "chunk_id",
-            "resource_id",
-            "content_revision",
-            "ontology_name",
-            "fact_id",
-            "text_sha256",
-        }
+        match.metadata["fact_sha256"]
+        == expected_fact_hashes[match.metadata["fact_id"]]
+        for match in matches
+    )
+    assert all(
+        match.metadata["graph_version"] == "second-graph-version"
         for match in matches
     )
 

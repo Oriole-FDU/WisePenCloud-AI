@@ -3,17 +3,17 @@
 from copy import deepcopy
 
 from common.utils.markdown import MarkdownChunker as CommonMarkdownChunker
-from rag.core.schema import Chunk, Document
-from rag.core.schema.content import rag_section_id
+from rag.domain.models import Chunk, Document
+from rag.domain.models.content import rag_section_id
 
 
 class MarkdownChunker:
     """复用 Common 算法，仅适配字段与资源/revision 限定的内容身份。"""
 
     def __init__(
-            self,
-            target_chunk_tokens: int = 800,
-            split_threshold_tokens: int = 1200,
+        self,
+        target_chunk_tokens: int = 800,
+        split_threshold_tokens: int = 1200,
     ) -> None:
         self._chunker = CommonMarkdownChunker(
             target_chunk_tokens, split_threshold_tokens

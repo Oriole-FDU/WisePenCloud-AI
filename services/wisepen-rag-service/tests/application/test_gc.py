@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from rag.application.gc import GcReport, ResourceGarbageCollector
-from rag.application.publication.models import PublicationAction
-from rag.core.schema import ContentRevision
+from rag.domain.models.publication import PublicationAction
+from rag.domain.models import ContentRevision
 
 
 @pytest.fixture

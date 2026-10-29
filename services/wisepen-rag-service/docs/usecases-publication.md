@@ -1,9 +1,9 @@
 # 发布、事件消费与永久销毁
 
-用于把上游完整 Markdown
-变成可查询的当前版本。入口是 [DocumentPublication / PublicationEventConsumer](../src/rag/application/publication/publish.py)
-，状态与异常见 [models.py](../src/rag/application/publication/models.py)
-。身份及组件合同分别见[模型](models.md)、[抽象](abstractions.md)。
+用于把上游完整 Markdown 变成可查询的当前版本。入口是 [DocumentPublication / PublicationEventConsumer](../src/rag/application/publication.py)。
+发布状态、动作与状态异常见 [domain/models/publication.py](../src/rag/domain/models/publication.py)；ContentIdentityError 和
+ContentIncompleteError 仍属于 [application/publication.py](../src/rag/application/publication.py)。存储端口见
+[domain/storage/publication.py](../src/rag/domain/storage/publication.py)。身份及组件合同分别见[模型](models.md)、[抽象](abstractions.md)。
 
 ## 1. 依赖与最小调用
 
@@ -38,7 +38,7 @@ to_document 用 Common 解析结构并映射章节 ID，Pipeline 再正式分块
 
 ## 3. 状态、顺序与结果
 
-ResourcePublicationState 保存 resource_id、staged_revision、applied_revision、destroyed。staged 是构建候选，applied
+[`ResourcePublicationState`](../src/rag/domain/models/publication.py) 保存 resource_id、staged_revision、applied_revision、destroyed。staged 是构建候选，applied
 是新请求可见版本，destroyed 是永久标记。
 
 ```text
@@ -49,7 +49,7 @@ ResourcePublicationState 保存 resource_id、staged_revision、applied_revision
 stage 优先检查销毁，再比较 staged/applied 最高版本；低版本跳过，同最高版本不同摘要冲突，已 applied 相同身份跳过，同身份
 staged 允许重建。更高版本可替换 staged，旧 applied 保留。
 
-| PublicationAction | 对外含义                                    |
+| [PublicationAction](../src/rag/domain/models/publication.py) | 对外含义                                    |
 |-------------------|---------------------------------------------|
 | APPLIED           | 本次事实回查及条件发布完成                  |
 | ALREADY_APPLIED   | 已发布相同身份，未重建                      |
@@ -81,8 +81,13 @@ Contextualizer 可以按组件合同降级后成功返回；注册链内 GraphEx
 publication group 为 `wisepen-rag-v4-publication-group`。内容事件以 resourceId 作 Kafka key，由调用链保证同资源串行；销毁独立消费，不依赖跨
 topic 顺序。
 
-RAG 使用自身 [Kafka 后端](../src/rag/backends/kafka/consumer.py)：进程内快速重试 3 次，等待 1/2/4 秒，仍失败进入
+RAG 使用自身 [Kafka adapter](../src/rag/core/messaging/kafka.py)：进程内快速重试 3 次，等待 1/2/4 秒，仍失败进入
 `<main>.DLT`。正常处理最多 4 次业务执行；崩溃/重复投递时不能承诺总次数或 exactly-once。
+
+`PublicationEventConsumer` 注入 `MessageConsumer` 实例并把各自的业务 handler 传给 `run(handler=..., started=...)`。Container
+构造 Kafka adapter 时提供 bootstrap servers、topic、group 和 retry policy；协议定义于
+[domain/messaging/consumer.py](../src/rag/domain/messaging/consumer.py)，实现见
+[core/messaging/kafka.py](../src/rag/core/messaging/kafka.py)。此职责拆分不改变下述重试、DLQ 确认和 offset 提交语义。
 
 坏 JSON/字段、身份错误、版本冲突和其他 ValueError（包括 ContentIncompleteError）直接 DLQ；其他 handler 异常只快速重试，不加异常白名单。发送
 DLQ 确认后才提交输入 offset+1；发送或提交失败退出，由入口重启。保留 key、业务 headers 和原始

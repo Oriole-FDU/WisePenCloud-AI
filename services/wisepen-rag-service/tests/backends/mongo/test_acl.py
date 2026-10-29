@@ -1,11 +1,14 @@
 """本地完整 ACL 投影的公开读取行为。"""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
+from beanie import init_beanie
+from pymongo.asynchronous.database import AsyncDatabase
 
-from rag.backends.mongo.acl import MongoResourceAclRepository
+from rag.core.persistence.mongo.acl import MongoResourceAclRepository
+from rag.domain.entities import ResourceAclEntity
 
 
 @pytest.fixture
@@ -29,10 +32,20 @@ def record():
 
 
 @pytest.fixture
-def repository(record):
+async def repository(record):
     cursor = SimpleNamespace(to_list=AsyncMock(return_value=[record]))
     collection = SimpleNamespace(find=Mock(return_value=cursor))
-    return MongoResourceAclRepository(collection), collection, cursor
+    database = MagicMock(spec=AsyncDatabase)
+    database.client = SimpleNamespace(append_metadata=None)
+    database.command = AsyncMock(return_value={"version": "8.0.0"})
+    database.list_collection_names = AsyncMock(return_value=[])
+    database.__getitem__.side_effect = {"resource_acls": collection}.__getitem__
+    await init_beanie(
+        database=database,
+        document_models=[ResourceAclEntity],
+        skip_indexes=True,
+    )
+    return MongoResourceAclRepository(), collection, cursor
 
 
 async def test_get_resource_acls_restores_complete_projection(repository):

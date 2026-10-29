@@ -1,27 +1,27 @@
 """按请求快照读取当前图事实；图库只定位来源，不替代 Mongo 授权与事实。"""
 
 from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
-from rag.core.schema import (
+from rag.core.filters import FilterCondition, FilterOperator, MetadataFilters
+from rag.domain.models import (
     Chunk,
     GraphEdge,
     GraphNode,
     GraphRelationOption,
     parse_graph_facts,
 )
-from rag.core.schema.filters import FilterCondition, FilterOperator, MetadataFilters
-from rag.storage.graph import GraphDirection, GraphReader
+from rag.domain.storage.graph import GraphDirection, GraphReader
 
 
 class GraphFactLoader:
     """一次调用内共享来源读取与解析；筛选条件不承担授权职责。"""
 
     def __init__(
-            self,
-            *,
-            snapshot_reader: ResourceSnapshotReader,
-            graph_reader: GraphReader,
-            snapshot: ResourceSnapshot,
-            filters: MetadataFilters | None = None,
+        self,
+        *,
+        snapshot_reader: ResourceSnapshotReader,
+        graph_reader: GraphReader,
+        snapshot: ResourceSnapshot,
+        filters: MetadataFilters | None = None,
     ) -> None:
         self.snapshot_reader = snapshot_reader
         self.graph_reader = graph_reader
@@ -49,8 +49,8 @@ class GraphFactLoader:
             for chunk in chunks:
                 # 无图事实的 Chunk 不进入缓存。
                 if (
-                        "entities" not in chunk.metadata
-                        and "relationships" not in chunk.metadata
+                    "entities" not in chunk.metadata
+                    and "relationships" not in chunk.metadata
                 ):
                     continue
 
@@ -107,7 +107,7 @@ class GraphFactLoader:
         return edges
 
     async def visible_connections(
-            self, node_ids: list[str]
+        self, node_ids: list[str]
     ) -> dict[str, list[GraphRelationOption]]:
         """完整定位一跳后再授权，不能用检索数量上限推导连接不存在。"""
         # 按节点收集其一跳关系的方向集合。
@@ -149,7 +149,7 @@ class GraphFactLoader:
 
 
 def _matches_source(
-        metadata: dict[str, str | None], filters: MetadataFilters
+    metadata: dict[str, str | None], filters: MetadataFilters
 ) -> bool:
     """当前事实复核与存储边界相同的来源筛选语义。"""
     matches = []

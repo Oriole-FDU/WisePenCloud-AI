@@ -4,9 +4,10 @@ from dataclasses import replace
 from hashlib import sha256
 
 from common.utils.ai_clients.embedding import EmbeddingClient
-from rag.core.schema import Chunk, Ontology
-from rag.core.schema.filters import FilterOperator, MetadataFilter, MetadataFilters
-from rag.storage.graph import (
+from rag.core.filters import FilterOperator, MetadataFilter, MetadataFilters
+from rag.domain.interfaces import Indexer
+from rag.domain.models import Chunk, Ontology
+from rag.domain.storage.graph import (
     GraphSourceProjection,
     GraphVectorKind,
     GraphWriter,
@@ -15,8 +16,7 @@ from rag.storage.graph import (
     graph_vector_record_id,
     relationship_vector_text,
 )
-from rag.storage.vector import VectorRecord, VectorWriter
-from .base import Indexer
+from rag.domain.storage.vector import VectorRecord, VectorWriter
 
 
 class GraphIndexer(Indexer):
@@ -26,20 +26,20 @@ class GraphIndexer(Indexer):
     """
 
     def __init__(
-            self,
-            *,
-            ontology: Ontology,
-            writer: GraphWriter | None = None,
-            embedding_client: EmbeddingClient | None = None,
-            entity_writer: VectorWriter | None = None,
-            relationship_writer: VectorWriter | None = None,
-            source_batch_size: int = 64,
-            embedding_batch_size: int = 32,
+        self,
+        *,
+        ontology: Ontology,
+        writer: GraphWriter | None = None,
+        embedding_client: EmbeddingClient | None = None,
+        entity_writer: VectorWriter | None = None,
+        relationship_writer: VectorWriter | None = None,
+        source_batch_size: int = 64,
+        embedding_batch_size: int = 32,
     ) -> None:
         # 向量投影三件套必须同时配置或同时缺省
         configured = (embedding_client, entity_writer, relationship_writer)
         if any(value is not None for value in configured) and any(
-                value is None for value in configured
+            value is None for value in configured
         ):
             raise ValueError(
                 "graph vectors require embedding client and both vector writers"
@@ -92,7 +92,7 @@ class GraphIndexer(Indexer):
 
             # 组装本批的实体与关系向量记录（先不带 embedding）
             for chunk, (nodes, edges) in zip(
-                    batch, facts[start: start + len(batch)], strict=True
+                batch, facts[start: start + len(batch)], strict=True
             ):
                 for kind, items, records in (
                         (GraphVectorKind.ENTITY, nodes.values(), entity_records),

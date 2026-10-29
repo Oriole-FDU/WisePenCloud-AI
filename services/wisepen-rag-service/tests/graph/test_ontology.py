@@ -6,7 +6,7 @@ from dataclasses import asdict, replace
 import pytest
 import yaml
 
-from rag.core.schema import GraphEdge, GraphNode, Ontology, RelationSpec
+from rag.domain.models import GraphEdge, GraphNode, Ontology, RelationSpec
 
 
 def test_domain_and_unrestricted_endpoint_categories(graph_ontology):

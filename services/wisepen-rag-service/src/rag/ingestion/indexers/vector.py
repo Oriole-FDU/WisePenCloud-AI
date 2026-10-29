@@ -3,21 +3,21 @@
 from collections.abc import Callable
 
 from common.utils.ai_clients.embedding import EmbeddingClient
-from rag.core.schema import Chunk
-from rag.storage.vector import VectorRecord, VectorWriter
-from .base import Indexer
+from rag.domain.interfaces import Indexer
+from rag.domain.models import Chunk
+from rag.domain.storage.vector import VectorRecord, VectorWriter
 
 
 class VectorIndexer(Indexer):
     """只读 Chunk；metadata_factory 提供业务增量，资源身份始终来自 Chunk。"""
 
     def __init__(
-            self,
-            *,
-            embedding_client: EmbeddingClient,
-            writer: VectorWriter,
-            batch_size: int = 32,
-            metadata_factory: Callable[[Chunk], dict[str, object]] | None = None,
+        self,
+        *,
+        embedding_client: EmbeddingClient,
+        writer: VectorWriter,
+        batch_size: int = 32,
+        metadata_factory: Callable[[Chunk], dict[str, object]] | None = None,
     ) -> None:
         self._embedding_client = embedding_client
         self._writer = writer

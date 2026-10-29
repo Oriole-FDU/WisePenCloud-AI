@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from aiokafka import TopicPartition
 
-from rag.backends.kafka import (
+from rag.core.messaging import (
     DeliveryHeader,
     KafkaConsumerClient,
     RetryPolicy,
@@ -97,25 +97,24 @@ class Broker:
 @pytest.fixture
 def broker(monkeypatch):
     broker = Broker()
-    monkeypatch.setattr("rag.backends.kafka.consumer.AIOKafkaConsumer", broker.factory)
+    monkeypatch.setattr("rag.core.messaging.kafka.AIOKafkaConsumer", broker.factory)
     monkeypatch.setattr(
-        "rag.backends.kafka.consumer.AIOKafkaProducer", broker.producer_factory
+        "rag.core.messaging.kafka.AIOKafkaProducer", broker.producer_factory
     )
     return broker
 
 
-def client(handler, policy=None):
+def client(policy=None):
     return KafkaConsumerClient(
         bootstrap_servers="localhost:9092",
         topic="main",
         group_id="group",
-        handler=handler,
         retry_policy=policy,
     )
 
 
-async def run_until(consumer, broker, predicate):
-    task = asyncio.create_task(consumer.run())
+async def run_until(consumer, broker, handler, predicate):
+    task = asyncio.create_task(consumer.run(handler))
     try:
         await asyncio.wait_for(broker.until(predicate), timeout=2)
     finally:
@@ -128,7 +127,7 @@ async def run_until(consumer, broker, predicate):
 async def test_success_decodes_wire_format_then_commits_exact_partition(broker, value):
     handler = AsyncMock()
     broker.put(broker.record(value=value))
-    await run_until(client(handler), broker, lambda: len(broker.commits) == 1)
+    await run_until(client(), broker, handler, lambda: len(broker.commits) == 1)
     handler.assert_awaited_once_with({"n": 1})
     assert broker.commits == [{TopicPartition("main", 2): 11}]
     assert broker.sent == []
@@ -153,33 +152,35 @@ async def test_quick_retry_backoff_is_one_two_four_seconds_then_dlq(
         waits.append(delay)
         await original_sleep(0)
 
-    monkeypatch.setattr("rag.backends.kafka.consumer.asyncio.sleep", sleep)
+    monkeypatch.setattr("rag.core.messaging.kafka.asyncio.sleep", sleep)
     handler = AsyncMock(side_effect=OSError("downstream failed"))
     broker.put(broker.record())
     await run_until(
-        client(handler, RetryPolicy()), broker, lambda: len(broker.commits) == 1
+        client(RetryPolicy()), broker, handler, lambda: len(broker.commits) == 1
     )
     assert waits == [1, 2, 4] and handler.await_count == 4
     assert broker.sent[0].topic == "main.DLT"
+    assert all(type(key) is str for key, _ in broker.sent[0].headers)
     headers = dict(broker.sent[0].headers)
-    assert headers[DeliveryHeader.ORIGINAL_OFFSET] == b"10"
-    assert headers[DeliveryHeader.EXCEPTION_TYPE] == b"builtins.OSError"
-    assert b"Traceback" in headers[DeliveryHeader.EXCEPTION_TRACEBACK]
+    assert headers[DeliveryHeader.ORIGINAL_OFFSET.value] == b"10"
+    assert headers[DeliveryHeader.EXCEPTION_TYPE.value] == b"builtins.OSError"
+    assert b"Traceback" in headers[DeliveryHeader.EXCEPTION_TRACEBACK.value]
 
 
 async def test_unknown_program_error_has_only_process_local_retry_budget(broker):
     handler = AsyncMock(side_effect=KeyError("unexpected contract"))
     broker.put(broker.record(headers=[("upstream", b"original")]))
     await run_until(
-        client(handler, RetryPolicy(backoff_seconds=[0, 0, 0])),
+        client(RetryPolicy(backoff_seconds=[0, 0, 0])),
         broker,
+        handler,
         lambda: len(broker.commits) == 1,
     )
     assert handler.await_count == 4
     assert set(broker.clients) == {"main"}
     assert dict(broker.sent[0].headers)["upstream"] == b"original"
     assert (
-            dict(broker.sent[0].headers)[DeliveryHeader.EXCEPTION_TYPE]
+            dict(broker.sent[0].headers)[DeliveryHeader.EXCEPTION_TYPE.value]
             == b"builtins.KeyError"
     )
 
@@ -188,8 +189,9 @@ async def test_quick_retry_can_recover_without_forwarding(broker):
     handler = AsyncMock(side_effect=[OSError("temporary"), None])
     broker.put(broker.record())
     await run_until(
-        client(handler, RetryPolicy(backoff_seconds=[0])),
+        client(RetryPolicy(backoff_seconds=[0])),
         broker,
+        handler,
         lambda: len(broker.commits) == 1,
     )
     assert handler.await_count == 2 and broker.sent == []
@@ -200,7 +202,7 @@ async def test_bad_message_is_forwarded_once_before_offset_commit(broker, value)
     handler = AsyncMock()
     message = broker.record(value=value, key=None)
     broker.put(message)
-    await run_until(client(handler), broker, lambda: len(broker.commits) == 1)
+    await run_until(client(), broker, handler, lambda: len(broker.commits) == 1)
     handler.assert_not_awaited()
     assert len(broker.sent) == 1 and broker.sent[0].topic == "main.DLT"
     assert broker.sent[0].value == value and broker.sent[0].key is None
@@ -210,8 +212,9 @@ async def test_permanent_handler_failure_goes_directly_to_dlq(broker):
     handler = AsyncMock(side_effect=ValueError("permanent conflict"))
     broker.put(broker.record())
     await run_until(
-        client(handler),
+        client(),
         broker,
+        handler,
         lambda: len(broker.commits) == 1,
     )
     assert handler.await_count == 1
@@ -224,7 +227,7 @@ async def test_forward_failure_propagates_without_committing_source(broker):
     policy = RetryPolicy(backoff_seconds=[])
     broker.put(broker.record())
     with pytest.raises(RuntimeError) as caught:
-        await client(handler, policy).run()
+        await client(policy).run(handler)
     assert caught.value is error and broker.commits == []
     for consumer in broker.clients.values():
         consumer.stop.assert_awaited_once()
@@ -238,8 +241,9 @@ async def test_commit_failure_after_successful_forward_preserves_published_dlq(
     broker.commit_error = error
     policy = RetryPolicy(backoff_seconds=[])
     broker.put(broker.record())
+    handler = AsyncMock(side_effect=OSError("downstream"))
     with pytest.raises(RuntimeError) as caught:
-        await client(AsyncMock(side_effect=OSError("downstream")), policy).run()
+        await client(policy).run(handler)
     assert caught.value is error and broker.commits == []
     assert len(broker.sent) == 1 and broker.sent[0].topic == "main.DLT"
 
@@ -264,7 +268,7 @@ async def test_infrastructure_failure_closes_all_resources_and_propagates(
 
         broker.factory.side_effect = create
     with pytest.raises(RuntimeError) as caught:
-        await client(AsyncMock()).run()
+        await client().run(AsyncMock())
     assert caught.value is error and broker.commits == []
     broker.producer.stop.assert_awaited_once()
     for consumer in broker.clients.values():
@@ -274,7 +278,7 @@ async def test_infrastructure_failure_closes_all_resources_and_propagates(
 @pytest.mark.parametrize("delay", [-1, float("nan"), float("inf")])
 def test_invalid_wait_budget_is_rejected_before_kafka_io(delay):
     with pytest.raises(ValueError):
-        client(AsyncMock(), RetryPolicy(backoff_seconds=[delay]))
+        client(RetryPolicy(backoff_seconds=[delay]))
 
 
 async def test_startup_signal_waits_for_producer_and_main_connection(broker):
@@ -292,7 +296,7 @@ async def test_startup_signal_waits_for_producer_and_main_connection(broker):
         return result
 
     broker.factory.side_effect = create
-    task = asyncio.create_task(client(AsyncMock()).run(started=started))
+    task = asyncio.create_task(client().run(AsyncMock(), started=started))
     try:
         await asyncio.wait_for(entering.wait(), timeout=2)
         assert not started.is_set()
@@ -315,11 +319,10 @@ async def test_send_deadline_stops_without_ack_and_closes_resources(broker):
         bootstrap_servers="localhost:9092",
         topic="main",
         group_id="group",
-        handler=AsyncMock(),
         delivery_timeout_ms=10,
     )
     with pytest.raises(TimeoutError):
-        await consumer.run()
+        await consumer.run(AsyncMock())
     assert broker.commits == []
     broker.producer.stop.assert_awaited_once()
     for connection in broker.clients.values():

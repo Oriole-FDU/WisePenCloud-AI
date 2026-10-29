@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from rag.application.common.snapshot import ResourceSnapshotReader
-from rag.application.publication.publish import DocumentReadyEvent
-from rag.core.schema import Chunk, ContentRevision
+from rag.application.publication import DocumentReadyEvent
+from rag.domain.models import Chunk, ContentRevision
 
 
 @pytest.fixture

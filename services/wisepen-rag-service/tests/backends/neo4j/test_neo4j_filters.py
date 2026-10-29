@@ -1,9 +1,9 @@
 """通过公开图读取验证嵌套过滤与 Cypher 参数隔离。"""
 
-from rag.backends.neo4j import Neo4jGraphStorage
-from rag.core.schema import GraphNode
-from rag.core.schema.filters import FilterCondition, MetadataFilter, MetadataFilters
-from rag.storage.graph import GraphSourceProjection
+from rag.core.persistence.neo4j import Neo4jGraphStorage
+from rag.domain.models import GraphNode
+from rag.core.filters import FilterCondition, MetadataFilter, MetadataFilters
+from rag.domain.storage.graph import GraphSourceProjection
 
 
 async def test_nested_filters_and_parameter_safety(driver):

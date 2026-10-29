@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from common.logger import error, info
-from rag.application.acl.store import ResourceAclRepository
-from rag.application.publication.store import PublicationStore
-from rag.core.schema.filters import MetadataFilter, MetadataFilters
-from rag.storage.content import ContentWriter
-from rag.storage.graph import GraphWriter
-from rag.storage.vector import VectorWriter
+from rag.core.filters import MetadataFilter, MetadataFilters
+from rag.domain.storage.acl import ResourceAclRepository
+from rag.domain.storage.content import ContentWriter
+from rag.domain.storage.graph import GraphWriter
+from rag.domain.storage.publication import PublicationStore
+from rag.domain.storage.vector import VectorWriter
 
 
 @dataclass(slots=True)
@@ -34,15 +34,15 @@ class ResourceGarbageCollector:
     """平台统一清理已配置存储；删除幂等，失败留给下轮重新扫描。"""
 
     def __init__(
-            self,
-            *,
-            store: PublicationStore,
-            content_writer: ContentWriter,
-            resource_acls: ResourceAclRepository,
-            vector_writers: list[VectorWriter],
-            graph_writers: list[GraphWriter],
-            batch_size: int = 100,
-            interval_seconds: float = 600,
+        self,
+        *,
+        store: PublicationStore,
+        content_writer: ContentWriter,
+        resource_acls: ResourceAclRepository,
+        vector_writers: list[VectorWriter],
+        graph_writers: list[GraphWriter],
+        batch_size: int = 100,
+        interval_seconds: float = 600,
     ) -> None:
         self._store = store
         self._content_writer = content_writer

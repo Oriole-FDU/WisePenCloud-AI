@@ -10,8 +10,8 @@ from common.utils.retrieval import (
     Retriever,
     RoundRobinFusion,
 )
-from rag.core.schema.filters import MetadataFilters
-from rag.storage.vector import VectorMatch, VectorQuery, VectorReader
+from rag.core.filters import MetadataFilters
+from rag.domain.storage.vector import VectorMatch, VectorQuery, VectorReader
 
 # hybrid 模式下各路未显式指定 top_k 时的默认召回量。
 _DEFAULT_HYBRID_ROUTE_TOP_K = 30
@@ -29,24 +29,24 @@ class VectorRetriever(Retriever[VectorMatch]):
     """按配置执行单路或 Common 并发融合；无请求运行状态。"""
 
     def __init__(
-            self, *, retriever: Retriever[VectorMatch], candidate_limit: int = 60
+        self, *, retriever: Retriever[VectorMatch], candidate_limit: int = 60
     ) -> None:
         super().__init__(top_k=candidate_limit)
         self._retriever = retriever
 
     @classmethod
     def from_storage(
-            cls,
-            *,
-            reader: VectorReader,
-            embedding_client: EmbeddingClient | None = None,
-            mode: VectorRetrievalMode = VectorRetrievalMode.HYBRID,
-            dense_top_k: int | None = None,
-            sparse_top_k: int | None = None,
-            candidate_limit: int = 60,
-            filters: MetadataFilters | None = None,
-            include_embedding: bool = False,
-            fusion: Fusion[VectorMatch] | None = None,
+        cls,
+        *,
+        reader: VectorReader,
+        embedding_client: EmbeddingClient | None = None,
+        mode: VectorRetrievalMode = VectorRetrievalMode.HYBRID,
+        dense_top_k: int | None = None,
+        sparse_top_k: int | None = None,
+        candidate_limit: int = 60,
+        filters: MetadataFilters | None = None,
+        include_embedding: bool = False,
+        fusion: Fusion[VectorMatch] | None = None,
     ) -> "VectorRetriever":
         """固定召回模式与配置；sparse 无需 embedding。
 
@@ -113,13 +113,13 @@ class _DenseRetriever(Retriever[VectorMatch]):
     """生成本次查询 embedding 后召回；供应商响应错误与 Indexer 使用相同合同。"""
 
     def __init__(
-            self,
-            *,
-            reader: VectorReader,
-            embedding_client: EmbeddingClient,
-            top_k: int,
-            filters: MetadataFilters | None,
-            include_embedding: bool,
+        self,
+        *,
+        reader: VectorReader,
+        embedding_client: EmbeddingClient,
+        top_k: int,
+        filters: MetadataFilters | None,
+        include_embedding: bool,
     ) -> None:
         super().__init__(top_k=top_k)
         self._reader = reader
@@ -148,12 +148,12 @@ class _SparseRetriever(Retriever[VectorMatch]):
     """将查询原文交给仓储 sparse 路线，不生成或替换候选 embedding。"""
 
     def __init__(
-            self,
-            *,
-            reader: VectorReader,
-            top_k: int,
-            filters: MetadataFilters | None,
-            include_embedding: bool,
+        self,
+        *,
+        reader: VectorReader,
+        top_k: int,
+        filters: MetadataFilters | None,
+        include_embedding: bool,
     ) -> None:
         super().__init__(top_k=top_k)
         self._reader = reader

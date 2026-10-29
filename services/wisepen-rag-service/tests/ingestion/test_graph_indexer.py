@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.core.schema import GraphEdge, GraphNode
+from rag.domain.models import GraphEdge, GraphNode
 from rag.ingestion.indexers import GraphIndexer
 
 

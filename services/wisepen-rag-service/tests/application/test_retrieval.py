@@ -8,12 +8,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from common.utils.retrieval import ModelReranker, RrfFusion
-from rag.application.acl.models import PermissionScope, ResourceAcl
+from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.retrieval import VectorRetrieval
-from rag.core.schema import ContentRevision
-from rag.core.schema.filters import MetadataFilter, MetadataFilters
-from rag.storage.vector import VectorMatch
+from rag.domain.models import ContentRevision
+from rag.core.filters import MetadataFilter, MetadataFilters
+from rag.domain.storage.vector import VectorMatch
 
 
 def match(chunk, score=1.0, embedding=None, **metadata):

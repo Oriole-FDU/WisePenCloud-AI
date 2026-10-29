@@ -159,23 +159,19 @@ async def test_empty_input_has_no_io(indexer, graph_vector_writers):
 
 
 @pytest.mark.parametrize("failure", [None, "topology", "embedding"])
-async def test_combined_graph_indexer_orders_topology_before_vectors(
+async def test_graph_indexer_preserves_projection_failure_boundaries(
         indexer, graph_ontology, chunk, make_graph_facts, graph_vector_writers, failure
 ):
     _, embedding = indexer
     entities, relationships = graph_vector_writers
     make_graph_facts(chunk)
-    order = []
 
     async def write(projections):
-        order.append("topology")
         assert len(projections[0].nodes) == 2 and len(projections[0].edges) == 1
-        embedding.embed.assert_not_awaited()
         if failure == "topology":
             raise OSError("topology failed")
 
     async def embed(*, texts):
-        order.append("embedding")
         if failure == "embedding":
             raise OSError("embedding failed")
         return [[1.0, 0.0] for _ in texts]
@@ -192,13 +188,14 @@ async def test_combined_graph_indexer_orders_topology_before_vectors(
     if failure:
         with pytest.raises(OSError):
             await usecase.index([chunk])
-        assert all(writer.delete.await_count == 0 for writer in graph_vector_writers)
+        # 拓扑不可用时，不能留下无法追溯来源的向量投影。
+        if failure == "topology":
+            embedding.embed.assert_not_awaited()
+        assert entities.records == {}
+        assert relationships.records == {}
     else:
         await usecase.index([chunk])
         assert [len(writer.records) for writer in graph_vector_writers] == [2, 1]
-    assert order == (
-        ["topology"] if failure == "topology" else ["topology", "embedding"]
-    )
 
 
 def test_projection_dependencies_are_complete(graph_ontology, graph_vector_writers):

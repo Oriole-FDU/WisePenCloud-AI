@@ -12,31 +12,32 @@ from qdrant_client import AsyncQdrantClient
 
 from common.utils.ai_clients import EmbeddingClient, InstructionClient, RerankClient
 from common.utils.retrieval import ModelReranker
-from rag.application.acl.synchronizer import AclEventConsumer, AclSynchronizer
+from rag.application.acl import AclEventConsumer, AclSynchronizer
 from rag.application.common.snapshot import ResourceSnapshotReader
 from rag.application.gc import ResourceGarbageCollector
 from rag.application.graph import GraphRetrieval, GraphTraversal
 from rag.application.publication import DocumentPublication, PublicationEventConsumer
 from rag.application.reading import DocumentReading
 from rag.application.retrieval import VectorRetrieval
-from rag.backends.mongo.acl import MongoResourceAclRepository
-from rag.backends.mongo.content import MongoContentStorage
-from rag.backends.mongo.publication import MongoPublicationStore
-from rag.backends.neo4j import Neo4jGraphStorage
-from rag.backends.qdrant import QdrantVectorStorage
-from rag.core.schema import Ontology
+from rag.core.messaging import KafkaConsumerClient
+from rag.core.persistence.mongo.acl import MongoResourceAclRepository
+from rag.core.persistence.mongo.content import MongoContentStorage
+from rag.core.persistence.mongo.publication import MongoPublicationStore
+from rag.core.persistence.neo4j import Neo4jGraphStorage
+from rag.core.persistence.qdrant import QdrantVectorStorage
+from rag.domain.models import Ontology
+from rag.domain.storage.vector import IndexKind, IndexableField, VectorCollection
 from rag.ingestion import IngestionPipeline
 from rag.ingestion.chunkers.markdown import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer, VectorIndexer
 from rag.ingestion.transformers import Contextualizer, GraphExtractor
-from rag.storage.vector import IndexableField, IndexKind, VectorCollection
 
 if TYPE_CHECKING:
     from rag.core.config.app_settings import AppSettings
 
 
 def _instruction_client(
-        settings: "AppSettings", openai_provider: Callable[[], AsyncOpenAI]
+    settings: "AppSettings", openai_provider: Callable[[], AsyncOpenAI]
 ) -> InstructionClient:
     """构造指令模型客户端；未配置模型时报错，避免半装配。"""
     if settings.INSTRUCTION_MODEL is None:
@@ -45,7 +46,7 @@ def _instruction_client(
 
 
 def _graph_storage(
-        settings: "AppSettings", driver_provider: Callable[[], AsyncDriver]
+    settings: "AppSettings", driver_provider: Callable[[], AsyncDriver]
 ) -> Neo4jGraphStorage | None:
     """图存储未启用时返回 None，让上层显式选择走图或不走图。"""
     if not settings.ENABLE_GRAPH_STORAGE:
@@ -70,7 +71,7 @@ def _contextualize_branch(enabled: bool) -> str:
 
 
 def _garbage_collector(
-        settings, store, content, acls, vectors, graph
+    settings, store, content, acls, vectors, graph
 ) -> ResourceGarbageCollector:
     # 清理目标来自平台存储，不取决于本次文档或垂类是否启用图算法。
     return ResourceGarbageCollector(
@@ -90,7 +91,7 @@ class Container(containers.DeclarativeContainer):
     settings = providers.Dependency()
 
     # ------------------------------------------------------------------
-    # MongoDB：客户端与三个集合
+    # MongoDB：四个自有集合由实体声明，外部资源库保持独立。
     # ------------------------------------------------------------------
     mongo_client = providers.Singleton(AsyncMongoClient, settings.provided.MONGODB_URL)
     database = providers.Callable(
@@ -102,19 +103,9 @@ class Container(containers.DeclarativeContainer):
     resource_items_collection = providers.Callable(
         getitem, resource_database, "wisepen_resource_items"
     )
-    acl_collection = providers.Callable(getitem, database, "resource_acls")
-    acl_repository = providers.Singleton(
-        MongoResourceAclRepository, collection=acl_collection
-    )
-    content_storage = providers.Singleton(
-        MongoContentStorage,
-        documents=providers.Callable(getitem, database, "document_revisions"),
-        chunks=providers.Callable(getitem, database, "doc_chunks"),
-    )
-    publication_store = providers.Singleton(
-        MongoPublicationStore,
-        collection=providers.Callable(getitem, database, "resource_publications"),
-    )
+    acl_repository = providers.Singleton(MongoResourceAclRepository)
+    content_storage = providers.Singleton(MongoContentStorage)
+    publication_store = providers.Singleton(MongoPublicationStore)
 
     # ------------------------------------------------------------------
     # Qdrant：客户端与三套向量集合
@@ -330,25 +321,40 @@ class Container(containers.DeclarativeContainer):
     # ------------------------------------------------------------------
     # Kafka 消费者：ACL 同步与发布事件
     # ------------------------------------------------------------------
+    acl_message_consumer = providers.Factory(
+        KafkaConsumerClient,
+        bootstrap_servers=settings.provided.KAFKA_BOOTSTRAP_SERVERS,
+        topic=settings.provided.KAFKA_RESOURCE_ACL_RECALC_TOPIC,
+        group_id=settings.provided.KAFKA_RAG_ACL_RECALC_GROUP_ID,
+        max_poll_interval_ms=settings.provided.KAFKA_MAX_POLL_INTERVAL_MS,
+    )
+    publication_content_consumer = providers.Factory(
+        KafkaConsumerClient,
+        bootstrap_servers=settings.provided.KAFKA_BOOTSTRAP_SERVERS,
+        topic=settings.provided.KAFKA_DOCUMENT_READY_TOPIC,
+        group_id=settings.provided.KAFKA_RAG_PUBLICATION_GROUP_ID,
+        max_poll_interval_ms=settings.provided.KAFKA_MAX_POLL_INTERVAL_MS,
+    )
+    publication_destroy_consumer = providers.Factory(
+        KafkaConsumerClient,
+        bootstrap_servers=settings.provided.KAFKA_BOOTSTRAP_SERVERS,
+        topic=settings.provided.KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC,
+        group_id=settings.provided.KAFKA_RAG_PUBLICATION_GROUP_ID,
+        max_poll_interval_ms=settings.provided.KAFKA_MAX_POLL_INTERVAL_MS,
+    )
     acl_synchronizer = providers.Singleton(
         AclSynchronizer, collection=resource_items_collection, repository=acl_repository
     )
     acl_consumer = providers.Factory(
         AclEventConsumer,
         projection=acl_synchronizer,
-        bootstrap_servers=settings.provided.KAFKA_BOOTSTRAP_SERVERS,
-        topic=settings.provided.KAFKA_RESOURCE_ACL_RECALC_TOPIC,
-        group_id=settings.provided.KAFKA_RAG_ACL_RECALC_GROUP_ID,
-        max_poll_interval_ms=settings.provided.KAFKA_MAX_POLL_INTERVAL_MS,
+        consumer=acl_message_consumer,
     )
     publication_consumer = providers.Factory(
         PublicationEventConsumer,
         publisher=publication,
-        bootstrap_servers=settings.provided.KAFKA_BOOTSTRAP_SERVERS,
-        group_id=settings.provided.KAFKA_RAG_PUBLICATION_GROUP_ID,
-        document_ready_topic=settings.provided.KAFKA_DOCUMENT_READY_TOPIC,
-        physical_destroy_topic=settings.provided.KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC,
-        max_poll_interval_ms=settings.provided.KAFKA_MAX_POLL_INTERVAL_MS,
+        content_consumer=publication_content_consumer,
+        destroy_consumer=publication_destroy_consumer,
     )
 
 

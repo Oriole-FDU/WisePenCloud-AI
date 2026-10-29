@@ -219,7 +219,7 @@ resource_id/content_revision 条件，不在工具里重写证据加载器。合
 
 ```python
 # example: ontology-scoped-graph
-from rag.core.schema.filters import MetadataFilter, MetadataFilters
+from rag.core.filters import MetadataFilter, MetadataFilters
 
 
 async def follow_employment(traversal, node_ids, snapshot, direction=None):

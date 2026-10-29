@@ -12,6 +12,8 @@ applied 且未 destroyed 的资源，不全库扫描。
 
 读取完整 Document 并核对资源/version/原文摘要/revision，然后读取当前既有 Chunk；不重新分块。缺资源/无 applied/destroyed
 跳过，缺文档或身份不符按资源错误报告。两脚本不加载 Nacos、不改 stage/apply、不修改 ACL；使用独立 CLI/环境变量配置。
+脚本通过 `init_beanie(document_models=[DocumentEntity, ChunkEntity, ResourcePublicationEntity], skip_indexes=True)` 绑定已有集合，
+不创建或重建索引；随后无参构造所需仓储并保留原有修复写入语义。
 
 | 需求                 | 入口/模式                              | 写入范围                                      |
 |----------------------|----------------------------------------|-----------------------------------------------|

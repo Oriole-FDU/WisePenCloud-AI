@@ -6,9 +6,10 @@ from unittest.mock import AsyncMock
 import pytest
 from qdrant_client import models
 
-from rag.application.publication import DocumentPublication, PublicationAction
-from rag.backends.qdrant import QdrantVectorStorage
-from rag.core.schema import ContentRevision
+from rag.application.publication import DocumentPublication
+from rag.domain.models.publication import PublicationAction
+from rag.core.persistence.qdrant import QdrantVectorStorage
+from rag.domain.models import ContentRevision
 from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer, VectorIndexer
 from rag.ingestion.pipeline import IngestionPipeline

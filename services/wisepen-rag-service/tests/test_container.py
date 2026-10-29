@@ -1,16 +1,84 @@
 """通用 provider 的真实装配；底层客户端显式替换，不拉取配置或访问模型。"""
 
+import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from dependency_injector import providers
 from pydantic import ValidationError
 
 from common.utils.retrieval import Candidate, RetrievalPipeline
-from rag.application.publication import DocumentReadyEvent, PublicationAction
+from rag.application.publication import DocumentReadyEvent
+from rag.domain.models.publication import PublicationAction
 from rag.application.retrieval import PreparedChunk
 from rag.container import Container
+
+
+async def test_message_clients_use_configured_topics_groups_and_poll_interval(
+        platform_settings, monkeypatch
+):
+    AppSettings = type(platform_settings)
+    settings = AppSettings(
+        **platform_settings.model_dump()
+        | {"KAFKA_ENABLED": True, "KAFKA_BOOTSTRAP_SERVERS": "localhost:9092"}
+    )
+    container = Container(settings=settings)
+    connections = []
+
+    def create_consumer(topic, **kwargs):
+        connections.append((topic, kwargs))
+        return SimpleNamespace(
+            start=AsyncMock(),
+            stop=AsyncMock(),
+            getone=AsyncMock(side_effect=asyncio.CancelledError),
+            commit=AsyncMock(),
+        )
+
+    producer = SimpleNamespace(start=AsyncMock(), stop=AsyncMock())
+    monkeypatch.setattr(
+        "rag.core.messaging.kafka.AIOKafkaConsumer", Mock(side_effect=create_consumer)
+    )
+    monkeypatch.setattr(
+        "rag.core.messaging.kafka.AIOKafkaProducer", Mock(return_value=producer)
+    )
+
+    for provider in (
+        container.acl_message_consumer,
+        container.publication_content_consumer,
+        container.publication_destroy_consumer,
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await provider().run(AsyncMock())
+
+    assert [
+        (
+            topic,
+            kwargs["bootstrap_servers"],
+            kwargs["group_id"],
+            kwargs["max_poll_interval_ms"],
+        )
+        for topic, kwargs in connections
+    ] == [
+        (
+            settings.KAFKA_RESOURCE_ACL_RECALC_TOPIC,
+            settings.KAFKA_BOOTSTRAP_SERVERS,
+            settings.KAFKA_RAG_ACL_RECALC_GROUP_ID,
+            settings.KAFKA_MAX_POLL_INTERVAL_MS,
+        ),
+        (
+            settings.KAFKA_DOCUMENT_READY_TOPIC,
+            settings.KAFKA_BOOTSTRAP_SERVERS,
+            settings.KAFKA_RAG_PUBLICATION_GROUP_ID,
+            settings.KAFKA_MAX_POLL_INTERVAL_MS,
+        ),
+        (
+            settings.KAFKA_RESOURCE_PHYSICAL_DESTROY_TOPIC,
+            settings.KAFKA_BOOTSTRAP_SERVERS,
+            settings.KAFKA_RAG_PUBLICATION_GROUP_ID,
+            settings.KAFKA_MAX_POLL_INTERVAL_MS,
+        ),
+    ]
 
 
 async def test_pipeline_routes_share_live_mapping_and_are_isolated_per_container(

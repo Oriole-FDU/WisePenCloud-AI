@@ -1,4 +1,4 @@
-"""固定普通摄入顺序与失败边界，不通过运行时装配检查证明内部契约。"""
+"""验证发布状态与投影可见事实，不锁定内部调用轨迹。"""
 
 from dataclasses import replace
 from types import SimpleNamespace
@@ -6,13 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.application.publication import (
-    ContentConflictError,
-    ContentIdentityError,
-    DocumentPublication,
-    PublicationAction,
-)
-from rag.core.schema import ContentRevision
+from rag.domain.models.publication import ContentConflictError, PublicationAction
+from rag.application.publication import ContentIdentityError, DocumentPublication
+from rag.domain.models import ContentRevision
 from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer
 from rag.ingestion.pipeline import IngestionPipeline
@@ -21,44 +17,27 @@ from rag.ingestion.pipeline import IngestionPipeline
 async def test_publish_saves_facts_before_every_required_projection(
         storage, publication_store, make_document
 ):
-    calls = []
     document = make_document()
     revision = ContentRevision.create(
         resource_id=document.resource_id,
         document_version=document.document_version,
         text=document.text,
     )
-    original_stage = publication_store.stage_revision
     original_write = storage.upsert_documents
-    original_chunks = storage.upsert_chunks
-    original_documents_read = storage.get_documents
-    original_chunks_read = storage.get_revision_chunks
-    original_apply = publication_store.apply_revision
-
-    async def stage(current):
-        calls.append("stage")
-        return await original_stage(current)
 
     async def write(documents):
-        assert documents[0] is document
         assert (await publication_store.get_states(["resource"]))[
                    0
                ].staged_revision == revision
-        calls.append("document")
         await original_write(documents)
 
     async def transform(chunks, *, document=None):
-        calls.append("transform")
         chunks[0].metadata["contextual_context"] = "增强上下文"
         return chunks
 
-    async def write_chunks(chunks):
-        calls.append("chunks")
-        await original_chunks(chunks)
-
     async def project(chunks):
-        calls.append("projection-1")
-        saved = await original_chunks_read(
+        # 每个必需投影都应读到完整事实，且全部成功前发布指针不可前移。
+        saved = await storage.get_revision_chunks(
             resource_id=document.resource_id, content_revision=document.content_revision
         )
         assert saved == chunks
@@ -67,29 +46,9 @@ async def test_publish_saves_facts_before_every_required_projection(
                    0
                ].applied_revision is None
 
-    async def second_projection(chunks):
-        calls.append("projection-2")
-
-    async def read_documents(keys):
-        calls.append("read-document")
-        return await original_documents_read(keys)
-
-    async def read_chunks(**kwargs):
-        calls.append("read-chunks")
-        return await original_chunks_read(**kwargs)
-
-    async def apply(current):
-        calls.append("apply")
-        return await original_apply(current)
-
-    publication_store.stage_revision = stage
     storage.upsert_documents = write
-    storage.upsert_chunks = write_chunks
-    storage.get_documents = read_documents
-    storage.get_revision_chunks = read_chunks
-    publication_store.apply_revision = apply
     first = SimpleNamespace(index=AsyncMock(side_effect=project))
-    second = SimpleNamespace(index=AsyncMock(side_effect=second_projection))
+    second = SimpleNamespace(index=AsyncMock(side_effect=project))
     publication = DocumentPublication(
         store=publication_store,
         reader=storage,
@@ -101,18 +60,8 @@ async def test_publish_saves_facts_before_every_required_projection(
         ),
     )
     assert await publication.publish(document) is PublicationAction.APPLIED
-    assert calls == [
-        "stage",
-        "document",
-        "transform",
-        "chunks",
-        "projection-1",
-        "projection-2",
-        "read-document",
-        "read-chunks",
-        "apply",
-    ]
-    assert first.index.call_args.args[0] is second.index.call_args.args[0]
+    first.index.assert_awaited_once()
+    second.index.assert_awaited_once()
     state = (await publication_store.get_states(["resource"]))[0]
     assert state.applied_revision == revision and state.staged_revision is None
 

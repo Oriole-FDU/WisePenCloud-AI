@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from functools import partial
 
+from beanie import init_beanie
 from fastapi import FastAPI
 
 from common.logger import error, info, setup_logging_intercept
@@ -25,6 +26,12 @@ from rag.container import container
 from rag.core.config.app_settings import settings
 from rag.core.config.nacos import nacos_client_manager
 from rag.extensions import register_extensions
+from rag.domain.entities import (
+    ChunkEntity,
+    DocumentEntity,
+    ResourceAclEntity,
+    ResourcePublicationEntity,
+)
 
 
 async def _run_background(name: str, run: Callable[[], Awaitable[None]]) -> None:
@@ -70,9 +77,16 @@ async def lifespan(app: FastAPI):
 
             # 存储层探活与索引/集合初始化
             await mongo.admin.command("ping")
-            await container.content_storage().ensure_indexes()
-            await container.publication_store().ensure_indexes()
-            await container.acl_repository().ensure_indexes()
+            # Beanie 统一声明自有集合和索引；外部资源库仍由上游管理。
+            await init_beanie(
+                database=container.database(),
+                document_models=[
+                    DocumentEntity,
+                    ChunkEntity,
+                    ResourceAclEntity,
+                    ResourcePublicationEntity,
+                ],
+            )
             for collection in container.vector_collections():
                 await collection.storage.ensure_collection(
                     collection.metadata_index_fields

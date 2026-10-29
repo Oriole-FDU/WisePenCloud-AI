@@ -8,10 +8,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from common.utils.retrieval import Candidate, RetrievalPipeline, RrfFusion
-from rag.core.schema.filters import MetadataFilter, MetadataFilters
+from rag.core.filters import MetadataFilter, MetadataFilters
 from rag.retrievers import GraphMatch, GraphRetrievalMode, GraphRetriever
-from rag.storage.graph import GraphVectorKind
-from rag.storage.vector import VectorMatch
+from rag.domain.storage.graph import GraphVectorKind
+from rag.domain.storage.vector import VectorMatch
 
 
 @pytest.fixture

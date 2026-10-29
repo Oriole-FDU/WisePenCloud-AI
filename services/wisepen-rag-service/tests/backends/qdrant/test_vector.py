@@ -7,9 +7,9 @@ from uuid import NAMESPACE_URL, uuid5
 import pytest
 from qdrant_client import AsyncQdrantClient, models
 
-from rag.backends.qdrant import QdrantVectorStorage
-from rag.core.schema.filters import MetadataFilter, MetadataFilters
-from rag.storage.vector import (
+from rag.core.persistence.qdrant import QdrantVectorStorage
+from rag.core.filters import MetadataFilter, MetadataFilters
+from rag.domain.storage.vector import (
     IndexableField,
     IndexKind,
     VectorMatch,

@@ -5,6 +5,8 @@ import asyncio
 import json
 import os
 from contextlib import AsyncExitStack
+
+from beanie import init_beanie
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -14,15 +16,16 @@ from qdrant_client import AsyncQdrantClient
 
 from common.logger import error
 from common.utils.ai_clients import EmbeddingClient, InstructionClient
-from rag.application.publication.store import PublicationStore
-from rag.backends.mongo.content import MongoContentStorage
-from rag.backends.mongo.publication import MongoPublicationStore
-from rag.backends.qdrant.vector import QdrantVectorStorage
-from rag.core.schema import ContentRevision
+from rag.domain.storage.publication import PublicationStore
+from rag.domain.entities import ChunkEntity, DocumentEntity, ResourcePublicationEntity
+from rag.core.persistence.mongo.content import MongoContentStorage
+from rag.core.persistence.mongo.publication import MongoPublicationStore
+from rag.core.persistence.qdrant.vector import QdrantVectorStorage
+from rag.domain.models import ContentRevision
 from rag.ingestion.indexers import ChunkFactsIndexer, VectorIndexer
 from rag.ingestion.transformers.contextualizer import ContextStatus, Contextualizer
-from rag.storage.content import ContentReader
-from rag.storage.vector import IndexableField, IndexKind
+from rag.domain.storage.content import ContentReader
+from rag.domain.storage.vector import IndexableField, IndexKind
 
 
 @dataclass(slots=True)
@@ -239,11 +242,14 @@ async def run(args: argparse.Namespace) -> RepairReport:
         )
         stack.push_async_callback(embedding_api.close)
         database = mongo[args.mongo_database]
-        content = MongoContentStorage(
-            documents=database["document_revisions"],
-            chunks=database["doc_chunks"],
+        # 维护入口只绑定现有集合；索引由服务启动时统一管理。
+        await init_beanie(
+            database=database,
+            document_models=[DocumentEntity, ChunkEntity, ResourcePublicationEntity],
+            skip_indexes=True,
         )
-        publication = MongoPublicationStore(database["resource_publications"])
+        content = MongoContentStorage()
+        publication = MongoPublicationStore()
         vectors = QdrantVectorStorage(
             client=qdrant,
             collection=args.vector_collection,

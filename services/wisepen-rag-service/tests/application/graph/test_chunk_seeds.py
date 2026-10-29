@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.application.acl.models import PermissionScope, ResourceAcl
+from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.retrieval import VectorRetrieval
-from rag.storage.graph import GraphDirection
-from rag.storage.vector import VectorMatch
+from rag.domain.storage.graph import GraphDirection
+from rag.domain.storage.vector import VectorMatch
 
 
 @pytest.fixture

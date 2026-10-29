@@ -5,7 +5,7 @@ from enum import StrEnum
 
 from common.utils.markdown import OutlineFormatter, Section
 from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
-from rag.core.schema import Document
+from rag.domain.models import Document
 
 
 class SectionReadScope(StrEnum):
@@ -65,11 +65,11 @@ class DocumentReading:
         self._reader = reader
 
     async def global_outline(
-            self,
-            resource_id: str,
-            *,
-            snapshot: ResourceSnapshot,
-            max_level: int = 0,
+        self,
+        resource_id: str,
+        *,
+        snapshot: ResourceSnapshot,
+        max_level: int = 0,
     ) -> DocumentOutline | None:
         documents = await self._reader.read_documents([resource_id], snapshot=snapshot)
         if not documents:
@@ -85,11 +85,11 @@ class DocumentReading:
         )
 
     async def neighborhood(
-            self,
-            section_ids: list[str],
-            *,
-            snapshot: ResourceSnapshot,
-            sibling_steps: int = 1,
+        self,
+        section_ids: list[str],
+        *,
+        snapshot: ResourceSnapshot,
+        sibling_steps: int = 1,
     ) -> list[SectionOutline]:
         documents = await self._reader.read_documents_by_section_ids(
             section_ids, snapshot=snapshot
@@ -122,11 +122,11 @@ class DocumentReading:
         return result
 
     async def read_sections(
-            self,
-            section_ids: list[str],
-            *,
-            snapshot: ResourceSnapshot,
-            scope: SectionReadScope = SectionReadScope.OWN,
+        self,
+        section_ids: list[str],
+        *,
+        snapshot: ResourceSnapshot,
+        scope: SectionReadScope = SectionReadScope.OWN,
     ) -> list[SectionText]:
         """按 own/subtree 半开字符区间原样读取，旧版本与不可见项省略。"""
         scope = SectionReadScope(scope)
@@ -159,7 +159,7 @@ class DocumentReading:
         return result
 
     async def read_chunks(
-            self, chunk_ids: list[str], *, snapshot: ResourceSnapshot
+        self, chunk_ids: list[str], *, snapshot: ResourceSnapshot
     ) -> list[ChunkText]:
         """按 Chunk ID 原样读取正文，供已持有定位的下游延迟取原文。"""
         chunks = await self._reader.read_chunks(
@@ -180,8 +180,8 @@ class DocumentReading:
         ]
 
 
-def  _section_locations(
-        documents: list[Document],
+def _section_locations(
+    documents: list[Document],
 ) -> dict[str, tuple[Document, Section]]:
     """仅为已通过共享 Reader 检查的事实建立章节索引。"""
     return {

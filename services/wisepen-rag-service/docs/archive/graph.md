@@ -219,7 +219,7 @@ force/gleaning。省略 --projection-only 则保持抽取→状态复核→事�
 
 ```python
 from common.utils.retrieval import RetrievalPipeline, RrfFusion
-from rag.core.schema.filters import MetadataFilter, MetadataFilters
+from rag.core.filters import MetadataFilter, MetadataFilters
 from rag.retrievers import GraphRetrievalMode, GraphRetriever
 
 retriever = GraphRetriever.from_storage(

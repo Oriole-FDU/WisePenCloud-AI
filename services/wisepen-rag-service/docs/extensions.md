@@ -89,8 +89,8 @@ platform.pipeline_routes()["history"] = history.pipeline()
 
 ```python
 # example: dedicated-indexes
-from rag.backends.qdrant import QdrantVectorStorage
-from rag.storage.vector import IndexableField, IndexKind, VectorCollection
+from rag.core.persistence.qdrant import QdrantVectorStorage
+from rag.domain.storage.vector import IndexableField, IndexKind, VectorCollection
 
 
 def contract_collection(client, dimensions, collection="employment_contract_vectors_v4"):
@@ -105,7 +105,7 @@ def contract_collection(client, dimensions, collection="employment_contract_vect
     ])
 ```
 
-VectorStorage.ensure_collection 要求必填 list[IndexableField]，空列表也初始化并核对集合；索引 SDK 翻译在 backend。无
+VectorStorage.ensure_collection 要求必填 list[IndexableField]，空列表也初始化并核对集合；索引 SDK 翻译在 core/persistence adapter。无
 DATETIME，时间需业务转整数。配置不匹配失败，不自动重建或删除既有字段索引。
 
 专用 VectorIndexer 使用 metadata_factory 提供业务增量，身份合并规则见[抽象](abstractions.md)。字段出现在 payload
@@ -122,7 +122,7 @@ extra storage 登记后由平台初始化并共享 GC；业务 adapter 不管理
 
 ```python
 # example: ontology-scoped-graph
-from rag.core.schema.filters import MetadataFilter, MetadataFilters
+from rag.core.filters import MetadataFilter, MetadataFilters
 
 
 async def follow_employment(traversal, node_ids, snapshot, direction=None):

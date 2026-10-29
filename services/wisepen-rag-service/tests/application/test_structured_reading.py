@@ -9,11 +9,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from common.utils.markdown import MarkdownChunker, OutlineFormatter
-from rag.application.acl.models import PermissionScope, ResourceAcl
+from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.reading import DocumentReading, SectionReadScope
-from rag.core.schema import ContentRevision
-from rag.core.schema.content import rag_section_id
+from rag.domain.models import ContentRevision
+from rag.domain.models.content import rag_section_id
 from rag.ingestion.chunkers import MarkdownChunker as RagMarkdownChunker
 
 SOURCE = (

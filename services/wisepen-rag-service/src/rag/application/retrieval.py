@@ -13,12 +13,12 @@ from common.utils.retrieval import (
     RetrievalPipeline,
 )
 from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
-from rag.core.schema import Chunk, GraphRelationOption, parse_graph_facts
-from rag.core.schema.filters import MetadataFilters
-from rag.core.schema.graph import GraphFactValidationError
+from rag.core.filters import MetadataFilters
+from rag.domain.models import Chunk, GraphRelationOption, parse_graph_facts
+from rag.domain.models.graph import GraphFactValidationError
+from rag.domain.storage.graph import GraphReader
+from rag.domain.storage.vector import VectorMatch, VectorReader
 from rag.retrievers.vector import VectorRetrievalMode, VectorRetriever
-from rag.storage.graph import GraphReader
-from rag.storage.vector import VectorMatch, VectorReader
 
 # ChunkHit 响应中排除的内部字段；不修改存储中的 metadata。
 _CHUNK_HIT_EXCLUDED_METADATA_KEYS = {"entities", "relationships"}
@@ -62,14 +62,14 @@ class VectorRetrieval:
     """共享固定依赖；每次调用构造 Retriever/Pipeline，显式使用调用方快照。"""
 
     def __init__(
-            self,
-            *,
-            snapshot_reader: ResourceSnapshotReader,
-            vector_reader: VectorReader,
-            embedding_client: EmbeddingClient,
-            fusion: Fusion[VectorMatch] | None = None,
-            reranker: Reranker[PreparedChunk] | None = None,
-            graph_reader: GraphReader | None = None,
+        self,
+        *,
+        snapshot_reader: ResourceSnapshotReader,
+        vector_reader: VectorReader,
+        embedding_client: EmbeddingClient,
+        fusion: Fusion[VectorMatch] | None = None,
+        reranker: Reranker[PreparedChunk] | None = None,
+        graph_reader: GraphReader | None = None,
     ) -> None:
         self._snapshot_reader = snapshot_reader
         self._vector_reader = vector_reader
@@ -77,19 +77,20 @@ class VectorRetrieval:
         self._fusion = fusion
         self._reranker = reranker
         self._graph_reader = graph_reader
+
     async def retrieve(
-            self,
-            query: str,
-            *,
-            snapshot: ResourceSnapshot,
-            mode: VectorRetrievalMode = VectorRetrievalMode.HYBRID,
-            top_k: int = 5,
-            focus: str = "",
-            diversity: Literal["off", "moderate", "high"] = "off",
-            filters: MetadataFilters | None = None,
-            dense_top_k: int | None = None,
-            sparse_top_k: int | None = None,
-            candidate_limit: int = 60,
+        self,
+        query: str,
+        *,
+        snapshot: ResourceSnapshot,
+        mode: VectorRetrievalMode = VectorRetrievalMode.HYBRID,
+        top_k: int = 5,
+        focus: str = "",
+        diversity: Literal["off", "moderate", "high"] = "off",
+        filters: MetadataFilters | None = None,
+        dense_top_k: int | None = None,
+        sparse_top_k: int | None = None,
+        candidate_limit: int = 60,
     ) -> list[ChunkHit]:
         """一次召回、授权准备和排序；授权过滤后不补召回或重新观察发布/ACL。"""
         include_embedding = diversity != "off"
@@ -107,7 +108,7 @@ class VectorRetrieval:
         )
 
         async def prepare(
-                candidates: list[Candidate[VectorMatch]],
+            candidates: list[Candidate[VectorMatch]],
         ) -> list[Candidate[PreparedChunk]]:
             return await self._prepare(candidates, snapshot=snapshot)
 
@@ -128,10 +129,10 @@ class VectorRetrieval:
         )
 
     async def _prepare(
-            self,
-            candidates: list[Candidate[VectorMatch]],
-            *,
-            snapshot: ResourceSnapshot,
+        self,
+        candidates: list[Candidate[VectorMatch]],
+        *,
+        snapshot: ResourceSnapshot,
     ) -> list[Candidate[PreparedChunk]]:
         """先筛除无定位投影，再批量授权回查；正文不能反向修补错误 metadata。"""
         located = [
@@ -156,9 +157,9 @@ class VectorRetrieval:
         for item in located:
             chunk = by_id.get(item.payload.record_id)
             if (
-                    chunk is None
-                    or item.payload.metadata["resource_id"] != chunk.resource_id
-                    or item.payload.metadata["content_revision"] != chunk.content_revision
+                chunk is None
+                or item.payload.metadata["resource_id"] != chunk.resource_id
+                or item.payload.metadata["content_revision"] != chunk.content_revision
             ):
                 continue
             prepared.append(
@@ -185,11 +186,11 @@ def chunk_seed_entities(chunk: Chunk) -> list[GraphNodeReference]:
 
 
 async def build_chunk_hits(
-        ranked: list[Candidate[PreparedChunk]],
-        *,
-        snapshot_reader: ResourceSnapshotReader,
-        graph_reader: GraphReader | None,
-        snapshot: ResourceSnapshot,
+    ranked: list[Candidate[PreparedChunk]],
+    *,
+    snapshot_reader: ResourceSnapshotReader,
+    graph_reader: GraphReader | None,
+    snapshot: ResourceSnapshot,
 ) -> list[ChunkHit]:
     """两类检索共用结果组装；只为最终命中的实体批量补充全图可见连接。"""
     seeds = [chunk_seed_entities(item.payload.chunk) for item in ranked]

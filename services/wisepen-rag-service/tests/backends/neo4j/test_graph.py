@@ -6,14 +6,14 @@ from dataclasses import asdict, replace
 
 import pytest
 
-from rag.backends.neo4j import Neo4jGraphStorage
-from rag.core.schema import GraphEdge, GraphNode
-from rag.core.schema.filters import (
+from rag.core.persistence.neo4j import Neo4jGraphStorage
+from rag.domain.models import GraphEdge, GraphNode
+from rag.core.filters import (
     MetadataFilter,
     MetadataFilters,
 )
 from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer
-from rag.storage.graph import GraphDirection, GraphSourceProjection
+from rag.domain.storage.graph import GraphDirection, GraphSourceProjection
 
 
 def projection(

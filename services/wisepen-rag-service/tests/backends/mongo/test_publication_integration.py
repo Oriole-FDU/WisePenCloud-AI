@@ -9,20 +9,18 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from beanie import init_beanie
 from pydantic import TypeAdapter
 from pymongo import AsyncMongoClient
 from pymongo.errors import DuplicateKeyError
 
 from rag.application.gc import GcReport, ResourceGarbageCollector
-from rag.application.publication import (
-    DocumentPublication,
-    PublicationAction,
-    PublicationStateChangedError,
-    ResourcePublicationState,
-)
-from rag.backends.mongo import MongoContentStorage, MongoPublicationStore
-from rag.backends.mongo.acl import MongoResourceAclRepository
-from rag.core.schema import ContentRevision
+from rag.application.publication import DocumentPublication
+from rag.domain.models.publication import PublicationAction, PublicationStateChangedError, ResourcePublicationState
+from rag.core.persistence.mongo import MongoContentStorage, MongoPublicationStore
+from rag.core.persistence.mongo.acl import MongoResourceAclRepository
+from rag.domain.models import ContentRevision
+from rag.domain.entities import ChunkEntity, DocumentEntity, ResourceAclEntity, ResourcePublicationEntity
 from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer
 from rag.ingestion.pipeline import IngestionPipeline
@@ -38,9 +36,9 @@ async def mongo_publication():
     client = AsyncMongoClient(uri, serverSelectionTimeoutMS=5000)
     database_name = f"codex_rag_publication_test_{uuid4().hex}"
     database = client[database_name]
-    store = MongoPublicationStore(database["resource_publications"])
     try:
-        await store.ensure_indexes()
+        await init_beanie(database=database, document_models=[DocumentEntity, ChunkEntity, ResourceAclEntity, ResourcePublicationEntity])
+        store = MongoPublicationStore()
         yield store, database
     finally:
         try:
@@ -60,12 +58,8 @@ async def test_real_gc_keyset_all_revisions_local_acl_and_permanent_markers(
         mongo_publication,
 ):
     store, database = mongo_publication
-    storage = MongoContentStorage(
-        documents=database["document_revisions"], chunks=database["doc_chunks"]
-    )
-    acls = MongoResourceAclRepository(database["resource_acls"])
-    await storage.ensure_indexes()
-    await acls.ensure_indexes()
+    storage = MongoContentStorage()
+    acls = MongoResourceAclRepository()
     for resource in ("c", "a", "b", "live"):
         for version in (1, 2):
             from rag.application.publication import DocumentReadyEvent
@@ -97,7 +91,6 @@ async def test_real_gc_keyset_all_revisions_local_acl_and_permanent_markers(
 async def test_real_state_round_trip_order_and_unique_identity(mongo_publication):
     store, database = mongo_publication
     first, other = revision(), revision(resource_id="other")
-    await store.ensure_indexes()
     assert await store.stage_revision(first) is PublicationAction.STAGED
     assert await store.stage_revision(first) is PublicationAction.STAGED
     assert await store.apply_revision(first) is PublicationAction.APPLIED
@@ -139,7 +132,7 @@ async def test_real_initial_stage_competition_never_overwrites_higher_version(
 @pytest.mark.parametrize("operation", ["stage", "apply"])
 @pytest.mark.parametrize("change", ["newer", "destroyed"])
 async def test_real_conditional_update_blocks_interleaved_state_change(
-        mongo_publication, operation, change
+        mongo_publication, monkeypatch, operation, change
 ):
     store, database = mongo_publication
     await store.stage_revision(revision())
@@ -157,12 +150,14 @@ async def test_real_conditional_update_blocks_interleaved_state_change(
             await store.destroy_resources(["resource"])
         return await collection.update_one(*args, **kwargs)
 
-    racing_store = MongoPublicationStore(
-        SimpleNamespace(
-            find_one=collection.find_one,
-            update_one=raced_update,
+    racing_collection = SimpleNamespace(update_one=raced_update)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            ResourcePublicationEntity,
+            "get_pymongo_collection",
+            classmethod(lambda cls: racing_collection),
         )
-    )
+        racing_store = MongoPublicationStore()
     if operation == "stage":
         action = await racing_store.stage_revision(candidate)
     else:
@@ -200,10 +195,7 @@ async def test_real_content_with_fake_projection_publishes_and_preserves_old_app
         mongo_publication, document
 ):
     store, database = mongo_publication
-    content = MongoContentStorage(
-        documents=database["document_revisions"], chunks=database["doc_chunks"]
-    )
-    await content.ensure_indexes()
+    content = MongoContentStorage()
     projection = SimpleNamespace(index=AsyncMock())
     publication = DocumentPublication(
         store=store,

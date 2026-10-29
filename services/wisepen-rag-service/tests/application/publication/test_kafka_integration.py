@@ -11,7 +11,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 
 from rag.application.publication import PublicationEventConsumer
-from rag.backends.kafka import DeliveryHeader, RetryPolicy
+from rag.core.messaging import DeliveryHeader, KafkaConsumerClient, RetryPolicy
 
 pytestmark = pytest.mark.kafka_integration
 
@@ -26,13 +26,12 @@ async def kafka_broker():
     policies = [RetryPolicy(backoff_seconds=[0, 0, 0]) for _ in topics]
     all_topics = [*topics, *[f"{topic}.DLT" for topic in topics]]
     group_id = f"codex-rag-publication-{identity}"
-    admin = AIOKafkaAdminClient(bootstrap_servers=servers, request_timeout_ms=5000)
-    producer = AIOKafkaProducer(bootstrap_servers=servers, request_timeout_ms=5000)
+    admin = AIOKafkaAdminClient(bootstrap_servers=servers)
+    producer = AIOKafkaProducer(bootstrap_servers=servers)
     observer = AIOKafkaConsumer(
         bootstrap_servers=servers,
         group_id=group_id,
         enable_auto_commit=False,
-        request_timeout_ms=5000,
     )
     created = False
     try:
@@ -47,6 +46,23 @@ async def kafka_broker():
         assert all(error[1] == 0 for error in response.topic_errors), (
             response.topic_errors
         )
+        # CreateTopics 成功不表示 MetadataResponse 已给每个分区分配 leader。
+        # 40 秒与当前 aiokafka 的默认 request_timeout_ms 相同。
+        async with asyncio.timeout(40):
+            while True:
+                topic_metadata = await admin.describe_topics(all_topics)
+                topics_by_name = {topic["topic"]: topic for topic in topic_metadata}
+                if set(topics_by_name) == set(all_topics) and all(
+                    topic["error_code"] == 0
+                    and topic["partitions"]
+                    and all(
+                        partition["error_code"] == 0 and partition["leader"] >= 0
+                        for partition in topic["partitions"]
+                    )
+                    for topic in topics_by_name.values()
+                ):
+                    break
+                await asyncio.sleep(0.1)
         await producer.start()
         await observer.start()
         yield servers, topics, group_id, producer, observer, policies
@@ -86,12 +102,18 @@ async def test_real_kafka_transient_failure_retries_then_publishes_both_versions
     )
     consumer = PublicationEventConsumer(
         publisher=publication,
-        bootstrap_servers=servers,
-        group_id=group_id,
-        document_ready_topic=topics[0],
-        physical_destroy_topic=topics[1],
-        content_retry_policy=policies[0],
-        destroy_retry_policy=policies[1],
+        content_consumer=KafkaConsumerClient(
+            bootstrap_servers=servers,
+            topic=topics[0],
+            group_id=group_id,
+            retry_policy=policies[0],
+        ),
+        destroy_consumer=KafkaConsumerClient(
+            bootstrap_servers=servers,
+            topic=topics[1],
+            group_id=group_id,
+            retry_policy=policies[1],
+        ),
     )
     error = RuntimeError("required projection failed")
     projection.index.side_effect = [error, None, None]
@@ -119,12 +141,18 @@ async def test_real_kafka_destroy_before_content_is_permanent_and_both_are_ackno
     servers, topics, group_id, producer, observer, policies = kafka_broker
     consumer = PublicationEventConsumer(
         publisher=publication,
-        bootstrap_servers=servers,
-        group_id=group_id,
-        document_ready_topic=topics[0],
-        physical_destroy_topic=topics[1],
-        content_retry_policy=policies[0],
-        destroy_retry_policy=policies[1],
+        content_consumer=KafkaConsumerClient(
+            bootstrap_servers=servers,
+            topic=topics[0],
+            group_id=group_id,
+            retry_policy=policies[0],
+        ),
+        destroy_consumer=KafkaConsumerClient(
+            bootstrap_servers=servers,
+            topic=topics[1],
+            group_id=group_id,
+            retry_policy=policies[1],
+        ),
     )
     destroy = await producer.send_and_wait(
         topics[1],
@@ -173,12 +201,18 @@ async def test_real_kafka_quick_retry_then_dlq_keeps_original_record(
     original = await producer.send_and_wait(topics[0], key=b"resource", value=payload)
     consumer = PublicationEventConsumer(
         publisher=publication,
-        bootstrap_servers=servers,
-        group_id=group_id,
-        document_ready_topic=topics[0],
-        physical_destroy_topic=topics[1],
-        content_retry_policy=policies[0],
-        destroy_retry_policy=policies[1],
+        content_consumer=KafkaConsumerClient(
+            bootstrap_servers=servers,
+            topic=topics[0],
+            group_id=group_id,
+            retry_policy=policies[0],
+        ),
+        destroy_consumer=KafkaConsumerClient(
+            bootstrap_servers=servers,
+            topic=topics[1],
+            group_id=group_id,
+            retry_policy=policies[1],
+        ),
     )
     dlq = AIOKafkaConsumer(
         f"{topics[0]}.DLT",
@@ -194,13 +228,13 @@ async def test_real_kafka_quick_retry_then_dlq_keeps_original_record(
         terminal = await asyncio.wait_for(dlq.getone(), timeout=45)
         assert terminal.value == payload and terminal.key == b"resource"
         headers = dict(terminal.headers)
-        assert headers[DeliveryHeader.ORIGINAL_TOPIC] == original.topic.encode()
+        assert headers[DeliveryHeader.ORIGINAL_TOPIC.value] == original.topic.encode()
         assert (
-                headers[DeliveryHeader.ORIGINAL_PARTITION]
+                headers[DeliveryHeader.ORIGINAL_PARTITION.value]
                 == str(original.partition).encode()
         )
-        assert headers[DeliveryHeader.ORIGINAL_OFFSET] == str(original.offset).encode()
-        assert headers[DeliveryHeader.EXCEPTION_TYPE] == b"builtins.OSError"
+        assert headers[DeliveryHeader.ORIGINAL_OFFSET.value] == str(original.offset).encode()
+        assert headers[DeliveryHeader.EXCEPTION_TYPE.value] == b"builtins.OSError"
         assert projection.index.await_count == 4
         state = (await publication_store.get_states(["resource"]))[0]
         assert state.applied_revision is None and state.staged_revision is not None

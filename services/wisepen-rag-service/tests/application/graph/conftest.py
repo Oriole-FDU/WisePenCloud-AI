@@ -8,11 +8,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.application.acl.models import PermissionScope, ResourceAcl
+from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.graph import GraphRetrieval, GraphTraversal
-from rag.core.schema import RelationSpec
-from rag.storage.graph import (
+from rag.domain.models import RelationSpec
+from rag.domain.storage.graph import (
     GraphDirection,
     GraphVectorKind,
     entity_vector_text,
@@ -20,7 +20,7 @@ from rag.storage.graph import (
     graph_vector_record_id,
     relationship_vector_text,
 )
-from rag.storage.vector import VectorMatch
+from rag.domain.storage.vector import VectorMatch
 
 
 class MemoryGraph:

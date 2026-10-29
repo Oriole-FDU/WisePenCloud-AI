@@ -11,10 +11,10 @@ import pytest_asyncio
 from neo4j import AsyncGraphDatabase
 
 from rag.application.gc import GcReport, ResourceGarbageCollector
-from rag.backends.neo4j import Neo4jGraphStorage
-from rag.core.schema import GraphEdge, GraphNode
-from rag.core.schema.filters import MetadataFilter, MetadataFilters
-from rag.storage.graph import GraphDirection, GraphSourceProjection
+from rag.core.persistence.neo4j import Neo4jGraphStorage
+from rag.domain.models import GraphEdge, GraphNode
+from rag.core.filters import MetadataFilter, MetadataFilters
+from rag.domain.storage.graph import GraphDirection, GraphSourceProjection
 
 pytestmark = pytest.mark.neo4j_integration
 

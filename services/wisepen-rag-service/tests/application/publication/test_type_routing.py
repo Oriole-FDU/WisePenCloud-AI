@@ -7,12 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
-from rag.application.publication import (
-    ContentIdentityError,
-    DocumentPublication,
-    DocumentReadyEvent,
-    PublicationAction,
-)
+from rag.application.publication import ContentIdentityError, DocumentPublication, DocumentReadyEvent
+from rag.domain.models.publication import PublicationAction
 from rag.ingestion import IngestionPipeline
 from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer, VectorIndexer

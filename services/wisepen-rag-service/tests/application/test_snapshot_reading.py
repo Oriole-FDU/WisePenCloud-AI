@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.application.acl.models import PermissionScope, ResourceAcl
+from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
 
 

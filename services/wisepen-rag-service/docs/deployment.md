@@ -93,8 +93,9 @@ $env:PROFILE = 'dev'
 .venv/Scripts/python.exe -m rag.main
 ```
 
-main 登记共享客户端，构造扩展并保存 app.state.extensions，探活 Mongo、初始化索引和全部 VectorCollection、可选 Neo4j
-schema，挂载扩展 API，构造必要模型组件与默认链。启动不向真实模型发送探测请求。
+main 登记共享客户端，构造扩展并保存 app.state.extensions，探活 Mongo，通过 `init_beanie` 注册四个 RAG Mongo 实体并初始化其
+Settings 声明的索引，再初始化全部 VectorCollection 和可选 Neo4j schema，挂载扩展 API，构造必要模型组件与默认链。Container 的默认仓储无参构造，
+使用已注册实体绑定集合；常规实体读取/删除与新建 publication 状态走 Beanie，CAS 和批量写入保留 PyMongo 原语。启动不向真实模型发送探测请求。
 
 GC 首轮立即启动；Kafka 开启时等待所有主消费者真正连接。Nacos 注册失败记录但不阻止 ready，首轮 GC 不参与等待。查询可在关闭
 Kafka 时使用，不过内容摄入和 ACL 更新需可信维护入口或已有数据。
@@ -133,7 +134,8 @@ Invoke-RestMethod http://127.0.0.1:19906/rag/health
 git diff --check
 ```
 
-按改动范围增加定向测试；纯文档迁移无需重复全业务回归。真实后端 fixture 仅在显式配置时用随机隔离空间，缺配置跳过，连接失败报错：Mongo
+按改动范围增加定向测试；纯文档迁移无需重复全业务回归。真实后端 fixture 仅在显式配置时用随机隔离空间；真实 Mongo fixture 通过 `init_beanie`
+注册实体并初始化索引，缺配置跳过，连接失败报错：Mongo
 `RAG_TEST_MONGODB_URI`、Qdrant `RAG_TEST_QDRANT_URL`（可选 RAG_TEST_QDRANT_API_KEY）、Kafka
 `RAG_TEST_KAFKA_BOOTSTRAP_SERVERS`、Neo4j `RAG_TEST_NEO4J_URI` 及该 fixture
 所需凭据，具体见[测试目录](../tests/conftest.py)。

@@ -1,20 +1,20 @@
 """摄入阶段的有序编排；不管理组件内部 I/O、重试或事务。"""
 
-from rag.core.schema import Chunk, Document
-from rag.ingestion.chunkers.base import Chunker
-from rag.ingestion.indexers.base import Indexer
-from rag.ingestion.transformers.base import Transformer
+from rag.domain.interfaces.chunker import Chunker
+from rag.domain.interfaces.indexer import Indexer
+from rag.domain.interfaces.transformer import Transformer
+from rag.domain.models import Chunk, Document
 
 
 class IngestionPipeline:
     """按配置串行执行；输入不复制，失败后停止且不回滚已完成写入。"""
 
     def __init__(
-            self,
-            *,
-            chunker: Chunker,
-            transformers: list[Transformer],
-            indexers: list[Indexer],
+        self,
+        *,
+        chunker: Chunker,
+        transformers: list[Transformer],
+        indexers: list[Indexer],
     ) -> None:
         self.chunker = chunker
         self.transformers = transformers

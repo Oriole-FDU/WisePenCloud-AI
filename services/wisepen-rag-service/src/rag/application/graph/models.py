@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from rag.core.schema import GraphEdge, GraphNode
+from rag.domain.models import GraphEdge, GraphNode
 
 
 @dataclass(frozen=True, slots=True)

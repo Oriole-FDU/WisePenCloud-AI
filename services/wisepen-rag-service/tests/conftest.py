@@ -2,16 +2,24 @@
 
 from dataclasses import asdict, replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
-from bson import BSON
+from beanie import init_beanie
+from bson import BSON, ObjectId
 from pymongo.errors import DuplicateKeyError
+from pymongo.asynchronous.database import AsyncDatabase
 
 from common.utils.markdown import MarkdownChunker
-from rag.backends.mongo.content import MongoContentStorage
-from rag.backends.mongo.publication import MongoPublicationStore
-from rag.core.schema import (
+from rag.core.persistence.mongo.content import MongoContentStorage
+from rag.core.persistence.mongo.publication import MongoPublicationStore
+from rag.domain.entities import (
+    ChunkEntity,
+    DocumentEntity,
+    ResourceAclEntity,
+    ResourcePublicationEntity,
+)
+from rag.domain.models import (
     Chunk,
     Document,
     DocumentStructure,
@@ -21,7 +29,7 @@ from rag.core.schema import (
     Ontology,
     RelationSpec,
 )
-from rag.core.schema.content import rag_section_id
+from rag.domain.models.content import rag_section_id
 
 
 @pytest.fixture
@@ -150,16 +158,26 @@ class MemoryCursor:
     def __init__(self, records):
         self._records = records
 
-    def sort(self, key, direction):
-        self._records.sort(key=lambda record: record[key], reverse=direction < 0)
+    def sort(self, key_or_pairs, direction=None):
+        pairs = (
+            [(key_or_pairs, direction)]
+            if isinstance(key_or_pairs, str)
+            else list(key_or_pairs)
+        )
+        for key, order in reversed(pairs):
+            self._records.sort(key=lambda record: record[key], reverse=order < 0)
+        return self
+
+    def skip(self, count):
+        self._records = self._records[count:]
         return self
 
     def limit(self, count):
         self._records = self._records[:count]
         return self
 
-    async def to_list(self, *, length):
-        return self._records
+    async def to_list(self, length=None):
+        return self._records if length is None else self._records[:length]
 
 
 class MemoryCollection:
@@ -171,8 +189,8 @@ class MemoryCollection:
         self.fail_bulk_call = None
         self.bulk_write = AsyncMock(side_effect=self._bulk_write)
         self.find = Mock(side_effect=self._find)
+        self.find_one = AsyncMock(side_effect=self._find_one)
         self.delete_many = AsyncMock(side_effect=self._delete_many)
-        self.create_indexes = AsyncMock()
 
     async def _bulk_write(self, operations, *, ordered):
         assert ordered is True
@@ -188,24 +206,49 @@ class MemoryCollection:
                     self.records[index] = record
                     break
             else:
-                record["_id"] = len(self.records)
+                record["_id"] = ObjectId()
                 self.records.append(record)
 
-    def _find(self, query, projection=None):
+    def _find(
+            self,
+            query=None,
+            projection=None,
+            *,
+            filter=None,
+            sort=None,
+            skip=None,
+            limit=None,
+            **kwargs,
+    ):
+        if filter is not None:
+            query = filter
         # 返回与插入相反的顺序，避免测试意外依赖 Mongo 的自然顺序。
         records = [
             BSON(BSON.encode(record)).decode()
             for record in reversed(self.records)
             if _matches(record, query)
         ]
+        cursor = MemoryCursor(records)
+        if sort:
+            cursor.sort(sort)
+        if skip:
+            cursor.skip(skip)
+        if limit:
+            cursor.limit(limit)
         if projection is not None:
-            records = [
+            cursor._records = [
                 {key: value for key, value in record.items() if projection.get(key)}
-                for record in records
+                for record in cursor._records
             ]
-        return MemoryCursor(records)
+        return cursor
 
-    async def _delete_many(self, query):
+    async def _find_one(self, query=None, projection=None, *, filter=None, **kwargs):
+        if filter is not None:
+            query = filter
+        records = self._find(query, projection)._records
+        return records[0] if records else None
+
+    async def _delete_many(self, query, **kwargs):
         self.records[:] = [
             record for record in self.records if not _matches(record, query)
         ]
@@ -223,8 +266,10 @@ class MemoryPublicationCollection(MemoryCollection):
         self.insert_one = AsyncMock(side_effect=self._insert_one)
         self.update_one = AsyncMock(side_effect=self._update_one)
 
-    async def _find_one(self, query):
-        records = self._find(query)._records
+    async def _find_one(self, query=None, projection=None, *, filter=None, **kwargs):
+        if filter is not None:
+            query = filter
+        records = self._find(query, projection)._records
         record = records[0] if records else None
         # 先取观察副本，再触发竞争写入，模拟读与条件更新之间的状态变化。
         hook, self.after_find = self.after_find, None
@@ -232,7 +277,7 @@ class MemoryPublicationCollection(MemoryCollection):
             await hook()
         return record
 
-    async def _insert_one(self, record):
+    async def _insert_one(self, record, **kwargs):
         hook, self.before_insert = self.before_insert, None
         if hook is not None:
             await hook()
@@ -242,7 +287,7 @@ class MemoryPublicationCollection(MemoryCollection):
         ):
             raise DuplicateKeyError("duplicate resource_id")
         record = BSON(BSON.encode(record)).decode()
-        record["_id"] = len(self.records)
+        record["_id"] = ObjectId()
         self.records.append(record)
         return SimpleNamespace(inserted_id=record["_id"])
 
@@ -283,8 +328,42 @@ def publication_collection():
 
 
 @pytest.fixture
-def publication_store(publication_collection):
-    return MongoPublicationStore(publication_collection)
+def acl_collection():
+    return MemoryCollection()
+
+
+@pytest.fixture
+async def beanie_entities(collections, acl_collection, publication_collection):
+    documents, chunks = collections
+    collections_by_name = {
+        "document_revisions": documents,
+        "doc_chunks": chunks,
+        "resource_acls": acl_collection,
+        "resource_publications": publication_collection,
+    }
+    database = MagicMock(spec=AsyncDatabase)
+    database.client = SimpleNamespace(append_metadata=None)
+    database.command = AsyncMock(return_value={"version": "8.0.0"})
+    database.list_collection_names = AsyncMock(return_value=[])
+    database.__getitem__.side_effect = collections_by_name.__getitem__
+
+    # 单元测试只绑定 collection；索引创建由隔离 Mongo 集成测试覆盖。
+    await init_beanie(
+        database=database,
+        document_models=[
+            DocumentEntity,
+            ChunkEntity,
+            ResourceAclEntity,
+            ResourcePublicationEntity,
+        ],
+        skip_indexes=True,
+    )
+    return database
+
+
+@pytest.fixture
+def publication_store(beanie_entities):
+    return MongoPublicationStore()
 
 
 @pytest.fixture
@@ -345,6 +424,5 @@ def collections():
 
 
 @pytest.fixture
-def storage(collections):
-    documents, chunks = collections
-    return MongoContentStorage(documents=documents, chunks=chunks)
+def storage(beanie_entities):
+    return MongoContentStorage()

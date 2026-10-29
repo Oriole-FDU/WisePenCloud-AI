@@ -7,7 +7,7 @@ from bson.errors import InvalidDocument
 from pydantic import ValidationError
 
 from common.utils.markdown import Anchor, Section
-from rag.core.schema import Document, DocumentStructure, GraphEdge, GraphNode
+from rag.domain.models import Document, DocumentStructure, GraphEdge, GraphNode
 from rag.ingestion import IngestionPipeline
 from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer
@@ -141,8 +141,6 @@ async def test_upsert_is_idempotent_and_replaces_metadata(
     }
     assert (await storage.get_chunks(["chunk"]))[0].metadata == {"new": 2}
     assert await storage.get_chunks(["unrelated"]) == [unrelated]
-    documents.create_indexes.assert_not_awaited()
-    chunks.create_indexes.assert_not_awaited()
 
 
 async def test_batch_reads_are_scoped_deduplicated_and_ordered(
@@ -204,65 +202,79 @@ async def test_empty_batches_do_not_access_mongo(storage, collections):
         collection.bulk_write.assert_not_awaited()
         collection.find.assert_not_called()
         collection.delete_many.assert_not_awaited()
-        collection.create_indexes.assert_not_awaited()
 
 
 @pytest.mark.parametrize("kind", ["documents", "chunks"])
-async def test_bulk_write_uses_ordered_batches_of_500(
-        storage, collections, document, chunk, kind
+async def test_bulk_write_persists_every_value(
+        storage, document, chunk, kind
 ):
     if kind == "documents":
         values = [
-            replace(document, content_revision=f"rev-{index}") for index in range(1001)
+            replace(document, content_revision=f"rev-{index}") for index in range(3)
         ]
-        collection = collections[0]
         await storage.upsert_documents(values)
+        stored = await storage.get_documents(
+            [(value.resource_id, value.content_revision) for value in values]
+        )
     else:
         values = [
             replace(chunk, chunk_id=f"chunk-{index}", chunk_index=index)
-            for index in range(1001)
+            for index in range(3)
         ]
-        collection = collections[1]
         await storage.upsert_chunks(values)
+        stored = await storage.get_chunks([value.chunk_id for value in values])
 
-    assert [len(call.args[0]) for call in collection.bulk_write.await_args_list] == [
-        500,
-        500,
-        1,
-    ]
-    assert all(
-        call.kwargs == {"ordered": True}
-        for call in collection.bulk_write.await_args_list
-    )
-    assert len(collection.records) == 1001
+    assert stored == values
 
 
 @pytest.mark.parametrize("kind", ["documents", "chunks"])
-async def test_bulk_failure_preserves_completed_batch_and_stops(
+async def test_partial_write_failure_can_be_replayed(
         storage, collections, document, chunk, kind
 ):
     if kind == "documents":
         values = [
-            replace(document, content_revision=f"rev-{index}") for index in range(1001)
+            replace(document, content_revision=f"rev-{index}") for index in range(2)
         ]
         collection = collections[0]
         write = storage.upsert_documents
     else:
         values = [
             replace(chunk, chunk_id=f"chunk-{index}", chunk_index=index)
-            for index in range(1001)
+            for index in range(2)
         ]
         collection = collections[1]
         write = storage.upsert_chunks
-    collection.fail_bulk_call = 2
+    bulk_write = collection.bulk_write
+
+    async def write_one_then_fail(operations, *, ordered):
+        # 模拟 Mongo 已写入一部分后返回错误，不依赖适配器的批大小。
+        await bulk_write(operations[:1], ordered=ordered)
+        raise collection.error
+
+    collection.bulk_write = AsyncMock(side_effect=write_one_then_fail)
 
     with pytest.raises(RuntimeError) as caught:
         await write(values)
 
     assert caught.value is collection.error
-    assert len(collection.records) == 500
-    assert collection.bulk_write.await_count == 2
-    collection.delete_many.assert_not_awaited()
+    if kind == "documents":
+        stored = await storage.get_documents(
+            [(value.resource_id, value.content_revision) for value in values]
+        )
+    else:
+        stored = await storage.get_chunks([value.chunk_id for value in values])
+    assert stored == values[:1]
+
+    collection.bulk_write = bulk_write
+    await write(values)
+
+    if kind == "documents":
+        stored = await storage.get_documents(
+            [(value.resource_id, value.content_revision) for value in values]
+        )
+    else:
+        stored = await storage.get_chunks([value.chunk_id for value in values])
+    assert stored == values
 
 
 @pytest.mark.parametrize("kind", ["documents", "chunks"])
@@ -367,25 +379,6 @@ async def test_partial_delete_is_preserved_and_can_be_replayed(
     assert chunks.records == []
 
 
-async def test_ensure_indexes_is_explicit_and_defines_content_identity(
-        storage, collections
-):
-    await storage.ensure_indexes()
-    documents, chunks = collections
-    document_indexes = documents.create_indexes.call_args.args[0]
-    chunk_indexes = chunks.create_indexes.call_args.args[0]
-
-    assert [dict(index.document["key"]) for index in document_indexes] == [
-        {"resource_id": 1, "content_revision": 1},
-        {"structure.sections.section_id": 1},
-    ]
-    assert [dict(index.document["key"]) for index in chunk_indexes] == [
-        {"chunk_id": 1},
-        {"resource_id": 1, "content_revision": 1, "chunk_index": 1},
-    ]
-    assert document_indexes[0].document["unique"]
-    assert "unique" not in document_indexes[1].document
-    assert all(index.document["unique"] for index in chunk_indexes)
 
 
 async def test_pipeline_persists_real_markdown_before_projection(storage, document):

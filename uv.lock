@@ -5806,6 +5806,7 @@ version = "0.1.0"
 source = { editable = "services/wisepen-rag-service" }
 dependencies = [
     { name = "aiokafka" },
+    { name = "beanie" },
     { name = "dependency-injector" },
     { name = "fastapi" },
     { name = "neo4j" },
@@ -5828,6 +5829,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiokafka", specifier = ">=0.12,<1" },
+    { name = "beanie" },
     { name = "dependency-injector", specifier = ">=4.49,<5" },
     { name = "fastapi", specifier = ">=0.136,<1" },
     { name = "neo4j", specifier = ">=6,<7" },

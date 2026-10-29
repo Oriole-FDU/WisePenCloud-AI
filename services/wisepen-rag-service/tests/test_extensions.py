@@ -7,7 +7,7 @@ from dependency_injector import providers
 
 from rag.container import Container
 from rag.extensions import register_extensions
-from rag.storage.vector import IndexableField, IndexKind, VectorCollection
+from rag.domain.storage.vector import IndexableField, IndexKind, VectorCollection
 
 
 def test_register_manifest_and_reject_collection_collision(

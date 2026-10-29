@@ -5,38 +5,43 @@
 
 ## 1. 模块职责与依赖
 
-实线表示组合或消费方向；backends 实现 storage 和应用拥有的持久化端口。
+实线表示组合或消费方向。application 依赖 domain 端口；Container 装配具体 adapter。
 
 ```mermaid
 flowchart TB
-    Main[main / Container 组合入口] --> App[application 用例]
+    Main[main / Container 组合入口] --> App[application 用例与 DTO]
     Main --> Ext[extensions 垂类装配]
-    Main --> Backend[backends 后端实现]
+    Main --> Persistence[core/persistence Mongo / Qdrant / Neo4j]
+    Main --> Messaging[core/messaging Kafka]
     Ext --> App
-    Ext --> Ing[ingestion 分块 / 增强 / 索引]
-    Ext --> Storage[storage 读写端口及投影对象]
+    Ext --> Ing[ingestion Pipeline 与实现]
+    Ext --> Persistence
+    Ext --> DomainStorage[domain/storage 读写端口及投影对象]
     App --> Ing
     App --> Ret[retrievers 候选召回]
-    App --> Storage
-    Ing --> Storage
-    Ret --> Storage
-    Backend --> Storage
-    Backend --> Ports[application ACL / publication 持久化端口]
-    App --> Core[core.schema 中立事实]
-    Ing --> Core
-    Storage --> Core
-    Backend --> Core
+    App --> DomainStorage
+    App --> DomainMessaging[domain/messaging MessageConsumer]
+    App --> DomainModels[domain/models 领域事实]
+    Ing --> Interfaces[domain/interfaces 摄入协议]
+    Ing --> DomainModels
+    Ing --> DomainStorage
+    Ret --> DomainStorage
+    Persistence --> DomainStorage
+    Messaging --> DomainMessaging
+    DomainStorage --> DomainModels
+    DomainStorage --> Filters[core/schema/filters.py]
     App --> Common[Common Markdown / AI clients / RetrievalPipeline / 安全]
     Ing --> Common
     Ret --> Common
-    Backend --> Mongo[(Mongo 内容 / 发布 / ACL)]
-    Backend --> Qdrant[(Qdrant 普通 / 图来源 / 扩展向量)]
-    Backend --> Neo[(Neo4j 可选来源拓扑)]
-    Backend --> Kafka[(Kafka 可选消费 / 重试 / DLQ)]
+    Persistence --> Mongo[(Mongo 内容 / 发布 / ACL)]
+    Persistence --> Qdrant[(Qdrant 普通 / 图来源 / 扩展向量)]
+    Persistence --> Neo[(Neo4j 可选来源拓扑)]
+    Messaging --> Kafka[(Kafka 可选消费 / 重试 / DLQ)]
 ```
 
-core.schema 不依赖 ingestion、application 或具体数据库。Common 提供 Markdown 与检索算法；RAG 不复用旧 Repository/插件
-runtime。配置加载属于正常入口，离线脚本自行组合现有组件。
+`domain/models` 保存内容、图、ACL 和发布状态等领域事实；`domain/storage` 保存存储端口及投影合同，`domain/interfaces`
+保存摄入协议，`domain/messaging` 保存消息消费端口。`core/schema` 只保留 metadata filters；`core/persistence` 实现存储端口，
+`core/messaging/kafka.py` 实现消息消费端口。Common 提供 Markdown 与检索算法；RAG 不复用旧 Repository/插件 runtime。配置加载属于正常入口，离线脚本自行组合现有组件。
 
 ## 2. 发布与投影
 
@@ -101,11 +106,11 @@ Document。详情见[向量](usecases-vector.md)、[图](usecases-graph.md)及[�
 flowchart TD
     Boot[bootstrap 环境 / Nacos AppSettings] --> Own[登记共享客户端关闭动作]
     Own --> Ext[register_extensions / 保存产物]
-    Ext --> Init[Mongo 探活和索引 / 所有 VectorCollection / 可选 Neo4j schema]
+    Ext --> Init[Mongo 探活与 Beanie 索引初始化 / 所有 VectorCollection / 可选 Neo4j schema]
     Init --> Mount[挂载扩展 API / 构造必要模型组件]
     Mount --> Pipeline[默认双链由 Selector 惰性选择]
     Pipeline --> GC[启动 GC 首轮立即运行]
-    Pipeline --> Consumers[可选 ACL / publication 消费者]
+    Pipeline --> Consumers[Container 装配 MessageConsumer / 可选 ACL 与 publication handler]
     Consumers --> Wait[等待主消费者连接]
     Wait --> Reg[Nacos 注册尝试]
     Reg --> Ready[宿主及子 API ready]
@@ -118,6 +123,13 @@ flowchart TD
 首轮 GC 不参与就绪等待；Nacos 注册失败记录后仍可 ready。Kafka 关闭时连接等待为空，GC
 仍启动。pipeline_with_context/pipeline_without_context 是平台共享链，默认 pipeline 按 ENABLE_CONTEXTUALIZE
 选择；扩展可以显式选另一条或自行组合。
+
+ACL 和 publication consumer wrapper 注入 `MessageConsumer`；Container 构造带连接、topic、group 和重试策略的 Kafka adapter，
+handler 在 `run(handler=..., started=...)` 时传入。消息重试、DLQ 确认与 offset 提交语义由 Kafka adapter 保持。
+
+`main.lifespan` 通过 `init_beanie` 注册四个 RAG Mongo 实体并初始化实体 Settings 声明的索引。Container 默认无参构造仓储，
+由已注册的 Beanie 实体绑定集合；一般读取使用 `find`/`find_one`，删除使用 Beanie query `delete`，新建 publication 状态使用实体 `insert`。
+需要原子条件或批量语义的写入仍通过实体 `get_pymongo_collection()`：内容批量 ReplaceOne、ACL revision 条件 upsert 和 publication CAS。
 
 永久销毁先撤销发布可见性，GC 后续清理所有已配置向量、拓扑、ACL 和内容，永久标记保留。离线 repair 是独立维护入口，不属于
 lifespan，也不会改变发布状态。配置与操作见[运行说明](deployment.md)、[GC](usecases-gc.md)和[运维手册](operations.md)。

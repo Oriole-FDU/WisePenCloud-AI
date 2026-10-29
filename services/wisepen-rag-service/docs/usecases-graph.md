@@ -11,9 +11,9 @@ Fusion/Reranker。GraphTraversal 只注入 SnapshotReader/GraphReader，不调�
 Ontology。
 
 ```python
-from rag.core.schema.filters import MetadataFilter, MetadataFilters
+from rag.core.filters import MetadataFilter, MetadataFilters
 from rag.retrievers.graph import GraphRetrievalMode
-from rag.storage.graph import GraphDirection
+from rag.domain.models.graph import GraphDirection
 
 
 async def search_and_follow(retrieval, traversal, snapshot):

@@ -1,40 +1,4 @@
-{
-  "resourceId": "employment-contract-001",
-  "version": 1,
-  "type": "employment",
-  "content": "# 公司内部劳动合同\n\n雇员：李明。公司：北辰科技。所属部门：研发部。\n\n李明于2020-03-01入职北辰科技，隶属于研发部，负责软件研发相关工作。双方约定遵守保密和劳动纪律。",
-  "metadata": {
-    "employee": "李明",
-    "start_date": "2020-03-01"
-  }
-}
-{
-  "resourceId": "employment-contract-002",
-  "version": 1,
-  "type": "employment",
-  "content": "# 公司内部劳动合同\n\n雇员：李明。公司：北辰科技。所属部门：产品部。\n\n李明于2024-06-15再次入职北辰科技，隶属于产品部，负责软件研发相关工作。双方约定遵守保密和劳动纪律。",
-  "metadata": {
-    "employee": "李明",
-    "start_date": "2024-06-15"
-  }
-}
-{
-  "resourceId": "employment-contract-003",
-  "version": 1,
-  "type": "employment",
-  "content": "# 公司内部劳动合同\n\n雇员：陈晨。公司：北辰科技。所属部门：研发部。\n\n陈晨于2022-09-01入职北辰科技，隶属于研发部，负责软件研发相关工作。双方约定遵守保密和劳动纪律。",
-  "metadata": {
-    "employee": "陈晨",
-    "start_date": "2022-09-01"
-  }
-}
-{
-  "resourceId": "employment-contract-004",
-  "version": 1,
-  "type": "employment",
-  "content": "# 公司内部劳动合同\n\n雇员：王小雨。公司：北辰科技。所属部门：研发部。\n\n王小雨于2025-02-01入职北辰科技，隶属于研发部，负责软件研发相关工作。双方约定遵守保密和劳动纪律。",
-  "metadata": {
-    "employee": "王小雨",
-    "start_date": "2025-02-01"
-  }
-}
+{"resourceId": "employment-contract-001", "version": 1, "type": "employment", "content": "# 公司内部劳动合同\n\n雇员：李明。公司：北辰科技。所属部门：研发部。\n\n李明于2020-03-01入职北辰科技，隶属于研发部，负责软件研发相关工作。双方约定遵守保密和劳动纪律。", "metadata": {"employee": "李明", "start_date": "2020-03-01"}}
+{"resourceId": "employment-contract-002", "version": 1, "type": "employment", "content": "# 公司内部劳动合同\n\n雇员：李明。公司：北辰科技。所属部门：产品部。\n\n李明于2024-06-15再次入职北辰科技，隶属于产品部，负责软件研发相关工作。双方约定遵守保密和劳动纪律。", "metadata": {"employee": "李明", "start_date": "2024-06-15"}}
+{"resourceId": "employment-contract-003", "version": 1, "type": "employment", "content": "# 公司内部劳动合同\n\n雇员：陈晨。公司：北辰科技。所属部门：研发部。\n\n陈晨于2022-09-01入职北辰科技，隶属于研发部，负责软件研发相关工作。双方约定遵守保密和劳动纪律。", "metadata": {"employee": "陈晨", "start_date": "2022-09-01"}}
+{"resourceId": "employment-contract-004", "version": 1, "type": "employment", "content": "# 公司内部劳动合同\n\n雇员：王小雨。公司：北辰科技。所属部门：研发部。\n\n王小雨于2025-02-01入职北辰科技，隶属于研发部，负责软件研发相关工作。双方约定遵守保密和劳动纪律。", "metadata": {"employee": "王小雨", "start_date": "2025-02-01"}}

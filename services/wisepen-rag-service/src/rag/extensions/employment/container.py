@@ -5,12 +5,12 @@ from pathlib import Path
 from dependency_injector import containers, providers
 
 from rag.application.retrieval import VectorRetrieval
-from rag.backends.qdrant import QdrantVectorStorage
-from rag.core.schema import Ontology
+from rag.core.persistence.qdrant import QdrantVectorStorage
+from rag.domain.models import Ontology
+from rag.domain.storage.vector import IndexKind, IndexableField, VectorCollection
 from rag.extensions.base import Extension
 from rag.ingestion import IngestionPipeline
 from rag.ingestion.indexers import VectorIndexer
-from rag.storage.vector import IndexableField, IndexKind, VectorCollection
 from .api import build_api
 from .metadata import EmploymentMetadataTransformer, employment_projection
 from .tools import EmploymentTools

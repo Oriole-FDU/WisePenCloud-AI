@@ -8,12 +8,14 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from beanie import init_beanie
 from pydantic import TypeAdapter
 from pymongo import AsyncMongoClient
 from pymongo.errors import DuplicateKeyError
 
-from rag.backends.mongo.content import MongoContentStorage
-from rag.core.schema import Chunk
+from rag.core.persistence.mongo.content import MongoContentStorage
+from rag.domain.models import Chunk
+from rag.domain.entities import ChunkEntity, DocumentEntity
 from rag.ingestion.indexers import ChunkFactsIndexer
 from rag.ingestion.transformers import GraphExtractor
 from rag.ingestion.transformers.graph import GraphExtraction
@@ -66,9 +68,9 @@ async def mongo_storage():
     database = client[database_name]
     documents = database["document_revisions"]
     chunks = database["doc_chunks"]
-    storage = MongoContentStorage(documents=documents, chunks=chunks)
     try:
-        await storage.ensure_indexes()
+        await init_beanie(database=documents.database, document_models=[DocumentEntity, ChunkEntity])
+        storage = MongoContentStorage()
         yield storage, documents, chunks
     finally:
         try:
@@ -82,7 +84,6 @@ async def test_real_mongo_round_trip_idempotency_and_unique_indexes(
         mongo_storage, document, chunk
 ):
     storage, documents, chunks = mongo_storage
-    await storage.ensure_indexes()
     await storage.upsert_documents([document])
     await storage.upsert_chunks([chunk])
     await storage.upsert_documents([document])

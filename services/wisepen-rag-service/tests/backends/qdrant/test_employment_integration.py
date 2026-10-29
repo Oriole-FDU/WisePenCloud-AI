@@ -3,9 +3,9 @@
 import pytest
 from qdrant_client import models
 
-from rag.backends.qdrant import QdrantVectorStorage
-from rag.core.schema.filters import FilterOperator, MetadataFilter, MetadataFilters
-from rag.storage.vector import IndexableField, IndexKind, VectorQuery, VectorRecord
+from rag.core.persistence.qdrant import QdrantVectorStorage
+from rag.core.filters import FilterOperator, MetadataFilter, MetadataFilters
+from rag.domain.storage.vector import IndexableField, IndexKind, VectorQuery, VectorRecord
 
 pytestmark = pytest.mark.qdrant_integration
 

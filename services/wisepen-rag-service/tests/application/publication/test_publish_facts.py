@@ -6,12 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.application.publication import (
-    ContentIncompleteError,
-    DocumentPublication,
-    PublicationAction,
-)
-from rag.core.schema import ContentRevision
+from rag.application.publication import ContentIncompleteError, DocumentPublication
+from rag.domain.models.publication import PublicationAction
+from rag.domain.models import ContentRevision
 
 
 @pytest.mark.parametrize(

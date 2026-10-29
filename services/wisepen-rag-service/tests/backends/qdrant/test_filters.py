@@ -2,14 +2,14 @@
 
 from qdrant_client import AsyncQdrantClient
 
-from rag.backends.qdrant import QdrantVectorStorage
-from rag.core.schema.filters import (
+from rag.core.persistence.qdrant import QdrantVectorStorage
+from rag.core.filters import (
     FilterCondition,
     FilterOperator,
     MetadataFilter,
     MetadataFilters,
 )
-from rag.storage.vector import VectorQuery, VectorRecord
+from rag.domain.storage.vector import VectorQuery, VectorRecord
 
 
 async def test_query_filters_against_qdrant_local_filter_engine():

@@ -12,7 +12,7 @@ import pytest
 
 from common.utils.markdown import Section, SourceSpan
 from common.utils.markdown.chunking.tokenizer import default_token_counter
-from rag.core.schema import Chunk, Document, DocumentStructure
+from rag.domain.models import Chunk, Document, DocumentStructure
 from rag.ingestion.transformers import Contextualizer
 
 

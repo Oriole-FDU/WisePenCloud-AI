@@ -17,9 +17,9 @@ from rag.application.publication import (
     PublicationEventConsumer,
     ResourceDestroyedEvent,
 )
-from rag.backends.kafka import DeliveryHeader, RetryPolicy
-from rag.core.schema import ContentRevision
-from rag.core.schema.content import rag_section_id
+from rag.core.messaging import DeliveryHeader, KafkaConsumerClient, RetryPolicy
+from rag.domain.models import ContentRevision
+from rag.domain.models.content import rag_section_id
 
 DOCUMENT_TOPIC = "wisepen-document-ready-topic"
 DESTROY_TOPIC = "wisepen-resource-physical-destroy-topic"
@@ -64,24 +64,34 @@ def kafka(monkeypatch):
     factory.side_effect = lambda topic, **kwargs: (
         factory.return_value if topic == DOCUMENT_TOPIC else factory.destroy_client
     )
-    monkeypatch.setattr("rag.backends.kafka.consumer.AIOKafkaConsumer", factory)
+    factory.content_consumer = KafkaConsumerClient(
+        bootstrap_servers="localhost:9092",
+        topic=DOCUMENT_TOPIC,
+        group_id="rag-test",
+        max_poll_interval_ms=900_000,
+        retry_policy=RetryPolicy(backoff_seconds=[]),
+    )
+    factory.destroy_consumer = KafkaConsumerClient(
+        bootstrap_servers="localhost:9092",
+        topic=DESTROY_TOPIC,
+        group_id="rag-test",
+        max_poll_interval_ms=900_000,
+        retry_policy=RetryPolicy(backoff_seconds=[]),
+    )
+    monkeypatch.setattr("rag.core.messaging.kafka.AIOKafkaConsumer", factory)
     monkeypatch.setattr(
-        "rag.backends.kafka.consumer.AIOKafkaProducer", Mock(return_value=producer)
+        "rag.core.messaging.kafka.AIOKafkaProducer", Mock(return_value=producer)
     )
     return client, factory
 
 
 @pytest.fixture
-def consumer(publication):
-    # 应用测试关闭等待阶段，集中验证业务与确认时序；生产默认仍为五次重试。
-    policy = RetryPolicy(backoff_seconds=[])
+def consumer(publication, kafka):
+    _, factory = kafka
     return PublicationEventConsumer(
         publisher=publication,
-        bootstrap_servers="localhost:9092",
-        group_id="rag-test",
-        max_poll_interval_ms=900_000,
-        content_retry_policy=policy,
-        destroy_retry_policy=policy,
+        content_consumer=factory.content_consumer,
+        destroy_consumer=factory.destroy_consumer,
     )
 
 
@@ -180,16 +190,16 @@ async def test_cleanup_logs_extra_failure_without_changing_primary_error(
         consumer, monkeypatch
 ):
     log = Mock()
-    monkeypatch.setattr("rag.application.publication.publish.error", log)
+    monkeypatch.setattr("rag.application.publication.error", log)
     entered = asyncio.Event()
     primary = RuntimeError("content failed")
     cleanup = OSError("destroy cleanup failed")
 
-    async def content_run(**kwargs):
+    async def content_run(handler, **kwargs):
         await entered.wait()
         raise primary
 
-    async def destroy_run(**kwargs):
+    async def destroy_run(handler, **kwargs):
         entered.set()
         try:
             await asyncio.Event().wait()
@@ -275,7 +285,9 @@ async def test_same_version_conflict_goes_directly_to_dlq_without_rebuild(
     with pytest.raises(asyncio.CancelledError):
         await consumer.run()
     headers = dict(factory.producer.send_and_wait.call_args.kwargs["headers"])
-    assert headers[DeliveryHeader.EXCEPTION_TYPE].endswith(b"ContentConflictError")
+    assert headers[DeliveryHeader.EXCEPTION_TYPE.value].endswith(
+        b"ContentConflictError"
+    )
     projection.index.assert_not_awaited()
 
 
@@ -419,12 +431,16 @@ async def test_incomplete_facts_follow_value_error_dlq_policy_without_apply(
         return await original_read(keys)
 
     storage.get_documents = read
+    _, factory = kafka
     consumer = PublicationEventConsumer(
         publisher=publication,
-        bootstrap_servers="localhost:9092",
-        group_id="rag-test",
-        content_retry_policy=RetryPolicy(backoff_seconds=[0]),
-        destroy_retry_policy=RetryPolicy(backoff_seconds=[]),
+        content_consumer=KafkaConsumerClient(
+            bootstrap_servers="localhost:9092",
+            topic=DOCUMENT_TOPIC,
+            group_id="rag-test",
+            retry_policy=RetryPolicy(backoff_seconds=[0]),
+        ),
+        destroy_consumer=factory.destroy_consumer,
     )
     client, factory = kafka
     client.getone.side_effect = [record(content()), asyncio.CancelledError()]

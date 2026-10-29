@@ -4,7 +4,7 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from rag.core.schema import Chunk
+from rag.domain.models import Chunk
 
 
 class EmploymentMetadata(BaseModel):

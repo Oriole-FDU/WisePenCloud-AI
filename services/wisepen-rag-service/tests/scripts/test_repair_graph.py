@@ -12,12 +12,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from rag.application.publication import DocumentReadyEvent
-from rag.core.schema import ContentRevision
+from rag.domain.models import ContentRevision
 from rag.ingestion.chunkers import MarkdownChunker
 from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer
 from rag.ingestion.transformers import GraphExtractor
 from rag.ingestion.transformers.graph import GraphExtraction
-from rag.storage.vector import IndexableField, IndexKind
+from rag.domain.storage.vector import IndexableField, IndexKind
 
 
 @pytest.fixture(scope="module")
@@ -28,6 +28,12 @@ def repair():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.fixture(autouse=True)
+def bind_entities(monkeypatch, repair):
+    # 命令装配测试隔离数据库初始化；读写合同由仓储往返测试覆盖。
+    monkeypatch.setattr(repair, "init_beanie", AsyncMock())
 
 
 @pytest.fixture

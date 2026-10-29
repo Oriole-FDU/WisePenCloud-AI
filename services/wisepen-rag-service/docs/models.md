@@ -1,11 +1,12 @@
 # 中立数据模型
 
-本文定义整套文档使用的事实、身份和投影术语。内容与图模型位于 [core/schema](../src/rag/core/schema/__init__.py)，是普通
-dataclass；它们不拥有发布、权限或后端连接。应用结果见各[用例说明](README.md)。
+本文定义整套文档使用的事实、身份和投影术语。内容与图模型位于 [domain/models/content.py](../src/rag/domain/models/content.py)
+和 [domain/models/graph.py](../src/rag/domain/models/graph.py)，是普通 dataclass；它们不拥有后端连接。metadata filters 仍位于
+[core/schema/filters.py](../src/rag/core/filters.py)。应用结果见各[用例说明](README.md)。
 
 ## 1. 内容事实与身份
 
-源码：[content.py](../src/rag/core/schema/content.py)。
+源码：[content.py](../src/rag/domain/models/content.py)。
 
 | 模型                | 字段                                                                                                                                   | 语义                                                                               |
 |---------------------|----------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
@@ -52,7 +53,7 @@ Chunk.raw_text 是分块正文事实。`content_token_count` 只统计正文，�
 
 ## 2. 图事实、本体与来源
 
-源码：[graph.py](../src/rag/core/schema/graph.py)。
+源码：[graph.py](../src/rag/domain/models/graph.py)。
 
 | 模型                  | 字段                                                                             | 语义                                                                                      |
 |-----------------------|----------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
@@ -86,7 +87,7 @@ graph_version；两个事实列表均缺失表示无图事实，损坏结构不�
 
 ## 3. 通用 metadata 条件
 
-源码：[filters.py](../src/rag/core/schema/filters.py)。
+源码：[filters.py](../src/rag/core/filters.py)。
 
 | 模型              | 字段/取值                | 语义                                                                      |
 |-------------------|--------------------------|---------------------------------------------------------------------------|
@@ -113,13 +114,24 @@ EQ/IN，详见[图筛选合同](usecases-graph.md)。不要根据枚举存在 GT
 | `GraphSourceProjection` | chunk_id、metadata、nodes=[]、edges=[]；一个来源的完整图投影，空事实也会移除该来源旧贡献 |
 | `GraphVectorKind`       | entity/relationship；区分两种图向量                                                      |
 
-定义见 [storage/vector.py](../src/rag/storage/vector.py) 和 [storage/graph.py](../src/rag/storage/graph.py)。图向量记录
+定义见 [domain/storage/vector.py](../src/rag/domain/storage/vector.py) 和 [domain/storage/graph.py](../src/rag/domain/storage/graph.py)。图向量记录
 ID 由 kind/来源 Chunk/逻辑 fact ID 共同生成，不能与 GraphNode.id 混用；fact_sha256 核验当前事实输入，text_sha256 记录索引文本摘要。
 
-## 5. 应用层拥有的对象
+## 5. 领域状态与应用对象
 
-ResourcePublicationState/PublicationAction 属于[发布用例](usecases-publication.md)；ResourceAcl/PermissionScope 和
-ResourceSnapshot 属于[授权用例](usecases-access.md)。它们不嵌入 Document/Chunk。
+ResourceAcl、GroupResourceAcl 和 PermissionScope 是 domain ACL 事实与请求授权范围，定义于
+[domain/models/acl.py](../src/rag/domain/models/acl.py)。ResourcePublicationState、PublicationAction、ContentConflictError、
+RevisionNotStagedError 和 PublicationStateChangedError 是 domain 发布状态、决策结果与状态异常，定义于
+[domain/models/publication.py](../src/rag/domain/models/publication.py)。这些模型不嵌入 Document/Chunk。
+
+ContentIdentityError 与 ContentIncompleteError 仍属于 [publication 用例](../src/rag/application/publication.py)；
+DocumentReadyEvent、AclRecalculateEvent、ResourceSnapshot，以及查询、阅读和图响应 DTO 仍由各自 application 功能目录拥有。
+它们不应因领域状态迁移而移动。
+
+Mongo 持久化实体位于 `domain/entities`，分别为 `DocumentEntity`、`ChunkEntity`、`ResourceAclEntity` 和
+`ResourcePublicationEntity`。它们承载现有 Mongo 文档形状；Beanie `Settings` 声明四个集合名和索引，`main.lifespan` 通过
+`init_beanie` 注册实体并初始化索引。实体不替代纯领域 dataclass 或存储端口：一般读取和删除、创建新 publication 状态使用 Beanie 实体操作；
+内容批量 ReplaceOne、ACL revision 条件 upsert 和 publication CAS 仍使用 `get_pymongo_collection()` 保留原子与批量语义。
 
 ChunkHit、GraphRetrievalResult/GraphTraversalResult、DocumentOutline/SectionOutline/SectionText 和 GcReport
 是各用例结果，不是数据库镜像模型。图结果的 GraphEntity 和 GraphRelationship 都只包含 id 和 sources，每个逻辑对象只出现一次。实体来源为

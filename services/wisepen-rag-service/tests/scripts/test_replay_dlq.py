@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from rag.backends.kafka import DeliveryHeader
+from rag.core.messaging import DeliveryHeader
 
 
 @pytest.fixture

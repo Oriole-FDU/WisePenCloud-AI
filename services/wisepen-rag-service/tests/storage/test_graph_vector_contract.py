@@ -4,7 +4,7 @@ from dataclasses import asdict, replace
 
 import pytest
 
-from rag.storage.graph import (
+from rag.domain.storage.graph import (
     GraphVectorKind,
     entity_vector_text,
     graph_vector_record_id,
