@@ -5,6 +5,8 @@ ELASTICSEARCH_URIS:
   - "http://wisepen-dev-server:9200"
 ELASTICSEARCH_USERNAME: "<username>"
 ELASTICSEARCH_PASSWORD: "<password>"
+QDRANT_URL: "http://wisepen-dev-server:6333"
+QDRANT_API_KEY: "<Qdrant API key>"
 REDIS_URL: "redis://:<password>@wisepen-dev-server:6379/1"
 S2_API_KEY: "<platform Semantic Scholar API key>"
 # Optional; set only through the existing Nacos secret channel when HF is used.

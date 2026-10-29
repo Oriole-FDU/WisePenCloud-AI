@@ -22,6 +22,8 @@ class AppSettings(BaseModel):
     ELASTICSEARCH_URIS: str
     ELASTICSEARCH_USERNAME: str
     ELASTICSEARCH_PASSWORD: str
+    QDRANT_URL: str
+    QDRANT_API_KEY: str = Field(repr=False)
     REDIS_URL: str
 
     # --- 外部 API 凭证（repr=False 防止泄漏到日志） ---

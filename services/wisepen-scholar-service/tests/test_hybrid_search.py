@@ -17,6 +17,7 @@ from scholar.application.services.search import (
 )
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.paper import Paper
+from scholar.domain.errors import ProviderError
 from scholar.domain.models.source_execution import SourceExecutionStatus
 from scholar.core.providers import ArxivProvider
 
@@ -44,8 +45,17 @@ class Repository:
     async def search(self, **kwargs):
         return self.lexical
 
-    async def search_vector(self, **kwargs):
-        return self.semantic
+    async def get_many(self, ids):
+        papers = {paper.arxiv_id: paper for paper in self.semantic}
+        return [papers[identifier] for identifier in ids if identifier in papers]
+
+
+class VectorRepository:
+    def __init__(self, repository):
+        self.repository = repository
+
+    async def search(self, **kwargs):
+        return [paper.arxiv_id for paper in self.repository.semantic]
 
 
 class Encoder:
@@ -78,10 +88,19 @@ async def search(provider):
     )
 
 
+def arxiv_provider(repository, encoder, **kwargs):
+    return ArxivProvider(
+        repository,
+        encoder,
+        vector_repository=VectorRepository(repository),
+        **kwargs,
+    )
+
+
 @pytest.mark.asyncio
 async def test_rrf_combines_independent_ranks_deduplicates_and_keeps_stable_ties():
     a, b, c = [paper(f"2501.{i:05d}") for i in range(1, 4)]
-    result = await search(ArxivProvider(Repository([a, b, c], [b, a]), Encoder()))
+    result = await search(arxiv_provider(Repository([a, b, c], [b, a]), Encoder()))
     assert [p.arxiv_id for p in result.papers] == [a.arxiv_id, b.arxiv_id, c.arxiv_id]
     assert result.partial_error is None
 
@@ -92,7 +111,7 @@ async def test_citation_bonus_preserves_zero_missing_and_cannot_overturn_large_r
     important = paper(
         "2501.00002", {"citation_count": 100, "influential_citation_count": 10}
     )
-    result = await search(ArxivProvider(Repository([plain], [important]), Encoder()))
+    result = await search(arxiv_provider(Repository([plain], [important]), Encoder()))
     assert [paper.arxiv_id for paper in result.papers] == [
         important.arxiv_id,
         plain.arxiv_id,
@@ -101,7 +120,7 @@ async def test_citation_bonus_preserves_zero_missing_and_cannot_overturn_large_r
         important,
         metadata={"s2": {"citation_count": 0, "influential_citation_count": 0}},
     )
-    zero_result = await search(ArxivProvider(Repository([plain], [zero]), Encoder()))
+    zero_result = await search(arxiv_provider(Repository([plain], [zero]), Encoder()))
     assert [paper.arxiv_id for paper in zero_result.papers] == [
         plain.arxiv_id,
         zero.arxiv_id,
@@ -112,7 +131,7 @@ async def test_citation_bonus_preserves_zero_missing_and_cannot_overturn_large_r
         metadata={"s2": {"citation_count": 10**9, "influential_citation_count": 10**9}},
     )
     result = await search(
-        ArxivProvider(Repository([plain, *crowd, huge], []), Encoder())
+        arxiv_provider(Repository([plain, *crowd, huge], []), Encoder())
     )
     assert result.papers[0].arxiv_id == plain.arxiv_id
 
@@ -124,7 +143,7 @@ async def test_encoder_failure_is_visible_not_cached_and_recovery_restores_hybri
         request=httpx.Request("POST", "http://encoder/v1/embeddings")
     )
     lexical, semantic = paper("2501.00001"), paper("2501.00002")
-    provider = ArxivProvider(Repository([lexical], [semantic]), encoder)
+    provider = arxiv_provider(Repository([lexical], [semantic]), encoder)
     binding = SearchBinding(provider, cache_revision=provider.cache_revision)
     cache = Cache()
     service = PaperSearchService(
@@ -144,7 +163,7 @@ async def test_encoder_failure_is_visible_not_cached_and_recovery_restores_hybri
     assert not recovered.execution[0].cache_hit
     assert (await service.search(query)).execution[0].cache_hit
     # 模拟平台调参后重新装配服务，旧排序缓存不能继续复用。
-    adjusted = ArxivProvider(Repository([lexical], [semantic]), encoder, rrf_k=30)
+    adjusted = arxiv_provider(Repository([lexical], [semantic]), encoder, rrf_k=30)
     binding.searcher = adjusted
     binding.cache_revision = adjusted.cache_revision
     assert not (await service.search(query)).execution[0].cache_hit
@@ -155,4 +174,25 @@ async def test_program_error_is_not_encoder_degradation():
     encoder = Encoder()
     encoder.error = TypeError("program bug")
     with pytest.raises(TypeError, match="program bug"):
-        await search(ArxivProvider(Repository([], []), encoder))
+        await search(arxiv_provider(Repository([], []), encoder))
+
+
+@pytest.mark.asyncio
+async def test_vector_repository_connection_failure_is_a_provider_error():
+    repository = Repository([], [])
+
+    class UnavailableVectorRepository:
+        async def search(self, **kwargs):
+            raise httpx.ConnectError(
+                "Qdrant unavailable",
+                request=httpx.Request("POST", "http://qdrant/collections/query"),
+            )
+
+    provider = ArxivProvider(
+        repository,
+        Encoder(),
+        vector_repository=UnavailableVectorRepository(),
+    )
+
+    with pytest.raises(ProviderError, match="Qdrant unavailable"):
+        await search(provider)

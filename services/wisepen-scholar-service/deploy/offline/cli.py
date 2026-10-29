@@ -12,6 +12,7 @@ from offline.arxiv_sync import sync_arxiv
 from offline.publish import publish_arxiv
 from offline.s2 import apply_s2_projection, import_s2
 from offline.s2_api import S2SyncClient
+from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 
 from scholar.core.config.bootstrap_settings import SERVICE_ROOT
@@ -70,19 +71,28 @@ async def run(args):
                 )
 
         if args.command == "publish":
-            async with create_elasticsearch(
-                settings.ELASTICSEARCH_URIS,
-                settings.ELASTICSEARCH_USERNAME,
-                settings.ELASTICSEARCH_PASSWORD,
-                settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
-            ) as es:
-                return await publish_arxiv(
-                    db,
-                    es,
-                    args.alias or settings.SCHOLAR_INDEX_ALIAS,
-                    batch_size=args.batch_size,
-                    max_batches=args.max_batches,
-                )
+            qdrant = AsyncQdrantClient(
+                url=settings.QDRANT_URL,
+                api_key=settings.QDRANT_API_KEY,
+                trust_env=False,
+            )
+            try:
+                async with create_elasticsearch(
+                    settings.ELASTICSEARCH_URIS,
+                    settings.ELASTICSEARCH_USERNAME,
+                    settings.ELASTICSEARCH_PASSWORD,
+                    settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
+                ) as es:
+                    return await publish_arxiv(
+                        db,
+                        es,
+                        args.alias or settings.SCHOLAR_INDEX_ALIAS,
+                        qdrant=qdrant,
+                        batch_size=args.batch_size,
+                        max_batches=args.max_batches,
+                    )
+            finally:
+                await qdrant.close()
 
         if args.command == "sync-arxiv":
             state = db.execute("SELECT complete,published FROM import_state").fetchone()
@@ -95,39 +105,47 @@ async def run(args):
             socket_timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
         )
         try:
-            async with (
-                create_elasticsearch(
-                    settings.ELASTICSEARCH_URIS,
-                    settings.ELASTICSEARCH_USERNAME,
-                    settings.ELASTICSEARCH_PASSWORD,
-                    settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
-                ) as es,
-                httpx.AsyncClient(
-                    timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS
-                ) as s2_http,
-            ):
-                transport = S2Transport(s2_http, redis, settings.S2_API_KEY)
-                s2_provider = S2SyncClient(transport)
-                s2_cache = RedisPaperLookupCache(redis, namespace=f"{alias}:s2")
-                arxiv_cache = RedisPaperLookupCache(redis, namespace=f"{alias}:arxiv")
-
-                async def publish_pending():
-                    return await publish_arxiv(db, es, alias)
-
-                if args.command == "sync-arxiv":
-                    async with httpx.AsyncClient(
+            qdrant = AsyncQdrantClient(
+                url=settings.QDRANT_URL,
+                api_key=settings.QDRANT_API_KEY,
+                trust_env=False,
+            )
+            try:
+                async with (
+                    create_elasticsearch(
+                        settings.ELASTICSEARCH_URIS,
+                        settings.ELASTICSEARCH_USERNAME,
+                        settings.ELASTICSEARCH_PASSWORD,
+                        settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
+                    ) as es,
+                    httpx.AsyncClient(
                         timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS
-                    ) as oai_http:
-                        return await sync_arxiv(
-                            db,
-                            ArxivOaiHarvester(oai_http),
-                            s2_provider,
-                            from_date=args.from_date,
-                            batch_size=args.batch_size,
-                            publish=publish_pending,
-                            cache=s2_cache,
-                            arxiv_cache=arxiv_cache,
-                        )
+                    ) as s2_http,
+                ):
+                    transport = S2Transport(s2_http, redis, settings.S2_API_KEY)
+                    s2_provider = S2SyncClient(transport)
+                    s2_cache = RedisPaperLookupCache(redis, namespace=f"{alias}:s2")
+                    arxiv_cache = RedisPaperLookupCache(redis, namespace=f"{alias}:arxiv")
+
+                    async def publish_pending():
+                        return await publish_arxiv(db, es, alias, qdrant=qdrant)
+
+                    if args.command == "sync-arxiv":
+                        async with httpx.AsyncClient(
+                            timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS
+                        ) as oai_http:
+                            return await sync_arxiv(
+                                db,
+                                ArxivOaiHarvester(oai_http),
+                                s2_provider,
+                                from_date=args.from_date,
+                                batch_size=args.batch_size,
+                                publish=publish_pending,
+                                cache=s2_cache,
+                                arxiv_cache=arxiv_cache,
+                            )
+            finally:
+                await qdrant.close()
 
         finally:
             await redis.aclose()

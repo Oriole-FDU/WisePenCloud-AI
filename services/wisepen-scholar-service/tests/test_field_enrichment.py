@@ -235,7 +235,11 @@ async def test_real_elasticsearch_lookup_error_is_visible_while_s2_fallback_succ
 
     identity = parse_identifier("2401.00001")
     repository = ElasticsearchPaperRepository(UnavailableElasticsearch(), "test-alias")
-    arxiv = ArxivProvider(repository, embedding_client=None)
+    arxiv = ArxivProvider(
+        repository,
+        embedding_client=None,
+        vector_repository=object(),
+    )
     s2_paper = make_paper(
         metadata={
             "s2": {

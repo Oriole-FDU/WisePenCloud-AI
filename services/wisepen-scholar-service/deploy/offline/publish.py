@@ -8,13 +8,19 @@ import duckdb
 import orjson
 from elasticsearch import AsyncElasticsearch
 from offline.arxiv import database_status
-from offline.embeddings import publication_documents
+from offline.embeddings import publication_documents, publication_vectors
+from qdrant_client import AsyncQdrantClient, models
 
+from scholar.core.storage.qdrant.paper_vectors import (
+    COLLECTION,
+    ensure_collection,
+    point_id,
+    point_payload,
+)
 from scholar.core.storage.elasticsearch.paper_repository import (
     ARXIV_INDEX_SETTINGS,
     ARXIV_MAPPING,
 )
-from scholar.ml.specter import MODEL_SIGNATURE
 
 
 def _publication_status(db: duckdb.DuckDBPyConnection) -> dict:
@@ -30,25 +36,22 @@ async def publish_arxiv(
     es: AsyncElasticsearch,
     alias: str,
     *,
+    qdrant: AsyncQdrantClient,
     batch_size: int = 5000,
     max_batches: int | None = None,
 ) -> dict:
-    """网络未知结果可按同一文档 ID 重放，成功项才从 pending 移除。"""
+    """双写 ES 全文事实与 Qdrant 向量；两端成功后才确认 DuckDB 待办。"""
     row = db.execute(
         "SELECT complete,target_index,published FROM import_state"
     ).fetchone()
     if row is None or not row[0]:
         raise ValueError("arXiv import must reach EOF before publication")
     target, published = row[1:]
+    await ensure_collection(qdrant)
 
     if published:
         if not target:
             raise ValueError("published arXiv state is missing its target index")
-        mappings = await es.indices.get_mapping(index=target)
-        vector_enabled = (
-            mappings[target]["mappings"].get("_meta", {}).get("embedding_signature")
-            == MODEL_SIGNATURE
-        )
         batches = 0
         while max_batches is None or batches < max_batches:
             rows = db.execute(
@@ -75,9 +78,8 @@ async def publish_arxiv(
                 for arxiv_id, action, document in rows
                 if action == "index"
             ]
-            projected = iter(
-                publication_documents(db, indexed, vector_enabled=vector_enabled)
-            )
+            documents = publication_documents(indexed)
+            projected = iter(documents)
             operations = []
             for arxiv_id, action, document in rows:
                 if action == "delete":
@@ -109,6 +111,35 @@ async def publish_arxiv(
                         }
                     )
 
+            vectors = publication_vectors(db, indexed)
+            documents_by_id = dict(
+                zip((arxiv_id for arxiv_id, _ in indexed), documents, strict=True)
+            )
+            qdrant_deletes = [
+                point_id(arxiv_id)
+                for arxiv_id, action, _ in rows
+                if action == "delete" or arxiv_id not in vectors
+            ]
+            if qdrant_deletes:
+                await qdrant.delete(
+                    collection_name=COLLECTION,
+                    points_selector=models.PointIdsList(points=qdrant_deletes),
+                    wait=True,
+                )
+            points = [
+                models.PointStruct(
+                    id=point_id(arxiv_id),
+                    vector=list(vector),
+                    payload=point_payload(documents_by_id[arxiv_id]),
+                )
+                for arxiv_id, vector in vectors.items()
+            ]
+            if points:
+                await qdrant.upsert(
+                    collection_name=COLLECTION, points=points, wait=True
+                )
+
+            # ES 与 Qdrant 不共享事务；只有当前批两端都完成后才确认 ES 成功项。
             if succeeded:
                 db.begin()
                 try:
@@ -185,10 +216,9 @@ async def publish_arxiv(
         ).fetchall()
         if not rows:
             break
+        documents = publication_documents(rows)
         operations = []
-        for (arxiv_id, _), document in zip(
-            rows, publication_documents(db, rows, vector_enabled=True), strict=True
-        ):
+        for (arxiv_id, _), document in zip(rows, documents, strict=True):
             operations.extend(
                 [{"index": {"_index": target, "_id": arxiv_id}}, document]
             )
@@ -200,6 +230,31 @@ async def publish_arxiv(
                 succeeded.append(arxiv_id)
             else:
                 failed.append({"arxiv_id": arxiv_id, "error": result["error"]})
+
+        vectors = publication_vectors(db, rows)
+        documents_by_id = dict(
+            zip((arxiv_id for arxiv_id, _ in rows), documents, strict=True)
+        )
+        missing_vectors = [arxiv_id for arxiv_id, _ in rows if arxiv_id not in vectors]
+        if missing_vectors:
+            await qdrant.delete(
+                collection_name=COLLECTION,
+                points_selector=models.PointIdsList(
+                    points=[point_id(arxiv_id) for arxiv_id in missing_vectors]
+                ),
+                wait=True,
+            )
+        points = [
+            models.PointStruct(
+                id=point_id(arxiv_id),
+                vector=list(vector),
+                payload=point_payload(documents_by_id[arxiv_id]),
+            )
+            for arxiv_id, vector in vectors.items()
+        ]
+        if points:
+            await qdrant.upsert(collection_name=COLLECTION, points=points, wait=True)
+
         if succeeded:
             db.begin()
             try:
@@ -251,6 +306,14 @@ async def publish_arxiv(
             else:
                 failed.append({"arxiv_id": arxiv_id, "error": result.get("error")})
 
+        await qdrant.delete(
+            collection_name=COLLECTION,
+            points_selector=models.PointIdsList(
+                points=[point_id(arxiv_id) for (arxiv_id,) in deleted]
+            ),
+            wait=True,
+        )
+
         if succeeded:
             db.begin()
             try:
@@ -293,7 +356,7 @@ async def publish_arxiv(
     ).fetchall()
     result = await es.mget(index=target, ids=[r[0] for r in sample])
     for document, item in zip(
-        publication_documents(db, sample, vector_enabled=True),
+        publication_documents(sample),
         result["docs"],
         strict=True,
     ):

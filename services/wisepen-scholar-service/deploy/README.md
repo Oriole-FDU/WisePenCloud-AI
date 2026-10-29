@@ -3,29 +3,24 @@
 以下命令均在仓库根目录运行。线上服务由 `uv run --no-sync python -m scholar.main` 一次启动，查询编码随主服务启动。离线工具在本目录，独立打开
 DuckDB 写连接。
 
-## 本次存量灌库
+## 已有向量迁移到 Qdrant
 
-当前已有发布过的 3,224,542 篇基线。运行迁移会冻结旧索引写入，复制到新索引，使用 GPU FP16 proximity
-模型生成向量并持久化，写入新索引；全部验证通过后切换 ES alias 和后续发布目标，旧索引保留。
-
-```powershell
-uv run --no-sync python services/wisepen-scholar-service/deploy/migrate_search_index.py --resume
-```
-
-`--resume` 复用当前迁移日志、远端任务和向量断点。首次建立迁移日志时不加此参数。默认日志是服务目录下
-`.runtime/hybrid-index-migration.json`，数据库是 `.runtime/scholar.duckdb`。迁移验证使用主服务的查询编码接口，因此先启动
-Scholar。GPU interpreter 默认 `D:/Rag/.venv/Scripts/python.exe`，可用 `--gpu-python` 指定；使用本地已下载模型，不修改主环境的
-CUDA 依赖。
+迁移复用 DuckDB 中已有的 768 维论文向量，不重新运行模型。脚本按 `specter.py` 的模型签名和标题/摘要输入指纹检查向量，使用稳定 arXiv UUID 分批写入
+Qdrant；完成后核对集合计数并恢复 HNSW 建图。ES alias 不参与这次迁移，也不需要启动 Scholar 或 GPU。
 
 ```powershell
-uv run --no-sync python services/wisepen-scholar-service/deploy/migrate_search_index.py --rollback
+uv run --no-sync python services/wisepen-scholar-service/deploy/migrate_qdrant.py --resume
 ```
 
-回滚会恢复旧 alias 和 DuckDB 发布目标，解除旧索引写屏障，保留新索引与已有向量。
+`--resume` 使用 `.runtime/qdrant-migration.json` 中记录的模型签名和已确认游标继续上传，数据库默认是 `.runtime/scholar.duckdb`。目标集合名由模型签名派生；
+当前集合必须为空，续跑时使用同一迁移日志。迁移只移动已有向量，不改变 arXiv 事实或 ES alias。
+
+在线查询由 Qdrant 按学科与含边界的 UTC 提交日期区间预过滤向量，并只返回排序后的 arXiv ID；论文事实仍从 ES 批量读取。每日发布先写 ES 全文文档，再写入或删除
+Qdrant 向量，两边操作成功后才确认对应 DuckDB 待办。ES 与 Qdrant 之间没有跨库事务；一端失败时待办保留，重跑会使用相同论文身份继续发布。
 
 ## Redis 缓存键升级
 
-查询、发现和论文富化缓存现在使用 `compact-v1` 命名空间。旧键不会再被读取；索引迁移会清理当前 alias 的新旧搜索缓存。需要一次性删除旧缓存时，先确认
+查询、发现和论文富化缓存现在使用 `compact-v1` 命名空间。旧键不会再被读取；Qdrant 向量迁移不切换 ES alias，也不清理 Redis 缓存。需要一次性删除旧缓存时，先确认
 `index_alias` 与当前 `SCHOLAR_INDEX_ALIAS` 一致、`REDIS_URL` 指向服务使用的 Redis 数据库，再执行以下命令。富化模式会覆盖该索引下所有来源及
 BYOK 凭证 scope；不执行 `FLUSHDB`。
 
@@ -63,7 +58,7 @@ uv run --no-sync python services/wisepen-scholar-service/deploy/run.py sync-arxi
 
 1. 从上次完成日期读取 arXiv OAI 变化，保存新增、修改和删除记录。
 2. 将变化论文和待补充论文分批请求 S2 Graph API，显式指定 `embedding.specter_v2`，保存引用指标、TLDR 和 768 维 v2 向量。
-3. 失效对应论文缓存，将变化文档和向量发布到 ES，发布删除记录。
+3. 失效对应论文缓存，将全文文档发布到 ES，将仍匹配模型及输入指纹的向量发布到 Qdrant，并发布删除记录。
 4. 待发布工作完成后推进 OAI 日期；S2 尚未收录的论文保留待办，下一轮重试。
 
 每日任务不启动 GPU，不下载 S2 release/diff 大包。标题或摘要变化会使旧向量失效；S2 尚未提供新向量时，论文仍可参与文本检索。仅引用数据变化时保留有效向量。S2
@@ -87,8 +82,8 @@ uv run --no-sync python services/wisepen-scholar-service/deploy/offline_dashboar
 uv run --no-sync python services/wisepen-scholar-service/deploy/offline_dashboard.py run --cwd . --name "每日 OAI + S2" daily-sync -- uv run --no-sync python services/wisepen-scholar-service/deploy/run.py sync-arxiv
 ```
 
-打开 http://127.0.0.1:19917 查看阶段、速率、剩余量和错误日志。看板只读取进度文件，不连接 DuckDB。已通过包装器运行的迁移可用同一任务
-ID `hybrid-index-migration` 记录恢复进度。
+打开 http://127.0.0.1:19917 查看阶段、速率、剩余量和错误日志。看板只读取进度文件，不连接 DuckDB。迁移日志记录 Qdrant 已确认的上传游标，可在原命令后追加
+`--resume` 恢复。
 
 ## 配置
 
@@ -98,20 +93,21 @@ ID `hybrid-index-migration` 记录恢复进度。
 | 配置                                     | 用途                                       |
 |------------------------------------------|--------------------------------------------|
 | ELASTICSEARCH_URIS / USERNAME / PASSWORD | 索引及发布                                 |
+| QDRANT_URL / QDRANT_API_KEY              | 向量集合迁移、在线召回及发布               |
 | REDIS_URL                                | 缓存失效和 S2 共享队列                     |
 | S2_API_KEY                               | 每日 S2 富化与 v2 向量                     |
 | SCHOLAR_INDEX_ALIAS                      | 在线读取 alias，默认 wisepen-scholar-arxiv |
 | SCHOLAR_EMBEDDING_MODELS_PATH            | 存量本地模型目录，默认服务 models/         |
-| SCHOLAR_EMBEDDING_GPU_PYTHON             | 本次灌库的 GPU Python                      |
+| SCHOLAR_EMBEDDING_GPU_PYTHON             | `encode-embeddings` 存量编码的 GPU Python  |
 | FROM_SOURCE_SECRET                       | 迁移验收调用主服务查询编码接口             |
 
 ## 文件职责
 
 - `run.py`：首次导入、每日同步、发布的命令入口。
-- `migrate_search_index.py`：现有完整索引迁移、验收、切换和回滚。
+- `migrate_qdrant.py`：将 DuckDB 中已验证的向量分批迁移到 Qdrant 并支持续传。
 - `offline/arxiv_oai.py`、`offline/arxiv_sync.py`：OAI 读取与每日流程。
 - `offline/s2_api.py`：每日 S2 batch 请求及 v2 向量解析。
 - `offline/arxiv.py`、`offline/s2.py`：存量文件导入。
-- `offline/embeddings.py`：存量 GPU 编码、向量持久化和发布投影。
+- `offline/embeddings.py`：存量 GPU 编码、向量持久化和输入指纹校验。
 - `offline/publish.py`：版本索引发布与增量写入。
 - `offline_dashboard.py`、`offline_dashboard.html`：进度展示和命令包装。

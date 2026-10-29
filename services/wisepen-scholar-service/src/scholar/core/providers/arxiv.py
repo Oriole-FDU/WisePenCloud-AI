@@ -10,7 +10,9 @@ from datetime import date
 from elastic_transport import ApiError as ElasticApiError
 from elastic_transport import ConnectionError as ElasticConnectionError
 from elastic_transport import ConnectionTimeout as ElasticConnectionTimeout
+from httpx import TransportError as HttpxTransportError
 from openai import APIConnectionError, APIStatusError
+from qdrant_client.http.exceptions import ApiException as QdrantApiError
 
 from common.utils.ai_clients.embedding import EmbeddingClient
 from common.utils.retrieval import Candidate, RrfFusion
@@ -25,6 +27,7 @@ from scholar.domain.models.identifiers import (
 )
 from scholar.domain.models.paper import Paper
 from scholar.domain.repositories.paper_repository import PaperRepository
+from scholar.domain.repositories.paper_vector_repository import PaperVectorRepository
 from scholar.ml.specter import MODEL_SIGNATURE
 from scholar.core.providers.s2 import has_signals as s2_has_signals
 
@@ -98,6 +101,7 @@ class ArxivProvider:
         paper_repository: PaperRepository,
         embedding_client: EmbeddingClient,
         *,
+        vector_repository: PaperVectorRepository,
         candidate_limit: int = 200,
         num_candidates: int = 1000,
         rrf_k: int = 60,
@@ -105,6 +109,7 @@ class ArxivProvider:
         influential_weight: float = 0.10,
     ):
         self.paper_repository = paper_repository
+        self.vector_repository = vector_repository
         self.embedding_client = embedding_client
         self.candidate_limit = candidate_limit
         self.num_candidates = num_candidates
@@ -118,7 +123,7 @@ class ArxivProvider:
         return hashlib.sha256(
             json.dumps(
                 {
-                    "algorithm": "dismax-rrf-saturation-v1",
+                    "algorithm": "keyword-qdrant-rrf-saturation-v2",
                     "model": MODEL_SIGNATURE,
                     "candidates": self.candidate_limit,
                     "num_candidates": self.num_candidates,
@@ -172,7 +177,7 @@ class ArxivProvider:
                 limit=self.candidate_limit,
             )
 
-            # 语义召回：编码服务边界失败时降级为仅关键词结果，其余异常继续上抛。
+            # 只有编码服务拒绝查询向量时保留关键词部分结果；存储错误继续上抛。
             partial_error = None
             try:
                 vector = (await self.embedding_client.embed(texts=[query]))[0]
@@ -180,7 +185,7 @@ class ArxivProvider:
                 semantic = []
                 partial_error = provider_error_message(error)
             else:
-                semantic = await self.paper_repository.search_vector(
+                semantic_ids = await self.vector_repository.search(
                     vector=vector,
                     categories=categories,
                     published_after=published_after,
@@ -188,6 +193,8 @@ class ArxivProvider:
                     limit=self.candidate_limit,
                     num_candidates=self.num_candidates,
                 )
+                # ES 批量回填按输入 ID 顺序返回，保持 Qdrant 的相似度排名。
+                semantic = await self.paper_repository.get_many(semantic_ids)
 
             # 两路召回用 RRF 融合：同一身份跨路排序靠前者得分更高。
             fused = RrfFusion(k=self.rrf_k).fuse(
@@ -223,7 +230,13 @@ class ArxivProvider:
                 ],
                 partial_error,
             )
-        except (ElasticApiError, ElasticConnectionError, ElasticConnectionTimeout) as error:
+        except (
+            ElasticApiError,
+            ElasticConnectionError,
+            ElasticConnectionTimeout,
+            QdrantApiError,
+            HttpxTransportError,
+        ) as error:
             raise ProviderError(provider_error_message(error)) from error
 
     @staticmethod

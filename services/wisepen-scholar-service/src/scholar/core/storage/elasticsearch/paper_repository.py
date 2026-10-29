@@ -14,11 +14,9 @@ from scholar.domain.errors import ProviderError, provider_error_message
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.ml.specter import DIMENSIONS, MODEL_SIGNATURE
 
 ARXIV_MAPPING = {
     "dynamic": "strict",
-    "_meta": {"embedding_signature": MODEL_SIGNATURE},
     "properties": {
         **{
             field: {"type": "keyword"}
@@ -85,13 +83,6 @@ ARXIV_MAPPING["properties"]["title"]["fields"]["exact"] = {
     "normalizer": "scholar_title",
     "ignore_above": 8191,
 }
-ARXIV_MAPPING["properties"]["embedding"] = {
-    "type": "dense_vector",
-    "dims": DIMENSIONS,
-    "index": True,
-    "similarity": "l2_norm",
-    "index_options": {"type": "int8_hnsw", "m": 16, "ef_construction": 100},
-}
 ARXIV_INDEX_SETTINGS = {
     "analysis": {
         "normalizer": {
@@ -149,7 +140,6 @@ class ElasticsearchPaperRepository:
             index=self.alias,
             size=limit,
             track_total_hits=False,
-            source_excludes=["embedding"],
             query={
                 "bool": {
                     # 每个逻辑字段只取原形/词干中的最高分；字段之间不直接累加。
@@ -199,33 +189,20 @@ class ElasticsearchPaperRepository:
         )
         return [self._to_paper(hit["_source"]) for hit in response["hits"]["hits"]]
 
-    async def search_vector(
-        self,
-        *,
-        vector: list[float],
-        categories: list[str],
-        published_after: date | None,
-        published_before: date | None,
-        limit: int,
-        num_candidates: int = 1000,
-    ) -> list[Paper]:
-        response = await self.es.search(
+    async def get_many(self, arxiv_ids: list[str]) -> list[Paper]:
+        """按请求的身份顺序批量读取论文事实，供稠密候选融合使用。"""
+        if not arxiv_ids:
+            return []
+        response = await self.es.mget(
             index=self.alias,
-            size=limit,
-            track_total_hits=False,
-            source_excludes=["embedding"],
-            knn={
-                "field": "embedding",
-                "query_vector": vector,
-                "k": limit,
-                "num_candidates": num_candidates,
-                # 必须用 kNN 预过滤；事后过滤会提前截断合格候选。
-                "filter": self._filters(
-                    categories, published_after, published_before
-                ),
-            },
+            ids=arxiv_ids,
         )
-        return [self._to_paper(hit["_source"]) for hit in response["hits"]["hits"]]
+        papers = {
+            document["_id"]: self._to_paper(document["_source"])
+            for document in response["docs"]
+            if document["found"]
+        }
+        return [papers[arxiv_id] for arxiv_id in arxiv_ids if arxiv_id in papers]
 
     @staticmethod
     def _filters(categories, published_after, published_before):
@@ -266,7 +243,6 @@ class ElasticsearchPaperRepository:
                     {"index": self.alias},
                     {
                         "size": 2,
-                        "_source": {"excludes": ["embedding"]},
                         "query": {"term": {field: identifier.value}},
                     },
                 ]

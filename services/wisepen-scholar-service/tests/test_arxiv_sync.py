@@ -5,7 +5,7 @@ import pytest
 from offline.arxiv import open_database
 from offline.arxiv_oai import ArxivOaiHarvest, ArxivOaiRecord
 from offline.arxiv_sync import sync_arxiv
-from offline.embeddings import publication_documents
+from offline.embeddings import publication_documents, publication_vectors
 from offline.s2_api import S2SyncPaper
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 
@@ -691,9 +691,10 @@ async def test_s2_retry_without_oai_records_invalidates_arxiv_cache_after_publis
     row = db.execute(
         "SELECT arxiv_id,document FROM arxiv WHERE arxiv_id=?", [arxiv_id]
     ).fetchall()
-    document = publication_documents(db, row, vector_enabled=True)[0]
+    document = publication_documents(row)[0]
     assert document["metadata"]["s2"]["corpus_id"] == "701"
-    assert document["embedding"] == pytest.approx([0.1] * 768)
+    assert "embedding" not in document
+    assert publication_vectors(db, row)[arxiv_id] == pytest.approx([0.1] * 768)
 
 
 @pytest.mark.asyncio

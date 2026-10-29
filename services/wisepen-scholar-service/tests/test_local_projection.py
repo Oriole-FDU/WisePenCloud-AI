@@ -43,10 +43,14 @@ async def test_arxiv_search_preserves_full_facts_after_ranking(local_paper):
     original = deepcopy(local_paper)
     repository = SimpleNamespace(
         search=AsyncMock(return_value=[local_paper]),
-        search_vector=AsyncMock(return_value=[local_paper]),
+        get_many=AsyncMock(return_value=[local_paper]),
     )
     provider = ArxivProvider(
-        repository, SimpleNamespace(embed=AsyncMock(return_value=[[1.0]]))
+        repository,
+        SimpleNamespace(embed=AsyncMock(return_value=[[1.0]])),
+        vector_repository=SimpleNamespace(
+            search=AsyncMock(return_value=[local_paper.arxiv_id])
+        ),
     )
     result = await provider.search(
         query="paper",
@@ -65,7 +69,11 @@ async def test_arxiv_lookup_preserves_ambiguity_and_item_error(local_paper):
     ambiguous = PaperLookupMatch([local_paper, deepcopy(local_paper)])
     failed = PaperLookupMatch([], "shard unavailable")
     repository = SimpleNamespace(lookup=AsyncMock(return_value=[ambiguous, failed]))
-    provider = ArxivProvider(repository, embedding_client=None)
+    provider = ArxivProvider(
+        repository,
+        embedding_client=None,
+        vector_repository=SimpleNamespace(search=AsyncMock(return_value=[])),
+    )
 
     results = await provider.lookup(
         [

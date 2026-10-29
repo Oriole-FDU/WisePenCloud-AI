@@ -97,6 +97,7 @@ async def lifespan(app):
         await s2_http.aclose()
         await unpaywall_http.aclose()
         await container.embedding_api().close()
+        await container.qdrant().close()
         await container.redis().aclose()
         await container.elasticsearch().close()
 

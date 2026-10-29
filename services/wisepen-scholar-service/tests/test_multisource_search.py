@@ -233,6 +233,7 @@ async def test_arxiv_provider_maps_shared_field_and_does_not_forward_api_key():
                 )
             )
         ),
+        vector_repository=object(),
     )
 
     await provider.search(

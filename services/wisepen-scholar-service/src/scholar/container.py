@@ -4,6 +4,7 @@ import httpx
 from dependency_injector import containers, providers
 from openai import AsyncOpenAI
 from redis.asyncio import Redis
+from qdrant_client import AsyncQdrantClient
 
 from common.utils.ai_clients.embedding import EmbeddingClient
 from scholar.application.field_policies import FIELD_POLICIES
@@ -24,6 +25,7 @@ from scholar.core.storage.redis.discovery_cache import RedisDiscoveryCacheReposi
 from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
 from scholar.core.storage.redis.pdf_cache import RedisPdfCache
 from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
+from scholar.core.storage.qdrant.paper_vectors import QdrantPaperVectorRepository
 from scholar.ml.specter import DIMENSIONS, QUERY_MODEL
 from scholar.core.providers import ArxivProvider
 from scholar.core.providers import PROVIDER_POLICIES
@@ -35,6 +37,14 @@ from scholar.core.providers import UnpaywallProvider
 
 class Container(containers.DeclarativeContainer):
     config = providers.Configuration()
+    qdrant = providers.Singleton(
+        AsyncQdrantClient,
+        url=config.QDRANT_URL,
+        api_key=config.QDRANT_API_KEY,
+        timeout=config.SCHOLAR_REQUEST_TIMEOUT_SECONDS,
+        trust_env=False,
+    )
+    vector_repository = providers.Singleton(QdrantPaperVectorRepository, client=qdrant)
     elasticsearch = providers.Singleton(
         create_elasticsearch,
         uris=config.ELASTICSEARCH_URIS,
@@ -106,6 +116,7 @@ class Container(containers.DeclarativeContainer):
     arxiv_searcher = providers.Singleton(
         ArxivProvider,
         paper_repository=paper_repository,
+        vector_repository=vector_repository,
         embedding_client=embedding_client,
         candidate_limit=config.SCHOLAR_SEARCH_CANDIDATES,
         num_candidates=config.SCHOLAR_SEARCH_NUM_CANDIDATES,

@@ -1,9 +1,14 @@
 """ETL checkpoint、全量发布与增量发布的可观察行为。"""
 
+from types import SimpleNamespace
+
 import orjson
 import pytest
+from qdrant_client.http.models import Distance
 from offline.arxiv import database_status, import_arxiv, open_database
 from offline.publish import publish_arxiv
+from scholar.core.storage.qdrant.paper_vectors import point_id
+from scholar.ml.specter import DIMENSIONS
 
 
 @pytest.fixture
@@ -88,20 +93,18 @@ class FakeIndices:
 
     def __init__(self, es):
         self.es = es
+        self.created_mappings = []
+        self.updated_properties = []
 
     async def exists(self, *, index):
         return index in self.es.documents
 
     async def create(self, *, index, mappings, settings):
         self.es.documents[index] = {}
-
-    async def get_mapping(self, *, index):
-        from scholar.core.storage.elasticsearch.paper_repository import ARXIV_MAPPING
-
-        return {index: {"mappings": ARXIV_MAPPING}}
+        self.created_mappings.append(mappings)
 
     async def put_mapping(self, *, index, properties):
-        pass
+        self.updated_properties.append(properties)
 
     async def refresh(self, *, index):
         self.es.refreshes.append(index)
@@ -206,14 +209,59 @@ class FakeElasticsearch:
         return {"docs": docs}
 
 
+class FakeQdrant:
+    """模拟离线发布依赖的 Qdrant collection 与 point 写入边界。"""
+
+    def __init__(self, *, fail_upsert=False, fail_delete=False):
+        self.exists = False
+        self.points = {}
+        self.fail_upsert = fail_upsert
+        self.fail_delete = fail_delete
+        self.upsert_calls = []
+        self.delete_calls = []
+
+    async def collection_exists(self, *, collection_name):
+        return self.exists
+
+    async def create_collection(self, *, collection_name, vectors_config, hnsw_config):
+        self.exists = True
+
+    async def get_collection(self, *, collection_name):
+        vectors = SimpleNamespace(size=DIMENSIONS, distance=Distance.EUCLID)
+        return SimpleNamespace(
+            config=SimpleNamespace(params=SimpleNamespace(vectors=vectors))
+        )
+
+    async def create_payload_index(self, *, collection_name, field_name, field_schema):
+        pass
+
+    async def upsert(self, *, collection_name, points, wait):
+        self.upsert_calls.append(points)
+        if self.fail_upsert:
+            raise RuntimeError("simulated Qdrant upsert failure")
+        self.points.update((point.id, point) for point in points)
+
+    async def delete(self, *, collection_name, points_selector, wait):
+        self.delete_calls.append(points_selector.points)
+        if self.fail_delete:
+            raise RuntimeError("simulated Qdrant delete failure")
+        for identifier in points_selector.points:
+            self.points.pop(identifier, None)
+
+
+@pytest.fixture
+def qdrant():
+    return FakeQdrant()
+
+
 @pytest.mark.asyncio
 async def test_publish_acknowledges_only_successes_replays_failures_and_is_idempotent(
-    completed_database,
+    completed_database, qdrant
 ):
     # 成功与失败处于同一 bulk 时，只确认成功项；下一次调用应只重放剩余论文。
     es = FakeElasticsearch(bulk_statuses=[[201, 429]])
     with pytest.raises(RuntimeError):
-        await publish_arxiv(completed_database, es, "papers")
+        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
 
     failed_status = database_status(completed_database)
     assert failed_status["papers"] == 2
@@ -224,7 +272,7 @@ async def test_publish_acknowledges_only_successes_replays_failures_and_is_idemp
     assert es.mget_calls == []
     assert es.alias_updates == []
 
-    published = await publish_arxiv(completed_database, es, "papers")
+    published = await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
     assert published["pending"] == 0
     assert published["import"]["published"] is True
     assert [
@@ -236,7 +284,7 @@ async def test_publish_acknowledges_only_successes_replays_failures_and_is_idemp
     assert len(es.alias_updates) == 1
 
     # 已发布数据库的重复运行不会重复写入或再次切换别名。
-    await publish_arxiv(completed_database, es, "papers")
+    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
     assert len(es.bulk_calls) == 2
     assert len(es.alias_updates) == 1
     assert len(es.documents[target]) == 2
@@ -244,7 +292,7 @@ async def test_publish_acknowledges_only_successes_replays_failures_and_is_idemp
 
 @pytest.mark.asyncio
 async def test_initial_publish_deletes_tombstones_before_alias_switch(
-    completed_database,
+    completed_database, qdrant
 ):
     completed_database.execute(
         "INSERT INTO pending_delete VALUES ('2101.00001', '2026-10-27')"
@@ -252,7 +300,7 @@ async def test_initial_publish_deletes_tombstones_before_alias_switch(
     es = FakeElasticsearch(fail_alias_update=True)
 
     with pytest.raises(RuntimeError, match="alias update failure"):
-        await publish_arxiv(completed_database, es, "papers")
+        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
 
     assert (
         completed_database.execute("SELECT arxiv_id FROM pending_delete").fetchall()
@@ -265,7 +313,7 @@ async def test_initial_publish_deletes_tombstones_before_alias_switch(
     assert database_status(completed_database)["import"]["published"] is False
 
     es.fail_alias_update = False
-    result = await publish_arxiv(completed_database, es, "papers")
+    result = await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
 
     assert result["pending_delete"] == 0
     assert es.alias_updates
@@ -275,7 +323,7 @@ async def test_initial_publish_deletes_tombstones_before_alias_switch(
 
 @pytest.mark.asyncio
 async def test_unpublished_existing_target_replays_failed_tombstone_before_validation(
-    completed_database,
+    completed_database, qdrant
 ):
     target = "papers-existing"
     old_documents = {
@@ -298,7 +346,7 @@ async def test_unpublished_existing_target_replays_failed_tombstone_before_valid
     es.documents[target] = old_documents
 
     with pytest.raises(RuntimeError, match="full ES delete failed"):
-        await publish_arxiv(completed_database, es, "papers")
+        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
 
     assert completed_database.execute(
         "SELECT arxiv_id FROM pending_delete"
@@ -308,10 +356,11 @@ async def test_unpublished_existing_target_replays_failed_tombstone_before_valid
         == []
     )
     assert "2202.00002" in es.documents[target]
+    assert "embedding" not in es.indices.updated_properties[0]
     assert es.count_calls == []
     assert es.alias_updates == []
 
-    result = await publish_arxiv(completed_database, es, "papers")
+    result = await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
 
     assert result["pending_delete"] == 0
     assert result["import"]["published"] is True
@@ -323,10 +372,10 @@ async def test_unpublished_existing_target_replays_failed_tombstone_before_valid
 
 @pytest.mark.asyncio
 async def test_incremental_publish_indexes_and_deletes_with_pending_replay(
-    completed_database,
+    completed_database, qdrant
 ):
     es = FakeElasticsearch()
-    initial = await publish_arxiv(completed_database, es, "papers")
+    initial = await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
     target = initial["import"]["target_index"]
     updated = completed_database.execute(
         "SELECT document FROM arxiv WHERE arxiv_id='2201.00001'"
@@ -345,7 +394,7 @@ async def test_incremental_publish_indexes_and_deletes_with_pending_replay(
     es.bulk_statuses.append([201, 429])
 
     with pytest.raises(RuntimeError, match="incremental ES bulk failed"):
-        await publish_arxiv(completed_database, es, "papers")
+        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
 
     assert (
         completed_database.execute("SELECT arxiv_id FROM pending_publish").fetchall()
@@ -360,7 +409,7 @@ async def test_incremental_publish_indexes_and_deletes_with_pending_replay(
 
     # 模拟远端已删除、但本地尚未确认的崩溃点；重放的 404 应确认删除。
     del es.documents[target]["2202.00002"]
-    replayed = await publish_arxiv(completed_database, es, "papers")
+    replayed = await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
 
     assert replayed["pending"] == 0
     assert replayed["pending_delete"] == 0
@@ -376,12 +425,12 @@ async def test_incremental_publish_indexes_and_deletes_with_pending_replay(
     [(0, False), (None, True)],
 )
 async def test_publish_never_switches_alias_before_count_and_sample_match(
-    completed_database, count_override, corrupt_sample
+    completed_database, qdrant, count_override, corrupt_sample
 ):
     es = FakeElasticsearch(count_override=count_override, corrupt_sample=corrupt_sample)
 
     with pytest.raises(RuntimeError):
-        await publish_arxiv(completed_database, es, "papers")
+        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
 
     assert database_status(completed_database)["pending"] == 0
     assert es.alias_updates == []
@@ -389,7 +438,7 @@ async def test_publish_never_switches_alias_before_count_and_sample_match(
 
 @pytest.mark.asyncio
 async def test_duplicate_snapshot_ids_keep_latest_source_metadata(
-    tmp_path, snapshot_rows
+    tmp_path, snapshot_rows, qdrant
 ):
     # 真实快照含重复 ID；更新日期较旧的后续行不能覆盖较新的来源事实。
     newer = {**snapshot_rows[0], "title": "Latest title", "update_date": "2026-06-03"}
@@ -400,7 +449,7 @@ async def test_duplicate_snapshot_ids_keep_latest_source_metadata(
         imported = import_arxiv(db, source, batch_size=1)
         assert imported["papers"] == 1
         es = FakeElasticsearch()
-        result = await publish_arxiv(db, es, "papers")
+        result = await publish_arxiv(db, es, "papers", qdrant=qdrant)
         assert (
             es.documents[result["import"]["target_index"]]["2201.00001"]["title"]
             == "Latest title"
@@ -408,8 +457,8 @@ async def test_duplicate_snapshot_ids_keep_latest_source_metadata(
 
 
 @pytest.mark.asyncio
-async def test_embeddings_resume_reuse_input_and_survive_full_document_publication(
-    completed_database,
+async def test_embeddings_reuse_and_publish_separately_from_es_documents(
+    completed_database, qdrant
 ):
     from offline.embeddings import generate_embeddings
 
@@ -423,14 +472,24 @@ async def test_embeddings_resume_reuse_input_and_survive_full_document_publicati
 
     worker, es = Worker(), FakeElasticsearch()
     await generate_embeddings(completed_database, worker)
-    await publish_arxiv(completed_database, es, "papers")
+    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
     index = completed_database.execute(
         "SELECT target_index FROM import_state"
     ).fetchone()[0]
-    assert all(len(doc["embedding"]) == 768 for doc in es.documents[index].values())
+    assert all("embedding" not in doc for doc in es.documents[index].values())
+    assert "embedding" not in es.indices.created_mappings[0]["properties"]
+    assert "_meta" not in es.indices.created_mappings[0]
+    point = qdrant.points[point_id("2201.00001")]
+    assert point.vector == [1.0] * DIMENSIONS
+    assert point.payload == {
+        "arxiv_id": "2201.00001",
+        "categories": ["cs.AI"],
+        "category_groups": ["cs"],
+        "submitted_date": "2022-01-03T00:00:00Z",
+    }
     assert len(worker.inputs) == 2
     assert (await generate_embeddings(completed_database, worker))["written"] == 0
-    # 模拟 S2 增量 writer 更新元数据；全文重发仍包含匹配输入的向量。
+    # S2 只变更元数据时沿用同一向量，全文投影与向量投影都可幂等重放。
     completed_database.execute(
         'UPDATE arxiv SET document=json_merge_patch(document, \'{"metadata":{"s2":{"citation_count":0}}}\')'
     )
@@ -438,23 +497,64 @@ async def test_embeddings_resume_reuse_input_and_survive_full_document_publicati
         "INSERT OR IGNORE INTO pending_publish SELECT arxiv_id FROM arxiv"
     )
     await generate_embeddings(completed_database, worker)
-    await publish_arxiv(completed_database, es, "papers")
+    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
     assert len(worker.inputs) == 2
     assert all(
-        doc["metadata"]["s2"]["citation_count"] == 0 and "embedding" in doc
+        doc["metadata"]["s2"]["citation_count"] == 0 and "embedding" not in doc
         for doc in es.documents[index].values()
     )
-    # 输入变化后，先发布基础事实时不得继续使用旧向量，随后只编码这一篇。
+    # 标题变化使输入指纹失效；先删除旧 Qdrant point，再由 GPU 编码器补入新向量。
     completed_database.execute(
         "UPDATE arxiv SET document=json_merge_patch(document, '{\"title\":\"Changed title\"}') WHERE arxiv_id='2201.00001'"
     )
     completed_database.execute("INSERT INTO pending_publish VALUES ('2201.00001')")
-    await publish_arxiv(completed_database, es, "papers")
+    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
     assert "embedding" not in es.documents[index]["2201.00001"]
+    assert point_id("2201.00001") not in qdrant.points
     await generate_embeddings(completed_database, worker)
-    await publish_arxiv(completed_database, es, "papers")
+    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
     assert len(worker.inputs) == 3
-    assert list(es.documents[index]["2201.00001"]["embedding"]) == [1.0] * 768
+    assert "embedding" not in es.documents[index]["2201.00001"]
+    assert qdrant.points[point_id("2201.00001")].vector == [1.0] * DIMENSIONS
+
+    completed_database.execute("DELETE FROM arxiv WHERE arxiv_id='2202.00002'")
+    completed_database.execute(
+        "INSERT INTO pending_delete VALUES ('2202.00002', '2026-10-27')"
+    )
+    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    assert "2202.00002" not in es.documents[index]
+    assert point_id("2202.00002") not in qdrant.points
+
+
+@pytest.mark.asyncio
+async def test_qdrant_write_failure_keeps_pending_for_idempotent_replay(
+    completed_database,
+):
+    from offline.embeddings import generate_embeddings
+
+    class Worker:
+        async def encode(self, documents):
+            return [[2.0] * DIMENSIONS for _ in documents]
+
+    es = FakeElasticsearch()
+    qdrant = FakeQdrant(fail_upsert=True)
+    await generate_embeddings(completed_database, Worker())
+
+    with pytest.raises(RuntimeError, match="simulated Qdrant upsert failure"):
+        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+
+    assert database_status(completed_database)["pending"] == 2
+    target = next(iter(es.documents))
+    assert set(es.documents[target]) == {"2201.00001", "2202.00002"}
+    assert qdrant.points == {}
+
+    qdrant.fail_upsert = False
+    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    assert database_status(completed_database)["pending"] == 0
+    assert set(qdrant.points) == {
+        point_id("2201.00001"),
+        point_id("2202.00002"),
+    }
 
 
 @pytest.mark.asyncio

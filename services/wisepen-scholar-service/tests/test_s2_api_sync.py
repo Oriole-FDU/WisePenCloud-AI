@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from offline.arxiv import open_database
 from offline.arxiv_sync import sync_arxiv
-from offline.embeddings import publication_documents
+from offline.embeddings import publication_documents, publication_vectors
 from offline.s2_api import S2SyncClient
 from scholar.domain.models.identifiers import parse_identifier
 from test_arxiv_sync import FakeCache, FakeHarvester, active_record, harvest, publisher
@@ -52,8 +52,9 @@ async def test_daily_sync_requests_v2_and_persists_vector_for_publication(db):
     assert "embedding" not in requests[0][2]["params"]["fields"].split(",")
     assert result["pending_s2"] == 0
     rows = db.execute("SELECT arxiv_id,document FROM arxiv").fetchall()
-    document = publication_documents(db, rows, vector_enabled=True)[0]
-    assert document["embedding"] == [0.25] * 768
+    document = publication_documents(rows)[0]
+    assert "embedding" not in document
+    assert list(publication_vectors(db, rows)["2501.12948"]) == [0.25] * 768
     assert document["metadata"]["s2"]["citation_count"] == 0
     assert "is_open_access" not in document["metadata"]["s2"]
     assert document["metadata"]["s2"]["tldr"] == {"text": "summary", "model": "tldr"}

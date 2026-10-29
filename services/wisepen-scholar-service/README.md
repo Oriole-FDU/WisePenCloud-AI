@@ -57,7 +57,7 @@ Lookup 统一取得基础论文及可用调研 metadata，不再接受 purpose�
 
 `POST /scholar/papers/search` 接受 query、field、published_after/before、limit、source_scope。时间按首次提交日期包含两端过滤；领域采用 plan.md 的 arXiv 分类映射。查询缓存默认 10 分钟，缓存只存论文事实，每次重新构造执行情况。
 
-本地检索初版采用 English 子字段上的 BM25F 近似召回，标题/TLDR/摘要权重为 3:2:1，原词形和短语匹配加分，引用数不参与排序。新查询需要先完整回填子字段后再启用；算法、参数和不干扰现有离线任务的迁移边界见[检索基线](docs/search-baseline.md)。
+本地检索由 ES 承担关键词召回，Qdrant 承担 SPECTER2 稠密召回；两路使用相同的学科和含边界的日期过滤，经 RRF 融合后加入有界引用先验。模型与参数见[混合检索](docs/hybrid-search.md)。DuckDB 已有向量可直接批量迁移，ES 不再保存 embedding。
 
 `POST /scholar/papers/lookup` 接受 identifiers、field（默认 general），逐项保留输入顺序、重复输入、未找到、标识错误或 DOI 歧义。arXiv 版本和官方 URL 归一化，DOI 不区分大小写。没有本地来源映射的领域不会退回全库检索。所有业务响应使用 Common `R<T>`。
 

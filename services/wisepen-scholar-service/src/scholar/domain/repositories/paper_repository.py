@@ -21,16 +21,7 @@ class PaperRepository(Protocol):
         limit: int,
     ) -> list[Paper]: ...
 
-    async def search_vector(
-        self,
-        *,
-        vector: list[float],
-        categories: list[str],
-        published_after: date | None,
-        published_before: date | None,
-        limit: int,
-        num_candidates: int = 1000,
-    ) -> list[Paper]: ...
+    async def get_many(self, arxiv_ids: list[str]) -> list[Paper]: ...
 
     async def lookup(
         self, identifiers: list[PaperIdentifier]

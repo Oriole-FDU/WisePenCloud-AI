@@ -179,6 +179,8 @@ def scholar_client():
     container.embedding_client.override(
         providers.Object(AsyncMock(embed=AsyncMock(return_value=[[0.0] * 768])))
     )
+    container.vector_repository.override(providers.Object(AsyncMock(search=AsyncMock(return_value=[]))))
+    container.qdrant.override(providers.Object(AsyncMock(collection_exists=AsyncMock(return_value=True))))
     container.elasticsearch.override(providers.Object(es))
     container.redis.override(providers.Object(redis))
     container.s2_provider.override(providers.Object(MissingPapers()))
@@ -202,6 +204,8 @@ def scholar_client():
     finally:
         container.unwire()
         container.embedding_client.reset_override()
+        container.vector_repository.reset_override()
+        container.qdrant.reset_override()
         container.elasticsearch.reset_override()
         container.redis.reset_override()
         container.s2_provider.reset_override()

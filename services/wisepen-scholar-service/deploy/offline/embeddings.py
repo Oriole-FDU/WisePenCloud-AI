@@ -63,12 +63,14 @@ def reconcile_embeddings(db, arxiv_ids: list[str] | None = None):
     # 不删除可重用的有效向量；未重新编码前，publisher 通过输入指纹排除失效向量。
 
 
-def publication_documents(db, rows, *, vector_enabled: bool) -> list[dict]:
-    """一次批量读出匹配当前输入的向量；全文 index 写入不会丢失既有派生字段。"""
-    documents = [orjson.loads(document) for _, document in rows]
-    if not vector_enabled:
-        return documents
-    vectors = dict(
+def publication_documents(rows) -> list[dict]:
+    """读取仅供 Elasticsearch 全文索引使用的 arXiv 文档，不投影派生向量。"""
+    return [orjson.loads(document) for _, document in rows]
+
+
+def publication_vectors(db, rows) -> dict[str, tuple[float, ...]]:
+    """批量读取本批中仍匹配当前标题与摘要指纹的 DuckDB 向量。"""
+    return dict(
         db.execute(
             f"""
         SELECT a.arxiv_id,e.vector FROM arxiv a JOIN paper_embeddings e USING(arxiv_id)
@@ -78,11 +80,6 @@ def publication_documents(db, rows, *, vector_enabled: bool) -> list[dict]:
             [[arxiv_id for arxiv_id, _ in rows], MODEL_SIGNATURE],
         ).fetchall()
     )
-    for (arxiv_id, _), document in zip(rows, documents, strict=True):
-        if arxiv_id in vectors:
-            # DuckDB 定长 ARRAY 返回 tuple；JSON 投影统一成 list，便于与 ES 往返比对。
-            document["embedding"] = list(vectors[arxiv_id])
-    return documents
 
 
 class DocumentWorker:
@@ -206,58 +203,3 @@ async def generate_embeddings(
         else:
             print(json.dumps(event), flush=True)
     return {"written": written, "remaining": remaining}
-
-
-async def publish_embeddings(db, es, index: str, state: dict, progress):
-    """只更新 staging 索引；游标在成功批次后提交，重放不会触发重新编码。"""
-    after = state.get("embedding_after", "")
-    written = state.get("embedding_written", 0)
-    while True:
-        rows = db.execute(
-            """
-            WITH ids AS MATERIALIZED (
-            SELECT arxiv_id
-            FROM paper_embeddings
-            WHERE arxiv_id > ?
-              AND model_signature = ?
-            ORDER BY arxiv_id LIMIT 500
-            )
-            SELECT e.arxiv_id, e.vector
-            FROM paper_embeddings e
-                     JOIN ids USING (arxiv_id)
-            WHERE e.arxiv_id BETWEEN (SELECT min(arxiv_id) FROM ids) AND (SELECT max(arxiv_id) FROM ids)
-            ORDER BY e.arxiv_id
-            """,
-            [after, MODEL_SIGNATURE],
-        ).fetchall()
-        if not rows:
-            break
-        operations = []
-        for arxiv_id, vector in rows:
-            operations.extend(
-                [
-                    {"update": {"_index": index, "_id": arxiv_id}},
-                    {"doc": {"embedding": vector}},
-                ]
-            )
-        response = await es.bulk(operations=operations)
-        failures = [
-            item["update"]
-            for item in response["items"]
-            if not 200 <= item["update"]["status"] < 300
-        ]
-        if failures:
-            raise RuntimeError(
-                f"embedding bulk failed; previous cursor retained: {failures[:3]}"
-            )
-        after = rows[-1][0]
-        written += len(rows)
-        progress(
-            {
-                "stage": "embedding_publish",
-                "embedding_after": after,
-                "embedding_written": written,
-                "written": written,
-            }
-        )
-    return written
