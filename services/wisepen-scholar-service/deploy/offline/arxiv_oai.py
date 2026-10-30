@@ -50,6 +50,8 @@ class ArxivOaiHarvester:
         }
         records: list[ArxivOaiRecord] = []
         is_initial_request = True
+        page_num = 1
+        print(f"[OAI] 开始从 arXiv OAI-PMH 拉取增量记录 (起始日期: {from_date})...", flush=True)
 
         while True:
             # arXiv 要求相邻 Legacy API 请求至少间隔 3 秒；分页串行复用同一客户端连接。
@@ -70,6 +72,7 @@ class ArxivOaiHarvester:
                 code = error.attrib["code"]
                 message = error.text or ""
                 if code == "noRecordsMatch" and is_initial_request:
+                    print(f"[OAI] 未查询到新增或变动记录 (起始日期: {from_date})", flush=True)
                     return ArxivOaiHarvest(response_date, ())
                 # badResumptionToken 不返回已读页面的部分结果，调用方应从原确认游标重放。
                 raise ArxivOaiProtocolError(code, message)
@@ -78,7 +81,8 @@ class ArxivOaiHarvester:
             if page is None:
                 raise ValueError("OAI-PMH response is missing ListRecords")
 
-            for item in page.findall(f"{{{_OAI_NS}}}record"):
+            page_records = page.findall(f"{{{_OAI_NS}}}record")
+            for item in page_records:
                 header = item.find(f"{{{_OAI_NS}}}header")
                 identifier = header.findtext(f"{{{_OAI_NS}}}identifier")
                 datestamp = header.findtext(f"{{{_OAI_NS}}}datestamp")
@@ -99,9 +103,19 @@ class ArxivOaiHarvester:
 
                 records.append(ArxivOaiRecord(identifier, datestamp, deleted, metadata))
 
+            print(
+                f"[OAI] 已获取第 {page_num} 页 (本页 {len(page_records)} 篇，累计 {len(records)} 篇)...",
+                flush=True,
+            )
+            page_num += 1
+
             token_element = page.find(f"{{{_OAI_NS}}}resumptionToken")
             token = token_element.text if token_element is not None else None
             if token is None or not token.strip():
+                print(
+                    f"[OAI] 拉取完毕，共获取 {len(records)} 篇变动记录 (响应时间: {response_date})",
+                    flush=True,
+                )
                 return ArxivOaiHarvest(response_date, tuple(records))
 
             params = {"verb": "ListRecords", "resumptionToken": token}

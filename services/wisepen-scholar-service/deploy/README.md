@@ -62,7 +62,7 @@ uv run --no-sync python services/wisepen-scholar-service/deploy/run.py sync-arxi
 4. 待发布工作完成后推进 OAI 日期；S2 尚未收录的论文保留待办，下一轮重试。
 
 每日任务不启动 GPU，不下载 S2 release/diff 大包。标题或摘要变化会使旧向量失效；S2 尚未提供新向量时，论文仍可参与文本检索。仅引用数据变化时保留有效向量。S2
-平台 API 与在线富化共享 Redis 1 RPS 队列，离线请求不受在线队列准入阈值限制。
+在线与离线使用独立的 Redis 合流双通道：先 NOKEY，仅 429 投递 KEY 兜底；每批最多 `SCHOLAR_S2_BATCH_MAX_IDS`（默认 300）。两路默认各间隔 1.5 秒，分别由 `SCHOLAR_S2_NOKEY_INTERVAL_SECONDS`、`SCHOLAR_S2_KEY_INTERVAL_SECONDS` 配置。离线不受在线队列准入阈值限制，与在线 KEY 共用平台凭证的发射锚点，在线兜底优先；CLI 负责完整消费者生命周期。
 
 重放某日起的变化：
 
@@ -70,7 +70,7 @@ uv run --no-sync python services/wisepen-scholar-service/deploy/run.py sync-arxi
 uv run --no-sync python services/wisepen-scholar-service/deploy/run.py sync-arxiv --from 2026-10-20
 ```
 
-请求或发布失败会使命令非零退出，保留待办和已提交数据；重跑原命令继续。每个 DuckDB 文件同时只运行一个离线写任务。
+S2 每批最多重试 5 次，耗尽后保留日常待办并继续；已确认未收录或缺核心信号/向量的论文转入 `pending_s2_core_missing`，由 `recover-s2` 单独恢复。发布失败会使命令非零退出，保留待办和已提交数据；重跑原命令继续。每个 DuckDB 文件同时只运行一个离线写任务。
 
 Linux 每日执行模板为本目录 `scholar-sync.service`、`scholar-sync.timer`。修改仓库路径、uv 路径及 EnvironmentFile 后安装到
 systemd，执行 `systemctl enable --now scholar-sync.timer`。定时器每日 03:00 运行一条 `sync-arxiv` 命令。

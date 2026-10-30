@@ -97,6 +97,8 @@ async def lifespan(app):
     app.state.encoder.encode(["warmup"])
     try:
         async with AsyncExitStack() as lifecycle:
+            await container.s2_transport().start()
+            lifecycle.push_async_callback(container.s2_transport().aclose)
             if bootstrap_settings.NACOS_ENABLED:
                 # 监听客户端属于服务事件循环，不复用导入配置时临时线程内的客户端。
                 await lifecycle.enter_async_context(watch_policies(

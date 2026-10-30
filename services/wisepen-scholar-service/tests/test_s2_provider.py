@@ -20,6 +20,8 @@ class Permits:
     async def eval(self, script, key_count, *args):
         if key_count == 3 and args[2].endswith(":sequence"):
             return [1, 0]
+        if key_count == 4:
+            return 1
         return self.delay
 
 
@@ -52,15 +54,15 @@ async def test_lookup_requests_fixed_fields_and_returns_complete_paper():
         return httpx.Response(200, json=[paper_response(), None])
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
-        transport = S2Transport(http, Permits(), "platform-key")
+        transport = S2Transport(http, Permits(), "platform")
         provider = S2Provider(transport)
         results = await provider.lookup(
-            [parse_identifier("2310.08560"), parse_identifier("corpusid:123")]
+            [parse_identifier("2310.08560"), parse_identifier("corpusid:123")], api_key="user-key"
         )
 
     request = requests[0]
     assert "user-agent" not in request.headers
-    assert request.headers["x-api-key"] == "platform-key"
+    assert request.headers["x-api-key"] == "user-key"
     assert request.headers["content-type"] == "application/json"
     assert request.read() == b'{"ids":["arxiv:2310.08560","CorpusId:123"]}'
     fields = set(request.url.params["fields"].split(","))
@@ -127,7 +129,7 @@ async def test_lookup_preserves_all_authors(authors, expected):
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         provider = S2Provider(S2Transport(http, Permits(), "key"))
-        result = await provider.lookup([parse_identifier("2310.08560")])
+        result = await provider.lookup([parse_identifier("2310.08560")], api_key="user-key")
 
     assert result[0].papers[0].authors == expected
 
@@ -154,7 +156,7 @@ async def test_cancel_redis_failure_and_http_failure_propagate_without_bypassing
         delayed = S2Provider(S2Transport(http, Permits(delay=10000), "key"))
         with pytest.raises(TimeoutError):
             async with asyncio.timeout(0.01):
-                await delayed.lookup([parse_identifier("2310.08560")])
+                await delayed.lookup([parse_identifier("2310.08560")], api_key="user-key")
 
         class Unavailable:
             async def eval(self, *args):
@@ -162,13 +164,13 @@ async def test_cancel_redis_failure_and_http_failure_propagate_without_bypassing
 
         blocked = S2Provider(S2Transport(http, Unavailable(), "key"))
         with pytest.raises(ProviderError) as redis_error:
-            await blocked.lookup([parse_identifier("2310.08560")])
+            await blocked.lookup([parse_identifier("2310.08560")], api_key="user-key")
         assert str(redis_error.value) == "unavailable"
         assert isinstance(redis_error.value.__cause__, RedisConnectionError)
 
         limited = S2Provider(S2Transport(http, Permits(), "key"))
         with pytest.raises(ProviderError) as http_error:
-            await limited.lookup([parse_identifier("2310.08560")])
+            await limited.lookup([parse_identifier("2310.08560")], api_key="user-key")
         assert isinstance(http_error.value.__cause__, httpx.HTTPStatusError)
         assert str(http_error.value) == str(http_error.value.__cause__)
         assert "429" in str(http_error.value)

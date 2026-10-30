@@ -59,7 +59,10 @@ class AppSettings(PolicySettings):
 
     # --- 并发与超时 ---
     SCHOLAR_HF_CONCURRENCY: int = Field(default=4, gt=0)
-    SCHOLAR_S2_MAX_QUEUED_AHEAD: int = Field(default=5, ge=0)
+    SCHOLAR_S2_MAX_QUEUED_AHEAD: int = Field(default=3, ge=0)
+    SCHOLAR_S2_NOKEY_INTERVAL_SECONDS: float = Field(default=1.5, gt=0)
+    SCHOLAR_S2_KEY_INTERVAL_SECONDS: float = Field(default=1.5, gt=0)
+    SCHOLAR_S2_BATCH_MAX_IDS: int = Field(default=300, ge=1, le=500)
     SCHOLAR_REQUEST_TIMEOUT_SECONDS: float = Field(default=25, gt=0)
     SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS: float = Field(default=120, gt=0)
 

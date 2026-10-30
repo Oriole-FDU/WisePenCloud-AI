@@ -116,7 +116,7 @@ async def test_real_es_qdrant_duckdb_publish_and_online_hybrid_search(tmp_path):
                     status = await publish_arxiv(
                         db, es, alias, qdrant=qdrant, batch_size=2
                     )
-                    assert status["pending_publish"] == 0
+                    assert status["pending"] == 0
                     assert status["pending_delete"] == 0
                     assert (await qdrant.count(COLLECTION, exact=True)).count == 4
 
@@ -154,7 +154,7 @@ async def test_real_es_qdrant_duckdb_publish_and_online_hybrid_search(tmp_path):
                         limit=10,
                         num_candidates=10,
                     )
-                    assert set(before) == {"2501.00001"}
+                    assert set(before) == {"2501.00001", "2501.00004"}
 
                     qdrant_order = await vector_repository.search(
                         vector=semantic_best,
@@ -196,7 +196,7 @@ async def test_real_es_qdrant_duckdb_publish_and_online_hybrid_search(tmp_path):
                         "INSERT INTO pending_publish VALUES('2501.00001')"
                     )
                     status = await publish_arxiv(db, es, alias, qdrant=qdrant)
-                    assert status["pending_publish"] == 0
+                    assert status["pending"] == 0
                     assert (await qdrant.count(COLLECTION, exact=True)).count == 4
 
                     # 标题变化使旧向量失效，旧 Qdrant 点被移除，ES 仍发布论文全文。
@@ -213,7 +213,7 @@ async def test_real_es_qdrant_duckdb_publish_and_online_hybrid_search(tmp_path):
                         "INSERT INTO pending_publish VALUES('2501.00002')"
                     )
                     status = await publish_arxiv(db, es, alias, qdrant=qdrant)
-                    assert status["pending_publish"] == 0
+                    assert status["pending"] == 0
                     assert (await qdrant.count(COLLECTION, exact=True)).count == 3
                     assert await qdrant.retrieve(
                         COLLECTION, ids=[point_id("2501.00002")]

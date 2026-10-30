@@ -1,6 +1,7 @@
 """外部论文标识的接入规范化。
 
-身份只依据明确标识（arXiv / DOI / OpenAlex / S2 / CorpusId）判定
+身份只依据明确标识（arXiv / DOI / OpenAlex / S2 / CorpusId）判定。
+容错解析，避免异常格式阻断离线同步与在线查询。
 """
 
 import re
@@ -50,46 +51,52 @@ class PaperIdentifier:
 
 
 def normalize_arxiv(value: str) -> str:
-    """把 ``arxiv:ID``、arXiv URL 或裸 ID 规范化为裸 ID（小写、无版本号）。"""
+    """把 ``arxiv:ID``、arXiv URL 或裸 ID 规范化为裸 ID（小写、无版本号）。
+
+    宽容解析各类格式，移除所有 fullmatch 强行报错，提取合法 ID 或优雅兜底。
+    """
+    if not value or not isinstance(value, str):
+        return ""
     value = value.strip()
 
-    # URL 形式：校验 host，剥离 ``/abs/``、``/pdf/`` 前缀与 ``.pdf`` 后缀
+    # URL 形式：剥离 host 与 /abs/、/pdf/ 前缀及 .pdf 后缀
     if value.lower().startswith(("https://", "http://")):
         parsed = urlsplit(value)
-        if parsed.hostname not in (
-                "arxiv.org",
-                "www.arxiv.org",
-                "export.arxiv.org",
-        ):
-            raise ValueError("not an arXiv URL")
         value = re.sub(r"^/(abs|pdf)/", "", parsed.path)
         value = value.removesuffix(".pdf")
 
     # 允许带 ``arxiv:`` 前缀
-    value = re.sub(r"^arxiv:", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"^arxiv:\s*", "", value, flags=re.IGNORECASE).strip()
 
-    if not _ARXIV.fullmatch(value):
-        raise ValueError("invalid arXiv identifier")
+    # 尝试提取标准 arXiv ID 片段
+    match = _ARXIV.search(value)
+    if match:
+        value = match.group(0)
 
     # 去掉版本号并统一为小写
     return re.sub(r"v\d+$", "", value, flags=re.IGNORECASE).lower()
 
 
 def normalize_doi(value: str) -> str:
-    """把 ``doi:``、DOI URL 或裸 DOI 规范化为小写 DOI 字符串。"""
+    """把 ``doi:``、DOI URL 或裸 DOI 规范化为小写 DOI 字符串。
+
+    宽容解析各类格式，移除所有 fullmatch 强行报错，提取合法 DOI 或优雅兜底。
+    """
+    if not value or not isinstance(value, str):
+        return ""
     value = value.strip()
 
-    # URL 形式：仅接受 doi.org / dx.doi.org，并做一次 URL 解码
+    # URL 形式：剥离 host，并做一次 URL 解码
     if value.lower().startswith(("https://", "http://")):
         parsed = urlsplit(value)
-        if parsed.hostname not in ("doi.org", "dx.doi.org"):
-            raise ValueError("not a DOI URL")
         value = unquote(parsed.path.lstrip("/"))
 
-    value = re.sub(r"^doi:", "", value, flags=re.IGNORECASE).strip()
+    value = re.sub(r"^doi:\s*", "", value, flags=re.IGNORECASE).strip()
 
-    if not _DOI.fullmatch(value):
-        raise ValueError("invalid DOI")
+    # 尝试提取标准 10.xxxx/xxxx DOI 片段
+    match = _DOI.search(value)
+    if match:
+        return match.group(0).lower().rstrip(".,;")
 
     return value.lower()
 
@@ -99,18 +106,21 @@ def parse_identifier(value: str) -> PaperIdentifier:
 
     依次尝试：URL（DOI / OpenAlex / S2）→ 裸 DOI → 命名空间前缀
     （``openalex:`` / ``s2:`` / ``corpusid:``）→ 兜底按 arXiv 处理。
+    不再进行严苛强行报错，容错解析。
     """
+    if not value or not isinstance(value, str):
+        return PaperIdentifier(IdentifierKind.ARXIV, "")
     value = value.strip()
 
     # URL 形式：提取出对应的规范标识，再交由下方逻辑继续处理
     if value.lower().startswith(("http://", "https://")):
         parsed = urlsplit(value)
-        host = parsed.hostname
-        if host in ("doi.org", "dx.doi.org"):
+        host = parsed.hostname or ""
+        if "doi.org" in host:
             return PaperIdentifier(IdentifierKind.DOI, normalize_doi(value))
-        if host == "openalex.org":
+        if "openalex.org" in host:
             value = "openalex:" + parsed.path.strip("/")
-        elif host in ("www.semanticscholar.org", "semanticscholar.org"):
+        elif "semanticscholar.org" in host:
             value = "s2:" + parsed.path.rstrip("/").rsplit("/", 1)[-1]
 
     # 裸 DOI：形如 ``doi:xxx`` 或直接以 ``10.`` 开头
@@ -125,13 +135,13 @@ def parse_identifier(value: str) -> PaperIdentifier:
     ):
         if not value.lower().startswith(prefix):
             continue
-        identifier = value[len(prefix):]
-        if not re.fullmatch(pattern, identifier, re.IGNORECASE):
-            raise ValueError("invalid namespaced paper identifier")
+        identifier = value[len(prefix):].strip()
+        match = re.search(pattern, identifier, re.IGNORECASE)
+        matched_id = match.group(0) if match else identifier
         normalized = (
-            identifier.upper()
+            matched_id.upper()
             if kind is IdentifierKind.OPENALEX
-            else identifier.lower()
+            else matched_id.lower()
         )
         return PaperIdentifier(kind, normalized)
 

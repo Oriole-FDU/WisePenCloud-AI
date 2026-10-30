@@ -58,13 +58,17 @@ async def test_daily_sync_requests_v2_and_persists_vector_for_publication(db):
     assert document["metadata"]["s2"]["citation_count"] == 0
     assert "is_open_access" not in document["metadata"]["s2"]
     assert document["metadata"]["s2"]["tldr"] == {"text": "summary", "model": "tldr"}
-    assert document["metadata"]["s2"]["observed_at"]
+    # 发布投影剔除抓取时间，完整来源事实仍保存在 DuckDB 中。
+    import orjson
+
+    assert orjson.loads(rows[0][1])["metadata"]["s2"]["observed_at"]
+    assert "observed_at" not in document["metadata"]["s2"]
     assert "embedding" not in document["metadata"]["s2"]
     assert db.execute("SELECT count(*) FROM pending_embeddings").fetchone()[0] == 0
 
 
 @pytest.mark.asyncio
-async def test_missing_s2_vector_keeps_daily_retry_without_gpu(db):
+async def test_missing_s2_vector_moves_to_recovery_queue_without_gpu(db):
     request = AsyncMock(
         return_value=[
             {
@@ -85,7 +89,10 @@ async def test_missing_s2_vector_keeps_daily_retry_without_gpu(db):
         cache=FakeCache(),
         arxiv_cache=FakeCache(),
     )
-    assert result["pending_s2"] == 1
+    assert result["pending_s2"] == 0
+    assert db.execute("SELECT arxiv_id,reason FROM pending_s2_core_missing").fetchall() == [
+        ("2501.12948", "core_missing")
+    ]
     assert db.execute("SELECT count(*) FROM pending_embeddings").fetchone()[0] == 1
 
 

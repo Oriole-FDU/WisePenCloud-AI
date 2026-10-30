@@ -10,7 +10,7 @@ CPU 查询编码模型并同时提供论文 API 与 `/v1/embeddings`。HTTP 进�
 
 `NACOS_ENABLED=false` 时，`SCHOLAR_POLICIES` 环境变量使用 YAML 或 JSON 文本，例如 `.env` 中使用单引号包裹完整 JSON 对象。此模式不会启动监听。
 
-平台凭证为 `S2_API_KEY`、`OPENALEX_API_KEY`、`HF_TOKEN`，仅用于 lookup 和富化，用户 BYOK 优先。HF/OpenAlex 搜索及 HF 发现必须使用用户 BYOK，缺 key 时不读取该来源搜索缓存，也不回退平台 key。S2 用户 key 使用独立 Redis FIFO，平台 key 继续与离线同步共享队列。模型位置由 `SCHOLAR_EMBEDDING_MODELS_PATH` 指定。
+平台凭证为 `S2_API_KEY`、`OPENALEX_API_KEY`、`HF_TOKEN`，仅用于 lookup 和富化，用户 BYOK 优先。HF/OpenAlex 搜索及 HF 发现必须使用用户 BYOK，缺 key 时不读取该来源搜索缓存，也不回退平台 key。S2 用户 key 使用独立 Redis FIFO；在线与离线各自使用 NOKEY → 429 → KEY 双通道及独立合流队列，同一平台 key 的发射锚点共享且在线兜底优先。模型位置由 `SCHOLAR_EMBEDDING_MODELS_PATH` 指定。
 
 PDF 补救使用 `UNPAYWALL_EMAIL`，默认 `jzsun24@m.fudan.edu.cn`；单次请求超时 5 秒、并发 4，结果使用独立 DOI 缓存。
 

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import orjson
 import pytest
-from qdrant_client.http.models import Distance
+from qdrant_client.http.models import Distance, VectorParams
 from offline.arxiv import database_status, import_arxiv, open_database
 from offline.publish import publish_arxiv
 from scholar.core.storage.qdrant.paper_vectors import point_id
@@ -227,7 +227,7 @@ class FakeQdrant:
         self.exists = True
 
     async def get_collection(self, *, collection_name):
-        vectors = SimpleNamespace(size=DIMENSIONS, distance=Distance.EUCLID)
+        vectors = VectorParams(size=DIMENSIONS, distance=Distance.EUCLID)
         return SimpleNamespace(
             config=SimpleNamespace(params=SimpleNamespace(vectors=vectors))
         )
@@ -398,7 +398,7 @@ async def test_incremental_publish_indexes_and_deletes_with_pending_replay(
 
     assert (
         completed_database.execute("SELECT arxiv_id FROM pending_publish").fetchall()
-        == []
+        == [("2201.00001",)]
     )
     assert completed_database.execute(
         "SELECT arxiv_id FROM pending_delete"
@@ -416,7 +416,14 @@ async def test_incremental_publish_indexes_and_deletes_with_pending_replay(
     assert replayed["import"]["published"] is True
     assert "2202.00002" not in es.documents[target]
     assert len(es.alias_updates) == 1
-    assert es.bulk_calls[-1] == [{"delete": {"_index": target, "_id": "2202.00002"}}]
+    # 增量基线在 ES、Qdrant 整批完成后确认；此前 ES 成功项也需要幂等重放。
+    actions = [
+        (action, details["_id"])
+        for operation in es.bulk_calls[-1]
+        for action, details in operation.items()
+        if action in {"index", "delete"}
+    ]
+    assert actions == [("index", "2201.00001"), ("delete", "2202.00002")]
 
 
 @pytest.mark.asyncio

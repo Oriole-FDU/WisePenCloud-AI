@@ -8,7 +8,7 @@
   AppSettings/Nacos 控制。离线 SQL 输入指纹继续负责向量续跑复用和增量失效判断。
 - Scholar main 一次启动 HTTP 与 CPU 查询编码，使用工作区依赖；NACOS_ENABLED 可关闭 Nacos。没有额外启动入口。
 - CS 检索来源为 `[arxiv, huggingface]`。通用富化链保持 arxiv → s2 → openalex；CS 的领域增量为 HF。
-- OpenAlex/HF 搜索和 HF 发现仅使用用户 BYOK，缺 key 时在缓存读取前禁用来源；无可用来源返回 503。lookup/富化仍允许平台 key，用户 key 优先。S2 支持 BYOK，用户 FIFO 按 key 隔离且不设排队阈值，平台 FIFO 继续与离线共享 1 RPS。
+- OpenAlex/HF 搜索和 HF 发现仅使用用户 BYOK，缺 key 时在缓存读取前禁用来源；无可用来源返回 503。lookup/富化仍允许平台 key，用户 key 优先。S2 支持 BYOK，用户 FIFO 按 key 隔离且不设排队阈值，平台跨进程合流走 NOKEY/KEY 双通道，离线与在线 KEY 共享节流且在线优先。
 - 搜索候选缓存区分日期、领域与模型版本，用户 limit 只裁剪返回结果。search/discover 以 candidates-v2 保存投影前候选；完整论文 lookup 缓存版本不变，仍按来源和稳定身份共享。论文事实缓存跨凭证共享，但搜索和发现必须先通过 BYOK 可用性判断；在途 I/O 按有效 key 隔离。
 - lookup 统一返回基础论文和调研 metadata，删除 purpose、重复的 item.metadata 及 enrichment_status；metadata 只出现在 paper 内。HF 可独立提供基础论文。
 - 各 provider 实现信号、别名、TTL 及字段投影，由 providers/policies.py 中的 ProviderPolicy 注册层统一组装。search、lookup、discover 最终出口统一投影；具体字段合同见 [README](../README.md#模型可见-metadata)。
@@ -327,18 +327,16 @@ ETL 负责。
 - Chat 的 `required_keys=()` 必须允许未配置用户继续使用本地工具；保留 Web Search 等必需配置工具的现有行为，工具选择和禁用仍使用已有机制。
 - 内部 HTTP 沿用仓库的可信来源、安全上下文、Nacos RPC 和响应包装；不新建用户密钥管理或认证协议。
 
-### 7.2 S2 FIFO、全局 1 RPS 与生命周期
+### 7.2 S2 跨进程合流、双通道与生命周期
 
-- 在线适配器与离线步骤共享 S2Transport 的 Redis FIFO 和发送配额。一个 HTTP 请求为一个等待项，batch
-  不按论文数量计数；先查缓存、合并相同在途请求再入队。
-- 在线准入读取 Nacos `SCHOLAR_S2_MAX_QUEUED_AHEAD`（默认 5）。前方等待数大于阈值才拒绝，5 项允许、6 项跳过；拥堵时不发 S2
-  HTTP，正常进入 OpenAlex 回退。离线调用不应用准入阈值，仍共用发送配额。
-- Redis TIME、序号与原子脚本协调跨实例 FIFO；只有队首能领取许可，全局相邻许可至少间隔 1000 ms。沿用既有 send-permit
-  键，以兼容当前尚未重启的离线进程；旧进程仍共享 1 RPS，新版进程之间保证 FIFO。本次不重启已有离线任务。
-- 等待项租约为 15 秒，轮询时续租；后续入队和轮询清除过期项。取消、超时移除本次等待项；Redis 故障不得绕过限流发送请求。
-- `execution.queued_ahead` 是可选准入快照，未入队或缓存命中时不伪造数值；同来源有多个批次时取最大快照。拥堵为 not_executed
-  并保留原因，不新增日志、实时查询接口或监控任务。
-- Scholar 请求预算默认 25 秒、MCP 30 秒，包含排队及外部调用。ETL 使用独立 CLI 和持久进度；HTTP 不启动 ETL，取消在线请求不会转成后台富化任务。
+- 在线平台请求先查缓存，再进入 Redis 统一合流。原子入队去重 ID、保存调用位置，每个首发 batch 最多 300 个不同 ID，支持配置 1～500。
+- NOKEY 首发无 key，仅 HTTP 429 将原 batch 投递平台 KEY；其他 HTTP 错误和网络异常直接失败。两路默认各间隔 1.5 秒，独立配置、独立发射锚点。
+- 收集间隔为相邻实际发射的最小间隔；首轮收集一轮，满批不提前发车，空批不发车，延迟不追赶，HTTP 响应等待不阻塞下一次发射。
+- 在线新建首发批次应用 `SCHOLAR_S2_MAX_QUEUED_AHEAD`（默认 3），前方 3 批允许、4 批拒绝；合入已有批次不另占队列项。KEY 兜底不做队长准入。
+- 每个实例使用一个 Redis 回执流，将跨进程结果按原调用顺序、重复位置及 null 分发。`execution.queued_ahead` 只保留首发快照，缓存命中不携带旧排队信息。
+- BYOK 直接进入按 key 指纹隔离的 KEY FIFO。离线不参加线上合流，使用独立的 NOKEY → 429 → KEY 双通道，复用平台 key；KEY 与在线共用发射锚点，在线兜底优先。
+- 两路消费者以 Redis 租约保证每路唯一有效发射者；实际启动 HTTP 后记账、释放队首。取消只解除该调用关联；整批无人等待时不发送。已领取但因崩溃结果不明的批次不自动重放。
+- 协调器随服务 lifespan 启停，任务和回执设 TTL；Redis 故障不得绕过队列。发布时在线与离线一并更新，避免混跑旧许可协议。线上 S2 调用预算默认 25 秒，离线使用 ETL 请求预算。
 
 ### 7.3 缓存
 
@@ -407,7 +405,7 @@ TTL 均可配置。search、discover、lookup 均先查共享缓存，命中不�
 - **交付**：lookup 三种 purpose、固定的精选字段集、单篇/批量适配、论文缓存、全局限流和有界等待。
 - **验收**：真实批量请求不含 User-Agent、不使用 authors 子字段；混合 ID 正确映射，PDF 与 BibTeX 可用；discover 不逐篇
   lookup；三种 lookup purpose 共用完整获取；成功通用 searcher 的搜索不再触发通用富化。三种 purpose 按有效信号短路，0/false
-  保留真实含义。验证跨进程 1 RPS、同请求复用、取消及超时/429
+  保留真实含义。验证跨进程合流、独立发射间隔、同请求复用、取消及超时/429
   部分结果。
 - **边界**：不获取 embedding、作者画像等弃选字段，不预置逐作者补查、未知字段自动裁剪或持久用户任务队列。
 - **提交**：`feat(scholar): add purpose-aware s2 enrichment`。
@@ -428,7 +426,7 @@ TTL 均可配置。search、discover、lookup 均先查共享缓存，命中不�
 
 - **交付**：每日 OAI + 批量 S2 API（含 specter_v2）、发布恢复、外部调度说明；补齐 Scholar 镜像、Compose 和 Jenkins 接入配置。
 - **验收**：真实验证新增、普通修改、身份变化、S2 暂未收录、旧 DOI 记录通过 API 关联、OAI 删除和向量失效；单独缺附加字段不触发
-  API，在线 lookup 与 ETL 共享 1 RPS。注入 Bulk 部分成功后失败，重放完成且未提前推进游标；基础论文不被 S2
+  API，在线 KEY 兜底与 ETL 共享凭证发射节奏，在线优先。注入 Bulk 部分成功后失败，重放完成且未提前推进游标；基础论文不被 S2
   删除误删；构建上下文排除数据集和凭证，部署部分仅验收配置及说明。
 - **边界**：不在 HTTP 进程运行 ETL，不因同步引入跨库事务。部署部分交付配置和运行说明，不启动本机
   Docker、不构建镜像、不执行生产部署；这些操作不是本次完成门槛。

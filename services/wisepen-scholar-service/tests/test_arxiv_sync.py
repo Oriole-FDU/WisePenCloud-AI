@@ -1,10 +1,12 @@
 from xml.etree import ElementTree as ET
+from unittest.mock import AsyncMock
 
 import orjson
 import pytest
 from offline.arxiv import open_database
 from offline.arxiv_oai import ArxivOaiHarvest, ArxivOaiRecord
-from offline.arxiv_sync import sync_arxiv
+from offline import arxiv_sync
+from offline.arxiv_sync import recover_s2_missing, sync_arxiv
 from offline.embeddings import publication_documents, publication_vectors
 from offline.s2_api import S2SyncPaper
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
@@ -329,8 +331,8 @@ async def test_two_oai_updates_preserve_s2_and_publish_tombstone_and_new_record(
     assert document_for(db, deleted_id) is None
     assert document_for(db, new_id)["doi"] == "10.1234/new"
     assert db.execute(
-        "SELECT reason FROM pending_s2 WHERE arxiv_id=?", [new_id]
-    ).fetchone() == ("new_paper",)
+        "SELECT reason FROM pending_s2_core_missing WHERE arxiv_id=?", [new_id]
+    ).fetchone() == ("not_found",)
     assert publish_calls[1]["pending_delete"] == [(deleted_id,)]
     assert new_id in [row[0] for row in publish_calls[1]["pending_publish"]]
     assert cursor_for(db) == ("2026-10-23T00:02:00Z",)
@@ -429,58 +431,34 @@ async def test_strong_s2_identity_conflicts_are_diagnostic_and_not_projected(db)
         ).fetchall()
     }
     assert {
-        "doi_conflict",
         "enrichment_doi_conflict",
         "enrichment_arxiv_conflict",
         "enrichment_corpus_conflict",
     } <= reasons
-    assert db.execute("SELECT count(*) FROM pending_s2").fetchone()[0] == 4
+    assert db.execute("SELECT count(*) FROM pending_s2").fetchone()[0] == 0
 
 
 @pytest.mark.asyncio
-async def test_s2_failure_replays_from_unadvanced_cursor(db):
+async def test_transient_s2_failure_retries_before_publishing(db, monkeypatch):
+    monkeypatch.setattr(arxiv_sync.asyncio, "sleep", AsyncMock())
     arxiv_id = "2404.00001"
     result = s2_lookup(arxiv_id, "10.1234/replay", "401")
-    same_harvest = harvest(
+    harvester = FakeHarvester(harvest(
         "2026-10-25T00:02:00Z",
         active_record(arxiv_id, "2026-10-24", doi="10.1234/replay"),
-    )
-    harvester = FakeHarvester(same_harvest, same_harvest)
-    events = []
-    enricher = FakeS2Client(
-        RuntimeError("simulated S2 failure"), [result], events=events
-    )
+    ))
+    enricher = FakeS2Client(RuntimeError("simulated S2 failure"), [result])
     publish, publish_calls = publisher(db)
-    cache = FakeCache(events=events)
-
-    with pytest.raises(RuntimeError, match="simulated S2 failure"):
-        await sync_arxiv(
-            db,
-            harvester,
-            enricher,
-            publish=publish,
-            cache=cache,
-            arxiv_cache=FakeArxivCache(),
-        )
-    assert events == ["invalidate", "lookup"]
-    assert cursor_for(db) is None
-    assert document_for(db, arxiv_id) is not None
-    assert db.execute("SELECT count(*) FROM pending_s2").fetchone()[0] == 1
-    assert publish_calls == []
-
-    await sync_arxiv(
-        db,
-        harvester,
-        enricher,
-        publish=publish,
-        cache=cache,
-        arxiv_cache=FakeArxivCache(),
+    outcome = await sync_arxiv(
+        db, harvester, enricher, publish=publish,
+        cache=FakeCache(), arxiv_cache=FakeArxivCache(),
     )
-
-    assert harvester.from_dates == ["2026-10-18", "2026-10-18"]
+    assert len(enricher.calls) == 2
+    assert len(publish_calls) == 1
+    assert harvester.from_dates == ["2026-10-18"]
     assert document_for(db, arxiv_id)["metadata"]["s2"]["corpus_id"] == "401"
     assert cursor_for(db) == ("2026-10-25T00:02:00Z",)
-    assert db.execute("SELECT count(*) FROM pending_s2").fetchone()[0] == 0
+    assert outcome["pending_s2"] == 0
 
 
 @pytest.mark.asyncio
@@ -633,7 +611,7 @@ async def test_arxiv_cache_failure_after_publish_replays_aliases_before_checkpoi
 
 
 @pytest.mark.asyncio
-async def test_s2_retry_without_oai_records_invalidates_arxiv_cache_after_publish(db):
+async def test_recovery_without_oai_records_invalidates_arxiv_cache_after_publish(db):
     arxiv_id = "2501.12949"
     harvester = FakeHarvester(
         harvest("2026-10-28T00:00:00Z", active_record(arxiv_id, "2026-10-28")),
@@ -650,55 +628,33 @@ async def test_s2_retry_without_oai_records_invalidates_arxiv_cache_after_publis
         await publish()
 
     first = await sync_arxiv(
-        db,
-        harvester,
-        client,
-        publish=publish_with_event,
-        cache=s2_cache,
-        arxiv_cache=arxiv_cache,
+        db, harvester, client, publish=publish_with_event,
+        cache=s2_cache, arxiv_cache=arxiv_cache,
     )
+    assert first["pending_s2"] == 0
+    assert db.execute("SELECT reason FROM pending_s2_core_missing").fetchall() == [("not_found",)]
+    recovered = await recover_s2_missing(db, client, publish=publish_with_event, cache=s2_cache)
     second = await sync_arxiv(
-        db,
-        harvester,
-        client,
-        publish=publish_with_event,
-        cache=s2_cache,
-        arxiv_cache=arxiv_cache,
+        db, harvester, client, publish=publish_with_event,
+        cache=s2_cache, arxiv_cache=arxiv_cache,
     )
-
-    assert first["pending_s2"] == 1
-    assert first["response_date"] == "2026-10-28T00:00:00Z"
+    assert recovered["recovered"] == 1
+    assert recovered["remaining"] == 0
     assert second["harvested"] == 0
-    assert second["s2_enriched"] == 1
     assert second["pending_s2"] == 0
-    assert second["response_date"] == "2026-10-29T00:00:00Z"
-    assert events == [
-        "invalidate",
-        "lookup",
-        "publish",
-        "arxiv_invalidate",
-        "invalidate",
-        "lookup",
-        "invalidate",
-        "publish",
-        "arxiv_invalidate",
-    ]
-    assert (
-        PaperIdentifier(IdentifierKind.CORPUS_ID, "701") in arxiv_cache.invalidations[1]
-    )
+    assert PaperIdentifier(IdentifierKind.CORPUS_ID, "701") in arxiv_cache.invalidations[-1]
+    assert max(i for i, event in enumerate(events) if event == "publish") < max(
+        i for i, event in enumerate(events) if event == "arxiv_invalidate")
     assert cursor_for(db) == ("2026-10-29T00:00:00Z",)
     assert len(publish_calls) == 2
-    row = db.execute(
-        "SELECT arxiv_id,document FROM arxiv WHERE arxiv_id=?", [arxiv_id]
-    ).fetchall()
-    document = publication_documents(row)[0]
-    assert document["metadata"]["s2"]["corpus_id"] == "701"
-    assert "embedding" not in document
-    assert publication_vectors(db, row)[arxiv_id] == pytest.approx([0.1] * 768)
+    rows = db.execute("SELECT arxiv_id,document FROM arxiv WHERE arxiv_id=?", [arxiv_id]).fetchall()
+    assert publication_documents(rows)[0]["metadata"]["s2"]["corpus_id"] == "701"
+    assert publication_vectors(db, rows)[arxiv_id] == pytest.approx([0.1] * 768)
 
 
 @pytest.mark.asyncio
-async def test_failed_metadata_refresh_survives_oai_replay_with_valid_vector(db):
+async def test_exhausted_metadata_refresh_keeps_pending_for_next_sync(db, monkeypatch):
+    monkeypatch.setattr(arxiv_sync.asyncio, "sleep", AsyncMock())
     arxiv_id = "2501.12948"
     harvester = FakeHarvester(
         harvest("2026-10-26T00:00:00Z", active_record(arxiv_id, "2026-10-26")),
@@ -707,35 +663,20 @@ async def test_failed_metadata_refresh_survives_oai_replay_with_valid_vector(db)
     )
     refreshed = s2_lookup(arxiv_id, None, "201", citation_count=7)
     enricher = FakeS2Client(
-        [s2_lookup(arxiv_id, None, "201")], RuntimeError("429"), [refreshed]
+        [s2_lookup(arxiv_id, None, "201")],
+        *(RuntimeError("429") for _ in range(5)), [refreshed],
     )
     publish, _ = publisher(db)
-    await sync_arxiv(
-        db,
-        harvester,
-        enricher,
-        publish=publish,
-        cache=FakeCache(),
-        arxiv_cache=FakeArxivCache(),
-    )
-    with pytest.raises(RuntimeError):
-        await sync_arxiv(
-            db,
-            harvester,
-            enricher,
-            publish=publish,
-            cache=FakeCache(),
-            arxiv_cache=FakeArxivCache(),
-        )
-    assert db.execute("SELECT count(*) FROM pending_s2").fetchone()[0] == 1
-    result = await sync_arxiv(
-        db,
-        harvester,
-        enricher,
-        publish=publish,
-        cache=FakeCache(),
-        arxiv_cache=FakeArxivCache(),
-    )
-    assert len(enricher.calls) == 3
+    await sync_arxiv(db, harvester, enricher, publish=publish,
+                     cache=FakeCache(), arxiv_cache=FakeArxivCache())
+    failed = await sync_arxiv(db, harvester, enricher, publish=publish,
+                              cache=FakeCache(), arxiv_cache=FakeArxivCache())
+    # 当前离线基线：S2 重试耗尽不阻塞 OAI 游标，但保留待办及旧的有效向量。
+    assert failed["pending_s2"] == 1
+    assert cursor_for(db) == ("2026-10-27T00:00:00Z",)
+    assert db.execute("SELECT count(*) FROM pending_embeddings").fetchone()[0] == 0
+    result = await sync_arxiv(db, harvester, enricher, publish=publish,
+                              cache=FakeCache(), arxiv_cache=FakeArxivCache())
+    assert len(enricher.calls) == 7
     assert result["pending_s2"] == 0
     assert document_for(db, arxiv_id)["metadata"]["s2"]["citation_count"] == 7

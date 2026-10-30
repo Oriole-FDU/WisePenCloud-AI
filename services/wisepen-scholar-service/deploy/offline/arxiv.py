@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -12,10 +13,19 @@ from offline.embeddings import EMBEDDING_SCHEMA, reconcile_embeddings
 from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
 
 
-def open_database(path: str | Path) -> duckdb.DuckDBPyConnection:
+def open_database(
+    path: str | Path,
+    *,
+    memory_limit: str | None = None,
+    threads: int | str | None = None,
+) -> duckdb.DuckDBPyConnection:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    db = duckdb.connect(str(path))
+    config = {
+        "memory_limit": memory_limit or os.getenv("DUCKDB_MEMORY_LIMIT", "4GB"),
+        "threads": str(threads or os.getenv("DUCKDB_THREADS", "4")),
+    }
+    db = duckdb.connect(str(path), config=config)
     db.execute("""
                CREATE TABLE IF NOT EXISTS arxiv
                (
@@ -30,6 +40,7 @@ def open_database(path: str | Path) -> duckdb.DuckDBPyConnection:
                    document
                    JSON
                );
+               CREATE INDEX IF NOT EXISTS idx_arxiv_doi ON arxiv(doi);
                CREATE TABLE IF NOT EXISTS pending_publish
                (
                    arxiv_id

@@ -81,6 +81,10 @@ class Container(containers.DeclarativeContainer):
         redis=redis,
         api_key=config.S2_API_KEY,
         max_queued_ahead=config.SCHOLAR_S2_MAX_QUEUED_AHEAD,
+        nokey_interval=config.SCHOLAR_S2_NOKEY_INTERVAL_SECONDS,
+        key_interval=config.SCHOLAR_S2_KEY_INTERVAL_SECONDS,
+        batch_max_ids=config.SCHOLAR_S2_BATCH_MAX_IDS,
+        request_timeout=config.SCHOLAR_REQUEST_TIMEOUT_SECONDS,
     )
     s2_provider = providers.Singleton(S2Provider, transport=s2_transport)
     paper_repository = providers.Singleton(

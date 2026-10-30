@@ -161,7 +161,6 @@ def scholar_client():
         {
             "SCHOLAR_INDEX_ALIAS": "test-scholar-papers",
             "FROM_SOURCE_SECRET": FROM_SOURCE_SECRET,
-            "SCHOLAR_EMBEDDING_BASE_URL": "http://127.0.0.1:1/v1",
             "SCHOLAR_EMBEDDING_TIMEOUT_SECONDS": 0.1,
             "SCHOLAR_QUERY_CACHE_TTL_SECONDS": 60,
             "SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS": 900,
@@ -171,7 +170,10 @@ def scholar_client():
             "S2_API_KEY": "test-s2-key",
             "UNPAYWALL_EMAIL": "jzsun24@m.fudan.edu.cn",
             "SCHOLAR_HF_CONCURRENCY": 4,
-            "SCHOLAR_S2_MAX_QUEUED_AHEAD": 5,
+            "SCHOLAR_S2_MAX_QUEUED_AHEAD": 3,
+            "SCHOLAR_S2_NOKEY_INTERVAL_SECONDS": 1.5,
+            "SCHOLAR_S2_KEY_INTERVAL_SECONDS": 1.5,
+            "SCHOLAR_S2_BATCH_MAX_IDS": 300,
             "SCHOLAR_PAPER_CACHE_TTL_SECONDS": 86400,
             "SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS": 3600,
         }
@@ -348,7 +350,7 @@ def test_lookup_preserves_input_order_duplicates_and_per_identifier_status(
         "found",
         "found",
         "found",
-        "invalid_identifier",
+        "not_found",
         "not_found",
         "ambiguous",
         "not_found",
@@ -361,6 +363,7 @@ def test_lookup_preserves_input_order_duplicates_and_per_identifier_status(
     ] == [
         {"arxiv_id": "2201.00001"},
         {"doi": "10.5555/p1.first"},
+        {"arxiv_id": "not-a-paper"},
         {"doi": "10.5555/p1.ambiguous"},
         {"arxiv_id": "2202.99999"},
     ]

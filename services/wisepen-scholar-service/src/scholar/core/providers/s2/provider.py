@@ -1,146 +1,20 @@
-"""Semantic Scholar 批量论文查询适配。"""
+"""S2 论文查询、身份映射、来源信号与公开元数据投影。"""
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
-from contextvars import ContextVar
 from datetime import UTC, date, datetime
-from uuid import uuid4
 
 import httpx
-from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from scholar.domain.errors import ProviderBusy, ProviderError, provider_error_message
+from scholar.domain.errors import ProviderError, provider_error_message
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import (
-    IdentifierKind,
-    PaperIdentifier,
-    normalize_arxiv,
-    normalize_doi,
-    parse_identifier,
+    IdentifierKind, PaperIdentifier, normalize_arxiv, normalize_doi, parse_identifier,
 )
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
-
-# S2 排队观测：记录当前请求在 FIFO 队列前等待的项数；不属于论文事实，不进入论文缓存。
-s2_queued_ahead: ContextVar[int | None] = ContextVar("s2_queued_ahead", default=None)
-
-# 使用 Redis 时钟和原子脚本，避免实例时钟差异改变 FIFO 或发送间隔。
-# 租约只覆盖等待期；崩溃进程的占位由后续入队/轮询清理，不需要后台清扫器。
-_PRUNE = """
-local clock = redis.call('TIME')
-local now = clock[1] * 1000 + math.floor(clock[2] / 1000)
-for _, member in ipairs(redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', now)) do
-    redis.call('ZREM', KEYS[1], member)
-    redis.call('ZREM', KEYS[2], member)
-end
-"""
-_ADMIT = (
-    _PRUNE
-    + """
-local ahead = redis.call('ZCARD', KEYS[1])
-if tonumber(ARGV[2]) >= 0 and ahead > tonumber(ARGV[2]) then
-    return {0, ahead}
-end
-local sequence = redis.call('INCR', KEYS[3])
-redis.call('ZADD', KEYS[1], sequence, ARGV[1])
-redis.call('ZADD', KEYS[2], now + 15000, ARGV[1])
-return {1, ahead}
-"""
-)
-_PERMIT = (
-    _PRUNE
-    + """
-if not redis.call('ZSCORE', KEYS[1], ARGV[1]) then return -1 end
-redis.call('ZADD', KEYS[2], now + 15000, ARGV[1])
-local head = redis.call('ZRANGE', KEYS[1], 0, 0)[1]
-if head ~= ARGV[1] then return 250 end
-local previous = tonumber(redis.call('GET', KEYS[3]) or '0')
-local delay = previous + 1000 - now
-if delay > 0 then return delay end
-redis.call('ZREM', KEYS[1], ARGV[1])
-redis.call('ZREM', KEYS[2], ARGV[1])
-redis.call('SET', KEYS[3], now, 'PX', 2000)
-return 0
-"""
-)
-_REMOVE = """
-redis.call('ZREM', KEYS[1], ARGV[1])
-redis.call('ZREM', KEYS[2], ARGV[1])
-return 0
-"""
-
-
-class S2Transport:
-    def __init__(
-        self,
-        http: httpx.AsyncClient,
-        redis: Redis,
-        api_key: str,
-        *,
-        max_queued_ahead: int | None = None,
-        namespace: str = "scholar:s2",
-    ):
-        self.http, self.redis, self._api_key = http, redis, api_key
-        # None 用于离线调用：参与同一配额，但不应用在线拥堵准入阈值。
-        self.max_queued_ahead = max_queued_ahead
-        self.namespace = namespace
-        self.http.headers.pop("User-Agent", None)
-
-    async def request(self, method: str, path: str, *, api_key: str | None = None, **kwargs):
-        effective_key = api_key or self._api_key
-        platform = effective_key == self._api_key
-        # 平台沿用原队列以继续与离线共享；用户配额按 key 隔离且不设准入阈值。
-        namespace = self.namespace if platform else f"{self.namespace}:byok:{hashlib.sha256(effective_key.encode()).hexdigest()}"
-        queue, leases, sequence, permit = [f"{namespace}:{suffix}" for suffix in ("queue", "leases", "sequence", "send-permit")]
-        max_ahead = self.max_queued_ahead if platform else None
-        member = uuid4().hex
-        try:
-            accepted, ahead = await self.redis.eval(
-                _ADMIT,
-                3,
-                queue,
-                leases,
-                sequence,
-                member,
-                -1 if max_ahead is None else max_ahead,
-            )
-            s2_queued_ahead.set(ahead)
-            if not accepted:
-                raise ProviderBusy(ahead, max_ahead)
-            while True:
-                delay = await self.redis.eval(
-                    _PERMIT,
-                    3,
-                    queue,
-                    leases,
-                    permit,
-                    member,
-                )
-                if delay < 0:
-                    raise ProviderError(
-                        "S2 waiting lease expired before send permission"
-                    )
-                if delay == 0:
-                    break
-                await asyncio.sleep(delay / 1000)
-        finally:
-            # 取消、超时、Redis 故障均不得留下可绕过配额的发送路径；
-            # 清理失败不吞掉，交由调用者感知。
-            await self.redis.eval(_REMOVE, 2, queue, leases, member)
-
-        request = self.http.build_request(
-            method,
-            f"https://api.semanticscholar.org/{path}",
-            headers={"x-api-key": effective_key},
-            **kwargs,
-        )
-        response = await self.http.send(request)
-        response.raise_for_status()
-        return response.json()
-
+from .transport import S2Transport
 
 IDENTITY_FIELDS = ("paperId", "corpusId", "externalIds", "url", "title")
 ENRICHMENT_FIELDS = (

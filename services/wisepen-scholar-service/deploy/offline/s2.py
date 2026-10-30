@@ -1265,9 +1265,12 @@ def _write_s2_document_changes(db: duckdb.DuckDBPyConnection) -> int:
                 ).decode(),
                 flush=True,
             )
+        # DOI 索引依赖阻止旧表改名；索引随替换表在同一事务中重建。
+        db.execute("DROP INDEX idx_arxiv_doi")
         db.execute("ALTER TABLE arxiv RENAME TO _arxiv_s2_previous")
         db.execute("ALTER TABLE _arxiv_s2_replacement RENAME TO arxiv")
         db.execute("DROP TABLE _arxiv_s2_previous")
+        db.execute("CREATE INDEX idx_arxiv_doi ON arxiv(doi)")
         for range_start, range_end in ranges:
             db.execute(
                 """INSERT

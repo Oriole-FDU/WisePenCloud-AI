@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from contextlib import asynccontextmanager
@@ -63,23 +64,68 @@ def reconcile_embeddings(db, arxiv_ids: list[str] | None = None):
     # 不删除可重用的有效向量；未重新编码前，publisher 通过输入指纹排除失效向量。
 
 
+_ES_S2_ALLOWED_FIELDS = {
+    "corpus_id",
+    "citation_count",
+    "influential_citation_count",
+    "is_open_access",
+    "tldr",
+    "release",
+    "paper_source",
+    "tldr_source",
+}
+
+
 def publication_documents(rows) -> list[dict]:
-    """读取仅供 Elasticsearch 全文索引使用的 arXiv 文档，不投影派生向量。"""
-    return [orjson.loads(document) for _, document in rows]
+    """读取仅供 Elasticsearch 全文索引使用的 arXiv 文档，严格清洗只保留 ES 规范字段。"""
+    documents = []
+    for _, raw in rows:
+        doc = orjson.loads(raw)
+        meta = doc.get("metadata")
+        if meta and isinstance(meta.get("s2"), dict):
+            doc["metadata"] = {
+                **meta,
+                "s2": {k: v for k, v in meta["s2"].items() if k in _ES_S2_ALLOWED_FIELDS},
+            }
+        documents.append(doc)
+    return documents
 
 
 def publication_vectors(db, rows) -> dict[str, tuple[float, ...]]:
-    """批量读取本批中仍匹配当前标题与摘要指纹的 DuckDB 向量。"""
-    return dict(
-        db.execute(
-            f"""
-        SELECT a.arxiv_id,e.vector FROM arxiv a JOIN paper_embeddings e USING(arxiv_id)
-        WHERE a.arxiv_id IN (SELECT unnest(?)) AND e.model_signature=?
-            AND e.input_fingerprint={INPUT_HASH_SQL}
-    """,
-            [[arxiv_id for arxiv_id, _ in rows], MODEL_SIGNATURE],
-        ).fetchall()
-    )
+    """批量读取本批中仍匹配当前标题与摘要指纹的 DuckDB 向量。
+    直接在内存计算当前指纹并单表点查 paper_embeddings，避免对全库几百万行大表执行笛卡尔级关联与底层 SHA256。
+    """
+    fingerprints = {}
+    for arxiv_id, raw in rows:
+        try:
+            doc = orjson.loads(raw) if isinstance(raw, (str, bytes)) else raw
+            title = doc.get("title") or ""
+            abstract = doc.get("abstract") or ""
+            fingerprints[arxiv_id] = hashlib.sha256(
+                f"{title}\x00{abstract}".encode("utf-8")
+            ).hexdigest()
+        except Exception:
+            continue
+
+    if not fingerprints:
+        return {}
+
+    id_list = list(fingerprints.keys())
+    res = db.execute(
+        """
+        SELECT arxiv_id, input_fingerprint, vector
+        FROM paper_embeddings
+        WHERE arxiv_id IN (SELECT unnest(?)) AND model_signature = ?
+        """,
+        [id_list, MODEL_SIGNATURE],
+    ).fetchall()
+
+    valid_vectors = {}
+    for arxiv_id, stored_fp, vector in res:
+        if stored_fp == fingerprints.get(arxiv_id):
+            valid_vectors[arxiv_id] = vector
+
+    return valid_vectors
 
 
 class DocumentWorker:

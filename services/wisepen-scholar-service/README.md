@@ -67,7 +67,13 @@ Lookup 统一取得基础论文及可用调研 metadata，不再接受 purpose�
 
 现有 MCP 服务的 search、lookup、discover 工具使用 Nacos RpcClient 调用这些 HTTP 接口，返回解包后的 data；来源路由和论文归一化不复制到 MCP。配置驱动的检索及医疗多源扩展验收见 [P3 记录](docs/p3-acceptance.md)。
 
-S2 支持用户 BYOK 覆盖平台 key。平台 Redis FIFO 与离线步骤共享 1 RPS，在线前方超过 `SCHOLAR_S2_MAX_QUEUED_AHEAD`（默认 5）则跳过；离线不应用阈值。用户 key 按 SHA-256 指纹隔离 FIFO，每 key 1 RPS，不设排队阈值，等待至现有工具超时。提供与平台相同的 key 仍归平台队列。`execution.queued_ahead` 展示准入快照，缓存命中不携带旧排队信息。
+S2 平台请求通过 Redis 跨实例合流：收集周期内按 ID 去重，每批最多 `SCHOLAR_S2_BATCH_MAX_IDS`（默认 300，范围 1～500）。NOKEY 首发不携带 key，仅 HTTP 429 将原批次投递平台 KEY 兜底；网络错误及其他状态直接失败。两路按各自上次实际发射时刻节流，间隔分别由 `SCHOLAR_S2_NOKEY_INTERVAL_SECONDS`、`SCHOLAR_S2_KEY_INTERVAL_SECONDS` 配置，默认均为 1.5 秒；满批不提前发车，慢响应不阻塞下一批发射。首轮收集一个间隔，之后空闲超过间隔时立即发出当前待办。
+
+在线仅在新建首发批次时应用 `SCHOLAR_S2_MAX_QUEUED_AHEAD`（默认 3）：前方 3 批允许、4 批拒绝，合入已有批次不额外占队列项。KEY 兜底不做队长拒绝，由请求预算终止等待。Redis 回执按调用的原顺序还原重复 ID 与 null；`execution.queued_ahead` 是首发准入快照，缓存命中不携带旧排队信息。
+
+用户 BYOK 直接使用按 SHA-256 指纹隔离的 KEY FIFO，不参加平台合流，不设队长阈值。提供与平台相同的 key 仍归平台对象。离线使用独立的 NOKEY → 429 → KEY 双通道及合流待办，不参加线上合流；复用平台 key，KEY 与线上共享发射锚点，在线兜底待办优先。离线 CLI 统一管理消费者启停，不再额外 sleep。消费者随服务 lifespan 启停，部署时线上与离线同时更新，避免混跑旧发送协议。
+
+合流与分发的自动化验收使用独立 Redis 测试命名空间及 HTTP 替身，覆盖不同实例和独立进程，不消耗真实 S2 配额。
 
 ## 模型可见 metadata
 
