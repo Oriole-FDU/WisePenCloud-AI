@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from datetime import date
-from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from scholar.application.field_policies import FIELD_POLICIES
 from scholar.application.discovery import PaperDiscoveryQuery
 from scholar.application.lookup import PaperLookup
 from scholar.application.search import PaperSearch, SourceScope
@@ -55,28 +53,17 @@ class LookupRequest(BaseModel):
         return PaperLookup(**self.model_dump())
 
 
-DiscoveryField = StrEnum(
-    "DiscoveryField",
-    {
-        field.name.upper(): field.value
-        for field, policy in FIELD_POLICIES.items()
-        if policy.discoverer is not None
-    },
-    module=__name__,
-)
-
-
 class DiscoveryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    field: DiscoveryField
+    field: AcademicField
     period: DiscoveryPeriod = DiscoveryPeriod.DAILY
     sort: DiscoverySort = DiscoverySort.TRENDING
     limit: int = Field(default=10, ge=1, le=15)
 
     def to_query(self) -> PaperDiscoveryQuery:
         return PaperDiscoveryQuery(
-            field=AcademicField(self.field.value),
+            field=self.field,
             period=self.period,
             sort=self.sort,
             limit=self.limit,

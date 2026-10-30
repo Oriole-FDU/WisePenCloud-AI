@@ -6,11 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
 
-from scholar.application.field_policies import (
-    COMMON_ENRICHERS,
-    FIELD_POLICIES,
-    FieldPolicy,
-)
+from scholar.domain.interfaces.field_policies import ScholarPolicyProvider
 from scholar.application.lookup_runner import LookupRunner
 from scholar.application.paper_projection import project_paper
 from scholar.application.pdf_recover import PaperPdfRecoverService
@@ -58,12 +54,12 @@ class PaperLookupService:
         lookup: LookupRunner,
         pdf: PaperPdfRecoverService,
         *,
-        policies: dict[AcademicField, FieldPolicy] | None = None,
+        policies: ScholarPolicyProvider,
         platform_credentials: dict[str, str] | None = None,
     ):
         self.lookup_runner = lookup
         self.pdf = pdf
-        self.policies = FIELD_POLICIES if policies is None else policies
+        self.policies = policies
         self.platform_credentials = platform_credentials or {}
 
     async def lookup(
@@ -72,6 +68,7 @@ class PaperLookupService:
         *,
         credentials: dict[str, str] | None = None,
     ) -> LookupResult:
+        policies = self.policies.current
         credentials = self.platform_credentials | (credentials or {})
         positions: dict[PaperIdentifier, list[int]] = {}
         items = []
@@ -85,10 +82,10 @@ class PaperLookupService:
             items.append(LookupItem(value, LookupStatus.NOT_FOUND))
 
         targets = [self.lookup_runner.target(identity) for identity in positions]
-        policy = self.policies[query.field]
+        policy = policies.fields[query.field]
         sources = [
             source
-            for source in COMMON_ENRICHERS
+            for source in policies.common_enrichers
             if source in self.lookup_runner.bindings
         ]
         execution = await self.lookup_runner.run(

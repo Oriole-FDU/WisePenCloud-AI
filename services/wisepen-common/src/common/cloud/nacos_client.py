@@ -1,4 +1,5 @@
 ﻿import socket
+from collections.abc import Awaitable
 from typing import Callable, Optional
 from common.logger import error, info
 from v2.nacos import (
@@ -131,16 +132,27 @@ class NacosClientManager:
         except Exception as e:
             error("nacos instance deregister failed.", service=self.bootstrap_settings.SERVICE_NAME, )
 
-    async def watch_config(self, callback: Callable[[dict], None]) -> None:
-        """启动 Nacos 配置监听"""
+    async def watch_config(self, callback: Callable[[str, str, str, str], Awaitable[None]]) -> None:
+        """订阅配置；SDK 按 namespace、group、data_id、content 调用异步回调。"""
         client = await self._get_config_client()
-        try:
-            # 注册监听器，当 Nacos 上的配置文件发生变化时，触发回调
-            await client.add_config_watcher(
-                data_id=self.bootstrap_settings.NACOS_DATA_ID,
-                group=self.bootstrap_settings.NACOS_GROUP,
-                cb=callback
-            )
-            info("nacos config watcher registered.", data_id=self.bootstrap_settings.NACOS_DATA_ID)
-        except Exception as e:
-            error("nacos config watcher register failed.", data_id=self.bootstrap_settings.NACOS_DATA_ID, exc=e)
+        # 订阅失败必须传播，避免服务启动后实际没有热更新能力。
+        await client.add_listener(
+            data_id=self.bootstrap_settings.NACOS_DATA_ID,
+            group=self.bootstrap_settings.NACOS_GROUP,
+            listener=callback,
+        )
+        info("nacos config watcher registered.", data_id=self.bootstrap_settings.NACOS_DATA_ID)
+
+    async def unwatch_config(self, callback: Callable[[str, str, str, str], Awaitable[None]]) -> None:
+        client = await self._get_config_client()
+        await client.remove_listener(
+            data_id=self.bootstrap_settings.NACOS_DATA_ID,
+            group=self.bootstrap_settings.NACOS_GROUP,
+            listener=callback,
+        )
+
+    async def close_config(self) -> None:
+        """关闭所属事件循环中的配置客户端，也适用于初始拉取或订阅失败后的清理。"""
+        if self._config_client is not None:
+            await self._config_client.shutdown()
+            self._config_client = None

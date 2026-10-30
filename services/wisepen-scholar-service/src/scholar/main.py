@@ -1,9 +1,10 @@
 """沿用 Chat/Sandbox 的引导、配置、容器和 HTTP 生命周期。"""
 
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 from common.logger import info, setup_logging_intercept
+from common.cloud.nacos_client import NacosClientManager
 from common.observability import setup_observability
 from scholar.core.config.bootstrap_settings import bootstrap_settings
 
@@ -30,10 +31,12 @@ from scholar.api.router import api_router
 from scholar.container import container
 from scholar.core.config.app_settings import settings
 from scholar.core.config.nacos import nacos_client_manager
+from scholar.core.config.policy_settings import ScholarPolicyStore, validate_policy_sources, watch_policies
 from scholar.domain.errors import ProviderError, ScholarErrorCode
 from scholar.ml.specter import DEFAULT_MODELS, SpecterEncoder
 
-container.config.from_dict(settings.model_dump())
+container.config.from_dict(settings.model_dump(exclude={"SCHOLAR_POLICIES"}))
+container.policy_store.override(ScholarPolicyStore(settings.SCHOLAR_POLICIES))
 container.wire(modules=[health, papers])
 
 
@@ -74,6 +77,13 @@ def setup_exception_handlers(app: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(app):
     info("service starting.", service=bootstrap_settings.SERVICE_NAME)
+    policy_store = container.policy_store()
+    capabilities = {
+        "search_sources": container.search_bindings.kwargs.keys(),
+        "lookup_sources": container.lookup_bindings.kwargs.keys(),
+        "discovery_sources": container.discovery_bindings.kwargs.keys(),
+    }
+    validate_policy_sources(policy_store.current, **capabilities)
     openalex_http = container.openalex_http()
     huggingface_http = container.huggingface_http()
     s2_http = container.s2_http()
@@ -86,9 +96,14 @@ async def lifespan(app):
     )
     app.state.encoder.encode(["warmup"])
     try:
-        if bootstrap_settings.NACOS_ENABLED:
-            await nacos_client_manager.register_instance()
-        yield
+        async with AsyncExitStack() as lifecycle:
+            if bootstrap_settings.NACOS_ENABLED:
+                # 监听客户端属于服务事件循环，不复用导入配置时临时线程内的客户端。
+                await lifecycle.enter_async_context(watch_policies(
+                    policy_store, NacosClientManager(bootstrap_settings), **capabilities
+                ))
+                await nacos_client_manager.register_instance()
+            yield
     finally:
         if bootstrap_settings.NACOS_ENABLED:
             await nacos_client_manager.deregister_instance()

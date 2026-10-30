@@ -1,4 +1,5 @@
 """验证 lookup runner 的缓存、信号短路、错误和并发生命周期合同。"""
+from policy_fakes import make_policy_store
 
 from pdf_fakes import make_pdf_service
 
@@ -156,7 +157,7 @@ def runner(provider, *, cache=None, extra_bindings=None):
 
 
 def service(provider, *, cache=None):
-    return PaperLookupService(runner(provider, cache=cache), pdf=make_pdf_service())
+    return PaperLookupService(runner(provider, cache=cache), pdf=make_pdf_service(), policies=make_policy_store())
 
 
 @pytest.mark.asyncio
@@ -198,7 +199,7 @@ async def test_negative_and_positive_lookup_results_use_distinct_ttls_and_cache_
         }
     )
     provider = FakeProvider({found: PaperLookupMatch([paper])})
-    lookup = PaperLookupService(runner(provider, cache=cache), pdf=make_pdf_service())
+    lookup = PaperLookupService(runner(provider, cache=cache), pdf=make_pdf_service(), policies=make_policy_store())
 
     absent = await lookup.lookup(PaperLookup(["corpusid:404"]))
     present = await lookup.lookup(PaperLookup(["corpusid:123"]))
@@ -216,7 +217,7 @@ async def test_cache_read_failure_does_not_fall_through_to_provider():
     cache = FakeCache()
     cache.fail_get = True
     provider = FakeProvider({identifier: PaperLookupMatch([make_paper()])})
-    lookup = PaperLookupService(runner(provider, cache=cache), pdf=make_pdf_service())
+    lookup = PaperLookupService(runner(provider, cache=cache), pdf=make_pdf_service(), policies=make_policy_store())
 
     with pytest.raises(RedisConnectionError, match="cache unavailable"):
         await lookup.lookup(PaperLookup(["corpusid:123"]))
@@ -342,7 +343,7 @@ async def test_base_paper_survives_failed_incremental_lookup_as_partial_result()
         }
     )
 
-    result = await PaperLookupService(run, pdf=make_pdf_service()).lookup(
+    result = await PaperLookupService(run, pdf=make_pdf_service(), policies=make_policy_store()).lookup(
         PaperLookup([identity.value])
     )
 
@@ -381,7 +382,7 @@ async def test_conflicting_exact_identity_keeps_base_and_does_not_cache_provider
         }
     )
 
-    result = await PaperLookupService(run, pdf=make_pdf_service()).lookup(
+    result = await PaperLookupService(run, pdf=make_pdf_service(), policies=make_policy_store()).lookup(
         PaperLookup([identity.value])
     )
 

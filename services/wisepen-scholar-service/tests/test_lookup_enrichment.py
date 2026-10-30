@@ -1,4 +1,5 @@
 """从 lookup 公共入口验证完整论文查询、缓存复用和逐项结果。"""
+from policy_fakes import make_policy_store
 
 from pdf_fakes import make_pdf_service
 
@@ -92,7 +93,7 @@ def binding(provider, *, cache=None, identifier_kinds=None, **kwargs):
 def service(bindings, *, platform_credentials=None):
     return PaperLookupService(
         LookupRunner(bindings), platform_credentials=platform_credentials
-    , pdf=make_pdf_service())
+    , pdf=make_pdf_service(), policies=make_policy_store())
 
 
 @pytest.mark.asyncio

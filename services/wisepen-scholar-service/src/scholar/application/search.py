@@ -12,7 +12,7 @@ import orjson
 
 from common.utils.retrieval import Candidate, RrfFusion
 from common.core.exceptions import ServiceException
-from scholar.application.field_policies import COMMON_ENRICHERS, FieldPolicy
+from scholar.domain.interfaces.field_policies import ScholarPolicyProvider
 from scholar.application.lookup_runner import LookupRunner
 from scholar.application.paper_projection import project_paper
 from scholar.application.pdf_recover import PaperPdfRecoverService
@@ -65,7 +65,7 @@ class PaperSearchService:
     def __init__(
         self,
         searchers: dict[str, SearchBinding],
-        policies: dict[AcademicField, FieldPolicy],
+        policies: ScholarPolicyProvider,
         query_cache: QueryCacheRepository,
         lookup: LookupRunner,
         pdf: PaperPdfRecoverService,
@@ -85,7 +85,9 @@ class PaperSearchService:
         credentials: dict[str, str] | None = None,
     ) -> SearchResult:
         credentials = credentials or {}
-        policy = self.policies[query.field]
+        # 在首次 I/O 前固定快照，后续富化也使用同一版通用来源与领域策略。
+        policies = self.policies.current
+        policy = policies.fields[query.field]
         # 搜索的可用性先于缓存判断；平台凭证只在后续富化阶段使用。
         skipped = {
             source: SourceExecution(source, False, SourceExecutionStatus.NOT_EXECUTED, f"{source} search requires user BYOK")
@@ -160,10 +162,10 @@ class PaperSearchService:
             # 通用来源中已有成功者则跳过通用富化链，否则补跑尚未执行的通用来源。
             common_sources=(
                 []
-                if succeeded.intersection(COMMON_ENRICHERS)
+                if succeeded.intersection(policies.common_enrichers)
                 else [
                     source
-                    for source in COMMON_ENRICHERS
+                    for source in policies.common_enrichers
                     if source in self.lookup_runner.bindings
                 ]
             ),

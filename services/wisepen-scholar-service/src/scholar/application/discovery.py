@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime
 import orjson
 
 from common.core.exceptions import ServiceException
-from scholar.application.field_policies import FieldPolicy
+from scholar.domain.interfaces.field_policies import ScholarPolicyProvider
 from scholar.application.pdf_recover import PaperPdfRecoverService
 from scholar.domain.errors import ScholarErrorCode
 from scholar.domain.interfaces.paper_discoverer import (
@@ -49,7 +49,7 @@ class PaperDiscoveryService:
     def __init__(
         self,
         discoverers: dict[str, PaperDiscoverer],
-        policies: dict[AcademicField, FieldPolicy],
+        policies: ScholarPolicyProvider,
         cache: DiscoveryCacheRepository,
         pdf: PaperPdfRecoverService,
     ):
@@ -61,7 +61,7 @@ class PaperDiscoveryService:
     async def discover(
         self, query: PaperDiscoveryQuery, *, credentials: dict[str, str] | None = None
     ) -> DiscoveryResult:
-        source = self.policies[query.field].discoverer
+        source = self.policies.current.fields[query.field].discoverer
         if source is None or source not in self.discoverers:
             raise ServiceException(ScholarErrorCode.CAPABILITY_UNAVAILABLE)
 

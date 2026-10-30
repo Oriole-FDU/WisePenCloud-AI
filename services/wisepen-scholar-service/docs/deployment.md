@@ -6,6 +6,10 @@ CPU 查询编码模型并同时提供论文 API 与 `/v1/embeddings`。HTTP 进�
 业务配置来自 `DEFAULT_GROUP / wisepen-scholar-service-{PROFILE}.yaml`。`NACOS_ENABLED=false` 时关闭配置拉取和注册，从服务
 `.env` 与进程环境读取相同配置。
 
+上线前先将 [配置模板](platform-settings.yaml) 中完整的 `SCHOLAR_POLICIES` 加入 Nacos，再部署新代码；首次缺失策略或策略无效会启动失败。领域策略和通用富化顺序支持热更新，其他配置仍需重启。多实例各自在收到通知后切换；恢复旧策略时重新发布上一份有效 YAML 即可，不需要清理 Redis。
+
+`NACOS_ENABLED=false` 时，`SCHOLAR_POLICIES` 环境变量使用 YAML 或 JSON 文本，例如 `.env` 中使用单引号包裹完整 JSON 对象。此模式不会启动监听。
+
 平台凭证为 `S2_API_KEY`、`OPENALEX_API_KEY`、`HF_TOKEN`，仅用于 lookup 和富化，用户 BYOK 优先。HF/OpenAlex 搜索及 HF 发现必须使用用户 BYOK，缺 key 时不读取该来源搜索缓存，也不回退平台 key。S2 用户 key 使用独立 Redis FIFO，平台 key 继续与离线同步共享队列。模型位置由 `SCHOLAR_EMBEDDING_MODELS_PATH` 指定。
 
 PDF 补救使用 `UNPAYWALL_EMAIL`，默认 `jzsun24@m.fudan.edu.cn`；单次请求超时 5 秒、并发 4，结果使用独立 DOI 缓存。

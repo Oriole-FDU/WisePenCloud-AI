@@ -1,4 +1,5 @@
 """从 provider 与公开搜索入口验证候选论文的完整 lookup 结果。"""
+from policy_fakes import make_policy_store
 
 from pdf_fakes import make_pdf_service
 
@@ -8,7 +9,7 @@ from datetime import date
 
 import httpx
 import pytest
-from scholar.application.field_policies import FieldPolicy
+from scholar.domain.models.fields import FieldPolicy
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.search import (
     PaperSearch,
@@ -166,7 +167,7 @@ async def test_search_merges_hf_facts_in_place_and_reuses_positive_and_negative_
         )
         service = PaperSearchService(
             {PaperSource.ARXIV: SearchBinding(searcher)},
-            {AcademicField.GENERAL: policy},
+            make_policy_store({AcademicField.GENERAL: policy}),
             query_cache,
             lookup,
             platform_credentials={"huggingface": "platform-hf"},

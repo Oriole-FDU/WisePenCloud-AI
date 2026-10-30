@@ -1,3 +1,4 @@
+from policy_fakes import make_policy_store
 
 from pdf_fakes import make_pdf_service
 import asyncio
@@ -10,7 +11,7 @@ import scholar.application.discovery as discovery_module
 from common.core.exceptions import ServiceException
 from pydantic import ValidationError
 from scholar.api.schemas.papers import DiscoveryRequest
-from scholar.application.field_policies import FieldPolicy
+from scholar.domain.models.fields import FieldPolicy
 from scholar.application.discovery import (
     PaperDiscoveryQuery,
     PaperDiscoveryService,
@@ -87,7 +88,7 @@ def make_paper(arxiv_id):
 def service_for(field, source, discoverer, cache):
     return PaperDiscoveryService(
         discoverers={source: discoverer},
-        policies={field: FieldPolicy(searchers=[], discoverer=source)},
+        policies=make_policy_store({field: FieldPolicy(searchers=[], discoverer=source)}),
         cache=cache,
     pdf=make_pdf_service())
 
@@ -312,7 +313,7 @@ async def test_missing_discovery_capability_fails_before_cache_read(
     )
     service = PaperDiscoveryService(
         discoverers=discoverers,
-        policies={field: FieldPolicy(searchers=[], discoverer=registered_source)},
+        policies=make_policy_store({field: FieldPolicy(searchers=[], discoverer=registered_source)}),
         cache=cache,
     pdf=make_pdf_service())
 
@@ -361,13 +362,14 @@ async def test_redis_discovery_cache_preserves_windows_and_uses_configured_ttl()
     assert await other_index.get("weekly-key") is None
 
 
-def test_discovery_request_schema_has_only_registered_field_and_no_query():
+def test_discovery_request_accepts_all_academic_fields_and_no_query():
     schema = DiscoveryRequest.model_json_schema()
     properties = schema["properties"]
 
     assert set(properties) == {"field", "period", "sort", "limit"}
     assert schema["required"] == ["field"]
-    assert schema["$defs"]["DiscoveryField"]["enum"] == ["computer_science"]
+    assert schema["$defs"]["AcademicField"]["enum"] == [field.value for field in AcademicField]
+    assert DiscoveryRequest(field="medicine").to_query().field == AcademicField.MEDICINE
     assert schema["$defs"]["DiscoveryPeriod"]["enum"] == [
         "daily",
         "weekly",
@@ -392,11 +394,11 @@ async def test_discovery_candidate_cache_reused_across_limits_and_credentials():
     cache = FakeDiscoveryCache()
     service = PaperDiscoveryService(
         {"huggingface": channel},
-        {
+        make_policy_store({
             AcademicField.COMPUTER_SCIENCE: FieldPolicy(
                 searchers=[], discoverer="huggingface"
             )
-        },
+        }),
         cache,
     pdf=make_pdf_service())
     small = await service.discover(

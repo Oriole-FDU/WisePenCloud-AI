@@ -18,6 +18,7 @@ from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.paper import Paper
 from scholar.main import setup_exception_handlers
+from policy_fakes import make_policy_store
 
 FROM_SOURCE_SECRET = "scholar-test-secret"
 AUTHORIZED = {"X-From-Source": FROM_SOURCE_SECRET}
@@ -155,6 +156,7 @@ class MissingPapers:
 def scholar_client():
     es, redis = FakeElasticsearch(), FakeRedis()
     container.reset_singletons()
+    container.policy_store.override(providers.Object(make_policy_store()))
     container.config.from_dict(
         {
             "SCHOLAR_INDEX_ALIAS": "test-scholar-papers",
@@ -202,6 +204,7 @@ def scholar_client():
             client.portal.call(huggingface_http.aclose)
             client.portal.call(unpaywall_http.aclose)
     finally:
+        container.policy_store.reset_last_overriding()
         container.unwire()
         container.embedding_client.reset_override()
         container.vector_repository.reset_override()
@@ -213,6 +216,14 @@ def scholar_client():
         container.huggingface_http.reset_override()
         container.unpaywall_http.reset_override()
         container.reset_singletons()
+
+
+def test_discovery_accepts_non_cs_field_and_reports_unavailable_capability(scholar_client):
+    client, _, _ = scholar_client
+    response = client.post(
+        "/scholar/papers/discover", headers=AUTHORIZED, json={"field": "medicine"}
+    )
+    assert response.status_code == 503
 
 
 def test_search_sends_domain_and_inclusive_date_bounds_to_es(scholar_client):
@@ -250,7 +261,9 @@ def test_search_cache_reuses_identical_request_and_isolates_changed_inputs(
     request = {"query": "transformer"}
 
     first = client.post("/scholar/papers/search", headers=AUTHORIZED, json=request)
+    first_searches = len(es.search_calls)
     repeated = client.post("/scholar/papers/search", headers=AUTHORIZED, json=request)
+    assert len(es.search_calls) == first_searches
     changed_query = client.post(
         "/scholar/papers/search", headers=AUTHORIZED, json={"query": "graph"}
     )
@@ -298,7 +311,6 @@ def test_search_cache_reuses_identical_request_and_isolates_changed_inputs(
         )["cache_hit"]
         is False
     )
-    assert len(es.search_calls) == 6
 
 
 def test_lookup_preserves_input_order_duplicates_and_per_identifier_status(

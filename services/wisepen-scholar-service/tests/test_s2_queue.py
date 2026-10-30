@@ -1,4 +1,5 @@
 """在独立 Redis 命名空间验证跨客户端 FIFO，不访问 S2 或现有任务键。"""
+from policy_fakes import make_policy_store
 
 from pdf_fakes import make_pdf_service
 
@@ -212,7 +213,7 @@ async def test_busy_is_not_executed_and_openalex_fallback_is_complete(queue_boun
                 "openalex": LookupBinding(FallbackProvider(), None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
             }
         )
-        result = await PaperLookupService(runner, pdf=make_pdf_service()).lookup(
+        result = await PaperLookupService(runner, pdf=make_pdf_service(), policies=make_policy_store()).lookup(
             PaperLookup([identity.value])
         )
     execution = next(e for e in result.execution if e.source == "s2")
@@ -252,7 +253,7 @@ async def test_cache_and_identical_inflight_batch_use_one_queue_task(queue_bound
                     ), cache, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals))
             }
         )
-        service = PaperLookupService(runner, pdf=make_pdf_service())
+        service = PaperLookupService(runner, pdf=make_pdf_service(), policies=make_policy_store())
         query = PaperLookup(["2401.00001", "2401.00001"])
         seconds, micros = await first.time()
         await first.set(f"{namespace}:send-permit", seconds * 1000 + micros // 1000)
@@ -363,7 +364,7 @@ async def test_byok_inflight_isolated_but_completed_papers_shared_across_keys(qu
             S2Provider(S2Transport(http, first, "platform", namespace=namespace, max_queued_ahead=5)),
             cache, PROVIDER_POLICIES["s2"],
         )})
-        service = PaperLookupService(runner, pdf=make_pdf_service(), platform_credentials={"s2": "platform"})
+        service = PaperLookupService(runner, pdf=make_pdf_service(), platform_credentials={"s2": "platform"}, policies=make_policy_store())
         query = PaperLookup(["2401.00001", "2401.00001"])
         tasks = [asyncio.create_task(service.lookup(query, credentials={"s2": key})) for key in ("user-a", "user-a", "user-b")]
         try:

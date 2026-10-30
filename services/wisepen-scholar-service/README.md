@@ -5,7 +5,7 @@ Scholar 是内部 HTTP 微服务。MCP 工具由现有 `wisepen-mcp-service` 注
 ## 结构与迭代边界
 
 - `api/schemas` 在 HTTP 边界校验完整契约；`api/endpoints` 只做 DTO 转换、预算控制及容器注入。
-- application 提供 search、lookup、discover 三个用例（`search.py`、`lookup.py`、`discovery.py`）。`lookup_runner.py` 是检索后处理与 lookup 共用的内部执行机制；`field_policies.py` 声明有序 searchers、领域增量 enrichers 和 discoverer。
+- application 提供 search、lookup、discover 三个用例（`search.py`、`lookup.py`、`discovery.py`）。`lookup_runner.py` 是检索后处理与 lookup 共用的内部执行机制；领域与策略模型统一定义在 `domain/models/fields.py`，通过 domain 的策略读取契约获取当前快照。
 - `domain/models/paper.py`、`identifiers.py` 保存领域论文及身份；请求、结果、执行状态属于具体应用用例或共享执行模型。`Paper.source` 接受开放来源字符串，来源附加事实放在 `metadata[来源名]` 自由字典中，不依赖供应商专用领域类型。
 - `domain/interfaces` 按搜索、富化、发现能力声明通用端口；provider 可实现一个或多个能力。`providers/field_mapping.py` 仍是领域分类到 arXiv/OpenAlex 来源参数的统一映射文件。
 - `core/storage` 实现 ES 论文读模型和 Redis 查询缓存；`container.py` 装配依赖。
@@ -18,11 +18,15 @@ P6 已提供独立 OAI/S2 差分同步与恢复、Compose/Jenkins/systemd 模板
 
 单源检索按领域配置顺序回退，正常空列表也结束；多源执行已启用来源并报告结果。HF/OpenAlex 搜索和 HF 发现必须携带用户 BYOK，平台 key 只用于富化。缺 key 的搜索来源在读取缓存前跳过并记为 not_executed；没有可用来源返回 503 并说明所需 BYOK。
 
-通用富化依次 arxiv→s2→openalex，每篇有有效信号即停止；领域增量全部执行，初始仅 CS 注册 HF。搜索成功来源包含任一通用来源时跳过通用富化，领域富化排除本次成功的同源 searcher。供应商规则在各 provider 实现，由 `providers.policies.PROVIDER_POLICIES` 统一注册，新增临床增量只需 provider、注册和领域配置。平台不默认融合同名字段或做语义去重。
+模板中的通用富化顺序为 arxiv→s2→openalex，可在 Nacos 调整，每篇有有效信号即停止；领域增量全部执行，初始仅 CS 注册 HF。搜索成功来源包含任一通用来源时跳过通用富化，领域富化排除本次成功的同源 searcher。供应商规则在各 provider 实现，由 `providers.policies.PROVIDER_POLICIES` 统一注册，新增临床增量只需 provider、注册和领域配置。平台不默认融合同名字段或做语义去重。
 
 ## 配置与启动
 
 在本目录复制 `.env.example` 为 `.env`，填写现有 Nacos 引导凭证。业务配置使用 DEFAULT_GROUP 下的 `wisepen-scholar-service-dev.yaml`，字段见 [配置模板](docs/platform-settings.yaml)。prod 对应 `wisepen-scholar-service-prod.yaml`。不把凭证提交进仓库。
+
+`SCHOLAR_POLICIES` 完整配置通用富化来源和全部领域的 `searchers`、`field_enrichers`、`discoverer`，列表顺序就是优先级。将 CS 的 `searchers` 改为 `[huggingface, arxiv]` 并发布 Nacos 后，收到更新的实例会优先使用 HF，无需重启。一次请求固定使用同一版策略。无效更新会记录错误并保留当前有效策略；其他业务设置仍在重启后生效。
+
+Scholar HTTP 的领域参数接受全部 `AcademicField` 枚举；未配置 `discoverer` 的领域由 discover 用例返回能力不可用。MCP 服务独立决定工具参数的暴露范围。
 
 在本目录执行：
 

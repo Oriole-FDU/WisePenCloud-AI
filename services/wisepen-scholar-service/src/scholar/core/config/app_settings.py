@@ -7,12 +7,13 @@ import json
 import threading
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from scholar.core.config.nacos import nacos_client_manager
+from scholar.core.config.policy_settings import PolicySettings
 
 
-class AppSettings(BaseModel):
+class AppSettings(PolicySettings):
     """业务配置只包含已使用的依赖；凭证不进入业务请求模型。"""
 
     model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)

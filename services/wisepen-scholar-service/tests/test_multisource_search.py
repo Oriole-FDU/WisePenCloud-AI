@@ -1,3 +1,4 @@
+from policy_fakes import make_policy_store
 
 from pdf_fakes import make_pdf_service
 from scholar.core.providers import PROVIDER_POLICIES, ProviderPolicy
@@ -9,7 +10,8 @@ import httpx
 import pytest
 from openai import APIConnectionError
 from common.core.exceptions import ServiceException
-from scholar.application.field_policies import FIELD_POLICIES, FieldPolicy
+from scholar.domain.models.fields import FieldPolicy
+from policy_fakes import TEST_FIELD_POLICIES
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.search import (
     PaperSearch,
@@ -84,7 +86,7 @@ async def test_bulk_candidates_reused_across_limits_and_byok_overrides_platform(
     cache = MemoryCache()
     search = PaperSearchService(
         {"openalex": SearchBinding(provider, candidate_limit=200, requires_byok=True)},
-        {AcademicField.GENERAL: FieldPolicy(searchers=["openalex"])},
+        make_policy_store({AcademicField.GENERAL: FieldPolicy(searchers=["openalex"])}),
         cache,
         LookupRunner({}),
         platform_credentials={"openalex": "platform-key"},
@@ -115,7 +117,7 @@ async def test_byok_quota_failure_uses_normal_search_fallback_without_platform_r
     fallback = FakeSearcher([paper(PaperSource.ARXIV, arxiv_id="2501.12948")])
     search = PaperSearchService(
         {"openalex": SearchBinding(quota, requires_byok=True), "arxiv": SearchBinding(fallback)},
-        {AcademicField.GENERAL: FieldPolicy(searchers=["openalex", "arxiv"])},
+        make_policy_store({AcademicField.GENERAL: FieldPolicy(searchers=["openalex", "arxiv"])}),
         MemoryCache(),
         LookupRunner({}),
         platform_credentials={"openalex": "platform-key"},
@@ -161,10 +163,10 @@ def service(*, arxiv=None, openalex=None, huggingface=None, cache=None):
             "huggingface": SearchBinding(huggingface or FakeSearcher(), requires_byok=True),
             "openalex": SearchBinding(openalex or FakeSearcher(), requires_byok=True),
         },
-        policies={
+        policies=make_policy_store({
             field: replace(policy, field_enrichers=[])
-            for field, policy in FIELD_POLICIES.items()
-        },
+            for field, policy in TEST_FIELD_POLICIES.items()
+        }),
         lookup=LookupRunner({}),
         query_cache=cache or MemoryCache(),
     pdf=make_pdf_service())
@@ -501,7 +503,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
     )
     search = PaperSearchService(
         bindings,
-        {AcademicField.MEDICINE: policy},
+        make_policy_store({AcademicField.MEDICINE: policy}),
         MemoryCache(),
         LookupRunner(enrichment),
     pdf=make_pdf_service())
@@ -533,7 +535,7 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
     # 调整默认计划只改配置，仍使用同一缓存、融合和专有富化用例。
     changed = PaperSearchService(
         bindings,
-        {AcademicField.MEDICINE: replace(policy, searchers=["web_of_science"])},
+        make_policy_store({AcademicField.MEDICINE: replace(policy, searchers=["web_of_science"])}),
         MemoryCache(),
         LookupRunner(enrichment),
     pdf=make_pdf_service())
@@ -550,12 +552,12 @@ async def test_field_configuration_controls_enrichment_after_final_limit(monkeyp
     enrich = {"specialized": LookupBinding(specialized, None, PROVIDER_POLICIES["specialized"])}
     search = PaperSearchService(
         {"local": SearchBinding(searcher)},
-        {
+        make_policy_store({
             AcademicField.GENERAL: FieldPolicy(["local"]),
             AcademicField.COMPUTER_SCIENCE: FieldPolicy(
                 ["local"], field_enrichers=["specialized"]
             ),
-        },
+        }),
         MemoryCache(),
         LookupRunner(enrich),
     pdf=make_pdf_service())
@@ -576,7 +578,7 @@ async def test_default_falls_back_only_on_provider_failure_and_stops_on_empty_re
     primary = FakeSearcher(ProviderError("primary offline"))
     search = PaperSearchService(
         {"primary": SearchBinding(primary), "secondary": SearchBinding(secondary)},
-        {AcademicField.GENERAL: FieldPolicy(["primary", "secondary"])},
+        make_policy_store({AcademicField.GENERAL: FieldPolicy(["primary", "secondary"])}),
         MemoryCache(),
         LookupRunner({}),
     pdf=make_pdf_service())

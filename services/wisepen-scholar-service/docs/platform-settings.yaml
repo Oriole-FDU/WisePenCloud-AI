@@ -17,6 +17,41 @@ SCHOLAR_EMBEDDING_CPU_THREADS: 2
 SCHOLAR_EMBEDDING_MODELS_PATH: null
 SCHOLAR_EMBEDDING_GPU_PYTHON: "D:/Rag/.venv/Scripts/python.exe"
 SCHOLAR_INDEX_ALIAS: "wisepen-scholar-arxiv"
+# 策略完整放在 Nacos；列表顺序即优先级，发布后由各实例自动更新。
+# CS 改为 HF 优先时，将 searchers 调整为 [huggingface, arxiv]。
+SCHOLAR_POLICIES:
+  common_enrichers: [arxiv, s2, openalex]
+  fields:
+    general:
+      searchers: [openalex, arxiv]
+    computer_science:
+      searchers: [arxiv, huggingface]
+      field_enrichers: [huggingface]
+      discoverer: huggingface
+    medicine:
+      searchers: [openalex]
+    biology:
+      searchers: [openalex, arxiv]
+    engineering:
+      searchers: [openalex, arxiv]
+    economics_business:
+      searchers: [openalex, arxiv]
+    mathematics:
+      searchers: [arxiv, openalex]
+    physics:
+      searchers: [arxiv, openalex]
+    chemistry:
+      searchers: [openalex, arxiv]
+    psychology:
+      searchers: [openalex]
+    social_sciences:
+      searchers: [openalex, arxiv]
+    arts_humanities:
+      searchers: [openalex]
+    law:
+      searchers: [openalex]
+    materials_environmental_sciences:
+      searchers: [openalex, arxiv]
 # 两路召回各取 SEARCH_CANDIDATES；NUM_CANDIDATES 不小于它。
 SCHOLAR_SEARCH_CANDIDATES: 200
 SCHOLAR_SEARCH_NUM_CANDIDATES: 1000

@@ -1,3 +1,4 @@
+from policy_fakes import make_policy_store
 
 from pdf_fakes import make_pdf_service
 from scholar.core.providers import PROVIDER_POLICIES, ProviderPolicy
@@ -8,7 +9,7 @@ from datetime import date
 
 import pytest
 from elastic_transport import ConnectionError as ElasticConnectionError
-from scholar.application.field_policies import FieldPolicy
+from scholar.domain.models.fields import FieldPolicy
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.lookup import (
     LookupStatus,
@@ -128,7 +129,7 @@ async def test_s2_aliases_route_domain_providers_without_changing_core_identity(
         }
     )
 
-    result = await PaperLookupService(runner, policies=policies, pdf=make_pdf_service()).lookup(
+    result = await PaperLookupService(runner, policies=make_policy_store(policies), pdf=make_pdf_service()).lookup(
         PaperLookup(
             [f"corpusid:{corpus.value}"], AcademicField.MEDICINE
         )
@@ -173,7 +174,7 @@ async def test_only_unresolved_targets_advance_to_the_next_common_source():
         }
     )
 
-    result = await PaperLookupService(runner, pdf=make_pdf_service()).lookup(
+    result = await PaperLookupService(runner, pdf=make_pdf_service(), policies=make_policy_store()).lookup(
         PaperLookup([first.value, second.value, second.value])
     )
 
@@ -208,7 +209,7 @@ async def test_general_fallback_success_is_complete_but_domain_failure_is_partia
         AcademicField.COMPUTER_SCIENCE: FieldPolicy([], [PaperSource.HUGGINGFACE])
     }
 
-    result = await PaperLookupService(runner, policies=policies, pdf=make_pdf_service()).lookup(
+    result = await PaperLookupService(runner, policies=make_policy_store(policies), pdf=make_pdf_service()).lookup(
         PaperLookup(
             [identity.value], AcademicField.COMPUTER_SCIENCE
         ),
@@ -256,7 +257,7 @@ async def test_real_elasticsearch_lookup_error_is_visible_while_s2_fallback_succ
         }
     )
 
-    result = await PaperLookupService(runner, pdf=make_pdf_service()).lookup(
+    result = await PaperLookupService(runner, pdf=make_pdf_service(), policies=make_policy_store()).lookup(
         PaperLookup([identity.value])
     )
 

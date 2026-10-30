@@ -72,7 +72,8 @@ models.py。
 `lookup_runner.py` 是 search/lookup 共用的内部执行机制，负责通用短路、领域增量、缓存及在途请求复用，不是额外应用服务。供应商信号与身份规则通过注册绑定注入，留在
 `providers/`。
 
-`application/field_policies.py` 是 search 与 lookup 共用的领域策略表。`FieldPolicy` 只记录有序 `searchers`、领域增量
+`domain/models/fields.py` 定义学术领域和策略模型，完整策略来自 Nacos YAML 的 `SCHOLAR_POLICIES`。
+`core/config/policy_settings.py` 负责加载与热更新，application 通过 domain 的策略读取契约固定单次请求快照。`FieldPolicy` 只记录有序 `searchers`、领域增量
 `field_enrichers` 和 `discoverer`；容器注册来源名称到 provider 能力的绑定。新增医疗来源时，兼容的 PubMed/WoS
 searcher、富化器及容器注册可以由领域配置选择，无需在核心检索、缓存或融合流程增加供应商分支。`Paper.source` 接受开放字符串，来源专有事实放在
 `metadata[来源名]` 自由字典中。

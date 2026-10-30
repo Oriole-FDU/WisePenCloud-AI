@@ -1,4 +1,5 @@
 """验证 OpenAlex lookup 作为通用 Paper provider 接入查询链。"""
+from policy_fakes import make_policy_store
 
 from pdf_fakes import make_pdf_service
 
@@ -65,7 +66,7 @@ async def test_openalex_missing_key_fails_without_sending_a_request():
                     PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.OPENALEX]))
                 }
             )
-        , pdf=make_pdf_service())
+        , pdf=make_pdf_service(), policies=make_policy_store())
 
         with pytest.raises(ProviderError, match="OpenAlex API key is required"):
             await lookup.lookup(
@@ -96,7 +97,7 @@ async def test_openalex_missing_key_does_not_discard_a_local_base_paper():
                     PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.ARXIV])),
                 }
             )
-        , pdf=make_pdf_service())
+        , pdf=make_pdf_service(), policies=make_policy_store())
 
         result = await lookup.lookup(
             PaperLookup([identity.value])
@@ -130,7 +131,7 @@ async def test_openalex_http_failure_keeps_status_url_and_excludes_user_key():
                     PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.OPENALEX]))
                 }
             )
-        , pdf=make_pdf_service())
+        , pdf=make_pdf_service(), policies=make_policy_store())
         with pytest.raises(ProviderError) as caught:
             await lookup.lookup(
                 PaperLookup(["openalex:W123"]),

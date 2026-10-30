@@ -7,7 +7,7 @@ from redis.asyncio import Redis
 from qdrant_client import AsyncQdrantClient
 
 from common.utils.ai_clients.embedding import EmbeddingClient
-from scholar.application.field_policies import FIELD_POLICIES
+from scholar.core.config.policy_settings import ScholarPolicyStore
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.discovery import PaperDiscoveryService
 from scholar.application.lookup import PaperLookupService
@@ -37,6 +37,7 @@ from scholar.core.providers import UnpaywallProvider
 
 class Container(containers.DeclarativeContainer):
     config = providers.Configuration()
+    policy_store = providers.Dependency(instance_of=ScholarPolicyStore)
     qdrant = providers.Singleton(
         AsyncQdrantClient,
         url=config.QDRANT_URL,
@@ -204,7 +205,7 @@ class Container(containers.DeclarativeContainer):
     paper_search_service = providers.Singleton(
         PaperSearchService,
         searchers=search_bindings,
-        policies=providers.Object(FIELD_POLICIES),
+        policies=policy_store,
         platform_credentials=platform_credentials,
         query_cache=query_cache_repository,
         lookup=lookup_runner,
@@ -214,13 +215,14 @@ class Container(containers.DeclarativeContainer):
         PaperLookupService,
         lookup=lookup_runner,
         pdf=pdf_service,
-        policies=providers.Object(FIELD_POLICIES),
+        policies=policy_store,
         platform_credentials=platform_credentials,
     )
+    discovery_bindings = providers.Dict(huggingface=huggingface_provider)
     paper_discovery_service = providers.Singleton(
         PaperDiscoveryService,
-        discoverers=providers.Dict(huggingface=huggingface_provider),
-        policies=providers.Object(FIELD_POLICIES),
+        discoverers=discovery_bindings,
+        policies=policy_store,
         cache=discovery_cache_repository,
         pdf=pdf_service,
     )
