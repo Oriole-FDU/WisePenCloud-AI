@@ -9,9 +9,9 @@ from pydantic import ValidationError
 
 from rag.application.publication import ContentIdentityError, DocumentPublication, DocumentReadyEvent
 from rag.domain.models.publication import PublicationAction
-from rag.ingestion import IngestionPipeline
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer, VectorIndexer
+from rag.application.publication.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import MarkdownChunker
+from rag.application.publication.ingestion import ChunkFactsIndexer, GraphIndexer, VectorIndexer
 
 
 def test_event_transmits_open_type_and_business_metadata_without_changing_revision():

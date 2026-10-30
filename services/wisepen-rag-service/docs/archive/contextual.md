@@ -17,10 +17,10 @@ Container 或消费者。
 from openai import AsyncOpenAI
 from common.utils.ai_clients import InstructionClient
 from rag.application.publication import DocumentPublication, DocumentReadyEvent
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.transformers import Contextualizer
-from rag.ingestion.indexers import ChunkFactsIndexer, VectorIndexer
-from rag.ingestion.pipeline import IngestionPipeline
+from rag.application.publication.ingestion import MarkdownChunker
+from rag.application.publication.ingestion import Contextualizer
+from rag.application.publication.ingestion import ChunkFactsIndexer, VectorIndexer
+from rag.application.publication.ingestion import IngestionPipeline
 
 instruction_api = AsyncOpenAI(
     base_url=INSTRUCTION_BASE_URL,

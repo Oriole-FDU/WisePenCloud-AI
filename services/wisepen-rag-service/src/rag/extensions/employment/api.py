@@ -7,13 +7,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from common.security import SecurityContextHolder
 from common.web.middleware.security_header import SecurityHeaderMiddleware
+from rag.application.chunk import ChunkHit
 from rag.application.common.snapshot import ResourceSnapshot
+from rag.application.graph import GraphRetrievalMode
 from rag.application.graph import GraphRetrievalResult, GraphTraversalResult
 from rag.application.reading import DocumentOutline, SectionReadScope, SectionText
-from rag.application.retrieval import ChunkHit
 from rag.domain.models.acl import PermissionScope
 from rag.domain.storage.graph import GraphDirection
-from rag.retrievers.graph import GraphRetrievalMode
 from .tools import EmploymentTools
 
 

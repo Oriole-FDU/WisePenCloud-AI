@@ -4,13 +4,13 @@ from pathlib import Path
 
 from dependency_injector import containers, providers
 
-from rag.application.retrieval import VectorRetrieval
+from rag.application.chunk import ChunkRetrieval
+from rag.application.publication.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import VectorIndexer
 from rag.core.persistence.qdrant import QdrantVectorStorage
 from rag.domain.models import Ontology
 from rag.domain.storage.vector import IndexKind, IndexableField, VectorCollection
 from rag.extensions.base import Extension
-from rag.ingestion import IngestionPipeline
-from rag.ingestion.indexers import VectorIndexer
 from .api import build_api
 from .metadata import EmploymentMetadataTransformer, employment_projection
 from .tools import EmploymentTools
@@ -85,7 +85,7 @@ class EmploymentContainer(containers.DeclarativeContainer):
         contract_indexer=contract_indexer,
     )
     contracts = providers.Singleton(
-        VectorRetrieval,
+        ChunkRetrieval,
         snapshot_reader=platform.snapshot_reader,
         vector_reader=storage,
         graph_reader=platform.graph_storage,

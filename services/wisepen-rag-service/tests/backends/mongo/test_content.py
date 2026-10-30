@@ -8,9 +8,9 @@ from pydantic import ValidationError
 
 from common.utils.markdown import Anchor, Section
 from rag.domain.models import Document, DocumentStructure, GraphEdge, GraphNode
-from rag.ingestion import IngestionPipeline
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer
+from rag.application.publication.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import MarkdownChunker
+from rag.application.publication.ingestion import ChunkFactsIndexer
 
 
 async def test_document_and_chunk_bson_round_trip(

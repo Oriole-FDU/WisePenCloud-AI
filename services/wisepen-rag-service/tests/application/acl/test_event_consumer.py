@@ -35,10 +35,10 @@ async def test_acl_uses_shared_backend_and_correct_confirmation_policy(
         start=AsyncMock(), stop=AsyncMock(), send_and_wait=AsyncMock()
     )
     monkeypatch.setattr(
-        "rag.core.messaging.kafka.AIOKafkaConsumer", Mock(return_value=driver)
+        "rag.core.kafka.AIOKafkaConsumer", Mock(return_value=driver)
     )
     monkeypatch.setattr(
-        "rag.core.messaging.kafka.AIOKafkaProducer", Mock(return_value=producer)
+        "rag.core.kafka.AIOKafkaProducer", Mock(return_value=producer)
     )
     projection = SimpleNamespace(handle_event=AsyncMock())
     if failure == "temporary":

@@ -15,7 +15,7 @@ from rag.application.graph import (
     GraphRetrievalResult,
     GraphTraversalResult,
 )
-from rag.application.retrieval import VectorRetrieval
+from rag.application.chunk import ChunkRetrieval
 from rag.domain.models import EntitySpec, Ontology, RelationSpec
 from rag.core.filters import (
     FilterCondition,
@@ -23,8 +23,8 @@ from rag.core.filters import (
     MetadataFilter,
     MetadataFilters,
 )
-from rag.ingestion.indexers import GraphIndexer
-from rag.retrievers.graph import GraphRetrievalMode
+from rag.application.publication.ingestion import GraphIndexer
+from rag.application.graph import GraphRetrievalMode
 from rag.domain.storage.graph import GraphDirection, GraphVectorKind
 from rag.domain.storage.vector import VectorMatch
 
@@ -647,7 +647,7 @@ async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ont
             ]
         )
     )
-    ordinary = VectorRetrieval(
+    ordinary = ChunkRetrieval(
         snapshot_reader=snapshot_reader,
         vector_reader=chunk_reader,
         embedding_client=env.embedding,

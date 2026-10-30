@@ -32,7 +32,7 @@ catch”解释，部分边界隔离实现确实冲突；若关注“不静默丢
 
 ## B01：可选上下文增强失败后继续摄入
 
-代码：[Contextualizer](../src/rag/ingestion/transformers/contextualizer.py)
+代码：[Contextualizer](../src/rag/application/publication/ingestion/transformers/contextualizer.py)
 。测试：[上下文](../tests/ingestion/test_contextualizer.py)、[发布](../tests/application/publication/test_vector_publication.py)。
 
 **当前选择与设计意图**：上下文是可选检索增强。模型失败清除旧上下文、标记 failed 后继续，必需事实及投影失败仍阻止发布。try 只包
@@ -50,7 +50,7 @@ RuntimeError/tokenizer 错误传播，避免掩盖程序问题。
 
 ## B02：损坏缓存失效后自动重算
 
-代码：[Contextualizer](../src/rag/ingestion/transformers/contextualizer.py)、[GraphExtractor](../src/rag/ingestion/transformers/graph.py)、[图事实解析](../src/rag/domain/models/graph.py)
+代码：[Contextualizer](../src/rag/application/publication/ingestion/transformers/contextualizer.py)、[GraphExtractor](../src/rag/application/publication/ingestion/transformers/graph.py)、[图事实解析](../src/rag/domain/models/graph.py)
 。测试：[上下文](../tests/ingestion/test_contextualizer.py)、[图抽取](../tests/ingestion/test_graph_extractor.py)。
 
 **当前选择与设计意图**：缓存是可丢弃的派生结果。指纹不符正常静默；指纹一致但结果无效，记录 invalid_cached_content warning，包含
@@ -96,7 +96,7 @@ traceback。不撤销 ready，不限定为 I/O，不加连续失败阈值。
 
 ## B05：进程内快速重试、DLQ 与人工重放
 
-代码：[KafkaConsumerClient](../src/rag/core/messaging/kafka.py)（实现 [MessageConsumer](../src/rag/domain/interfaces/consumer.py)）、[手动脚本](../scripts/replay_dlq.py)
+代码：[KafkaConsumerClient](../src/rag/core/kafka.py)、[手动脚本](../scripts/replay_dlq.py)
 。测试：[Kafka](../tests/backends/kafka/test_kafka_consumer.py)、[发布](../tests/application/publication/test_consumer.py)、[脚本](../tests/scripts/test_replay_dlq.py)。
 
 **当前选择与设计意图**：删延迟 topic、relay、可用时间 header 和跨消息重试计数。默认首次处理加 1/2/4 秒三次重试，共四次业务执行；ValueError
@@ -131,7 +131,7 @@ partition/offset/count，按原主分区回投，不做自动回投，详情见[
 
 ## B07：取消任务后等待并记录额外异常
 
-代码：[PublicationEventConsumer](../src/rag/application/publication.py)、[GraphExtractor](../src/rag/ingestion/transformers/graph.py)
+代码：[PublicationEventConsumer](../src/rag/application/publication/publish.py)、[GraphExtractor](../src/rag/application/publication/ingestion/transformers/graph.py)
 。测试：[发布](../tests/application/publication/test_consumer.py)、[图抽取](../tests/ingestion/test_graph_extractor.py)。
 
 **当前选择与设计意图**：保留 gather (return_exceptions=True)，收尾之后逐项检查结果；正常返回与 CancelledError 忽略，其余

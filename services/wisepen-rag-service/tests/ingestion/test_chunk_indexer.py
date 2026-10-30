@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.ingestion.indexers import ChunkFactsIndexer
+from rag.application.publication.ingestion import ChunkFactsIndexer
 
 
 async def test_chunk_facts_indexer_only_writes_shared_input(chunk):

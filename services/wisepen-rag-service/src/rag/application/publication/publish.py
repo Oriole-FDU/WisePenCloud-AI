@@ -8,13 +8,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from common.logger import error
 from common.utils.markdown import MarkdownChunker
-from rag.domain.interfaces import MessageConsumer
+from rag.application.publication.ingestion import IngestionPipeline
+from rag.core.kafka import KafkaConsumerClient
 from rag.domain.models import ContentRevision, Document, DocumentStructure
 from rag.domain.models.content import rag_section_id
 from rag.domain.models.publication import PublicationAction
 from rag.domain.storage.content import ContentReader, ContentWriter
 from rag.domain.storage.publication import PublicationStore
-from rag.ingestion.pipeline import IngestionPipeline
+
+
+class ContentIdentityError(ValueError):
+    """提交的 Document 身份与其完整正文和版本不符。"""
+
+
+class ContentIncompleteError(ValueError):
+    """待发布正文身份或 Chunk 集合与本次构建不一致。"""
 
 
 class DocumentPublication:
@@ -190,8 +198,8 @@ class PublicationEventConsumer:
         self,
         *,
         publisher: DocumentPublication,
-        content_consumer: MessageConsumer,
-        destroy_consumer: MessageConsumer,
+        content_consumer: KafkaConsumerClient,
+        destroy_consumer: KafkaConsumerClient,
     ) -> None:
         self._publisher = publisher
         self._content_consumer = content_consumer
@@ -257,11 +265,3 @@ class PublicationEventConsumer:
     async def _handle_resource_destroyed(self, payload: dict[str, object]) -> None:
         event = ResourceDestroyedEvent.model_validate(payload)
         await self._publisher.destroy_resources(event.resource_ids)
-
-
-class ContentIdentityError(ValueError):
-    """提交的 Document 身份与其完整正文和版本不符。"""
-
-
-class ContentIncompleteError(ValueError):
-    """待发布正文身份或 Chunk 集合与本次构建不一致。"""

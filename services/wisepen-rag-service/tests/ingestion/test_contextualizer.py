@@ -13,7 +13,7 @@ import pytest
 from common.utils.markdown import Section, SourceSpan
 from common.utils.markdown.chunking.tokenizer import default_token_counter
 from rag.domain.models import Chunk, Document, DocumentStructure
-from rag.ingestion.transformers import Contextualizer
+from rag.application.publication.ingestion import Contextualizer
 
 
 class CharacterCounter:

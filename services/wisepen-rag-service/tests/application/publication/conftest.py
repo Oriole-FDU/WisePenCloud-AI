@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from rag.application.publication import DocumentPublication, DocumentReadyEvent
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer
-from rag.ingestion.pipeline import IngestionPipeline
+from rag.application.publication.ingestion import MarkdownChunker
+from rag.application.publication.ingestion import ChunkFactsIndexer
+from rag.application.publication.ingestion import IngestionPipeline
 
 
 @pytest.fixture

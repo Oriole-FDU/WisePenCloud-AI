@@ -9,7 +9,7 @@ import pytest
 
 from common.utils.retrieval import Candidate, RetrievalPipeline, RrfFusion
 from rag.core.filters import MetadataFilter, MetadataFilters
-from rag.retrievers import GraphMatch, GraphRetrievalMode, GraphRetriever
+from rag.application.graph import GraphMatch, GraphRetrievalMode, GraphRetriever
 from rag.domain.storage.graph import GraphVectorKind
 from rag.domain.storage.vector import VectorMatch
 

@@ -10,10 +10,10 @@ from rag.application.publication import DocumentPublication
 from rag.domain.models.publication import PublicationAction
 from rag.core.persistence.qdrant import QdrantVectorStorage
 from rag.domain.models import ContentRevision
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer, VectorIndexer
-from rag.ingestion.pipeline import IngestionPipeline
-from rag.ingestion.transformers import Contextualizer
+from rag.application.publication.ingestion import MarkdownChunker
+from rag.application.publication.ingestion import ChunkFactsIndexer, VectorIndexer
+from rag.application.publication.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import Contextualizer
 
 
 @pytest.fixture

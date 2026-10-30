@@ -11,7 +11,7 @@ ResourceDeletedMessage 的 typedResourceIds。内容事件复用 Common Markdown
 canonical ContentRevision；不改写正文、不把 Kafka headers 放进 Document metadata。Common 目前以分块结果暴露章节和锚点，所以入口提取结构会先调用
 Common，后续外部 Pipeline 的 MarkdownChunker 再执行正式分块。
 
-publication 收敛为 `models.py`、`store.py`、`publication.py` 三个实现文件，保留 `__init__.py` 做包导出。`publication.py`
+publication 收敛为 `models.py`、`store.py`、`publish.py` 三个实现文件，保留 `__init__.py` 做包导出。`publish.py`
 同时定义事件、PublicationEventConsumer 和 DocumentPublication。消费者只注入 publisher：内容调用 publish，物理销毁调用
 destroy_resources，所有资源类型都建立永久销毁标记。publish 内部完成身份核对、stage、Document 保存、外部完整 Pipeline、事实回查和条件
 apply；状态端口继续原子判断版本、冲突及销毁状态。独立 DocumentIngestion 与公开 stage/apply
@@ -83,8 +83,8 @@ publication 仍以显式依赖启动，尚未注册到全局 Container/Nacos：�
 from rag.application.publication import (
     DocumentPublication, PublicationEventConsumer,
 )
-from rag.ingestion.pipeline import IngestionPipeline
-from rag.ingestion.indexers import ChunkFactsIndexer
+from rag.application.publication.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import ChunkFactsIndexer
 
 pipeline = IngestionPipeline(
     chunker=chunker,

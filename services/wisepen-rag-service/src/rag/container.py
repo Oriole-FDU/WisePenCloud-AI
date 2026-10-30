@@ -13,12 +13,16 @@ from qdrant_client import AsyncQdrantClient
 from common.utils.ai_clients import EmbeddingClient, InstructionClient, RerankClient
 from common.utils.retrieval import ModelReranker
 from rag.application.acl import AclEventConsumer, AclSynchronizer
+from rag.application.chunk import ChunkRetrieval
 from rag.application.common.snapshot import ResourceSnapshotReader
 from rag.application.gc import ResourceGarbageCollector
 from rag.application.graph import GraphRetrieval, GraphTraversal
 from rag.application.publication import DocumentPublication, PublicationEventConsumer
+from rag.application.publication.ingestion import ChunkFactsIndexer, GraphIndexer, VectorIndexer
+from rag.application.publication.ingestion import Contextualizer, GraphExtractor
+from rag.application.publication.ingestion import IngestionPipeline
+from rag.application.publication.ingestion.chunkers.markdown import MarkdownChunker
 from rag.application.reading import DocumentReading
-from rag.application.retrieval import VectorRetrieval
 from rag.core.kafka import KafkaConsumerClient
 from rag.core.persistence.mongo.acl import MongoResourceAclRepository
 from rag.core.persistence.mongo.content import MongoContentStorage
@@ -27,10 +31,6 @@ from rag.core.persistence.neo4j import Neo4jGraphStorage
 from rag.core.persistence.qdrant import QdrantVectorStorage
 from rag.domain.models import Ontology
 from rag.domain.storage.vector import IndexKind, IndexableField, VectorCollection
-from rag.ingestion import IngestionPipeline
-from rag.ingestion.chunkers.markdown import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer, VectorIndexer
-from rag.ingestion.transformers import Contextualizer, GraphExtractor
 
 if TYPE_CHECKING:
     from rag.core.config.app_settings import AppSettings
@@ -288,7 +288,7 @@ class Container(containers.DeclarativeContainer):
         pipelines=pipeline_routes,
     )
     vector_retrieval = providers.Singleton(
-        VectorRetrieval,
+        ChunkRetrieval,
         snapshot_reader=snapshot_reader,
         vector_reader=vector_storage,
         graph_reader=graph_storage,

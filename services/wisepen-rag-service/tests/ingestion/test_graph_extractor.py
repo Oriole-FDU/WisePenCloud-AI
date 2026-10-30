@@ -14,10 +14,10 @@ from pydantic import ValidationError
 
 from common.utils.ai_clients import InstructionClient
 from rag.domain.models import GraphNode
-from rag.ingestion import IngestionPipeline
-from rag.ingestion.indexers import ChunkFactsIndexer
-from rag.ingestion.transformers import GraphExtractor
-from rag.ingestion.transformers.graph import GraphExtraction
+from rag.application.publication.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import ChunkFactsIndexer
+from rag.application.publication.ingestion import GraphExtractor
+from rag.application.publication.ingestion import GraphExtraction
 
 
 def extraction(*, entities=None, relationships=None):

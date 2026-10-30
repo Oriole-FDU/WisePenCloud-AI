@@ -18,9 +18,9 @@ flowchart TB
     Ext --> Persistence
     Ext --> DomainStorage[domain/storage 读写端口及投影对象]
     App --> Ing
-    App --> Ret[retrievers 候选召回]
+    App --> Ret[chunk / graph retriever 候选召回]
     App --> DomainStorage
-    App --> DomainMessaging[domain/messaging MessageConsumer]
+    App --> KafkaClient[core/kafka.py KafkaConsumerClient]
     App --> DomainModels[domain/models 领域事实]
     Ing --> Interfaces[domain/interfaces 摄入协议]
     Ing --> DomainModels
@@ -110,7 +110,7 @@ flowchart TD
     Init --> Mount[挂载扩展 API / 构造必要模型组件]
     Mount --> Pipeline[默认双链由 Selector 惰性选择]
     Pipeline --> GC[启动 GC 首轮立即运行]
-    Pipeline --> Consumers[Container 装配 MessageConsumer / 可选 ACL 与 publication handler]
+    Pipeline --> Consumers[Container 装配 KafkaConsumerClient / ACL 与 publication handler]
     Consumers --> Wait[等待主消费者连接]
     Wait --> Reg[Nacos 注册尝试]
     Reg --> Ready[宿主及子 API ready]
@@ -124,7 +124,7 @@ flowchart TD
 仍启动。pipeline_with_context/pipeline_without_context 是平台共享链，默认 pipeline 按 ENABLE_CONTEXTUALIZE
 选择；扩展可以显式选另一条或自行组合。
 
-ACL 和 publication consumer wrapper 注入 `MessageConsumer`；Container 构造带连接、topic、group 和重试策略的 Kafka adapter，
+ACL 和 publication consumer wrapper 直接使用 `KafkaConsumerClient`；Container 构造带连接、topic、group 和重试策略的 Kafka adapter，
 handler 在 `run(handler=..., started=...)` 时传入。消息重试、DLQ 确认与 offset 提交语义由 Kafka adapter 保持。
 
 `main.lifespan` 通过 `init_beanie` 注册四个 RAG Mongo 实体并初始化实体 Settings 声明的索引。Container 默认无参构造仓储，

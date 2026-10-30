@@ -40,7 +40,7 @@ rsec_ + sha256(resource_id + "\0" + content_revision + "\0" + common_section_id)
 ```
 
 调用方直接传回 ID，不解析、不另行拼接；旧 revision 的 ID 不会切换到新版。Chunk.chunk_id
-由 [MarkdownChunker](../src/rag/ingestion/chunkers/markdown.py) 生成为 `resource_id:content_revision:common_chunk_id`
+由 [MarkdownChunker](../src/rag/application/publication/ingestion/chunkers/markdown.py) 生成为 `resource_id:content_revision:common_chunk_id`
 ，不因章节 ID 转换而改写。
 
 ### 正文与检索文本
@@ -124,7 +124,7 @@ ResourceAcl、GroupResourceAcl 和 PermissionScope 是 domain ACL 事实与请�
 RevisionNotStagedError 和 PublicationStateChangedError 是 domain 发布状态、决策结果与状态异常，定义于
 [domain/models/publication.py](../src/rag/domain/models/publication.py)。这些模型不嵌入 Document/Chunk。
 
-ContentIdentityError 与 ContentIncompleteError 仍属于 [publication 用例](../src/rag/application/publication.py)；
+ContentIdentityError 与 ContentIncompleteError 仍属于 [publication 用例](../src/rag/application/publication/publish.py)；
 DocumentReadyEvent、AclRecalculateEvent、ResourceSnapshot，以及查询、阅读和图响应 DTO 仍由各自 application 功能目录拥有。
 它们不应因领域状态迁移而移动。
 

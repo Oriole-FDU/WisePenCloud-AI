@@ -12,7 +12,7 @@ from rag.core.filters import (
     MetadataFilter,
     MetadataFilters,
 )
-from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer
+from rag.application.publication.ingestion import ChunkFactsIndexer, GraphIndexer
 from rag.domain.storage.graph import GraphDirection, GraphSourceProjection
 
 

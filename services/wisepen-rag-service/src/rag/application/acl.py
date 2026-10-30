@@ -8,7 +8,7 @@ from typing import Any
 from bson import ObjectId
 from pydantic import BaseModel, ConfigDict, Field
 
-from rag.domain.interfaces import MessageConsumer
+from rag.core.kafka import KafkaConsumerClient
 from rag.domain.models.acl import GroupResourceAcl, ResourceAcl
 from rag.domain.storage.acl import ResourceAclRepository
 
@@ -81,7 +81,7 @@ class AclEventConsumer:
         self,
         *,
         projection: AclSynchronizer,
-        consumer: MessageConsumer,
+        consumer: KafkaConsumerClient,
     ) -> None:
         self._projection = projection
         self._consumer = consumer

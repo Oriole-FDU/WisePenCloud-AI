@@ -16,9 +16,9 @@ from pymongo.errors import DuplicateKeyError
 from rag.core.persistence.mongo.content import MongoContentStorage
 from rag.domain.models import Chunk
 from rag.domain.entities import ChunkEntity, DocumentEntity
-from rag.ingestion.indexers import ChunkFactsIndexer
-from rag.ingestion.transformers import GraphExtractor
-from rag.ingestion.transformers.graph import GraphExtraction
+from rag.application.publication.ingestion import ChunkFactsIndexer
+from rag.application.publication.ingestion import GraphExtractor
+from rag.application.publication.ingestion import GraphExtraction
 
 pytestmark = pytest.mark.mongo_integration
 

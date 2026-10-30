@@ -13,10 +13,10 @@ import pytest
 
 from rag.application.publication import DocumentReadyEvent
 from rag.domain.models import ContentRevision
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer
-from rag.ingestion.transformers import GraphExtractor
-from rag.ingestion.transformers.graph import GraphExtraction
+from rag.application.publication.ingestion import MarkdownChunker
+from rag.application.publication.ingestion import ChunkFactsIndexer, GraphIndexer
+from rag.application.publication.ingestion import GraphExtractor
+from rag.application.publication.ingestion import GraphExtraction
 from rag.domain.storage.vector import IndexableField, IndexKind
 
 

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from rag.domain.models import Chunk, Document, DocumentStructure
-from rag.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import IngestionPipeline
 
 
 @pytest.fixture

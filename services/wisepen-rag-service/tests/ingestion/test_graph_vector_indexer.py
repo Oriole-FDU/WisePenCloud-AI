@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.ingestion.indexers import GraphIndexer
+from rag.application.publication.ingestion import GraphIndexer
 
 
 @pytest.fixture

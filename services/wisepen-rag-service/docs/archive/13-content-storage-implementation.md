@@ -37,9 +37,9 @@ Document 与 Chunk 直接使用 Pydantic TypeAdapter 展开和恢复。结构中
 
 ```python
 from rag.backends.mongo.content import MongoContentStorage
-from rag.ingestion import IngestionPipeline
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer
+from rag.application.publication.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import MarkdownChunker
+from rag.application.publication.ingestion import ChunkFactsIndexer
 
 storage = MongoContentStorage(
     documents=database["document_revisions"],

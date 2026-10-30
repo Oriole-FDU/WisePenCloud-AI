@@ -9,9 +9,9 @@ import pytest
 from rag.domain.models.publication import ContentConflictError, PublicationAction
 from rag.application.publication import ContentIdentityError, DocumentPublication
 from rag.domain.models import ContentRevision
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer
-from rag.ingestion.pipeline import IngestionPipeline
+from rag.application.publication.ingestion import MarkdownChunker
+from rag.application.publication.ingestion import ChunkFactsIndexer
+from rag.application.publication.ingestion import IngestionPipeline
 
 
 async def test_publish_saves_facts_before_every_required_projection(

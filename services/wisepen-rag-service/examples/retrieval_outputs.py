@@ -29,7 +29,7 @@ from rag.application.graph import (
     GraphTraversal,
     GraphTraversalResult,
 )
-from rag.application.retrieval import ChunkHit, GraphNodeReference, VectorRetrieval
+from rag.application.chunk import ChunkHit, GraphNodeReference, ChunkRetrieval
 from rag.core.schema import (
     Chunk,
     ContentRevision,
@@ -325,7 +325,7 @@ async def main() -> None:
         relationship_reader=relationship_reader,
         reranker=reranker,
     )
-    ordinary = VectorRetrieval(
+    ordinary = ChunkRetrieval(
         snapshot_reader=snapshot_reader,
         vector_reader=vector_reader,
         embedding_client=embedding,
@@ -358,7 +358,7 @@ async def main() -> None:
                 list[ChunkHit],
             )
         )
-    without_graph = VectorRetrieval(
+    without_graph = ChunkRetrieval(
         snapshot_reader=snapshot_reader,
         vector_reader=vector_reader,
         embedding_client=embedding,

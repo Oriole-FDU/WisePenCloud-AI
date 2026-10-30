@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 
 from fastapi import FastAPI
 
+from rag.application.publication.ingestion import IngestionPipeline
 from rag.domain.storage.vector import VectorCollection
-from rag.ingestion import IngestionPipeline
 
 
 @dataclass(slots=True)

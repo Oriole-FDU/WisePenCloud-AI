@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from rag.ingestion.indexers import VectorIndexer
+from rag.application.publication.ingestion import VectorIndexer
 
 
 @pytest.fixture

@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from common.utils.retrieval import Candidate, RetrievalPipeline
 from rag.application.publication import DocumentReadyEvent
 from rag.domain.models.publication import PublicationAction
-from rag.application.retrieval import PreparedChunk
+from rag.application.chunk import PreparedChunk
 from rag.container import Container
 
 
@@ -37,10 +37,10 @@ async def test_message_clients_use_configured_topics_groups_and_poll_interval(
 
     producer = SimpleNamespace(start=AsyncMock(), stop=AsyncMock())
     monkeypatch.setattr(
-        "rag.core.messaging.kafka.AIOKafkaConsumer", Mock(side_effect=create_consumer)
+        "rag.core.kafka.AIOKafkaConsumer", Mock(side_effect=create_consumer)
     )
     monkeypatch.setattr(
-        "rag.core.messaging.kafka.AIOKafkaProducer", Mock(return_value=producer)
+        "rag.core.kafka.AIOKafkaProducer", Mock(return_value=producer)
     )
 
     for provider in (
@@ -86,9 +86,9 @@ async def test_pipeline_routes_share_live_mapping_and_are_isolated_per_container
         storage,
         publication_store,
 ):
-    from rag.ingestion import IngestionPipeline
-    from rag.ingestion.chunkers import MarkdownChunker
-    from rag.ingestion.indexers import ChunkFactsIndexer
+    from rag.application.publication.ingestion import IngestionPipeline
+    from rag.application.publication.ingestion import MarkdownChunker
+    from rag.application.publication.ingestion import ChunkFactsIndexer
 
     first, second = (
         Container(settings=platform_settings),

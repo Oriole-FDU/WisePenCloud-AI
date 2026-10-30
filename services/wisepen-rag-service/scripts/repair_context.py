@@ -22,8 +22,8 @@ from rag.core.persistence.mongo.content import MongoContentStorage
 from rag.core.persistence.mongo.publication import MongoPublicationStore
 from rag.core.persistence.qdrant.vector import QdrantVectorStorage
 from rag.domain.models import ContentRevision
-from rag.ingestion.indexers import ChunkFactsIndexer, VectorIndexer
-from rag.ingestion.transformers.contextualizer import ContextStatus, Contextualizer
+from rag.application.publication.ingestion import ChunkFactsIndexer, VectorIndexer
+from rag.application.publication.ingestion import ContextStatus, Contextualizer
 from rag.domain.storage.content import ContentReader
 from rag.domain.storage.vector import IndexableField, IndexKind
 

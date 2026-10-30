@@ -7,7 +7,7 @@ from common.utils.markdown import (
 )
 from rag.domain.models import Document, DocumentStructure
 from rag.domain.models.content import rag_section_id
-from rag.ingestion.chunkers import MarkdownChunker
+from rag.application.publication.ingestion import MarkdownChunker
 
 
 @pytest.fixture

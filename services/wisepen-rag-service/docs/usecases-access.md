@@ -9,7 +9,7 @@
 AclSynchronizer 注入上游 resource collection 与 ResourceAclRepository。`handle_event(payload)` 接收 resourceId 刷新触发，
 `synchronize(resource_ids)` 去重保序读取上游当前事实；事件不是权威 ACL 快照。
 
-AclEventConsumer 注入 `MessageConsumer`，将绑定的业务 handler 传给 `run(handler=..., started=...)`；Container 装配已绑定
+AclEventConsumer 注入 `KafkaConsumerClient`，将绑定的业务 handler 传给 `run(handler=..., started=...)`；Container 装配已绑定
 ACL topic/group 和重试策略的 Kafka adapter。事件 DTO 与同步流程仍属于 application。
 
 ```python

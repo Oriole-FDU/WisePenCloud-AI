@@ -21,9 +21,9 @@ from rag.core.persistence.mongo import MongoContentStorage, MongoPublicationStor
 from rag.core.persistence.mongo.acl import MongoResourceAclRepository
 from rag.domain.models import ContentRevision
 from rag.domain.entities import ChunkEntity, DocumentEntity, ResourceAclEntity, ResourcePublicationEntity
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer
-from rag.ingestion.pipeline import IngestionPipeline
+from rag.application.publication.ingestion import MarkdownChunker
+from rag.application.publication.ingestion import ChunkFactsIndexer
+from rag.application.publication.ingestion import IngestionPipeline
 
 pytestmark = pytest.mark.mongo_integration
 

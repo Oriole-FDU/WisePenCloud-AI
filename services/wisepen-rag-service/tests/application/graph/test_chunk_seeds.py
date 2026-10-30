@@ -9,7 +9,7 @@ import pytest
 
 from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
-from rag.application.retrieval import VectorRetrieval
+from rag.application.chunk import ChunkRetrieval
 from rag.domain.storage.graph import GraphDirection
 from rag.domain.storage.vector import VectorMatch
 
@@ -34,7 +34,7 @@ def connected_retrieval(graph_env, snapshot_reader):
     )
     return SimpleNamespace(
         vector=vector,
-        usecase=VectorRetrieval(
+        usecase=ChunkRetrieval(
             snapshot_reader=snapshot_reader,
             vector_reader=vector,
             embedding_client=env.embedding,
@@ -73,7 +73,7 @@ async def test_chunk_hits_entity_references_are_from_selected_authorized_chunk(
         {"resource_id": chunk.resource_id, "content_revision": chunk.content_revision},
     )
     vector = SimpleNamespace(query=AsyncMock(return_value=[match]))
-    usecase = VectorRetrieval(
+    usecase = ChunkRetrieval(
         snapshot_reader=snapshot_reader,
         vector_reader=vector,
         embedding_client=env.embedding,
@@ -129,7 +129,7 @@ async def test_graph_seed_parser_program_errors_propagate_from_retrieval(
     def broken_parser(value):
         raise TypeError("parser program error")
 
-    monkeypatch.setattr("rag.application.retrieval.parse_graph_facts", broken_parser)
+    monkeypatch.setattr("rag.application.chunk.hit.parse_graph_facts", broken_parser)
     with pytest.raises(TypeError, match="parser program error"):
         await connected_retrieval.usecase.retrieve(
             "query", snapshot=env.snapshot(), mode="dense", top_k=1

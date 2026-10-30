@@ -94,7 +94,7 @@ Qdrant 和 Neo4j 只是可重建投影：
 2. `contextual`：作为 Transformer 基于 Chunk 序列生成 `metadata["contextual_context"]`。
 3. `retrieval`：调用文档向量仓储、`utils.retrieval` Fusion/ranking、Mongo 批量回查和 ACL 快照。
 4. `graph`：LightRAG 抽取/合并/查询内核，加上 ontology、plugin 和本地来源关联。
-5. `publication`：staged/applied 条件更新、删除和投影重建任务。
+5. `publish.py`：staged/applied 条件更新、删除和投影重建任务。
 6. `acl`：权威 ACL 读取、本地 ACL 同步和请求级可见性判断。
 
 HTTP、Kafka 和依赖注入只负责把外部请求接到这些能力；不在 transport 或 container 中重新实现业务规则。

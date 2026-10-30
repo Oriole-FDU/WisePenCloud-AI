@@ -10,11 +10,11 @@
 | Transformer | Chunk 列表 + 可选 Document → Chunk 列表 | 增强或校验；可调用模型，可原地修改或返回新列表           |
 | Indexer     | 最终 Chunk 列表 → None                  | 保存内容事实或生成投影，等待必需写入确认                 |
 | Storage     | 明确身份/过滤条件 → 原始事实或投影      | 数据库存取原语；不选择当前版本，不判权限                 |
-| Retriever   | query: str → list[Candidate[T]]         | 构造查询、召回候选、融合；不接收请求快照，不回查授权正文 |
-| MessageConsumer | handler + 可选 started event → None | 运行已绑定 topic/group 的消息处理；不解释业务 payload    |
+| Retriever   | query: str → list[Candidate[T]]         | 协议定义见 domain.interfaces；构造查询、召回候选、融合；不接收请求快照，不回查授权正文 |
+
 
 Pipeline 是顺序编排器，其接口定义在 domain、实现与编排仍在 ingestion。application 才拥有资源发布、授权准备、章节读取、
-证据组装和响应；消息业务 handler 留在 application，Container 注入 MessageConsumer；共享组件不保存用户请求状态。
+证据组装和响应；消息业务 handler 留在 application，Container 直接注入 KafkaConsumerClient；共享组件不保存用户请求状态。
 
 ### 摄入接口
 
@@ -41,7 +41,7 @@ class Indexer(Protocol):
 
 ## 2. Pipeline 装配合同
 
-[IngestionPipeline](../src/rag/ingestion/pipeline.py) 固定串行执行：
+[IngestionPipeline](../src/rag/application/publication/ingestion/pipeline.py) 固定串行执行：
 
 ```text
 Chunker → 全部 Transformers → ChunkFactsIndexer → 全部必需投影 Indexers
@@ -66,7 +66,7 @@ Indexer。任一未处理异常停止后续阶段，已经完成的写入保留�
 
 Contextualizer 的默认值为输入 8000 token、目标 100 字、输出硬上限 150 token、before_ratio=0.5、大纲比例 0.15、实例模型并发
 4。默认 TokenCounter 为 Common 离线 o200k_base。成功指纹匹配复用，failed/过期重试；全文模式不加入业务
-metadata。详见 [contextualizer.py](../src/rag/ingestion/transformers/contextualizer.py) 和[运维手册](operations.md)。
+metadata。详见 [contextualizer.py](../src/rag/application/publication/ingestion/transformers/contextualizer.py) 和[运维手册](operations.md)。
 
 GraphExtractor 默认输入 8000 token、输出 4096 token、并发
 4；补漏默认关闭、最多一次，不能改写首轮合法事实。指纹包含本体、模型、策略、生成配置和实际消息；来源匹配且整体合法才复用。成功缓存不能证明数据库投影已经写完。
@@ -84,7 +84,7 @@ GraphExtractor 默认输入 8000 token、输出 4096 token、并发
 
 ### metadata_factory 的增量合并
 
-[VectorIndexer](../src/rag/ingestion/indexers/vector.py) 的参数是 `Callable[[Chunk], dict[str, object]] | None`
+[VectorIndexer](../src/rag/application/publication/ingestion/indexers/vector.py) 的参数是 `Callable[[Chunk], dict[str, object]] | None`
 。其合并顺序等价于：
 
 ```python
@@ -118,9 +118,9 @@ Mongo 实体位于 `domain/entities`，由 Beanie 管理日常实体操作：普
 状态通过实体实例的 `insert()` 创建。需要保留批量与条件原子语义的写入使用对应实体的 `get_pymongo_collection()`：内容批量
 ReplaceOne、ACL revision 条件 upsert、publication CAS。存储端口不暴露 Beanie 或 PyMongo 类型。
 
-Kafka adapter 位于 [core/messaging/kafka.py](../src/rag/core/kafka.py)，实现 [MessageConsumer](../src/rag/domain/interfaces/consumer.py)。
-协议签名为 `async run(handler: Callable[[dict[str, object]], Awaitable[object]], *, started: asyncio.Event | None = None) -> None`。
-Container 注入已配置连接、topic、group 和 retry policy 的 adapter；application 在 `run(handler=..., started=...)` 传入业务 handler。
+Kafka 客户端位于 [core/kafka.py](../src/rag/core/kafka.py) (`KafkaConsumerClient`)，不通过领域接口间接抽象。
+运行方法签名为 `async run(handler: Callable[[dict[str, object]], Awaitable[object]], *, started: asyncio.Event | None = None) -> None`。
+Container 注入已配置连接、topic、group 和 retry policy 的客户端；application 在 `run(handler=..., started=...)` 传入业务 handler。
 
 GraphStorage.ensure_schema 是存储协议的一部分，由 main 在启用图存储时、图 repair
 在启用拓扑投影时显式调用。后端负责所需约束/索引的具体初始化；只读或只写消费方仍依赖 GraphReader/GraphWriter。
@@ -131,8 +131,8 @@ Qdrant 每批 wait=True 并核对 completed；Neo4j 来源批使用显式事务�
 ## 5. Retriever 与授权准备
 
 Common [Candidate/检索 Pipeline](../../wisepen-common/src/common/utils/retrieval/__init__.py) 提供
-candidate_id/payload/rank/score、融合、重排及多样化。RAG 的 [VectorRetriever](../src/rag/retrievers/vector.py)
-和 [GraphRetriever](../src/rag/retrievers/graph.py) 只做种子召回。
+candidate_id/payload/rank/score、融合、重排及多样化。RAG 的 [ChunkRetriever](../src/rag/application/chunk/retriever.py)
+和 [GraphRetriever](../src/rag/application/graph/retriever.py) 实现 [Retriever Protocol](../src/rag/domain/interfaces/retriever.py)，只做种子召回。
 
 `from_storage(...)` 固定本次 mode、预算、filters、include_embedding 和共享依赖；`retrieve(query: str)` 只接收字符串。application
 每次直接构造组件，把 ResourceSnapshot 留在异步 prepare_candidates 中；不使用 retriever_factory、请求缓存或全局 context。

@@ -1,7 +1,7 @@
 # 正文向量检索
 
-入口 [VectorRetrieval](../src/rag/application/retrieval.py)
-返回授权正文命中；[VectorRetriever](../src/rag/retrievers/vector.py)
+入口 [VectorRetrieval](../src/rag/application/chunk/retrieval.py)
+返回授权正文命中；[ChunkRetriever](../src/rag/application/chunk/retriever.py)
 仅返回候选。身份、派生文本及组件区别见[模型](models.md)、[抽象](abstractions.md)。
 
 ## 1. 依赖与最小调用
@@ -10,13 +10,13 @@
 Qwen 重排；手工组合可以不注入 reranker。每次调用创建本次 Retriever/Pipeline，连接共享，快照由调用方显式传入。
 
 ```python
-from rag.retrievers.vector import VectorRetrievalMode
+from rag.application.chunk import ChunkRetrievalMode
 
 
 async def search_chunks(retrieval, snapshot):
     return await retrieval.retrieve(
         "内部合同中的保密责任", snapshot=snapshot,
-        mode=VectorRetrievalMode.HYBRID, top_k=5,
+        mode=ChunkRetrievalMode.HYBRID, top_k=5,
     )
 ```
 

@@ -8,7 +8,7 @@ import pytest
 
 from common.utils.retrieval import RrfFusion
 from rag.core.filters import MetadataFilter, MetadataFilters
-from rag.retrievers.vector import VectorRetrievalMode, VectorRetriever
+from rag.application.chunk import ChunkRetriever, ChunkRetrievalMode
 from rag.domain.storage.vector import VectorMatch
 
 
@@ -22,7 +22,7 @@ def deps():
 
 def build(deps, **options):
     reader, embedding = deps
-    return VectorRetriever.from_storage(
+    return ChunkRetriever.from_storage(
         reader=reader,
         embedding_client=embedding,
         **options,
@@ -30,7 +30,7 @@ def build(deps, **options):
 
 
 @pytest.mark.parametrize(
-    "mode", [VectorRetrievalMode.DENSE, VectorRetrievalMode.SPARSE]
+    "mode", [ChunkRetrievalMode.DENSE, ChunkRetrievalMode.SPARSE]
 )
 async def test_single_mode_queries_only_selected_route_and_preserves_scores(deps, mode):
     reader, embedding = deps
@@ -51,7 +51,7 @@ async def test_single_mode_queries_only_selected_route_and_preserves_scores(deps
     assert request.top_k == 1
     assert result[0].payload is matches[0]
     assert len(result) == 1 and result[0].score == 8.0 and result[0].rank == 1
-    if mode is VectorRetrievalMode.DENSE:
+    if mode is ChunkRetrievalMode.DENSE:
         embedding.embed.assert_awaited_once_with(texts=["query"])
         assert request.embedding == [1.0, 0.0] and request.text is None
     else:
@@ -61,7 +61,7 @@ async def test_single_mode_queries_only_selected_route_and_preserves_scores(deps
 
 async def test_sparse_requires_only_vector_reader_and_uses_candidate_budget(deps):
     reader, _ = deps
-    retriever = VectorRetriever.from_storage(
+    retriever = ChunkRetriever.from_storage(
         reader=reader, mode="sparse", candidate_limit=4
     )
     await retriever.retrieve("query")
@@ -71,7 +71,7 @@ async def test_sparse_requires_only_vector_reader_and_uses_candidate_budget(deps
 
 
 @pytest.mark.parametrize(
-    "mode", [VectorRetrievalMode.DENSE, VectorRetrievalMode.SPARSE]
+    "mode", [ChunkRetrievalMode.DENSE, ChunkRetrievalMode.SPARSE]
 )
 @pytest.mark.parametrize("budget", [{"dense_top_k": 4}, {"sparse_top_k": 5}])
 def test_single_route_rejects_hybrid_budget_parameters_before_io(deps, mode, budget):
@@ -82,11 +82,11 @@ def test_single_route_rejects_hybrid_budget_parameters_before_io(deps, mode, bud
 
 
 @pytest.mark.parametrize(
-    "mode", [VectorRetrievalMode.DENSE, VectorRetrievalMode.HYBRID]
+    "mode", [ChunkRetrievalMode.DENSE, ChunkRetrievalMode.HYBRID]
 )
 def test_embedding_modes_require_client_at_initialization(deps, mode):
     with pytest.raises(ValueError, match="embedding client"):
-        VectorRetriever.from_storage(reader=deps[0], mode=mode)
+        ChunkRetriever.from_storage(reader=deps[0], mode=mode)
     deps[0].query.assert_not_called()
 
 
@@ -138,7 +138,7 @@ async def test_defaults_and_round_robin_preserve_provider_payload_scores(deps):
     )
 
     # 每路初始分数也是 provider score，只有融合才替换阶段分数。
-    branch = await build(deps, mode=VectorRetrievalMode.DENSE).retrieve("query")
+    branch = await build(deps, mode=ChunkRetrievalMode.DENSE).retrieve("query")
     assert [item.score for item in branch] == [8.0, 7.0]
     assert [item.rank for item in branch] == [1, 2]
 
@@ -239,7 +239,7 @@ async def test_dense_and_sparse_execute_concurrently(deps):
     assert await asyncio.wait_for(build(deps).retrieve("query"), timeout=2) == []
 
 
-@pytest.mark.parametrize("mode", list(VectorRetrievalMode))
+@pytest.mark.parametrize("mode", list(ChunkRetrievalMode))
 async def test_same_retriever_concurrent_queries_do_not_share_query_state(deps, mode):
     async def embed(*, texts, **kwargs):
         await asyncio.sleep(0)

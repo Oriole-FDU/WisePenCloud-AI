@@ -7,15 +7,19 @@ from .models import (
     GraphRelationshipSource,
 )
 from .retrieval import GraphRetrieval, GraphRetrievalResult
+from .retriever import GraphMatch, GraphRetrievalMode, GraphRetriever
 from .traversal import GraphTraversal, GraphTraversalResult
 
 __all__ = [
     "GraphEntity",
     "GraphEntitySource",
+    "GraphMatch",
     "GraphRelationship",
     "GraphRelationshipSource",
     "GraphRetrieval",
+    "GraphRetrievalMode",
     "GraphRetrievalResult",
+    "GraphRetriever",
     "GraphTraversal",
     "GraphTraversalResult",
 ]

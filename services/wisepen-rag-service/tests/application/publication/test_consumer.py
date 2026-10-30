@@ -78,9 +78,9 @@ def kafka(monkeypatch):
         max_poll_interval_ms=900_000,
         retry_policy=RetryPolicy(backoff_seconds=[]),
     )
-    monkeypatch.setattr("rag.core.messaging.kafka.AIOKafkaConsumer", factory)
+    monkeypatch.setattr("rag.core.kafka.AIOKafkaConsumer", factory)
     monkeypatch.setattr(
-        "rag.core.messaging.kafka.AIOKafkaProducer", Mock(return_value=producer)
+        "rag.core.kafka.AIOKafkaProducer", Mock(return_value=producer)
     )
     return client, factory
 
@@ -139,9 +139,9 @@ async def test_platform_consumer_routes_type_and_preserves_metadata(
         storage,
         publication_store,
 ):
-    from rag.ingestion import IngestionPipeline
-    from rag.ingestion.chunkers import MarkdownChunker as RagMarkdownChunker
-    from rag.ingestion.indexers import ChunkFactsIndexer
+    from rag.application.publication.ingestion import IngestionPipeline
+    from rag.application.publication.ingestion import MarkdownChunker as RagMarkdownChunker
+    from rag.application.publication.ingestion import ChunkFactsIndexer
 
     marker = SimpleNamespace(index=AsyncMock())
     pipeline_routes["history"] = IngestionPipeline(
@@ -190,7 +190,7 @@ async def test_cleanup_logs_extra_failure_without_changing_primary_error(
         consumer, monkeypatch
 ):
     log = Mock()
-    monkeypatch.setattr("rag.application.publication.error", log)
+    monkeypatch.setattr("rag.application.publication.publish.error", log)
     entered = asyncio.Event()
     primary = RuntimeError("content failed")
     cleanup = OSError("destroy cleanup failed")

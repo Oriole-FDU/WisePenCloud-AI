@@ -1,8 +1,8 @@
 # 发布、事件消费与永久销毁
 
-用于把上游完整 Markdown 变成可查询的当前版本。入口是 [DocumentPublication / PublicationEventConsumer](../src/rag/application/publication.py)。
+用于把上游完整 Markdown 变成可查询的当前版本。入口是 [DocumentPublication / PublicationEventConsumer](../src/rag/application/publication/publish.py)。
 发布状态、动作与状态异常见 [domain/models/publication.py](../src/rag/domain/models/publication.py)；ContentIdentityError 和
-ContentIncompleteError 仍属于 [application/publication.py](../src/rag/application/publication.py)。存储端口见
+ContentIncompleteError 仍属于 [application/publication.py](../src/rag/application/publication/publish.py)。存储端口见
 [domain/storage/publication.py](../src/rag/domain/storage/publication.py)。身份及组件合同分别见[模型](models.md)、[抽象](abstractions.md)。
 
 ## 1. 依赖与最小调用
@@ -81,13 +81,12 @@ Contextualizer 可以按组件合同降级后成功返回；注册链内 GraphEx
 publication group 为 `wisepen-rag-v4-publication-group`。内容事件以 resourceId 作 Kafka key，由调用链保证同资源串行；销毁独立消费，不依赖跨
 topic 顺序。
 
-RAG 使用自身 [Kafka adapter](../src/rag/core/messaging/kafka.py)：进程内快速重试 3 次，等待 1/2/4 秒，仍失败进入
+RAG 使用自身 [Kafka 客户端](../src/rag/core/kafka.py)：进程内快速重试 3 次，等待 1/2/4 秒，仍失败进入
 `<main>.DLT`。正常处理最多 4 次业务执行；崩溃/重复投递时不能承诺总次数或 exactly-once。
 
-`PublicationEventConsumer` 注入 `MessageConsumer` 实例并把各自的业务 handler 传给 `run(handler=..., started=...)`。Container
-构造 Kafka adapter 时提供 bootstrap servers、topic、group 和 retry policy；协议定义于
-[domain/messaging/consumer.py](../src/rag/domain/interfaces/consumer.py)，实现见
-[core/messaging/kafka.py](../src/rag/core/messaging/kafka.py)。此职责拆分不改变下述重试、DLQ 确认和 offset 提交语义。
+`PublicationEventConsumer` 注入 `KafkaConsumerClient` 实例并把各自的业务 handler 传给 `run(handler=..., started=...)`。Container
+构造 Kafka 客户端时提供 bootstrap servers、topic、group 和 retry policy；实现见
+[core/kafka.py](../src/rag/core/kafka.py)。此职责拆分不改变下述重试、DLQ 确认和 offset 提交语义。
 
 坏 JSON/字段、身份错误、版本冲突和其他 ValueError（包括 ContentIncompleteError）直接 DLQ；其他 handler 异常只快速重试，不加异常白名单。发送
 DLQ 确认后才提交输入 offset+1；发送或提交失败退出，由入口重启。保留 key、业务 headers 和原始

@@ -11,9 +11,9 @@ from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.application.publication import DocumentReadyEvent
 from rag.application.reading import DocumentReading, SectionReadScope
-from rag.application.retrieval import VectorRetrieval
+from rag.application.chunk import ChunkRetrieval
 from rag.domain.models import ContentRevision
-from rag.ingestion.chunkers import MarkdownChunker
+from rag.application.publication.ingestion import MarkdownChunker
 
 
 @pytest.mark.parametrize("diversity", ["off", "high"])
@@ -86,7 +86,7 @@ async def test_storage_to_vector_retrieval_composition(
     )
 
     # 用例绑定实际仓储与模型客户端，调用时直接 from_storage 组装本次 Retriever。
-    usecase = VectorRetrieval(
+    usecase = ChunkRetrieval(
         snapshot_reader=snapshot_reader,
         vector_reader=vectors,
         embedding_client=embedding_client,

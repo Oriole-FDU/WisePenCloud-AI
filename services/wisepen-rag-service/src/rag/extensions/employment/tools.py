@@ -1,5 +1,7 @@
 """把通用图检索、traversal、章节读取组合成任职工具，仍以来源为授权单位。"""
 
+from rag.application.chunk import ChunkHit, ChunkRetrieval
+from rag.application.chunk import ChunkRetrievalMode
 from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.graph import (
     GraphRetrieval,
@@ -7,12 +9,10 @@ from rag.application.graph import (
     GraphTraversal,
     GraphTraversalResult,
 )
+from rag.application.graph import GraphRetrievalMode
 from rag.application.reading import DocumentReading
-from rag.application.retrieval import ChunkHit, VectorRetrieval
 from rag.core.filters import FilterOperator, MetadataFilter, MetadataFilters
 from rag.domain.storage.graph import GraphDirection
-from rag.retrievers.graph import GraphRetrievalMode
-from rag.retrievers.vector import VectorRetrievalMode
 
 
 class EmploymentTools:
@@ -21,7 +21,7 @@ class EmploymentTools:
     def __init__(
         self,
         *,
-        contracts: VectorRetrieval,
+        contracts: ChunkRetrieval,
         graph_retrieval: GraphRetrieval,
         graph_traversal: GraphTraversal,
         document_reading: DocumentReading,
@@ -54,7 +54,7 @@ class EmploymentTools:
         return await self._contracts.retrieve(
             query,
             snapshot=snapshot,
-            mode=VectorRetrievalMode.DENSE,
+            mode=ChunkRetrievalMode.DENSE,
             filters=MetadataFilters(fields) if fields else None,
             top_k=top_k,
             candidate_limit=candidate_limit,

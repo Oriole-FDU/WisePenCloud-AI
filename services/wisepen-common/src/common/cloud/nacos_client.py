@@ -18,7 +18,7 @@ _config_client: NacosConfigService | None = None
 _naming_client: NacosNamingService | None = None
 
 
-class NacosClientManager:
+class  NacosClientManager:
     """
     Nacos 客户端管理器 (单例类)
     封装了 Nacos 的配置拉取、配置监听、服务注册与注销逻辑

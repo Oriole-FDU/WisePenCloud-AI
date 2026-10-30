@@ -25,8 +25,8 @@ from rag.core.persistence.mongo.publication import MongoPublicationStore
 from rag.core.persistence.neo4j import Neo4jGraphStorage
 from rag.core.persistence.qdrant import QdrantVectorStorage
 from rag.domain.models import ContentRevision, Ontology
-from rag.ingestion.indexers import ChunkFactsIndexer, GraphIndexer
-from rag.ingestion.transformers import GraphExtractor
+from rag.application.publication.ingestion import ChunkFactsIndexer, GraphIndexer
+from rag.application.publication.ingestion import GraphExtractor
 from rag.domain.storage.content import ContentReader
 from rag.domain.storage.vector import IndexableField, IndexKind
 

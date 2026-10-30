@@ -31,8 +31,8 @@ from rag.extensions.employment.metadata import (
     EmploymentMetadataTransformer,
     employment_projection,
 )
-from rag.ingestion.chunkers.markdown import MarkdownChunker
-from rag.ingestion.transformers.graph import GraphExtraction
+from rag.application.publication.ingestion.chunkers.markdown import MarkdownChunker
+from rag.application.publication.ingestion import GraphExtraction
 from rag.domain.storage.graph import GraphDirection
 from rag.domain.storage.vector import VectorMatch
 
@@ -716,7 +716,7 @@ async def test_graph_tools_keep_orphan_seed_and_do_not_reload_evidence(employmen
 async def test_tools_select_namespace_from_facts_without_parsing_id(employment_env):
     from dataclasses import asdict
 
-    from rag.ingestion.indexers import GraphIndexer
+    from rag.application.publication.ingestion import GraphIndexer
 
     env = employment_env
     chunk = env.chunks[2]

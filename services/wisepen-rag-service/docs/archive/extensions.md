@@ -67,7 +67,7 @@ broker 消费。
 # example: extension-composition
 from dependency_injector import containers, providers
 from rag.extensions.base import Extension
-from rag.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import IngestionPipeline
 
 
 def build_ingestion(platform, ontology):
@@ -180,7 +180,7 @@ resource_id，覆盖所有 revision，永久 destroyed 标记保留。adapter �
 
 ### 3.3 高级工具只映射业务参数，再调用通用正文用例
 
-通用 `VectorRetrieval` 支持 dense/sparse/hybrid，默认 hybrid；单路使用 candidate_limit，hybrid 默认每路 30。Employment
+通用 `ChunkRetrieval` 支持 dense/sparse/hybrid，默认 hybrid；单路使用 candidate_limit，hybrid 默认每路 30。Employment
 的专用集合是 dense-only，因此子容器把同一个通用用例绑定到专用 storage，工具明确选择 dense：
 
 ```text
@@ -262,7 +262,7 @@ transport，不能凭请求正文赋予所有者/ACL。
 # example: extension-test
 from types import SimpleNamespace
 from dependency_injector import containers, providers
-from rag.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import IngestionPipeline
 from rag.application.publication import DocumentPublication
 
 

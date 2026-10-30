@@ -10,9 +10,9 @@ import pytest
 
 from rag.application.publication import DocumentReadyEvent
 from rag.domain.models import ContentRevision
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer, VectorIndexer
-from rag.ingestion.transformers import Contextualizer
+from rag.application.publication.ingestion import MarkdownChunker
+from rag.application.publication.ingestion import ChunkFactsIndexer, VectorIndexer
+from rag.application.publication.ingestion import Contextualizer
 
 
 @pytest.fixture(scope="module")

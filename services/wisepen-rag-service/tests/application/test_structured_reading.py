@@ -14,7 +14,7 @@ from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.reading import DocumentReading, SectionReadScope
 from rag.domain.models import ContentRevision
 from rag.domain.models.content import rag_section_id
-from rag.ingestion.chunkers import MarkdownChunker as RagMarkdownChunker
+from rag.application.publication.ingestion import MarkdownChunker as RagMarkdownChunker
 
 SOURCE = (
     "文档开头😀\n\n"

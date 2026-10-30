@@ -49,7 +49,7 @@ class FilesContainer(containers.DeclarativeContainer):
 # example: extension-composition
 from dependency_injector import containers, providers
 from rag.extensions.base import Extension
-from rag.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import IngestionPipeline
 
 
 def build_ingestion(platform, ontology):
@@ -152,7 +152,7 @@ apply；独立维护的部分成功遵循[运维](operations.md)，不会自动�
 # example: extension-test
 from types import SimpleNamespace
 from dependency_injector import containers, providers
-from rag.ingestion import IngestionPipeline
+from rag.application.publication.ingestion import IngestionPipeline
 from rag.application.publication import DocumentPublication
 
 

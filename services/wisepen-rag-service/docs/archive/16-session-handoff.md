@@ -194,7 +194,7 @@ revision；标记永久保留，迟到写入由下轮回收。真实模型与业
 publication 是 application 用例，没有独立于摄入的领域能力。目录已收敛为 **models.py、store.py、publish.py**，另有仅做导出的
 `__init__.py`。
 
-`publication.py` 同时定义 DocumentReadyEvent、ResourceDestroyedEvent、PublicationEventConsumer 和 DocumentPublication。消费者只注入一个
+`publish.py` 同时定义 DocumentReadyEvent、ResourceDestroyedEvent、PublicationEventConsumer 和 DocumentPublication。消费者只注入一个
 publisher 业务对象，内容直接调用 `publish(document)`，销毁直接调用 `destroy_resources(ids)`。
 
 独立 DocumentIngestion 和原 consumer.py／ingestion.py／publisher.py 已移除。发布器不再公开

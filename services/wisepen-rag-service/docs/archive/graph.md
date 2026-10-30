@@ -10,8 +10,8 @@ Pipeline 不自动生成图事实；扩展包须显式传 Ontology，流程见 [
 ```python
 from common.utils.ai_clients import InstructionClient
 from rag.core.schema import Ontology
-from rag.ingestion.indexers import ChunkFactsIndexer
-from rag.ingestion.transformers import GraphExtractor
+from rag.application.publication.ingestion import ChunkFactsIndexer
+from rag.application.publication.ingestion import GraphExtractor
 
 ontology = Ontology.from_file("services/rag/demo/graph-ontology.json")
 extractor = GraphExtractor(
@@ -132,7 +132,7 @@ Neo4j 失败时保留事实，资源计错并非零退出，重跑可以复用�
 ```python
 from neo4j import AsyncGraphDatabase
 from rag.backends.neo4j import Neo4jGraphStorage
-from rag.ingestion.indexers import GraphIndexer
+from rag.application.publication.ingestion import GraphIndexer
 
 async with AsyncGraphDatabase.driver(neo4j_uri, auth=neo4j_auth) as driver:
     topology = Neo4jGraphStorage(driver=driver)
@@ -160,7 +160,7 @@ contextual_context 或原文。连接和 embedding 配置由装配入口提供�
 
 ```python
 from rag.backends.qdrant import QdrantVectorStorage
-from rag.ingestion.indexers import GraphIndexer
+from rag.application.publication.ingestion import GraphIndexer
 
 entity_vectors = QdrantVectorStorage(
     client=qdrant_client, collection="graph_entity_source_vectors_v4",

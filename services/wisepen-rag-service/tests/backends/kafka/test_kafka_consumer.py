@@ -97,9 +97,9 @@ class Broker:
 @pytest.fixture
 def broker(monkeypatch):
     broker = Broker()
-    monkeypatch.setattr("rag.core.messaging.kafka.AIOKafkaConsumer", broker.factory)
+    monkeypatch.setattr("rag.core.kafka.AIOKafkaConsumer", broker.factory)
     monkeypatch.setattr(
-        "rag.core.messaging.kafka.AIOKafkaProducer", broker.producer_factory
+        "rag.core.kafka.AIOKafkaProducer", broker.producer_factory
     )
     return broker
 
@@ -152,7 +152,7 @@ async def test_quick_retry_backoff_is_one_two_four_seconds_then_dlq(
         waits.append(delay)
         await original_sleep(0)
 
-    monkeypatch.setattr("rag.core.messaging.kafka.asyncio.sleep", sleep)
+    monkeypatch.setattr("rag.core.kafka.asyncio.sleep", sleep)
     handler = AsyncMock(side_effect=OSError("downstream failed"))
     broker.put(broker.record())
     await run_until(

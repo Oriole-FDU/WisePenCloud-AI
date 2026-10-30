@@ -10,7 +10,7 @@ import pytest
 from common.utils.retrieval import ModelReranker, RrfFusion
 from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
-from rag.application.retrieval import VectorRetrieval
+from rag.application.chunk import ChunkRetrieval
 from rag.domain.models import ContentRevision
 from rag.core.filters import MetadataFilter, MetadataFilters
 from rag.domain.storage.vector import VectorMatch
@@ -61,7 +61,7 @@ def retrieval_deps(snapshot_reader):
         client=client,
         dependencies=dependencies,
         reranker=reranker,
-        usecase=VectorRetrieval(
+        usecase=ChunkRetrieval(
             snapshot_reader=snapshot_reader,
             **dependencies,
             reranker=reranker,
@@ -355,7 +355,7 @@ async def test_usecase_failure_propagates_at_owning_stage(
     error = OSError("failed")
     if failure == "read":
         storage.get_chunks = AsyncMock(side_effect=error)
-    usecase = VectorRetrieval(
+    usecase = ChunkRetrieval(
         snapshot_reader=snapshot_reader,
         **retrieval_deps.dependencies,
         reranker=retrieval_deps.reranker,
@@ -381,7 +381,7 @@ async def test_empty_recall_skips_content_and_model(
         retrieval_deps, snapshot_reader, storage
 ):
     storage.get_chunks = AsyncMock(wraps=storage.get_chunks)
-    usecase = VectorRetrieval(
+    usecase = ChunkRetrieval(
         snapshot_reader=snapshot_reader,
         **retrieval_deps.dependencies,
         reranker=retrieval_deps.reranker,
@@ -459,7 +459,7 @@ async def test_application_modes_and_authoritative_metadata(
     await storage.upsert_chunks([chunk])
     projection = match(chunk, business={"year": 1900}, vector_only="不进入结果")
     retrieval_deps.matches.append(projection)
-    usecase = VectorRetrieval(
+    usecase = ChunkRetrieval(
         snapshot_reader=snapshot_reader, **retrieval_deps.dependencies
     )
     hits = await usecase.retrieve(

@@ -6,8 +6,8 @@ from itertools import zip_longest
 
 from common.utils.ai_clients.embedding import EmbeddingClient
 from common.utils.retrieval import Candidate, Fusion, Reranker, RetrievalPipeline
+from rag.application.chunk.hit import ChunkHit, PreparedChunk, build_chunk_hits
 from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
-from rag.application.retrieval import ChunkHit, PreparedChunk, build_chunk_hits
 from rag.core.filters import MetadataFilters
 from rag.domain.models import GraphEdge, GraphNode
 from rag.domain.storage.graph import (
@@ -18,9 +18,9 @@ from rag.domain.storage.graph import (
     graph_vector_record_id,
 )
 from rag.domain.storage.vector import VectorReader
-from rag.retrievers.graph import GraphMatch, GraphRetrievalMode, GraphRetriever
 from .graph_facts import GraphFactLoader
 from .models import GraphEntity, GraphRelationship, group_entities, group_relationships
+from .retriever import GraphMatch, GraphRetrievalMode, GraphRetriever
 
 
 @dataclass(frozen=True, slots=True)

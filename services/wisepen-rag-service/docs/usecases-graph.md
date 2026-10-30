@@ -12,7 +12,7 @@ Ontology。
 
 ```python
 from rag.core.filters import MetadataFilter, MetadataFilters
-from rag.retrievers.graph import GraphRetrievalMode
+from rag.application.graph import GraphRetrievalMode
 from rag.domain.models.graph import GraphDirection
 
 

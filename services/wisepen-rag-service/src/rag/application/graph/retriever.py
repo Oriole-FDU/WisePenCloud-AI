@@ -14,7 +14,6 @@ from common.utils.retrieval import (
 from rag.core.filters import MetadataFilters
 from rag.domain.storage.graph import GraphVectorKind
 from rag.domain.storage.vector import VectorMatch, VectorQuery, VectorReader
-from rag.retrievers.vector import embed_query
 
 
 class GraphRetrievalMode(StrEnum):
@@ -129,7 +128,7 @@ class GraphRetriever(Retriever[GraphMatch]):
             raise ValueError("query must not be empty")
 
         # 两路检索同一 query，只生成一次向量；请求材料不留在共享实例。
-        embedding = await embed_query(self._embedding_client, query)
+        embedding = await _embed_query(self._embedding_client, query)
 
         # 各路线并行查询
         matches = await asyncio.gather(
@@ -169,3 +168,12 @@ class GraphRetriever(Retriever[GraphMatch]):
             else result_sets[0]
         )
         return candidates[: self.top_k]
+
+
+async def _embed_query(embedding_client: EmbeddingClient, query: str) -> list[float]:
+    """响应合同由 Common 核对；这里只把响应 ValueError 转为可重试的后端失败。"""
+    try:
+        vectors = await embedding_client.embed(texts=[query])
+    except ValueError as exc:
+        raise RuntimeError("invalid embedding response") from exc
+    return vectors[0]

@@ -191,7 +191,7 @@ async def test_real_indexer_cross_document_path_and_namespace_isolation(
         real_storage, graph_ontology, chunk
 ):
     storage, driver, database, graph_name = real_storage
-    from rag.ingestion.indexers import GraphIndexer
+    from rag.application.publication.ingestion import GraphIndexer
 
     first = make_source("a", "doc-a")
     second = make_source("b", "doc-b")

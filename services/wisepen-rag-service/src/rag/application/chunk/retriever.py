@@ -17,7 +17,7 @@ from rag.domain.storage.vector import VectorMatch, VectorQuery, VectorReader
 _DEFAULT_HYBRID_ROUTE_TOP_K = 30
 
 
-class VectorRetrievalMode(StrEnum):
+class ChunkRetrievalMode(StrEnum):
     """初始化时选择召回路线；仅 hybrid 使用融合策略。"""
 
     DENSE = "dense"
@@ -25,7 +25,7 @@ class VectorRetrievalMode(StrEnum):
     HYBRID = "hybrid"
 
 
-class VectorRetriever(Retriever[VectorMatch]):
+class ChunkRetriever(Retriever[VectorMatch]):
     """按配置执行单路或 Common 并发融合；无请求运行状态。"""
 
     def __init__(
@@ -40,21 +40,21 @@ class VectorRetriever(Retriever[VectorMatch]):
         *,
         reader: VectorReader,
         embedding_client: EmbeddingClient | None = None,
-        mode: VectorRetrievalMode = VectorRetrievalMode.HYBRID,
+        mode: ChunkRetrievalMode = ChunkRetrievalMode.HYBRID,
         dense_top_k: int | None = None,
         sparse_top_k: int | None = None,
         candidate_limit: int = 60,
         filters: MetadataFilters | None = None,
         include_embedding: bool = False,
         fusion: Fusion[VectorMatch] | None = None,
-    ) -> "VectorRetriever":
+    ) -> "ChunkRetriever":
         """固定召回模式与配置；sparse 无需 embedding。
 
         单路模式直接使用 candidate_limit 作为路内 top_k，保留 provider 排名和分数；
         dense_top_k / sparse_top_k 仅在 hybrid 下用于控制各路召回量。
         """
-        mode = VectorRetrievalMode(mode)
-        if mode is VectorRetrievalMode.HYBRID:
+        mode = ChunkRetrievalMode(mode)
+        if mode is ChunkRetrievalMode.HYBRID:
             dense_k = (
                 _DEFAULT_HYBRID_ROUTE_TOP_K if dense_top_k is None else dense_top_k
             )
@@ -70,7 +70,7 @@ class VectorRetriever(Retriever[VectorMatch]):
             dense_k = sparse_k = candidate_limit
 
         retrievers: list[Retriever[VectorMatch]] = []
-        if mode in {VectorRetrievalMode.DENSE, VectorRetrievalMode.HYBRID}:
+        if mode in {ChunkRetrievalMode.DENSE, ChunkRetrievalMode.HYBRID}:
             if embedding_client is None:
                 raise ValueError("dense and hybrid modes require an embedding client")
             retrievers.append(
@@ -82,7 +82,7 @@ class VectorRetriever(Retriever[VectorMatch]):
                     include_embedding=include_embedding,
                 )
             )
-        if mode in {VectorRetrievalMode.SPARSE, VectorRetrievalMode.HYBRID}:
+        if mode in {ChunkRetrievalMode.SPARSE, ChunkRetrievalMode.HYBRID}:
             retrievers.append(
                 _SparseRetriever(
                     reader=reader,
@@ -93,7 +93,7 @@ class VectorRetriever(Retriever[VectorMatch]):
             )
         # 单路直接使用适配器，只有 hybrid 需要 Common 的并发与融合编排。
         retriever = retrievers[0]
-        if mode is VectorRetrievalMode.HYBRID:
+        if mode is ChunkRetrievalMode.HYBRID:
             retriever = FusionRetriever(
                 retrievers=retrievers,
                 fusion=fusion if fusion is not None else RoundRobinFusion(),
@@ -128,7 +128,7 @@ class _DenseRetriever(Retriever[VectorMatch]):
         self._include_embedding = include_embedding
 
     async def retrieve(self, query: str) -> list[Candidate[VectorMatch]]:
-        embedding = await embed_query(self._embedding_client, query)
+        embedding = await _embed_query(self._embedding_client, query)
 
         matches = await self._reader.query(
             VectorQuery(
@@ -175,7 +175,7 @@ class _SparseRetriever(Retriever[VectorMatch]):
         ]
 
 
-async def embed_query(embedding_client: EmbeddingClient, query: str) -> list[float]:
+async def _embed_query(embedding_client: EmbeddingClient, query: str) -> list[float]:
     """响应合同由 Common 核对；这里只把响应 ValueError 转为可重试的后端失败。"""
     try:
         vectors = await embedding_client.embed(texts=[query])

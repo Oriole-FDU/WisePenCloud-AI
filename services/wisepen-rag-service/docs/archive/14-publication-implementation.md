@@ -65,9 +65,9 @@ VectorStorage/VectorIndexer 和可选图谱尚未实现。Kafka 使用 RAG 内�
 ```python
 from rag.application.publication import DocumentPublication
 from rag.backends.mongo import MongoContentStorage, MongoPublicationStore
-from rag.ingestion.chunkers import MarkdownChunker
-from rag.ingestion.indexers import ChunkFactsIndexer
-from rag.ingestion.pipeline import IngestionPipeline
+from rag.application.publication.ingestion import MarkdownChunker
+from rag.application.publication.ingestion import ChunkFactsIndexer
+from rag.application.publication.ingestion import IngestionPipeline
 
 content = MongoContentStorage(
     documents=database["document_revisions"],
