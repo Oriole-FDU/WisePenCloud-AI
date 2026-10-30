@@ -1,15 +1,24 @@
 pipeline {
     agent any
 
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timestamps()
+    }
+
     environment {
         PROJECT_NAME = 'wisepencloud'
         DOCKER_REGISTRY = 'local'
-        IMAGE_TAG = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
         COMPOSE_FILE_PATH = 'docker-compose-app.yml'
     }
 
     parameters {
         string(name: 'BRANCH_NAME', defaultValue: 'main', description: '选择需要构建的 Git 分支')
+        booleanParam(name: 'DEPLOY_AFTER_BUILD', defaultValue: true, description: '构建成功后是否执行部署')
+        booleanParam(name: 'PUSH_TO_REGISTRY', defaultValue: false, description: '是否额外上传镜像到用户指定的制品仓')
+        string(name: 'REGISTRY_HOST', defaultValue: '', description: '制品仓主机名和可选端口，不包含协议或路径')
+        string(name: 'REGISTRY_NAMESPACE', defaultValue: '', description: '制品仓命名空间，例如 wisepen')
         string(name: 'PYPI_INDEX_URL', defaultValue: 'https://mirrors.aliyun.com/pypi/simple/', description: 'Python 包索引地址，默认使用中国大陆镜像')
         booleanParam(name: 'DEPLOY_CHAT_SERVICE', defaultValue: true, description: '构建并部署 chat-service')
         booleanParam(name: 'DEPLOY_MCP_SERVICE', defaultValue: true, description: '构建并部署 mcp-service')
@@ -22,9 +31,16 @@ pipeline {
     stages {
         stage('1. 拉取代码 (Checkout)') {
             steps {
-                echo "开始拉取 ${params.BRANCH_NAME} 分支代码..."
-                checkout scm
-                echo "代码拉取成功，当前构建版本 TAG: ${IMAGE_TAG}"
+                script {
+                    def remoteUrl = scm.userRemoteConfigs[0].url
+                    echo "开始从 ${remoteUrl} 拉取 ${params.BRANCH_NAME} 分支代码..."
+                    deleteDir()
+                    git branch: params.BRANCH_NAME, url: remoteUrl
+                    env.GIT_COMMIT_FULL = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    env.IMAGE_TAG = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    sh 'git status --short --branch'
+                    echo "代码拉取成功，Commit: ${env.GIT_COMMIT_FULL}，镜像 TAG: ${env.IMAGE_TAG}"
+                }
             }
         }
 
@@ -42,71 +58,11 @@ pipeline {
                         selectedServices << 'sandbox-service'
                     }
                     if (selectedServices.isEmpty()) {
-                        error '至少需要选择一个要构建并部署的服务。'
+                        error '至少需要选择一个要构建的服务。'
                     }
                     env.SELECTED_COMPOSE_SERVICES = selectedServices.join(' ')
-                    echo "本次选择构建并部署的服务: ${env.SELECTED_COMPOSE_SERVICES}"
+                    echo "本次选择构建的服务: ${env.SELECTED_COMPOSE_SERVICES}"
                 }
-            }
-        }
-
-        stage('1.6 预检远程沙箱节点 (Preflight Remote Sandbox)') {
-            when {
-                expression {
-                    return params.DEPLOY_SANDBOX_SERVICE && params.SANDBOX_RUNTIME_TARGET == 'REMOTE'
-                }
-            }
-            steps {
-                sh '''
-                    set -eu
-
-                    case "${SANDBOX_REMOTE_DOCKER_HOST}" in
-                        tcp://*) ;;
-                        *)
-                            echo "SANDBOX_REMOTE_DOCKER_HOST 必须使用 tcp://host:port 格式"
-                            exit 1
-                            ;;
-                    esac
-
-                    remote_endpoint="${SANDBOX_REMOTE_DOCKER_HOST#tcp://}"
-                    remote_docker_host="${remote_endpoint%:*}"
-                    remote_docker_port="${remote_endpoint##*:}"
-                    if [ -z "${remote_docker_host}" ] || [ "${remote_docker_host}" = "${remote_endpoint}" ]; then
-                        echo "SANDBOX_REMOTE_DOCKER_HOST 缺少主机或端口"
-                        exit 1
-                    fi
-                    case "${remote_docker_host}" in
-                        *[!A-Za-z0-9.-]*)
-                            echo "SANDBOX_REMOTE_DOCKER_HOST 的主机格式无效"
-                            exit 1
-                            ;;
-                    esac
-                    case "${remote_docker_port}" in
-                        ''|*[!0-9]*)
-                            echo "SANDBOX_REMOTE_DOCKER_HOST 的端口格式无效"
-                            exit 1
-                            ;;
-                    esac
-                    case "${SANDBOX_REMOTE_HTTP_HOST}" in
-                        ''|*[!A-Za-z0-9.-]*)
-                            echo "SANDBOX_REMOTE_HTTP_HOST 只能填写 IP 或主机名，不含协议和端口"
-                            exit 1
-                            ;;
-                    esac
-
-                    echo "检查远程 Docker API: ${SANDBOX_REMOTE_DOCKER_HOST}"
-                    docker_daemon_id=$(docker --host "${SANDBOX_REMOTE_DOCKER_HOST}" info --format '{{.ID}}')
-
-                    http_route_docker_host="tcp://${SANDBOX_REMOTE_HTTP_HOST}:${remote_docker_port}"
-                    echo "检查沙箱 HTTP 主机到远程节点的网络路径: ${http_route_docker_host}"
-                    http_route_daemon_id=$(docker --host "${http_route_docker_host}" info --format '{{.ID}}')
-
-                    if [ -z "${docker_daemon_id}" ] || [ "${docker_daemon_id}" != "${http_route_daemon_id}" ]; then
-                        echo "两个远程地址未连接到同一个 Docker daemon"
-                        exit 1
-                    fi
-                    echo "远程沙箱节点预检通过，Docker daemon ID: ${docker_daemon_id}"
-                '''
             }
         }
 
@@ -175,7 +131,60 @@ pipeline {
             }
         }
 
+        stage('2.5 上传镜像到制品仓 (Push Registry)') {
+            when {
+                expression { return params.PUSH_TO_REGISTRY }
+            }
+            steps {
+                script {
+                    if (!params.REGISTRY_HOST?.trim() || params.REGISTRY_HOST.contains('://') || params.REGISTRY_HOST.contains('/')) {
+                        error 'REGISTRY_HOST 必须填写主机名和可选端口，不能包含协议或路径。'
+                    }
+                    if (!params.REGISTRY_NAMESPACE?.trim()) {
+                        error '启用制品仓上传时必须填写 REGISTRY_NAMESPACE。'
+                    }
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'docker-registry-credentials',
+                            usernameVariable: 'REGISTRY_USERNAME',
+                            passwordVariable: 'REGISTRY_PASSWORD'
+                        )
+                    ]) {
+                        withEnv([
+                            "REGISTRY_HOST=${params.REGISTRY_HOST.trim()}",
+                            "REGISTRY_NAMESPACE=${params.REGISTRY_NAMESPACE.trim()}"
+                        ]) {
+                            sh '''
+                            set -eu
+                            DOCKER_CONFIG="$(mktemp -d)"
+                            export DOCKER_CONFIG
+                            trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+                            printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY_HOST" \
+                                --username "$REGISTRY_USERNAME" --password-stdin
+
+                            for service in $SELECTED_COMPOSE_SERVICES; do
+                                case "$service" in
+                                    chat-service) image_name=chat ;;
+                                    mcp-service) image_name=mcp ;;
+                                    sandbox-service) image_name=sandbox ;;
+                                    *) echo "未知服务: $service"; exit 1 ;;
+                                esac
+                                source_image="${DOCKER_REGISTRY}/${PROJECT_NAME}-${image_name}:${IMAGE_TAG}"
+                                target_image="${REGISTRY_HOST}/${REGISTRY_NAMESPACE}/${PROJECT_NAME}-${image_name}:${IMAGE_TAG}"
+                                docker tag "$source_image" "$target_image"
+                                docker push "$target_image"
+                            done
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+
         stage('3. 部署 (Deploy)') {
+            when {
+                expression { return params.DEPLOY_AFTER_BUILD }
+            }
             environment {
                 NACOS_USER = credentials('nacos-username')
                 NACOS_PWD  = credentials('nacos-password')
@@ -184,11 +193,8 @@ pipeline {
                 script {
                     echo "开始部署最新版本: ${IMAGE_TAG}，服务: ${env.SELECTED_COMPOSE_SERVICES} ..."
                     sh """
-                    if ! command -v docker-compose &> /dev/null; then
-                        echo "容器内缺失 docker-compose，正在自动下载..."
-                        curl -L -# -o /usr/local/bin/docker-compose "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)"
-                        chmod +x /usr/local/bin/docker-compose
-                    fi
+                    set -eu
+                    docker compose version
 
                     export APP_VERSION=${IMAGE_TAG}
                     export DOCKER_REGISTRY=${DOCKER_REGISTRY}
@@ -202,6 +208,13 @@ pipeline {
                                 export SANDBOX_DOCKER_HTTP_HOST="host.docker.internal"
                                 ;;
                             REMOTE)
+                                case "\${SANDBOX_REMOTE_DOCKER_HOST}" in
+                                    tcp://*:* ) ;;
+                                    * ) echo "SANDBOX_REMOTE_DOCKER_HOST 必须使用 tcp://host:port 格式"; exit 1 ;;
+                                esac
+                                case "\${SANDBOX_REMOTE_HTTP_HOST}" in
+                                    ''|*[!A-Za-z0-9.-]* ) echo "SANDBOX_REMOTE_HTTP_HOST 只能填写 IP 或主机名"; exit 1 ;;
+                                esac
                                 export SANDBOX_DOCKER_API_HOST="\${SANDBOX_REMOTE_DOCKER_HOST}"
                                 export SANDBOX_DOCKER_HTTP_HOST="\${SANDBOX_REMOTE_HTTP_HOST}"
                                 ;;
@@ -213,21 +226,29 @@ pipeline {
                         echo "沙箱容器运行位置: \${SANDBOX_RUNTIME_TARGET}"
                     fi
 
-                    # 网络兼容
-                    # 检测到遗留 cloud-infra_cloud-net 时叠加 legacy-net overlay
-                    # 老中间件全部下线后，本脚本可以与docker-compose-app.legacy-net.yml文件、部署脚本中的探测分支一并删除
                     docker network create wisepen-net 2>/dev/null || true
-                    COMPOSE_FILES="-f ${COMPOSE_FILE_PATH}"
-                    if docker network inspect cloud-infra_cloud-net >/dev/null 2>&1; then
-                        echo "检测到遗留网络 cloud-infra_cloud-net，叠加 docker-compose-app.legacy-net.yml"
-                        COMPOSE_FILES="\$COMPOSE_FILES -f docker-compose-app.legacy-net.yml"
-                    fi
 
-                    docker-compose \$COMPOSE_FILES up -d --no-build --remove-orphans ${env.SELECTED_COMPOSE_SERVICES}
+                    # 清理本轮选中服务的规范容器
+                    for service in ${env.SELECTED_COMPOSE_SERVICES}; do
+                        case "\$service" in
+                            chat-service) container_name=wisepen-chat-service ;;
+                            mcp-service) container_name=wisepen-mcp-service ;;
+                            sandbox-service) container_name=wisepen-sandbox-service ;;
+                            *) echo "未知 Compose 服务: \$service"; exit 1 ;;
+                        esac
+                        docker rm -f "\$container_name" >/dev/null 2>&1 || true
+                    done
+
+                    docker compose \
+                        -p wisepen-cloud-ai \
+                        -f ${COMPOSE_FILE_PATH} \
+                        up -d --no-build --force-recreate --remove-orphans \
+                        ${env.SELECTED_COMPOSE_SERVICES}
 
                     if [ "\${DEPLOY_SANDBOX_SERVICE}" = "true" ]; then
-                        echo "验证 sandbox-service 的 Docker daemon 连接..."
-                        docker exec wisepen-sandbox-service docker info --format 'Server={{.Name}} Docker={{.ServerVersion}} Containers={{.Containers}}'
+                        echo "验证 sandbox-service 的 Docker daemon 连接（15 秒超时）..."
+                        timeout 15s docker exec wisepen-sandbox-service \
+                            docker info --format 'Server={{.Name}} Docker={{.ServerVersion}} Containers={{.Containers}}'
                     fi
                     """
                 }
@@ -241,7 +262,11 @@ pipeline {
             sh 'docker image prune -f'
         }
         success {
-            echo "构建与部署完成！版本: ${IMAGE_TAG}"
+            script {
+                echo(params.DEPLOY_AFTER_BUILD
+                    ? "构建与部署完成！版本: ${IMAGE_TAG}"
+                    : "构建完成，已按 build-only 模式跳过部署！版本: ${IMAGE_TAG}")
+            }
         }
         failure {
             echo "流水线执行失败，请检查 Jenkins 控制台报错日志！"
