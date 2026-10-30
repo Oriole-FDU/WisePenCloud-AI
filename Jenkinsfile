@@ -66,7 +66,7 @@ pipeline {
             }
         }
 
-        stage('2. 构建 Docker 镜像') {
+        stage('2. 构建 Docker 镜像 (Docker Build)') {
             failFast true
 
             parallel {
@@ -194,7 +194,7 @@ pipeline {
                     echo "开始部署最新版本: ${IMAGE_TAG}，服务: ${env.SELECTED_COMPOSE_SERVICES} ..."
                     sh """
                     set -eu
-                    docker compose version
+                    docker-compose version
 
                     export APP_VERSION=${IMAGE_TAG}
                     export DOCKER_REGISTRY=${DOCKER_REGISTRY}
@@ -239,7 +239,7 @@ pipeline {
                         docker rm -f "\$container_name" >/dev/null 2>&1 || true
                     done
 
-                    docker compose \
+                    docker-compose \
                         -p wisepen-cloud-ai \
                         -f ${COMPOSE_FILE_PATH} \
                         up -d --no-build --force-recreate --remove-orphans \
