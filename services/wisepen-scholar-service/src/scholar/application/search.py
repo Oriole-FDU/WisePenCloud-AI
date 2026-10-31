@@ -153,7 +153,7 @@ class PaperSearchService:
         else:
             papers, conflicts = self._fuse_sources(ranked, limit=query.limit)
 
-        # 只排除本次成功来源；注册过但未执行或失败的来源仍可提供增量。
+        # 通用来源取得论文即完成获取；领域来源仍按详情完整性决定是否补查。
         succeeded = {
             source
             for source, result in zip(plan, results)
@@ -172,9 +172,7 @@ class PaperSearchService:
                     if source in self.lookup_runner.bindings
                 ]
             ),
-            domain_sources=[
-                source for source in policy.field_enrichers if source not in succeeded
-            ],
+            domain_sources=policy.field_enrichers,
             credentials=self.platform_credentials | credentials,
             deadline=deadline,
         )

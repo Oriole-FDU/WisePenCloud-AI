@@ -13,7 +13,6 @@ from scholar.domain.models.identifiers import (
     IdentifierKind, PaperIdentifier, normalize_arxiv, normalize_doi, parse_identifier,
 )
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
 from .transport import S2Transport
 
 IDENTITY_FIELDS = ("paperId", "corpusId", "externalIds", "url", "title")
@@ -24,30 +23,6 @@ ENRICHMENT_FIELDS = (
     "openAccessPdf",
 )
 DETAIL_FIELDS = ("abstract", "authors", "year", "publicationDate", "venue")
-
-
-def has_signals(metadata: dict) -> bool:
-    """判定 S2 元数据是否含有效富化信号。
-
-    三类价值维度取 OR，覆盖不同时效与学科的论文：
-
-    - 计量指标：``citation_count`` / ``influential_citation_count`` 任一非 None。
-    - 速读价值：``tldr.text`` 非空（引用为 0 的预印本也可能已有 LLM 摘要）。
-    - 阅读入口：``open_access_pdf`` 存在。
-    """
-    values = metadata.get("s2", {})
-    tldr = values.get("tldr")
-    return (
-        any(
-            values.get(key) is not None
-            for key in (
-                "citation_count",
-                "influential_citation_count",
-            )
-        )
-        or bool(tldr and tldr.get("text"))
-        or bool(values.get("open_access_pdf"))
-    )
 
 
 def aliases(metadata: dict) -> list[PaperIdentifier]:
@@ -64,28 +39,6 @@ def aliases(metadata: dict) -> list[PaperIdentifier]:
     if values.get("corpus_id") is not None:
         aliases.append(parse_identifier(f"corpusid:{values['corpus_id']}"))
     return aliases
-
-
-def short_lived(record: CachedPaperLookup) -> bool:
-    """判定 S2 lookup 缓存是否暂态或缺少关键信号（是则用短 TTL）。
-
-    与 ``has_signals`` 的「宽进」互补：这里「严出」，任一残缺即降级为短 TTL，
-    避免负结果或半成品长期占缓存。触发条件：
-
-    - 已确认未找到（``paper`` 为空）；
-    - ``citation_count`` 或 ``influential_citation_count`` 尚未出炉；
-    - ``tldr`` 缺失或其 ``text`` 为空（LLM 摘要仍在生成）。
-    """
-    if record.paper is None:
-        return True
-    values = record.paper.metadata.get("s2", {})
-    tldr = values.get("tldr")
-    return (
-        values.get("citation_count") is None
-        or values.get("influential_citation_count") is None
-        or not tldr
-        or not tldr.get("text")
-    )
 
 
 def pdf_url(paper: Paper) -> str | None:

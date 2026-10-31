@@ -22,6 +22,7 @@ from scholar.domain.models.identifiers import (
     parse_identifier,
 )
 from scholar.domain.models.paper import Paper, PaperSource
+from scholar.domain.models.fields import AcademicField, FieldPolicy
 
 
 def make_paper(
@@ -86,7 +87,7 @@ def binding(provider, *, cache=None, identifier_kinds=None, **kwargs):
     return LookupBinding(
         provider,
         cache,
-        replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=identifier_kinds or IdentifierKind.members(), **({"has_signals": None} | kwargs)),
+        replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=identifier_kinds or IdentifierKind.members(), **kwargs),
     )
 
 
@@ -275,11 +276,10 @@ async def test_later_ambiguous_match_does_not_return_a_previously_found_paper():
     ambiguous = FakeProvider(
         {identity: PaperLookupMatch([base, make_paper(title="Other")])}
     )
-    lookup = service(
-        {
-            "arxiv": binding(local, has_signals=lambda metadata: False),
-            "s2": binding(ambiguous),
-        }
+    lookup = PaperLookupService(
+        LookupRunner({"arxiv": binding(local), "huggingface": binding(ambiguous)}),
+        pdf=make_pdf_service(),
+        policies=make_policy_store({AcademicField.GENERAL: FieldPolicy([], ["huggingface"])}),
     )
 
     result = await lookup.lookup(PaperLookup([identity.value]))
@@ -352,8 +352,7 @@ async def test_transformer_lookup_preserves_research_signals_and_removes_interna
 
     assert result.items[0].paper.metadata == {
         "arxiv": {
-            "categories": ["cs.CL", "cs.LG"], "updated_date": "2023-08-03",
-            "comments": "15 pages, 5 figures", "latest_version": "v7",
+            "categories": ["cs.CL", "cs.LG"], "comments": "15 pages, 5 figures",
             **extra_arxiv,
         },
         "s2": {
@@ -415,3 +414,26 @@ async def test_medical_lookup_compacts_mesh_and_preserves_distinct_reading_entri
         ],
         "best_oa_location": {"landing_page_url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7745181/"},
     }}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["s2", "openalex"])
+async def test_exact_common_match_stops_fallback_without_research_signals(source):
+    identity = parse_identifier("2401.00001")
+    base = make_paper(source=source)
+    matched = FakeProvider({identity: PaperLookupMatch([base])})
+    fallback_source = "openalex" if source == "s2" else "s2"
+    fallback = FakeProvider()
+    lookup = PaperLookupService(
+        LookupRunner({source: binding(matched), fallback_source: binding(fallback)}),
+        pdf=make_pdf_service(),
+        policies=make_policy_store(common_enrichers=[source, fallback_source]),
+    )
+
+    result = await lookup.lookup(PaperLookup([identity.value]))
+
+    assert result.items[0].status == LookupStatus.FOUND
+    assert result.items[0].paper == base
+    assert result.items[0].error is None
+    assert matched.calls == [([identity], None)]
+    assert fallback.calls == []

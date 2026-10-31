@@ -1,4 +1,4 @@
-"""验证 lookup runner 的缓存、信号短路、错误和并发生命周期合同。"""
+"""验证 lookup runner 的缓存、精确命中短路、错误和并发生命周期合同。"""
 from policy_fakes import make_policy_store
 
 from pdf_fakes import make_pdf_service
@@ -22,11 +22,10 @@ from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
+from scholar.domain.models.fields import AcademicField, FieldPolicy
 from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
 from scholar.core.providers.s2 import provider as s2
-from scholar.core.providers.arxiv import has_signals as arxiv_signals
 from scholar.core.providers.s2.provider import aliases as s2_aliases
-from scholar.core.providers.s2.provider import has_signals as s2_signals
 
 
 class FakeRedisPipeline:
@@ -149,7 +148,7 @@ def make_paper(
 
 def runner(provider, *, cache=None, extra_bindings=None):
     bindings = {
-        PaperSource.S2: LookupBinding(provider, cache, replace(PROVIDER_POLICIES["s2"], identifier_kinds=IdentifierKind.members(), has_signals=s2.has_signals, aliases=s2.aliases, short_lived=s2.short_lived))
+        PaperSource.S2: LookupBinding(provider, cache, replace(PROVIDER_POLICIES["s2"], identifier_kinds=IdentifierKind.members(), aliases=s2.aliases))
     }
     if extra_bindings:
         bindings.update(extra_bindings)
@@ -182,7 +181,8 @@ async def test_redis_cache_roundtrips_full_paper_aliases_and_ttl_then_invalidate
 
 
 @pytest.mark.asyncio
-async def test_negative_and_positive_lookup_results_use_distinct_ttls_and_cache_hits():
+@pytest.mark.parametrize("signals", [{}, {"citation_count": 0}])
+async def test_negative_and_positive_lookup_results_use_distinct_ttls_and_cache_hits(signals):
     redis = FakeRedisBoundary()
     cache = RedisPaperLookupCache(redis, "ttl-contract")
     missing = parse_identifier("corpusid:404")
@@ -192,9 +192,7 @@ async def test_negative_and_positive_lookup_results_use_distinct_ttls_and_cache_
             "s2": {
                 "paper_id": "a" * 40,
                 "corpus_id": "123",
-                "citation_count": 5,
-                "influential_citation_count": 1,
-                "tldr": {"text": "Summary"},
+                **signals,
             }
         }
     )
@@ -226,59 +224,7 @@ async def test_cache_read_failure_does_not_fall_through_to_provider():
 
 
 @pytest.mark.asyncio
-async def test_zero_false_and_empty_summary_are_known_signals_but_observed_at_is_not():
-    identifier = parse_identifier("2401.00001")
-    known = make_paper(
-        metadata={
-            "s2": {
-                "citation_count": 0,
-                "influential_citation_count": 0,
-                "is_open_access": False,
-                "tldr": {"model": "offline", "text": ""},
-            }
-        }
-    )
-    provider = FakeProvider(
-        {
-            identifier: PaperLookupMatch(
-                [make_paper(metadata={"s2": {"citation_count": None}})]
-            )
-        }
-    )
-    run = runner(provider)
-    known_target = run.target(identifier, known)
-
-    await run.run([known_target], common_sources=[PaperSource.S2], domain_sources=[])
-
-    assert provider.calls == []
-    assert known_target.metadata["s2"]["citation_count"] == 0
-    assert known_target.metadata["s2"]["is_open_access"] is False
-
-    stale = make_paper(metadata={"s2": {"observed_at": "2026-10-28"}})
-    stale_target = run.target(identifier, stale)
-    await run.run([stale_target], common_sources=[PaperSource.S2], domain_sources=[])
-    assert provider.calls == [([identifier], None)]
-    assert stale_target.metadata["s2"]["citation_count"] is None
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("source", ["s2", "openalex"])
-async def test_legacy_oa_status_alone_does_not_stop_provider_recovery(source):
-    identity = parse_identifier("2401.00001")
-    metadata = {source: {"is_open_access": False} if source == "s2" else {"open_access": {"is_oa": True}}}
-    metric = "citation_count" if source == "s2" else "cited_by_count"
-    provider = FakeProvider({identity: PaperLookupMatch([make_paper(metadata={source: {metric: 0}})])})
-    run = LookupRunner({source: LookupBinding(provider, None, PROVIDER_POLICIES[source])})
-    target = run.target(identity, make_paper(metadata=metadata))
-
-    await run.run([target], common_sources=[source], domain_sources=[])
-
-    assert provider.calls == [([identity], None)]
-    assert target.general_found is True
-
-
-@pytest.mark.asyncio
-async def test_existing_common_signal_stops_common_chain_but_domain_provider_still_runs():
+async def test_existing_common_paper_stops_common_chain_but_domain_provider_still_runs():
     identity = parse_identifier("2401.00001")
     offline = make_paper(
         doi="10.5555/example",
@@ -289,7 +235,7 @@ async def test_existing_common_signal_stops_common_chain_but_domain_provider_sti
             }
         },
     )
-    unreachable = FakeProvider(error=AssertionError("S2 must stop at its known signal"))
+    unreachable = FakeProvider(error=AssertionError("The common paper is already acquired"))
     hf = FakeProvider(
         {
             identity: PaperLookupMatch(
@@ -330,7 +276,7 @@ async def test_existing_common_signal_stops_common_chain_but_domain_provider_sti
 
 
 @pytest.mark.asyncio
-async def test_base_paper_survives_failed_incremental_lookup_as_partial_result():
+async def test_arxiv_match_without_s2_signals_does_not_query_other_common_sources():
     identity = parse_identifier("2401.00001")
     base = make_paper(metadata={"arxiv": {"comments": "Accepted at a conference"}})
     arxiv = FakeProvider({identity: PaperLookupMatch([base])})
@@ -338,8 +284,8 @@ async def test_base_paper_survives_failed_incremental_lookup_as_partial_result()
     s2 = FakeProvider(error=failure)
     run = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
-            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV])),
         }
     )
 
@@ -349,8 +295,8 @@ async def test_base_paper_survives_failed_incremental_lookup_as_partial_result()
 
     assert result.items[0].status == LookupStatus.FOUND
     assert result.items[0].paper.metadata["arxiv"]["comments"] == "Accepted at a conference"
-    assert result.items[0].error == "S2 request timed out"
-    assert s2.calls == [([identity], None)]
+    assert result.items[0].error is None
+    assert s2.calls == []
 
 
 @pytest.mark.asyncio
@@ -368,7 +314,7 @@ async def test_all_provider_failures_reraise_the_original_error_object():
 @pytest.mark.asyncio
 async def test_conflicting_exact_identity_keeps_base_and_does_not_cache_provider_paper():
     identity = parse_identifier("2401.00001")
-    base = make_paper(doi="10.5555/original", metadata={"s2": {"corpus_id": "111"}})
+    base = make_paper(source=PaperSource.ARXIV, doi="10.5555/original", metadata={"arxiv": {"comments": "Author notes"}})
     contradictory = make_paper(
         arxiv_id="2402.00002",
         doi="10.5555/different",
@@ -378,17 +324,18 @@ async def test_conflicting_exact_identity_keeps_base_and_does_not_cache_provider
     run = LookupRunner(
         {
             PaperSource.ARXIV: LookupBinding(FakeProvider({identity: PaperLookupMatch([base])}), None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
-            PaperSource.S2: LookupBinding(FakeProvider({identity: PaperLookupMatch([contradictory])}), cache, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals, aliases=s2_aliases)),
+            PaperSource.S2: LookupBinding(FakeProvider({identity: PaperLookupMatch([contradictory])}), cache, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], aliases=s2_aliases)),
         }
     )
 
-    result = await PaperLookupService(run, pdf=make_pdf_service(), policies=make_policy_store()).lookup(
-        PaperLookup([identity.value])
-    )
+    result = await PaperLookupService(
+        run, pdf=make_pdf_service(),
+        policies=make_policy_store({AcademicField.GENERAL: FieldPolicy([], [PaperSource.S2])}),
+    ).lookup(PaperLookup([identity.value]))
 
     assert result.items[0].paper.arxiv_id == base.arxiv_id
     assert result.items[0].paper.doi == base.doi
-    assert result.items[0].paper.metadata["s2"] == {"corpus_id": "111"}
+    assert result.items[0].paper.metadata == {"arxiv": {"comments": "Author notes"}}
     assert "conflicts" in result.items[0].error
     assert cache.puts == []
 

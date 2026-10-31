@@ -20,7 +20,6 @@ from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.core.providers.arxiv import has_signals as arxiv_signals
 from scholar.core.providers import OpenAlexProvider
 
 
@@ -77,7 +76,7 @@ async def test_openalex_missing_key_fails_without_sending_a_request():
 
 
 @pytest.mark.asyncio
-async def test_openalex_missing_key_does_not_discard_a_local_base_paper():
+async def test_local_exact_match_does_not_require_openalex_key():
     requests = []
     identity = parse_identifier("2401.00001")
     base = make_paper(
@@ -93,7 +92,7 @@ async def test_openalex_missing_key_does_not_discard_a_local_base_paper():
         lookup = PaperLookupService(
             LookupRunner(
                 {
-                    PaperSource.ARXIV: LookupBinding(LocalProvider(base), None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
+                    PaperSource.ARXIV: LookupBinding(LocalProvider(base), None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
                     PaperSource.OPENALEX: LookupBinding(OpenAlexProvider(http), None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.ARXIV])),
                 }
             )
@@ -106,13 +105,8 @@ async def test_openalex_missing_key_does_not_discard_a_local_base_paper():
     assert result.items[0].status == LookupStatus.FOUND
     assert result.items[0].paper.title == "Local base paper"
     assert result.items[0].paper.metadata["arxiv"]["comments"] == "Accepted at a conference"
-    assert result.items[0].error == "OpenAlex API key is required"
-    assert (
-        next(
-            item for item in result.execution if item.source == PaperSource.OPENALEX
-        ).error
-        == "OpenAlex API key is required"
-    )
+    assert result.items[0].error is None
+    assert [item.source for item in result.execution] == [PaperSource.ARXIV]
     assert requests == []
 
 

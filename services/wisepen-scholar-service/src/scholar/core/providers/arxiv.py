@@ -15,7 +15,6 @@ from qdrant_client.http.exceptions import ApiException as QdrantApiError
 
 from common.logger import warning
 from common.utils.ai_clients.embedding import EmbeddingClient
-from scholar.core.providers.s2.provider import has_signals as s2_has_signals
 from scholar.domain.errors import (
     ProviderError,
     provider_error_message,
@@ -70,22 +69,13 @@ ARXIV_CATEGORIES: dict[AcademicField, list[str] | None] = {
 }
 
 
-def has_signals(metadata: dict) -> bool:
-    """本地基础元信息只算检索底库；仅当同步注入了 S2 字段才算富化。"""
-    return s2_has_signals(metadata)
-
-
 def project_metadata(paper: Paper) -> dict:
-    """保留分类、发表线索与最新修订；仅当提交日期不同于顶层日期时补入。"""
+    """保留分类及作者发表线索；仅当提交日期不同于顶层日期时补入。"""
     values = paper.metadata["arxiv"]
     result = {
         name: values.get(name)
-        for name in ("categories", "updated_date", "journal_ref", "comments")
+        for name in ("categories", "journal_ref", "comments")
     }
-
-    versions = values.get("versions")
-    if versions:
-        result["latest_version"] = versions[-1]["version"]
 
     publication_date = (
         paper.publication_date.isoformat()

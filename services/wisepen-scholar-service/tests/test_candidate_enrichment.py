@@ -6,11 +6,15 @@ from pdf_fakes import make_pdf_service
 from copy import deepcopy
 from dataclasses import replace
 from datetime import date
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from scholar.domain.models.fields import FieldPolicy
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
+from scholar.application.lookup import PaperLookup, PaperLookupService
+from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.application.search import (
     PaperSearch,
     PaperSearchService,
@@ -184,7 +188,7 @@ async def test_search_merges_hf_facts_in_place_and_reuses_positive_and_negative_
     assert first.papers[0].metadata["huggingface"]["upvotes"] == 0
     assert first.papers[0].metadata["huggingface"]["github_stars"] is False
     assert first.papers[0].metadata["arxiv"] == {
-        "categories": ["cs.CL"], "latest_version": "v2",
+        "categories": ["cs.CL"],
     }
     assert first.papers[0].authors == ["Candidate Author et al."]
     assert repeated.papers == first.papers
@@ -202,3 +206,83 @@ async def test_search_merges_hf_facts_in_place_and_reuses_positive_and_negative_
     assert repeated.enrichment_execution[0].cache_hit is True
     assert len(requests) == 2
     assert all(request.headers["authorization"] == "Bearer platform-hf" for request in requests)
+
+
+@pytest.mark.asyncio
+async def test_search_and_lookup_share_arxiv_projection_and_field_enrichment():
+    requests = []
+
+    async def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json=hf_payload("2401.00001"))
+
+    base = make_paper("2401.00001", metadata={"arxiv": {
+        "categories": ["cs.CL", "cs.AI"],
+        "journal_ref": "Proceedings of Example 2024, pp. 1-14",
+        "comments": "Accepted at Example; 14 pages",
+        "updated_date": "2025-02-03",
+        "versions": [{"version": "v1"}, {"version": "v3"}],
+    }})
+    original = deepcopy(base)
+    local = SimpleNamespace(lookup=AsyncMock(return_value=[PaperLookupMatch([base])]))
+    policies = make_policy_store({
+        AcademicField.COMPUTER_SCIENCE: FieldPolicy(["arxiv"], ["huggingface"]),
+    })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        runner = LookupRunner({
+            "arxiv": LookupBinding(local, None, PROVIDER_POLICIES["arxiv"]),
+            "huggingface": LookupBinding(HuggingFaceProvider(http), FakeLookupCache(), PROVIDER_POLICIES["huggingface"]),
+        })
+        search = PaperSearchService(
+            {"arxiv": SearchBinding(FakeSearcher([base]))}, policies,
+            FakeQueryCache(), runner, make_pdf_service(),
+        )
+        lookup = PaperLookupService(runner, pdf=make_pdf_service(), policies=policies)
+        searched = await search.search(PaperSearch("paper", field=AcademicField.COMPUTER_SCIENCE))
+        retrieved = await lookup.lookup(PaperLookup([base.arxiv_id], AcademicField.COMPUTER_SCIENCE))
+
+    assert searched.papers == [retrieved.items[0].paper]
+    assert searched.papers[0].metadata["arxiv"] == {
+        "categories": ["cs.CL", "cs.AI"],
+        "journal_ref": "Proceedings of Example 2024, pp. 1-14",
+        "comments": "Accepted at Example; 14 pages",
+    }
+    assert searched.papers[0].metadata["huggingface"]["linked_models"] == [{"id": "org/model", "likes": 0}]
+    assert len(requests) == 1
+    assert base == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("complete", [False, True])
+async def test_hf_search_fetches_details_only_when_required_fields_are_missing(complete):
+    requests = []
+
+    async def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json=hf_payload("2401.00001"))
+
+    metadata = {"upvotes": 0}
+    if complete:
+        metadata.update({
+            "ai_summary": None, "ai_keywords": [], "github_repo": None,
+            "github_stars": None, "linked_models": [{"id": "org/model", "likes": 0}],
+            "linked_datasets": [],
+        })
+    base = make_paper("2401.00001", source=PaperSource.HUGGINGFACE,
+                      metadata={"huggingface": metadata})
+    original = deepcopy(base)
+    policies = make_policy_store({
+        AcademicField.COMPUTER_SCIENCE: FieldPolicy(["huggingface"], ["huggingface"]),
+    })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        search = PaperSearchService(
+            {"huggingface": SearchBinding(FakeSearcher([base]))}, policies,
+            FakeQueryCache(), LookupRunner({
+                "huggingface": LookupBinding(HuggingFaceProvider(http), None, PROVIDER_POLICIES["huggingface"]),
+            }), make_pdf_service(),
+        )
+        result = await search.search(PaperSearch("paper", field=AcademicField.COMPUTER_SCIENCE))
+
+    assert result.papers[0].metadata["huggingface"]["linked_models"] == [{"id": "org/model", "likes": 0}]
+    assert len(requests) == (0 if complete else 1)
+    assert base == original

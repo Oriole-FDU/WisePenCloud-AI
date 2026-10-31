@@ -73,7 +73,6 @@ def lookup_binding(provider):
     return LookupBinding(provider, None, ProviderPolicy(
         identifier_kinds=[IdentifierKind.ARXIV],
         project_metadata=lambda paper: paper.metadata[provider.source],
-        has_signals=lambda metadata: provider.source in metadata,
     ))
 
 

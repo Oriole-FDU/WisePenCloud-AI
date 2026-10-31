@@ -29,7 +29,6 @@ from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper
 from scholar.domain.models.source_execution import SourceExecutionStatus
 from scholar.core.providers import S2Provider, S2Transport
-from scholar.core.providers.s2.provider import has_signals as s2_signals
 
 
 @pytest_asyncio.fixture
@@ -208,9 +207,9 @@ async def test_busy_batch_is_not_executed_and_preserves_source_fallback(queue_bo
                     await asyncio.sleep(0.01)
             runner = LookupRunner({
                 "s2": LookupBinding(S2Provider(transport), None, replace(
-                    PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+                    PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV])),
                 "openalex": LookupBinding(FallbackProvider(), None, replace(
-                    PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+                    PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.ARXIV])),
             })
             result = await PaperLookupService(runner, pdf=make_pdf_service(), policies=make_policy_store()).lookup(
                 PaperLookup(["2401.00001"]))

@@ -1,4 +1,4 @@
-# 当前实施约定（2026-10-29）
+# 当前实施约定（2026-10-31）
 
 本节更新覆盖下文历史阶段中的检索、离线同步和凭证约定。
 
@@ -11,7 +11,9 @@
 - OpenAlex/HF 搜索和 HF 发现仅使用用户 BYOK，缺 key 时在缓存读取前禁用来源；无可用来源返回 503。lookup/富化仍允许平台 key，用户 key 优先。S2 支持 BYOK，用户 FIFO 按 key 隔离且不设排队阈值，平台跨进程合流走 NOKEY/KEY 双通道，离线与在线 KEY 共享节流且在线优先。
 - 搜索候选缓存区分日期、领域与模型版本，用户 limit 只裁剪返回结果。search/discover 以 candidates-v2 保存投影前候选；完整论文 lookup 缓存版本不变，仍按来源和稳定身份共享。论文事实缓存跨凭证共享，但搜索和发现必须先通过 BYOK 可用性判断；在途 I/O 按有效 key 隔离。
 - lookup 统一返回基础论文和调研 metadata，删除 purpose、重复的 item.metadata 及 enrichment_status；metadata 只出现在 paper 内。HF 可独立提供基础论文。
-- 各 provider 实现信号、别名、TTL 及字段投影，由 providers/policies.py 中的 ProviderPolicy 注册层统一组装。search、lookup、discover 最终出口统一投影；具体字段合同见 [README](../README.md#模型可见-metadata)。
+- search 与 lookup 只在主题检索和按 ID 精确获取阶段不同，随后共用领域富化、PDF 补救和投影。通用来源精确找到论文即停止，arXiv 无 S2 信号时不在线补查；S2 事实由离线同步负责。
+- 删除 has_signals 与 short_lived 回调。已找到论文统一使用正缓存 TTL，缺引用数或 TLDR 不缩短缓存；确认未找到使用负 TTL。arXiv 公共 metadata 提供 categories、原始 journal_ref 和 comments，不提供 updated_date、latest_version，也不解析 venue。
+- 各 provider 实现别名、详情完整性及字段投影，由 providers/policies.py 中的 ProviderPolicy 注册层统一组装。search、lookup、discover 最终出口统一投影；具体字段合同见 [README](../README.md#模型可见-metadata)。
 - 本次 GPU FP16 只负责存量灌库。后续每日 arXiv OAI + S2 Graph batch，必须请求 `embedding.specter_v2`；不使用 S2 diff，不下载
   release 大包。离线代码移出 src，位于 deploy/offline。
 - 分期交付：HF 搜索；查询编码与同进程启动；存量向量持久化及每日 API 同步；混合检索与版本索引切换。每期维护稳定接口，向量不进入
@@ -52,13 +54,12 @@ V1 不建设全文语料库、完整引用图、作者研究工具、用户密�
 
 | 入口                       | 通用富化                                                                    | 领域增量                                        |
 |----------------------------|-----------------------------------------------------------------------------|-------------------------------------------------|
-| search                     | 本次成功 searcher 包含 arxiv/s2/openalex 时直接消费检索数据，否则执行通用链 | 全部执行，排除本次成功执行的同源 searcher       |
-| lookup details/enrich/full | 每篇依次 arxiv→s2→openalex，先读完整来源缓存，获得可用信号即停止            | 按请求 field 全部执行；无基础信息时可由 HF 提供 |
+| search | 本次成功 searcher 包含通用来源时直接消费检索数据，否则执行通用链 | 按详情完整性执行，HF 概要缺字段时获取详情 |
+| lookup | 按配置依次精确查询，先读完整来源缓存，找到论文即停止 | 与 search 相同；无基础信息时可由 HF 提供 |
 | discover                   | 直接交付渠道列表，不逐篇执行通用链                                          | 保留渠道实际返回的数据                          |
 | 每日同步                   | 保留独立离线补充规则和持久进度                                              | 不执行在线领域增量                              |
 
-领域由请求配置选择，不从结果内容推断。初始仅 CS 的 field_enrichers 注册 HF，其余为空。通用链未解决论文按来源批量回退，0/false
-是有效信号；arXiv 只有基础论文信息不算富化成功。
+领域由请求配置选择，不从结果内容推断。初始仅 CS 的 field_enrichers 注册 HF，其余为空。通用链仅让未解决论文按来源批量回退；基础论文已找到即停止，不以引用数或 TLDR 的内容判定命中。领域来源已取得完整详情则跳过；HF 列表概要通过 required_fields 判断是否需要补查。
 
 ### 1.2 工程架构约定
 
@@ -69,7 +70,7 @@ V1 不建设全文语料库、完整引用图、作者研究工具、用户密�
 models.py。
 
 `application/` 只有 search、lookup、discover 三个用例，分别由 `search.py`、`lookup.py`、`discovery.py` 编排。
-`lookup_runner.py` 是 search/lookup 共用的内部执行机制，负责通用短路、领域增量、缓存及在途请求复用，不是额外应用服务。供应商信号与身份规则通过注册绑定注入，留在
+`lookup_runner.py` 是 search/lookup 共用的内部执行机制，负责通用短路、领域增量、缓存及在途请求复用，不是额外应用服务。供应商身份与详情完整性规则通过注册绑定注入，留在
 `providers/`。
 
 `domain/models/fields.py` 定义学术领域和策略模型，完整策略来自 Nacos YAML 的 `SCHOLAR_POLICIES`。
@@ -176,11 +177,11 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 | `identifiers` | 必填字符串列表，1–20 项 | DOI、arXiv、OpenAlex、S2、Corpus ID 或相应官方 URL |
 | `field` | 领域枚举，默认 general | 选择领域增量来源 |
 
-响应为 `items[{identifier,status,paper,error}]` 和 `execution`。找到的 Paper 包含基础信息及唯一一份 metadata，不接受 purpose。
+响应为 `items[{identifier,status,paper,error}]` 和 `execution`。找到的 Paper 包含与 search 相同类型的基础信息及唯一一份 metadata，不接受 purpose。lookup 用于已知标识符的精确查询，不是 search 的常规后处理富化入口。
 
-1. 通用链固定 arxiv→s2→openalex，各来源先批量读缓存，未命中才访问 provider。每篇取得有效通用信号即停止；只有基础论文仍继续补充信号。
+1. 通用链按配置顺序（默认 arxiv→s2→openalex）执行，各来源先批量读缓存，未命中才访问 provider。每篇精确找到 Paper 即停止；arXiv 命中但无离线 S2 信号时不再在线补查。
 2. 未找到、不支持、外部失败或拥堵允许下一来源；歧义不任取候选，不继续关联。保留输入顺序和重复项。
-3. 通用链后执行 field.field_enrichers。已有基础信息取首个成功来源，metadata 按来源命名空间保留；HF 也可独立提供 Paper。
+3. 通用链后与 search 一样按详情完整性执行 field.field_enrichers。已有基础信息取首个成功来源，metadata 按来源命名空间保留；HF 也可独立提供 Paper。
 4. 内部保留完整作者及来源事实，最终返回前统一投影。部分成功保留论文和真实错误；没有可用结果且发生查询失败时传播原始错误。
 5. 来源缓存和在途请求按稳定身份共享；缓存命中不要求上游 key，未命中使用 BYOK 或平台凭证。只有确认未找到才负缓存；最后一个等待者取消才取消共享请求。
 
@@ -216,7 +217,7 @@ API，并遵循[官方 HfApi 源码](https://raw.githubusercontent.com/huggingfa
 
 身份字段为 paperId、corpusId、externalIds、url、title；基础字段为 abstract、authors、year、publicationDate、venue。每次 lookup 获取相同字段集。
 
-富化字段请求 tldr、citationCount、influentialCitationCount、openAccessPdf。停止请求 citationStyles，BibTeX 不再作为有效信号。
+富化字段请求 tldr、citationCount、influentialCitationCount、openAccessPdf。停止请求 citationStyles，BibTeX 不进入公共投影；这些调研字段是否齐全不影响精确命中的停止条件。
 
 出口保留 corpus_id、citation_count、influential_citation_count、venue、tldr 文本和独立阅读入口。paper_id、observed_at、TLDR model 及离线 release/文件路径/行号保留在内部事实中，不返回模型。
 
@@ -345,7 +346,7 @@ ETL 负责。
 | 查询候选及来源排序               | 10 分钟  | 各来源跨用户及凭证共享，包含查询条件与来源版本                            |
 | HF 发现列表                      | 15 分钟  | 跨用户及凭证共享，包含领域、实际周期及排序                                 |
 | 完整论文 lookup                  | 24 小时  | arXiv/S2/OpenAlex/HF 分来源按稳定身份和别名共享，不含凭证、领域、purpose |
-| 已确认未找到或字段为空的查询结果 | 1 小时   | 区分成功确认与网络失败，避免重复请求                                     |
+| 已确认未找到的查询结果 | 1 小时 | 区分确认未找到与网络失败；已找到但字段为空的论文仍使用正缓存 TTL |
 
 TTL 均可配置。search、discover、lookup 均先查共享缓存，命中不要求上游凭证，未命中才使用 BYOK 或平台凭证访问来源；用户标识和凭证不参与缓存键、Redis 命名空间或 lookup 在途复用键。缓存事实与本次执行状态分别构造，不缓存上次的执行状态。旧凭证隔离键不再读取，自然过期，不做兼容读取或迁移。
 

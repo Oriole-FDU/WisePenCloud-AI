@@ -33,7 +33,7 @@ from scholar.core.providers.s2.transport import s2_queued_ahead
 
 @dataclass
 class LookupBinding:
-    """来源声明支持的身份、有效信号与缓存规则；编排不读取供应商字段。"""
+    """来源声明支持的身份、详情完整性与缓存；编排不读取供应商字段。"""
 
     provider: PaperLookupProvider
     cache: PaperLookupCache | None
@@ -100,10 +100,6 @@ class LookupRunner:
             list(dict.fromkeys(identifiers)), deepcopy(paper), metadata
         )
 
-    def _has_signals(self, source: str, metadata: dict) -> bool:
-        rule = self.bindings[source].rules.has_signals
-        return rule(metadata) if rule is not None else bool(metadata.get(source))
-
     async def run(
         self,
         targets: list[LookupTarget],
@@ -116,12 +112,13 @@ class LookupRunner:
         credentials = credentials or {}
         execution = []
 
-        # 通用来源：任一命中即短路，未命中才继续下一个来源。
+        # 已由通用来源取得的论文无需补信号；arXiv 的 S2 事实由离线同步负责。
+        for target in targets:
+            if target.paper is not None and target.paper.source in common_sources:
+                target.general_found = True
+
+        # 通用来源只负责精确获取；命中论文即停止，与引用数、TLDR 是否齐全无关。
         for source in common_sources:
-            # 入场前先根据已有 metadata 标记命中，避免重复调用。
-            for target in targets:
-                if self._has_signals(source, target.metadata):
-                    target.general_found = True
             pending = [
                 target
                 for target in targets
@@ -130,11 +127,11 @@ class LookupRunner:
             if not pending:
                 break
             execution.append(
-                await self._apply(source, pending, credentials.get(source), deadline)
+                await self._apply(
+                    source, pending, credentials.get(source), deadline,
+                    resolve_common=True,
+                )
             )
-            for target in pending:
-                if self._has_signals(source, target.metadata):
-                    target.general_found = True
 
         # 通用来源互相替代，领域来源提供增量；前面的成功不能跳过领域来源。
         for source in domain_sources:
@@ -152,6 +149,8 @@ class LookupRunner:
         targets: list[LookupTarget],
         api_key: str | None,
         deadline: float | None,
+        *,
+        resolve_common: bool = False,
     ) -> SourceExecution:
         binding = self.bindings[source]
         positions: dict[PaperIdentifier, list[LookupTarget]] = {}
@@ -160,6 +159,13 @@ class LookupRunner:
             if target.ambiguous or source in target.observed_sources:
                 continue
             known = target.metadata.get(source, {})
+            # 无详情差异的领域来源已在搜索中取得时，不重复查询同源；
+            # HF 等列表概要仍由 required_fields 决定是否需要获取详情。
+            if not resolve_common and not binding.rules.required_fields and (
+                source in target.metadata
+                or (target.paper is not None and target.paper.source == source)
+            ):
+                continue
             # 必填字段齐全即代表已具备完整详情（即使值为 None 也算已确认事实），
             # 跳过冗余请求。
             if binding.rules.required_fields and all(
@@ -232,6 +238,8 @@ class LookupRunner:
                 target.observed_sources.add(source)
                 if record.paper is None:
                     continue
+                if resolve_common:
+                    target.general_found = True
                 # 命名空间整体替换，不融合不同来源的同名指标；基础信息取首个成功来源。
                 target.metadata.update(deepcopy(record.paper.metadata))
                 target.identifiers = list(
@@ -382,14 +390,10 @@ class LookupRunner:
                 paper, tuple(dict.fromkeys([identifier, *aliases]))
             )
             batch.records[identifier] = record
-            short = paper is None or (
-                binding.rules.short_lived is not None
-                and binding.rules.short_lived(record)
-            )
             writes.append(
                 (
                     record,
-                    self.negative_ttl_seconds if short else self.positive_ttl_seconds,
+                    self.negative_ttl_seconds if paper is None else self.positive_ttl_seconds,
                 )
             )
         if binding.cache is not None and writes:

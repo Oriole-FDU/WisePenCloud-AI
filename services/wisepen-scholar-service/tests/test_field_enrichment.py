@@ -26,10 +26,7 @@ from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.models.source_execution import SourceExecutionStatus
 from scholar.core.providers import ArxivProvider
-from scholar.core.providers.arxiv import has_signals as arxiv_signals
-from scholar.core.providers.openalex import has_signals as openalex_signals
 from scholar.core.providers.s2.provider import aliases as s2_aliases
-from scholar.core.providers.s2.provider import has_signals as s2_signals
 
 
 class FakeProvider:
@@ -123,7 +120,7 @@ async def test_s2_aliases_route_domain_providers_without_changing_core_identity(
     }
     runner = LookupRunner(
         {
-            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.CORPUS_ID], has_signals=s2_signals, aliases=s2_aliases)),
+            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.CORPUS_ID], aliases=s2_aliases)),
             PaperSource.HUGGINGFACE: LookupBinding(hf, None, replace(PROVIDER_POLICIES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV])),
             "clinical_trials": LookupBinding(clinical, None, rules),
         }
@@ -152,7 +149,7 @@ async def test_only_unresolved_targets_advance_to_the_next_common_source():
     local = make_paper(
         PaperSource.ARXIV,
         arxiv_id=first.value,
-        metadata={"s2": {"citation_count": 0}},
+        metadata={"arxiv": {"categories": ["cs.AI"]}},
     )
     arxiv = FakeProvider({first: PaperLookupMatch([local])})
     s2 = FakeProvider(
@@ -169,8 +166,8 @@ async def test_only_unresolved_targets_advance_to_the_next_common_source():
     )
     runner = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
-            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV])),
         }
     )
 
@@ -199,9 +196,9 @@ async def test_general_fallback_success_is_complete_but_domain_failure_is_partia
     hf = FakeProvider(error=ProviderError("HF unavailable"))
     runner = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
-            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
-            PaperSource.OPENALEX: LookupBinding(openalex, None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=openalex_signals)),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.OPENALEX: LookupBinding(openalex, None, replace(PROVIDER_POLICIES["openalex"], identifier_kinds=[IdentifierKind.ARXIV])),
             PaperSource.HUGGINGFACE: LookupBinding(hf, None, replace(PROVIDER_POLICIES["huggingface"], identifier_kinds=[IdentifierKind.ARXIV])),
         }
     )
@@ -251,8 +248,8 @@ async def test_real_qdrant_lookup_error_is_visible_while_s2_fallback_succeeds():
     s2 = FakeProvider({identity: PaperLookupMatch([s2_paper])})
     runner = LookupRunner(
         {
-            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=arxiv_signals)),
-            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV], has_signals=s2_signals)),
+            PaperSource.ARXIV: LookupBinding(arxiv, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=[IdentifierKind.ARXIV])),
+            PaperSource.S2: LookupBinding(s2, None, replace(PROVIDER_POLICIES["s2"], identifier_kinds=[IdentifierKind.ARXIV])),
         }
     )
 

@@ -18,7 +18,7 @@ P6 已提供独立 OAI/S2 差分同步与恢复、Compose/Jenkins/systemd 模板
 
 单源检索按领域配置顺序回退，正常空列表也结束；多源执行已启用来源并报告结果。HF/OpenAlex 搜索和 HF 发现必须携带用户 BYOK，平台 key 只用于富化。缺 key 的搜索来源在读取缓存前跳过并记为 not_executed；没有可用来源返回 503 并说明所需 BYOK。
 
-模板中的通用富化顺序为 arxiv→s2→openalex，可在 Nacos 调整，每篇有有效信号即停止；领域增量全部执行，初始仅 CS 注册 HF。搜索成功来源包含任一通用来源时跳过通用富化，领域富化排除本次成功的同源 searcher。供应商规则在各 provider 实现，由 `providers.policies.PROVIDER_POLICIES` 统一注册，新增临床增量只需 provider、注册和领域配置。平台不默认融合同名字段或做语义去重。
+模板中的通用精确获取顺序为 arxiv→s2→openalex，可在 Nacos 调整，每篇精确找到论文即停止，不因缺少引用数或 TLDR 继续回退。arXiv 的 S2 事实由离线同步负责，命中 arXiv 后不再在线补信号。搜索成功来源包含任一通用来源时跳过通用链；两种入口按相同完整性规则执行领域增量，初始仅 CS 注册 HF。HF 搜索概要缺少 required_fields 时获取详情，字段齐全（包括已确认的空值）则跳过。供应商规则在各 provider 实现，由 `providers.policies.PROVIDER_POLICIES` 统一注册，新增临床增量只需 provider、注册和领域配置。平台不默认融合同名字段或做语义去重。
 
 ## 配置与启动
 
@@ -57,7 +57,7 @@ uv run --no-sync python deploy/run.py publish
 
 `POST /scholar/papers/discover` 与现有 MCP `discover_papers` 提供 CS 的 daily/weekly/monthly 渠道发现，默认 trending，支持 recent 和 limit，不接受 query。每次只发一个官方列表请求，直接交付成功响应；daily 使用官方最新内容默认值，weekly/monthly 传周期参数。不按渠道日期丢弃或过滤结果，见 [P5 验收记录](docs/p5-acceptance.md)。
 
-Lookup 统一取得基础论文及可用调研 metadata，不再接受 purpose。响应为 `items[{identifier,status,paper,error}]` 与 `execution`；metadata 仅位于 `paper.metadata`。没有可用结果的外部失败直接抛出，已有论文的部分结果保留真实错误。历史验收见 [P4 记录](docs/p4-acceptance.md)。
+Lookup 定位为已知标识符的精确查询，不再接受 purpose；取得论文后与 search 执行相同的领域富化、PDF 补救和投影。search 已包含可用调研 metadata，不应例行调用 lookup 获取更完整的结果。响应为 `items[{identifier,status,paper,error}]` 与 `execution`；metadata 仅位于 `paper.metadata`。没有可用结果的外部失败直接抛出，已有论文的部分结果保留真实错误。历史验收见 [P4 记录](docs/p4-acceptance.md)。
 
 `POST /scholar/papers/search` 接受 query、field、published_after/before、limit、source_scope。时间按首次提交日期包含两端过滤；领域采用 plan.md 的 arXiv 分类映射。查询缓存默认 10 分钟，缓存只存论文事实，每次重新构造执行情况。
 
@@ -75,17 +75,20 @@ S2 平台请求通过 Redis 跨实例合流：收集周期内按 ID 去重，每
 
 合流与分发的自动化验收使用独立 Redis 测试命名空间及 HTTP 替身，覆盖不同实例和独立进程，不消耗真实 S2 配额。
 
+论文 lookup 正缓存默认 24 小时，确认未找到的负缓存默认 1 小时，均可配置。找到论文即使用正缓存 TTL，不因缺少引用数、TLDR 等字段缩短 TTL；网络失败不写负缓存。
+
 ## 模型可见 metadata
 
-search、lookup、discover 在最终出口统一调用 `application.paper_projection.project_paper`。各 provider 的 `project_metadata` 定义保留清单；内部信号、别名、完整性及 TTL 判断使用完整事实。search/discover 的 `candidates-v2` 缓存也保存投影前候选，lookup 缓存版本保持不变。
+search、lookup、discover 在最终出口统一调用 `application.paper_projection.project_paper`。各 provider 的 `project_metadata` 定义保留清单；内部身份别名及详情完整性判断使用完整事实。search/discover 的 `candidates-v2` 缓存也保存投影前候选，lookup 缓存版本保持不变。
 
 | 来源 | 保留内容 |
 |---|---|
-| arXiv | categories、updated_date、journal_ref、comments；versions 压缩为 latest_version；submitted_date 仅在不同于顶层 publication_date 时保留 |
+| arXiv | categories、journal_ref、comments；submitted_date 仅在不同于顶层 publication_date 时保留；不输出 updated_date 或 latest_version |
 | S2 | corpus_id、citation_count、influential_citation_count、venue、tldr 文本字符串及独立的 open_access_pdf 入口 |
 | OpenAlex | id、cited_by_count、venue、is_retracted、primary_topic 名称、study_designs 名称列表、精简 MeSH、独立阅读入口、额外 arXiv 标识 |
 | Hugging Face | ai_keywords、upvotes、github_repo、github_stars、submitted_at、linked_models、linked_datasets；没有 abstract 时保留 ai_summary |
 
+- search 与 lookup 均直接提供可用的 arXiv categories、原始 journal_ref 及作者 comments，不解析或归一化 venue，也不生成同行评审状态。
 - S2 TLDR 可结合摘要、引言和结论，保留文本；HF AI 摘要是 abstract 的一句话总结，已有 abstract 时省略。
 - OpenAlex MeSH 仅含 descriptor_name、非空 qualifier_name、is_major_topic，按完整条目去重并保留不同限定词。研究设计沿用上游自动分类含义。
 - 不展示或使用 OA 状态；OpenAlex best_oa_location 只保留独立 landing_page_url、pdf_url。同一 URL 在该来源内只出现一次，与顶层 url/pdf_url 相同的链接省略。

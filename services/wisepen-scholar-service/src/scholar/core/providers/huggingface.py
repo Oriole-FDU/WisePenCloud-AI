@@ -28,11 +28,6 @@ from scholar.domain.models.paper import Paper, PaperSource
 _HF_ORIGIN = "https://huggingface.co"
 
 
-def has_signals(metadata: dict) -> bool:
-    """只要存在 ``huggingface`` 命名空间即视为已富化。"""
-    return bool(metadata.get("huggingface"))
-
-
 def project_metadata(paper: Paper) -> dict:
     """保留关键词、社区反馈与关联产物；仅当 abstract 缺失时补入 ai_summary。"""
     values = paper.metadata["huggingface"]

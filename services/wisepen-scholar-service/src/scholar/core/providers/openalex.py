@@ -53,25 +53,6 @@ def aliases(metadata: dict) -> list[PaperIdentifier]:
     return [] if value is None else [parse_identifier(value)]
 
 
-def has_signals(metadata: dict) -> bool:
-    """判定 OpenAlex 元数据是否含有效富化信号。
-
-    两组 OR：
-
-    - 宏观标量：``cited_by_count`` / ``primary_topic`` / ``is_retracted`` 任一非 None。
-    - 结构化字段：``mesh`` / ``study_designs`` 任一存在（医学专用字段）。
-    """
-    values = metadata.get("openalex", {})
-    return any(
-        values.get(name) is not None
-        for name in (
-            "cited_by_count",
-            "primary_topic",
-            "is_retracted",
-        )
-    ) or bool(values.get("mesh") or values.get("study_designs"))
-
-
 def pdf_url(paper: Paper) -> str | None:
     location = paper.metadata.get("openalex", {}).get("best_oa_location")
     return location.get("pdf_url") if location else None

@@ -1084,33 +1084,6 @@ wheels = [
 ]
 
 [[package]]
-name = "elastic-transport"
-version = "8.19.0"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
-dependencies = [
-    { name = "certifi" },
-    { name = "urllib3" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/fc/63/c61700c42f74d70a4ae11394c619cf91b837b500144166e828546f1fdd8d/elastic_transport-8.19.0.tar.gz", hash = "sha256:32afed2a70dad80511476c821b2cf823f35a82153289765f6b2e2eb8cb0de099" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/bd/46/a6091ee84351b61bfb55cf615e538c38c1be4cfceae12f952953eb8d446c/elastic_transport-8.19.0-py3-none-any.whl", hash = "sha256:97ab35de878c7f4c7ebf8840cbc8ff1ff01d9dbc0e977e52d82715b155678b4f" },
-]
-
-[[package]]
-name = "elasticsearch"
-version = "8.19.3"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
-dependencies = [
-    { name = "elastic-transport" },
-    { name = "python-dateutil" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/6b/79/365e306017a9fcfbbefab1a3b588d2404bea8806b36766ff0f886509a20e/elasticsearch-8.19.3.tar.gz", hash = "sha256:e84dd618a220cac25b962790085045dd27ac72e01c0a5d81bd29a2d47a71f03f" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/56/0f/ac126833c385b06166d41c486e4911f58ad7791fd1a53dd6e0b8d16ff214/elasticsearch-8.19.3-py3-none-any.whl", hash = "sha256:fe1db2555811192e8a1be78b01234d0a49d32b185ea7eeeb6f059331dee32838" },
-]
-
-[[package]]
 name = "et-xmlfile"
 version = "2.0.0"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
@@ -5903,7 +5876,6 @@ dependencies = [
     { name = "adapters" },
     { name = "dependency-injector" },
     { name = "duckdb" },
-    { name = "elasticsearch" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "numpy" },
@@ -5929,7 +5901,6 @@ requires-dist = [
     { name = "adapters", specifier = "==1.3.0" },
     { name = "dependency-injector" },
     { name = "duckdb", specifier = ">=1.4,<2" },
-    { name = "elasticsearch", specifier = ">=8.17,<9" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "numpy", specifier = ">=2.4.6" },

@@ -57,7 +57,10 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             "If you need to explore or clarify an unfamiliar research direction first, use web_search before calling this tool. "
             "Sources: Built upon three general platforms (arXiv is always available without keys; OpenAlex and Semantic Scholar platform keys are reserved for metadata enrichment, so direct searching on them requires user BYOK) "
             "plus domain-specific sources (some require user BYOK for search). "
-            "Scholar handles query normalization, multi-source routing, and metadata fusion."
+            "Scholar handles query normalization, multi-source routing, and metadata fusion. "
+            "Results already include configured field enrichment and, when available, "
+            "metadata.arxiv.categories, raw journal_ref, and author comments. "
+            "journal_ref and comments are source text, not normalized publication or peer-review status."
         ),
     )
     async def search_papers(
@@ -126,10 +129,12 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
     @mcp.tool(
         name="lookup_papers",
         description=(
-            "Fetch comprehensive metadata and citation signals for 1 to 20 papers by their identifiers (DOI, arXiv ID, etc.). "
+            "Retrieve 1 to 20 specific papers by known identifiers (DOI, arXiv ID, etc.). "
+            "Returns the same paper information and configured field enrichment as search_papers; "
+            "use it for exact identifier queries, not as routine post-processing to obtain fuller search results. "
             "IMPORTANT: Batch as many identifiers as possible in a single call (up to 20) instead of calling this tool one-by-one in a loop, "
             "to minimize network roundtrips and avoid rate-limiting by scholarly providers. "
-            "Scholar normalizes identifiers and cascades enrichment across general platforms and domain-specific sources."
+            "Scholar normalizes identifiers and stops general-source fallback when an exact paper match is found."
         ),
     )
     async def lookup_papers(
@@ -149,8 +154,8 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             SearchField,
             Field(
                 description=(
-                    "Academic field to enable relevant domain-specific source enrichment "
-                    "(e.g., linking domain assets or specialized metadata). Defaults to 'general'."
+                    "Academic discipline used for routing and domain-specific source enrichment, "
+                    "with the same field semantics as search_papers. Defaults to 'general'."
                 )
             ),
         ] = SearchField.GENERAL,
