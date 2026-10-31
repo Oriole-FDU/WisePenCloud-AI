@@ -135,6 +135,12 @@ class S2Provider:
                     ]
                 },
             )
+        except TimeoutError as error:
+            # 队列预算属于已知来源失败，不能绕过 LookupRunner 的富化隔离。
+            raise ProviderError(
+                f"S2 queue/HTTP request timed out (budget {self.transport.request_timeout:g}s): "
+                f"{str(error) or type(error).__name__}"
+            ) from error
         except (httpx.HTTPError, RedisError) as error:
             raise ProviderError(provider_error_message(error)) from error
         results = []

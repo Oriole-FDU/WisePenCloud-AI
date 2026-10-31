@@ -34,5 +34,11 @@ uv run --no-sync python deploy/offline_dashboard.py serve --log "前次投影=.r
 
 看板只监听 `127.0.0.1`，不提供网页执行命令、停止任务或生产部署入口。关闭看板不影响包装器及离线任务；重新启动会继续读取保留的快照。
 
+原生混合检索灌库使用 `deploy/migrate_qdrant.py --resume --batch-size 2048 --concurrency 4`（首次运行省略 `--resume`），仍通过 `offline_dashboard.py run` 包装。请求体采用 NumPy float32 与 orjson 直接编码，再使用 gzip level=1 压缩；多个 `wait=false` 请求并发上传，按源批次顺序确认 WAL 接收断点，失败后重放未确认批次。`accepted` 只代表已接收；全部提交后进入 `applying`，等待精确点数追平且后台更新队列清空，再构建索引和执行验收。看板分别显示已接收、已应用及后台待应用批次，并显示批次大小、并发数、组装/提交耗时和压缩前后请求体大小；BM25 三字段及完整论文 payload 比仅上传稠密向量更大。当前批量任务使用 `--batch-size 2048 --concurrency 4`；`--concurrency` 可调整，默认值为 4。灌库验收后停在 `ready_for_cutover`，只有显式 `--cutover` 才切换别名。
+
+稠密向量和 HNSW 的加载时缓存配置、已有集合调整方式及内存成本见 [论文集合的内存缓存](qdrant-memory.md)。存储策略修改后的后台索引转换同样使用上述 `--resume` 监督和验收。
+
 完整检索索引迁移也通过上述 `run` 包装器启动，命令和失败恢复步骤见 [检索初版说明](search-baseline.md#执行完整迁移)
 。看板展示冻结、回填、验收、切换、完成或恢复阶段，以及新旧索引名和已复制数量；成功退出后才表示迁移完成。
+
+2026-10-31 开发环境吞吐观测：原 256 篇/批、2 路 SDK 写入约 325 篇/秒；改为 NumPy/orjson 直接 HTTP 编码、gzip 和 2048 篇/批、4 路并发后，约 71 秒窗口达到 745 篇/秒。1024 篇/批、8 路并发未继续提升，出现更长服务端等待。上述速率包含完整 payload 与三路服务器端 BM25 生成，不等同于此前仅写入稠密向量的吞吐。

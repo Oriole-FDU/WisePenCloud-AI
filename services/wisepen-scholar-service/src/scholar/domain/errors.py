@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+
 from common.core.domain import IErrorCode
+
+# 同一搜索任务记录当前依赖操作；并发来源各自持有上下文，超时后仍能指出中断位置。
+provider_operation: ContextVar[str | None] = ContextVar("scholar_provider_operation", default=None)
 
 
 class ScholarErrorCode(IErrorCode):
@@ -33,7 +38,7 @@ def provider_error_message(error: Exception) -> str:
 
     超时或连接失败常省略 URL，补齐定位信息但不读取请求头中的敏感凭证。
     """
-    message = str(error)
+    message = str(error) or type(error).__name__
     request = getattr(error, "request", None)
     if request is not None:
         url = str(request.url)

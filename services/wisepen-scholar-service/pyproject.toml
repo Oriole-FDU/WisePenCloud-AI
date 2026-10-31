@@ -9,7 +9,6 @@ dependencies = [
     "uvicorn[standard]",
     "pydantic-settings",
     "pyyaml",
-    "elasticsearch>=8.17,<9",
     "redis>=5",
     "duckdb>=1.4,<2",
     "orjson",

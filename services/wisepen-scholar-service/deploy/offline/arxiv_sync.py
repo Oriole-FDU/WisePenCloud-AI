@@ -1116,7 +1116,7 @@ async def sync_arxiv(
     published = bool(pending_publish or pending_delete)
     if published:
         print(
-            f"[Publish] 正在发布到 Elasticsearch 与 Qdrant (待发布: {pending_publish} 篇，待删除: {pending_delete} 篇)...",
+            f"[Publish] 正在发布到 Qdrant (待发布: {pending_publish} 篇，待删除: {pending_delete} 篇)...",
             flush=True,
         )
         await publish()
@@ -1125,7 +1125,7 @@ async def sync_arxiv(
             or db.execute("SELECT count(*) FROM pending_delete").fetchone()[0]
         ):
             raise RuntimeError("arXiv publication returned with pending records")
-        print("[Publish] 增量数据已发布成功到 Elasticsearch 与 Qdrant", flush=True)
+        print("[Publish] 增量数据已发布成功到 Qdrant", flush=True)
 
     pending_aliases = db.execute(
         "SELECT identifiers FROM pending_arxiv_cache_invalidation ORDER BY arxiv_id"
@@ -1327,7 +1327,7 @@ async def recover_s2_missing(
     if publish is not None:
         pending_publish = db.execute("SELECT count(*) FROM pending_publish").fetchone()[0]
         if pending_publish:
-            print(f"[Publish] 正在发布补全的 {pending_publish} 篇记录到 Elasticsearch 与 Qdrant...", flush=True)
+            print(f"[Publish] 正在发布补全的 {pending_publish} 篇记录到 Qdrant...", flush=True)
             await publish()
 
     return {"total": total_missing, "recovered": recovered, "remaining": remaining}

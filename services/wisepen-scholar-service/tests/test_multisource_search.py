@@ -1,3 +1,5 @@
+import asyncio
+
 from policy_fakes import make_policy_store
 
 from pdf_fakes import make_pdf_service
@@ -235,7 +237,6 @@ async def test_arxiv_provider_maps_shared_field_and_does_not_forward_api_key():
                 )
             )
         ),
-        vector_repository=object(),
     )
 
     await provider.search(
@@ -431,6 +432,45 @@ async def test_multisource_retains_success_and_reports_provider_failure(message)
         "openalex": SourceExecutionStatus.FAILED,
     }
     assert result.execution[0].error == message
+
+
+@pytest.mark.asyncio
+async def test_multisource_deadline_keeps_the_completed_source():
+    class SlowSearcher:
+        async def search(self, **kwargs):
+            await asyncio.Event().wait()
+
+    found = paper(PaperSource.ARXIV, arxiv_id="2401.00001")
+    search = service(arxiv=FakePaperRepository([found]), openalex=SlowSearcher())
+    result = await search.search(
+        PaperSearch("partial deadline", source_scope=SourceScope.MULTI_SOURCE),
+        credentials={"openalex": "user-key"}, timeout=0.03,
+    )
+
+    assert result.papers[0].arxiv_id == found.arxiv_id
+    failures = [item for item in result.execution if item.status == SourceExecutionStatus.FAILED]
+    assert len(failures) == 1
+    assert failures[0].source == "openalex"
+    assert "deadline" in failures[0].error
+
+
+@pytest.mark.asyncio
+async def test_caller_cancellation_is_not_a_search_deadline_failure():
+    started = asyncio.Event()
+
+    class SlowSearcher:
+        async def search(self, **kwargs):
+            started.set()
+            await asyncio.Event().wait()
+
+    search = service(openalex=SlowSearcher())
+    task = asyncio.create_task(search.search(
+        PaperSearch("cancel"), credentials={"openalex": "user-key"}, timeout=1,
+    ))
+    await asyncio.wait_for(started.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 class RecordingEnricher:

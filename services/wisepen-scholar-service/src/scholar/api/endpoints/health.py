@@ -3,15 +3,12 @@
 import asyncio
 
 from dependency_injector.wiring import Provide, inject
-from elastic_transport import TransportError
-from elasticsearch import ApiError, AsyncElasticsearch
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
-from scholar.core.storage.qdrant.paper_vectors import COLLECTION
 
 from scholar.container import Container
 
@@ -21,18 +18,16 @@ router = APIRouter(tags=["health"])
 @router.get("/health")
 @inject
 async def health(
-    es: AsyncElasticsearch = Depends(Provide[Container.elasticsearch]),
     cache: Redis = Depends(Provide[Container.redis]),
     vectors: AsyncQdrantClient = Depends(Provide[Container.qdrant]),
-    alias: str = Depends(Provide[Container.config.SCHOLAR_INDEX_ALIAS]),
+    alias: str = Depends(Provide[Container.config.SCHOLAR_COLLECTION_ALIAS]),
     timeout: float = Depends(Provide[Container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS]),
 ):
     try:
         async with asyncio.timeout(timeout):
-            await es.info()
             await cache.ping()
-            ready = bool(await es.indices.exists_alias(name=alias)) and await vectors.collection_exists(COLLECTION)
-    except (TransportError, ApiError, RedisError, TimeoutError, ResponseHandlingException, UnexpectedResponse):
+            ready = await vectors.collection_exists(alias)
+    except (RedisError, TimeoutError, ResponseHandlingException, UnexpectedResponse):
         ready = False
     return JSONResponse(
         status_code=200 if ready else 503,

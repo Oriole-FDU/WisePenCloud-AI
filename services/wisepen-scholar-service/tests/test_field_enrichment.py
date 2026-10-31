@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import date
 
 import pytest
-from elastic_transport import ConnectionError as ElasticConnectionError
+from qdrant_client.http.exceptions import ApiException as QdrantApiError
 from scholar.domain.models.fields import FieldPolicy
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.lookup import (
@@ -16,8 +16,8 @@ from scholar.application.lookup import (
     PaperLookup,
     PaperLookupService,
 )
-from scholar.core.storage.elasticsearch.paper_repository import (
-    ElasticsearchPaperRepository,
+from scholar.core.storage.qdrant.paper_repository import (
+    QdrantPaperRepository,
 )
 from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
@@ -229,17 +229,16 @@ async def test_general_fallback_success_is_complete_but_domain_failure_is_partia
 
 
 @pytest.mark.asyncio
-async def test_real_elasticsearch_lookup_error_is_visible_while_s2_fallback_succeeds():
-    class UnavailableElasticsearch:
-        async def msearch(self, **kwargs):
-            raise ElasticConnectionError("ES connection lost")
+async def test_real_qdrant_lookup_error_is_visible_while_s2_fallback_succeeds():
+    class UnavailableQdrant:
+        async def query_batch_points(self, *args, **kwargs):
+            raise QdrantApiError(503, "connection lost")
 
     identity = parse_identifier("2401.00001")
-    repository = ElasticsearchPaperRepository(UnavailableElasticsearch(), "test-alias")
+    repository = QdrantPaperRepository(UnavailableQdrant(), "test-alias")
     arxiv = ArxivProvider(
         repository,
         embedding_client=None,
-        vector_repository=object(),
     )
     s2_paper = make_paper(
         metadata={
@@ -264,4 +263,4 @@ async def test_real_elasticsearch_lookup_error_is_visible_while_s2_fallback_succ
     assert result.items[0].status == LookupStatus.FOUND
     assert result.items[0].paper.metadata["s2"]["citation_count"] == 4
     assert result.execution[0].status == SourceExecutionStatus.FAILED
-    assert "Connection error" in result.execution[0].error
+    assert "qdrant.lookup" in result.execution[0].error

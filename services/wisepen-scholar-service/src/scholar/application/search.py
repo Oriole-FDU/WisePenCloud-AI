@@ -16,7 +16,7 @@ from scholar.domain.interfaces.field_policies import ScholarPolicyProvider
 from scholar.application.lookup_runner import LookupRunner
 from scholar.application.paper_projection import project_paper
 from scholar.application.pdf_recover import PaperPdfRecoverService
-from scholar.domain.errors import ProviderError, ScholarErrorCode
+from scholar.domain.errors import ProviderError, ScholarErrorCode, provider_operation
 from scholar.domain.interfaces.paper_searcher import PaperSearcher
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
@@ -83,7 +83,10 @@ class PaperSearchService:
         query: PaperSearch,
         *,
         credentials: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> SearchResult:
+        # 检索和富化共用截止时间；富化耗尽预算不能撤销已检索到的论文。
+        deadline = asyncio.get_running_loop().time() + timeout if timeout is not None else None
         credentials = credentials or {}
         # 在首次 I/O 前固定快照，后续富化也使用同一版通用来源与领域策略。
         policies = self.policies.current
@@ -102,7 +105,7 @@ class PaperSearchService:
         if query.source_scope == SourceScope.MULTI_SOURCE:
             results = await asyncio.gather(
                 *(
-                    self._search_source(source, query, credentials.get(source))
+                    self._search_source(source, query, credentials.get(source), deadline)
                     for source in plan
                 ),
                 return_exceptions=True,
@@ -112,7 +115,7 @@ class PaperSearchService:
             for source in plan:
                 try:
                     result = await self._search_source(
-                        source, query, credentials.get(source)
+                        source, query, credentials.get(source), deadline
                     )
                 except ProviderError as error:
                     results.append(error)
@@ -173,8 +176,20 @@ class PaperSearchService:
                 source for source in policy.field_enrichers if source not in succeeded
             ],
             credentials=self.platform_credentials | credentials,
+            deadline=deadline,
         )
-        papers, pdf_execution = await self.pdf.recover([target.paper for target in targets])
+        pdf_budget = asyncio.timeout_at(deadline)
+        try:
+            async with pdf_budget:
+                papers, pdf_execution = await self.pdf.recover([target.paper for target in targets])
+        except TimeoutError:
+            if not pdf_budget.expired():
+                raise
+            papers = [target.paper for target in targets]
+            pdf_execution = SourceExecution(
+                "unpaywall", False, SourceExecutionStatus.FAILED,
+                "PDF recovery exceeded the search request deadline",
+            )
         if pdf_execution is not None:
             enrichment_execution.append(pdf_execution)
         enriched_papers = [project_paper(paper) for paper in papers]
@@ -187,26 +202,41 @@ class PaperSearchService:
         source: str,
         query: PaperSearch,
         api_key: str | None,
+        deadline: float | None,
     ) -> tuple[list[Paper], SourceExecution]:
         binding = self.searchers[source]
         cache_key = self._cache_key(source, binding, query)
 
-        cached = await self.query_cache.get(cache_key)
-        if cached is not None:
-            return cached, SourceExecution(source, True)
+        budget = asyncio.timeout_at(deadline)
+        stage = "query_cache.get"
+        operation_token = provider_operation.set("search")
+        try:
+            async with budget:
+                cached = await self.query_cache.get(cache_key)
+                if cached is not None:
+                    return cached, SourceExecution(source, True)
 
-        # 缓存来源的一批候选；用户 limit 只在融合/返回时裁剪，避免改数量重新请求上游。
-        batch = await binding.searcher.search(
-            query=query.query,
-            field=query.field,
-            published_after=query.published_after,
-            published_before=query.published_before,
-            limit=binding.candidate_limit,
-            api_key=api_key,
-        )
-        # 降级结果仍可返回，但不缓存为完整检索，避免编码恢复后继续命中旧降级结果。
-        if batch.partial_error is None:
-            await self.query_cache.put(cache_key, batch.papers)
+                # 缓存来源的一批候选；用户 limit 只在融合/返回时裁剪，避免改数量重新请求上游。
+                stage = "search"
+                batch = await binding.searcher.search(
+                    query=query.query,
+                    field=query.field,
+                    published_after=query.published_after,
+                    published_before=query.published_before,
+                    limit=binding.candidate_limit,
+                    api_key=api_key,
+                )
+                # 降级结果仍可返回，但不缓存为完整检索，避免编码恢复后继续命中旧降级结果。
+                if batch.partial_error is None:
+                    stage = "query_cache.put"
+                    await self.query_cache.put(cache_key, batch.papers)
+        except TimeoutError as error:
+            if not budget.expired():
+                raise
+            operation = provider_operation.get() if stage == "search" else stage
+            raise ProviderError(f"{source} {operation} exceeded the search request deadline") from error
+        finally:
+            provider_operation.reset(operation_token)
         return batch.papers, SourceExecution(
             source,
             False,

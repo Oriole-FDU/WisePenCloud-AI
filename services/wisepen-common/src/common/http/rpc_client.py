@@ -135,6 +135,7 @@ class RpcClient:
         last_status: Optional[int] = None
         last_msg: Optional[str] = None
         last_exc: Optional[BaseException] = None
+        last_response: httpx.Response | None = None
 
         merged_headers = self._build_headers(headers)
         req_timeout = httpx.Timeout(timeout) if timeout is not None else None
@@ -162,6 +163,7 @@ class RpcClient:
                     timeout=req_timeout,
                 )
                 last_status = resp.status_code
+                last_response = resp
 
                 if resp.status_code >= 500:
                     last_msg = f"upstream 5xx: {resp.text[:200]}"
@@ -179,6 +181,7 @@ class RpcClient:
                 return resp
 
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
+                last_response = None
                 last_exc = e
                 last_msg = f"{type(e).__name__}: {e}"
                 warn(
@@ -191,11 +194,16 @@ class RpcClient:
                 )
                 continue
             except Exception as e:
+                last_response = None
                 last_exc = e
                 last_msg = f"{type(e).__name__}: {e}"
                 error("rpc unexpected error.", service=service_name, path=path, addr=addr, exc=e)
                 break
 
+        # 已收到 HTTP 错误时仍由 request() 解包 R，保留真实 code/msg；
+        # 只有无响应的网络/发现失败才在此构造 RpcError。
+        if last_response is not None:
+            return last_response
         raise RpcError(
             service_name=service_name,
             path=path,

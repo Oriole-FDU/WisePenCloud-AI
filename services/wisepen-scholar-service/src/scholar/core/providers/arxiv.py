@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from dataclasses import replace
 from datetime import date
+from time import monotonic
 
-from elastic_transport import ApiError as ElasticApiError
-from elastic_transport import ConnectionError as ElasticConnectionError
-from elastic_transport import ConnectionTimeout as ElasticConnectionTimeout
 from httpx import TransportError as HttpxTransportError
 from openai import APIConnectionError, APIStatusError
 from qdrant_client.http.exceptions import ApiException as QdrantApiError
 
+from common.logger import warning
 from common.utils.ai_clients.embedding import EmbeddingClient
-from common.utils.retrieval import Candidate, RrfFusion
-from scholar.domain.errors import ProviderError, provider_error_message
+from scholar.core.providers.s2.provider import has_signals as s2_has_signals
+from scholar.domain.errors import (
+    ProviderError,
+    provider_error_message,
+    provider_operation,
+)
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
@@ -26,10 +30,8 @@ from scholar.domain.models.identifiers import (
     normalize_arxiv,
 )
 from scholar.domain.models.paper import Paper
-from scholar.domain.repositories.paper_repository import PaperRepository
-from scholar.domain.repositories.paper_vector_repository import PaperVectorRepository
+from scholar.domain.repositories.local_paper_repository import LocalPaperRepository
 from scholar.ml.specter import MODEL_SIGNATURE
-from scholar.core.providers.s2.provider import has_signals as s2_has_signals
 
 # 领域 → arXiv 分类映射；None 表示该领域不支持 arXiv 搜索，空列表表示不限分类。
 ARXIV_CATEGORIES: dict[AcademicField, list[str] | None] = {
@@ -69,7 +71,7 @@ ARXIV_CATEGORIES: dict[AcademicField, list[str] | None] = {
 
 
 def has_signals(metadata: dict) -> bool:
-    """本地基础元信息只算检索底库，不算增量；仅当同步注入了 S2 字段才算富化。"""
+    """本地基础元信息只算检索底库；仅当同步注入了 S2 字段才算富化。"""
     return s2_has_signals(metadata)
 
 
@@ -98,10 +100,9 @@ def project_metadata(paper: Paper) -> dict:
 class ArxivProvider:
     def __init__(
         self,
-        paper_repository: PaperRepository,
+        paper_repository: LocalPaperRepository,
         embedding_client: EmbeddingClient,
         *,
-        vector_repository: PaperVectorRepository,
         candidate_limit: int = 200,
         num_candidates: int = 1000,
         rrf_k: int = 60,
@@ -109,7 +110,6 @@ class ArxivProvider:
         influential_weight: float = 0.10,
     ):
         self.paper_repository = paper_repository
-        self.vector_repository = vector_repository
         self.embedding_client = embedding_client
         self.candidate_limit = candidate_limit
         self.num_candidates = num_candidates
@@ -123,7 +123,7 @@ class ArxivProvider:
         return hashlib.sha256(
             json.dumps(
                 {
-                    "algorithm": "keyword-qdrant-rrf-saturation-v2",
+                    "algorithm": "qdrant-bm25-specter2-native-rrf-v1",
                     "model": MODEL_SIGNATURE,
                     "candidates": self.candidate_limit,
                     "num_candidates": self.num_candidates,
@@ -144,7 +144,7 @@ class ArxivProvider:
         """按 arXiv/DOI 身份透传仓储结果，保留歧义与逐项失败。"""
         try:
             matches = await self.paper_repository.lookup(self._normalize_ids(ids))
-        except (ElasticApiError, ElasticConnectionError, ElasticConnectionTimeout) as error:
+        except QdrantApiError as error:
             raise ProviderError(provider_error_message(error)) from error
         return [
             replace(
@@ -168,52 +168,36 @@ class ArxivProvider:
         if categories is None:
             raise ValueError(f"arXiv search is not mapped for {field.value}")
 
+        # 分阶段埋点：编码 → qdrant 检索；取消时可按当前 stage 记录耗时。
+        stage = "embedding"
+        provider_operation.set(stage)
+        started = monotonic()
         try:
-            papers = await self.paper_repository.search(
-                query=query,
-                categories=categories,
-                published_after=published_after,
-                published_before=published_before,
-                limit=self.candidate_limit,
-            )
-
-            # 只有编码服务拒绝查询向量时保留关键词部分结果；存储错误继续上抛。
+            # 编码失败降级为纯 BM25 召回，并显式标记 partial。
             partial_error = None
             try:
                 vector = (await self.embedding_client.embed(texts=[query]))[0]
             except (APIConnectionError, APIStatusError) as error:
-                semantic = []
+                vector = None
                 partial_error = provider_error_message(error)
-            else:
-                semantic_ids = await self.vector_repository.search(
-                    vector=vector,
-                    categories=categories,
-                    published_after=published_after,
-                    published_before=published_before,
-                    limit=self.candidate_limit,
-                    num_candidates=self.num_candidates,
-                )
-                # ES 批量回填按输入 ID 顺序返回，保持 Qdrant 的相似度排名。
-                semantic = await self.paper_repository.get_many(semantic_ids)
 
-            # 两路召回用 RRF 融合：同一身份跨路排序靠前者得分更高。
-            fused = RrfFusion(k=self.rrf_k).fuse(
-                [
-                    [
-                        Candidate(
-                            candidate_id=paper.arxiv_id,
-                            payload=paper,
-                            rank=rank,
-                        )
-                        for rank, paper in enumerate(result, 1)
-                    ]
-                    for result in (papers, semantic)
-                ]
+            stage = "qdrant.search"
+            provider_operation.set(stage)
+            started = monotonic()
+            candidates = await self.paper_repository.search(
+                query=query,
+                vector=vector,
+                categories=categories,
+                published_after=published_after,
+                published_before=published_before,
+                limit=self.candidate_limit,
+                num_candidates=self.num_candidates,
+                rrf_k=self.rrf_k,
             )
 
             # 引用先验只对已召回候选做有界平滑加分；零和缺失不会抹掉相关性分数。
             def boosted_score(candidate):
-                metrics = candidate.payload.metadata.get("s2", {})
+                metrics = candidate.paper.metadata.get("s2", {})
                 citations = metrics.get("citation_count") or 0
                 influential = metrics.get("influential_citation_count") or 0
                 return candidate.score * (
@@ -222,22 +206,25 @@ class ArxivProvider:
                     + self.influential_weight * influential / (influential + 10)
                 )
 
-            ranked = sorted(fused, key=boosted_score, reverse=True)
+            ranked = sorted(candidates, key=boosted_score, reverse=True)
             return PaperSearchBatch(
                 [
-                    self._with_arxiv_doi(candidate.payload)
+                    self._with_arxiv_doi(candidate.paper)
                     for candidate in ranked[:limit]
                 ],
                 partial_error,
             )
-        except (
-            ElasticApiError,
-            ElasticConnectionError,
-            ElasticConnectionTimeout,
-            QdrantApiError,
-            HttpxTransportError,
-        ) as error:
-            raise ProviderError(provider_error_message(error)) from error
+        except asyncio.CancelledError:
+            warning(
+                "arXiv search interrupted.",
+                stage=stage,
+                elapsed_seconds=round(monotonic() - started, 3),
+            )
+            raise
+        except (QdrantApiError, HttpxTransportError) as error:
+            raise ProviderError(
+                f"arxiv {stage}: {provider_error_message(error)}"
+            ) from error
 
     @staticmethod
     def _normalize_ids(ids: list[PaperIdentifier]) -> list[PaperIdentifier]:

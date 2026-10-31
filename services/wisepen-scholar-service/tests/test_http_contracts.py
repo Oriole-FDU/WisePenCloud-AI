@@ -1,5 +1,6 @@
 """Scholar HTTP 合同：认证、检索投影、缓存和逐项标识结果。"""
 
+import asyncio
 from datetime import date
 from copy import deepcopy
 
@@ -9,10 +10,11 @@ from common.web.middleware import SecurityHeaderMiddleware
 from dependency_injector import providers
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 from scholar.api.endpoints import health, papers
 from scholar.api.router import api_router
 from scholar.container import container
-from scholar.domain.errors import ProviderError
+from scholar.domain.errors import ProviderBusy, ProviderError
 from scholar.domain.interfaces.paper_discoverer import PaperDiscovery
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
@@ -407,7 +409,9 @@ def test_lookup_keeps_base_facts_or_raises_when_s2_fails(
 
     class LimitedProvider:
         async def lookup(self, ids, *, api_key=None):
-            raise ProviderError("429 Too Many Requests from Semantic Scholar")
+            request = httpx.Request("POST", "https://api.semanticscholar.org/graph/v1/paper/batch")
+            error = httpx.HTTPStatusError("429 Too Many Requests from Semantic Scholar", request=request, response=httpx.Response(429, request=request))
+            raise ProviderError(str(error)) from error
 
     with container.s2_provider.override(providers.Object(LimitedProvider())):
         response = client.post(
@@ -422,9 +426,76 @@ def test_lookup_keeps_base_facts_or_raises_when_s2_fails(
         assert item["paper"]["title"] == "First paper"
         assert "429" in item["error"]
     else:
-        assert response.status_code == 503
+        assert response.status_code == 429
+        assert response.json()["code"] == 429
         assert "429" in response.json()["msg"]
         assert response.json()["data"] is None
+
+
+@pytest.mark.parametrize("failure", ["deadline", "bad_gateway", "read_timeout"])
+def test_search_reports_vector_failure_with_actual_status_and_stage(scholar_client, failure):
+    client, _, _ = scholar_client
+
+    class SlowVectors:
+        async def search(self, **kwargs):
+            if failure == "bad_gateway":
+                raise UnexpectedResponse(502, "Bad Gateway", b"proxy failed", httpx.Headers())
+            if failure == "read_timeout":
+                raise ResponseHandlingException(httpx.ReadTimeout("vector query timed out"))
+            await asyncio.Event().wait()
+
+    with (
+        container.vector_repository.override(providers.Object(SlowVectors())),
+        container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS.override(0.03),
+    ):
+        response = client.post("/scholar/papers/search", headers=AUTHORIZED, json={"query": "slow vectors"})
+
+    status = 502 if failure == "bad_gateway" else 504
+    assert response.status_code == status
+    assert response.json()["code"] == status
+    assert "arxiv" in response.json()["msg"]
+    assert "qdrant.search" in response.json()["msg"]
+
+
+def test_search_keeps_found_papers_when_enrichment_exhausts_deadline(scholar_client, monkeypatch):
+    client, es, _ = scholar_client
+
+    async def found(**kwargs):
+        return {"hits": {"hits": [{"_source": PAPER_A}]}}
+
+    class SlowEnrichment:
+        async def lookup(self, ids, *, api_key=None):
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(es, "search", found)
+    with (
+        container.policy_store.override(providers.Object(make_policy_store(common_enrichers=["s2"]))),
+        container.s2_provider.override(providers.Object(SlowEnrichment())),
+        container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS.override(0.03),
+    ):
+        response = client.post("/scholar/papers/search", headers=AUTHORIZED, json={"query": "found before enrichment"})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["papers"][0]["arxiv_id"] == PAPER_A["arxiv_id"]
+    s2 = next(item for item in data["enrichment_execution"] if item["source"] == "s2")
+    assert s2["status"] == "failed"
+    assert "deadline" in s2["error"]
+
+
+def test_lookup_queue_admission_rejection_is_429(scholar_client):
+    client, _, _ = scholar_client
+
+    class BusyProvider:
+        async def lookup(self, ids, *, api_key=None):
+            raise ProviderBusy(4, 3)
+
+    with container.s2_provider.override(providers.Object(BusyProvider())):
+        response = client.post("/scholar/papers/lookup", headers=AUTHORIZED, json={"identifiers": ["corpusid:123"]})
+
+    assert response.status_code == 429
+    assert response.json()["code"] == 429
+    assert "4 waiting ahead" in response.json()["msg"]
 
 
 def test_multisource_without_openalex_key_keeps_arxiv_success(scholar_client):

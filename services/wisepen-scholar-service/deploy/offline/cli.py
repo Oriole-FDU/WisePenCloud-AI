@@ -19,7 +19,6 @@ from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 
 from scholar.core.config.bootstrap_settings import SERVICE_ROOT
-from scholar.core.storage.elasticsearch.paper_repository import create_elasticsearch
 from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
 from scholar.core.providers import S2Transport
 
@@ -88,23 +87,14 @@ async def run(args):
                 url=settings.QDRANT_URL,
                 api_key=settings.QDRANT_API_KEY,
                 trust_env=False,
-                timeout=60.0,
+                timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
+                cloud_inference=True,
             )
             try:
-                async with create_elasticsearch(
-                    settings.ELASTICSEARCH_URIS,
-                    settings.ELASTICSEARCH_USERNAME,
-                    settings.ELASTICSEARCH_PASSWORD,
-                    settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
-                ) as es:
-                    return await publish_arxiv(
-                        db,
-                        es,
-                        args.alias or settings.SCHOLAR_INDEX_ALIAS,
-                        qdrant=qdrant,
-                        batch_size=args.batch_size,
-                        max_batches=args.max_batches,
-                    )
+                return await publish_arxiv(
+                    db, args.alias or settings.SCHOLAR_COLLECTION_ALIAS,
+                    qdrant=qdrant, batch_size=args.batch_size, max_batches=args.max_batches,
+                )
             finally:
                 await qdrant.close()
 
@@ -113,7 +103,7 @@ async def run(args):
             if state is None or not state[0] or not state[1]:
                 raise ValueError("sync-arxiv requires a completed, published baseline")
 
-        alias = args.alias or settings.SCHOLAR_INDEX_ALIAS
+        alias = args.alias or settings.SCHOLAR_COLLECTION_ALIAS
         redis = Redis.from_url(
             settings.REDIS_URL,
             socket_timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
@@ -123,7 +113,8 @@ async def run(args):
                 url=settings.QDRANT_URL,
                 api_key=settings.QDRANT_API_KEY,
                 trust_env=False,
-                timeout=60.0,
+                timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
+                cloud_inference=True,
             )
             proxy_url = resolve_proxy(getattr(args, "proxy_port", None))
             if proxy_url:
@@ -133,12 +124,6 @@ async def run(args):
             s2_key = os.environ.get("S2_API_KEY") or settings.S2_API_KEY
             try:
                 async with (
-                    create_elasticsearch(
-                        settings.ELASTICSEARCH_URIS,
-                        settings.ELASTICSEARCH_USERNAME,
-                        settings.ELASTICSEARCH_PASSWORD,
-                        settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
-                    ) as es,
                     httpx.AsyncClient(
                         proxy=proxy_url,
                         timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
@@ -158,7 +143,7 @@ async def run(args):
                     arxiv_cache = RedisPaperLookupCache(redis, namespace=f"{alias}:arxiv")
 
                     async def publish_pending():
-                        return await publish_arxiv(db, es, alias, qdrant=qdrant)
+                        return await publish_arxiv(db, alias, qdrant=qdrant)
 
                     if args.command == "recover-s2":
                         return await recover_s2_missing(

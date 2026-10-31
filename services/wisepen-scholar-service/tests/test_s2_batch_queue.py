@@ -157,7 +157,8 @@ async def test_only_429_uses_key(boundary, failure):
         return httpx.Response(failure, json={"error": "bad response"})
 
     async with transports(boundary, handle) as (one, _):
-        with pytest.raises((httpx.HTTPStatusError, ProviderError)):
+        expected = TimeoutError if failure == "timeout" else ProviderError if failure == "malformed" else httpx.HTTPStatusError
+        with pytest.raises(expected):
             await lookup(one, ["A"])
     assert len(sent) == 1
     assert "x-api-key" not in sent[0].headers

@@ -6,8 +6,7 @@ import orjson
 import pytest
 from qdrant_client.http.models import Distance, VectorParams
 from offline.arxiv import database_status, import_arxiv, open_database
-from offline.publish import publish_arxiv
-from scholar.core.storage.qdrant.paper_vectors import point_id
+from offline.publish import point_id, publish_arxiv
 from scholar.ml.specter import DIMENSIONS
 
 
@@ -261,7 +260,7 @@ async def test_publish_acknowledges_only_successes_replays_failures_and_is_idemp
     # 成功与失败处于同一 bulk 时，只确认成功项；下一次调用应只重放剩余论文。
     es = FakeElasticsearch(bulk_statuses=[[201, 429]])
     with pytest.raises(RuntimeError):
-        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+        await publish_arxiv(completed_database, "papers", qdrant=qdrant)
 
     failed_status = database_status(completed_database)
     assert failed_status["papers"] == 2
@@ -272,7 +271,7 @@ async def test_publish_acknowledges_only_successes_replays_failures_and_is_idemp
     assert es.mget_calls == []
     assert es.alias_updates == []
 
-    published = await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    published = await publish_arxiv(completed_database, "papers", qdrant=qdrant)
     assert published["pending"] == 0
     assert published["import"]["published"] is True
     assert [
@@ -284,7 +283,7 @@ async def test_publish_acknowledges_only_successes_replays_failures_and_is_idemp
     assert len(es.alias_updates) == 1
 
     # 已发布数据库的重复运行不会重复写入或再次切换别名。
-    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    await publish_arxiv(completed_database, "papers", qdrant=qdrant)
     assert len(es.bulk_calls) == 2
     assert len(es.alias_updates) == 1
     assert len(es.documents[target]) == 2
@@ -300,7 +299,7 @@ async def test_initial_publish_deletes_tombstones_before_alias_switch(
     es = FakeElasticsearch(fail_alias_update=True)
 
     with pytest.raises(RuntimeError, match="alias update failure"):
-        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+        await publish_arxiv(completed_database, "papers", qdrant=qdrant)
 
     assert (
         completed_database.execute("SELECT arxiv_id FROM pending_delete").fetchall()
@@ -313,7 +312,7 @@ async def test_initial_publish_deletes_tombstones_before_alias_switch(
     assert database_status(completed_database)["import"]["published"] is False
 
     es.fail_alias_update = False
-    result = await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    result = await publish_arxiv(completed_database, "papers", qdrant=qdrant)
 
     assert result["pending_delete"] == 0
     assert es.alias_updates
@@ -346,7 +345,7 @@ async def test_unpublished_existing_target_replays_failed_tombstone_before_valid
     es.documents[target] = old_documents
 
     with pytest.raises(RuntimeError, match="full ES delete failed"):
-        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+        await publish_arxiv(completed_database, "papers", qdrant=qdrant)
 
     assert completed_database.execute(
         "SELECT arxiv_id FROM pending_delete"
@@ -360,7 +359,7 @@ async def test_unpublished_existing_target_replays_failed_tombstone_before_valid
     assert es.count_calls == []
     assert es.alias_updates == []
 
-    result = await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    result = await publish_arxiv(completed_database, "papers", qdrant=qdrant)
 
     assert result["pending_delete"] == 0
     assert result["import"]["published"] is True
@@ -375,7 +374,7 @@ async def test_incremental_publish_indexes_and_deletes_with_pending_replay(
     completed_database, qdrant
 ):
     es = FakeElasticsearch()
-    initial = await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    initial = await publish_arxiv(completed_database, "papers", qdrant=qdrant)
     target = initial["import"]["target_index"]
     updated = completed_database.execute(
         "SELECT document FROM arxiv WHERE arxiv_id='2201.00001'"
@@ -394,7 +393,7 @@ async def test_incremental_publish_indexes_and_deletes_with_pending_replay(
     es.bulk_statuses.append([201, 429])
 
     with pytest.raises(RuntimeError, match="incremental ES bulk failed"):
-        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+        await publish_arxiv(completed_database, "papers", qdrant=qdrant)
 
     assert (
         completed_database.execute("SELECT arxiv_id FROM pending_publish").fetchall()
@@ -409,7 +408,7 @@ async def test_incremental_publish_indexes_and_deletes_with_pending_replay(
 
     # 模拟远端已删除、但本地尚未确认的崩溃点；重放的 404 应确认删除。
     del es.documents[target]["2202.00002"]
-    replayed = await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    replayed = await publish_arxiv(completed_database, "papers", qdrant=qdrant)
 
     assert replayed["pending"] == 0
     assert replayed["pending_delete"] == 0
@@ -437,7 +436,7 @@ async def test_publish_never_switches_alias_before_count_and_sample_match(
     es = FakeElasticsearch(count_override=count_override, corrupt_sample=corrupt_sample)
 
     with pytest.raises(RuntimeError):
-        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+        await publish_arxiv(completed_database, "papers", qdrant=qdrant)
 
     assert database_status(completed_database)["pending"] == 0
     assert es.alias_updates == []
@@ -456,7 +455,7 @@ async def test_duplicate_snapshot_ids_keep_latest_source_metadata(
         imported = import_arxiv(db, source, batch_size=1)
         assert imported["papers"] == 1
         es = FakeElasticsearch()
-        result = await publish_arxiv(db, es, "papers", qdrant=qdrant)
+        result = await publish_arxiv(db, "papers", qdrant=qdrant)
         assert (
             es.documents[result["import"]["target_index"]]["2201.00001"]["title"]
             == "Latest title"
@@ -479,7 +478,7 @@ async def test_embeddings_reuse_and_publish_separately_from_es_documents(
 
     worker, es = Worker(), FakeElasticsearch()
     await generate_embeddings(completed_database, worker)
-    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    await publish_arxiv(completed_database, "papers", qdrant=qdrant)
     index = completed_database.execute(
         "SELECT target_index FROM import_state"
     ).fetchone()[0]
@@ -504,7 +503,7 @@ async def test_embeddings_reuse_and_publish_separately_from_es_documents(
         "INSERT OR IGNORE INTO pending_publish SELECT arxiv_id FROM arxiv"
     )
     await generate_embeddings(completed_database, worker)
-    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    await publish_arxiv(completed_database, "papers", qdrant=qdrant)
     assert len(worker.inputs) == 2
     assert all(
         doc["metadata"]["s2"]["citation_count"] == 0 and "embedding" not in doc
@@ -515,11 +514,11 @@ async def test_embeddings_reuse_and_publish_separately_from_es_documents(
         "UPDATE arxiv SET document=json_merge_patch(document, '{\"title\":\"Changed title\"}') WHERE arxiv_id='2201.00001'"
     )
     completed_database.execute("INSERT INTO pending_publish VALUES ('2201.00001')")
-    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    await publish_arxiv(completed_database, "papers", qdrant=qdrant)
     assert "embedding" not in es.documents[index]["2201.00001"]
     assert point_id("2201.00001") not in qdrant.points
     await generate_embeddings(completed_database, worker)
-    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    await publish_arxiv(completed_database, "papers", qdrant=qdrant)
     assert len(worker.inputs) == 3
     assert "embedding" not in es.documents[index]["2201.00001"]
     assert qdrant.points[point_id("2201.00001")].vector == [1.0] * DIMENSIONS
@@ -528,7 +527,7 @@ async def test_embeddings_reuse_and_publish_separately_from_es_documents(
     completed_database.execute(
         "INSERT INTO pending_delete VALUES ('2202.00002', '2026-10-27')"
     )
-    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    await publish_arxiv(completed_database, "papers", qdrant=qdrant)
     assert "2202.00002" not in es.documents[index]
     assert point_id("2202.00002") not in qdrant.points
 
@@ -548,7 +547,7 @@ async def test_qdrant_write_failure_keeps_pending_for_idempotent_replay(
     await generate_embeddings(completed_database, Worker())
 
     with pytest.raises(RuntimeError, match="simulated Qdrant upsert failure"):
-        await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+        await publish_arxiv(completed_database, "papers", qdrant=qdrant)
 
     assert database_status(completed_database)["pending"] == 2
     target = next(iter(es.documents))
@@ -556,7 +555,7 @@ async def test_qdrant_write_failure_keeps_pending_for_idempotent_replay(
     assert qdrant.points == {}
 
     qdrant.fail_upsert = False
-    await publish_arxiv(completed_database, es, "papers", qdrant=qdrant)
+    await publish_arxiv(completed_database, "papers", qdrant=qdrant)
     assert database_status(completed_database)["pending"] == 0
     assert set(qdrant.points) == {
         point_id("2201.00001"),

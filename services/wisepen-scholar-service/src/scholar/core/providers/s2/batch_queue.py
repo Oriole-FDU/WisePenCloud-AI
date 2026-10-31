@@ -160,6 +160,7 @@ return 0
 class ReplyKind(StrEnum):
     DATA = "data"
     HTTP_ERROR = "http_error"
+    TIMEOUT = "timeout"
     ERROR = "error"
 
 
@@ -370,7 +371,10 @@ class S2BatchQueue:
             await acknowledged.wait()
             await self._complete(
                 batch,
-                {"kind": ReplyKind.ERROR, "message": provider_error_message(error)},
+                {
+                    "kind": ReplyKind.TIMEOUT if isinstance(error, httpx.TimeoutException) else ReplyKind.ERROR,
+                    "message": provider_error_message(error),
+                },
             )
             return
         await acknowledged.wait()
@@ -482,6 +486,8 @@ class S2BatchQueue:
                                             response=response,
                                         )
                                     )
+                            elif payload["kind"] == ReplyKind.TIMEOUT:
+                                call.future.set_exception(TimeoutError(payload["message"]))
                             else:
                                 call.future.set_exception(
                                     ProviderError(payload["message"])

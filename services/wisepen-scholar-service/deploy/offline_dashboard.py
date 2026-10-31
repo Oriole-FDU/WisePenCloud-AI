@@ -124,6 +124,8 @@ def run_job(args: argparse.Namespace) -> int:
                             event[k]
                             for k in (
                             "staged_changed",
+                            "applied",
+                            "accepted",
                             "written",
                             "scanned",
                             "pending",
@@ -191,6 +193,11 @@ def serve(args: argparse.Namespace) -> None:
                     if path.name == "baseline.json":
                         continue
                     state = json.loads(path.read_text(encoding="utf-8"))
+                    # 已打开的旧页面仍读取 written；仅在 HTTP 展示投影补齐别名，不改断点语义。
+                    for entry in state["stages"].values():
+                        event = entry["event"]
+                        if "accepted" in event:
+                            event["written"] = event["accepted"]
                     if state["status"] == "running" and not process_alive(state["pid"]):
                         # 包装器异常消失时不能宣称成功，也不能凭日志更新时间判为失败。
                         state["status"] = "interrupted"

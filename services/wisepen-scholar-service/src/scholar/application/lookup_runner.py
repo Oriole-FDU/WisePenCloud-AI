@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from redis.exceptions import RedisError
+from common.logger import warning
 
 from scholar.domain.errors import ProviderBusy, ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupProvider
@@ -110,6 +111,7 @@ class LookupRunner:
         common_sources: list[str],
         domain_sources: list[str],
         credentials: dict[str, str] | None = None,
+        deadline: float | None = None,
     ) -> list[SourceExecution]:
         credentials = credentials or {}
         execution = []
@@ -128,7 +130,7 @@ class LookupRunner:
             if not pending:
                 break
             execution.append(
-                await self._apply(source, pending, credentials.get(source))
+                await self._apply(source, pending, credentials.get(source), deadline)
             )
             for target in pending:
                 if self._has_signals(source, target.metadata):
@@ -138,7 +140,7 @@ class LookupRunner:
         for source in domain_sources:
             before = [len(target.errors) for target in targets]
             execution.append(
-                await self._apply(source, targets, credentials.get(source))
+                await self._apply(source, targets, credentials.get(source), deadline)
             )
             for target, offset in zip(targets, before, strict=True):
                 target.domain_errors.extend(target.errors[offset:])
@@ -149,6 +151,7 @@ class LookupRunner:
         source: str,
         targets: list[LookupTarget],
         api_key: str | None,
+        deadline: float | None,
     ) -> SourceExecution:
         binding = self.bindings[source]
         positions: dict[PaperIdentifier, list[LookupTarget]] = {}
@@ -197,7 +200,17 @@ class LookupRunner:
             )
             for identity, entries in positions.items()
         }
-        batch = await self._shared(source, known_ids, api_key)
+        budget = asyncio.timeout_at(deadline)
+        try:
+            async with budget:
+                batch = await self._shared(source, known_ids, api_key)
+        except TimeoutError:
+            if not budget.expired():
+                raise
+            # 只隔离本次搜索持有的超时；共享任务仍由其他等待者继续使用。
+            failure = ProviderError(f"{source} enrichment exceeded the search request deadline")
+            warning("Scholar enrichment timed out.", source=source, error=str(failure))
+            batch = _SourceBatch(errors=dict.fromkeys(positions, failure))
 
         failures = 0
         first_error = None

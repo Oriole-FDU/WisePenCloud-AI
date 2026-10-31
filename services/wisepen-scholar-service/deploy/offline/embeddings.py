@@ -64,7 +64,7 @@ def reconcile_embeddings(db, arxiv_ids: list[str] | None = None):
     # 不删除可重用的有效向量；未重新编码前，publisher 通过输入指纹排除失效向量。
 
 
-_ES_S2_ALLOWED_FIELDS = {
+_PUBLISHED_S2_FIELDS = {
     "corpus_id",
     "citation_count",
     "influential_citation_count",
@@ -77,7 +77,7 @@ _ES_S2_ALLOWED_FIELDS = {
 
 
 def publication_documents(rows) -> list[dict]:
-    """读取仅供 Elasticsearch 全文索引使用的 arXiv 文档，严格清洗只保留 ES 规范字段。"""
+    """生成在线论文事实投影，排除离线诊断字段和编码向量。"""
     documents = []
     for _, raw in rows:
         doc = orjson.loads(raw)
@@ -85,7 +85,7 @@ def publication_documents(rows) -> list[dict]:
         if meta and isinstance(meta.get("s2"), dict):
             doc["metadata"] = {
                 **meta,
-                "s2": {k: v for k, v in meta["s2"].items() if k in _ES_S2_ALLOWED_FIELDS},
+                "s2": {k: v for k, v in meta["s2"].items() if k in _PUBLISHED_S2_FIELDS},
             }
         documents.append(doc)
     return documents

@@ -9,6 +9,10 @@ uv run --no-sync python -m scholar.main
 主服务加载 CPU FP32 adhoc query adapter，预热后在 19916 提供 `/scholar/*` 和 OpenAI 兼容 `/v1/embeddings`。两者使用同一内部来源鉴权。
 `NACOS_ENABLED=false` 可关闭配置拉取和服务注册，改从 `.env` 与进程环境读取配置。
 
+启动时执行一次 `machine learning`、计算机科学领域的 arXiv 混合检索，使用当前召回参数，覆盖 ES 关键词检索、查询编码、Qdrant 召回与 ES 回填。预热直接调用 arXiv provider，不读取查询缓存或执行在线富化；启动阶段通过进程内 ASGI 调用同一编码路由，完成启动后正常请求继续使用本机 HTTP。启动预热总预算为 `SCHOLAR_REQUEST_TIMEOUT_SECONDS * 3`，默认 **75 秒**；正常在线请求仍使用原配置的 **25 秒**预算。超时、依赖失败或编码降级均使启动失败，空结果允许通过。预热成功后才注册 Nacos 并开放服务，日志记录实际预热预算、耗时、返回数量及失败阶段。
+
+2026-10-31 开发环境冷启动观测：Elasticsearch 首次检索约 **24 秒**，Qdrant 首次向量检索也约 **24 秒**，两段在当前检索链中串行执行。沿用 25 秒总预算时，第一次请求预热完 Elasticsearch 后超时，第二次请求在 Elasticsearch 已热的情况下预热 Qdrant 后仍超时，第三次请求因两者均已预热而迅速完成。这与端到端测试中前两次请求失败、随后恢复的现象一致。因此启动预热采用三倍请求预算，容纳两段串行冷启动及编码、论文回填开销。
+
 工作区使用 `transformers==4.57.6`、`adapters==1.3.0` 及已有 Torch CPU 依赖。没有另一个虚拟环境或独立服务启动命令。模型目录由
 `SCHOLAR_EMBEDDING_MODELS_PATH` 指定，默认读取服务 models/ 下固定修订。
 
@@ -50,6 +54,10 @@ deploy/offline/embeddings.py。续跑会复用指纹和模型签名均匹配的�
 时仍可复用。没有单独的 Python document_fingerprint 函数。
 
 编码超时默认 2 秒；已知编码 HTTP/网络失败时返回文本结果，execution 标记 partial 并保留原因，该结果不写正常查询缓存。Qdrant 或 ES 检索失败会作为来源错误返回，不降级为不完整混合结果。编码恢复后的下一次请求重新执行混合检索。
+
+搜索各来源、富化与 PDF 补救共用 `SCHOLAR_REQUEST_TIMEOUT_SECONDS` 的截止时间（默认 25 秒）。多源检索保留已完成来源；已有论文时，富化或 PDF 补救超时只记入 `enrichment_execution`，不撤销论文。调用方取消仍直接传播。检索阶段耗尽预算时，错误和日志会指出来源及正在等待的操作，例如 `arxiv qdrant.search`；取消日志还记录该操作已等待的秒数。
+
+整次请求失败时，供应商 HTTP 错误保留实际状态；队列准入拒绝和上游限流返回 HTTP/code 429，依赖或检索截止时间超时返回 504，连接失败返回 503。S2 的 NOKEY 429 若被 KEY 成功兜底，仍正常返回成功。RPC 在重试耗尽后保留 Scholar 的完整 code/msg，不再只返回截断的 `upstream 5xx` 文本。
 
 ## 来源、凭证和缓存
 

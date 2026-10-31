@@ -17,15 +17,11 @@ from scholar.application.search import (
     SearchBinding,
 )
 from scholar.core.config.bootstrap_settings import bootstrap_settings
-from scholar.core.storage.elasticsearch.paper_repository import (
-    ElasticsearchPaperRepository,
-    create_elasticsearch,
-)
 from scholar.core.storage.redis.discovery_cache import RedisDiscoveryCacheRepository
 from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
 from scholar.core.storage.redis.pdf_cache import RedisPdfCache
 from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
-from scholar.core.storage.qdrant.paper_vectors import QdrantPaperVectorRepository
+from scholar.core.storage.qdrant.paper_repository import QdrantPaperRepository
 from scholar.ml.specter import DIMENSIONS, QUERY_MODEL
 from scholar.core.providers import ArxivProvider
 from scholar.core.providers import PROVIDER_POLICIES
@@ -44,14 +40,7 @@ class Container(containers.DeclarativeContainer):
         api_key=config.QDRANT_API_KEY,
         timeout=config.SCHOLAR_REQUEST_TIMEOUT_SECONDS,
         trust_env=False,
-    )
-    vector_repository = providers.Singleton(QdrantPaperVectorRepository, client=qdrant)
-    elasticsearch = providers.Singleton(
-        create_elasticsearch,
-        uris=config.ELASTICSEARCH_URIS,
-        username=config.ELASTICSEARCH_USERNAME,
-        password=config.ELASTICSEARCH_PASSWORD,
-        timeout=config.SCHOLAR_REQUEST_TIMEOUT_SECONDS,
+        cloud_inference=True,
     )
     redis = providers.Singleton(
         Redis.from_url,
@@ -88,18 +77,18 @@ class Container(containers.DeclarativeContainer):
     )
     s2_provider = providers.Singleton(S2Provider, transport=s2_transport)
     paper_repository = providers.Singleton(
-        ElasticsearchPaperRepository, es=elasticsearch, alias=config.SCHOLAR_INDEX_ALIAS
+        QdrantPaperRepository, client=qdrant, collection=config.SCHOLAR_COLLECTION_ALIAS
     )
     query_cache_repository = providers.Singleton(
         RedisQueryCacheRepository,
         redis=redis,
-        namespace=config.SCHOLAR_INDEX_ALIAS,
+        namespace=config.SCHOLAR_COLLECTION_ALIAS,
         ttl=config.SCHOLAR_QUERY_CACHE_TTL_SECONDS,
     )
     discovery_cache_repository = providers.Singleton(
         RedisDiscoveryCacheRepository,
         redis=redis,
-        namespace=config.SCHOLAR_INDEX_ALIAS,
+        namespace=config.SCHOLAR_COLLECTION_ALIAS,
         ttl=config.SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS,
     )
     embedding_api = providers.Singleton(
@@ -118,10 +107,10 @@ class Container(containers.DeclarativeContainer):
         model=QUERY_MODEL,
         dimensions=DIMENSIONS,
     )
-    arxiv_searcher = providers.Singleton(
+    # 无状态适配器允许启动预热替换编码客户端，仓储和连接仍复用单例。
+    arxiv_searcher = providers.Factory(
         ArxivProvider,
         paper_repository=paper_repository,
-        vector_repository=vector_repository,
         embedding_client=embedding_client,
         candidate_limit=config.SCHOLAR_SEARCH_CANDIDATES,
         num_candidates=config.SCHOLAR_SEARCH_NUM_CANDIDATES,
@@ -140,28 +129,28 @@ class Container(containers.DeclarativeContainer):
         RedisPaperLookupCache,
         redis=redis,
         namespace=providers.Callable(
-            lambda alias: f"{alias}:arxiv", config.SCHOLAR_INDEX_ALIAS
+            lambda alias: f"{alias}:arxiv", config.SCHOLAR_COLLECTION_ALIAS
         ),
     )
     s2_cache = providers.Singleton(
         RedisPaperLookupCache,
         redis=redis,
         namespace=providers.Callable(
-            lambda alias: f"{alias}:s2", config.SCHOLAR_INDEX_ALIAS
+            lambda alias: f"{alias}:s2", config.SCHOLAR_COLLECTION_ALIAS
         ),
     )
     openalex_cache = providers.Singleton(
         RedisPaperLookupCache,
         redis=redis,
         namespace=providers.Callable(
-            lambda alias: f"{alias}:openalex", config.SCHOLAR_INDEX_ALIAS
+            lambda alias: f"{alias}:openalex", config.SCHOLAR_COLLECTION_ALIAS
         ),
     )
     huggingface_cache = providers.Singleton(
         RedisPaperLookupCache,
         redis=redis,
         namespace=providers.Callable(
-            lambda alias: f"{alias}:huggingface", config.SCHOLAR_INDEX_ALIAS
+            lambda alias: f"{alias}:huggingface", config.SCHOLAR_COLLECTION_ALIAS
         ),
     )
     platform_credentials = providers.Callable(

@@ -18,6 +18,7 @@ from scholar.application.search import (
 )
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.paper import Paper
+from scholar.domain.repositories.local_paper_repository import PaperCandidate
 from scholar.domain.errors import ProviderError
 from scholar.domain.models.source_execution import SourceExecutionStatus
 from scholar.core.providers import ArxivProvider
@@ -43,20 +44,18 @@ class Repository:
     def __init__(self, lexical, semantic):
         self.lexical, self.semantic = lexical, semantic
 
-    async def search(self, **kwargs):
-        return self.lexical
-
-    async def get_many(self, ids):
-        papers = {paper.arxiv_id: paper for paper in self.semantic}
-        return [papers[identifier] for identifier in ids if identifier in papers]
-
-
-class VectorRepository:
-    def __init__(self, repository):
-        self.repository = repository
-
-    async def search(self, **kwargs):
-        return [paper.arxiv_id for paper in self.repository.semantic]
+    async def search(self, *, vector=None, **kwargs):
+        if vector is None:
+            return [PaperCandidate(p, 1.0 / (rank + 60)) for rank, p in enumerate(self.lexical)]
+        scores = {}
+        for rank, p in enumerate(self.lexical):
+            scores[p.arxiv_id] = [p, 1.0 / (rank + 60)]
+        for rank, p in enumerate(self.semantic):
+            if p.arxiv_id in scores:
+                scores[p.arxiv_id][1] += 1.0 / (rank + 60)
+            else:
+                scores[p.arxiv_id] = [p, 1.0 / (rank + 60)]
+        return [PaperCandidate(p, score) for p, score in sorted(scores.values(), key=lambda x: x[1], reverse=True)]
 
 
 class Encoder:
@@ -93,7 +92,6 @@ def arxiv_provider(repository, encoder, **kwargs):
     return ArxivProvider(
         repository,
         encoder,
-        vector_repository=VectorRepository(repository),
         **kwargs,
     )
 
@@ -180,9 +178,7 @@ async def test_program_error_is_not_encoder_degradation():
 
 @pytest.mark.asyncio
 async def test_vector_repository_connection_failure_is_a_provider_error():
-    repository = Repository([], [])
-
-    class UnavailableVectorRepository:
+    class UnavailableRepository:
         async def search(self, **kwargs):
             raise httpx.ConnectError(
                 "Qdrant unavailable",
@@ -190,9 +186,8 @@ async def test_vector_repository_connection_failure_is_a_provider_error():
             )
 
     provider = ArxivProvider(
-        repository,
+        UnavailableRepository(),
         Encoder(),
-        vector_repository=UnavailableVectorRepository(),
     )
 
     with pytest.raises(ProviderError, match="Qdrant unavailable"):

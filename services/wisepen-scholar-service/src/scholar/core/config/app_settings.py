@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import threading
 
 import yaml
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field
 
 from scholar.core.config.nacos import nacos_client_manager
 from scholar.core.config.policy_settings import PolicySettings
@@ -20,9 +19,6 @@ class AppSettings(PolicySettings):
 
     # --- 基础设施 ---------------------------------------------------------
     FROM_SOURCE_SECRET: str
-    ELASTICSEARCH_URIS: str
-    ELASTICSEARCH_USERNAME: str
-    ELASTICSEARCH_PASSWORD: str
     QDRANT_URL: str
     QDRANT_API_KEY: str = Field(repr=False)
     REDIS_URL: str
@@ -41,7 +37,7 @@ class AppSettings(PolicySettings):
     SCHOLAR_EMBEDDING_GPU_PYTHON: str = "D:/Rag/.venv/Scripts/python.exe"
 
     # --- 索引 ---
-    SCHOLAR_INDEX_ALIAS: str = "wisepen-scholar-arxiv"
+    SCHOLAR_COLLECTION_ALIAS: str = "wisepen-scholar-arxiv"
 
     # --- 检索参数 ---
     # 控制两路召回成本与排序先验；固定文本权重和模型身份随代码发布。
@@ -66,11 +62,6 @@ class AppSettings(PolicySettings):
     SCHOLAR_REQUEST_TIMEOUT_SECONDS: float = Field(default=25, gt=0)
     SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS: float = Field(default=120, gt=0)
 
-    @field_validator("ELASTICSEARCH_URIS", mode="before")
-    @classmethod
-    def serialize_uris(cls, value):
-        """允许 Nacos 以列表形式注入，统一序列化为 JSON 字符串。"""
-        return json.dumps(value) if isinstance(value, list) else value
 
 
 def _run_async(coroutine):

@@ -10,6 +10,7 @@ from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import parse_identifier
 from scholar.domain.models.paper import Paper
+from scholar.domain.repositories.local_paper_repository import PaperCandidate
 from scholar.core.providers import ArxivProvider
 
 
@@ -42,15 +43,11 @@ def local_paper():
 async def test_arxiv_search_preserves_full_facts_after_ranking(local_paper):
     original = deepcopy(local_paper)
     repository = SimpleNamespace(
-        search=AsyncMock(return_value=[local_paper]),
-        get_many=AsyncMock(return_value=[local_paper]),
+        search=AsyncMock(return_value=[PaperCandidate(local_paper, 1.0)]),
     )
     provider = ArxivProvider(
         repository,
         SimpleNamespace(embed=AsyncMock(return_value=[[1.0]])),
-        vector_repository=SimpleNamespace(
-            search=AsyncMock(return_value=[local_paper.arxiv_id])
-        ),
     )
     result = await provider.search(
         query="paper",
@@ -72,7 +69,6 @@ async def test_arxiv_lookup_preserves_ambiguity_and_item_error(local_paper):
     provider = ArxivProvider(
         repository,
         embedding_client=None,
-        vector_repository=SimpleNamespace(search=AsyncMock(return_value=[])),
     )
 
     results = await provider.lookup(

@@ -38,21 +38,22 @@ async def search(
     ] = None,
     x_s2_api_key: Annotated[str | None, Header(alias="X-S2-Api-Key")] = None,
 ) -> R[SearchResult]:
-    async with asyncio.timeout(timeout):
-        return R.success(
-            await service.search(
-                request.to_query(),
-                credentials={
-                    key: value
-                    for key, value in {
-                        PaperSource.OPENALEX: x_openalex_api_key,
-                        PaperSource.HUGGINGFACE: x_huggingface_api_key,
-                        PaperSource.S2: x_s2_api_key,
-                    }.items()
-                    if value
-                },
-            )
+    # 搜索用例按阶段处理同一预算，富化超时保留检索结果。
+    return R.success(
+        await service.search(
+            request.to_query(),
+            credentials={
+                key: value
+                for key, value in {
+                    PaperSource.OPENALEX: x_openalex_api_key,
+                    PaperSource.HUGGINGFACE: x_huggingface_api_key,
+                    PaperSource.S2: x_s2_api_key,
+                }.items()
+                if value
+            },
+            timeout=timeout,
         )
+    )
 
 
 @router.post("/lookup", response_model=R[LookupResult])

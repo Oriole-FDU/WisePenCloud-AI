@@ -178,3 +178,12 @@ async def test_cancel_redis_failure_and_http_failure_propagate_without_bypassing
         assert "key" not in str(http_error.value)
 
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_transport_budget_timeout_is_a_known_provider_failure():
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200))) as http:
+        provider = S2Provider(S2Transport(http, Permits(delay=10000), "key", request_timeout=0.01))
+        with pytest.raises(ProviderError, match="S2.*timed out") as caught:
+            await provider.lookup([parse_identifier("2310.08560")], api_key="user-key")
+    assert isinstance(caught.value.__cause__, TimeoutError)

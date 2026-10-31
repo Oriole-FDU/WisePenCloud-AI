@@ -73,9 +73,13 @@ def open_database(
                ),
                    source_path VARCHAR, source_size BIGINT, source_mtime_ns BIGINT,
                    byte_offset BIGINT, records BIGINT, complete BOOLEAN,
-                   target_index VARCHAR, published BOOLEAN DEFAULT false
+                   target_collection VARCHAR, published BOOLEAN DEFAULT false
                    );
                """)
+    # 从既有 ES 发布基线升级列名；迁移任务验收后再写入真正的 Qdrant 目标。
+    columns = {row[0] for row in db.execute("DESCRIBE import_state").fetchall()}
+    if "target_index" in columns:
+        db.execute("ALTER TABLE import_state RENAME COLUMN target_index TO target_collection")
     db.execute(EMBEDDING_SCHEMA)
     return db
 
@@ -219,7 +223,7 @@ def import_arxiv(
 
 def database_status(db: duckdb.DuckDBPyConnection) -> dict:
     row = db.execute(
-        "SELECT byte_offset,records,complete,target_index,published FROM import_state"
+        "SELECT byte_offset,records,complete,target_collection,published FROM import_state"
     ).fetchone()
     return {
         "papers": db.execute("SELECT count(*) FROM arxiv").fetchone()[0],
@@ -228,7 +232,7 @@ def database_status(db: duckdb.DuckDBPyConnection) -> dict:
         if row is None
         else dict(
             zip(
-                ("byte_offset", "records", "complete", "target_index", "published"), row
+                ("byte_offset", "records", "complete", "target_collection", "published"), row
             )
         ),
     }
