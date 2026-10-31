@@ -45,6 +45,7 @@ from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillM
 from chat.application.tools.skill_tools import LoadSkillAssetTool
 from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
+from chat.application.subagents.tools import subagent_tools
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
 from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
@@ -85,6 +86,8 @@ def _build_registry(
     )
     for provider in tool_providers:
         registry.register(provider)
+    for tool in subagent_tools():
+        registry.register(tool)
     return registry
 
 
@@ -327,6 +330,8 @@ class Container(containers.DeclarativeContainer):
         suspended_chat_repo=suspended_chat_repo,
         agent_resolver=agent_resolver,
         oss_file_loader=oss_file_loader,
+        turn_stream_repo=chat_turn_stream_repo,
+        resource_client=resource_client,
     )
 
     chat_turn_stream_manager = providers.Singleton(

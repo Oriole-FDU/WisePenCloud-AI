@@ -17,6 +17,7 @@ class ChatTurnStreamManager:
     def __init__(self, *, stream_repo: RedisChatTurnStream) -> None:
         self._stream_repo = stream_repo
         self._tasks: dict[str, asyncio.Task] = {}
+        self._lost_leases: set[str] = set()
 
     async def start_turn(
         self,
@@ -61,7 +62,10 @@ class ChatTurnStreamManager:
         return turn_id
 
     async def is_turn_cancel_requested(self, turn_id: str) -> bool:
-        return await self._stream_repo.is_turn_cancel_requested(turn_id)
+        return turn_id in self._lost_leases or await self._stream_repo.is_turn_cancel_requested(turn_id)
+
+    def is_turn_lease_lost(self, turn_id: str) -> bool:
+        return turn_id in self._lost_leases
 
     async def active_turn_id(self, *, user_id: str, session_id: str) -> str | None:
         return await self._stream_repo.get_active_turn(user_id, session_id)
@@ -85,31 +89,68 @@ class ChatTurnStreamManager:
     ) -> None:
         # 创建一个后台执行环境
         background_tasks = BackgroundTasks()
+        runner = asyncio.current_task()
+        heartbeat_done = asyncio.Event()
+        chat_gen = build_chat_gen(background_tasks, turn_id)
+
+        async def heartbeat():
+            interval = max(0.02, min(self._stream_repo.active_turn_ttl / 3, 10))
+            while True:
+                try:
+                    await asyncio.wait_for(heartbeat_done.wait(), timeout=interval)
+                    return
+                except TimeoutError:
+                    pass
+                try:
+                    renewed = await self._stream_repo.renew_active_turn(user_id, session_id, turn_id)
+                except Exception:
+                    renewed = False
+                if not renewed:
+                    self._lost_leases.add(turn_id)
+                    runner.cancel()
+                    return
+
+        lease_task = asyncio.create_task(heartbeat(), name=f"chat-turn-lease:{turn_id}")
 
         try:
             # 后台执行器统一负责消息生命周期帧，页面连接只转发。
             await self._stream_repo.append_frame(turn_id, message_start(f"msg_{uuid.uuid4().hex}"))
 
-            async for frame in build_chat_gen(background_tasks, turn_id):
+            async for frame in chat_gen:
                 # 业务输出帧写入前检查租约，避免旧 runner 在会话所有权失效后继续写内容
                 renewed = await self._stream_repo.renew_active_turn(user_id, session_id, turn_id) # 续期
                 if not renewed: # 无法续期，中止任务
+                    self._lost_leases.add(turn_id)
                     await self._stream_repo.append_frame(turn_id, sse_error(error_text="当前对话运行租约已失效"))
                     await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
                     return
                 await self._stream_repo.append_frame(turn_id, frame)
 
-            # 在执行后台任务前释放 active_turn
+            # 正式持久化完成後即可釋放；摘要和標題不佔用會話租約。
+            heartbeat_done.set()
+            await asyncio.gather(lease_task, return_exceptions=True)
             await self._stream_repo.release_active_turn(user_id, session_id, turn_id)
 
             await self._stream_repo.append_frame(turn_id, message_finish())
+            await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
+        except asyncio.CancelledError:
+            await self._stream_repo.append_frame(turn_id, sse_error(
+                error_text="当前对话运行租约已失效" if turn_id in self._lost_leases else "本轮对话已被取消",
+            ))
             await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
         except Exception as exc:
             error("chat turn runner failed.", turn_id=turn_id, session_id=session_id, exc=exc)
             await self._stream_repo.append_frame(turn_id, sse_error(error_text=str(exc)))
             await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
         finally:
+            try:
+                await chat_gen.aclose()
+            finally:
+                heartbeat_done.set()
+                await asyncio.gather(lease_task, return_exceptions=True)
             self._tasks.pop(turn_id, None)
+            await self._stream_repo.release_active_turn(user_id, session_id, turn_id)
+            self._lost_leases.discard(turn_id)
             try:
                 await background_tasks()
             except Exception as exc:

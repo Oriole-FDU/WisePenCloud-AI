@@ -30,6 +30,8 @@ class SuspendedTurnContext:
     billing_resource_id: Optional[str]
     preferred_billing_group_id: Optional[str]
     turn_suspension: TurnSuspension
+    root_execution_id: str | None = None
+    subagent_state: dict | None = None
 
 
 # 运行时用 Any，避免 Pydantic 解析 SuspendedTurnContext 内的 TYPE_CHECKING 前向引用。
