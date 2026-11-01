@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
@@ -13,7 +14,7 @@ from scholar.application.pdf_recover import PaperPdfRecoverService
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.domain.models.source_execution import SourceExecution
+from scholar.domain.models.source_execution import SourceExecution, SourceExecutionStatus
 
 
 class LookupStatus(StrEnum):
@@ -67,7 +68,9 @@ class PaperLookupService:
         query: PaperLookup,
         *,
         credentials: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> LookupResult:
+        deadline = asyncio.get_running_loop().time() + timeout if timeout is not None else None
         policies = self.policies.current
         credentials = self.platform_credentials | (credentials or {})
         positions: dict[PaperIdentifier, list[int]] = {}
@@ -93,9 +96,19 @@ class PaperLookupService:
             common_sources=sources,
             domain_sources=policy.field_enrichers,
             credentials=credentials,
+            deadline=deadline,
         )
         confirmed = [target for target in targets if target.paper is not None and not target.ambiguous]
-        papers, pdf_execution = await self.pdf.recover([target.paper for target in confirmed])
+        budget = asyncio.timeout_at(deadline)
+        try:
+            async with budget:
+                papers, pdf_execution = await self.pdf.recover([target.paper for target in confirmed])
+        except TimeoutError:
+            if not budget.expired():
+                raise
+            # match 的剩余预算耗尽时保留已取得的论文，PDF 补救失败单独报告。
+            papers = [target.paper for target in confirmed]
+            pdf_execution = SourceExecution("unpaywall", False, SourceExecutionStatus.FAILED, "PDF recovery exceeded the lookup request deadline")
         for target, paper in zip(confirmed, papers, strict=True):
             target.paper = paper
         if pdf_execution is not None:

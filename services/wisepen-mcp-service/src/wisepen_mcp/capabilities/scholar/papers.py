@@ -54,6 +54,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         description=(
             "Search academic papers across scholarly providers. "
             "Use this tool when you already have a clear research topic, specific technical concepts, or scholarly keywords. "
+            "For known complete paper titles use match_papers; for known stable identifiers use lookup_papers. "
             "If you need to explore or clarify an unfamiliar research direction first, use web_search before calling this tool. "
             "Sources: Built upon three general platforms (arXiv is always available without keys; OpenAlex and Semantic Scholar platform keys are reserved for metadata enrichment, so direct searching on them requires user BYOK) "
             "plus domain-specific sources (some require user BYOK for search). "
@@ -127,9 +128,33 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         )
 
     @mcp.tool(
+        name="match_papers",
+        description=(
+            "Match 1 to 20 known complete paper titles to specific papers. "
+            "Titles must match in full after formatting normalization, including subtitles; "
+            "same-title papers may be ambiguous. Batch titles in one call. "
+            "Returns the same paper information and configured field enrichment as lookup_papers. "
+            "Per-title external failures, including rate limits, preserve other results. "
+            "Use search_papers for topics or incomplete titles, and lookup_papers for stable identifiers."
+        ),
+    )
+    async def match_papers(
+        ctx: Context,
+        titles: Annotated[list[str], Field(min_length=1, max_length=20, description="Complete paper titles, including subtitles; batch 1 to 20 titles.")],
+        field: Annotated[SearchField, Field(description="Academic discipline used for the same domain-specific enrichment as lookup_papers.")] = SearchField.GENERAL,
+    ) -> dict[str, Any]:
+        return await scholar_client.match_papers(
+            titles=titles, field=field.value,
+            openalex_api_key=_secret(ctx, "openalex_api_key"),
+            huggingface_api_key=_secret(ctx, "huggingface_api_key"),
+            s2_api_key=_secret(ctx, "s2_api_key"),
+        )
+
+    @mcp.tool(
         name="lookup_papers",
         description=(
             "Retrieve 1 to 20 specific papers by known identifiers (DOI, arXiv ID, etc.). "
+            "For known complete titles use match_papers. "
             "Returns the same paper information and configured field enrichment as search_papers; "
             "use it for exact identifier queries, not as routine post-processing to obtain fuller search results. "
             "IMPORTANT: Batch as many identifiers as possible in a single call (up to 20) instead of calling this tool one-by-one in a loop, "

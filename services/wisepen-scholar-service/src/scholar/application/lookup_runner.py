@@ -100,6 +100,19 @@ class LookupRunner:
             list(dict.fromkeys(identifiers)), deepcopy(paper), metadata
         )
 
+    async def cache_papers(self, source: str, papers: list[Paper]) -> None:
+        """搜索的完整来源事实写入既有 lookup 缓存；列表概要仅建立标题身份索引。"""
+        binding = self.bindings.get(source)
+        if binding is None or binding.cache is None:
+            return
+        records = [
+            (CachedPaperLookup(paper, tuple(self._aliases(paper))), self.positive_ttl_seconds)
+            for paper in papers
+            if all(name in paper.metadata.get(source, {}) for name in binding.rules.required_fields)
+        ]
+        if records:
+            await binding.cache.put_many(records)
+
     async def run(
         self,
         targets: list[LookupTarget],

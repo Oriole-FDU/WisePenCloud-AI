@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
+from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier, parse_identifier
 from scholar.domain.models.paper import Paper
 from . import arxiv, huggingface, openalex
 from .s2 import provider as s2
@@ -57,3 +57,16 @@ PROVIDER_POLICIES = {
         ],
     ),
 }
+
+
+def paper_identifiers(paper: Paper) -> list[PaperIdentifier]:
+    """来源事实中的稳定身份；lookup 与标题索引使用相同的供应商别名规则。"""
+    aliases = []
+    if paper.arxiv_id is not None:
+        aliases.append(parse_identifier(paper.arxiv_id))
+    if paper.doi is not None:
+        aliases.append(parse_identifier(paper.doi))
+    for policy in PROVIDER_POLICIES.values():
+        if policy.aliases is not None:
+            aliases.extend(policy.aliases(paper.metadata))
+    return list(dict.fromkeys(aliases))

@@ -40,6 +40,10 @@ class FakeMcpClient:
                 },
             ),
             McpToolDescriptor(
+                name="match_papers", description="Match complete paper titles.",
+                input_schema={"type": "object", "properties": {"titles": {"type": "array"}}, "required": ["titles"]},
+            ),
+            McpToolDescriptor(
                 name="exa_search",
                 description="Search with Exa.",
                 input_schema={
@@ -84,7 +88,7 @@ def user_tool_config(tool_name, api_key, *, enabled=True):
         tool_name=tool_name,
         enabled=enabled,
         config={},
-        secret_config={"api_key": api_key} if api_key is not None else {},
+        secret_config={"openalex_api_key": api_key} if api_key is not None else {},
         secret_fingerprints={},
     )
 
@@ -114,6 +118,7 @@ async def test_optional_scholar_config_keeps_local_tools_callable(scholar_tools)
 
     assert scope.get("system_search_papers") is not None
     assert scope.get("system_lookup_papers") is not None
+    assert scope.get("system_match_papers") is not None
     assert scope.get("system_discover_papers") is not None
     assert scope.get("system_exa_search") is None
     assert "api_key" not in json.dumps(scope.schemas())
@@ -122,7 +127,10 @@ async def test_optional_scholar_config_keeps_local_tools_callable(scholar_tools)
     assert response.requires_config is False
     assert response.configured is True
     assert response.enabled is True
-    assert response.config_schema["properties"]["api_key"]["writeOnly"] is True
+    for tool_name in ("system_search_papers", "system_match_papers"):
+        config = build_tool_response(scope.get(tool_name), None).config_schema["properties"]
+        assert set(config) == {"openalex_api_key", "huggingface_api_key"}
+        assert all(value["writeOnly"] for value in config.values())
     discovery_response = build_tool_response(scope.get("system_discover_papers"), None)
     assert discovery_response.requires_config is False
     assert discovery_response.enabled is True
@@ -140,6 +148,7 @@ async def test_optional_scholar_config_keeps_local_tools_callable(scholar_tools)
                 "system_lookup_papers",
                 {"identifiers": ["arxiv:2601.12345"]},
             ),
+            ToolInvocation("match", "system_match_papers", {"titles": ["Attention Is All You Need"]}),
             ToolInvocation(
                 "discover",
                 "system_discover_papers",
@@ -153,6 +162,7 @@ async def test_optional_scholar_config_keeps_local_tools_callable(scholar_tools)
     assert [(name, config) for name, _, config in mcp_client.calls] == [
         ("search_papers", None),
         ("lookup_papers", None),
+        ("match_papers", None),
         ("discover_papers", None),
     ]
 
@@ -164,10 +174,12 @@ async def test_scholar_api_keys_are_isolated_by_user_and_tool(scholar_tools):
         "alice": [
             user_tool_config("system_search_papers", "alice-search"),
             user_tool_config("system_lookup_papers", "alice-lookup"),
+            user_tool_config("system_match_papers", "alice-match"),
         ],
         "bob": [
             user_tool_config("system_search_papers", "bob-search"),
             user_tool_config("system_lookup_papers", "bob-lookup"),
+            user_tool_config("system_match_papers", "bob-match"),
         ],
     }
 
@@ -183,6 +195,7 @@ async def test_scholar_api_keys_are_isolated_by_user_and_tool(scholar_tools):
                     "system_lookup_papers",
                     {"identifiers": ["arxiv:2601.12345"]},
                 ),
+                ToolInvocation("match", "system_match_papers", {"titles": ["Attention Is All You Need"]}),
             ],
             scope,
         )
@@ -190,10 +203,12 @@ async def test_scholar_api_keys_are_isolated_by_user_and_tool(scholar_tools):
         assert "api_key" not in json.dumps(scope.schemas())
 
     assert [(name, config) for name, _, config in mcp_client.calls] == [
-        ("search_papers", {"api_key": "alice-search"}),
-        ("lookup_papers", {"api_key": "alice-lookup"}),
-        ("search_papers", {"api_key": "bob-search"}),
-        ("lookup_papers", {"api_key": "bob-lookup"}),
+        ("search_papers", {"openalex_api_key": "alice-search"}),
+        ("lookup_papers", {"openalex_api_key": "alice-lookup"}),
+        ("match_papers", {"openalex_api_key": "alice-match"}),
+        ("search_papers", {"openalex_api_key": "bob-search"}),
+        ("lookup_papers", {"openalex_api_key": "bob-lookup"}),
+        ("match_papers", {"openalex_api_key": "bob-match"}),
     ]
 
 
@@ -219,6 +234,6 @@ async def test_suspended_scope_omits_secrets_and_reloads_current_user_config(
     recovered_scope = await registry.recover_derived(suspended_scope, "alice")
 
     assert recovered_scope.config_for("system_search_papers") == {
-        "api_key": "current-user-key"
+        "openalex_api_key": "current-user-key"
     }
     assert recovered_scope.get("system_lookup_papers") is None

@@ -113,7 +113,7 @@ class ArxivProvider:
         return hashlib.sha256(
             json.dumps(
                 {
-                    "algorithm": "qdrant-bm25-specter2-native-rrf-v1",
+                    "algorithm": "qdrant-bm25-specter2-native-rrf-title-v2",
                     "model": MODEL_SIGNATURE,
                     "candidates": self.candidate_limit,
                     "num_candidates": self.num_candidates,
@@ -143,6 +143,18 @@ class ArxivProvider:
             )
             for match in matches
         ]
+
+    async def match_titles(
+        self, *, query: str, field: AcademicField,
+        published_after: date | None, published_before: date | None,
+        limit: int, api_key: str | None = None,
+    ) -> PaperSearchBatch:
+        """搜索中的完整标题召回，与普通召回采用同一学科和日期过滤。"""
+        matches = await self.paper_repository.match_titles(
+            [query], categories=ARXIV_CATEGORIES[field],
+            published_after=published_after, published_before=published_before, limit=limit,
+        )
+        return PaperSearchBatch([self._with_arxiv_doi(paper) for paper in matches[0].papers])
 
     async def search(
         self,

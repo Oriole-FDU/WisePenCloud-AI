@@ -2,6 +2,9 @@
 
 本节更新覆盖下文历史阶段中的检索、离线同步和凭证约定。
 
+- 独立 match_papers / POST /scholar/papers/match 接收批量完整标题，按 Redis 标题身份索引→Qdrant keyword→Crossref 解析，最终批量复用 lookup；不扩充 lookup 的标识解析。Crossref 单进程共享并发 2，逐项保留 429 与超时。search 独立补召回完整标题，在最终融合后、limit 前优先排列。存量 normalized_title 回填和新发布写入先于读取代码上线，详见部署及离线维护文档。
+
+
 - 本地检索采用 BM25 dis_max + SPECTER2 + RRF60 + 有界引用加分；title/TLDR/abstract=3/2/1，取消 `2<70%`
   。实现与参数见 [混合检索](hybrid-search.md)。
 - 模型合同并入 embedding_runtime，检索规则内联在仓储及 arXiv provider；召回规模、RRF k、引用加分权重和 CPU 线程通过
@@ -69,7 +72,7 @@ V1 不建设全文语料库、完整引用图、作者研究工具、用户密�
 `domain/models/` 中的 `paper.py`、`identifiers.py` 只保存论文和身份领域语义。请求、结果、来源执行状态等细节放在具体应用用例或其共享执行模型中，不放入一个总
 models.py。
 
-`application/` 只有 search、lookup、discover 三个用例，分别由 `search.py`、`lookup.py`、`discovery.py` 编排。
+`application/` 分为 search、lookup、match、discover 四个独立用例；match 只解析完整标题并复用 lookup，不建设总服务。
 `lookup_runner.py` 是 search/lookup 共用的内部执行机制，负责通用短路、领域增量、缓存及在途请求复用，不是额外应用服务。供应商身份与详情完整性规则通过注册绑定注入，留在
 `providers/`。
 

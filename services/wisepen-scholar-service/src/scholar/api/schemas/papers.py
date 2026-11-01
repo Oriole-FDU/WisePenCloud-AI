@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from scholar.application.discovery import PaperDiscoveryQuery
 from scholar.application.lookup import PaperLookup
+from scholar.application.match import PaperMatch
 from scholar.application.search import PaperSearch, SourceScope
 from scholar.domain.interfaces.paper_discoverer import DiscoveryPeriod, DiscoverySort
 from scholar.domain.models.fields import AcademicField
@@ -51,6 +52,22 @@ class LookupRequest(BaseModel):
 
     def to_query(self) -> PaperLookup:
         return PaperLookup(**self.model_dump())
+
+
+class MatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    titles: list[str] = Field(min_length=1, max_length=20)
+    field: AcademicField = AcademicField.GENERAL
+
+    @field_validator("titles")
+    @classmethod
+    def nonblank_titles(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("titles must not contain blank strings")
+        return [value.strip() for value in values]
+
+    def to_query(self) -> PaperMatch:
+        return PaperMatch(**self.model_dump())
 
 
 class DiscoveryRequest(BaseModel):

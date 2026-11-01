@@ -273,6 +273,12 @@ _SYSTEM_TOOL_CONFIGS: list[dict[str, Any]] = [{
         "config_spec": _SCHOLAR_API_KEY_CONFIG,
         "failure_reason": "Scholar Paper Lookup Failed",
     },{
+        "tool_name": "match_papers",
+        "ui_spec": ToolUISpec(display_name="匹配论文", description="根据完整论文标题匹配论文；同名论文保留歧义"),
+        "policy": _SCHOLAR_POLICY,
+        "config_spec": _SCHOLAR_API_KEY_CONFIG,
+        "failure_reason": "Scholar Paper Match Failed",
+    },{
         "tool_name": "discover_papers",
         "config_spec": _SCHOLAR_HF_API_KEY_CONFIG,
         "ui_spec": ToolUISpec(display_name="发现论文", description="发现新鲜论文，追踪学术热点"),

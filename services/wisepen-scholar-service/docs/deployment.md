@@ -12,6 +12,8 @@ CPU 查询编码模型并同时提供论文 API 与 `/v1/embeddings`。HTTP 进�
 
 平台凭证为 `S2_API_KEY`、`OPENALEX_API_KEY`、`HF_TOKEN`，仅用于 lookup 和富化，用户 BYOK 优先。HF/OpenAlex 搜索及 HF 发现必须使用用户 BYOK，缺 key 时不读取该来源搜索缓存，也不回退平台 key。S2 用户 key 使用独立 Redis FIFO；在线与离线各自使用 NOKEY → 429 → KEY 双通道及独立合流队列，同一平台 key 的发射锚点共享且在线兜底优先。模型位置由 `SCHOLAR_EMBEDDING_MODELS_PATH` 指定。
 
+完整标题能力上线前，先按[离线维护](../deploy/README.md#完整标题字段回填)更新发布写入并回填 normalized_title；回填窗口暂停增量发布，完成后再上线读取代码并恢复发布。Redis 标题身份索引随 search/lookup 新写入预热，无需扫描旧缓存。Crossref 标题解析使用同一 UNPAYWALL_EMAIL 联系邮箱，单进程共享并发 2，429/超时逐项返回。
+
 PDF 补救使用 `UNPAYWALL_EMAIL`，默认 `jzsun24@m.fudan.edu.cn`；单次请求超时 5 秒、并发 4，结果使用独立 DOI 缓存。
 
 HTTP 请求使用内部来源请求头；`/scholar/health` 检查 ES、Redis、alias，模型启动完成后 `/health` 返回查询编码就绪。MCP 入口由

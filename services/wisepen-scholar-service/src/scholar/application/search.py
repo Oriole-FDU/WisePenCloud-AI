@@ -7,6 +7,7 @@ import hashlib
 from dataclasses import dataclass, field, replace
 from datetime import date
 from enum import StrEnum
+from collections.abc import Awaitable, Callable
 
 import orjson
 
@@ -17,10 +18,11 @@ from scholar.application.lookup_runner import LookupRunner
 from scholar.application.paper_projection import project_paper
 from scholar.application.pdf_recover import PaperPdfRecoverService
 from scholar.domain.errors import ProviderError, ScholarErrorCode, provider_operation
-from scholar.domain.interfaces.paper_searcher import PaperSearcher
+from scholar.domain.interfaces.paper_searcher import PaperSearcher, PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
 from scholar.domain.models.paper import Paper
+from scholar.domain.models.titles import normalize_title
 from scholar.domain.models.source_execution import (
     SourceExecution,
     SourceExecutionStatus,
@@ -56,9 +58,10 @@ class SearchBinding:
     """注册来源能力及结果缓存版本。"""
 
     searcher: PaperSearcher
-    cache_revision: str = "2"
+    cache_revision: str = "3"
     candidate_limit: int = 100
     requires_byok: bool = False
+    title_matcher: Callable[..., Awaitable[PaperSearchBatch]] | None = None
 
 
 class PaperSearchService:
@@ -101,27 +104,40 @@ class PaperSearchService:
         if not plan:
             raise ServiceException(ScholarErrorCode.CAPABILITY_UNAVAILABLE, "; ".join(item.error for item in skipped.values()))
 
-        # 多源：并发请求；单源：按优先级回退，空结果也视为成功。
-        if query.source_scope == SourceScope.MULTI_SOURCE:
-            results = await asyncio.gather(
-                *(
-                    self._search_source(source, query, credentials.get(source), deadline)
-                    for source in plan
-                ),
-                return_exceptions=True,
-            )
-        else:
-            results = []
-            for source in plan:
-                try:
-                    result = await self._search_source(
-                        source, query, credentials.get(source), deadline
-                    )
-                except ProviderError as error:
-                    results.append(error)
-                else:
-                    results.append(result)
-                    break
+        # 完整标题通道独立于普通来源回退；默认来源成功也不能跳过本地精确项。
+        title_plan = [source for source in plan if self.searchers[source].title_matcher is not None]
+        title_tasks = [asyncio.create_task(self._search_source(
+            source, query, credentials.get(source), deadline, exact_title=True,
+        )) for source in title_plan]
+        try:
+            # 多源：并发请求；单源：按优先级回退，空结果也视为成功。
+            if query.source_scope == SourceScope.MULTI_SOURCE:
+                results = await asyncio.gather(
+                    *(
+                        self._search_source(source, query, credentials.get(source), deadline)
+                        for source in plan
+                    ),
+                    return_exceptions=True,
+                )
+            else:
+                results = []
+                for source in plan:
+                    try:
+                        result = await self._search_source(
+                            source, query, credentials.get(source), deadline
+                        )
+                    except ProviderError as error:
+                        results.append(error)
+                    else:
+                        results.append(result)
+                        break
+
+            title_results = await asyncio.gather(*title_tasks, return_exceptions=True)
+        finally:
+            for task in title_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*title_tasks, return_exceptions=True)
 
         ranked, execution, failures = {}, [], []
         for source, result in zip(plan[: len(results)], results, strict=True):
@@ -140,25 +156,53 @@ class PaperSearchService:
                     )
                 )
             else:
-                ranked[source] = result[0]
+                # 后续会合并标题候选和排序，不能改写来源缓存持有的列表。
+                ranked[source] = result[0][:]
                 execution.append(result[1])
 
-        # 全部来源失败时抛出首个错误。
-        if len(failures) == len(results):
+        title_execution, title_sources = [], set()
+        for source, result in zip(title_plan, title_results, strict=True):
+            if isinstance(result, BaseException):
+                if not isinstance(result, ProviderError):
+                    raise result
+                title_execution.append(SourceExecution(f"{source}.title", False, SourceExecutionStatus.FAILED, str(result)))
+                continue
+            exact, event = result
+            title_execution.append(replace(event, source=f"{source}.title"))
+            if exact:
+                title_sources.add(source)
+            existing = ranked.setdefault(source, [])
+            # 同源普通召回与标题召回按稳定身份去重，避免把一次命中算作两篇。
+            identities = [self._paper_identity(p) for p in existing]
+            for paper in exact:
+                identity = self._paper_identity(paper)
+                if not any(self._same_identity(identity, known) for known in identities):
+                    existing.append(paper)
+                    identities.append(identity)
+
+        # 空的精确通道不能掩盖普通检索失败；已有精确论文则保留结果并报告失败。
+        if len(failures) == len(results) and not title_sources:
             raise failures[0]
 
-        if query.source_scope == SourceScope.DEFAULT:
-            # 单源只取最后一个被尝试来源的结果（即首个成功来源）。
-            papers, conflicts = ranked[plan[len(results) - 1]][: query.limit], []
+        normalized = normalize_title(query.query)
+        exact_identities = [
+            self._paper_identity(paper) for values in ranked.values() for paper in values
+            if normalize_title(paper.title or "") == normalized
+        ]
+        if query.source_scope == SourceScope.DEFAULT and not title_sources:
+            papers, conflicts = ranked[plan[len(results) - 1]], []
         else:
-            papers, conflicts = self._fuse_sources(ranked, limit=query.limit)
-
-        # 通用来源取得论文即完成获取；领域来源仍按详情完整性决定是否补查。
+            papers, conflicts = self._fuse_sources(ranked, limit=sum(len(values) for values in ranked.values()))
+        # 排序发生在所有来源融合后、最终 limit 前，不改变非完整命中之间的原顺序。
+        # 融合可能选用另一来源的正式标题；完整命中的稳定身份仍享有优先级。
+        papers.sort(key=lambda paper: normalize_title(paper.title or "") != normalized and not any(
+            self._same_identity(self._paper_identity(paper), identity) for identity in exact_identities
+        ))
+        papers = papers[:query.limit]
         succeeded = {
-            source
-            for source, result in zip(plan, results)
+            source for source, result in zip(plan, results)
             if not isinstance(result, BaseException)
-        }
+        } | title_sources
         targets = [self.lookup_runner.target(None, paper) for paper in papers]
         enrichment_execution = await self.lookup_runner.run(
             targets,
@@ -192,7 +236,7 @@ class PaperSearchService:
             enrichment_execution.append(pdf_execution)
         enriched_papers = [project_paper(paper) for paper in papers]
         executions = skipped | {item.source: item for item in execution}
-        execution = [executions[source] for source in policy.searchers if source in executions]
+        execution = [executions[source] for source in policy.searchers if source in executions] + title_execution
         return SearchResult(enriched_papers, execution, conflicts, enrichment_execution)
 
     async def _search_source(
@@ -201,9 +245,11 @@ class PaperSearchService:
         query: PaperSearch,
         api_key: str | None,
         deadline: float | None,
+        *,
+        exact_title: bool = False,
     ) -> tuple[list[Paper], SourceExecution]:
         binding = self.searchers[source]
-        cache_key = self._cache_key(source, binding, query)
+        cache_key = self._cache_key(source, binding, query) + (":title" if exact_title else "")
 
         budget = asyncio.timeout_at(deadline)
         stage = "query_cache.get"
@@ -216,7 +262,8 @@ class PaperSearchService:
 
                 # 缓存来源的一批候选；用户 limit 只在融合/返回时裁剪，避免改数量重新请求上游。
                 stage = "search"
-                batch = await binding.searcher.search(
+                search = binding.title_matcher if exact_title else binding.searcher.search
+                batch = await search(
                     query=query.query,
                     field=query.field,
                     published_after=query.published_after,
@@ -228,6 +275,8 @@ class PaperSearchService:
                 if batch.partial_error is None:
                     stage = "query_cache.put"
                     await self.query_cache.put(cache_key, batch.papers)
+                    stage = "paper_cache.put"
+                    await self.lookup_runner.cache_papers(source, batch.papers)
         except TimeoutError as error:
             if not budget.expired():
                 raise
@@ -281,6 +330,13 @@ class PaperSearchService:
             normalize_arxiv(paper.arxiv_id) if paper.arxiv_id else None,
             normalize_doi(paper.doi) if paper.doi else None,
         )
+
+    @staticmethod
+    def _same_identity(left: tuple[str | None, str | None], right: tuple[str | None, str | None]) -> bool:
+        """arXiv 身份优先；相同 DOI 不能合并两个不同的 arXiv 论文。"""
+        if left[0] is not None and right[0] is not None:
+            return left[0] == right[0]
+        return left[1] is not None and left[1] == right[1]
 
     @classmethod
     def _fuse_sources(

@@ -9,6 +9,7 @@ from common.http.rpc_client import RpcClient
 _SCHOLAR_SERVICE_NAME = "wisepen-scholar-service"
 _SEARCH_PAPERS_PATH = "/scholar/papers/search"
 _LOOKUP_PAPERS_PATH = "/scholar/papers/lookup"
+_MATCH_PAPERS_PATH = "/scholar/papers/match"
 _DISCOVER_PAPERS_PATH = "/scholar/papers/discover"
 
 
@@ -66,6 +67,24 @@ class ScholarClient:
                     "source_scope": source_scope,
                 },
                 timeout=self._timeout,
+                **({"headers": headers} if headers else {}),
+            )
+
+    async def match_papers(
+        self, *, titles: list[str], field: str = "general",
+        openalex_api_key: str | None = None,
+        huggingface_api_key: str | None = None,
+        s2_api_key: str | None = None,
+    ) -> dict[str, Any]:
+        headers = {name: value for name, value in {
+            "X-OpenAlex-Api-Key": openalex_api_key,
+            "X-HuggingFace-Api-Key": huggingface_api_key,
+            "X-S2-Api-Key": s2_api_key,
+        }.items() if value}
+        async with asyncio.timeout(self._timeout):
+            return await self._rpc.post(
+                self._service_name, _MATCH_PAPERS_PATH,
+                json={"titles": titles, "field": field}, timeout=self._timeout,
                 **({"headers": headers} if headers else {}),
             )
 

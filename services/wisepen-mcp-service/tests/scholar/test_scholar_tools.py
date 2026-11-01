@@ -102,6 +102,12 @@ async def test_mcp_scholar_schemas_expose_declared_contracts(scholar_server):
     assert lookup["properties"]["identifiers"]["minItems"] == 1
     assert lookup["properties"]["identifiers"]["maxItems"] == 20
 
+    match = tools["match_papers"].inputSchema
+    assert set(match["properties"]) == {"titles", "field"}
+    assert match["required"] == ["titles"]
+    assert match["properties"]["titles"]["minItems"] == 1
+    assert match["properties"]["titles"]["maxItems"] == 20
+
     discovery = tools["discover_papers"].inputSchema
     assert set(discovery["properties"]) == {"field", "period", "sort", "limit"}
     assert discovery["required"] == ["field"]
@@ -190,6 +196,25 @@ async def test_lookup_papers_passes_identifiers_and_field(scholar_server):
 
 
 @pytest.mark.asyncio
+async def test_match_papers_preserves_partial_results_and_forwards_secret_headers(scholar_server):
+    mcp, rpc = scholar_server
+    rpc.response = {"items": [{"title": "Attention Is All You Need", "status": "found"}, {"title": "Limited", "status": "failed", "error": "429"}]}
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool("match_papers", {
+            "titles": ["Attention Is All You Need", "Limited"], "field": "computer_science",
+        }, meta={"com.wisepen/tool_config": {
+            "openalex_api_key": "oa-match", "huggingface_api_key": "hf-match", "s2_api_key": "s2-match",
+        }})
+    assert result.structuredContent == rpc.response
+    assert not result.isError
+    assert rpc.calls == [("wisepen-scholar-service", "/scholar/papers/match", {
+        "json": {"titles": ["Attention Is All You Need", "Limited"], "field": "computer_science"},
+        "timeout": 30.0,
+        "headers": {"X-OpenAlex-Api-Key": "oa-match", "X-HuggingFace-Api-Key": "hf-match", "X-S2-Api-Key": "s2-match"},
+    })]
+
+
+@pytest.mark.asyncio
 async def test_discover_papers_maps_period_and_returns_scholar_data(scholar_server):
     mcp, rpc = scholar_server
     response = {"papers": [{"title": "A discovered paper"}], "window_start": None}
@@ -241,14 +266,16 @@ async def test_scholar_total_timeout_cancels_slow_calls():
     with pytest.raises(TimeoutError):
         await client.lookup_papers(identifiers=["arxiv:2401.00001"])
     with pytest.raises(TimeoutError):
+        await client.match_papers(titles=["Attention Is All You Need"])
+    with pytest.raises(TimeoutError):
         await client.discover_papers(
             field="computer_science",
             period="daily",
             sort="trending",
             limit=10,
         )
-    assert rpc.cancelled_calls == 3
-    assert rpc.timeouts == [0.01, 0.01, 0.01]
+    assert rpc.cancelled_calls == 4
+    assert rpc.timeouts == [0.01] * 4
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,7 @@ Scholar 是内部 HTTP 微服务。MCP 工具由现有 `wisepen-mcp-service` 注
 ## 结构与迭代边界
 
 - `api/schemas` 在 HTTP 边界校验完整契约；`api/endpoints` 只做 DTO 转换、预算控制及容器注入。
-- application 提供 search、lookup、discover 三个用例（`search.py`、`lookup.py`、`discovery.py`）。`lookup_runner.py` 是检索后处理与 lookup 共用的内部执行机制；领域与策略模型统一定义在 `domain/models/fields.py`，通过 domain 的策略读取契约获取当前快照。
+- application 提供 search、lookup、match、discover 四个独立用例。`lookup_runner.py` 是检索后处理与 lookup 共用的内部执行机制；领域与策略模型统一定义在 `domain/models/fields.py`，通过 domain 的策略读取契约获取当前快照。
 - `domain/models/paper.py`、`identifiers.py` 保存领域论文及身份；请求、结果、执行状态属于具体应用用例或共享执行模型。`Paper.source` 接受开放来源字符串，来源附加事实放在 `metadata[来源名]` 自由字典中，不依赖供应商专用领域类型。
 - `domain/interfaces` 按搜索、富化、发现能力声明通用端口；provider 可实现一个或多个能力。`providers/field_mapping.py` 仍是领域分类到 arXiv/OpenAlex 来源参数的统一映射文件。
 - `core/storage` 实现 ES 论文读模型和 Redis 查询缓存；`container.py` 装配依赖。
@@ -65,7 +65,7 @@ Lookup 定位为已知标识符的精确查询，不再接受 purpose；取得�
 
 `POST /scholar/papers/lookup` 接受 identifiers、field（默认 general），逐项保留输入顺序、重复输入、未找到、标识错误或 DOI 歧义。arXiv 版本和官方 URL 归一化，DOI 不区分大小写。没有本地来源映射的领域不会退回全库检索。所有业务响应使用 Common `R<T>`。
 
-现有 MCP 服务的 search、lookup、discover 工具使用 Nacos RpcClient 调用这些 HTTP 接口，返回解包后的 data；来源路由和论文归一化不复制到 MCP。配置驱动的检索及医疗多源扩展验收见 [P3 记录](docs/p3-acceptance.md)。
+现有 MCP 服务的 search、lookup、match、discover 工具使用 Nacos RpcClient 调用这些 HTTP 接口，返回解包后的 data；来源路由和论文归一化不复制到 MCP。配置驱动的检索及医疗多源扩展验收见 [P3 记录](docs/p3-acceptance.md)。
 
 S2 平台请求通过 Redis 跨实例合流：收集周期内按 ID 去重，每批最多 `SCHOLAR_S2_BATCH_MAX_IDS`（默认 300，范围 1～500）。NOKEY 首发不携带 key，仅 HTTP 429 将原批次投递平台 KEY 兜底；网络错误及其他状态直接失败。两路按各自上次实际发射时刻节流，间隔分别由 `SCHOLAR_S2_NOKEY_INTERVAL_SECONDS`、`SCHOLAR_S2_KEY_INTERVAL_SECONDS` 配置，默认均为 1.5 秒；满批不提前发车，慢响应不阻塞下一批发射。首轮收集一个间隔，之后空闲超过间隔时立即发出当前待办。
 
@@ -76,6 +76,20 @@ S2 平台请求通过 Redis 跨实例合流：收集周期内按 ID 去重，每
 合流与分发的自动化验收使用独立 Redis 测试命名空间及 HTTP 替身，覆盖不同实例和独立进程，不消耗真实 S2 配额。
 
 论文 lookup 正缓存默认 24 小时，确认未找到的负缓存默认 1 小时，均可配置。找到论文即使用正缓存 TTL，不因缺少引用数、TLDR 等字段缩短 TTL；网络失败不写负缓存。
+
+## 完整标题匹配
+
+已知完整论文标题使用 `match_papers`；已知 DOI/arXiv 等稳定 ID 使用 `lookup_papers`；主题或不完整标题使用 `search_papers`。
+
+`POST /scholar/papers/match` 接受 `titles`（1–20 个非空标题）和 `field`，返回 `items[{title,status,paper,error}]`、`execution`。保留顺序和重复项，状态为 found、not_found、ambiguous、failed。标题统一 Unicode、大小写、空白、引号和破折号形式；保留词序、停用词、完整副标题及数学符号，不使用近似置信度。
+
+解析顺序为 Redis 标题身份索引 → Qdrant normalized_title keyword → Crossref。Hash 按规范化标题摘要定位，稳定身份组分开存放，同一论文别名合并，不同论文同名返回歧义。索引只缓存身份；完整来源事实仍使用既有 lookup 缓存。search 写入完整来源事实，HF 列表概要不会冒充详情写入来源缓存；旧标题索引随新缓存写入预热，不扫描迁移 Redis。
+
+Crossref 只为未解决标题请求 query.bibliographic、select=DOI,title、rows=5，完整标题相等才接受 DOI，再批量调用既有 lookup。单例 Semaphore(2) 在单进程所有请求间共享，不加间隔、不重试，mailto 和 User-Agent 复用 UNPAYWALL_EMAIL。429、网络错误及超时逐项返回失败；整批均失败也保留 items，不丢弃其他成功项。请求预算包含排队、解析及 lookup，已解析项会与 Crossref 并行开始 lookup。
+
+search 对领域配置允许的本地来源增加独立完整标题召回，仍遵守学科与日期过滤；默认普通来源选中 OpenAlex 也不会跳过本地标题通道。完整标题在最终融合后、limit 截断前优先排列；search 不请求 Crossref。未命中时由调用方按需求改用主题搜索。
+
+存量集合必须先完成 [标题字段回填](deploy/README.md#完整标题字段回填)，再上线读取完整标题的服务版本。回填仅更新 payload，不重算向量。
 
 ## 模型可见 metadata
 

@@ -107,6 +107,7 @@ async def lifespan(app):
     huggingface_http = container.huggingface_http()
     s2_http = container.s2_http()
     unpaywall_http = container.unpaywall_http()
+    crossref_http = container.crossref_http()
     try:
         # 同一启动入口加载一次查询模型；预热和线上编码路由使用同一个实例。
         app.state.encoder = SpecterEncoder(
@@ -158,6 +159,7 @@ async def lifespan(app):
         await huggingface_http.aclose()
         await s2_http.aclose()
         await unpaywall_http.aclose()
+        await crossref_http.aclose()
         await container.embedding_api().close()
         await container.qdrant().close()
         await container.redis().aclose()

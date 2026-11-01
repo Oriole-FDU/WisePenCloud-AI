@@ -7,7 +7,8 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, Header
 
 from common.core.domain import R
-from scholar.api.schemas.papers import DiscoveryRequest, LookupRequest, SearchRequest
+from scholar.api.schemas.papers import DiscoveryRequest, LookupRequest, SearchRequest, MatchRequest
+from scholar.application.match import MatchResult, PaperMatchService
 from scholar.application.discovery import (
     DiscoveryResult,
     PaperDiscoveryService,
@@ -54,6 +55,26 @@ async def search(
             timeout=timeout,
         )
     )
+
+
+@router.post("/match", response_model=R[MatchResult])
+@inject
+async def match(
+    request: MatchRequest,
+    service: Annotated[PaperMatchService, Depends(Provide[Container.paper_match_service])],
+    timeout: Annotated[float, Depends(Provide[Container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS])],
+    x_openalex_api_key: Annotated[str | None, Header(alias="X-OpenAlex-Api-Key")] = None,
+    x_huggingface_api_key: Annotated[str | None, Header(alias="X-HuggingFace-Api-Key")] = None,
+    x_s2_api_key: Annotated[str | None, Header(alias="X-S2-Api-Key")] = None,
+) -> R[MatchResult]:
+    # 用例管理逐项预算与失败，HTTP 不用整批 timeout 丢弃已完成项。
+    return R.success(await service.match(request.to_query(), timeout=timeout, credentials={
+        source: key for source, key in {
+            PaperSource.OPENALEX: x_openalex_api_key,
+            PaperSource.HUGGINGFACE: x_huggingface_api_key,
+            PaperSource.S2: x_s2_api_key,
+        }.items() if key
+    }))
 
 
 @router.post("/lookup", response_model=R[LookupResult])

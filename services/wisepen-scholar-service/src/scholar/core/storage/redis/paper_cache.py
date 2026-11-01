@@ -8,13 +8,15 @@ from redis.asyncio import Redis
 from scholar.core.storage.redis import LOOKUP_CACHE_REVISION
 from scholar.domain.models.identifiers import PaperIdentifier
 from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
+from scholar.domain.repositories.title_cache import TitleCache
 
 _LOOKUP = TypeAdapter(CachedPaperLookup)
 
 
 class RedisPaperLookupCache:
-    def __init__(self, redis: Redis, namespace: str):
+    def __init__(self, redis: Redis, namespace: str, title_cache: TitleCache | None = None):
         self.redis, self.namespace = redis, f"{LOOKUP_CACHE_REVISION}:{namespace}"
+        self.title_cache = title_cache
 
     async def get_many(
         self, ids: list[PaperIdentifier]
@@ -36,6 +38,12 @@ class RedisPaperLookupCache:
                 for identifier in record.cache_aliases:
                     await pipeline.set(self._key(identifier), payload, ex=ttl_seconds)
             await pipeline.execute()
+        if self.title_cache is not None:
+            await self.title_cache.put_many([
+                (record.paper.title, list(record.cache_aliases))
+                for record, _ in entries
+                if record.paper is not None and record.paper.title
+            ])
 
     async def invalidate(self, identifiers: list[PaperIdentifier]) -> None:
         """同时删除已知身份和缓存中声明的全部别名。"""

@@ -3,6 +3,33 @@
 以下命令均在仓库根目录运行。线上服务由 `uv run --no-sync python -m scholar.main` 一次启动，查询编码随主服务启动。离线工具在本目录，独立打开
 DuckDB 写连接。
 
+## 完整标题字段回填
+
+上线顺序：先使用包含 normalized_title 的离线发布代码；暂停增量发布写入，完成下面的存量回填；再上线 match/search 标题读取能力，恢复增量发布。在线旧版本读取保持可用。回填期间不切换集合别名，不运行并行发布，避免旧标题覆盖新标题键。
+
+在仓库根目录执行：
+
+```powershell
+uv run --no-sync python services/wisepen-scholar-service/deploy/backfill_titles.py
+# 中断后恢复
+uv run --no-sync python services/wisepen-scholar-service/deploy/backfill_titles.py --resume
+```
+
+默认使用配置的 SCHOLAR_COLLECTION_ALIAS，首次解析为真实集合后固定在 `.runtime/title-backfill.json`；可用 `--collection`、`--journal`、`--batch-size` 指定目标和批大小。默认每批 128 条、`--concurrency 1`，`--max-batches` 可限制本次提交批数。
+
+提交阶段只读取 point ID 和 title、生成 normalized_title、批量发送 wait=false 更新。断点按顺序记录服务端已经接收的连续前缀；网络响应不确定时幂等重放。每批不回读、不比对、不计数、不建索引。日志中的 accepted 和 accepted_per_second 只表示接收数量与提交速率，不表示实际应用吞吐；stage=submitted 只表示整段数据已提交。
+
+旧的 updated/complete 断点在 `--resume` 时转换为 accepted/stage，不重扫已处理前缀。响应禁用压缩、复用有界连接池；临时网络或服务失败最多重试 3 次，失败保留阶段与底层异常。请求/载荷错误立即传播，不吞错误。
+
+提交完成后，由操作者独立执行一次验收：
+
+```powershell
+uv run --no-sync python services/wisepen-scholar-service/deploy/backfill_titles.py --verify
+```
+
+验收只检查更新队列和 normalized_title 覆盖数量；尚未应用完则立即报错，断点保持 submitted，不自动轮询。通过后才标记 stage=verified。此工具不创建 collection、不创建索引、不重算向量，也不等待 HNSW 建图；keyword 索引由既有发布/运维步骤处理。不能把快速接收请求当作真实写入性能已经改善。
+
+
 ## 已有向量迁移到 Qdrant
 
 迁移复用 DuckDB 中已有的 768 维论文向量，不重新运行模型。脚本按 `specter.py` 的模型签名和标题/摘要输入指纹检查向量，使用稳定 arXiv UUID 分批写入

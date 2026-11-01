@@ -11,6 +11,7 @@ from scholar.domain.errors import ProviderError, provider_error_message
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.models.paper import Paper, PaperSource
+from scholar.domain.models.titles import normalize_title
 from scholar.domain.repositories.local_paper_repository import (
     LocalPaperRepository,
     PaperCandidate,
@@ -67,6 +68,47 @@ class QdrantPaperRepository:
         self.client = client
         self.collection = collection
 
+    @staticmethod
+    def _conditions(categories, published_after, published_before):
+        conditions = []
+        if categories:
+            conditions.append(models.Filter(should=[
+                models.FieldCondition(
+                    key="category_groups" if value.endswith(".*") else "categories",
+                    match=models.MatchValue(value=value.partition(".")[0] if value.endswith(".*") else value),
+                ) for value in categories
+            ]))
+        if published_after is not None or published_before is not None:
+            conditions.append(models.FieldCondition(
+                key="submitted_date",
+                range=models.DatetimeRange(
+                    gte=f"{published_after}T00:00:00Z" if published_after else None,
+                    lte=f"{published_before}T00:00:00Z" if published_before else None,
+                ),
+            ))
+        return conditions
+
+    async def match_titles(
+        self, titles: list[str], *, categories: list[str] | None = None,
+        published_after: date | None = None, published_before: date | None = None,
+        limit: int = 2,
+    ) -> list[PaperLookupMatch]:
+        """keyword 完整相等通道；最多两篇即可区分唯一命中与同名歧义。"""
+        if not titles:
+            return []
+        conditions = self._conditions(categories, published_after, published_before)
+        try:
+            batches = await self.client.query_batch_points(self.collection, requests=[
+                models.QueryRequest(
+                    filter=models.Filter(must=[*conditions, models.FieldCondition(
+                        key="normalized_title", match=models.MatchValue(value=normalize_title(title)),
+                    )]), limit=limit, with_payload=True, with_vector=False,
+                ) for title in titles
+            ])
+        except ApiException as error:
+            raise ProviderError(f"qdrant.match_titles: {provider_error_message(error)}") from error
+        return [PaperLookupMatch([to_paper(point.payload) for point in batch.points]) for batch in batches]
+
     async def search(
         self,
         *,
@@ -79,33 +121,7 @@ class QdrantPaperRepository:
         num_candidates: int = 1000,
         rrf_k: int = 60,
     ) -> list[PaperCandidate]:
-        conditions = []
-        if categories:
-            conditions.append(
-                models.Filter(
-                    should=[
-                        models.FieldCondition(
-                            key="category_groups" if value.endswith(".*") else "categories",
-                            match=models.MatchValue(
-                                value=value.partition(".")[0]
-                                if value.endswith(".*")
-                                else value
-                            ),
-                        )
-                        for value in categories
-                    ]
-                )
-            )
-        if published_after is not None or published_before is not None:
-            conditions.append(
-                models.FieldCondition(
-                    key="submitted_date",
-                    range=models.DatetimeRange(
-                        gte=f"{published_after}T00:00:00Z" if published_after else None,
-                        lte=f"{published_before}T00:00:00Z" if published_before else None,
-                    ),
-                )
-            )
+        conditions = self._conditions(categories, published_after, published_before)
         filters = models.Filter(must=conditions) if conditions else None
         # 先在关键词通道内按标题/TLDR/摘要权重融合，再与稠密通道等权融合；
         # 避免三个文本分支在外层 RRF 中无意把关键词总权重放大三倍。

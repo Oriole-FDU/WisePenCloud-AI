@@ -12,6 +12,7 @@ from scholar.core.storage.qdrant.paper_repository import (
     BM25_OPTIONS,
 )
 from scholar.ml.specter import DIMENSIONS, MODEL_SIGNATURE
+from scholar.domain.models.titles import normalize_title
 
 COLLECTION = f"wisepen-scholar-hybrid-{MODEL_SIGNATURE[:16]}-v1"
 
@@ -25,6 +26,7 @@ def point_payload(document: dict) -> dict:
     """完整论文事实随候选直接返回；日期投影为可建立 datetime 索引的格式。"""
     return {
         **document,
+        "normalized_title": normalize_title(document["title"]),
         "submitted_date": f"{document['submitted_date']}T00:00:00Z",
         "category_groups": sorted({value.partition('.')[0] for value in document['categories']}),
     }
@@ -53,7 +55,7 @@ async def ensure_collection(client: AsyncQdrantClient, collection: str = COLLECT
             optimizers_config=models.OptimizersConfigDiff(indexing_threshold=0 if bulk else 10000),
             on_disk_payload=True,
         )
-        for field, kind in (("arxiv_id", models.PayloadSchemaType.KEYWORD), ("doi", models.PayloadSchemaType.KEYWORD), ("categories", models.PayloadSchemaType.KEYWORD), ("category_groups", models.PayloadSchemaType.KEYWORD), ("submitted_date", models.PayloadSchemaType.DATETIME)):
+        for field, kind in (("arxiv_id", models.PayloadSchemaType.KEYWORD), ("doi", models.PayloadSchemaType.KEYWORD), ("normalized_title", models.PayloadSchemaType.KEYWORD), ("categories", models.PayloadSchemaType.KEYWORD), ("category_groups", models.PayloadSchemaType.KEYWORD), ("submitted_date", models.PayloadSchemaType.DATETIME)):
             await client.create_payload_index(collection, field, kind, wait=True)
 
 

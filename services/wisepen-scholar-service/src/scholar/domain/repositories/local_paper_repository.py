@@ -19,6 +19,12 @@ class PaperCandidate:
 
 
 class LocalPaperRepository(Protocol):
+    async def match_titles(
+        self, titles: list[str], *, categories: list[str] | None = None,
+        published_after: date | None = None, published_before: date | None = None,
+        limit: int = 2,
+    ) -> list[PaperLookupMatch]: ...
+
     async def search(
         self,
         *,
