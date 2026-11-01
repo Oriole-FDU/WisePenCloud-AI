@@ -113,6 +113,7 @@ async def run(args):
                 url=settings.QDRANT_URL,
                 api_key=settings.QDRANT_API_KEY,
                 trust_env=False,
+                check_compatibility=False,
                 timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
                 cloud_inference=True,
             )
@@ -132,7 +133,6 @@ async def run(args):
                         s2_http, redis, s2_key, offline=True,
                         nokey_interval=settings.SCHOLAR_S2_NOKEY_INTERVAL_SECONDS,
                         key_interval=settings.SCHOLAR_S2_KEY_INTERVAL_SECONDS,
-                        batch_max_ids=settings.SCHOLAR_S2_BATCH_MAX_IDS,
                         request_timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
                     ) as transport,
                 ):
@@ -158,7 +158,8 @@ async def run(args):
                     if args.command in ("sync-arxiv", "recover-s2"):
                         async with httpx.AsyncClient(
                             proxy=proxy_url,
-                            timeout=settings.SCHOLAR_ETL_REQUEST_TIMEOUT_SECONDS,
+                            # OAI 页面生成显著慢于普通存储请求；连接失败仍快速暴露。
+                            timeout=httpx.Timeout(args.oai_timeout, connect=15),
                         ) as oai_http:
                             return await sync_arxiv(
                                 db,
@@ -222,17 +223,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="显式指定代理端口（例如 7897），默认自动发现本地 7897 或系统代理",
     )
     parser.add_argument("--from", "--from-date", dest="from_date")
+    parser.add_argument("--oai-timeout", type=float, default=300, help="OAI 单页读取超时秒数，默认 300；连接超时 15 秒")
     return parser
 
 
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    if args.oai_timeout <= 0:
+        parser.error("oai-timeout must be positive")
     if args.batch_size is None:
         args.batch_size = (
             8
             if args.command == "encode-embeddings"
-            else 500
+            else 300
             if args.command in ("sync-arxiv", "recover-s2")
             else 50000
             if args.command == "import-s2"

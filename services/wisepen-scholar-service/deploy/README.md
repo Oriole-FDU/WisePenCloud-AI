@@ -97,7 +97,13 @@ uv run --no-sync python services/wisepen-scholar-service/deploy/run.py sync-arxi
 uv run --no-sync python services/wisepen-scholar-service/deploy/run.py sync-arxiv --from 2026-10-20
 ```
 
-S2 每批最多重试 5 次，耗尽后保留日常待办并继续；已确认未收录或缺核心信号/向量的论文转入 `pending_s2_core_missing`，由 `recover-s2` 单独恢复。发布失败会使命令非零退出，保留待办和已提交数据；重跑原命令继续。每个 DuckDB 文件同时只运行一个离线写任务。
+S2 日常同步和恢复仅对 HTTP 429 退避，单批最多尝试 5 次；其他来源错误立即跳过整批、不等待重试，保留待办并继续后续批次。已确认未收录或缺核心信号/向量的论文转入 `pending_s2_core_missing`，由 `recover-s2` 单独恢复。发布失败会使命令非零退出，保留待办和已提交数据；重跑原命令继续。每个 DuckDB 文件同时只运行一个离线写任务。
+
+OAI 重放逐记录比较和应用事实，不因抽样 ID 已存在而跳过整批。已发布基线的增量发布解析 `--alias`（默认 `SCHOLAR_COLLECTION_ALIAS`）当前指向的 Qdrant 集合，并更新 DuckDB 中的目标指针；不沿用迁移前 ES 名称，不创建新集合或切换别名。发布确认后才清理对应待办。
+
+OAI 单页读取默认等待 300 秒，连接超时 15 秒，可用 `sync-arxiv --oai-timeout 600` 调整读取时间。等待时每 15 秒打印进度；暂时性网络失败最多尝试当前页 3 次，沿用当前 resumptionToken，不重读前面成功的页面。HTTP 429/503 仍保留原状态及 Retry-After，由操作者处理。
+
+S2 的 HTTP 分批、去重、节流及原位置回执统一由 src 中的 transport 控制；离线 CLI 不覆盖 HTTP 批大小，`--batch-size` 只控制数据库处理批次。返回列表数量不符时记录请求数量、返回数量、响应字节数和通道并报错，离线适配器不二分重查，不补造 null，也不把异常当成“未收录”。429 继续沿用现有通道与退避规则。
 
 Linux 每日执行模板为本目录 `scholar-sync.service`、`scholar-sync.timer`。修改仓库路径、uv 路径及 EnvironmentFile 后安装到
 systemd，执行 `systemctl enable --now scholar-sync.timer`。定时器每日 03:00 运行一条 `sync-arxiv` 命令。

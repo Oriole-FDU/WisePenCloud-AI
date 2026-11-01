@@ -15,11 +15,13 @@ from xml.etree import ElementTree as ET
 import duckdb
 import httpx
 import orjson
+from redis.exceptions import RedisError
 from offline.arxiv_oai import ArxivOaiHarvest, ArxivOaiRecord, INITIAL_FROM
 from offline.embeddings import INPUT_HASH_SQL, reconcile_embeddings
 from offline.s2_api import S2SyncClient, S2SyncPaper
 
 from scholar.core.config.bootstrap_settings import SERVICE_ROOT
+from scholar.domain.errors import ProviderError
 
 from scholar.domain.models.identifiers import (
     IdentifierKind,
@@ -658,11 +660,14 @@ async def _enrich_pending(
             try:
                 synced = await client.lookup(identifiers)
                 break
-            except Exception as err:
+            except (httpx.HTTPError, ProviderError, TimeoutError, RedisError, ValueError) as err:
                 err_type = type(err).__name__
                 err_detail = str(err).strip() or repr(err)
-                is_429 = "429" in err_detail or "too many requests" in err_detail.lower()
-                wait_seconds = min(3.0 * (2 ** attempt), 30.0) if is_429 else min(2.0 * (attempt + 1), 10.0)
+                # 仅真实限流值得等待重试；其他来源失败保留待办并立即让出请求额度。
+                if not isinstance(err, httpx.HTTPStatusError) or err.response.status_code != 429:
+                    print(f"[S2] 批次 {offset}-{offset + len(batch)} 失败 ({err_type}: {err_detail})，跳过该批（保留在待办），不重试", flush=True)
+                    break
+                wait_seconds = min(3.0 * (2 ** attempt), 30.0)
                 if attempt < max_retries - 1:
                     print(
                         f"[S2] 批次 {offset}-{offset + len(batch)} 遇到异常 ({err_type}: {err_detail})，等待 {wait_seconds:.1f} 秒后重试 (第 {attempt + 1}/{max_retries} 次)...",
@@ -1047,58 +1052,35 @@ async def sync_arxiv(
     deleted = 0
     chunk_size = 500
 
-    already_ingested = False
-    if total_records and cache_harvest:
-        sample_records = [r for r in harvest.records if not r.deleted]
-        if sample_records:
-            samples = [
-                _normalize_oai_identifier(sample_records[0].identifier),
-                _normalize_oai_identifier(sample_records[len(sample_records) // 2].identifier),
-                _normalize_oai_identifier(sample_records[-1].identifier),
-            ]
-            in_db_count = db.execute(
-                "SELECT count(*) FROM arxiv WHERE arxiv_id IN (SELECT unnest(?))",
-                [samples],
-            ).fetchone()[0]
-            pending_pub_count = db.execute("SELECT count(*) FROM pending_publish").fetchone()[0]
-            pending_s2_count = db.execute("SELECT count(*) FROM pending_s2").fetchone()[0]
-            if in_db_count == len(samples) and (pending_pub_count > 0 or pending_s2_count > 0):
-                already_ingested = True
+    # 重跑仍逐记录应用当前 OAI 事实；ID 已存在不代表版本、内容或删除状态相同。
+    for chunk_start in range(0, total_records, chunk_size):
+        chunk = harvest.records[chunk_start : chunk_start + chunk_size]
+        db.begin()
+        try:
+            chunk_updated, chunk_deleted, chunk_invalidations = _apply_chunk(
+                db, chunk, harvest.response_date, doi_lookup=doi_lookup
+            )
+            updated += chunk_updated
+            deleted += chunk_deleted
+            invalidations.extend(chunk_invalidations)
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
 
-    if already_ingested:
-        print(
-            f"[Local] 检测到本次 {total_records} 篇 OAI 变动已在本地 DuckDB 中，直接复用入库产物 (跳过重复写入)！",
-            flush=True,
-        )
-    else:
-        for chunk_start in range(0, total_records, chunk_size):
-            chunk = harvest.records[chunk_start : chunk_start + chunk_size]
-            db.begin()
-            try:
-                chunk_updated, chunk_deleted, chunk_invalidations = _apply_chunk(
-                    db, chunk, harvest.response_date, doi_lookup=doi_lookup
-                )
-                updated += chunk_updated
-                deleted += chunk_deleted
-                invalidations.extend(chunk_invalidations)
-                db.commit()
-            except BaseException:
-                db.rollback()
-                raise
-
-            processed = min(chunk_start + len(chunk), total_records)
-            pct = (processed / total_records) * 100
-            if total_records > chunk_size:
-                print(
-                    f"[Local] 本地数据库入库进度: {processed}/{total_records} ({pct:.1f}%)...",
-                    flush=True,
-                )
-
-        if total_records:
+        processed = min(chunk_start + len(chunk), total_records)
+        pct = (processed / total_records) * 100
+        if total_records > chunk_size:
             print(
-                f"[Local] 本地数据库更新完毕: 新增/修改 {updated} 篇，标记删除 {deleted} 篇",
+                f"[Local] 本地数据库入库进度: {processed}/{total_records} ({pct:.1f}%)...",
                 flush=True,
             )
+
+    if total_records:
+        print(
+            f"[Local] 本地数据库更新完毕: 新增/修改 {updated} 篇，标记删除 {deleted} 篇",
+            flush=True,
+        )
 
     # 待办记录会在外部操作完成前保留，重放可再次清理部分写入后的缓存。
     invalidations.extend(_pending_invalidation_aliases(db))
@@ -1231,11 +1213,14 @@ async def recover_s2_missing(
             try:
                 synced = await client.lookup(identifiers)
                 break
-            except Exception as err:
+            except (httpx.HTTPError, ProviderError, TimeoutError, RedisError, ValueError) as err:
                 err_type = type(err).__name__
                 err_detail = str(err).strip() or repr(err)
-                is_429 = "429" in err_detail or "too many requests" in err_detail.lower()
-                wait_seconds = min(3.0 * (2 ** attempt), 30.0) if is_429 else min(2.0 * (attempt + 1), 10.0)
+                # 恢复队列与日常同步保持相同规则，异常批次不阻塞后续可成功论文。
+                if not isinstance(err, httpx.HTTPStatusError) or err.response.status_code != 429:
+                    print(f"[Recover] 批次失败 ({err_type}: {err_detail})，跳过该批（保留在待办），不重试", flush=True)
+                    break
+                wait_seconds = min(3.0 * (2 ** attempt), 30.0)
                 if attempt < max_retries - 1:
                     print(
                         f"[Recover] 批次遇到异常 ({err_type}: {err_detail})，等待 {wait_seconds:.1f} 秒后重试 (第 {attempt + 1}/{max_retries} 次)...",

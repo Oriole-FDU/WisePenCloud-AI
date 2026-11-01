@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from math import isfinite
-import httpx
 
 from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
 from scholar.ml.specter import DIMENSIONS
@@ -59,33 +58,19 @@ class S2SyncClient:
             return []
 
         # 裸 embedding 默认为 v1；必须显式请求 v2，与本地 proximity 灌库处于同一空间。
-        try:
-            payloads = await self.transport.request(
-                "POST",
-                "graph/v1/paper/batch",
-                params={
-                    "fields": ",".join(
-                        (*IDENTITY_FIELDS, *ENRICHMENT_FIELDS, "embedding.specter_v2")
-                    )
-                },
-                json={
-                    "ids": [S2Provider.serialize_identifier(item) for item in identifiers]
-                },
-            )
-        except httpx.HTTPStatusError as err:
-            err_text = err.response.text.lower()
-            # S2 核心机制：当整批论文在 S2 中均未收录时，S2 不返回全 null，而是返回 HTTP 400: {"error": "No valid paper ids given"}
-            if err.response.status_code == 400 and "no valid paper ids" in err_text:
-                return [None] * len(identifiers)
-            # 若是其他 400 格式错误，二分定位隔离问题样本
-            if err.response.status_code == 400 and len(identifiers) > 1:
-                mid = len(identifiers) // 2
-                left = await self.lookup(identifiers[:mid])
-                right = await self.lookup(identifiers[mid:])
-                return left + right
-            elif err.response.status_code == 400 and len(identifiers) == 1:
-                return [None]
-            raise
+        # HTTP 分批、去重和“全批未收录”均由共享 transport 处理，离线层只转换完整回执。
+        payloads = await self.transport.request(
+            "POST",
+            "graph/v1/paper/batch",
+            params={
+                "fields": ",".join(
+                    (*IDENTITY_FIELDS, *ENRICHMENT_FIELDS, "embedding.specter_v2")
+                )
+            },
+            json={
+                "ids": [S2Provider.serialize_identifier(item) for item in identifiers]
+            },
+        )
 
         results = []
         for payload in payloads:

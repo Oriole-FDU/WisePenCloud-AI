@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 import pytest
 from offline import arxiv_oai
@@ -196,3 +197,56 @@ async def test_http_429_exposes_retry_after_without_retrying():
     assert exc_info.value.response.status_code == 429
     assert exc_info.value.response.headers["Retry-After"] == "37"
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_page_timeout_retries_same_token_without_duplicating_records():
+    requests = []
+
+    async def handle(request):
+        requests.append(dict(request.url.params))
+        if len(requests) == 1:
+            return httpx.Response(200, text=f'<OAI-PMH xmlns="{OAI}"><responseDate>2026-11-01T00:00:00Z</responseDate><ListRecords><record><header status="deleted"><identifier>oai:arXiv.org:1706.03762</identifier><datestamp>2026-10-30</datestamp></header></record><resumptionToken>page-two</resumptionToken></ListRecords></OAI-PMH>')
+        if len(requests) == 2:
+            raise httpx.ReadTimeout("slow page", request=request)
+        return httpx.Response(200, text=f'<OAI-PMH xmlns="{OAI}"><responseDate>2026-11-01T00:01:00Z</responseDate><ListRecords/></OAI-PMH>')
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        result = await ArxivOaiHarvester(http).list_records()
+    assert requests[1] == requests[2] == {"verb": "ListRecords", "resumptionToken": "page-two"}
+    assert len(result.records) == 1
+    assert result.response_date == "2026-11-01T00:01:00Z"
+
+
+@pytest.mark.asyncio
+async def test_persistent_network_timeout_stops_after_three_attempts():
+    requests = []
+
+    async def handle(request):
+        requests.append(request)
+        raise httpx.ReadTimeout("unavailable", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        with pytest.raises(httpx.ReadTimeout):
+            await ArxivOaiHarvester(http).list_records()
+    assert len(requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_cancel_harvest_cancels_pending_page_request():
+    started, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def handle(request):
+        started.set()
+        try:
+            await asyncio.sleep(60)
+        finally:
+            cancelled.set()
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        task = asyncio.create_task(ArxivOaiHarvester(http).list_records())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert cancelled.is_set()

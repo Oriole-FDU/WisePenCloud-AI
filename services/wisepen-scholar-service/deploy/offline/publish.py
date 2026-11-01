@@ -93,12 +93,18 @@ async def publish_arxiv(db: duckdb.DuckDBPyConnection, alias: str, *, qdrant: As
     if state is None or not state[0]:
         raise ValueError("arXiv import must reach EOF before publication")
     target, published = state[1:]
-    if target is None:
-        target = f"{COLLECTION}-{uuid4().hex}"
+    if published:
+        # 增量发布以当前线上别名为准；本地基线可能还保留迁移前的 ES 名称。
+        aliases = await qdrant.get_aliases()
+        target = next((item.collection_name for item in aliases.aliases if item.alias_name == alias), alias)
+        if not await qdrant.collection_exists(target):
+            raise ValueError(f"Published Qdrant alias or collection does not exist: {alias}")
         db.execute("UPDATE import_state SET target_collection=?", [target])
-    if published and not await qdrant.collection_exists(target):
-        raise ValueError("published baseline is not a Qdrant hybrid collection; complete migrate_qdrant.py first")
-    await ensure_collection(qdrant, target)
+    else:
+        if target is None:
+            target = f"{COLLECTION}-{uuid4().hex}"
+            db.execute("UPDATE import_state SET target_collection=?", [target])
+        await ensure_collection(qdrant, target)
     batches = 0
     while max_batches is None or batches < max_batches:
         rows = db.execute("""WITH pending AS MATERIALIZED (

@@ -17,6 +17,8 @@ from redis.asyncio import Redis
 
 from scholar.core.providers.s2.transport import S2Transport, s2_queued_ahead
 from scholar.domain.errors import ProviderBusy, ProviderError
+from offline.s2_api import S2SyncClient
+from scholar.domain.models.identifiers import parse_identifier
 
 
 @pytest.fixture
@@ -87,6 +89,58 @@ async def test_cross_client_merge_preserves_positions_duplicates_and_null(bounda
     assert "x-api-key" not in sent[0][0].headers
     assert first == [{"paperId": "A"}, {"paperId": "B"}, {"paperId": "A"}]
     assert second == [{"paperId": "B"}, None]
+
+
+@pytest.mark.asyncio
+async def test_offline_request_uses_transport_batches_and_restores_duplicate_positions(boundary):
+    sent = []
+
+    async def handle(request):
+        ids = json.loads(request.content)["ids"]
+        sent.append(ids)
+        values = [None if item.endswith("00004") else {
+            "paperId": "a" * 40, "externalIds": {"ArXiv": item.removeprefix("arxiv:")},
+        } for item in ids]
+        return httpx.Response(200, json=values)
+
+    async with transports(boundary, handle, offline=True, batch_max_ids=2) as (transport, _):
+        ids = [parse_identifier(f"2301.{i:05d}") for i in (1, 2, 1, 3, 4, 5)]
+        result = await S2SyncClient(transport).lookup(ids)
+    assert [None if paper is None else next(i.value for i in paper.identifiers if i.kind == "arxiv") for paper in result] == [
+        "2301.00001", "2301.00002", "2301.00001", "2301.00003", None, "2301.00005",
+    ]
+    assert sum(map(len, sent)) == 5
+    assert all(len(batch) <= 2 for batch in sent)
+
+
+@pytest.mark.asyncio
+async def test_offline_short_response_is_not_split_or_padded(boundary):
+    sent = []
+
+    async def handle(request):
+        ids = json.loads(request.content)["ids"]
+        sent.append(ids)
+        return httpx.Response(200, json=[None] * (len(ids) - 1))
+
+    async with transports(boundary, handle, offline=True) as (transport, _):
+        with pytest.raises(ProviderError, match="expected=3, received=2"):
+            await S2SyncClient(transport).lookup([parse_identifier(f"2301.{i:05d}") for i in range(1, 4)])
+    assert len(sent) == 1
+
+
+@pytest.mark.parametrize("body", [[], {"error": "unexpected response"}])
+@pytest.mark.asyncio
+async def test_offline_invalid_single_response_is_not_treated_as_missing(boundary, body):
+    sent = []
+
+    async def handle(request):
+        sent.append(request)
+        return httpx.Response(200, json=body)
+
+    async with transports(boundary, handle, offline=True) as (transport, _):
+        with pytest.raises(ProviderError, match="expected=1"):
+            await S2SyncClient(transport).lookup([parse_identifier("2301.00001")])
+    assert len(sent) == 1
 
 
 @pytest.mark.parametrize("offline", [False, True])

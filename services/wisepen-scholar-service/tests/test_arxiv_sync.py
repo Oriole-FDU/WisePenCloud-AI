@@ -2,6 +2,7 @@ from xml.etree import ElementTree as ET
 from unittest.mock import AsyncMock
 
 import orjson
+import httpx
 import pytest
 from offline.arxiv import open_database
 from offline.arxiv_oai import ArxivOaiHarvest, ArxivOaiRecord
@@ -10,8 +11,76 @@ from offline.arxiv_sync import recover_s2_missing, sync_arxiv
 from offline.embeddings import publication_documents, publication_vectors
 from offline.s2_api import S2SyncPaper
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
+from scholar.domain.errors import S2BatchSizeMismatch
 
 RAW_NS = "http://arxiv.org/OAI/arXivRaw/"
+
+
+@pytest.mark.asyncio
+async def test_existing_sample_ids_do_not_skip_new_updated_or_deleted_oai_records(db, tmp_path, monkeypatch):
+    monkeypatch.setattr(arxiv_sync, "SERVICE_ROOT", tmp_path)
+    ids = [f"2501.{i:05d}" for i in range(1, 7)]
+    for identifier in (ids[0], ids[2], ids[3], ids[4], ids[5]):
+        seed_paper(db, identifier, None)
+    db.execute("INSERT INTO pending_publish VALUES (?)", [ids[0]])
+    records = harvest("2026-11-01T09:40:01Z", *[
+        active_record(identifier, "2026-10-30", title=f"Updated {identifier}") for identifier in ids[:5]
+    ], deleted_record(ids[5], "2026-10-30"))
+    client = FakeS2Client([None] * 5)
+    publish, _ = publisher(db)
+    await sync_arxiv(db, FakeHarvester(records), client, from_date="2026-10-30",
+                     publish=publish, cache=FakeCache(), arxiv_cache=FakeArxivCache(), cache_harvest=True)
+    assert document_for(db, ids[1])["title"] == f"Updated {ids[1]}"
+    assert document_for(db, ids[3])["title"] == f"Updated {ids[3]}"
+    assert document_for(db, ids[5]) is None
+    assert {identity.value for identity in client.calls[0]} == set(ids[:5])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["sync", "recover"])
+@pytest.mark.parametrize("failure", ["mismatch", "400", "503", "timeout", "embedding", "429", "429_exhausted"])
+async def test_only_429_is_retried_and_failed_batch_does_not_block_next(db, monkeypatch, operation, failure):
+    first, second = "2501.12948", "2501.12949"
+    records = harvest("2026-11-01T00:00:00Z", active_record(first, "2026-10-30"), active_record(second, "2026-10-30"))
+    publish, _ = publisher(db)
+    sync_options = {"publish": publish, "cache": FakeCache(), "arxiv_cache": FakeArxivCache()}
+    if operation == "recover":
+        await sync_arxiv(db, FakeHarvester(records), FakeS2Client([None, None]), **sync_options)
+
+    request = httpx.Request("POST", "https://api.semanticscholar.org/graph/v1/paper/batch")
+    if failure in ("400", "503", "429", "429_exhausted"):
+        status = 429 if failure.startswith("429") else int(failure)
+        response = httpx.Response(status, request=request)
+        error = httpx.HTTPStatusError(f"upstream {status}", request=request, response=response)
+    elif failure == "mismatch":
+        error = S2BatchSizeMismatch("expected=300, received=299")
+    elif failure == "timeout":
+        error = httpx.ReadTimeout("slow upstream", request=request)
+    else:
+        error = ValueError("S2 returned an invalid specter_v2 embedding")
+
+    attempts = 5 if failure == "429_exhausted" else 1
+    outcomes = [error] * attempts
+    if failure == "429":
+        outcomes.append([s2_lookup(first, None, "701")])
+    outcomes.append([s2_lookup(second, None, "702")])
+    client = FakeS2Client(*outcomes)
+    wait = AsyncMock()
+    monkeypatch.setattr(arxiv_sync.asyncio, "sleep", wait)
+
+    if operation == "sync":
+        await sync_arxiv(db, FakeHarvester(records), client, batch_size=1, **sync_options)
+        pending = db.execute("SELECT arxiv_id FROM pending_s2 ORDER BY arxiv_id").fetchall()
+    else:
+        await recover_s2_missing(db, client, batch_size=1)
+        pending = db.execute("SELECT arxiv_id FROM pending_s2_core_missing ORDER BY arxiv_id").fetchall()
+
+    # 非 429 一次失败后直接推进下一批；只有 429 可再次请求同一批，失败项仍留在原待办。
+    assert [[identity.value for identity in call] for call in client.calls] == (
+        [[first]] * (attempts + (failure == "429")) + [[second]]
+    )
+    assert pending == ([] if failure == "429" else [(first,)])
+    assert wait.await_count == (4 if failure == "429_exhausted" else 1 if failure == "429" else 0)
 
 
 class FakeHarvester:
@@ -439,7 +508,7 @@ async def test_strong_s2_identity_conflicts_are_diagnostic_and_not_projected(db)
 
 
 @pytest.mark.asyncio
-async def test_transient_s2_failure_retries_before_publishing(db, monkeypatch):
+async def test_s2_http_429_retries_before_publishing(db, monkeypatch):
     monkeypatch.setattr(arxiv_sync.asyncio, "sleep", AsyncMock())
     arxiv_id = "2404.00001"
     result = s2_lookup(arxiv_id, "10.1234/replay", "401")
@@ -447,7 +516,9 @@ async def test_transient_s2_failure_retries_before_publishing(db, monkeypatch):
         "2026-10-25T00:02:00Z",
         active_record(arxiv_id, "2026-10-24", doi="10.1234/replay"),
     ))
-    enricher = FakeS2Client(RuntimeError("simulated S2 failure"), [result])
+    request = httpx.Request("POST", "https://api.semanticscholar.org/graph/v1/paper/batch")
+    error = httpx.HTTPStatusError("rate limited", request=request, response=httpx.Response(429, request=request))
+    enricher = FakeS2Client(error, [result])
     publish, publish_calls = publisher(db)
     outcome = await sync_arxiv(
         db, harvester, enricher, publish=publish,
@@ -662,9 +733,10 @@ async def test_exhausted_metadata_refresh_keeps_pending_for_next_sync(db, monkey
         harvest("2026-10-27T00:00:00Z", active_record(arxiv_id, "2026-10-27")),
     )
     refreshed = s2_lookup(arxiv_id, None, "201", citation_count=7)
+    request = httpx.Request("POST", "https://api.semanticscholar.org/graph/v1/paper/batch")
     enricher = FakeS2Client(
         [s2_lookup(arxiv_id, None, "201")],
-        *(RuntimeError("429") for _ in range(5)), [refreshed],
+        *(httpx.HTTPStatusError("rate limited", request=request, response=httpx.Response(429, request=request)) for _ in range(5)), [refreshed],
     )
     publish, _ = publisher(db)
     await sync_arxiv(db, harvester, enricher, publish=publish,

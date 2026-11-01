@@ -1,6 +1,8 @@
 """独立 ETL 的 arXiv OAI-PMH 增量收割步骤。"""
 
+import asyncio
 from asyncio import sleep
+from time import monotonic
 from dataclasses import dataclass
 from xml.etree import ElementTree as ET
 
@@ -41,6 +43,28 @@ class ArxivOaiHarvester:
     def __init__(self, http: httpx.AsyncClient):
         self.http = http
 
+    async def _read_page(self, params: dict, page_num: int) -> httpx.Response:
+        """重试当前页的暂时性网络失败；等待期间报进度，取消时回收请求任务。"""
+        for attempt in range(3):
+            started = monotonic()
+            print(f"[OAI] 请求第 {page_num} 页 (第 {attempt + 1}/3 次，读取超时 {self.http.timeout.read}s)...", flush=True)
+            task = asyncio.create_task(self.http.get(_ENDPOINT, params=params))
+            try:
+                while True:
+                    done, _ = await asyncio.wait({task}, timeout=15)
+                    if done:
+                        return task.result()
+                    print(f"[OAI] 第 {page_num} 页仍在等待响应/下载，已等待 {monotonic() - started:.0f}s...", flush=True)
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as error:
+                print(f"[OAI] 第 {page_num} 页请求失败: {type(error).__name__}: {error}", flush=True)
+                if attempt == 2:
+                    raise
+                await sleep(3 * (attempt + 1))
+            finally:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
     async def list_records(self, *, from_date: str = INITIAL_FROM) -> ArxivOaiHarvest:
         # OAI-PMH 的续页请求只携带不透明 token；终页 responseDate 才能作为下一轮 from。
         params = {
@@ -56,7 +80,7 @@ class ArxivOaiHarvester:
         while True:
             # arXiv 要求相邻 Legacy API 请求至少间隔 3 秒；分页串行复用同一客户端连接。
             await sleep(3)
-            response = await self.http.get(_ENDPOINT, params=params)
+            response = await self._read_page(params, page_num)
             # 429/503 等 HTTP 状态交给调用方读取 Retry-After 并安排重试，本适配器不隐藏重试。
             response.raise_for_status()
             root = ET.fromstring(response.content)

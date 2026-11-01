@@ -14,7 +14,7 @@ from common.logger import warning
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from scholar.domain.errors import ProviderBusy, ProviderError, provider_error_message
+from scholar.domain.errors import ProviderBusy, ProviderError, S2BatchSizeMismatch, provider_error_message
 
 
 # 批次保存原始位置映射；取消只删除 job，不会破坏同批其他调用。
@@ -162,6 +162,7 @@ class ReplyKind(StrEnum):
     HTTP_ERROR = "http_error"
     TIMEOUT = "timeout"
     ERROR = "error"
+    SIZE_MISMATCH = "size_mismatch"
 
 
 @dataclass
@@ -418,14 +419,26 @@ class S2BatchQueue:
             return
         try:
             values = response.json()
-            if not isinstance(values, list) or len(values) != len(batch["ids"]):
+            if not isinstance(values, list):
                 raise ValueError(
-                    "S2 batch response does not match the submitted ID count"
+                    f"S2 batch response must be a list: type={type(values).__name__}, "
+                    f"expected={len(batch['ids'])}, bytes={len(response.content)}"
                 )
         except ValueError as error:
             await self._complete(
                 batch, {"kind": ReplyKind.ERROR, "message": str(error)}
             )
+            return
+        if len(values) != len(batch["ids"]):
+            # 数量不符时不能按位置分发；保留独立错误类型供离线调用缩小批次重查。
+            await self._complete(batch, {
+                "kind": ReplyKind.SIZE_MISMATCH,
+                "message": (
+                    "S2 batch response does not match the submitted ID count: "
+                    f"expected={len(batch['ids'])}, received={len(values)}, "
+                    f"bytes={len(response.content)}, channel={channel}"
+                ),
+            })
             return
         await self._complete(batch, {"kind": ReplyKind.DATA}, values)
 
@@ -488,6 +501,8 @@ class S2BatchQueue:
                                     )
                             elif payload["kind"] == ReplyKind.TIMEOUT:
                                 call.future.set_exception(TimeoutError(payload["message"]))
+                            elif payload["kind"] == ReplyKind.SIZE_MISMATCH:
+                                call.future.set_exception(S2BatchSizeMismatch(payload["message"]))
                             else:
                                 call.future.set_exception(
                                     ProviderError(payload["message"])
