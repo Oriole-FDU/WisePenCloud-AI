@@ -1,4 +1,4 @@
-"""外部论文标识的接入规范化。
+"""论文标识的接入规范化、别名分组与冲突判断。
 
 身份只依据明确标识（arXiv / DOI / OpenAlex / S2 / CorpusId）判定。
 容错解析，避免异常格式阻断离线同步与在线查询。
@@ -29,7 +29,13 @@ class IdentifierKind(StrEnum):
     DOI = "doi"
     OPENALEX = "openalex"
     S2 = "s2"
-    CORPUS_ID = "corpus_id"
+    CORPUS_ID = "corpusid"
+
+    @classmethod
+    def _missing_(cls, value: object):
+        if isinstance(value, str) and value.lower() in ("corpus_id", "corpus-id"):
+            return cls.CORPUS_ID
+        return None
 
     @classmethod
     def values(cls) -> list[str]:
@@ -132,6 +138,7 @@ def parse_identifier(value: str) -> PaperIdentifier:
             ("openalex:", IdentifierKind.OPENALEX, r"W[0-9]+"),
             ("s2:", IdentifierKind.S2, r"[a-f0-9]{40}"),
             ("corpusid:", IdentifierKind.CORPUS_ID, r"[0-9]+"),
+            ("corpus_id:", IdentifierKind.CORPUS_ID, r"[0-9]+"),
     ):
         if not value.lower().startswith(prefix):
             continue
@@ -147,3 +154,38 @@ def parse_identifier(value: str) -> PaperIdentifier:
 
     # 兜底：按 arXiv ID 处理（同时兼容 arXiv URL 形式）
     return PaperIdentifier(IdentifierKind.ARXIV, normalize_arxiv(value))
+
+
+def identities_conflict(known: list[PaperIdentifier] | tuple[PaperIdentifier, ...], actual: list[PaperIdentifier]) -> bool:
+    """同一种稳定身份出现不同值时，不把来源结果关联到请求论文。"""
+    return any(left.kind == right.kind and left.value != right.value for left in known for right in actual)
+
+
+def merge_identity_groups(candidates: list[list[PaperIdentifier]]) -> list[list[PaperIdentifier]]:
+    """合并共享身份的别名组；arXiv 身份冲突时保留为不同论文。"""
+    groups: list[list[PaperIdentifier]] = []
+
+    for candidate in candidates:
+        # 1. 局部去重并保留原顺序
+        combined = list(dict.fromkeys(candidate))
+        remaining = []
+
+        for group in groups:
+            # 2. 提取当前项与已有分组中的所有 arXiv 标识符
+            left_arxiv = {i for i in combined if i.kind == IdentifierKind.ARXIV}
+            right_arxiv = {i for i in group if i.kind == IdentifierKind.ARXIV}
+
+            # 3. 判定是否满足合并条件
+            if set(combined).intersection(group) and (
+                not left_arxiv or not right_arxiv or left_arxiv == right_arxiv
+            ):
+                # 满足条件：将已有 group 吸收到 combined 中，并做保序去重
+                combined = list(dict.fromkeys([*group, *combined]))
+            else:
+                # 不满足条件（无交集或 arXiv 冲突）：group 保持原样留存
+                remaining.append(group)
+
+        # 4. 将最新合并后的 combined 与未被吸收的 groups 重新组合
+        groups = [*remaining, combined]
+
+    return groups

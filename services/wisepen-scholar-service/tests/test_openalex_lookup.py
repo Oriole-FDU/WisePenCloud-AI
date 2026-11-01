@@ -22,7 +22,26 @@ from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.core.providers import OpenAlexProvider, S2Provider, S2Transport
+from scholar.core.providers.openalex import aliases
 from test_s2_provider import Permits
+
+
+def test_openalex_aliases_merge_id_and_supported_ids_after_normalization():
+    metadata = {"openalex": {
+        "id": "https://openalex.org/W123",
+        "ids": {
+            "openalex": "http://openalex.org/w123",
+            "doi": "https://doi.org/10.5555/EXAMPLE",
+            "pmid": "https://pubmed.ncbi.nlm.nih.gov/12345678",
+            "pmcid": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1234567",
+            "mag": 123456789,
+        },
+    }}
+
+    assert aliases(metadata) == [
+        parse_identifier("openalex:W123"),
+        parse_identifier("10.5555/example"),
+    ]
 
 
 def make_paper(source, *, arxiv_id="2401.00001", metadata=None):

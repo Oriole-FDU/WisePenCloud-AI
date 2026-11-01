@@ -13,7 +13,7 @@ from qdrant_client.common.client_exceptions import ResourceExhaustedResponse
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from scholar.core.config.bootstrap_settings import SERVICE_ROOT
-from scholar.domain.models.titles import normalize_title
+from scholar.utils import normalize_title
 
 
 async def _request(stage, method, *args, **kwargs):

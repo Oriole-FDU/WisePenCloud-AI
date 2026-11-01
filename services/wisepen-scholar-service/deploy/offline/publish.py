@@ -12,7 +12,7 @@ from scholar.core.storage.qdrant.paper_repository import (
     BM25_OPTIONS,
 )
 from scholar.ml.specter import DIMENSIONS, MODEL_SIGNATURE
-from scholar.domain.models.titles import normalize_title
+from scholar.utils import normalize_title
 
 COLLECTION = f"wisepen-scholar-hybrid-{MODEL_SIGNATURE[:16]}-v1"
 

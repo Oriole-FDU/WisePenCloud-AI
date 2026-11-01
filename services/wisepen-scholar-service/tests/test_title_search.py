@@ -14,15 +14,14 @@ from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.search import PaperSearch, PaperSearchService, SearchBinding, SourceScope
 from scholar.core.providers import PROVIDER_POLICIES, ArxivProvider
 from scholar.core.storage.qdrant.paper_repository import QdrantPaperRepository
-from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
-from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
-from scholar.core.storage.redis.title_cache import RedisTitleCache
+from scholar.core.storage.redis.paper_cache import RedisPaperCache
+from scholar.core.storage.redis.query_cache import RedisQueryCacheRepository
 from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField, FieldPolicy
 from scholar.domain.models.identifiers import parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.domain.models.source_execution import SourceExecutionStatus
+from scholar.application.source_execution import SourceExecutionStatus
 from offline.publish import point_payload
 
 
@@ -98,14 +97,13 @@ async def test_exact_paper_survives_ordinary_failure_but_empty_exact_channel_doe
 @pytest.mark.parametrize("source", ["arxiv", "huggingface"])
 async def test_search_warms_complete_source_cache_but_not_hf_overview(source):
     redis = MemoryRedis()
-    titles = RedisTitleCache(redis, 86400)
-    full = RedisPaperLookupCache(redis, f"test:{source}", title_cache=titles)
+    full = RedisPaperCache(redis, "test")
     p = paper("Attention Is All You Need", source=source)
     provider = SimpleNamespace(search=AsyncMock(return_value=PaperSearchBatch([p])), lookup=AsyncMock())
     policies = make_policy_store({AcademicField.GENERAL: FieldPolicy([source])})
     runner = LookupRunner({source: LookupBinding(provider, full, PROVIDER_POLICIES[source])})
     search = PaperSearchService({source: SearchBinding(provider)}, policies,
-                               RedisQueryCacheRepository(redis, "test", 600, title_cache=titles), runner, make_pdf_service())
+                               RedisQueryCacheRepository(redis, "test", 600, paper_cache=full), runner, make_pdf_service())
     await search.search(PaperSearch(p.title))
     identity = parse_identifier(p.arxiv_id)
     if source == "arxiv":
@@ -114,8 +112,8 @@ async def test_search_warms_complete_source_cache_but_not_hf_overview(source):
         assert result.items[0].paper.title == p.title
         provider.lookup.assert_not_awaited()
     else:
-        assert await full.get_many([identity]) == [None]
-    assert (await titles.get_many([p.title]))[0].candidates == [[identity]]
+        assert await full.get_many(source, [identity]) == [None]
+    assert len((await full.match_titles([p.title], [source]))[0].papers) == (1 if source == "arxiv" else 0)
 
 
 @pytest.mark.asyncio

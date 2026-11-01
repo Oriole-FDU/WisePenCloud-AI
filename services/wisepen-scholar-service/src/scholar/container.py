@@ -27,10 +27,8 @@ from scholar.core.providers import (
 from scholar.core.providers.crossref import CrossrefTitleResolver
 from scholar.core.storage.qdrant.paper_repository import QdrantPaperRepository
 from scholar.core.storage.redis.discovery_cache import RedisDiscoveryCacheRepository
-from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
-from scholar.core.storage.redis.pdf_cache import RedisPdfCache
-from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
-from scholar.core.storage.redis.title_cache import RedisTitleCache
+from scholar.core.storage.redis.paper_cache import RedisPaperCache
+from scholar.core.storage.redis.query_cache import RedisQueryCacheRepository
 from scholar.ml.specter import DIMENSIONS, QUERY_MODEL
 
 
@@ -89,9 +87,10 @@ class Container(containers.DeclarativeContainer):
     )
 
     # --- 缓存层 -----------------------------------------------------------
-    title_cache = providers.Singleton(
-        RedisTitleCache,
+    paper_cache = providers.Singleton(
+        RedisPaperCache,
         redis=redis,
+        namespace=config.SCHOLAR_COLLECTION_ALIAS,
         ttl=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
     )
     query_cache_repository = providers.Singleton(
@@ -99,7 +98,7 @@ class Container(containers.DeclarativeContainer):
         redis=redis,
         namespace=config.SCHOLAR_COLLECTION_ALIAS,
         ttl=config.SCHOLAR_QUERY_CACHE_TTL_SECONDS,
-        title_cache=title_cache,
+        paper_cache=paper_cache,
     )
     discovery_cache_repository = providers.Singleton(
         RedisDiscoveryCacheRepository,
@@ -107,40 +106,6 @@ class Container(containers.DeclarativeContainer):
         namespace=config.SCHOLAR_COLLECTION_ALIAS,
         ttl=config.SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS,
     )
-    # 按来源隔离的论文查找缓存；namespace 追加来源后缀避免键冲突。
-    arxiv_cache = providers.Singleton(
-        RedisPaperLookupCache,
-        redis=redis,
-        title_cache=title_cache,
-        namespace=providers.Callable(
-            lambda alias: f"{alias}:arxiv", config.SCHOLAR_COLLECTION_ALIAS
-        ),
-    )
-    s2_cache = providers.Singleton(
-        RedisPaperLookupCache,
-        redis=redis,
-        title_cache=title_cache,
-        namespace=providers.Callable(
-            lambda alias: f"{alias}:s2", config.SCHOLAR_COLLECTION_ALIAS
-        ),
-    )
-    openalex_cache = providers.Singleton(
-        RedisPaperLookupCache,
-        redis=redis,
-        title_cache=title_cache,
-        namespace=providers.Callable(
-            lambda alias: f"{alias}:openalex", config.SCHOLAR_COLLECTION_ALIAS
-        ),
-    )
-    huggingface_cache = providers.Singleton(
-        RedisPaperLookupCache,
-        redis=redis,
-        title_cache=title_cache,
-        namespace=providers.Callable(
-            lambda alias: f"{alias}:huggingface", config.SCHOLAR_COLLECTION_ALIAS
-        ),
-    )
-
     # --- 仓储与本地适配 ---------------------------------------------------
     paper_repository = providers.Singleton(
         QdrantPaperRepository,
@@ -159,7 +124,7 @@ class Container(containers.DeclarativeContainer):
             http=unpaywall_http,
             email=config.UNPAYWALL_EMAIL,
         ),
-        cache=providers.Singleton(RedisPdfCache, redis=redis),
+        cache=paper_cache,
         positive_ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
         negative_ttl_seconds=config.SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS,
     )
@@ -233,25 +198,25 @@ class Container(containers.DeclarativeContainer):
         arxiv=providers.Factory(
             LookupBinding,
             provider=arxiv_searcher,
-            cache=arxiv_cache,
+            cache=paper_cache,
             rules=PROVIDER_POLICIES["arxiv"],
         ),
         s2=providers.Factory(
             LookupBinding,
             provider=s2_provider,
-            cache=s2_cache,
+            cache=paper_cache,
             rules=PROVIDER_POLICIES["s2"],
         ),
         openalex=providers.Factory(
             LookupBinding,
             provider=openalex_searcher,
-            cache=openalex_cache,
+            cache=paper_cache,
             rules=PROVIDER_POLICIES["openalex"],
         ),
         huggingface=providers.Factory(
             LookupBinding,
             provider=huggingface_provider,
-            cache=huggingface_cache,
+            cache=paper_cache,
             rules=PROVIDER_POLICIES["huggingface"],
         ),
     )
@@ -281,7 +246,8 @@ class Container(containers.DeclarativeContainer):
     )
     paper_match_service = providers.Singleton(
         PaperMatchService,
-        cache=title_cache,
+        cache=paper_cache,
+        ttl=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
         local=paper_repository,
         crossref=crossref_resolver,
         lookup=paper_lookup_service,

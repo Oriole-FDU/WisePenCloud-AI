@@ -2,7 +2,7 @@ from datetime import date
 
 import orjson
 import pytest
-from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
+from scholar.core.storage.redis.query_cache import RedisQueryCacheRepository
 from scholar.domain.models.paper import Paper, PaperSource
 
 

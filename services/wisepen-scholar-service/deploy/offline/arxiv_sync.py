@@ -29,7 +29,7 @@ from scholar.domain.models.identifiers import (
     normalize_arxiv,
     normalize_doi,
 )
-from scholar.domain.repositories.paper_lookup_cache import PaperLookupCache
+from scholar.domain.repositories.paper_cache import PaperCache
 from scholar.ml.specter import MODEL_SIGNATURE
 
 _RAW_NS = "http://arxiv.org/OAI/arXivRaw/"
@@ -996,8 +996,8 @@ async def sync_arxiv(
     from_date: str | None = None,
     batch_size: int = 500,
     publish: Callable[[], Awaitable[object]],
-    cache: PaperLookupCache,
-    arxiv_cache: PaperLookupCache,
+    cache: PaperCache,
+    arxiv_cache: PaperCache,
     cache_harvest: bool = False,
 ) -> dict:
     """同步 OAI 与 S2 投影，并在两类缓存处理成功后确认响应日期。"""
@@ -1085,13 +1085,13 @@ async def sync_arxiv(
     # 待办记录会在外部操作完成前保留，重放可再次清理部分写入后的缓存。
     invalidations.extend(_pending_invalidation_aliases(db))
     if invalidations:
-        await cache.invalidate(list(dict.fromkeys(invalidations)))
+        await cache.invalidate("s2", list(dict.fromkeys(invalidations)))
 
     requested, enriched, s2_invalidations = await _enrich_pending(
         db, client, batch_size=batch_size, response_date=harvest.response_date
     )
     if s2_invalidations:
-        await cache.invalidate(s2_invalidations)
+        await cache.invalidate("s2", s2_invalidations)
 
     pending_publish = db.execute("SELECT count(*) FROM pending_publish").fetchone()[0]
     pending_delete = db.execute("SELECT count(*) FROM pending_delete").fetchone()[0]
@@ -1125,7 +1125,7 @@ async def sync_arxiv(
             f"[Cache] 正在精确失效 {len(arxiv_cache_aliases)} 项 Redis 查询缓存...",
             flush=True,
         )
-        await arxiv_cache.invalidate(arxiv_cache_aliases)
+        await arxiv_cache.invalidate("arxiv", arxiv_cache_aliases)
     db.begin()
     try:
         db.execute("DELETE FROM pending_arxiv_cache_invalidation")
@@ -1178,7 +1178,7 @@ async def recover_s2_missing(
     batch_size: int = 100,
     max_batches: int | None = None,
     publish: Callable[[], Awaitable[object]] | None = None,
-    cache: PaperLookupCache | None = None,
+    cache: PaperCache | None = None,
 ) -> dict:
     """单独跑 core_missing 队列：对之前未收录或缺失核心信号（引用/TLDR/向量）的论文重试补全，不阻塞日常 sync。"""
     _create_sync_schema(db)
@@ -1304,7 +1304,7 @@ async def recover_s2_missing(
         print(f"[Recover] 恢复进度: {requested}/{total_missing} ({pct:.1f}%) | 本次成功补齐核心数据: {recovered} 篇", flush=True)
 
     if invalidations and cache is not None:
-        await cache.invalidate(list(dict.fromkeys(invalidations)))
+        await cache.invalidate("s2", list(dict.fromkeys(invalidations)))
 
     remaining = db.execute("SELECT count(*) FROM pending_s2_core_missing").fetchone()[0]
     print(f"[Recover] 本轮补全完毕：已扫描 {requested} 篇，成功彻底补齐 {recovered} 篇，core_missing 剩余待办: {remaining} 篇", flush=True)

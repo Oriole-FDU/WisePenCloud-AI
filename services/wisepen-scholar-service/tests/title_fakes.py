@@ -1,20 +1,5 @@
 """标题用例的内存外部边界；不访问真实 Redis、Qdrant 或论文 API。"""
 
-from scholar.domain.models.titles import TitleMatch, merge_title_identities, normalize_title
-
-
-class MemoryTitleCache:
-    def __init__(self):
-        self.entries = {}
-
-    async def get_many(self, titles):
-        return [TitleMatch(merge_title_identities(self.entries.get(normalize_title(title), []))) for title in titles]
-
-    async def put_many(self, entries):
-        for title, aliases in entries:
-            self.entries.setdefault(normalize_title(title), []).append(aliases)
-
-
 class MemoryRedis:
     def __init__(self):
         self.values, self.hashes, self.ttls = {}, {}, {}
@@ -28,6 +13,12 @@ class MemoryRedis:
     async def set(self, key, value, *, ex):
         self.values[key] = value
         self.ttls[key] = ex
+
+    async def delete(self, *keys):
+        for key in keys:
+            self.values.pop(key, None)
+            self.hashes.pop(key, None)
+            self.ttls.pop(key, None)
 
     def pipeline(self, *, transaction):
         return MemoryPipeline(self)
@@ -49,7 +40,7 @@ class MemoryPipeline:
     def hset(self, key, *, mapping):
         self.commands.append(("hset", key, mapping))
 
-    def expire(self, key, ttl):
+    async def expire(self, key, ttl):
         self.commands.append(("expire", key, ttl))
 
     def hvals(self, key):

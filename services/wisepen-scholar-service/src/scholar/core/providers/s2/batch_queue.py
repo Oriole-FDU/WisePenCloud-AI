@@ -14,7 +14,12 @@ from common.logger import warning
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from scholar.domain.errors import ProviderBusy, ProviderError, S2BatchSizeMismatch, provider_error_message
+from scholar.domain.errors import ProviderBusy, ProviderError, provider_error_message
+
+
+
+class S2BatchSizeMismatch(ProviderError):
+    """S2 返回列表长度与请求不一致，无法安全地按请求位置分发。"""
 
 
 # 批次保存原始位置映射；取消只删除 job，不会破坏同批其他调用。
@@ -531,3 +536,5 @@ class S2BatchQueue:
                 result, asyncio.CancelledError
             ):
                 raise result
+
+

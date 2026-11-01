@@ -11,7 +11,7 @@ from offline.arxiv_sync import recover_s2_missing, sync_arxiv
 from offline.embeddings import publication_documents, publication_vectors
 from offline.s2_api import S2SyncPaper
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
-from scholar.domain.errors import S2BatchSizeMismatch
+from scholar.core.providers.s2.batch_queue import S2BatchSizeMismatch
 
 RAW_NS = "http://arxiv.org/OAI/arXivRaw/"
 
@@ -115,7 +115,7 @@ class FakeCache:
         self.fail_count = fail_count
         self.events = events
 
-    async def invalidate(self, identifiers):
+    async def invalidate(self, source, identifiers):
         if self.events is not None:
             self.events.append("invalidate")
         self.invalidations.append(list(identifiers))
@@ -130,7 +130,7 @@ class FakeArxivCache:
         self.fail_count = fail_count
         self.events = events
 
-    async def invalidate(self, identifiers):
+    async def invalidate(self, source, identifiers):
         if self.events is not None:
             self.events.append("arxiv_invalidate")
         self.invalidations.append(list(identifiers))

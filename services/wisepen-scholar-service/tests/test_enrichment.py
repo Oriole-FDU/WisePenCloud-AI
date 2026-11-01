@@ -17,57 +17,22 @@ from scholar.application.lookup import (
     PaperLookup,
     PaperLookupService,
 )
-from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
+from scholar.core.storage.redis.paper_cache import RedisPaperCache
 from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.models.fields import AcademicField, FieldPolicy
-from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
+from scholar.domain.repositories.paper_cache import CachedPaperLookup
 from scholar.core.providers.s2 import provider as s2
 from scholar.core.providers.s2.provider import aliases as s2_aliases
 
 
-class FakeRedisPipeline:
-    """最小 Redis pipeline 替身，保留实际 JSON 序列化和 TTL 路径。"""
-
-    def __init__(self, redis):
-        self.redis = redis
-        self.pending = {}
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, traceback):
-        return False
-
-    async def set(self, key, value, *, ex):
-        self.pending[key] = (value, ex)
-
-    async def execute(self):
-        for key, (value, ttl) in self.pending.items():
-            self.redis.values[key] = value
-            self.redis.ttls[key] = ttl
+from title_fakes import MemoryRedis
 
 
-class FakeRedisBoundary:
-    def __init__(self):
-        self.values = {}
-        self.ttls = {}
-        self.fail_delete = False
-
-    async def mget(self, keys):
-        return [self.values.get(key) for key in keys]
-
-    async def delete(self, *keys):
-        if self.fail_delete:
-            raise RedisConnectionError("redis unavailable")
-        for key in keys:
-            self.values.pop(key, None)
-            self.ttls.pop(key, None)
-
-    def pipeline(self, *, transaction):
-        return FakeRedisPipeline(self)
+class FakeRedisBoundary(MemoryRedis):
+    """实际序列化、标题索引和 TTL 的内存 Redis 边界。"""
 
 
 class FakeCache:
@@ -78,18 +43,18 @@ class FakeCache:
         self.puts = []
         self.fail_get = False
 
-    async def get_many(self, ids):
+    async def get_many(self, source, ids):
         if self.fail_get:
             raise RedisConnectionError("cache unavailable")
         return [self.values.get(identity) for identity in ids]
 
-    async def put_many(self, entries):
+    async def put_many(self, source, entries):
         self.puts.extend(entries)
         for record, _ttl_seconds in entries:
             for identity in record.cache_aliases:
                 self.values[identity] = record
 
-    async def invalidate(self, identifiers):
+    async def invalidate(self, source, identifiers):
         for identity in identifiers:
             self.values.pop(identity, None)
 
@@ -162,21 +127,21 @@ def service(provider, *, cache=None):
 @pytest.mark.asyncio
 async def test_redis_cache_roundtrips_full_paper_aliases_and_ttl_then_invalidates_all_aliases():
     redis = FakeRedisBoundary()
-    cache = RedisPaperLookupCache(redis, "public-papers")
+    cache = RedisPaperCache(redis, "public-papers")
     arxiv = parse_identifier("2401.00001")
     doi = parse_identifier("10.5555/example")
     paper = make_paper(doi=doi.value, metadata={"s2": {"citation_count": 0}})
     record = CachedPaperLookup(paper, (arxiv, doi))
 
-    await cache.put_many([(record, 7200)])
+    await cache.put_many("s2", [(record, 7200)])
 
-    assert await cache.get_many([doi, parse_identifier("2401.00002")]) == [
+    assert await cache.get_many("s2", [doi, parse_identifier("2401.00002")]) == [
         record,
         None,
     ]
-    assert set(redis.ttls.values()) == {7200}
-    await cache.invalidate([doi])
-    assert await cache.get_many([arxiv, doi]) == [None, None]
+    assert set(redis.ttls.values()) == {7200, 86400}
+    await cache.invalidate("s2", [doi])
+    assert await cache.get_many("s2", [arxiv, doi]) == [None, None]
     assert redis.values == {}
 
 
@@ -184,7 +149,7 @@ async def test_redis_cache_roundtrips_full_paper_aliases_and_ttl_then_invalidate
 @pytest.mark.parametrize("signals", [{}, {"citation_count": 0}])
 async def test_negative_and_positive_lookup_results_use_distinct_ttls_and_cache_hits(signals):
     redis = FakeRedisBoundary()
-    cache = RedisPaperLookupCache(redis, "ttl-contract")
+    cache = RedisPaperCache(redis, "ttl-contract")
     missing = parse_identifier("corpusid:404")
     found = parse_identifier("corpusid:123")
     paper = make_paper(
@@ -422,3 +387,21 @@ async def test_programming_errors_propagate_without_provider_fallback():
         )
 
     assert caught.value is failure
+
+
+@pytest.mark.asyncio
+async def test_unified_cache_isolates_sources_and_retains_pdf_negative_result():
+    redis = MemoryRedis()
+    cache = RedisPaperCache(redis, "isolated")
+    identity = parse_identifier("10.5555/shared")
+    paper = make_paper(arxiv_id=None, doi=identity.value)
+    positive = CachedPaperLookup(paper, (identity,))
+    negative = CachedPaperLookup(None, (identity,))
+    await cache.put_many("arxiv", [(negative, 3600)])
+    await cache.put_many("s2", [(positive, 86400)])
+    await cache.put_pdf_many([(identity.value, None, 3600)])
+    assert await cache.get_pdf_many([identity.value, "10.5555/missing"]) == {identity.value: None}
+    await cache.invalidate("arxiv", [identity])
+    assert await cache.get_many("arxiv", [identity]) == [None]
+    assert await cache.get_many("s2", [identity]) == [positive]
+    assert (await cache.match_titles([paper.title], ["arxiv", "s2"]))[0].papers == [paper]

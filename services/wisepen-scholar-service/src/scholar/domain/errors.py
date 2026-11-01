@@ -23,10 +23,6 @@ class ProviderError(RuntimeError):
     """
 
 
-class S2BatchSizeMismatch(ProviderError):
-    """S2 返回列表长度与请求不一致，无法安全地按请求位置分发。"""
-
-
 class ProviderBusy(ProviderError):
     """来源准入拒绝（如排队数超限），尚未发送 HTTP；允许普通通用来源回退。"""
 

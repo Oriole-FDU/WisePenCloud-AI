@@ -5,7 +5,8 @@ import asyncio
 import httpx
 
 from scholar.domain.models.identifiers import parse_identifier
-from scholar.domain.models.titles import TitleMatch, normalize_title
+from scholar.domain.interfaces.title_resolver import TitleMatch
+from scholar.utils import normalize_title
 
 
 class CrossrefTitleResolver:

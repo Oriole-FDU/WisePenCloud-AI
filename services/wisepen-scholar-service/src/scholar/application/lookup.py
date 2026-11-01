@@ -14,7 +14,7 @@ from scholar.application.pdf_recover import PaperPdfRecoverService
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.domain.models.source_execution import SourceExecution, SourceExecutionStatus
+from scholar.application.source_execution import SourceExecution, SourceExecutionStatus
 
 
 class LookupStatus(StrEnum):
@@ -99,20 +99,26 @@ class PaperLookupService:
             deadline=deadline,
         )
         confirmed = [target for target in targets if target.paper is not None and not target.ambiguous]
-        budget = asyncio.timeout_at(deadline)
-        try:
-            async with budget:
-                papers, pdf_execution = await self.pdf.recover([target.paper for target in confirmed])
-        except TimeoutError:
-            if not budget.expired():
-                raise
-            # match 的剩余预算耗尽时保留已取得的论文，PDF 补救失败单独报告。
-            papers = [target.paper for target in confirmed]
-            pdf_execution = SourceExecution("unpaywall", False, SourceExecutionStatus.FAILED, "PDF recovery exceeded the lookup request deadline")
-        for target, paper in zip(confirmed, papers, strict=True):
-            target.paper = paper
-        if pdf_execution is not None:
-            execution.append(pdf_execution)
+        # 缓存命中项只读取已有补充事实；新获取项仍执行正常 PDF 补救。
+        for cache_hit in (True, False):
+            group = [target for target in confirmed if target.cache_hit == cache_hit]
+            if not group:
+                continue
+            budget = asyncio.timeout_at(deadline)
+            try:
+                async with budget:
+                    papers, pdf_execution = await self.pdf.recover(
+                        [target.paper for target in group], cache_only=cache_hit,
+                    )
+            except TimeoutError:
+                if not budget.expired():
+                    raise
+                papers = [target.paper for target in group]
+                pdf_execution = SourceExecution("unpaywall", False, SourceExecutionStatus.FAILED, "PDF recovery exceeded the lookup request deadline")
+            for target, paper in zip(group, papers, strict=True):
+                target.paper = paper
+            if pdf_execution is not None:
+                execution.append(pdf_execution)
         first_error = None
         for identity, target in zip(positions, targets, strict=True):
             if target.errors:

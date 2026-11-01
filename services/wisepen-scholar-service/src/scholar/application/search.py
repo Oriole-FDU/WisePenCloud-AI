@@ -22,8 +22,8 @@ from scholar.domain.interfaces.paper_searcher import PaperSearcher, PaperSearchB
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
 from scholar.domain.models.paper import Paper
-from scholar.domain.models.titles import normalize_title
-from scholar.domain.models.source_execution import (
+from scholar.utils import normalize_title
+from scholar.application.source_execution import (
     SourceExecution,
     SourceExecutionStatus,
 )

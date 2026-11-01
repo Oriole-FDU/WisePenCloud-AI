@@ -22,12 +22,12 @@ from scholar.application.lookup import (
     PaperLookup,
     PaperLookupService,
 )
-from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
+from scholar.core.storage.redis.paper_cache import RedisPaperCache
 from scholar.domain.errors import ProviderBusy
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.domain.models.source_execution import SourceExecutionStatus
+from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.providers import S2Provider, S2Transport
 
 
@@ -44,6 +44,7 @@ async def queue_boundary():
     finally:
         # 只清理本测试 UUID 命名空间，包含动态 job、批次与回执键。
         keys = [key async for key in first.scan_iter(match=f"{namespace}:*")]
+        keys.extend([key async for key in first.scan_iter(match=f"scholar:paper:*:{namespace}:*")])
         if keys:
             await first.delete(*keys)
         await first.aclose()
@@ -238,7 +239,7 @@ async def test_completed_cache_and_identical_inflight_calls_do_not_submit_again(
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         transport = S2Transport(http, first, "platform", namespace=namespace, nokey_interval=0.12)
-        cache = RedisPaperLookupCache(first, namespace)
+        cache = RedisPaperCache(first, namespace)
         runner = LookupRunner({"s2": LookupBinding(S2Provider(transport), cache, PROVIDER_POLICIES["s2"])})
         service = PaperLookupService(runner, pdf=make_pdf_service(), policies=make_policy_store())
         query = PaperLookup(["2401.00001", "2401.00001"])
@@ -251,7 +252,7 @@ async def test_completed_cache_and_identical_inflight_calls_do_not_submit_again(
             assert len(sent) == 1
         finally:
             await transport.aclose()
-            await cache.invalidate([parse_identifier("2401.00001")])
+            await cache.invalidate("s2", [parse_identifier("2401.00001")])
 
 
 
@@ -338,7 +339,7 @@ async def test_byok_inflight_isolated_but_completed_papers_shared_across_keys(qu
         }])
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
-        cache = RedisPaperLookupCache(first, namespace)
+        cache = RedisPaperCache(first, namespace)
         runner = LookupRunner({"s2": LookupBinding(
             S2Provider(S2Transport(http, first, "platform", namespace=namespace, max_queued_ahead=5)),
             cache, PROVIDER_POLICIES["s2"],
@@ -358,4 +359,4 @@ async def test_byok_inflight_isolated_but_completed_papers_shared_across_keys(qu
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            await cache.invalidate([parse_identifier("2401.00001")])
+            await cache.invalidate("s2", [parse_identifier("2401.00001")])

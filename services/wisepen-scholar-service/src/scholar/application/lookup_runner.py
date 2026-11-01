@@ -17,15 +17,16 @@ from scholar.domain.models.identifiers import (
     IdentifierKind,
     PaperIdentifier,
     parse_identifier,
+    identities_conflict,
 )
 from scholar.domain.models.paper import Paper
-from scholar.domain.models.source_execution import (
+from scholar.application.source_execution import (
     SourceExecution,
     SourceExecutionStatus,
 )
-from scholar.domain.repositories.paper_lookup_cache import (
+from scholar.domain.repositories.paper_cache import (
     CachedPaperLookup,
-    PaperLookupCache,
+    PaperCache,
 )
 from scholar.core.providers import ProviderPolicy
 from scholar.core.providers.s2.transport import s2_queued_ahead
@@ -36,7 +37,7 @@ class LookupBinding:
     """来源声明支持的身份、详情完整性与缓存；编排不读取供应商字段。"""
 
     provider: PaperLookupProvider
-    cache: PaperLookupCache | None
+    cache: PaperCache | None
     rules: ProviderPolicy
 
 
@@ -48,6 +49,7 @@ class LookupTarget:
     paper: Paper | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     observed_sources: set[str] = field(default_factory=set)
+    cache_hit: bool = False
     general_found: bool = False
     ambiguous: bool = False
     errors: list[Exception] = field(default_factory=list)
@@ -111,7 +113,7 @@ class LookupRunner:
             if all(name in paper.metadata.get(source, {}) for name in binding.rules.required_fields)
         ]
         if records:
-            await binding.cache.put_many(records)
+            await binding.cache.put_many(source, records)
 
     async def run(
         self,
@@ -128,6 +130,23 @@ class LookupRunner:
         # 已由通用来源取得的论文无需补信号；arXiv 的 S2 事实由离线同步负责。
         for target in targets:
             if target.paper is not None and target.paper.source in common_sources:
+                target.general_found = True
+
+        # 先读完各来源缓存，再允许任何外部查询；后序命中不能被前序网络请求挡住。
+        for source in dict.fromkeys([*common_sources, *domain_sources]):
+            before = [len(target.errors) for target in targets]
+            event = await self._apply(
+                source, [target for target in targets if not target.general_found] if source in common_sources else targets,
+                credentials.get(source), deadline,
+                resolve_common=source in common_sources, cache_only=True,
+            )
+            if event.status != SourceExecutionStatus.NOT_EXECUTED:
+                execution.append(event)
+            if source in domain_sources:
+                for target, offset in zip(targets, before, strict=True):
+                    target.domain_errors.extend(target.errors[offset:])
+        for target in targets:
+            if target.cache_hit:
                 target.general_found = True
 
         # 通用来源只负责精确获取；命中论文即停止，与引用数、TLDR 是否齐全无关。
@@ -150,11 +169,30 @@ class LookupRunner:
         for source in domain_sources:
             before = [len(target.errors) for target in targets]
             execution.append(
-                await self._apply(source, targets, credentials.get(source), deadline)
+                await self._apply(source, [target for target in targets if not target.cache_hit], credentials.get(source), deadline)
             )
             for target, offset in zip(targets, before, strict=True):
                 target.domain_errors.extend(target.errors[offset:])
-        return execution
+        # 同一来源可能同时有缓存命中和未命中项，合并为一次来源执行报告。
+        merged = {}
+        for event in execution:
+            previous = merged.get(event.source)
+            if previous is None:
+                merged[event.source] = event
+            else:
+                previous.cache_hit |= event.cache_hit
+                previous.queued_ahead = event.queued_ahead if event.queued_ahead is not None else previous.queued_ahead
+                previous.error = previous.error or event.error
+                statuses = {previous.status, event.status}
+                if SourceExecutionStatus.PARTIAL in statuses or {
+                    SourceExecutionStatus.COMPLETED, SourceExecutionStatus.FAILED,
+                }.issubset(statuses):
+                    previous.status = SourceExecutionStatus.PARTIAL
+                elif event.status != SourceExecutionStatus.NOT_EXECUTED:
+                    previous.status = event.status
+                if previous.error and previous.status == SourceExecutionStatus.COMPLETED:
+                    previous.status = SourceExecutionStatus.PARTIAL
+        return list(merged.values())
 
     async def _apply(
         self,
@@ -164,6 +202,7 @@ class LookupRunner:
         deadline: float | None,
         *,
         resolve_common: bool = False,
+        cache_only: bool = False,
     ) -> SourceExecution:
         binding = self.bindings[source]
         positions: dict[PaperIdentifier, list[LookupTarget]] = {}
@@ -222,7 +261,10 @@ class LookupRunner:
         budget = asyncio.timeout_at(deadline)
         try:
             async with budget:
-                batch = await self._shared(source, known_ids, api_key)
+                if cache_only:
+                    batch = await self._load(source, known_ids, api_key, cache_only=True)
+                else:
+                    batch = await self._shared(source, known_ids, api_key)
         except TimeoutError:
             if not budget.expired():
                 raise
@@ -241,6 +283,8 @@ class LookupRunner:
                 first_error = first_error or error
                 for target in entries:
                     target.errors.append(error)
+                    if cache_only:
+                        target.observed_sources.add(source)
             if identifier in batch.ambiguous:
                 for target in entries:
                     target.ambiguous = True
@@ -251,6 +295,8 @@ class LookupRunner:
                 target.observed_sources.add(source)
                 if record.paper is None:
                     continue
+                if identifier in batch.cache_hits and target.paper is None:
+                    target.cache_hit = True
                 if resolve_common:
                     target.general_found = True
                 # 命名空间整体替换，不融合不同来源的同名指标；基础信息取首个成功来源。
@@ -341,14 +387,17 @@ class LookupRunner:
         source: str,
         known_ids: dict[PaperIdentifier, tuple[PaperIdentifier, ...]],
         api_key: str | None,
+        *,
+        cache_only: bool = False,
     ) -> _SourceBatch:
         binding = self.bindings[source]
         batch = _SourceBatch()
         ids = list(known_ids)
         cached = [None] * len(ids)
+        # 共享任务入场前可能已有另一请求填好缓存，入场后仍须复用其结果。
         if binding.cache is not None:
             try:
-                cached = await binding.cache.get_many(ids)
+                cached = await binding.cache.get_many(source, ids)
             except RedisError as error:
                 batch.errors.update(dict.fromkeys(ids, error))
                 return batch
@@ -359,7 +408,7 @@ class LookupRunner:
                 pending.append(identifier)
             elif identifier not in record.cache_aliases or (
                 record.paper is not None
-                and self._conflicts(
+                and identities_conflict(
                     known_ids[identifier], self._aliases(record.paper)
                 )
             ):
@@ -369,7 +418,7 @@ class LookupRunner:
             else:
                 batch.records[identifier] = record
                 batch.cache_hits.add(identifier)
-        if not pending:
+        if cache_only or not pending:
             return batch
 
         token = s2_queued_ahead.set(None)
@@ -394,7 +443,7 @@ class LookupRunner:
                 continue
             paper = match.papers[0] if match.papers else None
             aliases = self._aliases(paper) if paper is not None else []
-            if self._conflicts(known_ids[identifier], aliases):
+            if identities_conflict(known_ids[identifier], aliases):
                 batch.errors[identifier] = ProviderError(
                     "Lookup conflicts with the requested paper identity"
                 )
@@ -411,7 +460,7 @@ class LookupRunner:
             )
         if binding.cache is not None and writes:
             try:
-                await binding.cache.put_many(writes)
+                await binding.cache.put_many(source, writes)
             except RedisError as error:
                 batch.cache_errors.append(error)
         return batch
@@ -426,14 +475,3 @@ class LookupRunner:
             if binding.rules.aliases is not None:
                 aliases.extend(binding.rules.aliases(paper.metadata))
         return list(dict.fromkeys(aliases))
-
-    @staticmethod
-    def _conflicts(
-        known: tuple[PaperIdentifier, ...],
-        actual: list[PaperIdentifier],
-    ) -> bool:
-        return any(
-            left.kind == right.kind and left.value != right.value
-            for left in known
-            for right in actual
-        )

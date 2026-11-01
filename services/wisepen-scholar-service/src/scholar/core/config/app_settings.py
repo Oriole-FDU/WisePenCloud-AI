@@ -48,8 +48,8 @@ class AppSettings(PolicySettings):
     SCHOLAR_SEARCH_INFLUENTIAL_WEIGHT: float = Field(default=0.10, ge=0)
 
     # --- 缓存 TTL（秒） ---
-    SCHOLAR_QUERY_CACHE_TTL_SECONDS: int = Field(default=600, gt=0)
-    SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS: int = Field(default=900, gt=0)
+    SCHOLAR_QUERY_CACHE_TTL_SECONDS: int = Field(default=3600, gt=0)
+    SCHOLAR_DISCOVERY_CACHE_TTL_SECONDS: int = Field(default=3600, gt=0)
     SCHOLAR_PAPER_CACHE_TTL_SECONDS: int = Field(default=86400, gt=0)
     SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS: int = Field(default=3600, gt=0)
 

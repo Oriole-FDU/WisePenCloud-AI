@@ -62,16 +62,16 @@ class FakeLookupCache:
         self.values = {}
         self.ttls = []
 
-    async def get_many(self, ids):
+    async def get_many(self, source, ids):
         return [self.values.get(identity) for identity in ids]
 
-    async def put_many(self, entries):
+    async def put_many(self, source, entries):
         for record, ttl_seconds in entries:
             self.ttls.append(ttl_seconds)
             for identity in record.cache_aliases:
                 self.values[identity] = record
 
-    async def invalidate(self, identifiers):
+    async def invalidate(self, source, identifiers):
         for identity in identifiers:
             self.values.pop(identity, None)
 
@@ -230,7 +230,7 @@ async def test_search_and_lookup_share_arxiv_projection_and_field_enrichment():
     })
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         runner = LookupRunner({
-            "arxiv": LookupBinding(local, None, PROVIDER_POLICIES["arxiv"]),
+            "arxiv": LookupBinding(local, FakeLookupCache(), PROVIDER_POLICIES["arxiv"]),
             "huggingface": LookupBinding(HuggingFaceProvider(http), FakeLookupCache(), PROVIDER_POLICIES["huggingface"]),
         })
         search = PaperSearchService(

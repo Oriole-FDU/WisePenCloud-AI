@@ -9,11 +9,11 @@ from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_pdf_recover import PaperPdfRecover
 from scholar.domain.models.identifiers import normalize_doi
 from scholar.domain.models.paper import Paper
-from scholar.domain.models.source_execution import (
+from scholar.application.source_execution import (
     SourceExecution,
     SourceExecutionStatus,
 )
-from scholar.domain.repositories.pdf_cache import PdfCache
+from scholar.domain.repositories.paper_cache import PaperCache
 from scholar.core.providers import PROVIDER_POLICIES
 
 
@@ -21,7 +21,7 @@ class PaperPdfRecoverService:
     def __init__(
         self,
         provider: PaperPdfRecover,
-        cache: PdfCache,
+        cache: PaperCache,
         *,
         positive_ttl_seconds: int,
         negative_ttl_seconds: int,
@@ -33,6 +33,8 @@ class PaperPdfRecoverService:
     async def recover(
         self,
         papers: list[Paper],
+        *,
+        cache_only: bool = False,
     ) -> tuple[list[Paper], SourceExecution | None]:
         # 只改副本；来源和候选缓存仍保留投影前的原始事实。
         papers = [replace(paper) for paper in papers]
@@ -59,7 +61,7 @@ class PaperPdfRecoverService:
 
         # 批量查缓存，再对未命中的 DOI 并发补查上游。
         try:
-            resolved = await self.cache.get_many(list(positions))
+            resolved = await self.cache.get_pdf_many(list(positions))
         except RedisError as error:
             return papers, SourceExecution(
                 "unpaywall",
@@ -68,7 +70,8 @@ class PaperPdfRecoverService:
                 str(error),
             )
         cache_hit = bool(resolved)
-        pending = [doi for doi in positions if doi not in resolved]
+        # 完整论文缓存命中后只组装已有 PDF 事实，不再触发外部补全。
+        pending = [] if cache_only else [doi for doi in positions if doi not in resolved]
         results = await asyncio.gather(
             *(self.provider.recover(doi) for doi in pending),
             return_exceptions=True,
@@ -92,7 +95,7 @@ class PaperPdfRecoverService:
 
         if writes:
             try:
-                await self.cache.put_many(writes)
+                await self.cache.put_pdf_many(writes)
             except RedisError as error:
                 # 新找到的 PDF 仍可返回，写缓存故障单独报告。
                 errors.append(error)

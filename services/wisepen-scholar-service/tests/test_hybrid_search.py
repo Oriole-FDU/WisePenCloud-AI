@@ -20,7 +20,7 @@ from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.paper import Paper
 from scholar.domain.repositories.local_paper_repository import PaperCandidate
 from scholar.domain.errors import ProviderError
-from scholar.domain.models.source_execution import SourceExecutionStatus
+from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.providers import ArxivProvider
 
 

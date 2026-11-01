@@ -19,7 +19,7 @@ from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 
 from scholar.core.config.bootstrap_settings import SERVICE_ROOT
-from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
+from scholar.core.storage.redis.paper_cache import RedisPaperCache
 from scholar.core.providers import S2Transport
 
 
@@ -139,8 +139,7 @@ async def run(args):
                     if s2_key:
                         print(f"[S2] 已成功加载 S2 API Key (前缀: {s2_key[:6]}***)", flush=True)
                     s2_provider = S2SyncClient(transport)
-                    s2_cache = RedisPaperLookupCache(redis, namespace=f"{alias}:s2")
-                    arxiv_cache = RedisPaperLookupCache(redis, namespace=f"{alias}:arxiv")
+                    paper_cache = RedisPaperCache(redis, namespace=alias)
 
                     async def publish_pending():
                         return await publish_arxiv(db, alias, qdrant=qdrant)
@@ -152,7 +151,7 @@ async def run(args):
                             batch_size=args.batch_size,
                             max_batches=args.max_batches,
                             publish=publish_pending,
-                            cache=s2_cache,
+                            cache=paper_cache,
                         )
 
                     if args.command in ("sync-arxiv", "recover-s2"):
@@ -168,8 +167,8 @@ async def run(args):
                                 from_date=args.from_date,
                                 batch_size=args.batch_size,
                                 publish=publish_pending,
-                                cache=s2_cache,
-                                arxiv_cache=arxiv_cache,
+                                cache=paper_cache,
+                                arxiv_cache=paper_cache,
                                 cache_harvest=True,
                             )
             finally:

@@ -10,10 +10,10 @@ class MemoryPdfCache:
         self.values = {}
         self.writes = []
 
-    async def get_many(self, dois):
+    async def get_pdf_many(self, dois):
         return {doi: self.values[doi] for doi in dois if doi in self.values}
 
-    async def put_many(self, entries):
+    async def put_pdf_many(self, entries):
         self.writes.extend(entries)
         self.values.update((doi, url) for doi, url, _ in entries)
 

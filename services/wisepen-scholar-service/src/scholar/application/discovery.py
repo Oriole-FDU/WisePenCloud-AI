@@ -20,7 +20,7 @@ from scholar.domain.interfaces.paper_discoverer import (
 from scholar.domain.models.fields import AcademicField
 from scholar.application.paper_projection import project_paper
 from scholar.domain.models.paper import Paper
-from scholar.domain.models.source_execution import (
+from scholar.application.source_execution import (
     SourceExecution,
     SourceExecutionStatus,
 )

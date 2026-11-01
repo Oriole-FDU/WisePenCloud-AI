@@ -28,7 +28,7 @@ from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.domain.models.source_execution import (
+from scholar.application.source_execution import (
     SourceExecutionStatus,
 )
 from scholar.core.providers.arxiv import ARXIV_CATEGORIES, ArxivProvider

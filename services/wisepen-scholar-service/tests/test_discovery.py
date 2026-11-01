@@ -25,7 +25,7 @@ from scholar.domain.interfaces.paper_discoverer import (
 )
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.domain.models.source_execution import SourceExecutionStatus
+from scholar.application.source_execution import SourceExecutionStatus
 
 
 class FakeDiscoveryCache:

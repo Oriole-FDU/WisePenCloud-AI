@@ -10,20 +10,20 @@ import pytest
 
 from policy_fakes import make_policy_store
 from pdf_fakes import make_pdf_service
-from title_fakes import MemoryRedis, MemoryTitleCache
+from title_fakes import MemoryRedis
 from scholar.application.lookup import PaperLookupService
 from scholar.application.lookup_runner import LookupBinding, LookupRunner
 from scholar.application.match import MatchStatus, PaperMatch, PaperMatchService
 from scholar.core.providers import PROVIDER_POLICIES
 from scholar.core.providers.crossref import CrossrefTitleResolver
-from scholar.core.storage.redis.paper_cache import RedisPaperLookupCache
-from scholar.core.storage.redis.query_cache_repository import RedisQueryCacheRepository
-from scholar.core.storage.redis.title_cache import RedisTitleCache
+from scholar.core.storage.redis.paper_cache import RedisPaperCache
+from scholar.core.storage.redis.query_cache import RedisQueryCacheRepository
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
-from scholar.domain.models.identifiers import parse_identifier
+from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.domain.models.titles import normalize_title
-from scholar.domain.repositories.paper_lookup_cache import CachedPaperLookup
+from scholar.domain.interfaces.title_resolver import TitleMatch
+from scholar.utils import normalize_title
+from scholar.domain.repositories.paper_cache import CachedPaperLookup
 
 
 def paper(title="Attention Is All You Need", arxiv="1706.03762", doi=None):
@@ -40,10 +40,10 @@ class Provider:
         return [PaperLookupMatch([self.papers[identity]]) if identity in self.papers else PaperLookupMatch([]) for identity in identities]
 
 
-def lookup(papers):
+def lookup(papers, cache=None):
     provider = Provider(papers)
     service = PaperLookupService(
-        LookupRunner({"arxiv": LookupBinding(provider, None, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=list({i.kind for i in papers})))}),
+        LookupRunner({"arxiv": LookupBinding(provider, cache, replace(PROVIDER_POLICIES["arxiv"], identifier_kinds=IdentifierKind.members()))}),
         pdf=make_pdf_service(), policies=make_policy_store(),
     )
     return service, provider
@@ -57,42 +57,39 @@ def test_title_normalization_preserves_words_subtitles_and_math():
     assert normalize_title("A − B") != normalize_title("A - B")
 
 
-@pytest.mark.asyncio
-async def test_title_index_keeps_collisions_and_merges_identity_aliases():
-    redis = MemoryRedis()
-    cache = RedisTitleCache(redis, ttl=86400)
-    first, second = map(parse_identifier, ["1706.03762", "1810.04805"])
-    doi = parse_identifier("10.1000/attention")
-    await cache.put_many([("Same title", [first, doi]), ("SAME TITLE", [doi]), ("same title", [first])])
-    matched = (await cache.get_many([" same   title "]))[0]
-    assert len(matched.candidates) == 1
-    assert set(matched.candidates[0]) == {first, doi}
-    await cache.put_many([("same title", [second])])
-    assert len((await cache.get_many(["Same title"]))[0].candidates) == 2
-    assert set(redis.ttls.values()) == {86400}
+@pytest.fixture
+def cache():
+    return RedisPaperCache(MemoryRedis(), "test")
 
 
 @pytest.mark.asyncio
-async def test_source_and_search_cache_writes_build_shared_title_index():
-    redis = MemoryRedis()
-    index = RedisTitleCache(redis, ttl=86400)
-    query = RedisQueryCacheRepository(redis, "test", 600, title_cache=index)
-    full = RedisPaperLookupCache(redis, "test:arxiv", title_cache=index)
+async def test_paper_cache_keeps_title_collisions_and_identity_aliases(cache):
+    first = paper("Same title", doi="10.1000/attention")
+    second = paper("Same title", "1810.04805")
+    aliases = (parse_identifier(first.arxiv_id), parse_identifier(first.doi))
+    await cache.put_many("arxiv", [(CachedPaperLookup(first, aliases), 86400)])
+    await cache.index_titles([("SAME TITLE", [aliases[1]])])
+    matched = (await cache.match_titles([" same   title "], ["arxiv"]))[0]
+    assert matched.papers == [first]
+    await cache.put_many("arxiv", [(CachedPaperLookup(second, (parse_identifier(second.arxiv_id),)), 86400)])
+    assert len((await cache.match_titles(["Same title"], ["arxiv"]))[0].papers) == 2
+
+
+@pytest.mark.asyncio
+async def test_search_overview_indexes_title_without_becoming_a_full_paper_hit(cache):
+    query = RedisQueryCacheRepository(cache.redis, "test", 600, paper_cache=cache)
     p = paper()
-    identity = parse_identifier(p.arxiv_id)
     await query.put("search", [p])
-    assert (await index.get_many([p.title]))[0].candidates == [[identity]]
-    await full.put_many([(CachedPaperLookup(p, (identity,)), 86400)])
-    assert (await full.get_many([identity]))[0].paper == p
-    assert len((await index.get_many([p.title]))[0].candidates) == 1
+    assert (await cache.match_titles([p.title], ["arxiv"]))[0].papers == []
+    await cache.put_many("arxiv", [(CachedPaperLookup(p, (parse_identifier(p.arxiv_id),)), 86400)])
+    assert (await cache.match_titles([p.title], ["arxiv"]))[0].papers == [p]
 
 
 @pytest.mark.asyncio
-async def test_batch_match_uses_cache_then_qdrant_then_crossref_and_preserves_positions():
+async def test_batch_match_uses_full_cache_then_local_then_crossref_and_preserves_positions(cache):
     cached, local, external = paper("Cached"), paper("Local", "1810.04805"), paper("External", None, "10.1000/external")
-    identities = [parse_identifier(p.arxiv_id or p.doi) for p in (cached, local, external)]
-    cache = MemoryTitleCache()
-    await cache.put_many([("Cached", [identities[0]])])
+    identity = parse_identifier(cached.arxiv_id)
+    await cache.put_many("arxiv", [(CachedPaperLookup(cached, (identity,)), 86400)])
     repository = SimpleNamespace(match_titles=AsyncMock(return_value=[PaperLookupMatch([local]), PaperLookupMatch([])]))
     calls = []
 
@@ -100,31 +97,66 @@ async def test_batch_match_uses_cache_then_qdrant_then_crossref_and_preserves_po
         calls.append(request)
         return httpx.Response(200, json={"message": {"items": [{"DOI": external.doi, "title": ["External"]}]}})
 
-    fetch, provider = lookup(dict(zip(identities, [cached, local, external])))
+    fetch, provider = lookup({parse_identifier(external.doi): external}, cache)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         service = PaperMatchService(cache, repository, CrossrefTitleResolver(http, "jzsun@example.test"), fetch)
         result = await service.match(PaperMatch(["Cached", "Local", "External", " CACHED "]))
+        repeated = await service.match(PaperMatch(["Local", "External"]))
     assert [item.status for item in result.items] == [MatchStatus.FOUND] * 4
     assert [item.paper.title for item in result.items] == ["Cached", "Local", "External", "Cached"]
+    assert result.items[1].paper.doi == "10.48550/arxiv.1810.04805"
+    assert [item.status for item in repeated.items] == [MatchStatus.FOUND] * 2
     repository.match_titles.assert_awaited_once_with(["Local", "External"])
     assert [request.url.params["query.bibliographic"] for request in calls] == ["External"]
-    assert sum(len(ids) for ids, _ in provider.calls) == 3
-    assert len((await cache.get_many(["External"]))[0].candidates) == 1
+    assert provider.calls == [([parse_identifier(external.doi)], None)]
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_cache_does_not_choose_a_paper_or_call_later_layers():
-    cache = MemoryTitleCache()
-    await cache.put_many([("Same", [parse_identifier("1706.03762")]), ("Same", [parse_identifier("1810.04805")])])
+async def test_ambiguous_cache_does_not_choose_a_paper_or_call_later_layers(cache):
+    for identity in ("1706.03762", "1810.04805"):
+        await cache.put_many("arxiv", [(CachedPaperLookup(paper("Same", identity), (parse_identifier(identity),)), 86400)])
     local = SimpleNamespace(match_titles=AsyncMock())
     crossref = SimpleNamespace(match=AsyncMock())
-    fetch = SimpleNamespace(lookup=AsyncMock())
+    fetch, provider = lookup({})
     result = await PaperMatchService(cache, local, crossref, fetch).match(PaperMatch(["Same"]))
     assert result.items[0].status == MatchStatus.AMBIGUOUS
     assert result.items[0].paper is None
     local.match_titles.assert_not_awaited()
     crossref.match.assert_not_awaited()
-    fetch.lookup.assert_not_awaited()
+    assert provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_stale_title_index_continues_through_local_and_crossref(cache):
+    identity = parse_identifier("1706.03762")
+    await cache.index_titles([("Stale", [identity])])
+    local = SimpleNamespace(match_titles=AsyncMock(return_value=[PaperLookupMatch([])]))
+    crossref = SimpleNamespace(match=AsyncMock(return_value=[TitleMatch()]))
+    fetch, provider = lookup({})
+    result = await PaperMatchService(cache, local, crossref, fetch).match(PaperMatch(["Stale"]))
+    assert result.items[0].status == MatchStatus.NOT_FOUND
+    local.match_titles.assert_awaited_once_with(["Stale"])
+    crossref.match.assert_awaited_once()
+    assert provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_full_cached_paper_assembles_domain_and_pdf_without_external_calls(cache):
+    base = paper("Complete", None, "10.1000/complete")
+    base.pdf_url = None
+    base.authors = ["First", "Second"]
+    identity = parse_identifier(base.doi)
+    await cache.put_many("arxiv", [(CachedPaperLookup(base, (identity,)), 86400)])
+    enriched = replace(base, source="s2", metadata={"s2": {"citation_count": 0}})
+    await cache.put_many("s2", [(CachedPaperLookup(enriched, (identity,)), 86400)])
+    await cache.put_pdf_many([(base.doi, "https://example.test/recovered.pdf", 86400)])
+    fetch, provider = lookup({})
+    result = await PaperMatchService(cache, SimpleNamespace(), SimpleNamespace(), fetch).match(PaperMatch([base.title]))
+    assert result.items[0].paper.pdf_url == "https://example.test/recovered.pdf"
+    assert result.items[0].paper.metadata["s2"]["citation_count"] == 0
+    assert provider.calls == []
+    raw = (await cache.get_many("arxiv", [identity]))[0].paper
+    assert raw.authors == ["First", "Second"] and raw.pdf_url is None
 
 
 @pytest.mark.asyncio
@@ -170,11 +202,10 @@ async def test_crossref_semaphore_is_shared_between_batches():
 
 
 @pytest.mark.asyncio
-async def test_crossref_timeout_preserves_cached_paper_and_all_failures_remain_items():
+async def test_crossref_timeout_preserves_cached_paper_and_all_failures_remain_items(cache):
     cached = paper("Cached")
     identity = parse_identifier(cached.arxiv_id)
-    cache = MemoryTitleCache()
-    await cache.put_many([("Cached", [identity])])
+    await cache.put_many("arxiv", [(CachedPaperLookup(cached, (identity,)), 86400)])
     local = SimpleNamespace(match_titles=AsyncMock(return_value=[PaperLookupMatch([])]))
     fetch, _ = lookup({identity: cached})
 
@@ -191,8 +222,46 @@ async def test_crossref_timeout_preserves_cached_paper_and_all_failures_remain_i
 
 
 @pytest.mark.asyncio
-async def test_programming_errors_are_not_hidden_as_missing_titles():
+async def test_programming_errors_are_not_hidden_as_missing_titles(cache):
     local = SimpleNamespace(match_titles=AsyncMock(side_effect=TypeError("bug")))
-    service = PaperMatchService(MemoryTitleCache(), local, SimpleNamespace(), SimpleNamespace())
+    fetch, _ = lookup({})
+    service = PaperMatchService(cache, local, SimpleNamespace(), fetch)
     with pytest.raises(TypeError, match="bug"):
         await service.match(PaperMatch(["Title"]))
+
+
+@pytest.mark.asyncio
+async def test_mixed_batch_preserves_cache_local_and_lookup_successes_with_external_failures(cache):
+    cached, local = paper("Cached"), paper("Local", "1810.04805")
+    remote = paper("Remote", None, "10.5555/remote")
+    await cache.put_many("arxiv", [(CachedPaperLookup(cached, (parse_identifier(cached.arxiv_id),)), 86400)])
+    repository = SimpleNamespace(match_titles=AsyncMock(return_value=[
+        PaperLookupMatch([local]), PaperLookupMatch([]), PaperLookupMatch([]), PaperLookupMatch([]), PaperLookupMatch([]),
+    ]))
+    crossref = SimpleNamespace(match=AsyncMock(return_value=[
+        TitleMatch([[parse_identifier(remote.doi)]]),
+        TitleMatch(error="crossref: HTTP 429"), TitleMatch(),
+        TitleMatch([[parse_identifier("10.5555/first")], [parse_identifier("10.5555/second")]]),
+    ]))
+    fetch, provider = lookup({parse_identifier(remote.doi): remote}, cache)
+    result = await PaperMatchService(cache, repository, crossref, fetch).match(
+        PaperMatch(["Cached", "Local", "Remote", "Limited", "Missing", "Same", " CACHED "])
+    )
+    assert [item.status for item in result.items] == [
+        MatchStatus.FOUND, MatchStatus.FOUND, MatchStatus.FOUND, MatchStatus.FAILED,
+        MatchStatus.NOT_FOUND, MatchStatus.AMBIGUOUS, MatchStatus.FOUND,
+    ]
+    assert result.items[3].error == "crossref: HTTP 429"
+    assert provider.calls == [([parse_identifier(remote.doi)], None)]
+
+
+@pytest.mark.asyncio
+async def test_crossref_batch_error_keeps_already_found_papers(cache):
+    from scholar.domain.errors import ProviderError
+    cached = paper("Cached")
+    await cache.put_many("arxiv", [(CachedPaperLookup(cached, (parse_identifier(cached.arxiv_id),)), 86400)])
+    repository = SimpleNamespace(match_titles=AsyncMock(return_value=[PaperLookupMatch([])]))
+    crossref = SimpleNamespace(match=AsyncMock(side_effect=ProviderError("crossref unavailable")))
+    fetch, _ = lookup({})
+    result = await PaperMatchService(cache, repository, crossref, fetch).match(PaperMatch(["Cached", "Missing"]))
+    assert [item.status for item in result.items] == [MatchStatus.FOUND, MatchStatus.FAILED]

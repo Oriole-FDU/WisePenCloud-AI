@@ -24,7 +24,7 @@ from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.domain.models.source_execution import SourceExecutionStatus
+from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.providers import ArxivProvider
 from scholar.core.providers.s2.provider import aliases as s2_aliases
 

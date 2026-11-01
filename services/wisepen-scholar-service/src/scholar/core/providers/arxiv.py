@@ -139,7 +139,7 @@ class ArxivProvider:
         return [
             replace(
                 match,
-                papers=[self._with_arxiv_doi(paper) for paper in match.papers],
+                papers=[with_arxiv_doi(paper) for paper in match.papers],
             )
             for match in matches
         ]
@@ -154,7 +154,7 @@ class ArxivProvider:
             [query], categories=ARXIV_CATEGORIES[field],
             published_after=published_after, published_before=published_before, limit=limit,
         )
-        return PaperSearchBatch([self._with_arxiv_doi(paper) for paper in matches[0].papers])
+        return PaperSearchBatch([with_arxiv_doi(paper) for paper in matches[0].papers])
 
     async def search(
         self,
@@ -211,7 +211,7 @@ class ArxivProvider:
             ranked = sorted(candidates, key=boosted_score, reverse=True)
             return PaperSearchBatch(
                 [
-                    self._with_arxiv_doi(candidate.paper)
+                    with_arxiv_doi(candidate.paper)
                     for candidate in ranked[:limit]
                 ],
                 partial_error,
@@ -242,9 +242,9 @@ class ArxivProvider:
             for identifier in ids
         ]
 
-    @staticmethod
-    def _with_arxiv_doi(paper: Paper) -> Paper:
-        """为仅有 arXiv ID 的论文补全官方 DOI（``10.48550/arXiv.<ID>``）。"""
-        if paper.arxiv_id is None or paper.doi is not None:
-            return paper
-        return replace(paper, doi=f"10.48550/arxiv.{paper.arxiv_id}")
+
+def with_arxiv_doi(paper: Paper) -> Paper:
+    """为仅有 arXiv ID 的论文补全官方 DOI（``10.48550/arXiv.<ID>``）。"""
+    if paper.arxiv_id is None or paper.doi is not None:
+        return paper
+    return replace(paper, doi=f"10.48550/arxiv.{paper.arxiv_id}")

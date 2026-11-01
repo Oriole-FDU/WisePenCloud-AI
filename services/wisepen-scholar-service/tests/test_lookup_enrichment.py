@@ -69,16 +69,16 @@ class FakeCache:
         self.values = {}
         self.puts = []
 
-    async def get_many(self, ids):
+    async def get_many(self, source, ids):
         return [self.values.get(identity) for identity in ids]
 
-    async def put_many(self, entries):
+    async def put_many(self, source, entries):
         self.puts.extend(entries)
         for record, _ttl_seconds in entries:
             for identity in record.cache_aliases:
                 self.values[identity] = record
 
-    async def invalidate(self, identifiers):
+    async def invalidate(self, source, identifiers):
         for identity in identifiers:
             self.values.pop(identity, None)
 
@@ -290,7 +290,7 @@ async def test_later_ambiguous_match_does_not_return_a_previously_found_paper():
 
 
 def test_identifier_kind_values_and_members():
-    assert IdentifierKind.values() == ["arxiv", "doi", "openalex", "s2", "corpus_id"]
+    assert IdentifierKind.values() == ["arxiv", "doi", "openalex", "s2", "corpusid"]
     assert IdentifierKind.members() == [
         IdentifierKind.ARXIV,
         IdentifierKind.DOI,
@@ -437,3 +437,45 @@ async def test_exact_common_match_stops_fallback_without_research_signals(source
     assert result.items[0].error is None
     assert matched.calls == [([identity], None)]
     assert fallback.calls == []
+
+
+@pytest.mark.asyncio
+async def test_later_common_cache_hit_prevents_earlier_provider_request():
+    from scholar.domain.repositories.paper_cache import CachedPaperLookup
+    identity = parse_identifier("2401.00001")
+    paper = make_paper(source=PaperSource.S2)
+    cached = FakeCache()
+    await cached.put_many("s2", [(CachedPaperLookup(paper, (identity,)), 86400)])
+    arxiv, s2 = FakeProvider(), FakeProvider()
+    lookup = service({
+        "arxiv": LookupBinding(arxiv, FakeCache(), PROVIDER_POLICIES["arxiv"]),
+        "s2": LookupBinding(s2, cached, PROVIDER_POLICIES["s2"]),
+    })
+    found = await lookup.lookup(PaperLookup([identity.value]))
+    assert found.items[0].status == LookupStatus.FOUND
+    assert arxiv.calls == s2.calls == []
+    assert found.execution[0].cache_hit
+
+
+@pytest.mark.asyncio
+async def test_cached_paper_skips_missing_domain_and_pdf_external_requests():
+    from scholar.domain.repositories.paper_cache import CachedPaperLookup
+    from unittest.mock import AsyncMock
+    identity = parse_identifier("10.5555/cached")
+    paper = make_paper(arxiv_id=None, doi=identity.value)
+    paper.pdf_url = None
+    cached = FakeCache()
+    await cached.put_many("arxiv", [(CachedPaperLookup(paper, (identity,)), 86400)])
+    base, domain = FakeProvider(), FakeProvider()
+    pdf_provider = AsyncMock()
+    lookup = PaperLookupService(LookupRunner({
+        "arxiv": LookupBinding(base, cached, PROVIDER_POLICIES["arxiv"]),
+        "openalex": LookupBinding(domain, FakeCache(), PROVIDER_POLICIES["openalex"]),
+    }), pdf=make_pdf_service(provider=pdf_provider), policies=make_policy_store({
+        AcademicField.COMPUTER_SCIENCE: FieldPolicy(["arxiv"], ["openalex"]),
+    }, common_enrichers=["arxiv"]))
+    found = await lookup.lookup(PaperLookup([identity.value], AcademicField.COMPUTER_SCIENCE))
+    assert found.items[0].status == LookupStatus.FOUND
+    assert found.items[0].paper.pdf_url is None
+    assert base.calls == domain.calls == []
+    pdf_provider.recover.assert_not_awaited()

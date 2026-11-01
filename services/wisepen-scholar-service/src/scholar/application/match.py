@@ -1,4 +1,4 @@
-"""批量完整标题解析：共享身份索引 → 本地标题索引 → Crossref → 既有 lookup。"""
+"""批量完整标题匹配：完整论文缓存 → 本地论文 → Crossref DOI → lookup。"""
 
 from __future__ import annotations
 
@@ -10,23 +10,22 @@ from enum import StrEnum
 from redis.exceptions import RedisError
 
 from scholar.application.lookup import LookupStatus, PaperLookup, PaperLookupService
-from scholar.core.providers.policies import paper_identifiers
-from scholar.domain.errors import ProviderError
-from scholar.domain.interfaces.title_resolver import TitleResolver
-from scholar.domain.models.fields import AcademicField
-from scholar.domain.models.identifiers import IdentifierKind
-from scholar.domain.models.paper import Paper
-from scholar.domain.models.source_execution import (
+from scholar.application.paper_projection import project_paper
+from scholar.application.source_execution import (
     SourceExecution,
     SourceExecutionStatus,
 )
-from scholar.domain.models.titles import (
-    TitleMatch,
-    merge_title_identities,
-    normalize_title,
-)
+from scholar.core.providers.arxiv import with_arxiv_doi
+from scholar.core.providers.policies import paper_identifiers
+from scholar.domain.errors import ProviderError
+from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
+from scholar.domain.interfaces.title_resolver import TitleMatch, TitleResolver
+from scholar.domain.models.fields import AcademicField
+from scholar.domain.models.identifiers import IdentifierKind, merge_identity_groups
+from scholar.domain.models.paper import Paper
 from scholar.domain.repositories.local_paper_repository import LocalPaperRepository
-from scholar.domain.repositories.title_cache import TitleCache
+from scholar.domain.repositories.paper_cache import CachedPaperLookup, PaperCache
+from scholar.utils import normalize_title
 
 
 class MatchStatus(StrEnum):
@@ -69,7 +68,7 @@ def _error_text(error: BaseException) -> str:
 
 def _execution(
     source: str,
-    matches: list[TitleMatch],
+    matches: list[TitleMatch] | list[PaperLookupMatch],
     *,
     cache_hit: bool = False,
 ) -> SourceExecution:
@@ -81,18 +80,21 @@ def _execution(
         status = SourceExecutionStatus.FAILED
     else:
         status = SourceExecutionStatus.PARTIAL
-    return SourceExecution(source, cache_hit, status, failures[0] if failures else None)
+    return SourceExecution(
+        source, cache_hit, status, failures[0] if failures else None
+    )
 
 
 class PaperMatchService:
-    """只编排标题到稳定身份的解析；论文获取、富化和投影全部委托 lookup。"""
+    """逐项保留已找到的完整论文，只为未解决的标题访问下一层。"""
 
     def __init__(
         self,
-        cache: TitleCache,
+        cache: PaperCache,
         local: LocalPaperRepository,
         crossref: TitleResolver,
         lookup: PaperLookupService,
+        ttl: int = 86400,
     ):
         self.cache, self.local, self.crossref, self.lookup_service = (
             cache,
@@ -100,6 +102,7 @@ class PaperMatchService:
             crossref,
             lookup,
         )
+        self.ttl = ttl
 
     async def match(
         self,
@@ -114,223 +117,232 @@ class PaperMatchService:
             else None
         )
 
-        # 标题归一化后去重：positions 记录每个唯一标题对应的所有原始位置。
-        items = [MatchItem(title) for title in query.titles]
+        # 归一化后去重；positions 保留每个唯一标题对应的原始位置。
         positions: dict[str, list[int]] = {}
         for index, title in enumerate(query.titles):
             positions.setdefault(normalize_title(title), []).append(index)
-        titles = [items[indexes[0]].title for indexes in positions.values()]
-        slots = list(positions.values())
-
+        titles = [query.titles[indexes[0]] for indexes in positions.values()]
+        resolved = [MatchItem(title) for title in titles]
         execution: list[SourceExecution] = []
-        matches = [TitleMatch() for _ in titles]
 
-        # 1) 共享标题缓存：命中则得到候选身份，未命中留空继续后续阶段。
-        budget = asyncio.timeout_at(deadline)
-        try:
-            async with budget:
-                matches = await self.cache.get_many(titles)
-            execution.append(
-                _execution(
-                    "title_cache",
-                    matches,
-                    cache_hit=any(m.candidates for m in matches),
-                )
-            )
-        except (RedisError, TimeoutError) as error:
-            # 缓存失败不影响后续阶段；本地索引仍可提供匹配。
-            execution.append(
-                SourceExecution(
-                    "title_cache",
-                    False,
-                    SourceExecutionStatus.FAILED,
-                    _error_text(error),
-                )
-            )
-
-        # 2) 本地标题索引：仅处理缓存无候选、且无错误的项。
-        pending = [
-            i
-            for i, match in enumerate(matches)
-            if not match.candidates and not match.error
-        ]
-        if pending:
-            budget = asyncio.timeout_at(deadline)
-            try:
-                async with budget:
-                    local = await self.local.match_titles([titles[i] for i in pending])
-                # 把本地多条论文的身份合并为一个候选集合。
-                resolved = [
-                    TitleMatch(
-                        merge_title_identities(
-                            [paper_identifiers(paper) for paper in match.papers]
-                        ),
-                        match.error,
-                    )
-                    for match in local
+        # 参与标题匹配的来源：通用富化来源 + 当前领域的专用来源。
+        policies = self.lookup_service.policies.current
+        sources = list(
+            dict.fromkeys(
+                [
+                    *policies.common_enrichers,
+                    *policies.fields[query.field].field_enrichers,
                 ]
-            except (ProviderError, TimeoutError) as error:
-                resolved = [
-                    TitleMatch(error=_error_text(error)) for _ in pending
-                ]
-            execution.append(_execution("arxiv", resolved))
-            for index, match in zip(pending, resolved, strict=True):
-                matches[index] = match
-
-        # 3) 已解决项与慢速 Crossref 并行 lookup；先启动避免被后者耗尽预算。
-        ready = [i for i, match in enumerate(matches) if match.candidates]
-        tasks = (
-            [
-                asyncio.create_task(
-                    self._lookup(
-                        ready, titles, matches, query.field, credentials, deadline
-                    )
-                )
-            ]
-            if ready
-            else []
+            )
         )
-        try:
-            pending = [i for i, match in enumerate(matches) if not match.candidates]
-            if pending:
-                resolved = await self.crossref.match(
-                    [titles[i] for i in pending], deadline=deadline
-                )
-                execution.append(_execution("crossref", resolved))
-                for index, match in zip(pending, resolved, strict=True):
-                    matches[index] = match
-                ready = [i for i in pending if matches[i].candidates]
-                if ready:
-                    tasks.append(
-                        asyncio.create_task(
-                            self._lookup(
-                                ready,
-                                titles,
-                                matches,
-                                query.field,
-                                credentials,
-                                deadline,
-                            )
-                        )
-                    )
 
-            # 汇总 lookup 结果到原始位置（同一标题可能对应多个原始位置）。
-            for result, events in await asyncio.gather(*tasks):
-                for index, item in result.items():
-                    for position in slots[index]:
-                        items[position] = MatchItem(
-                            items[position].title,
-                            item.status,
-                            deepcopy(item.paper),
-                            item.error,
-                        )
-                execution.extend(events)
-        finally:
-            # 任一 lookup 失败或调用者取消时，其余任务不得游离在用例之外。
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 未解决项：有 error 记 FAILED，否则记 NOT_FOUND。
-        for index, match in enumerate(matches):
-            if not match.candidates:
-                for position in slots[index]:
-                    items[position].status = (
-                        MatchStatus.FAILED if match.error else MatchStatus.NOT_FOUND
-                    )
-                    items[position].error = match.error
-        return MatchResult(items, execution)
-
-    async def _lookup(
-        self,
-        indexes,
-        titles,
-        matches,
-        field,
-        credentials,
-        deadline,
-    ):
-        result = {}
-        events = []
-        unique = []
-        identities = []
-        for index in indexes:
-            candidates = merge_title_identities(matches[index].candidates)
-            if len(candidates) > 1:
-                result[index] = MatchItem("", MatchStatus.AMBIGUOUS)
-            else:
-                # 同一论文优先使用 arXiv，其次 DOI，再使用其他稳定身份。
-                identity = min(
-                    candidates[0],
-                    key=lambda value: IdentifierKind.members().index(value.kind),
-                )
-                identities.append(
-                    f"{identity.kind.value if identity.kind != IdentifierKind.CORPUS_ID else 'corpusid'}:"
-                    f"{identity.value}"
-                )
-                unique.append(index)
-
-        # 保留请求标题到解析身份的关联，即使详情来源使用了另一种正式标题。
+        # 1) 完整论文缓存：命中即拿到完整论文，未命中留待后续层。
         try:
             async with asyncio.timeout_at(deadline):
-                await self.cache.put_many(
-                    [
-                        (titles[index], aliases)
-                        for index in indexes
-                        for aliases in matches[index].candidates
-                    ]
+                cached = await self.cache.match_titles(titles, sources)
+            for item, match in zip(resolved, cached, strict=True):
+                if match.error:
+                    item.error = match.error
+                    item.status = MatchStatus.FAILED
+                elif len(match.papers) > 1:
+                    item.status = MatchStatus.AMBIGUOUS
+                elif match.papers:
+                    item.status = MatchStatus.FOUND
+                    item.paper = project_paper(match.papers[0])
+            execution.append(
+                _execution(
+                    "paper_cache",
+                    cached,
+                    cache_hit=any(match.papers for match in cached),
                 )
+            )
         except (RedisError, TimeoutError) as error:
-            events.append(
+            execution.append(
                 SourceExecution(
-                    "title_cache",
+                    "paper_cache",
                     False,
                     SourceExecutionStatus.FAILED,
                     _error_text(error),
                 )
             )
 
-        if not unique:
-            return result, events
-
-        # 剩余预算 = deadline - 当前时间；无 deadline 则不限时。
-        remaining = (
-            max(0, deadline - asyncio.get_running_loop().time())
-            if deadline is not None
-            else None
-        )
-        try:
-            found = await self.lookup_service.lookup(
-                PaperLookup(identities, field),
-                credentials=credentials,
-                timeout=remaining,
-            )
-        except (ProviderError, RedisError, TimeoutError) as error:
-            for index in unique:
-                result[index] = MatchItem(
-                    "", MatchStatus.FAILED, error=_error_text(error)
+        # 2) 本地论文索引：只处理仍未确定（非 FOUND / AMBIGUOUS）的标题。
+        pending = [
+            i
+            for i, item in enumerate(resolved)
+            if item.status not in (MatchStatus.FOUND, MatchStatus.AMBIGUOUS)
+        ]
+        if pending:
+            try:
+                async with asyncio.timeout_at(deadline):
+                    local = await self.local.match_titles(
+                        [titles[i] for i in pending]
+                    )
+                matches, writes, title_entries = [], [], []
+                for index, match in zip(pending, local, strict=True):
+                    # 本地可能有多篇论文共享同一身份组，合并后用于歧义判断。
+                    candidates = merge_identity_groups(
+                        [paper_identifiers(paper) for paper in match.papers]
+                    )
+                    matches.append(TitleMatch(candidates, match.error))
+                    if match.error:
+                        resolved[index] = MatchItem(
+                            titles[index], MatchStatus.FAILED, error=match.error
+                        )
+                    elif len(candidates) > 1:
+                        resolved[index] = MatchItem(
+                            titles[index], MatchStatus.AMBIGUOUS
+                        )
+                    elif match.papers:
+                        # 仓储已给出正文，直接复用；保持 arXiv 既有 DOI 规范化合同。
+                        paper = with_arxiv_doi(match.papers[0])
+                        aliases = paper_identifiers(paper)
+                        writes.append(
+                            (CachedPaperLookup(paper, tuple(aliases)), self.ttl)
+                        )
+                        title_entries.append((titles[index], aliases))
+                        resolved[index] = MatchItem(
+                            titles[index],
+                            MatchStatus.FOUND,
+                            project_paper(paper),
+                        )
+                execution.append(_execution("arxiv", matches))
+                if writes:
+                    # 把本地命中写回完整缓存与标题索引，下次可直接缓存命中。
+                    try:
+                        async with asyncio.timeout_at(deadline):
+                            await self.cache.put_many("arxiv", writes)
+                            await self.cache.index_titles(title_entries)
+                    except (RedisError, TimeoutError) as error:
+                        execution.append(
+                            SourceExecution(
+                                "paper_cache",
+                                False,
+                                SourceExecutionStatus.FAILED,
+                                _error_text(error),
+                            )
+                        )
+            except (ProviderError, TimeoutError) as error:
+                for index in pending:
+                    resolved[index] = MatchItem(
+                        titles[index], MatchStatus.FAILED, error=_error_text(error)
+                    )
+                execution.append(
+                    SourceExecution(
+                        "arxiv",
+                        False,
+                        SourceExecutionStatus.FAILED,
+                        _error_text(error),
+                    )
                 )
-            return result, [
-                *events,
-                SourceExecution(
-                    "lookup",
-                    False,
-                    SourceExecutionStatus.FAILED,
-                    _error_text(error),
-                ),
-            ]
 
-        statuses = {
-            LookupStatus.FOUND: MatchStatus.FOUND,
-            LookupStatus.NOT_FOUND: MatchStatus.NOT_FOUND,
-            LookupStatus.AMBIGUOUS: MatchStatus.AMBIGUOUS,
-        }
-        for index, item in zip(unique, found.items, strict=True):
-            result[index] = MatchItem(
-                "",
-                statuses.get(item.status, MatchStatus.FAILED),
-                item.paper,
-                item.error,
-            )
-        return result, [*events, *found.execution]
+        # 3) Crossref DOI：把标题解析为稳定身份，只对仍未确定的标题请求。
+        pending = [
+            i
+            for i, item in enumerate(resolved)
+            if item.status not in (MatchStatus.FOUND, MatchStatus.AMBIGUOUS)
+        ]
+        if pending:
+            try:
+                matches = await self.crossref.match(
+                    [titles[i] for i in pending], deadline=deadline
+                )
+            except (ProviderError, TimeoutError) as error:
+                matches = [
+                    TitleMatch(error=_error_text(error)) for _ in pending
+                ]
+            execution.append(_execution("crossref", matches))
+
+            ready, identities, title_entries = [], [], []
+            for index, match in zip(pending, matches, strict=True):
+                candidates = merge_identity_groups(match.candidates)
+                if match.error:
+                    resolved[index] = MatchItem(
+                        titles[index], MatchStatus.FAILED, error=match.error
+                    )
+                elif len(candidates) > 1:
+                    resolved[index] = MatchItem(
+                        titles[index], MatchStatus.AMBIGUOUS
+                    )
+                elif candidates:
+                    # 同一论文优先 arXiv，其次 DOI，再其他稳定身份。
+                    identity = min(
+                        candidates[0],
+                        key=lambda value: IdentifierKind.members().index(
+                            value.kind
+                        ),
+                    )
+                    identities.append(f"{identity.kind.value}:{identity.value}")
+                    ready.append(index)
+                # 索引保存请求标题与身份的关系；只有取得正文才会成为下一次完整缓存命中。
+                title_entries.extend(
+                    (titles[index], aliases) for aliases in candidates
+                )
+
+            if title_entries:
+                try:
+                    async with asyncio.timeout_at(deadline):
+                        await self.cache.index_titles(title_entries)
+                except (RedisError, TimeoutError) as error:
+                    execution.append(
+                        SourceExecution(
+                            "paper_cache",
+                            False,
+                            SourceExecutionStatus.FAILED,
+                            _error_text(error),
+                        )
+                    )
+
+            if ready:
+                remaining = (
+                    max(0, deadline - asyncio.get_running_loop().time())
+                    if deadline is not None
+                    else None
+                )
+                try:
+                    found = await self.lookup_service.lookup(
+                        PaperLookup(identities, query.field),
+                        credentials=credentials,
+                        timeout=remaining,
+                    )
+                except (ProviderError, RedisError, TimeoutError) as error:
+                    for index in ready:
+                        resolved[index] = MatchItem(
+                            titles[index],
+                            MatchStatus.FAILED,
+                            error=_error_text(error),
+                        )
+                    execution.append(
+                        SourceExecution(
+                            "lookup",
+                            False,
+                            SourceExecutionStatus.FAILED,
+                            _error_text(error),
+                        )
+                    )
+                else:
+                    statuses = {
+                        LookupStatus.FOUND: MatchStatus.FOUND,
+                        LookupStatus.NOT_FOUND: MatchStatus.NOT_FOUND,
+                        LookupStatus.AMBIGUOUS: MatchStatus.AMBIGUOUS,
+                    }
+                    for index, item in zip(ready, found.items, strict=True):
+                        resolved[index] = MatchItem(
+                            titles[index],
+                            statuses.get(item.status, MatchStatus.FAILED),
+                            item.paper,
+                            item.error,
+                        )
+                    execution.extend(found.execution)
+
+        # 4) 把去重后的结果展开回原始标题位置（含重复项）。
+        items = [MatchItem(title) for title in query.titles]
+        for item, slots in zip(resolved, positions.values(), strict=True):
+            for index in slots:
+                items[index] = MatchItem(
+                    query.titles[index],
+                    item.status,
+                    deepcopy(item.paper),
+                    item.error,
+                )
+        return MatchResult(items, execution)

@@ -20,6 +20,8 @@ P6 已提供独立 OAI/S2 差分同步与恢复、Compose/Jenkins/systemd 模板
 
 模板中的通用精确获取顺序为 arxiv→s2→openalex，可在 Nacos 调整，每篇精确找到论文即停止，不因缺少引用数或 TLDR 继续回退。arXiv 的 S2 事实由离线同步负责，命中 arXiv 后不再在线补信号。搜索成功来源包含任一通用来源时跳过通用链；两种入口按相同完整性规则执行领域增量，初始仅 CS 注册 HF。HF 搜索概要缺少 required_fields 时获取详情，字段齐全（包括已确认的空值）则跳过。供应商规则在各 provider 实现，由 `providers.policies.PROVIDER_POLICIES` 统一注册，新增临床增量只需 provider、注册和领域配置。平台不默认融合同名字段或做语义去重。
 
+缓存分为 query、paper、discover 三个业务边界。match 按完整论文缓存、本地标题库、Crossref DOI、lookup 逐项回退；缓存和本地命中不再触发外部补全。lookup 先读取可复用的来源缓存，再访问未解决的来源。来源缓存命中可直接返回，已有领域信息和 PDF 在本地组装；新获取项仍按领域策略补全。详见 [缓存与标题匹配](docs/cache-architecture.md)。
+
 ## 配置与启动
 
 在本目录复制 `.env.example` 为 `.env`，填写现有 Nacos 引导凭证。业务配置使用 DEFAULT_GROUP 下的 `wisepen-scholar-service-dev.yaml`，字段见 [配置模板](docs/platform-settings.yaml)。prod 对应 `wisepen-scholar-service-prod.yaml`。不把凭证提交进仓库。

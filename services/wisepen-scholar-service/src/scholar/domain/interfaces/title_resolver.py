@@ -1,8 +1,17 @@
 """将一批完整标题解析为稳定身份候选的外部边界。"""
 
+from dataclasses import dataclass, field
 from typing import Protocol
 
-from scholar.domain.models.titles import TitleMatch
+from scholar.domain.models.identifiers import PaperIdentifier
+
+
+@dataclass
+class TitleMatch:
+    """一个标题的候选；每个内部列表是同一论文的身份别名，多组表示歧义。"""
+
+    candidates: list[list[PaperIdentifier]] = field(default_factory=list)
+    error: str | None = None
 
 
 class TitleResolver(Protocol):

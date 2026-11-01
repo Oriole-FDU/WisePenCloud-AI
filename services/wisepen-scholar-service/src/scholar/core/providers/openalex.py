@@ -48,9 +48,15 @@ OPENALEX_FILTERS: dict[AcademicField, str | None] = {
 
 
 def aliases(metadata: dict) -> list[PaperIdentifier]:
-    """从 OpenAlex 响应中提取 Work URI（如 ``https://openalex.org/W...``）。"""
-    value = metadata.get("openalex", {}).get("id")
-    return [] if value is None else [parse_identifier(value)]
+    """合并顶层 Work ID 与 ids 中已支持的论文身份，归一化后保序去重。"""
+    values = metadata.get("openalex", {})
+    ids = values.get("ids") or {}
+    # PMID、PMCID、MAG 尚不属于内部身份类型，不能交给 arXiv 兜底解析。
+    return list(dict.fromkeys(
+        parse_identifier(value)
+        for value in (values.get("id"), ids.get("openalex"), ids.get("doi"))
+        if value
+    ))
 
 
 def pdf_url(paper: Paper) -> str | None:

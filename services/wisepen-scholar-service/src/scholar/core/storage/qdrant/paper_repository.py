@@ -11,12 +11,13 @@ from scholar.domain.errors import ProviderError, provider_error_message
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, PaperIdentifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.domain.models.titles import normalize_title
+from scholar.utils import normalize_title
 from scholar.domain.repositories.local_paper_repository import (
     LocalPaperRepository,
     PaperCandidate,
 )
 
+# BM25 三个文本通道：字段名 → Qdrant 稀疏向量名；权重按标题 > TLDR > 摘要。
 BM25_FIELDS = {
     "bm25_title": "title",
     "bm25_tldr": "metadata.s2.tldr.text",
@@ -28,6 +29,7 @@ BM25_OPTIONS = {"language": "english", "k": 1.2, "b": 0.75, "avg_len": 256.0}
 
 
 def to_paper(document: dict) -> Paper:
+    """把 Qdrant payload 还原为领域 Paper；arxiv 命名空间字段在此重建。"""
     submitted = date.fromisoformat(document["submitted_date"][:10])
     return Paper(
         arxiv_id=document["arxiv_id"],
@@ -69,45 +71,107 @@ class QdrantPaperRepository:
         self.collection = collection
 
     @staticmethod
-    def _conditions(categories, published_after, published_before):
+    def _conditions(
+        categories: list[str] | None,
+        published_after: date | None,
+        published_before: date | None,
+    ) -> list:
+        """把领域分类与日期范围转成 Qdrant must 条件列表。
+
+        分类匹配有两种形态：``cs.*`` 命中 ``category_groups``（顶层分组），
+        精确分类如 ``cs.CL`` 命中 ``categories``。
+        """
         conditions = []
         if categories:
-            conditions.append(models.Filter(should=[
-                models.FieldCondition(
-                    key="category_groups" if value.endswith(".*") else "categories",
-                    match=models.MatchValue(value=value.partition(".")[0] if value.endswith(".*") else value),
-                ) for value in categories
-            ]))
+            conditions.append(
+                models.Filter(
+                    should=[
+                        models.FieldCondition(
+                            key=(
+                                "category_groups"
+                                if value.endswith(".*")
+                                else "categories"
+                            ),
+                            match=models.MatchValue(
+                                value=(
+                                    value.partition(".")[0]
+                                    if value.endswith(".*")
+                                    else value
+                                )
+                            ),
+                        )
+                        for value in categories
+                    ]
+                )
+            )
         if published_after is not None or published_before is not None:
-            conditions.append(models.FieldCondition(
-                key="submitted_date",
-                range=models.DatetimeRange(
-                    gte=f"{published_after}T00:00:00Z" if published_after else None,
-                    lte=f"{published_before}T00:00:00Z" if published_before else None,
-                ),
-            ))
+            conditions.append(
+                models.FieldCondition(
+                    key="submitted_date",
+                    range=models.DatetimeRange(
+                        gte=(
+                            f"{published_after}T00:00:00Z"
+                            if published_after
+                            else None
+                        ),
+                        lte=(
+                            f"{published_before}T00:00:00Z"
+                            if published_before
+                            else None
+                        ),
+                    ),
+                )
+            )
         return conditions
 
     async def match_titles(
-        self, titles: list[str], *, categories: list[str] | None = None,
-        published_after: date | None = None, published_before: date | None = None,
+        self,
+        titles: list[str],
+        *,
+        categories: list[str] | None = None,
+        published_after: date | None = None,
+        published_before: date | None = None,
         limit: int = 2,
     ) -> list[PaperLookupMatch]:
         """keyword 完整相等通道；最多两篇即可区分唯一命中与同名歧义。"""
         if not titles:
             return []
+
         conditions = self._conditions(categories, published_after, published_before)
         try:
-            batches = await self.client.query_batch_points(self.collection, requests=[
-                models.QueryRequest(
-                    filter=models.Filter(must=[*conditions, models.FieldCondition(
-                        key="normalized_title", match=models.MatchValue(value=normalize_title(title)),
-                    )]), limit=limit, with_payload=True, with_vector=False,
-                ) for title in titles
-            ])
+            batches = await self.client.query_batch_points(
+                self.collection,
+                requests=[
+                    models.QueryRequest(
+                        filter=models.Filter(
+                            must=[
+                                *conditions,
+                                models.FieldCondition(
+                                    key="normalized_title",
+                                    match=models.MatchValue(
+                                        value=normalize_title(title)
+                                    ),
+                                ),
+                            ]
+                        ),
+                        limit=limit,
+                        with_payload=True,
+                        with_vector=False,
+                    )
+                    for title in titles
+                ],
+            )
         except ApiException as error:
-            raise ProviderError(f"qdrant.match_titles: {provider_error_message(error)}") from error
-        return [PaperLookupMatch([to_paper(point.payload) for point in batch.points]) for batch in batches]
+            raise ProviderError(
+                f"qdrant.match_titles: {provider_error_message(error)}"
+            ) from error
+
+        return [
+            PaperLookupMatch(
+                [to_paper(point.payload) for point in batch.points]
+            )
+            for batch in batches
+        ]
 
     async def search(
         self,
@@ -123,12 +187,15 @@ class QdrantPaperRepository:
     ) -> list[PaperCandidate]:
         conditions = self._conditions(categories, published_after, published_before)
         filters = models.Filter(must=conditions) if conditions else None
+
         # 先在关键词通道内按标题/TLDR/摘要权重融合，再与稠密通道等权融合；
         # 避免三个文本分支在外层 RRF 中无意把关键词总权重放大三倍。
         lexical = [
             models.Prefetch(
                 query=models.Document(
-                    text=query, model="Qdrant/bm25", options=BM25_OPTIONS
+                    text=query,
+                    model="Qdrant/bm25",
+                    options=BM25_OPTIONS,
                 ),
                 using=name,
                 filter=filters,
@@ -136,7 +203,11 @@ class QdrantPaperRepository:
             )
             for name in BM25_FIELDS
         ]
-        fusion = models.RrfQuery(rrf=models.Rrf(k=rrf_k, weights=BM25_WEIGHTS))
+        fusion = models.RrfQuery(
+            rrf=models.Rrf(k=rrf_k, weights=BM25_WEIGHTS)
+        )
+
+        # 有稠密向量时：关键词子融合 + 稠密单路 → 外层等权 RRF。
         prefetch = lexical
         if vector is not None:
             prefetch = [
@@ -150,6 +221,7 @@ class QdrantPaperRepository:
                 ),
             ]
             fusion = models.RrfQuery(rrf=models.Rrf(k=rrf_k))
+
         response = await self.client.query_points(
             self.collection,
             prefetch=prefetch,
@@ -164,10 +236,13 @@ class QdrantPaperRepository:
         ]
 
     async def lookup(
-        self, identifiers: list[PaperIdentifier]
+        self,
+        identifiers: list[PaperIdentifier],
     ) -> list[PaperLookupMatch]:
+        """按 arXiv id 与 DOI 精确查找；每条身份独立成批，避免混查歧义。"""
         if not identifiers:
             return []
+
         try:
             results = await self.client.query_batch_points(
                 self.collection,
@@ -176,9 +251,11 @@ class QdrantPaperRepository:
                         filter=models.Filter(
                             must=[
                                 models.FieldCondition(
-                                    key="arxiv_id"
-                                    if item.kind == IdentifierKind.ARXIV
-                                    else "doi",
+                                    key=(
+                                        "arxiv_id"
+                                        if item.kind == IdentifierKind.ARXIV
+                                        else "doi"
+                                    ),
                                     match=models.MatchValue(value=item.value),
                                 )
                             ]
@@ -194,7 +271,10 @@ class QdrantPaperRepository:
             raise ProviderError(
                 f"qdrant.lookup: {provider_error_message(exc)}"
             ) from exc
+
         return [
-            PaperLookupMatch([to_paper(point.payload) for point in batch.points])
+            PaperLookupMatch(
+                [to_paper(point.payload) for point in batch.points]
+            )
             for batch in results
         ]
