@@ -63,7 +63,7 @@ class FakeProvider:
 
 
 class FakeCache:
-    """按论文身份共享完整 Paper，并记录正负缓存的 TTL。"""
+    """按论文身份共享完整 Paper，并记录找到与未找到结果的统一 TTL。"""
 
     def __init__(self):
         self.values = {}

@@ -22,6 +22,5 @@ def make_pdf_service(provider=None, cache=None):
     return PaperPdfRecoverService(
         provider=provider or AsyncMock(recover=AsyncMock(return_value=None)),
         cache=cache or MemoryPdfCache(),
-        positive_ttl_seconds=86400,
-        negative_ttl_seconds=3600,
+        ttl_seconds=86400,
     )

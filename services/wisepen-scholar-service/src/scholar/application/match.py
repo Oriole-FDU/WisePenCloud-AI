@@ -136,7 +136,7 @@ class PaperMatchService:
             )
         )
 
-        # 1) 完整论文缓存：命中即拿到完整论文，未命中留待后续层。
+        # 完整论文缓存：命中即拿到完整论文，未命中留待后续层。
         try:
             async with asyncio.timeout_at(deadline):
                 cached = await self.cache.match_titles(titles, sources)
@@ -166,7 +166,7 @@ class PaperMatchService:
                 )
             )
 
-        # 2) 本地论文索引：只处理仍未确定（非 FOUND / AMBIGUOUS）的标题。
+        # 本地论文索引：只处理仍未确定（非 FOUND / AMBIGUOUS）的标题。
         pending = [
             i
             for i, item in enumerate(resolved)
@@ -236,7 +236,7 @@ class PaperMatchService:
                     )
                 )
 
-        # 3) Crossref DOI：把标题解析为稳定身份，只对仍未确定的标题请求。
+        # Crossref DOI：把标题解析为稳定身份，只对仍未确定的标题请求。
         pending = [
             i
             for i, item in enumerate(resolved)
@@ -335,7 +335,7 @@ class PaperMatchService:
                         )
                     execution.extend(found.execution)
 
-        # 4) 把去重后的结果展开回原始标题位置（含重复项）。
+        # 把去重后的结果展开回原始标题位置（含重复项）。
         items = [MatchItem(title) for title in query.titles]
         for item, slots in zip(resolved, positions.values(), strict=True):
             for index in slots:

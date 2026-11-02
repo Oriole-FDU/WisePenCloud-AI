@@ -125,8 +125,7 @@ class Container(containers.DeclarativeContainer):
             email=config.UNPAYWALL_EMAIL,
         ),
         cache=paper_cache,
-        positive_ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
-        negative_ttl_seconds=config.SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS,
+        ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
     )
 
     # --- 平台 Provider ----------------------------------------------------
@@ -223,8 +222,7 @@ class Container(containers.DeclarativeContainer):
     lookup_runner = providers.Singleton(
         LookupRunner,
         bindings=lookup_bindings,
-        positive_ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
-        negative_ttl_seconds=config.SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS,
+        ttl_seconds=config.SCHOLAR_PAPER_CACHE_TTL_SECONDS,
     )
 
     # --- 应用用例 ---------------------------------------------------------

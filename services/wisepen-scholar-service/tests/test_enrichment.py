@@ -147,7 +147,7 @@ async def test_redis_cache_roundtrips_full_paper_aliases_and_ttl_then_invalidate
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("signals", [{}, {"citation_count": 0}])
-async def test_negative_and_positive_lookup_results_use_distinct_ttls_and_cache_hits(signals):
+async def test_found_and_not_found_lookup_results_share_full_ttl_and_cache_hits(signals):
     redis = FakeRedisBoundary()
     cache = RedisPaperCache(redis, "ttl-contract")
     missing = parse_identifier("corpusid:404")
@@ -165,13 +165,14 @@ async def test_negative_and_positive_lookup_results_use_distinct_ttls_and_cache_
     lookup = PaperLookupService(runner(provider, cache=cache), pdf=make_pdf_service(), policies=make_policy_store())
 
     absent = await lookup.lookup(PaperLookup(["corpusid:404"]))
+    absent_repeated = await lookup.lookup(PaperLookup(["corpusid:404"]))
     present = await lookup.lookup(PaperLookup(["corpusid:123"]))
     repeated = await lookup.lookup(PaperLookup(["corpusid:123"]))
 
-    assert absent.items[0].status == LookupStatus.NOT_FOUND
+    assert absent.items[0].status == absent_repeated.items[0].status == LookupStatus.NOT_FOUND
     assert present.items[0].paper.title == repeated.items[0].paper.title
     assert provider.calls == [([missing], None), ([found], None)]
-    assert set(redis.ttls.values()) == {3600, 86400}
+    assert set(redis.ttls.values()) == {86400}
 
 
 @pytest.mark.asyncio

@@ -77,7 +77,7 @@ S2 平台请求通过 Redis 跨实例合流：收集周期内按 ID 去重，每
 
 合流与分发的自动化验收使用独立 Redis 测试命名空间及 HTTP 替身，覆盖不同实例和独立进程，不消耗真实 S2 配额。
 
-论文 lookup 正缓存默认 24 小时，确认未找到的负缓存默认 1 小时，均可配置。找到论文即使用正缓存 TTL，不因缺少引用数、TLDR 等字段缩短 TTL；网络失败不写负缓存。
+论文 lookup 的找到与确认未找到结果统一使用 `SCHOLAR_PAPER_CACHE_TTL_SECONDS`，默认 24 小时。不因缺少引用数、TLDR 等字段缩短 TTL；网络失败不写缓存。
 
 ## 完整标题匹配
 
@@ -116,7 +116,7 @@ search、lookup、discover 在最终出口统一调用 `application.paper_projec
 
 search、lookup、discover 对最终返回论文调用 `PaperPdfRecoverService.recover`，随后统一投影。顺序为顶层 PDF、provider 注册的 PDF（S2 优先 OpenAlex）、确定 arXiv ID 对应的标准 PDF、Unpaywall DOI 补救。已有明确链接不发 HEAD、不下载验证；没有 DOI 不请求 Unpaywall。
 
-Unpaywall 仅取 `best_oa_location.url_for_pdf` 或其他 `oa_locations` 的 PDF，不使用落地页和 OA 状态。邮箱配置 `UNPAYWALL_EMAIL` 默认为 `jzsun24@m.fudan.edu.cn`，单次请求超时 5 秒、并发上限 4、不自动重试。独立 DOI 缓存的正 TTL 沿用论文缓存 TTL，确认无链接或 404 使用负 TTL；网络失败不写负缓存。补救失败保留论文并报告 `unpaywall` execution，结果只填顶层 `pdf_url`，不新增 metadata 命名空间。
+Unpaywall 仅取 `best_oa_location.url_for_pdf` 或其他 `oa_locations` 的 PDF，不使用落地页和 OA 状态。邮箱配置 `UNPAYWALL_EMAIL` 默认为 `jzsun24@m.fudan.edu.cn`，单次请求超时 5 秒、并发上限 4、不自动重试。独立 DOI 缓存中，找到 PDF、确认无链接和 404 统一沿用论文缓存 TTL；网络失败不写缓存。补救失败保留论文并报告 `unpaywall` execution，结果只填顶层 `pdf_url`，不新增 metadata 命名空间。
 
 HTTP BYOK 请求头为 `X-OpenAlex-Api-Key`、`X-HuggingFace-Api-Key`、`X-S2-Api-Key`。MCP 从 `com.wisepen/tool_config` 的 `openalex_api_key`、`huggingface_api_key`、`s2_api_key` 读取，不进入模型参数或请求 JSON。没有搜索 BYOK 时，本地结果仍可使用平台 key 富化。
 

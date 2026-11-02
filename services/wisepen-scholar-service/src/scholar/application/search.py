@@ -353,7 +353,7 @@ class PaperSearchService:
         ]
         identities = [cls._paper_identity(paper) for _, _, paper in rows]
 
-        # 1) 构建跨来源的精确身份关联图。
+        # 构建跨来源的精确身份关联图。
         neighbors = [set() for _ in rows]
         conflicts = []
         for left, (left_source, _, _) in enumerate(rows):
@@ -382,7 +382,7 @@ class PaperSearchService:
                 neighbors[left].add(right)
                 neighbors[right].add(left)
 
-        # 2) 按连通分量合并；同一来源重复出现或 arXiv 身份不唯一时记录冲突。
+        # 按连通分量合并；同一来源重复出现或 arXiv 身份不唯一时记录冲突。
         candidates, seen = {}, set()
         for index in range(len(rows)):
             if index in seen:
@@ -440,7 +440,7 @@ class PaperSearchService:
             for member in members:
                 candidates[member] = (f"record:{members[0]}", merged)
 
-        # 3) 按融合器要求组织为来源列表，再交给 RRF。
+        # 按融合器要求组织为来源列表，再交给 RRF。
         lists = {source: [] for source in ranked}
         for index, (source, rank, _) in enumerate(rows):
             identity, paper = candidates[index]

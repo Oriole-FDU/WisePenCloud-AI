@@ -23,12 +23,10 @@ class PaperPdfRecoverService:
         provider: PaperPdfRecover,
         cache: PaperCache,
         *,
-        positive_ttl_seconds: int,
-        negative_ttl_seconds: int,
+        ttl_seconds: int,
     ):
         self.provider, self.cache = provider, cache
-        self.positive_ttl_seconds = positive_ttl_seconds
-        self.negative_ttl_seconds = negative_ttl_seconds
+        self.ttl_seconds = ttl_seconds
 
     async def recover(
         self,
@@ -86,12 +84,8 @@ class PaperPdfRecoverService:
                 errors.append(result)
             else:
                 resolved[doi] = result
-                ttl = (
-                    self.positive_ttl_seconds
-                    if result is not None
-                    else self.negative_ttl_seconds
-                )
-                writes.append((doi, result, ttl))
+                # 确认无 PDF 与找到 PDF 共用完整缓存周期；请求失败仍不缓存。
+                writes.append((doi, result, self.ttl_seconds))
 
         if writes:
             try:

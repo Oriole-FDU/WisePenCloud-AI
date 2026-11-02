@@ -177,7 +177,6 @@ def scholar_client():
             "SCHOLAR_S2_KEY_INTERVAL_SECONDS": 1.5,
             "SCHOLAR_S2_BATCH_MAX_IDS": 300,
             "SCHOLAR_PAPER_CACHE_TTL_SECONDS": 86400,
-            "SCHOLAR_NEGATIVE_CACHE_TTL_SECONDS": 3600,
         }
     )
     from unittest.mock import AsyncMock

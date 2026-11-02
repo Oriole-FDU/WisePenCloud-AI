@@ -15,7 +15,7 @@
 - 搜索候选缓存区分日期、领域与模型版本，用户 limit 只裁剪返回结果。search/discover 以 candidates-v2 保存投影前候选；完整论文 lookup 缓存版本不变，仍按来源和稳定身份共享。论文事实缓存跨凭证共享，但搜索和发现必须先通过 BYOK 可用性判断；在途 I/O 按有效 key 隔离。
 - lookup 统一返回基础论文和调研 metadata，删除 purpose、重复的 item.metadata 及 enrichment_status；metadata 只出现在 paper 内。HF 可独立提供基础论文。
 - search 与 lookup 只在主题检索和按 ID 精确获取阶段不同，随后共用领域富化、PDF 补救和投影。通用来源精确找到论文即停止，arXiv 无 S2 信号时不在线补查；S2 事实由离线同步负责。
-- 删除 has_signals 与 short_lived 回调。已找到论文统一使用正缓存 TTL，缺引用数或 TLDR 不缩短缓存；确认未找到使用负 TTL。arXiv 公共 metadata 提供 categories、原始 journal_ref 和 comments，不提供 updated_date、latest_version，也不解析 venue。
+- 删除 has_signals 与 short_lived 回调。找到与确认未找到的论文统一使用完整缓存 TTL，缺引用数或 TLDR 不缩短缓存。arXiv 公共 metadata 提供 categories、原始 journal_ref 和 comments，不提供 updated_date、latest_version，也不解析 venue。
 - 各 provider 实现别名、详情完整性及字段投影，由 providers/policies.py 中的 ProviderPolicy 注册层统一组装。search、lookup、discover 最终出口统一投影；具体字段合同见 [README](../README.md#模型可见-metadata)。
 - 本次 GPU FP16 只负责存量灌库。后续每日 arXiv OAI + S2 Graph batch，必须请求 `embedding.specter_v2`；不使用 S2 diff，不下载
   release 大包。离线代码移出 src，位于 deploy/offline。
@@ -186,7 +186,7 @@ V1 不增加 `recency` 别名。时间过滤使用来源提供的发表或首次
 2. 未找到、不支持、外部失败或拥堵允许下一来源；歧义不任取候选，不继续关联。保留输入顺序和重复项。
 3. 通用链后与 search 一样按详情完整性执行 field.field_enrichers。已有基础信息取首个成功来源，metadata 按来源命名空间保留；HF 也可独立提供 Paper。
 4. 内部保留完整作者及来源事实，最终返回前统一投影。部分成功保留论文和真实错误；没有可用结果且发生查询失败时传播原始错误。
-5. 来源缓存和在途请求按稳定身份共享；缓存命中不要求上游 key，未命中使用 BYOK 或平台凭证。只有确认未找到才负缓存；最后一个等待者取消才取消共享请求。
+5. 来源缓存和在途请求按稳定身份共享；缓存命中不要求上游 key，未命中使用 BYOK 或平台凭证。找到与确认未找到统一使用完整论文缓存 TTL，网络失败不缓存；最后一个等待者取消才取消共享请求。
 
 ### 3.3 `discover_papers`
 

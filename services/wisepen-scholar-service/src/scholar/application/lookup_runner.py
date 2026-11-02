@@ -79,12 +79,10 @@ class LookupRunner:
         self,
         bindings: dict[str, LookupBinding],
         *,
-        positive_ttl_seconds: int = 86400,
-        negative_ttl_seconds: int = 3600,
+        ttl_seconds: int = 86400,
     ):
         self.bindings = bindings
-        self.positive_ttl_seconds = positive_ttl_seconds
-        self.negative_ttl_seconds = negative_ttl_seconds
+        self.ttl_seconds = ttl_seconds
         self._inflight: dict[tuple, _InFlight] = {}
         self._lock = asyncio.Lock()
 
@@ -108,7 +106,7 @@ class LookupRunner:
         if binding is None or binding.cache is None:
             return
         records = [
-            (CachedPaperLookup(paper, tuple(self._aliases(paper))), self.positive_ttl_seconds)
+            (CachedPaperLookup(paper, tuple(self._aliases(paper))), self.ttl_seconds)
             for paper in papers
             if all(name in paper.metadata.get(source, {}) for name in binding.rules.required_fields)
         ]
@@ -452,12 +450,8 @@ class LookupRunner:
                 paper, tuple(dict.fromkeys([identifier, *aliases]))
             )
             batch.records[identifier] = record
-            writes.append(
-                (
-                    record,
-                    self.negative_ttl_seconds if paper is None else self.positive_ttl_seconds,
-                )
-            )
+            # 未找到也是已完成的查询结果，与找到论文共用完整缓存周期。
+            writes.append((record, self.ttl_seconds))
         if binding.cache is not None and writes:
             try:
                 await binding.cache.put_many(source, writes)

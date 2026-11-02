@@ -202,7 +202,7 @@ async def test_search_merges_hf_facts_in_place_and_reuses_positive_and_negative_
         "2401.00001",
         "2401.00003",
     }
-    assert set(lookup_cache.ttls) == {3600, 86400}
+    assert set(lookup_cache.ttls) == {86400}
     assert repeated.enrichment_execution[0].cache_hit is True
     assert len(requests) == 2
     assert all(request.headers["authorization"] == "Bearer platform-hf" for request in requests)

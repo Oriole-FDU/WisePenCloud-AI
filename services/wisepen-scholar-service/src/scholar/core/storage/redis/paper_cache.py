@@ -1,5 +1,7 @@
 """统一论文缓存：来源事实、标题索引和 Unpaywall 正负结果。"""
 
+from __future__ import annotations
+
 import hashlib
 from copy import deepcopy
 
@@ -10,12 +12,51 @@ from redis.asyncio import Redis
 from scholar.core.providers.policies import paper_identifiers
 from scholar.core.storage.redis import PAPER_CACHE_REVISION
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
+from scholar.domain.models.paper import Paper
 from scholar.domain.models.identifiers import PaperIdentifier, identities_conflict, merge_identity_groups
 from scholar.utils import normalize_title
 from scholar.domain.repositories.paper_cache import CachedPaperLookup
 
 _LOOKUP = TypeAdapter(CachedPaperLookup)
 _IDENTITIES = TypeAdapter(list[PaperIdentifier])
+
+_IDENTITY_CONFLICT = "Cached lookup conflicts with the requested paper identity"
+
+
+def _find_cached_record(
+    source_records: dict[PaperIdentifier, CachedPaperLookup | None],
+    aliases: list[PaperIdentifier],
+) -> tuple[PaperIdentifier | None, CachedPaperLookup | None]:
+    """在单个来源中按别名顺序查找首条有正文的缓存记录。"""
+    for identity in aliases:
+        record = source_records.get(identity)
+        if record is not None and record.paper is not None:
+            return identity, record
+    return None, None
+
+
+def _resolve_candidate(
+    aliases: list[PaperIdentifier],
+    sources: list[str],
+    records: dict[str, dict[PaperIdentifier, CachedPaperLookup | None]],
+) -> tuple[Paper | None, str | None]:
+    """跨来源合并单篇候选论文事实：首个有正文的来源作为基础，其余补齐缺失元数据。"""
+    paper = None
+    error = None
+    for source in sources:
+        identity, record = _find_cached_record(records[source], aliases)
+        if record is None:
+            continue
+        if identity not in record.cache_aliases:
+            error = _IDENTITY_CONFLICT
+        if identities_conflict(aliases, paper_identifiers(record.paper)):
+            return paper, _IDENTITY_CONFLICT
+        if paper is None:
+            paper = deepcopy(record.paper)
+        else:
+            for name, facts in record.paper.metadata.items():
+                paper.metadata.setdefault(name, deepcopy(facts))
+    return paper, error
 
 
 class RedisPaperCache:
@@ -98,7 +139,7 @@ class RedisPaperCache:
         sources: list[str],
     ) -> list[PaperLookupMatch]:
         """按标题返回候选论文；逐候选跨来源合并，缺失时继续交由本地索引回退。"""
-        # 1) 批量取每个标题的全部身份组。
+        # 批量取每个标题的全部身份组。
         async with self.redis.pipeline(transaction=False) as pipeline:
             for title in titles:
                 pipeline.hvals(self._title_key(title))
@@ -110,7 +151,7 @@ class RedisPaperCache:
             for bucket in buckets
         ]
 
-        # 2) 收集所有唯一身份，按来源一次性批量查询。
+        # 收集所有唯一身份，按来源一次性批量查询。
         identities = list(
             dict.fromkeys(
                 identity
@@ -130,41 +171,17 @@ class RedisPaperCache:
             for source in sources
         }
 
-        # 3) 逐候选跨来源合并：同一身份组内取首个有 paper 的来源作为基础，
-        #    其余来源仅补缺失命名空间；任一候选不齐或身份冲突即判整组歧义。
+        # 逐候选跨来源合并：同一身份组内取首个有 paper 的来源作为基础，
+        # 其余来源仅补缺失命名空间；任一候选不齐或身份冲突即判整组歧义。
         matches = []
         for candidates in groups:
-            papers = []
-            error = None
-            for aliases in candidates:
-                paper = None
-                for source in sources:
-                    record = None
-                    for identity in aliases:
-                        candidate = records[source][identity]
-                        if candidate is not None and candidate.paper is not None:
-                            if identity not in candidate.cache_aliases:
-                                error = (
-                                    "Cached lookup conflicts with the requested "
-                                    "paper identity"
-                                )
-                            record = candidate
-                            break
-                    if record is None:
-                        continue
-                    actual = paper_identifiers(record.paper)
-                    if identities_conflict(aliases, actual):
-                        error = (
-                            "Cached lookup conflicts with the requested paper identity"
-                        )
-                        break
-                    if paper is None:
-                        paper = deepcopy(record.paper)
-                    else:
-                        for name, facts in record.paper.metadata.items():
-                            paper.metadata.setdefault(name, deepcopy(facts))
-                if paper is not None:
-                    papers.append(paper)
+            results = [
+                _resolve_candidate(aliases, sources, records)
+                for aliases in candidates
+            ]
+            papers = [paper for paper, _ in results if paper is not None]
+            # 组内 error 取最后一次出现的冲突错误
+            error = next((err for _, err in reversed(results) if err), None)
             # 只有身份而没有正文时继续查本地；已知同名候选不齐时也不能任选一篇。
             matches.append(
                 PaperLookupMatch(
@@ -173,7 +190,7 @@ class RedisPaperCache:
                 )
             )
 
-        # 4) 命中论文若缺 PDF，用 Unpaywall 正负缓存统一补齐。
+        # 命中论文若缺 PDF，用 Unpaywall 正负缓存统一补齐。
         dois = list(
             dict.fromkeys(
                 paper.doi
@@ -189,7 +206,7 @@ class RedisPaperCache:
                     paper.pdf_url = pdfs[paper.doi]
         return matches
 
-    # -- Unpaywall 正负缓存 --
+    # -- pdf 缓存 --
 
     async def get_pdf_many(self, dois: list[str]) -> dict[str, str | None]:
         values = await self.redis.mget([self._pdf_key(doi) for doi in dois])

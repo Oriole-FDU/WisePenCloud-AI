@@ -18,6 +18,29 @@ def db(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_sync_requests_only_consumed_fields_and_returns_supported_aliases():
+    request = AsyncMock(return_value=[{
+        "paperId": "a" * 40,
+        "externalIds": {
+            "ArXiv": "2501.12948v2", "DOI": "10.5555/EXAMPLE", "PubMed": "12345678",
+        },
+    }])
+    results = await S2SyncClient(AsyncMock(request=request)).lookup([
+        parse_identifier("2501.12948"),
+    ])
+
+    assert set(request.call_args.kwargs["params"]["fields"].split(",")) == {
+        "corpusId", "externalIds", "tldr", "citationCount",
+        "influentialCitationCount", "openAccessPdf", "embedding.specter_v2",
+    }
+    assert results[0].identifiers == [
+        parse_identifier(f"s2:{'a' * 40}"),
+        parse_identifier("2501.12948"),
+        parse_identifier("10.5555/example"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_daily_sync_requests_v2_and_persists_vector_for_publication(db):
     requests = []
 

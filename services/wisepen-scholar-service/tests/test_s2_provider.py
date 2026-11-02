@@ -11,6 +11,8 @@ from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import parse_identifier
 from scholar.domain.models.paper import PaperSource
 from scholar.core.providers import S2Provider, S2Transport
+from scholar.core.providers.policies import paper_identifiers
+from scholar.core.providers.s2.provider import aliases
 
 
 class Permits:
@@ -66,8 +68,7 @@ async def test_lookup_requests_fixed_fields_and_returns_complete_paper():
     assert request.headers["content-type"] == "application/json"
     assert request.read() == b'{"ids":["arxiv:2310.08560","CorpusId:123"]}'
     fields = set(request.url.params["fields"].split(","))
-    assert {
-        "paperId",
+    assert fields == {
         "corpusId",
         "externalIds",
         "url",
@@ -81,7 +82,7 @@ async def test_lookup_requests_fixed_fields_and_returns_complete_paper():
         "year",
         "publicationDate",
         "venue",
-    } <= fields
+    }
     assert not any(field.startswith("authors.") for field in fields)
     assert not fields.intersection(
         {"embedding", "referenceCount", "fieldsOfStudy", "s2FieldsOfStudy"}
@@ -107,10 +108,31 @@ async def test_lookup_requests_fixed_fields_and_returns_complete_paper():
     assert paper.doi == "10.5555/s2.test"
     assert paper.publication_date == date(2024, 1, 2)
     assert paper.pdf_url == "https://example.test/paper.pdf"
-    assert S2Provider.identifiers(paper_response()) == [
+    assert paper_identifiers(paper) == [
+        parse_identifier("2310.08560v2"),
+        parse_identifier("10.5555/s2.test"),
         parse_identifier(f"s2:{'a' * 40}"),
         parse_identifier("corpusid:123"),
-        parse_identifier("2310.08560v2"),
+    ]
+
+
+def test_s2_aliases_keep_only_supported_external_identities():
+    payload = paper_response()
+    payload["externalIds"].update({
+        "CorpusId": 123,
+        "PubMed": "12345678",
+        "MAG": "3015453090",
+        "DBLP": "conf/example/paper",
+    })
+    metadata = S2Provider.metadata(payload)
+
+    assert metadata["s2"]["external_ids"] == {
+        "ArXiv": "2310.08560v2", "DOI": "10.5555/S2.TEST", "CorpusId": 123,
+    }
+    assert aliases(metadata) == [
+        parse_identifier(f"s2:{'a' * 40}"),
+        parse_identifier("corpusid:123"),
+        parse_identifier("2310.08560"),
         parse_identifier("10.5555/s2.test"),
     ]
 

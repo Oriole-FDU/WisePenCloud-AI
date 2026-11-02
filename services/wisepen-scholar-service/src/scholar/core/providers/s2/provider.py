@@ -15,18 +15,19 @@ from scholar.domain.models.identifiers import (
 from scholar.domain.models.paper import Paper, PaperSource
 from .transport import S2Transport
 
-IDENTITY_FIELDS = ("paperId", "corpusId", "externalIds", "url", "title")
+# paperId 由 S2 自动返回；离线同步只需要身份，不请求在线详情字段。
+IDENTITY_FIELDS = ("corpusId", "externalIds")
 ENRICHMENT_FIELDS = (
     "tldr",
     "citationCount",
     "influentialCitationCount",
     "openAccessPdf",
 )
-DETAIL_FIELDS = ("abstract", "authors", "year", "publicationDate", "venue")
+DETAIL_FIELDS = ("url", "title", "abstract", "authors", "year", "publicationDate", "venue")
 
 
 def aliases(metadata: dict) -> list[PaperIdentifier]:
-    """从 S2 响应中提取 paper_id 与 corpus_id 作为别名。
+    """从 S2 来源事实中提取平台支持的身份，归一化后保序去重。
 
     别名用于：多 Key 共享缓存（同一份数据同时写入 ``s2:<id>``、
     ``corpusid:<id>``）、跨源身份接力，以及比对 known 与 actual 别名以
@@ -38,7 +39,12 @@ def aliases(metadata: dict) -> list[PaperIdentifier]:
         aliases.append(parse_identifier(f"s2:{values['paper_id']}"))
     if values.get("corpus_id") is not None:
         aliases.append(parse_identifier(f"corpusid:{values['corpus_id']}"))
-    return aliases
+    external_ids = values.get("external_ids") or {}
+    # 其余外部身份不属于 IdentifierKind，不能落入 parse_identifier 的 arXiv 兜底。
+    for key, prefix in (("ArXiv", "arxiv"), ("DOI", "doi"), ("CorpusId", "corpusid")):
+        if external_ids.get(key) is not None and external_ids[key] != "":
+            aliases.append(parse_identifier(f"{prefix}:{external_ids[key]}"))
+    return list(dict.fromkeys(aliases))
 
 
 def pdf_url(paper: Paper) -> str | None:
@@ -129,6 +135,12 @@ class S2Provider:
                     else str(payload["corpusId"])
                 ),
                 "paper_id": payload.get("paperId"),
+                # 只保存有别名消费方的外部身份，不透传整份 externalIds。
+                "external_ids": {
+                    key: value
+                    for key, value in (payload.get("externalIds") or {}).items()
+                    if key in ("ArXiv", "DOI", "CorpusId") and value is not None and value != ""
+                },
                 "citation_count": payload.get("citationCount"),
                 "influential_citation_count": payload.get(
                     "influentialCitationCount"
@@ -146,20 +158,6 @@ class S2Provider:
         if "venue" in payload:
             metadata["s2"]["venue"] = payload["venue"]
         return metadata
-
-    @staticmethod
-    def identifiers(payload: dict) -> list[PaperIdentifier]:
-        identifiers = []
-        if payload.get("paperId"):
-            identifiers.append(parse_identifier(f"s2:{payload['paperId']}"))
-        if payload.get("corpusId") is not None:
-            identifiers.append(parse_identifier(f"corpusid:{payload['corpusId']}"))
-        external_ids = payload.get("externalIds") or {}
-        if external_ids.get("ArXiv"):
-            identifiers.append(parse_identifier(external_ids["ArXiv"]))
-        if external_ids.get("DOI"):
-            identifiers.append(parse_identifier(external_ids["DOI"]))
-        return list(dict.fromkeys(identifiers))
 
     @staticmethod
     def _paper(payload: dict, metadata: dict) -> Paper:

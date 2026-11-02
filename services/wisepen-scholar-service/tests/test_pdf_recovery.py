@@ -67,7 +67,7 @@ async def test_unpaywall_uses_only_pdf_fields_and_caches_positive_and_negative_r
     assert requests[0].method == "GET"
     assert requests[0].url.path == "/v2/10.1234/example"
     assert requests[0].url.params["email"] == "jzsun24@m.fudan.edu.cn"
-    assert cache.writes == [("10.1234/example", expected, 86400 if expected else 3600)]
+    assert cache.writes == [("10.1234/example", expected, 86400)]
 
 
 @pytest.mark.asyncio

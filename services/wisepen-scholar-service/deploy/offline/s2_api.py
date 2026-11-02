@@ -3,37 +3,10 @@
 from dataclasses import dataclass
 from math import isfinite
 
-from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
+from scholar.domain.models.identifiers import PaperIdentifier
 from scholar.ml.specter import DIMENSIONS
-from scholar.core.providers.s2.provider import ENRICHMENT_FIELDS, IDENTITY_FIELDS, S2Provider
+from scholar.core.providers.s2.provider import ENRICHMENT_FIELDS, IDENTITY_FIELDS, S2Provider, aliases
 from scholar.core.providers.s2 import S2Transport
-
-
-def _safe_identifiers(payload: dict) -> list[PaperIdentifier]:
-    """安全解析 S2 返回的外部标识，过滤脏数据（如格式不合规的 DOI），避免阻断主流程。"""
-    identifiers = []
-    if payload.get("paperId"):
-        try:
-            identifiers.append(parse_identifier(f"s2:{payload['paperId']}"))
-        except ValueError:
-            pass
-    if payload.get("corpusId") is not None:
-        try:
-            identifiers.append(parse_identifier(f"corpusid:{payload['corpusId']}"))
-        except ValueError:
-            pass
-    external_ids = payload.get("externalIds") or {}
-    if external_ids.get("ArXiv"):
-        try:
-            identifiers.append(parse_identifier(external_ids["ArXiv"]))
-        except ValueError:
-            pass
-    if external_ids.get("DOI"):
-        try:
-            identifiers.append(parse_identifier(external_ids["DOI"]))
-        except ValueError:
-            pass
-    return list(dict.fromkeys(identifiers))
 
 
 @dataclass
@@ -87,10 +60,11 @@ class S2SyncClient:
                     or not all(isfinite(value) for value in vector)
                 ):
                     raise ValueError("S2 returned an invalid specter_v2 embedding")
+            metadata = S2Provider.metadata(payload)
             results.append(
                 S2SyncPaper(
-                    _safe_identifiers(payload),
-                    S2Provider.metadata(payload),
+                    aliases(metadata),
+                    metadata,
                     vector,
                 )
             )
