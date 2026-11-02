@@ -126,3 +126,36 @@ async def test_unpaywall_bounds_concurrency_and_cancels_pending_http():
             await task
     assert peak == 4
     assert active == 0
+
+
+@pytest.mark.asyncio
+async def test_pdf_read_deadline_preserves_paper_and_reports_failure():
+    async def blocked(doi):
+        await asyncio.Event().wait()
+
+    provider = AsyncMock(recover=AsyncMock(side_effect=blocked))
+    recovered, execution = await make_pdf_service(provider).recover(
+        [paper()], deadline=asyncio.get_running_loop().time() + 0.05,
+    )
+
+    assert recovered[0].title == "Research"
+    assert recovered[0].pdf_url is None
+    assert execution.status == SourceExecutionStatus.FAILED
+    assert "deadline" in execution.error
+
+
+@pytest.mark.asyncio
+async def test_cache_write_failure_preserves_new_pdf_and_success(failed_cache_write):
+    cache = MemoryPdfCache()
+    cache.put_pdf_many = failed_cache_write
+    provider = AsyncMock(recover=AsyncMock(return_value="https://repo.test/pdf"))
+    source = paper()
+
+    recovered, execution = await make_pdf_service(provider, cache).recover(
+        [source], deadline=asyncio.get_running_loop().time() + 0.05,
+    )
+
+    assert recovered[0].pdf_url == "https://repo.test/pdf"
+    assert source.pdf_url is None
+    assert execution.status == SourceExecutionStatus.COMPLETED
+    assert execution.error is None

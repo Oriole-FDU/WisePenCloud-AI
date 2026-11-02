@@ -10,7 +10,9 @@ from enum import StrEnum
 from collections.abc import Awaitable, Callable
 
 import orjson
+from redis.exceptions import RedisError
 
+from common.logger import warning
 from common.utils.retrieval import Candidate, RrfFusion
 from common.core.exceptions import ServiceException
 from scholar.domain.interfaces.field_policies import ScholarPolicyProvider
@@ -220,18 +222,9 @@ class PaperSearchService:
             credentials=self.platform_credentials | credentials,
             deadline=deadline,
         )
-        pdf_budget = asyncio.timeout_at(deadline)
-        try:
-            async with pdf_budget:
-                papers, pdf_execution = await self.pdf.recover([target.paper for target in targets])
-        except TimeoutError:
-            if not pdf_budget.expired():
-                raise
-            papers = [target.paper for target in targets]
-            pdf_execution = SourceExecution(
-                "unpaywall", False, SourceExecutionStatus.FAILED,
-                "PDF recovery exceeded the search request deadline",
-            )
+        papers, pdf_execution = await self.pdf.recover(
+            [target.paper for target in targets], deadline=deadline,
+        )
         if pdf_execution is not None:
             enrichment_execution.append(pdf_execution)
         enriched_papers = [project_paper(paper) for paper in papers]
@@ -271,12 +264,6 @@ class PaperSearchService:
                     limit=binding.candidate_limit,
                     api_key=api_key,
                 )
-                # 降级结果仍可返回，但不缓存为完整检索，避免编码恢复后继续命中旧降级结果。
-                if batch.partial_error is None:
-                    stage = "query_cache.put"
-                    await self.query_cache.put(cache_key, batch.papers)
-                    stage = "paper_cache.put"
-                    await self.lookup_runner.cache_papers(source, batch.papers)
         except TimeoutError as error:
             if not budget.expired():
                 raise
@@ -284,6 +271,19 @@ class PaperSearchService:
             raise ProviderError(f"{source} {operation} exceeded the search request deadline") from error
         finally:
             provider_operation.reset(operation_token)
+
+        # 写缓存只复用剩余预算；写入失败不能撤销已完成的检索或触发来源回退。
+        # 降级结果不缓存为完整检索，避免编码恢复后继续命中旧降级结果。
+        if batch.partial_error is None:
+            stage = "query_cache.put"
+            try:
+                async with asyncio.timeout_at(deadline):
+                    await self.query_cache.put(cache_key, batch.papers)
+                    stage = "paper_cache.put"
+                    await self.lookup_runner.cache_papers(source, batch.papers)
+            except (RedisError, TimeoutError) as error:
+                warning("Scholar cache write failed.", source=source, operation=stage,
+                        error_type=type(error).__name__, error=str(error))
         return batch.papers, SourceExecution(
             source,
             False,

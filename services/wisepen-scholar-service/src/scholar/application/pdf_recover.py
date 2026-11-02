@@ -5,6 +5,7 @@ from dataclasses import replace
 
 from redis.exceptions import RedisError
 
+from common.logger import warning
 from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_pdf_recover import PaperPdfRecover
 from scholar.domain.models.identifiers import normalize_doi
@@ -33,6 +34,7 @@ class PaperPdfRecoverService:
         papers: list[Paper],
         *,
         cache_only: bool = False,
+        deadline: float | None = None,
     ) -> tuple[list[Paper], SourceExecution | None]:
         # 只改副本；来源和候选缓存仍保留投影前的原始事实。
         papers = [replace(paper) for paper in papers]
@@ -57,9 +59,18 @@ class PaperPdfRecoverService:
         if not positions:
             return papers, None
 
-        # 批量查缓存，再对未命中的 DOI 并发补查上游。
+        # 读取与写入分别使用剩余预算，避免写入超时被误判为 PDF 读取失败。
+        budget = asyncio.timeout_at(deadline)
         try:
-            resolved = await self.cache.get_pdf_many(list(positions))
+            async with budget:
+                resolved = await self.cache.get_pdf_many(list(positions))
+                cache_hit = bool(resolved)
+                # 完整论文缓存命中后只组装已有 PDF 事实，不再触发外部补全。
+                pending = [] if cache_only else [doi for doi in positions if doi not in resolved]
+                results = await asyncio.gather(
+                    *(self.provider.recover(doi) for doi in pending),
+                    return_exceptions=True,
+                )
         except RedisError as error:
             return papers, SourceExecution(
                 "unpaywall",
@@ -67,13 +78,13 @@ class PaperPdfRecoverService:
                 SourceExecutionStatus.FAILED,
                 str(error),
             )
-        cache_hit = bool(resolved)
-        # 完整论文缓存命中后只组装已有 PDF 事实，不再触发外部补全。
-        pending = [] if cache_only else [doi for doi in positions if doi not in resolved]
-        results = await asyncio.gather(
-            *(self.provider.recover(doi) for doi in pending),
-            return_exceptions=True,
-        )
+        except TimeoutError:
+            if not budget.expired():
+                raise
+            return papers, SourceExecution(
+                "unpaywall", False, SourceExecutionStatus.FAILED,
+                "PDF recovery exceeded the request deadline",
+            )
 
         errors, writes = [], []
         for doi, result in zip(pending, results, strict=True):
@@ -87,17 +98,19 @@ class PaperPdfRecoverService:
                 # 确认无 PDF 与找到 PDF 共用完整缓存周期；请求失败仍不缓存。
                 writes.append((doi, result, self.ttl_seconds))
 
-        if writes:
-            try:
-                await self.cache.put_pdf_many(writes)
-            except RedisError as error:
-                # 新找到的 PDF 仍可返回，写缓存故障单独报告。
-                errors.append(error)
-
         # 回填 PDF：不覆盖已有 pdf_url 的论文（positions 只收集缺失者）。
         for doi, url in resolved.items():
             for paper in positions[doi]:
                 paper.pdf_url = url
+
+        if writes:
+            try:
+                async with asyncio.timeout_at(deadline):
+                    await self.cache.put_pdf_many(writes)
+            except (RedisError, TimeoutError) as error:
+                # 新找到的 PDF 已回填；写入故障不改变上游补全的执行状态。
+                warning("Scholar cache write failed.", source="unpaywall", operation="paper_cache.put_pdf_many",
+                        error_type=type(error).__name__, error=str(error))
 
         status = SourceExecutionStatus.COMPLETED
         if errors:

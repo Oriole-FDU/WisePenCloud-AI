@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from redis.exceptions import RedisError
+from common.logger import warning
 
 from scholar.application.lookup import LookupStatus, PaperLookup, PaperLookupService
 from scholar.application.paper_projection import project_paper
@@ -124,6 +125,7 @@ class PaperMatchService:
         titles = [query.titles[indexes[0]] for indexes in positions.values()]
         resolved = [MatchItem(title) for title in titles]
         execution: list[SourceExecution] = []
+        writes, title_entries = [], []
 
         # 参与标题匹配的来源：通用富化来源 + 当前领域的专用来源。
         policies = self.lookup_service.policies.current
@@ -178,7 +180,7 @@ class PaperMatchService:
                     local = await self.local.match_titles(
                         [titles[i] for i in pending]
                     )
-                matches, writes, title_entries = [], [], []
+                matches = []
                 for index, match in zip(pending, local, strict=True):
                     # 本地可能有多篇论文共享同一身份组，合并后用于歧义判断。
                     candidates = merge_identity_groups(
@@ -207,21 +209,6 @@ class PaperMatchService:
                             project_paper(paper),
                         )
                 execution.append(_execution("arxiv", matches))
-                if writes:
-                    # 把本地命中写回完整缓存与标题索引，下次可直接缓存命中。
-                    try:
-                        async with asyncio.timeout_at(deadline):
-                            await self.cache.put_many("arxiv", writes)
-                            await self.cache.index_titles(title_entries)
-                    except (RedisError, TimeoutError) as error:
-                        execution.append(
-                            SourceExecution(
-                                "paper_cache",
-                                False,
-                                SourceExecutionStatus.FAILED,
-                                _error_text(error),
-                            )
-                        )
             except (ProviderError, TimeoutError) as error:
                 for index in pending:
                     resolved[index] = MatchItem(
@@ -253,7 +240,7 @@ class PaperMatchService:
                 ]
             execution.append(_execution("crossref", matches))
 
-            ready, identities, title_entries = [], [], []
+            ready, identities = [], []
             for index, match in zip(pending, matches, strict=True):
                 candidates = merge_identity_groups(match.candidates)
                 if match.error:
@@ -278,20 +265,6 @@ class PaperMatchService:
                 title_entries.extend(
                     (titles[index], aliases) for aliases in candidates
                 )
-
-            if title_entries:
-                try:
-                    async with asyncio.timeout_at(deadline):
-                        await self.cache.index_titles(title_entries)
-                except (RedisError, TimeoutError) as error:
-                    execution.append(
-                        SourceExecution(
-                            "paper_cache",
-                            False,
-                            SourceExecutionStatus.FAILED,
-                            _error_text(error),
-                        )
-                    )
 
             if ready:
                 remaining = (
@@ -334,6 +307,20 @@ class PaperMatchService:
                             item.error,
                         )
                     execution.extend(found.execution)
+
+        # 内容解析全部完成后再写缓存，不能让可选写入耗尽后续查询的预算。
+        if writes or title_entries:
+            operation = "paper_cache.put_many" if writes else "paper_cache.index_titles"
+            try:
+                async with asyncio.timeout_at(deadline):
+                    if writes:
+                        await self.cache.put_many("arxiv", writes)
+                    if title_entries:
+                        operation = "paper_cache.index_titles"
+                        await self.cache.index_titles(title_entries)
+            except (RedisError, TimeoutError) as error:
+                warning("Scholar cache write failed.", source="match", operation=operation,
+                        error_type=type(error).__name__, error=str(error))
 
         # 把去重后的结果展开回原始标题位置（含重复项）。
         items = [MatchItem(title) for title in query.titles]

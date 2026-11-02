@@ -62,7 +62,7 @@ class _SourceBatch:
     errors: dict[PaperIdentifier, Exception] = field(default_factory=dict)
     ambiguous: set[PaperIdentifier] = field(default_factory=set)
     cache_hits: set[PaperIdentifier] = field(default_factory=set)
-    cache_errors: list[Exception] = field(default_factory=list)
+    cache_writes: list[tuple[CachedPaperLookup, int]] = field(default_factory=list)
     queued_ahead: int | None = None
 
 
@@ -263,11 +263,13 @@ class LookupRunner:
                     batch = await self._load(source, known_ids, api_key, cache_only=True)
                 else:
                     batch = await self._shared(source, known_ids, api_key)
-        except TimeoutError:
+        except TimeoutError as error:
             if not budget.expired():
                 raise
             # 只隔离本次搜索持有的超时；共享任务仍由其他等待者继续使用。
             failure = ProviderError(f"{source} enrichment exceeded the search request deadline")
+            # 整批读取失败时，HTTP 仍需通过原始原因识别 504。
+            failure.__cause__ = error
             warning("Scholar enrichment timed out.", source=source, error=str(failure))
             batch = _SourceBatch(errors=dict.fromkeys(positions, failure))
 
@@ -306,11 +308,15 @@ class LookupRunner:
                     target.paper = deepcopy(record.paper)
                 target.paper.metadata = deepcopy(target.metadata)
 
-        for error in batch.cache_errors:
-            first_error = first_error or error
-            for entries in positions.values():
-                for target in entries:
-                    target.errors.append(error)
+        if binding.cache is not None and batch.cache_writes:
+            # 共享批次的待写条目只取走一次；读取结果已交给各等待者，写入不再决定其成败。
+            writes, batch.cache_writes = batch.cache_writes, []
+            try:
+                async with asyncio.timeout_at(deadline):
+                    await binding.cache.put_many(source, writes)
+            except (RedisError, TimeoutError) as error:
+                warning("Scholar cache write failed.", source=source, operation="paper_cache.put_many",
+                        error_type=type(error).__name__, error=str(error))
 
         successes = len(batch.records) + len(batch.ambiguous)
         if successes and first_error:
@@ -430,7 +436,6 @@ class LookupRunner:
             batch.queued_ahead = s2_queued_ahead.get()
             s2_queued_ahead.reset(token)
 
-        writes = []
         for identifier, match in zip(pending, matches, strict=True):
             if match.error is not None:
                 batch.errors[identifier] = ProviderError(match.error)
@@ -451,12 +456,8 @@ class LookupRunner:
             )
             batch.records[identifier] = record
             # 未找到也是已完成的查询结果，与找到论文共用完整缓存周期。
-            writes.append((record, self.ttl_seconds))
-        if binding.cache is not None and writes:
-            try:
-                await binding.cache.put_many(source, writes)
-            except RedisError as error:
-                batch.cache_errors.append(error)
+            if binding.cache is not None:
+                batch.cache_writes.append((record, self.ttl_seconds))
         return batch
 
     def _aliases(self, paper: Paper) -> list[PaperIdentifier]:

@@ -473,6 +473,59 @@ async def test_caller_cancellation_is_not_a_search_deadline_failure():
         await task
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cache_kind", ["query", "paper"])
+async def test_cache_write_failure_keeps_search_success_without_fallback(cache_kind, failed_cache_write):
+    found = paper(PaperSource.OPENALEX, arxiv_id="2401.00001")
+    provider, fallback = FakeSearcher([found]), FakeSearcher()
+    query_cache = MemoryCache()
+    paper_cache = AsyncMock(put_many=failed_cache_write)
+    if cache_kind == "query":
+        query_cache.put = failed_cache_write
+    search = PaperSearchService(
+        {"openalex": SearchBinding(provider), "arxiv": SearchBinding(fallback)},
+        make_policy_store({AcademicField.GENERAL: FieldPolicy(["openalex", "arxiv"])}, common_enrichers=[]),
+        query_cache,
+        LookupRunner({"openalex": LookupBinding(provider, paper_cache, PROVIDER_POLICIES["openalex"])}),
+        pdf=make_pdf_service(),
+    )
+
+    result = await search.search(PaperSearch("cached write failure"), timeout=0.05)
+
+    assert result.papers[0].title == found.title
+    event = next(item for item in result.execution if item.source == "openalex")
+    assert event.status == SourceExecutionStatus.COMPLETED
+    assert event.error is None
+    assert fallback.calls == []
+
+
+@pytest.mark.asyncio
+async def test_cache_write_programming_error_propagates():
+    cache = MemoryCache()
+    cache.put = AsyncMock(side_effect=TypeError("cache implementation bug"))
+    search = service(openalex=FakeSearcher([paper(PaperSource.OPENALEX)]), cache=cache)
+    with pytest.raises(TypeError, match="cache implementation bug"):
+        await search.search(PaperSearch("broken write"), credentials={"openalex": "key"})
+
+
+@pytest.mark.asyncio
+async def test_caller_cancellation_during_cache_write_propagates():
+    started = asyncio.Event()
+
+    async def blocked(*args):
+        started.set()
+        await asyncio.Event().wait()
+
+    cache = MemoryCache()
+    cache.put = blocked
+    search = service(openalex=FakeSearcher([paper(PaperSource.OPENALEX)]), cache=cache)
+    task = asyncio.create_task(search.search(PaperSearch("cancel write"), credentials={"openalex": "key"}, timeout=1))
+    await asyncio.wait_for(started.wait(), 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
 class RecordingEnricher:
     def __init__(self, source):
         self.source = source

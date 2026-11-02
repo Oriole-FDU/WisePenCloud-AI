@@ -24,6 +24,7 @@ from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.models.fields import AcademicField, FieldPolicy
 from scholar.domain.repositories.paper_cache import CachedPaperLookup
+from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.providers.s2 import provider as s2
 from scholar.core.providers.s2.provider import aliases as s2_aliases
 
@@ -187,6 +188,57 @@ async def test_cache_read_failure_does_not_fall_through_to_provider():
         await lookup.lookup(PaperLookup(["corpusid:123"]))
 
     assert provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_cache_write_failure_preserves_lookup_paper_and_enrichment(failed_cache_write):
+    identity = parse_identifier("corpusid:123")
+    found = make_paper(metadata={"s2": {"citation_count": 9}})
+    provider = FakeProvider({identity: PaperLookupMatch([found])})
+    cache = FakeCache()
+    cache.put_many = failed_cache_write
+
+    result = await service(provider, cache=cache).lookup(PaperLookup(["corpusid:123"]), timeout=0.05)
+
+    assert result.items[0].status == LookupStatus.FOUND
+    assert result.items[0].paper.metadata["s2"]["citation_count"] == 9
+    assert result.items[0].error is None
+    event = next(item for item in result.execution if item.source == "s2")
+    assert event.status == SourceExecutionStatus.COMPLETED
+    assert event.error is None
+
+
+@pytest.mark.asyncio
+async def test_shared_lookup_delivers_papers_while_one_waiter_writes_cache():
+    identity = parse_identifier("corpusid:123")
+    provider = FakeProvider({identity: PaperLookupMatch([make_paper()])})
+    provider.block = True
+    cache = FakeCache()
+    writing = asyncio.Event()
+
+    async def blocked(*args):
+        writing.set()
+        await asyncio.Event().wait()
+
+    from unittest.mock import AsyncMock
+
+    cache.put_many = AsyncMock(side_effect=blocked)
+    lookup = service(provider, cache=cache)
+    first = asyncio.create_task(lookup.lookup(PaperLookup(["corpusid:123"])))
+    await provider.entered.wait()
+    second = asyncio.create_task(lookup.lookup(PaperLookup(["corpusid:123"])))
+    await asyncio.sleep(0)
+    provider.release.set()
+    await asyncio.wait_for(writing.wait(), 1)
+    done, pending = await asyncio.wait([first, second], timeout=1, return_when=asyncio.FIRST_COMPLETED)
+    assert len(done) == len(pending) == 1
+    assert next(iter(done)).result().items[0].status == LookupStatus.FOUND
+    writer = next(iter(pending))
+    writer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await writer
+    assert len(provider.calls) == 1
+    assert cache.put_many.await_count == 1
 
 
 @pytest.mark.asyncio

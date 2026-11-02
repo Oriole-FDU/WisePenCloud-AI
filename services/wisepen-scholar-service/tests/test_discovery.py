@@ -93,6 +93,24 @@ def service_for(field, source, discoverer, cache):
     pdf=make_pdf_service())
 
 
+@pytest.mark.asyncio
+async def test_cache_write_failure_keeps_discovered_papers_and_window(failed_cache_write):
+    cache = FakeDiscoveryCache()
+    cache.put = failed_cache_write
+    channel = FakeDiscoverer(PaperDiscovery([make_paper("2501.12948")], date(2026, 11, 1), date(2026, 11, 2)))
+    service = service_for(AcademicField.COMPUTER_SCIENCE, "huggingface", channel, cache)
+
+    result = await service.discover(
+        PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE),
+        credentials={"huggingface": "key"}, timeout=0.05,
+    )
+
+    assert result.papers[0].arxiv_id == "2501.12948"
+    assert (result.window_start, result.window_end) == (date(2026, 11, 1), date(2026, 11, 2))
+    assert result.execution[0].status == SourceExecutionStatus.COMPLETED
+    assert result.execution[0].error is None
+
+
 class FixedDateTime(datetime):
     current = datetime(2026, 10, 27, 12, tzinfo=UTC)
 

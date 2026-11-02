@@ -24,6 +24,7 @@ from scholar.domain.models.paper import Paper
 from scholar.domain.interfaces.title_resolver import TitleMatch
 from scholar.utils import normalize_title
 from scholar.domain.repositories.paper_cache import CachedPaperLookup
+from scholar.application.source_execution import SourceExecutionStatus
 
 
 def paper(title="Attention Is All You Need", arxiv="1706.03762", doi=None):
@@ -83,6 +84,24 @@ async def test_search_overview_indexes_title_without_becoming_a_full_paper_hit(c
     assert (await cache.match_titles([p.title], ["arxiv"]))[0].papers == []
     await cache.put_many("arxiv", [(CachedPaperLookup(p, (parse_identifier(p.arxiv_id),)), 86400)])
     assert (await cache.match_titles([p.title], ["arxiv"]))[0].papers == [p]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["put_many", "index_titles"])
+async def test_cache_write_failure_preserves_local_and_crossref_results(cache, operation, failed_cache_write):
+    local = paper("Local")
+    external = paper("External", None, "10.1000/external")
+    repository = SimpleNamespace(match_titles=AsyncMock(return_value=[PaperLookupMatch([local]), PaperLookupMatch([])]))
+    crossref = SimpleNamespace(match=AsyncMock(return_value=[TitleMatch([[parse_identifier(external.doi)]])]))
+    fetch, _ = lookup({parse_identifier(external.doi): external})
+    setattr(cache, operation, failed_cache_write)
+    service = PaperMatchService(cache, repository, crossref, fetch)
+
+    result = await service.match(PaperMatch(["Local", "External"]), timeout=0.05)
+
+    assert [item.status for item in result.items] == [MatchStatus.FOUND, MatchStatus.FOUND]
+    assert [item.paper.title for item in result.items] == ["Local", "External"]
+    assert all(event.status == SourceExecutionStatus.COMPLETED and event.error is None for event in result.execution)
 
 
 @pytest.mark.asyncio

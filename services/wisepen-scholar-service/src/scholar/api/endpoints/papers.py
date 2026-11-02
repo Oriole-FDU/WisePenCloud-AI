@@ -1,6 +1,5 @@
 """论文 HTTP 薄适配；业务路由与标识解析属于应用用例。"""
 
-import asyncio
 from typing import Annotated
 
 from dependency_injector.wiring import Provide, inject
@@ -95,21 +94,22 @@ async def lookup(
     ] = None,
     x_s2_api_key: Annotated[str | None, Header(alias="X-S2-Api-Key")] = None,
 ) -> R[LookupResult]:
-    async with asyncio.timeout(timeout):
-        return R.success(
-            await service.lookup(
-                request.to_query(),
-                credentials={
-                    key: value
-                    for key, value in {
-                        PaperSource.OPENALEX: x_openalex_api_key,
-                        PaperSource.HUGGINGFACE: x_huggingface_api_key,
-                        PaperSource.S2: x_s2_api_key,
-                    }.items()
-                    if value
-                },
-            )
+    # 用例分别限制读取和缓存写入，HTTP 不再因可选写入撤销已有结果。
+    return R.success(
+        await service.lookup(
+            request.to_query(),
+            credentials={
+                key: value
+                for key, value in {
+                    PaperSource.OPENALEX: x_openalex_api_key,
+                    PaperSource.HUGGINGFACE: x_huggingface_api_key,
+                    PaperSource.S2: x_s2_api_key,
+                }.items()
+                if value
+            },
+            timeout=timeout,
         )
+    )
 
 
 @router.post("/discover", response_model=R[DiscoveryResult])
@@ -126,12 +126,12 @@ async def discover(
         str | None, Header(alias="X-HuggingFace-Api-Key")
     ] = None,
 ) -> R[DiscoveryResult]:
-    async with asyncio.timeout(timeout):
-        return R.success(
-            await service.discover(
-                request.to_query(),
-                credentials={PaperSource.HUGGINGFACE: x_huggingface_api_key}
-                if x_huggingface_api_key
-                else {},
-            )
+    return R.success(
+        await service.discover(
+            request.to_query(),
+            credentials={PaperSource.HUGGINGFACE: x_huggingface_api_key}
+            if x_huggingface_api_key
+            else {},
+            timeout=timeout,
         )
+    )

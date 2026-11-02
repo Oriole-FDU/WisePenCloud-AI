@@ -104,17 +104,9 @@ class PaperLookupService:
             group = [target for target in confirmed if target.cache_hit == cache_hit]
             if not group:
                 continue
-            budget = asyncio.timeout_at(deadline)
-            try:
-                async with budget:
-                    papers, pdf_execution = await self.pdf.recover(
-                        [target.paper for target in group], cache_only=cache_hit,
-                    )
-            except TimeoutError:
-                if not budget.expired():
-                    raise
-                papers = [target.paper for target in group]
-                pdf_execution = SourceExecution("unpaywall", False, SourceExecutionStatus.FAILED, "PDF recovery exceeded the lookup request deadline")
+            papers, pdf_execution = await self.pdf.recover(
+                [target.paper for target in group], cache_only=cache_hit, deadline=deadline,
+            )
             for target, paper in zip(group, papers, strict=True):
                 target.paper = paper
             if pdf_execution is not None:

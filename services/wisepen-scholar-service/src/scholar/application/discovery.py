@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 import orjson
+from redis.exceptions import RedisError
 
 from common.core.exceptions import ServiceException
+from common.logger import warning
 from scholar.domain.interfaces.field_policies import ScholarPolicyProvider
 from scholar.application.pdf_recover import PaperPdfRecoverService
 from scholar.domain.errors import ScholarErrorCode
@@ -59,8 +62,10 @@ class PaperDiscoveryService:
         self.pdf = pdf
 
     async def discover(
-        self, query: PaperDiscoveryQuery, *, credentials: dict[str, str] | None = None
+        self, query: PaperDiscoveryQuery, *, credentials: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> DiscoveryResult:
+        deadline = asyncio.get_running_loop().time() + timeout if timeout is not None else None
         source = self.policies.current.fields[query.field].discoverer
         if source is None or source not in self.discoverers:
             raise ServiceException(ScholarErrorCode.CAPABILITY_UNAVAILABLE)
@@ -69,19 +74,27 @@ class PaperDiscoveryService:
         if not api_key:
             raise ServiceException(ScholarErrorCode.CAPABILITY_UNAVAILABLE, f"{source} discovery requires user BYOK")
         cache_key = self._cache_key(source, query)
-        discovery = await self.cache.get(cache_key)
-        cache_hit = discovery is not None
-        if discovery is None:
-            # ProviderError、缓存错误和取消保留原语义；失败发现不会写负缓存。
-            discovery = await self.discoverers[source].discover(
-                period=query.period,
-                sort=query.sort,
-                limit=100,
-                api_key=api_key,
-            )
-            await self.cache.put(cache_key, discovery)
+        # 必要读取保留失败语义；可选写入使用独立的剩余预算。
+        async with asyncio.timeout_at(deadline):
+            discovery = await self.cache.get(cache_key)
+            cache_hit = discovery is not None
+            if discovery is None:
+                discovery = await self.discoverers[source].discover(
+                    period=query.period,
+                    sort=query.sort,
+                    limit=100,
+                    api_key=api_key,
+                )
+        if not cache_hit:
+            try:
+                async with asyncio.timeout_at(deadline):
+                    await self.cache.put(cache_key, discovery)
+            except (RedisError, TimeoutError) as error:
+                # 发现结果已经取得，缓存写入故障只用于诊断。
+                warning("Scholar cache write failed.", source=source, operation="discovery_cache.put",
+                        error_type=type(error).__name__, error=str(error))
 
-        papers, pdf_execution = await self.pdf.recover(discovery.papers[: query.limit])
+        papers, pdf_execution = await self.pdf.recover(discovery.papers[: query.limit], deadline=deadline)
         execution = [SourceExecution(source, cache_hit, SourceExecutionStatus.COMPLETED)]
         if pdf_execution is not None:
             execution.append(pdf_execution)
