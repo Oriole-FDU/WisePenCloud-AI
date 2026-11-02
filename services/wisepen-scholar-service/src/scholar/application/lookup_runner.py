@@ -148,6 +148,7 @@ class LookupRunner:
                 target.general_found = True
 
         # 通用来源只负责精确获取；命中论文即停止，与引用数、TLDR 是否齐全无关。
+        # 隐含前提：通用源的 search 结果与 lookup 结果一致，均包含完整的富化信息，只要命中了缓存就已经完整
         for source in common_sources:
             pending = [
                 target

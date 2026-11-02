@@ -2,6 +2,8 @@
 
 Scholar 是内部 HTTP 微服务。MCP 工具由现有 `wisepen-mcp-service` 注册，Scholar 不启动独立 MCP server。
 
+> 📖 **新版微服务技术文档库**：请查阅 [文档库导航 (docs/README.md)](docs/README.md)，包含 [系统架构](docs/architecture.md)、[用例解析](docs/usecases.md)、[HTTP API](docs/http-service.md)、[新增 Provider 指南](docs/provider-guide.md)、[混合检索与模型](docs/retrieval-and-models.md)、[缓存与配额队列](docs/caching-and-quotas.md) 及 [V2 演进路线](docs/v2-roadmap.md)。历史流水账与分期验收已归档至 [docs/archive/](docs/archive/)。
+
 ## 结构与迭代边界
 
 - `api/schemas` 在 HTTP 边界校验完整契约；`api/endpoints` 只做 DTO 转换、预算控制及容器注入。
@@ -14,13 +16,13 @@ Scholar 是内部 HTTP 微服务。MCP 工具由现有 `wisepen-mcp-service` 注
 
 P1 本地 arXiv、P3 配置驱动检索、P4 lookup 在线富化已验收；P2 正在合并本地 S2 信息并更新检索索引。P5 发现按 HF 官方 SDK 的请求与返回流程实现。CS 搜索与发现通过原生异步 HTTP 调用 HF。
 
-P6 已提供独立 OAI/S2 差分同步与恢复、Compose/Jenkins/systemd 模板；真实完整同步的剩余验收见 [P6 记录](docs/p6-acceptance.md)。部署交付仅包含配置和说明，本次不启动 Docker、不构建镜像、不做生产部署。
+P6 已提供独立 OAI/S2 差分同步与恢复、Compose/Jenkins/systemd 模板；真实完整同步的剩余验收见 [P6 记录](docs/archive/p6-acceptance.md)。部署交付仅包含配置和说明，本次不启动 Docker、不构建镜像、不做生产部署。
 
 单源检索按领域配置顺序回退，正常空列表也结束；多源执行已启用来源并报告结果。HF/OpenAlex 搜索和 HF 发现必须携带用户 BYOK，平台 key 只用于富化。缺 key 的搜索来源在读取缓存前跳过并记为 not_executed；没有可用来源返回 503 并说明所需 BYOK。
 
 模板中的通用精确获取顺序为 arxiv→s2→openalex，可在 Nacos 调整，每篇精确找到论文即停止，不因缺少引用数或 TLDR 继续回退。arXiv 的 S2 事实由离线同步负责，命中 arXiv 后不再在线补信号。搜索成功来源包含任一通用来源时跳过通用链；两种入口按相同完整性规则执行领域增量，初始仅 CS 注册 HF。HF 搜索概要缺少 required_fields 时获取详情，字段齐全（包括已确认的空值）则跳过。供应商规则在各 provider 实现，由 `providers.policies.PROVIDER_POLICIES` 统一注册，新增临床增量只需 provider、注册和领域配置。平台不默认融合同名字段或做语义去重。
 
-缓存分为 query、paper、discover 三个业务边界。match 按完整论文缓存、本地标题库、Crossref DOI、lookup 逐项回退；缓存和本地命中不再触发外部补全。lookup 先读取可复用的来源缓存，再访问未解决的来源。来源缓存命中可直接返回，已有领域信息和 PDF 在本地组装；新获取项仍按领域策略补全。详见 [缓存与标题匹配](docs/cache-architecture.md)。
+缓存分为 query、paper、discover 三个业务边界。match 按完整论文缓存、本地标题库、Crossref DOI、lookup 逐项回退；缓存和本地命中不再触发外部补全。lookup 先读取可复用的来源缓存，再访问未解决的来源。来源缓存命中可直接返回，已有领域信息和 PDF 在本地组装；新获取项仍按领域策略补全。详见 [缓存架构与配额管理](docs/caching-and-quotas.md)。
 
 ## 配置与启动
 
@@ -57,17 +59,17 @@ uv run --no-sync python deploy/run.py publish
 
 ## HTTP 与 MCP
 
-`POST /scholar/papers/discover` 与现有 MCP `discover_papers` 提供 CS 的 daily/weekly/monthly 渠道发现，默认 trending，支持 recent 和 limit，不接受 query。每次只发一个官方列表请求，直接交付成功响应；daily 使用官方最新内容默认值，weekly/monthly 传周期参数。不按渠道日期丢弃或过滤结果，见 [P5 验收记录](docs/p5-acceptance.md)。
+`POST /scholar/papers/discover` 与现有 MCP `discover_papers` 提供 CS 的 daily/weekly/monthly 渠道发现，默认 trending，支持 recent 和 limit，不接受 query。每次只发一个官方列表请求，直接交付成功响应；daily 使用官方最新内容默认值，weekly/monthly 传周期参数。不按渠道日期丢弃或过滤结果，见 [P5 验收记录](docs/archive/p5-acceptance.md)。
 
-Lookup 定位为已知标识符的精确查询，不再接受 purpose；取得论文后与 search 执行相同的领域富化、PDF 补救和投影。search 已包含可用调研 metadata，不应例行调用 lookup 获取更完整的结果。响应为 `items[{identifier,status,paper,error}]` 与 `execution`；metadata 仅位于 `paper.metadata`。没有可用结果的外部失败直接抛出，已有论文的部分结果保留真实错误。历史验收见 [P4 记录](docs/p4-acceptance.md)。
+Lookup 定位为已知标识符的精确查询，不再接受 purpose；取得论文后与 search 执行相同的领域富化、PDF 补救和投影。search 已包含可用调研 metadata，不应例行调用 lookup 获取更完整的结果。响应为 `items[{identifier,status,paper,error}]` 与 `execution`；metadata 仅位于 `paper.metadata`。没有可用结果的外部失败直接抛出，已有论文的部分结果保留真实错误。历史验收见 [P4 记录](docs/archive/p4-acceptance.md)。
 
 `POST /scholar/papers/search` 接受 query、field、published_after/before、limit、source_scope。时间按首次提交日期包含两端过滤；领域采用 plan.md 的 arXiv 分类映射。查询缓存默认 10 分钟，缓存只存论文事实，每次重新构造执行情况。
 
-本地检索由 ES 承担关键词召回，Qdrant 承担 SPECTER2 稠密召回；两路使用相同的学科和含边界的日期过滤，经 RRF 融合后加入有界引用先验。模型与参数见[混合检索](docs/hybrid-search.md)。DuckDB 已有向量可直接批量迁移，ES 不再保存 embedding。
+本地检索由 Qdrant 承担 BM25 稀疏与 SPECTER2 稠密双路混合召回；两路使用相同的学科和含边界的日期过滤，经 RRF 融合后加入有界引用先验。模型与参数见[混合检索与模型运行时](docs/retrieval-and-models.md)。DuckDB 已有向量可直接批量迁移，Qdrant 原生管理稀疏与稠密索引。
 
 `POST /scholar/papers/lookup` 接受 identifiers、field（默认 general），逐项保留输入顺序、重复输入、未找到、标识错误或 DOI 歧义。arXiv 版本和官方 URL 归一化，DOI 不区分大小写。没有本地来源映射的领域不会退回全库检索。所有业务响应使用 Common `R<T>`。
 
-现有 MCP 服务的 search、lookup、match、discover 工具使用 Nacos RpcClient 调用这些 HTTP 接口，返回解包后的 data；来源路由和论文归一化不复制到 MCP。配置驱动的检索及医疗多源扩展验收见 [P3 记录](docs/p3-acceptance.md)。
+现有 MCP 服务的 search、lookup、match、discover 工具使用 Nacos RpcClient 调用这些 HTTP 接口，返回解包后的 data；来源路由和论文归一化不复制到 MCP。配置驱动的检索及医疗多源扩展验收见 [P3 记录](docs/archive/p3-acceptance.md)。
 
 S2 平台请求通过 Redis 跨实例合流：收集周期内按 ID 去重，每批最多 `SCHOLAR_S2_BATCH_MAX_IDS`（默认 300，范围 1～500）。NOKEY 首发不携带 key，仅 HTTP 429 将原批次投递平台 KEY 兜底；网络错误及其他状态直接失败。两路按各自上次实际发射时刻节流，间隔分别由 `SCHOLAR_S2_NOKEY_INTERVAL_SECONDS`、`SCHOLAR_S2_KEY_INTERVAL_SECONDS` 配置，默认均为 1.5 秒；满批不提前发车，慢响应不阻塞下一批发射。首轮收集一个间隔，之后空闲超过间隔时立即发出当前待办。
 
@@ -126,6 +128,6 @@ HTTP BYOK 请求头为 `X-OpenAlex-Api-Key`、`X-HuggingFace-Api-Key`、`X-S2-Ap
 uv run --no-sync python -m pytest tests -q
 ```
 
-[数据基线](docs/data-baseline.md)记录输入及样本验证范围；[阶段验收记录](docs/p0-p1-acceptance.md)记录真实基础设施与全量导入结果。单元测试中的外部依赖替身不替代真实 ES 验收。
+[数据基线](docs/archive/data-baseline.md)记录输入及样本验证范围；[阶段验收记录](docs/archive/p0-p1-acceptance.md)记录真实基础设施与全量导入结果。单元测试中的外部依赖替身不替代真实 Qdrant 验收。
 
 真实 Redis 队列验收使用独立随机命名空间，显式设置 `SCHOLAR_TEST_REDIS_URL` 后执行 `uv run --no-sync pytest tests/test_s2_queue.py -q`。未配置时队列验收跳过，不连接默认服务命名空间。
