@@ -315,15 +315,10 @@ class QueryLoopRuntime:
                     aborted_messages.extend(
                         self._build_aborted_tool_messages(
                             session_id=session_id,
-                            invocations=[
-                                ToolInvocation(
-                                    tool_call_id=tool_call.call_id,
-                                    tool_name=tool_call.name,
-                                    tool_call_arguments=tool_call.arguments,
-                                    query_loop_iteration=iteration,
-                                )
-                                for tool_call in event_interpreter.tool_calls
-                            ],
+                            invocations=self._build_tool_invocations(
+                                tool_calls=event_interpreter.tool_calls,
+                                iteration=iteration,
+                            ),
                         )
                     ) # 补工具调用被取消消息
                 yield StepFinishEvent(
@@ -372,15 +367,7 @@ class QueryLoopRuntime:
         # 如果有工具调用，则进入工具阶段
 
         # 构造工具调用
-        invocations = [
-            ToolInvocation(
-                tool_call_id=tool_call.call_id,
-                tool_name=tool_call.name,
-                tool_call_arguments=tool_call.arguments,
-                query_loop_iteration=iteration,
-            )
-            for tool_call in tool_calls
-        ]
+        invocations = self._build_tool_invocations(tool_calls=tool_calls, iteration=iteration)
 
         tool_outputs: list[ToolExecutionResult] = []
         try:
@@ -508,6 +495,22 @@ class QueryLoopRuntime:
                 aborted=True,
             )
             return
+
+    def _build_tool_invocations(
+        self,
+        *,
+        tool_calls: list[ToolCallMessage],
+        iteration: int,
+    ) -> list[ToolInvocation]:
+        return [
+            ToolInvocation(
+                tool_call_id=tool_call.call_id,
+                tool_name=tool_call.name,
+                tool_call_arguments=tool_call.arguments,
+                query_loop_iteration=iteration,
+            )
+            for tool_call in tool_calls
+        ]
 
     def _build_aborted_tool_messages(
         self,
