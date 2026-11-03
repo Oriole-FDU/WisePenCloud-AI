@@ -15,9 +15,9 @@ from common.logger import error
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.application.llm_provider_resolver import LLMProviderResolver
-from chat.application.token_counter import TokenCounter
+from chat.application.token_usage import TokenUsage
 from chat.core.providers import OssFileLoader
-from chat.domain.interfaces.llm import TextCompletionProvider, TokenUsage
+from chat.domain.interfaces.llm import TextCompletionProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, \
     ProviderRepository, SuspendedChatRepository
@@ -65,7 +65,6 @@ class ChatTurnCoordinator:
             self,
             llm_provider_resolver: LLMProviderResolver,
             text_llm: TextCompletionProvider,
-            token_counter: TokenCounter,
             memory: MemoryProvider,
             model_repo: ModelRepository,
             provider_repo: ProviderRepository,
@@ -91,12 +90,10 @@ class ChatTurnCoordinator:
         self._tool_registry = tool_registry
         self._query_loop_runtime = QueryLoopRuntime(
             llm_provider_resolver=llm_provider_resolver,
-            token_counter=token_counter,
             tool_dispatcher=tool_dispatcher,
         )
         self._turn_finalizer = ChatTurnFinalizer(
             text_llm=text_llm,
-            token_counter=token_counter,
             memory=memory,
             message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo,
             provider_repo=provider_repo,

@@ -5,7 +5,7 @@ import uuid
 
 from chat.application.agents import AgentMemoryPolicy
 from chat.application.chat_context_assembler import WindowedMessages
-from chat.application.token_counter import TokenCounter
+from chat.application.token_usage import count_message_tokens, TokenUsage
 from common.logger import error
 from common.core.domain import IdentityType
 from common.core.exceptions import ServiceException
@@ -14,7 +14,7 @@ from chat.domain.error_codes import ChatErrorCode
 from chat.core.config.app_settings import settings
 from chat.core.constants import KAFKA_TOKEN_CONSUMPTION_TOPIC
 from chat.domain.entities import ChatMessage, Role
-from chat.domain.interfaces.llm import TextCompletionProvider, TokenUsage
+from chat.domain.interfaces.llm import TextCompletionProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository, ProviderRepository
 from chat.domain.repositories.model_repo import ModelRequestInfo
@@ -29,7 +29,6 @@ class ChatTurnFinalizer:
     def __init__(
         self,
         text_llm: TextCompletionProvider,
-        token_counter: TokenCounter,
         memory: MemoryProvider,
         message_repo: MessageRepository,
         session_repo: SessionRepository,
@@ -38,7 +37,6 @@ class ChatTurnFinalizer:
         kafka_producer: KafkaProducerClient,
     ):
         self.text_llm = text_llm
-        self.token_counter = token_counter
         self.memory = memory
         self.session_repo = session_repo
         self.message_repo = message_repo
@@ -334,4 +332,4 @@ class ChatTurnFinalizer:
         for msg in messages:
             if not force and msg.content_token_count:
                 continue
-            msg.content_token_count = await self.token_counter.count_messages([msg])
+            msg.content_token_count = await count_message_tokens([msg])

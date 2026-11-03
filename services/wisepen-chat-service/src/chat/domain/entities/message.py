@@ -12,6 +12,7 @@ from chat.domain.entities.provider import ProviderScope, ProviderType
 from chat.domain.entities.token_usage import TokenUsageSource
 
 if TYPE_CHECKING:
+    from chat.application.token_usage import TokenUsage
     from chat.domain.repositories.model_repo import ModelRequestInfo
 
 
@@ -125,6 +126,13 @@ class ChatMessage(Document):
             IndexModel([("session_id", ASCENDING), ("created_at", ASCENDING)]),
             IndexModel([("content_search_tokens", "text")]),
         ]
+
+    def attach_usage(self, usage: "TokenUsage") -> None:
+        """将本次模型调用的用量写入消息，不改变消息内容。"""
+        self.input_tokens = usage.input_tokens
+        self.cached_input_tokens = usage.cached_input_tokens
+        self.output_tokens = usage.output_tokens
+        self.usage_source = usage.usage_source
 
     def build_search_tokens(self) -> None:
         """

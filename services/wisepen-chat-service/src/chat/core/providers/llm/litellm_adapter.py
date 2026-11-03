@@ -9,14 +9,8 @@ from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.provider import ProviderType
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
-from chat.domain.interfaces.llm import (
-    LLMCompletionResult,
-    LLMEventType,
-    LLMStreamEvent,
-    TokenUsage,
-    TokenUsageSource,
-    TextCompletionProvider,
-)
+from chat.domain.interfaces.llm import LLMCompletionResult, LLMEventType, LLMStreamEvent, TextCompletionProvider
+from chat.application.token_usage import TokenUsage, TokenUsageSource
 from chat.domain.entities.message import ToolCallMessage
 from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.core.exceptions import ServiceException

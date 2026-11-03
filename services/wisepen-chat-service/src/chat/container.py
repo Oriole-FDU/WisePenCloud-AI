@@ -18,7 +18,6 @@ from chat.core.providers import (
     IflytekSpeechProvider,
 )
 from chat.application.llm_provider_resolver import LLMProviderResolver
-from chat.application.token_counter import TokenCounter
 from chat.core.persistence import (
     MongoSessionRepository,
     MongoMessageRepository,
@@ -109,7 +108,6 @@ class Container(containers.DeclarativeContainer):
         gemini_adapter=gemini_adapter,
         litellm_adapter=litellm_adapter,
     )
-    token_counter = providers.Singleton(TokenCounter)
     memory_provider = providers.Singleton(Mem0Adapter)
     iflytek_speech_provider = providers.Singleton(
         IflytekSpeechProvider,
@@ -313,7 +311,6 @@ class Container(containers.DeclarativeContainer):
         ChatTurnCoordinator,
         llm_provider_resolver=llm_provider_resolver,
         text_llm=litellm_adapter,
-        token_counter=token_counter,
         memory=memory_provider,
         model_repo=model_repo,
         provider_repo=provider_repo,

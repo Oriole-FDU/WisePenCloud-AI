@@ -4,7 +4,7 @@ from typing import List, Optional
 from chat.application.events.base import StreamEvent
 from chat.application.tools.core import ClassifiedToolInvocationPlan
 from chat.domain.entities import ChatMessage
-from chat.domain.interfaces.llm import TokenUsage
+from chat.application.token_usage import TokenUsage
 
 
 @dataclass(frozen=True)
