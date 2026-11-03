@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from scholar.application.paper_projection import project_paper
+from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import parse_identifier
@@ -64,7 +65,7 @@ async def test_arxiv_search_preserves_full_facts_after_ranking(local_paper):
 @pytest.mark.asyncio
 async def test_arxiv_lookup_preserves_ambiguity_and_item_error(local_paper):
     ambiguous = PaperLookupMatch([local_paper, deepcopy(local_paper)])
-    failed = PaperLookupMatch([], "shard unavailable")
+    failed = PaperLookupMatch([], ProviderError("shard unavailable"))
     repository = SimpleNamespace(lookup=AsyncMock(return_value=[ambiguous, failed]))
     provider = ArxivProvider(
         repository,

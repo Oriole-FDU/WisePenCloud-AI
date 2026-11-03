@@ -61,9 +61,7 @@ class CrossrefTitleResolver:
                     works = response.json()["message"]["items"]
         except (httpx.HTTPError, TimeoutError) as error:
             # 包括 429 在内的外部失败逐项返回，不重试、不伪装成标题不存在。
-            return TitleMatch(
-                error=f"crossref: {str(error) or type(error).__name__}"
-            )
+            return TitleMatch(error=error)
 
         # 只保留标题归一化后完全匹配的 DOI；Crossref 的模糊召回不足以作为身份。
         target = normalize_title(title)

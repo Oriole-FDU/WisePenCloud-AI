@@ -23,10 +23,6 @@ from scholar.domain.interfaces.paper_discoverer import (
 from scholar.domain.models.fields import AcademicField
 from scholar.application.paper_projection import project_paper
 from scholar.domain.models.paper import Paper
-from scholar.application.source_execution import (
-    SourceExecution,
-    SourceExecutionStatus,
-)
 from scholar.domain.repositories.discovery_cache import DiscoveryCacheRepository
 
 
@@ -43,11 +39,10 @@ class DiscoveryResult:
     papers: list[Paper]
     window_start: date | None
     window_end: date | None
-    execution: list[SourceExecution]
 
 
 class PaperDiscoveryService:
-    """选择已登记的 discovery 能力，复用其候选结果并报告本次执行状态。"""
+    """选择已登记的 discovery 能力，复用候选结果与请求时间窗口。"""
 
     def __init__(
         self,
@@ -94,15 +89,11 @@ class PaperDiscoveryService:
                 warning("Scholar cache write failed.", source=source, operation="discovery_cache.put",
                         error_type=type(error).__name__, error=str(error))
 
-        papers, pdf_execution = await self.pdf.recover(discovery.papers[: query.limit], deadline=deadline)
-        execution = [SourceExecution(source, cache_hit, SourceExecutionStatus.COMPLETED)]
-        if pdf_execution is not None:
-            execution.append(pdf_execution)
+        papers = await self.pdf.recover(discovery.papers[: query.limit], deadline=deadline)
         return DiscoveryResult(
             papers=[project_paper(paper) for paper in papers],
             window_start=discovery.window_start,
             window_end=discovery.window_end,
-            execution=execution,
         )
 
     @staticmethod

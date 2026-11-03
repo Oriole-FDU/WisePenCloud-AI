@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from contextvars import ContextVar
 from uuid import uuid4
 
 import httpx
@@ -12,9 +11,6 @@ from redis.asyncio import Redis
 
 from scholar.domain.errors import ProviderBusy, ProviderError
 from .batch_queue import S2BatchQueue
-
-# S2 排队观测：记录当前请求在 FIFO 队列前等待的项数；不属于论文事实，不进入论文缓存。
-s2_queued_ahead: ContextVar[int | None] = ContextVar("s2_queued_ahead", default=None)
 
 # 使用 Redis 时钟和原子脚本，避免实例时钟差异改变 FIFO 或发送间隔。
 # 租约只覆盖等待期；崩溃进程的占位由后续入队/轮询清理，不需要后台清扫器。
@@ -122,12 +118,7 @@ class S2Transport:
             effective_key = api_key or self._api_key
             platform = effective_key == self._api_key
             if platform and method == "POST" and path == "graph/v1/paper/batch":
-                try:
-                    ahead, future, job = await self.batches.submit(kwargs["json"]["ids"], kwargs["params"])
-                except ProviderBusy as error:
-                    s2_queued_ahead.set(error.queued_ahead)
-                    raise
-                s2_queued_ahead.set(ahead)
+                _, future, job = await self.batches.submit(kwargs["json"]["ids"], kwargs["params"])
                 try:
                     return await asyncio.shield(future)
                 finally:
@@ -159,7 +150,6 @@ class S2Transport:
                     member,
                     -1 if max_ahead is None else max_ahead,
                 )
-                s2_queued_ahead.set(ahead)
                 if not accepted:
                     raise ProviderBusy(ahead, max_ahead)
                 while True:

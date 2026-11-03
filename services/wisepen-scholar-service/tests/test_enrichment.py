@@ -24,7 +24,6 @@ from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
 from scholar.domain.models.fields import AcademicField, FieldPolicy
 from scholar.domain.repositories.paper_cache import CachedPaperLookup
-from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.providers.s2 import provider as s2
 from scholar.core.providers.s2.provider import aliases as s2_aliases
 
@@ -202,10 +201,7 @@ async def test_cache_write_failure_preserves_lookup_paper_and_enrichment(failed_
 
     assert result.items[0].status == LookupStatus.FOUND
     assert result.items[0].paper.metadata["s2"]["citation_count"] == 9
-    assert result.items[0].error is None
-    event = next(item for item in result.execution if item.source == "s2")
-    assert event.status == SourceExecutionStatus.COMPLETED
-    assert event.error is None
+    assert result.items[0].limitations == []
 
 
 @pytest.mark.asyncio
@@ -313,7 +309,7 @@ async def test_arxiv_match_without_s2_signals_does_not_query_other_common_source
 
     assert result.items[0].status == LookupStatus.FOUND
     assert result.items[0].paper.metadata["arxiv"]["comments"] == "Accepted at a conference"
-    assert result.items[0].error is None
+    assert result.items[0].limitations == []
     assert s2.calls == []
 
 
@@ -354,7 +350,7 @@ async def test_conflicting_exact_identity_keeps_base_and_does_not_cache_provider
     assert result.items[0].paper.arxiv_id == base.arxiv_id
     assert result.items[0].paper.doi == base.doi
     assert result.items[0].paper.metadata == {"arxiv": {"comments": "Author notes"}}
-    assert "conflicts" in result.items[0].error
+    assert result.items[0].limitations == []
     assert cache.puts == []
 
 

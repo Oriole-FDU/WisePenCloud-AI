@@ -14,7 +14,8 @@ class PaperLookupMatch:
     """与一个输入位置对应；零篇为未找到，多篇为歧义，错误不等于未找到。"""
 
     papers: list[Paper]
-    error: str | None = None
+    # 保留原始异常及 cause，供用例分类和审计，不能直接序列化给调用方。
+    error: Exception | None = None
 
 
 class PaperLookupProvider(Protocol):

@@ -9,7 +9,6 @@ import httpx
 import pytest
 from pdf_fakes import MemoryPdfCache, make_pdf_service
 from scholar.domain.models.paper import Paper
-from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.providers import UnpaywallProvider
 
 
@@ -31,11 +30,10 @@ async def test_existing_pdf_and_arxiv_identity_skip_external_recovery(changes, e
     source = paper(**changes)
     original = deepcopy(source)
     provider = AsyncMock()
-    recovered, execution = await make_pdf_service(provider).recover([source])
+    recovered = await make_pdf_service(provider).recover([source])
 
     assert recovered[0].pdf_url == expected
     assert source == original
-    assert execution is None
     provider.recover.assert_not_awaited()
 
 
@@ -56,13 +54,11 @@ async def test_unpaywall_uses_only_pdf_fields_and_caches_positive_and_negative_r
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
         cache = MemoryPdfCache()
         service = make_pdf_service(UnpaywallProvider(http, "jzsun24@m.fudan.edu.cn"), cache)
-        first, execution = await service.recover([paper(doi="10.1234/EXAMPLE"), paper()])
-        repeated, cached = await service.recover([paper()])
+        first = await service.recover([paper(doi="10.1234/EXAMPLE"), paper()])
+        repeated = await service.recover([paper()])
 
     assert [p.pdf_url for p in first] == [expected, expected]
     assert repeated[0].pdf_url == expected
-    assert execution.status == SourceExecutionStatus.COMPLETED
-    assert cached.cache_hit is True
     assert len(requests) == 1
     assert requests[0].method == "GET"
     assert requests[0].url.path == "/v2/10.1234/example"
@@ -72,7 +68,9 @@ async def test_unpaywall_uses_only_pdf_fields_and_caches_positive_and_negative_r
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["http", "timeout"])
-async def test_unpaywall_errors_preserve_papers_and_are_not_negative_cached(failure):
+async def test_unpaywall_errors_preserve_papers_and_are_not_negative_cached(failure, monkeypatch):
+    audited = []
+    monkeypatch.setattr("scholar.application.pdf_recover.warning", lambda message, **fields: audited.append(fields))
     requests = []
 
     def handle(request):
@@ -88,14 +86,13 @@ async def test_unpaywall_errors_preserve_papers_and_are_not_negative_cached(fail
         service = make_pdf_service(UnpaywallProvider(http, "jzsun24@m.fudan.edu.cn"), cache)
         source = [paper(), paper(doi="10.1234/failed")]
         original = deepcopy(source)
-        recovered, execution = await service.recover(source)
-        _, failed = await service.recover([source[1]])
+        recovered = await service.recover(source)
+        failed = await service.recover([source[1]])
 
     assert recovered[0].pdf_url == "https://repo.test/pdf"
     assert recovered[1].pdf_url is None
-    assert execution.status == SourceExecutionStatus.PARTIAL
-    assert execution.error
-    assert failed.status == SourceExecutionStatus.FAILED
+    assert failed[0].pdf_url is None
+    assert any(fields.get("source") == "unpaywall" and fields.get("exc") is not None for fields in audited)
     assert "10.1234/failed" not in cache.values
     assert len(requests) == 3
     assert source == original
@@ -129,19 +126,17 @@ async def test_unpaywall_bounds_concurrency_and_cancels_pending_http():
 
 
 @pytest.mark.asyncio
-async def test_pdf_read_deadline_preserves_paper_and_reports_failure():
+async def test_pdf_read_deadline_preserves_paper():
     async def blocked(doi):
         await asyncio.Event().wait()
 
     provider = AsyncMock(recover=AsyncMock(side_effect=blocked))
-    recovered, execution = await make_pdf_service(provider).recover(
+    recovered = await make_pdf_service(provider).recover(
         [paper()], deadline=asyncio.get_running_loop().time() + 0.05,
     )
 
     assert recovered[0].title == "Research"
     assert recovered[0].pdf_url is None
-    assert execution.status == SourceExecutionStatus.FAILED
-    assert "deadline" in execution.error
 
 
 @pytest.mark.asyncio
@@ -151,11 +146,9 @@ async def test_cache_write_failure_preserves_new_pdf_and_success(failed_cache_wr
     provider = AsyncMock(recover=AsyncMock(return_value="https://repo.test/pdf"))
     source = paper()
 
-    recovered, execution = await make_pdf_service(provider, cache).recover(
+    recovered = await make_pdf_service(provider, cache).recover(
         [source], deadline=asyncio.get_running_loop().time() + 0.05,
     )
 
     assert recovered[0].pdf_url == "https://repo.test/pdf"
     assert source.pdf_url is None
-    assert execution.status == SourceExecutionStatus.COMPLETED
-    assert execution.error is None

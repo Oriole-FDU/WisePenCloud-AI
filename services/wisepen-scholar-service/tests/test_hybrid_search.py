@@ -20,7 +20,6 @@ from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.paper import Paper
 from scholar.domain.repositories.local_paper_repository import PaperCandidate
 from scholar.domain.errors import ProviderError
-from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.providers import ArxivProvider
 
 
@@ -61,7 +60,11 @@ class Repository:
 class Encoder:
     error = None
 
+    def __init__(self):
+        self.calls = []
+
     async def embed(self, *, texts):
+        self.calls.append(texts)
         if self.error is not None:
             raise self.error
         return [[1.0] * 768]
@@ -101,7 +104,7 @@ async def test_rrf_combines_independent_ranks_deduplicates_and_keeps_stable_ties
     a, b, c = [paper(f"2501.{i:05d}") for i in range(1, 4)]
     result = await search(arxiv_provider(Repository([a, b, c], [b, a]), Encoder()))
     assert [p.arxiv_id for p in result.papers] == [a.arxiv_id, b.arxiv_id, c.arxiv_id]
-    assert result.partial_error is None
+    assert not result.retrieval_degraded
 
 
 @pytest.mark.asyncio
@@ -154,18 +157,18 @@ async def test_encoder_failure_is_visible_not_cached_and_recovery_restores_hybri
     query = PaperSearch("reasoning")
     degraded = await service.search(query)
     assert [paper.arxiv_id for paper in degraded.papers] == [lexical.arxiv_id]
-    assert degraded.execution[0].status == SourceExecutionStatus.PARTIAL
-    assert degraded.execution[0].error
+    assert [(item.source, item.reason) for item in degraded.limitations] == [("arxiv", "retrieval_degraded")]
     encoder.error = None
     recovered = await service.search(query)
     assert len(recovered.papers) == 2
-    assert not recovered.execution[0].cache_hit
-    assert (await service.search(query)).execution[0].cache_hit
+    assert (await service.search(query)).papers == recovered.papers
+    assert len(encoder.calls) == 2
     # 模拟平台调参后重新装配服务，旧排序缓存不能继续复用。
     adjusted = arxiv_provider(Repository([lexical], [semantic]), encoder, rrf_k=30)
     binding.searcher = adjusted
     binding.cache_revision = adjusted.cache_revision
-    assert not (await service.search(query)).execution[0].cache_hit
+    assert len((await service.search(query)).papers) == 2
+    assert len(encoder.calls) == 3
 
 
 @pytest.mark.asyncio

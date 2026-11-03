@@ -94,7 +94,7 @@ async def test_startup_requires_complete_arxiv_search_and_closes_resources(monke
             nacos.register_instance.assert_awaited_once()
             # 预热使用的 ASGI 客户端关闭后，线上检索仍能使用自己的编码连接。
             result = await local.arxiv_searcher().search(query="runtime", field=main.AcademicField.COMPUTER_SCIENCE, published_after=None, published_before=None, limit=10)
-            assert result.partial_error is None
+            assert not result.retrieval_degraded
             assert len(runtime_requests) == 1
         nacos.deregister_instance.assert_awaited_once()
         transport.aclose.assert_awaited_once()

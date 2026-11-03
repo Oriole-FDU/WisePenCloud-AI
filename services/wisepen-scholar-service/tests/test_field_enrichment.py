@@ -24,7 +24,6 @@ from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.providers import ArxivProvider
 from scholar.core.providers.s2.provider import aliases as s2_aliases
 
@@ -182,7 +181,7 @@ async def test_only_unresolved_targets_advance_to_the_next_common_source():
 
 
 @pytest.mark.asyncio
-async def test_general_fallback_success_is_complete_but_domain_failure_is_partial():
+async def test_general_fallback_success_is_complete_and_domain_failure_is_audit_only():
     identity = parse_identifier("2401.00001")
     arxiv_error = ProviderError("local lookup unavailable")
     s2_error = ProviderError("S2 unavailable")
@@ -215,18 +214,12 @@ async def test_general_fallback_success_is_complete_but_domain_failure_is_partia
 
     assert result.items[0].status == LookupStatus.FOUND
     assert result.items[0].paper.metadata["openalex"]["cited_by_count"] == 0
-    assert result.items[0].error == "HF unavailable"
-    assert [(item.source, item.status) for item in result.execution] == [
-        (PaperSource.ARXIV, SourceExecutionStatus.FAILED),
-        (PaperSource.S2, SourceExecutionStatus.FAILED),
-        (PaperSource.OPENALEX, SourceExecutionStatus.COMPLETED),
-        (PaperSource.HUGGINGFACE, SourceExecutionStatus.FAILED),
-    ]
+    assert result.items[0].limitations == []
     assert openalex.calls == [([identity], "user-key")]
 
 
 @pytest.mark.asyncio
-async def test_real_qdrant_lookup_error_is_visible_while_s2_fallback_succeeds():
+async def test_real_qdrant_lookup_error_is_recovered_by_s2_fallback():
     class UnavailableQdrant:
         async def query_batch_points(self, *args, **kwargs):
             raise QdrantApiError(503, "connection lost")
@@ -259,5 +252,3 @@ async def test_real_qdrant_lookup_error_is_visible_while_s2_fallback_succeeds():
 
     assert result.items[0].status == LookupStatus.FOUND
     assert result.items[0].paper.metadata["s2"]["citation_count"] == 4
-    assert result.execution[0].status == SourceExecutionStatus.FAILED
-    assert "qdrant.lookup" in result.execution[0].error

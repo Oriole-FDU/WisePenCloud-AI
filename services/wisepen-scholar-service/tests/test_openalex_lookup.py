@@ -126,8 +126,7 @@ async def test_local_exact_match_does_not_require_openalex_key():
     assert result.items[0].status == LookupStatus.FOUND
     assert result.items[0].paper.title == "Local base paper"
     assert result.items[0].paper.metadata["arxiv"]["comments"] == "Accepted at a conference"
-    assert result.items[0].error is None
-    assert [item.source for item in result.execution] == [PaperSource.ARXIV]
+    assert result.items[0].limitations == []
     assert requests == []
 
 
@@ -198,11 +197,7 @@ async def test_s2_http_400_still_falls_back_to_openalex(openalex_found):
             assert result.items[0].status == LookupStatus.FOUND
             assert result.items[0].paper.source == PaperSource.OPENALEX
             assert result.items[0].paper.doi == doi
-            assert result.items[0].error is None
-            execution = {item.source: item for item in result.execution}
-            assert execution["s2"].status == "failed"
-            assert "400" in execution["s2"].error
-            assert execution["openalex"].status == "completed"
+            assert result.items[0].limitations == []
         else:
             # 后续来源确认未找到，不能抹掉前一来源的真实失败；最终仍传播 S2 错误。
             with pytest.raises(ProviderError) as caught:

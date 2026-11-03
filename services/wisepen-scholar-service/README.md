@@ -61,7 +61,7 @@ uv run --no-sync python deploy/run.py publish
 
 `POST /scholar/papers/discover` 与现有 MCP `discover_papers` 提供 CS 的 daily/weekly/monthly 渠道发现，默认 trending，支持 recent 和 limit，不接受 query。每次只发一个官方列表请求，直接交付成功响应；daily 使用官方最新内容默认值，weekly/monthly 传周期参数。不按渠道日期丢弃或过滤结果，见 [P5 验收记录](docs/archive/p5-acceptance.md)。
 
-Lookup 定位为已知标识符的精确查询，不再接受 purpose；取得论文后与 search 执行相同的领域富化、PDF 补救和投影。search 已包含可用调研 metadata，不应例行调用 lookup 获取更完整的结果。响应为 `items[{identifier,status,paper,error}]` 与 `execution`；metadata 仅位于 `paper.metadata`。没有可用结果的外部失败直接抛出，已有论文的部分结果保留真实错误。历史验收见 [P4 记录](docs/archive/p4-acceptance.md)。
+Lookup 定位为已知标识符的精确查询，不再接受 purpose；取得论文后与 search 执行相同的领域富化、PDF 补救和投影。search 已包含可用调研 metadata，不应例行调用 lookup 获取更完整的结果。响应为 `items[{identifier,status,paper,limitations}]`；metadata 仅位于 `paper.metadata`。没有可用结果的外部失败保留 HTTP 状态码；逐项失败只返回来源及原因码，已恢复失败和自动补全失败仅写审计日志。历史验收见 [P4 记录](docs/archive/p4-acceptance.md)。
 
 `POST /scholar/papers/search` 接受 query、field、published_after/before、limit、source_scope。时间按首次提交日期包含两端过滤；领域采用 plan.md 的 arXiv 分类映射。查询缓存默认 10 分钟，缓存只存论文事实，每次重新构造执行情况。
 
@@ -73,7 +73,7 @@ Lookup 定位为已知标识符的精确查询，不再接受 purpose；取得�
 
 S2 平台请求通过 Redis 跨实例合流：收集周期内按 ID 去重，每批最多 `SCHOLAR_S2_BATCH_MAX_IDS`（默认 300，范围 1～500）。NOKEY 首发不携带 key，仅 HTTP 429 将原批次投递平台 KEY 兜底；网络错误及其他状态直接失败。两路按各自上次实际发射时刻节流，间隔分别由 `SCHOLAR_S2_NOKEY_INTERVAL_SECONDS`、`SCHOLAR_S2_KEY_INTERVAL_SECONDS` 配置，默认均为 1.5 秒；满批不提前发车，慢响应不阻塞下一批发射。首轮收集一个间隔，之后空闲超过间隔时立即发出当前待办。
 
-在线仅在新建首发批次时应用 `SCHOLAR_S2_MAX_QUEUED_AHEAD`（默认 3）：前方 3 批允许、4 批拒绝，合入已有批次不额外占队列项。KEY 兜底不做队长拒绝，由请求预算终止等待。Redis 回执按调用的原顺序还原重复 ID 与 null；`execution.queued_ahead` 是首发准入快照，缓存命中不携带旧排队信息。
+在线仅在新建首发批次时应用 `SCHOLAR_S2_MAX_QUEUED_AHEAD`（默认 3）：前方 3 批允许、4 批拒绝，合入已有批次不额外占队列项。KEY 兜底不做队长拒绝，由请求预算终止等待。Redis 回执按调用的原顺序还原重复 ID 与 null；排队快照用于内部审计；最终未恢复的准入拒绝通过 `rate_limited` 或整次失败的 HTTP 429 表达，不向调用方返回队列轨迹。
 
 用户 BYOK 直接使用按 SHA-256 指纹隔离的 KEY FIFO，不参加平台合流，不设队长阈值。提供与平台相同的 key 仍归平台对象。离线使用独立的 NOKEY → 429 → KEY 双通道及合流待办，不参加线上合流；复用平台 key，KEY 与线上共享发射锚点，在线兜底待办优先。离线 CLI 统一管理消费者启停，不再额外 sleep。消费者随服务 lifespan 启停，部署时线上与离线同时更新，避免混跑旧发送协议。
 
@@ -85,7 +85,7 @@ S2 平台请求通过 Redis 跨实例合流：收集周期内按 ID 去重，每
 
 已知完整论文标题使用 `match_papers`；已知 DOI/arXiv 等稳定 ID 使用 `lookup_papers`；主题或不完整标题使用 `search_papers`。
 
-`POST /scholar/papers/match` 接受 `titles`（1–20 个非空标题）和 `field`，返回 `items[{title,status,paper,error}]`、`execution`。保留顺序和重复项，状态为 found、not_found、ambiguous、failed。标题统一 Unicode、大小写、空白、引号和破折号形式；保留词序、停用词、完整副标题及数学符号，不使用近似置信度。
+`POST /scholar/papers/match` 接受 `titles`（1–20 个非空标题）和 `field`，返回 `items[{title,status,paper,limitations}]`。保留顺序和重复项，状态为 found、not_found、ambiguous、failed。标题统一 Unicode、大小写、空白、引号和破折号形式；保留词序、停用词、完整副标题及数学符号，不使用近似置信度。
 
 解析顺序为 Redis 标题身份索引 → Qdrant normalized_title keyword → Crossref。Hash 按规范化标题摘要定位，稳定身份组分开存放，同一论文别名合并，不同论文同名返回歧义。索引只缓存身份；完整来源事实仍使用既有 lookup 缓存。search 写入完整来源事实，HF 列表概要不会冒充详情写入来源缓存；旧标题索引随新缓存写入预热，不扫描迁移 Redis。
 
@@ -118,7 +118,7 @@ search、lookup、discover 在最终出口统一调用 `application.paper_projec
 
 search、lookup、discover 对最终返回论文调用 `PaperPdfRecoverService.recover`，随后统一投影。顺序为顶层 PDF、provider 注册的 PDF（S2 优先 OpenAlex）、确定 arXiv ID 对应的标准 PDF、Unpaywall DOI 补救。已有明确链接不发 HEAD、不下载验证；没有 DOI 不请求 Unpaywall。
 
-Unpaywall 仅取 `best_oa_location.url_for_pdf` 或其他 `oa_locations` 的 PDF，不使用落地页和 OA 状态。邮箱配置 `UNPAYWALL_EMAIL` 默认为 `jzsun24@m.fudan.edu.cn`，单次请求超时 5 秒、并发上限 4、不自动重试。独立 DOI 缓存中，找到 PDF、确认无链接和 404 统一沿用论文缓存 TTL；网络失败不写缓存。补救失败保留论文并报告 `unpaywall` execution，结果只填顶层 `pdf_url`，不新增 metadata 命名空间。
+Unpaywall 仅取 `best_oa_location.url_for_pdf` 或其他 `oa_locations` 的 PDF，不使用落地页和 OA 状态。邮箱配置 `UNPAYWALL_EMAIL` 默认为 `jzsun24@m.fudan.edu.cn`，单次请求超时 5 秒、并发上限 4、不自动重试。独立 DOI 缓存中，找到 PDF、确认无链接和 404 统一沿用论文缓存 TTL；网络失败不写缓存。补救失败保留论文，仅写审计日志，结果只填顶层 `pdf_url`，不新增 metadata 命名空间。
 
 HTTP BYOK 请求头为 `X-OpenAlex-Api-Key`、`X-HuggingFace-Api-Key`、`X-S2-Api-Key`。MCP 从 `com.wisepen/tool_config` 的 `openalex_api_key`、`huggingface_api_key`、`s2_api_key` 读取，不进入模型参数或请求 JSON。没有搜索 BYOK 时，本地结果仍可使用平台 key 富化。
 
@@ -131,3 +131,9 @@ uv run --no-sync python -m pytest tests -q
 [数据基线](docs/archive/data-baseline.md)记录输入及样本验证范围；[阶段验收记录](docs/archive/p0-p1-acceptance.md)记录真实基础设施与全量导入结果。单元测试中的外部依赖替身不替代真实 Qdrant 验收。
 
 真实 Redis 队列验收使用独立随机命名空间，显式设置 `SCHOLAR_TEST_REDIS_URL` 后执行 `uv run --no-sync pytest tests/test_s2_queue.py -q`。未配置时队列验收跳过，不连接默认服务命名空间。
+
+### 结果限制与审计
+
+search 的 `limitations` 与 lookup/match 的逐项 `limitations` 仅包含 `{source, reason}`，按来源和原因去重。原因码为 `rate_limited`、`credentials_required`、`credential_rejected`、`source_unavailable`、`retrieval_degraded`。默认回退成功后不携带前序失败；多源缺口和 BM25 召回降级仍明确返回。身份歧义和冲突继续作为业务结果保留。
+
+四个论文入口不再返回 `execution`、`enrichment_execution`、缓存命中或排队快照。自动补全超时、限流和缓存写入故障只审计；整次请求失败保留 HTTP 状态和简短说明，原始异常、阶段及 cause 留在日志。MCP 直接透传相同合同。

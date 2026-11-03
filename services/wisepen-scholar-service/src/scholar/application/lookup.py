@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from scholar.domain.interfaces.field_policies import ScholarPolicyProvider
@@ -14,7 +14,7 @@ from scholar.application.pdf_recover import PaperPdfRecoverService
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import PaperIdentifier, parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.application.source_execution import SourceExecution, SourceExecutionStatus
+from scholar.application.limitations import ResultLimitation
 
 
 class LookupStatus(StrEnum):
@@ -38,13 +38,12 @@ class LookupItem:
     identifier: str
     status: LookupStatus
     paper: Paper | None = None
-    error: str | None = None
+    limitations: list[ResultLimitation] = field(default_factory=list)
 
 
 @dataclass
 class LookupResult:
     items: list[LookupItem]
-    execution: list[SourceExecution]
 
 
 class PaperLookupService:
@@ -91,7 +90,7 @@ class PaperLookupService:
             for source in policies.common_enrichers
             if source in self.lookup_runner.bindings
         ]
-        execution = await self.lookup_runner.run(
+        await self.lookup_runner.run(
             targets,
             common_sources=sources,
             domain_sources=policy.field_enrichers,
@@ -104,17 +103,15 @@ class PaperLookupService:
             group = [target for target in confirmed if target.cache_hit == cache_hit]
             if not group:
                 continue
-            papers, pdf_execution = await self.pdf.recover(
+            papers = await self.pdf.recover(
                 [target.paper for target in group], cache_only=cache_hit, deadline=deadline,
             )
             for target, paper in zip(group, papers, strict=True):
                 target.paper = paper
-            if pdf_execution is not None:
-                execution.append(pdf_execution)
         first_error = None
         for identity, target in zip(positions, targets, strict=True):
             if target.errors:
-                first_error = first_error or target.errors[0]
+                first_error = first_error or next(iter(target.errors.values()))
             supported = any(
                 alias.kind in self.lookup_runner.bindings[source].rules.identifier_kinds
                 for source in [*sources, *policy.field_enrichers]
@@ -133,20 +130,18 @@ class PaperLookupService:
                     else LookupStatus.UNSUPPORTED_IDENTIFIER
                 )
 
-            # 已成功回退的通用错误保留在 execution；仍影响增量的错误也放在论文项上。
-            error = (
-                target.domain_errors[0]
-                if target.domain_errors
-                else target.errors[0]
-                if target.errors and not target.general_found
-                else None
+            # 成功或歧义已确定最终业务结果；补全和已恢复失败不再降低该结果。
+            limitations = (
+                list(dict.fromkeys(ResultLimitation.from_error(source, error)
+                                   for source, error in target.errors.items()))
+                if status == LookupStatus.FAILED else []
             )
             # 歧义属于整个身份查询的结果，不把此前的基础论文作为已确认匹配返回。
             paper = project_paper(target.paper) if target.paper is not None and not target.ambiguous else None
             for index in positions[identity]:
                 item = items[index]
                 item.status = status
-                item.error = str(error) if error is not None else None
+                item.limitations = limitations[:]
                 item.paper = deepcopy(paper)
 
         # 可用性基于查询结果；保留找到的论文和身份歧义，只有整批失败才传播错误。
@@ -156,4 +151,4 @@ class PaperLookupService:
             for item in items
         ):
             raise first_error
-        return LookupResult(items, execution)
+        return LookupResult(items)

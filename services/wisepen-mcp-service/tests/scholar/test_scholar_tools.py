@@ -198,7 +198,7 @@ async def test_lookup_papers_passes_identifiers_and_field(scholar_server):
 @pytest.mark.asyncio
 async def test_match_papers_preserves_partial_results_and_forwards_secret_headers(scholar_server):
     mcp, rpc = scholar_server
-    rpc.response = {"items": [{"title": "Attention Is All You Need", "status": "found"}, {"title": "Limited", "status": "failed", "error": "429"}]}
+    rpc.response = {"items": [{"title": "Attention Is All You Need", "status": "found"}, {"title": "Limited", "status": "failed", "limitations": [{"source": "crossref", "reason": "rate_limited"}]}]}
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("match_papers", {
             "titles": ["Attention Is All You Need", "Limited"], "field": "computer_science",
@@ -336,10 +336,10 @@ async def test_byok_metadata_is_per_call_and_only_forwarded_in_http_headers(
         (
             200,
             503,
-            "OpenAlex search unavailable: upstream single-source failure",
+            "Scholar source is unavailable; try again later.",
         ),
-        (429, 429, "Too Many Requests: retry after 12 seconds"),
-        (None, None, "ReadTimeout: Scholar request exceeded its time budget"),
+        (429, 429, "Scholar source is rate limited; try again later."),
+        (None, None, "ReadTimeout: private-stage at http://private-address"),
     ],
 )
 @pytest.mark.asyncio
@@ -362,5 +362,45 @@ async def test_scholar_rpc_failures_are_visible_as_mcp_tool_errors(
         item.text for item in result.content if item.type == "text"
     )
     assert result.isError is True
-    assert message in visible_error
+    if code is not None:
+        assert message in visible_error
+    else:
+        assert "unavailable" in visible_error
+        assert "private-stage" not in visible_error and "private-address" not in visible_error
+    assert "wisepen-scholar-service" not in visible_error
     assert "source_error" not in visible_error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool, payload", [
+    ("search_papers", {"query": "retrieval"}),
+    ("lookup_papers", {"identifiers": ["1706.03762"]}),
+    ("match_papers", {"titles": ["Known title"]}),
+    ("discover_papers", {"field": "computer_science"}),
+])
+async def test_scholar_tool_deadline_is_actionable_without_rpc_diagnostics(scholar_server, tool, payload):
+    mcp, rpc = scholar_server
+    rpc.error = TimeoutError("private-stage at private-address")
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool(tool, payload)
+    visible = "\n".join(item.text for item in result.content if item.type == "text")
+    assert result.isError
+    assert "504" in visible and "timed out" in visible
+    assert "private-stage" not in visible and "private-address" not in visible
+
+
+@pytest.mark.asyncio
+async def test_scholar_rpc_network_timeout_keeps_504_and_audits_original_cause(scholar_server, monkeypatch):
+    import httpx
+
+    mcp, rpc = scholar_server
+    audited = []
+    monkeypatch.setattr("wisepen_mcp.capabilities.scholar.papers.warning", lambda event, **fields: audited.append(fields))
+    cause = httpx.ReadTimeout("private rpc address")
+    rpc.error = RpcError("wisepen-scholar-service", "/scholar/papers/search", cause=cause)
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool("search_papers", {"query": "retrieval"})
+    visible = "\n".join(item.text for item in result.content if item.type == "text")
+    assert result.isError and "504" in visible
+    assert "private rpc address" not in visible
+    assert any(fields.get("cause") is cause for fields in audited)

@@ -24,7 +24,6 @@ from scholar.domain.models.paper import Paper
 from scholar.domain.interfaces.title_resolver import TitleMatch
 from scholar.utils import normalize_title
 from scholar.domain.repositories.paper_cache import CachedPaperLookup
-from scholar.application.source_execution import SourceExecutionStatus
 
 
 def paper(title="Attention Is All You Need", arxiv="1706.03762", doi=None):
@@ -101,7 +100,6 @@ async def test_cache_write_failure_preserves_local_and_crossref_results(cache, o
 
     assert [item.status for item in result.items] == [MatchStatus.FOUND, MatchStatus.FOUND]
     assert [item.paper.title for item in result.items] == ["Local", "External"]
-    assert all(event.status == SourceExecutionStatus.COMPLETED and event.error is None for event in result.execution)
 
 
 @pytest.mark.asyncio
@@ -160,6 +158,24 @@ async def test_stale_title_index_continues_through_local_and_crossref(cache):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("found", [True, False])
+async def test_title_cache_failure_is_audited_and_later_resolution_has_no_limitations(cache, monkeypatch, found):
+    from redis.exceptions import RedisError
+
+    audited = []
+    monkeypatch.setattr("scholar.application.match.warning", lambda event, **fields: audited.append(fields))
+    failure = RedisError("private cache diagnostic")
+    monkeypatch.setattr(cache, "match_titles", AsyncMock(side_effect=failure))
+    local = SimpleNamespace(match_titles=AsyncMock(return_value=[PaperLookupMatch([paper("Known")] if found else [])]))
+    crossref = SimpleNamespace(match=AsyncMock(return_value=[TitleMatch()]))
+    fetch, _ = lookup({})
+    result = await PaperMatchService(cache, local, crossref, fetch).match(PaperMatch(["Known"]))
+    assert result.items[0].status == (MatchStatus.FOUND if found else MatchStatus.NOT_FOUND)
+    assert result.items[0].limitations == []
+    assert any(fields.get("exc") is failure for fields in audited)
+
+
+@pytest.mark.asyncio
 async def test_full_cached_paper_assembles_domain_and_pdf_without_external_calls(cache):
     base = paper("Complete", None, "10.1000/complete")
     base.pdf_url = None
@@ -192,7 +208,8 @@ async def test_crossref_filters_non_equal_titles_and_keeps_item_rate_limits():
         matches = await CrossrefTitleResolver(http, "contact@example.test").match(["Exact", "Missing", "Limited"])
     assert matches[0].candidates == [[parse_identifier("10.1000/exact")]]
     assert matches[1].candidates == [] and matches[1].error is None
-    assert "429" in matches[2].error
+    assert isinstance(matches[2].error, httpx.HTTPStatusError)
+    assert matches[2].error.response.status_code == 429
 
 
 @pytest.mark.asyncio
@@ -259,7 +276,7 @@ async def test_mixed_batch_preserves_cache_local_and_lookup_successes_with_exter
     ]))
     crossref = SimpleNamespace(match=AsyncMock(return_value=[
         TitleMatch([[parse_identifier(remote.doi)]]),
-        TitleMatch(error="crossref: HTTP 429"), TitleMatch(),
+        TitleMatch(error=httpx.HTTPStatusError("quota diagnostic", request=httpx.Request("GET", "https://crossref.test"), response=httpx.Response(429))), TitleMatch(),
         TitleMatch([[parse_identifier("10.5555/first")], [parse_identifier("10.5555/second")]]),
     ]))
     fetch, provider = lookup({parse_identifier(remote.doi): remote}, cache)
@@ -270,7 +287,7 @@ async def test_mixed_batch_preserves_cache_local_and_lookup_successes_with_exter
         MatchStatus.FOUND, MatchStatus.FOUND, MatchStatus.FOUND, MatchStatus.FAILED,
         MatchStatus.NOT_FOUND, MatchStatus.AMBIGUOUS, MatchStatus.FOUND,
     ]
-    assert result.items[3].error == "crossref: HTTP 429"
+    assert [(item.source, item.reason) for item in result.items[3].limitations] == [("crossref", "rate_limited")]
     assert provider.calls == [([parse_identifier(remote.doi)], None)]
 
 

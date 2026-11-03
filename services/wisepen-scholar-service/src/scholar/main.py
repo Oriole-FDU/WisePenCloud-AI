@@ -26,8 +26,7 @@ from common.utils.ai_clients.embedding import EmbeddingClient
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from redis.exceptions import RedisError, TimeoutError as RedisTimeout
-from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
+from redis.exceptions import RedisError
 
 from scholar.api.endpoints import embeddings, health, papers
 from scholar.api.router import api_router
@@ -35,7 +34,8 @@ from scholar.container import container
 from scholar.core.config.app_settings import settings
 from scholar.core.config.nacos import nacos_client_manager
 from scholar.core.config.policy_settings import ScholarPolicyStore, validate_policy_sources, watch_policies
-from scholar.domain.errors import ProviderBusy, ProviderError, ScholarErrorCode, provider_operation
+from scholar.domain.errors import ProviderCredentialsRequired, ProviderError, ScholarErrorCode, provider_operation
+from scholar.application.limitations import dependency_status
 from scholar.domain.models.fields import AcademicField
 from scholar.ml.specter import DEFAULT_MODELS, DIMENSIONS, QUERY_MODEL, SpecterEncoder
 
@@ -58,31 +58,27 @@ def setup_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RedisError)
     @app.exception_handler(ProviderError)
     async def dependency_error(request: Request, exc):
-        cause = exc.__cause__ if isinstance(exc, ProviderError) and exc.__cause__ is not None else exc
-        if isinstance(cause, ResponseHandlingException):
-            cause = cause.source
-        # 限流、依赖 HTTP 拒绝和超时保留各自状态，不能统一伪装成 503。
-        if isinstance(exc, ProviderBusy):
-            status = 429
-        elif isinstance(cause, httpx.HTTPStatusError):
-            status = cause.response.status_code
-        elif isinstance(cause, UnexpectedResponse):
-            status = cause.status_code
-        elif isinstance(cause, (TimeoutError, httpx.TimeoutException, RedisTimeout)):
-            status = 504
-        else:
-            status = 503
-        warning("Scholar dependency failed.", path=request.url.path, status_code=status, error=str(exc))
+        status = dependency_status(exc)
+        # 状态与简短说明供调用方行动，原始异常及阶段只进入审计。
+        message = {
+            401: "Scholar source credentials were rejected.",
+            403: "Scholar source credentials were rejected.",
+            429: "Scholar source is rate limited; try again later.",
+            504: "Scholar request timed out; try again later.",
+        }.get(status, "Scholar source is unavailable; try again later.")
+        if isinstance(exc, ProviderCredentialsRequired):
+            message = "Scholar source requires an API key."
+        warning("Scholar dependency failed.", path=request.url.path, status_code=status,
+                exc=exc, cause=exc.__cause__)
         return JSONResponse(
             status_code=status,
-            # HTTP/MCP 将真实外部错误交给调用方决策，不再抹平成分类字符串。
-            content=R(code=status, msg=str(exc)).model_dump(),
+            content=R(code=status, msg=message).model_dump(),
         )
 
     @app.exception_handler(TimeoutError)
     async def request_timeout(request: Request, exc):
-        message = f"{request.url.path} timed out: {str(exc) or type(exc).__name__}"
-        warning("Scholar request timed out.", path=request.url.path, error=message)
+        message = "Scholar request timed out; try again later."
+        warning("Scholar request timed out.", path=request.url.path, exc=exc)
         return JSONResponse(
             status_code=504,
             content={
@@ -135,8 +131,8 @@ async def lifespan(app):
                             limit=settings.SCHOLAR_SEARCH_CANDIDATES,
                         )
                         # 线上允许编码失败时返回文本结果；启动检查必须确认完整混合链路可用。
-                        if result.partial_error is not None:
-                            raise ProviderError(f"arxiv startup warmup incomplete: {result.partial_error}")
+                        if result.retrieval_degraded:
+                            raise ProviderError("arxiv startup warmup incomplete: retrieval degraded")
             except (ProviderError, TimeoutError) as exc:
                 error(
                     "arXiv startup warmup failed.", exc=exc,

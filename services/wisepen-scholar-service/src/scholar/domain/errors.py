@@ -23,6 +23,10 @@ class ProviderError(RuntimeError):
     """
 
 
+class ProviderCredentialsRequired(ProviderError):
+    """外部来源缺少所需凭证；与远端拒绝已有凭证区别处理。"""
+
+
 class ProviderBusy(ProviderError):
     """来源准入拒绝（如排队数超限），尚未发送 HTTP；允许普通通用来源回退。"""
 

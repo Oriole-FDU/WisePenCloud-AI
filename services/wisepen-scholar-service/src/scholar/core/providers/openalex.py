@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from scholar.domain.errors import ProviderError, provider_error_message
+from scholar.domain.errors import ProviderCredentialsRequired, ProviderError, provider_error_message
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
@@ -126,7 +126,7 @@ class OpenAlexProvider:
         api_key: str | None = None,
     ) -> PaperSearchBatch:
         if not api_key:
-            raise ProviderError("OpenAlex API key is required")
+            raise ProviderCredentialsRequired("OpenAlex API key is required")
 
         # 组装 filter：领域过滤 + 可选时间范围。
         field_filter = OPENALEX_FILTERS[field]
@@ -163,7 +163,7 @@ class OpenAlexProvider:
     ) -> list[PaperLookupMatch]:
         """批量精确读取完整 Work，保持输入顺序并约束并发。"""
         if not api_key:
-            raise ProviderError("OpenAlex API key is required")
+            raise ProviderCredentialsRequired("OpenAlex API key is required")
 
         async def resolve(identifier):
             async with self._slots:

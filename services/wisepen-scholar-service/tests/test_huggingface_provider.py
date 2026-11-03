@@ -329,9 +329,11 @@ async def test_lookup_records_non_404_http_errors_on_the_item(status_code):
         )
 
     assert result[0].papers == []
-    assert str(status_code) in result[0].error
-    assert "https://huggingface.co/api/papers/2401.00001" in result[0].error
-    assert "hf-test-token" not in result[0].error
+    assert str(status_code) in str(result[0].error)
+    assert isinstance(result[0].error.__cause__, httpx.HTTPStatusError)
+    assert result[0].error.__cause__.response.status_code == status_code
+    assert "https://huggingface.co/api/papers/2401.00001" in str(result[0].error)
+    assert "hf-test-token" not in str(result[0].error)
 
 
 @pytest.mark.asyncio
@@ -345,8 +347,8 @@ async def test_lookup_records_network_errors_on_the_item():
         )
 
     assert result[0].papers == []
-    assert "connection failed" in result[0].error
-    assert "https://huggingface.co/api/papers/2401.00001" in result[0].error
+    assert "connection failed" in str(result[0].error)
+    assert "https://huggingface.co/api/papers/2401.00001" in str(result[0].error)
 
 
 @pytest.mark.asyncio
@@ -359,8 +361,8 @@ async def test_lookup_timeout_is_recorded_on_the_item():
             [parse_identifier("arxiv:2401.00001")]
         )
 
-    assert "read timed out" in result[0].error
-    assert "https://huggingface.co/api/papers/2401.00001" in result[0].error
+    assert "read timed out" in str(result[0].error)
+    assert "https://huggingface.co/api/papers/2401.00001" in str(result[0].error)
 
 
 @pytest.mark.asyncio
@@ -399,7 +401,7 @@ async def test_lookup_keeps_success_beside_item_http_failure():
     assert results[0].papers[0].arxiv_id == "2401.00001"
     assert results[0].error is None
     assert results[1].papers == []
-    assert "503" in results[1].error
+    assert "503" in str(results[1].error)
 
 
 @pytest.mark.asyncio

@@ -176,12 +176,13 @@ class ArxivProvider:
         started = monotonic()
         try:
             # 编码失败降级为纯 BM25 召回，并显式标记 partial。
-            partial_error = None
+            retrieval_degraded = False
             try:
                 vector = (await self.embedding_client.embed(texts=[query]))[0]
             except (APIConnectionError, APIStatusError) as error:
                 vector = None
-                partial_error = provider_error_message(error)
+                retrieval_degraded = True
+                warning("arXiv retrieval degraded to BM25.", stage=stage, exc=error)
 
             stage = "qdrant.search"
             provider_operation.set(stage)
@@ -214,7 +215,7 @@ class ArxivProvider:
                     with_arxiv_doi(candidate.paper)
                     for candidate in ranked[:limit]
                 ],
-                partial_error,
+                retrieval_degraded,
             )
         except asyncio.CancelledError:
             warning(

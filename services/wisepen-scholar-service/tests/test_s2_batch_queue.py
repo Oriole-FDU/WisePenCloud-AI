@@ -15,7 +15,7 @@ import pytest_asyncio
 from loguru import logger
 from redis.asyncio import Redis
 
-from scholar.core.providers.s2.transport import S2Transport, s2_queued_ahead
+from scholar.core.providers.s2.transport import S2Transport
 from scholar.domain.errors import ProviderBusy, ProviderError
 from offline.s2_api import S2SyncClient
 from scholar.domain.models.identifiers import parse_identifier
@@ -339,9 +339,7 @@ async def test_queue_snapshot_is_set_in_original_context(boundary):
         return httpx.Response(200, json=json.loads(request.content)["ids"])
 
     async with transports(boundary, handle) as (one, _):
-        s2_queued_ahead.set(None)
         assert await lookup(one, ["A"]) == ["A"]
-        assert s2_queued_ahead.get() == 0
 
 
 def process_lookup(url, namespace, ids, barrier, output):

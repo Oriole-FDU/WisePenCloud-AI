@@ -12,10 +12,10 @@ from scholar.domain.models.paper import Paper
 
 @dataclass
 class PaperSearchBatch:
-    """来源返回的论文及本次部分失败；执行状态不属于可缓存的论文事实。"""
+    """来源论文及召回降级标记；诊断异常由降级处记录，不进入结果缓存。"""
 
     papers: list[Paper]
-    partial_error: str | None = None
+    retrieval_degraded: bool = False
 
 
 class PaperSearcher(Protocol):

@@ -115,7 +115,7 @@ class HuggingFaceProvider:
                 payload = await self._paper_info(identifier.value, api_key=api_key)
             except ProviderError as error:
                 # 单篇失败按论文隔离；取消与程序错误不在此包装。
-                return PaperLookupMatch([], str(error))
+                return PaperLookupMatch([], error)
             if payload is None:
                 return PaperLookupMatch([])
             metadata = self._metadata(payload)

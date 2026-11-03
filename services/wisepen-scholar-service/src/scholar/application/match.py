@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from redis.exceptions import RedisError
@@ -12,14 +12,10 @@ from common.logger import warning
 
 from scholar.application.lookup import LookupStatus, PaperLookup, PaperLookupService
 from scholar.application.paper_projection import project_paper
-from scholar.application.source_execution import (
-    SourceExecution,
-    SourceExecutionStatus,
-)
+from scholar.application.limitations import ResultLimitation
 from scholar.core.providers.arxiv import with_arxiv_doi
 from scholar.core.providers.policies import paper_identifiers
 from scholar.domain.errors import ProviderError
-from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.interfaces.title_resolver import TitleMatch, TitleResolver
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind, merge_identity_groups
@@ -51,7 +47,7 @@ class MatchItem:
     title: str
     status: MatchStatus = MatchStatus.NOT_FOUND
     paper: Paper | None = None
-    error: str | None = None
+    limitations: list[ResultLimitation] = field(default_factory=list)
 
 
 @dataclass
@@ -59,31 +55,6 @@ class MatchResult:
     """保留标题顺序、重复项及逐项失败的公共响应。"""
 
     items: list[MatchItem]
-    execution: list[SourceExecution]
-
-
-def _error_text(error: BaseException) -> str:
-    """异常可能没有文本（如某些自定义异常），用类名兜底。"""
-    return str(error) or type(error).__name__
-
-
-def _execution(
-    source: str,
-    matches: list[TitleMatch] | list[PaperLookupMatch],
-    *,
-    cache_hit: bool = False,
-) -> SourceExecution:
-    """按成功/失败比例汇总一次来源执行的 SourceExecution。"""
-    failures = [match.error for match in matches if match.error]
-    if not failures:
-        status = SourceExecutionStatus.COMPLETED
-    elif len(failures) == len(matches):
-        status = SourceExecutionStatus.FAILED
-    else:
-        status = SourceExecutionStatus.PARTIAL
-    return SourceExecution(
-        source, cache_hit, status, failures[0] if failures else None
-    )
 
 
 class PaperMatchService:
@@ -124,7 +95,6 @@ class PaperMatchService:
             positions.setdefault(normalize_title(title), []).append(index)
         titles = [query.titles[indexes[0]] for indexes in positions.values()]
         resolved = [MatchItem(title) for title in titles]
-        execution: list[SourceExecution] = []
         writes, title_entries = [], []
 
         # 参与标题匹配的来源：通用富化来源 + 当前领域的专用来源。
@@ -144,29 +114,16 @@ class PaperMatchService:
                 cached = await self.cache.match_titles(titles, sources)
             for item, match in zip(resolved, cached, strict=True):
                 if match.error:
-                    item.error = match.error
+                    warning("Scholar title cache failed.", source="scholar", exc=match.error)
+                    item.limitations.append(ResultLimitation.from_error("scholar", match.error))
                     item.status = MatchStatus.FAILED
                 elif len(match.papers) > 1:
                     item.status = MatchStatus.AMBIGUOUS
                 elif match.papers:
                     item.status = MatchStatus.FOUND
                     item.paper = project_paper(match.papers[0])
-            execution.append(
-                _execution(
-                    "paper_cache",
-                    cached,
-                    cache_hit=any(match.papers for match in cached),
-                )
-            )
         except (RedisError, TimeoutError) as error:
-            execution.append(
-                SourceExecution(
-                    "paper_cache",
-                    False,
-                    SourceExecutionStatus.FAILED,
-                    _error_text(error),
-                )
-            )
+            warning("Scholar title cache failed.", source="scholar", exc=error)
 
         # 本地论文索引：只处理仍未确定（非 FOUND / AMBIGUOUS）的标题。
         pending = [
@@ -180,17 +137,15 @@ class PaperMatchService:
                     local = await self.local.match_titles(
                         [titles[i] for i in pending]
                     )
-                matches = []
                 for index, match in zip(pending, local, strict=True):
                     # 本地可能有多篇论文共享同一身份组，合并后用于歧义判断。
                     candidates = merge_identity_groups(
                         [paper_identifiers(paper) for paper in match.papers]
                     )
-                    matches.append(TitleMatch(candidates, match.error))
                     if match.error:
-                        resolved[index] = MatchItem(
-                            titles[index], MatchStatus.FAILED, error=match.error
-                        )
+                        warning("Scholar local title match failed.", source="arxiv", exc=match.error)
+                        resolved[index].status = MatchStatus.FAILED
+                        resolved[index].limitations.append(ResultLimitation.from_error("arxiv", match.error))
                     elif len(candidates) > 1:
                         resolved[index] = MatchItem(
                             titles[index], MatchStatus.AMBIGUOUS
@@ -208,20 +163,11 @@ class PaperMatchService:
                             MatchStatus.FOUND,
                             project_paper(paper),
                         )
-                execution.append(_execution("arxiv", matches))
             except (ProviderError, TimeoutError) as error:
+                warning("Scholar local title match failed.", source="arxiv", exc=error)
                 for index in pending:
-                    resolved[index] = MatchItem(
-                        titles[index], MatchStatus.FAILED, error=_error_text(error)
-                    )
-                execution.append(
-                    SourceExecution(
-                        "arxiv",
-                        False,
-                        SourceExecutionStatus.FAILED,
-                        _error_text(error),
-                    )
-                )
+                    resolved[index].status = MatchStatus.FAILED
+                    resolved[index].limitations.append(ResultLimitation.from_error("arxiv", error))
 
         # Crossref DOI：把标题解析为稳定身份，只对仍未确定的标题请求。
         pending = [
@@ -236,17 +182,16 @@ class PaperMatchService:
                 )
             except (ProviderError, TimeoutError) as error:
                 matches = [
-                    TitleMatch(error=_error_text(error)) for _ in pending
+                    TitleMatch(error=error) for _ in pending
                 ]
-            execution.append(_execution("crossref", matches))
 
             ready, identities = [], []
             for index, match in zip(pending, matches, strict=True):
                 candidates = merge_identity_groups(match.candidates)
                 if match.error:
-                    resolved[index] = MatchItem(
-                        titles[index], MatchStatus.FAILED, error=match.error
-                    )
+                    warning("Scholar Crossref title match failed.", source="crossref", exc=match.error)
+                    resolved[index].status = MatchStatus.FAILED
+                    resolved[index].limitations.append(ResultLimitation.from_error("crossref", match.error))
                 elif len(candidates) > 1:
                     resolved[index] = MatchItem(
                         titles[index], MatchStatus.AMBIGUOUS
@@ -279,20 +224,10 @@ class PaperMatchService:
                         timeout=remaining,
                     )
                 except (ProviderError, RedisError, TimeoutError) as error:
+                    warning("Scholar matched paper lookup failed.", source="scholar", exc=error)
                     for index in ready:
-                        resolved[index] = MatchItem(
-                            titles[index],
-                            MatchStatus.FAILED,
-                            error=_error_text(error),
-                        )
-                    execution.append(
-                        SourceExecution(
-                            "lookup",
-                            False,
-                            SourceExecutionStatus.FAILED,
-                            _error_text(error),
-                        )
-                    )
+                        resolved[index].status = MatchStatus.FAILED
+                        resolved[index].limitations.append(ResultLimitation.from_error("scholar", error))
                 else:
                     statuses = {
                         LookupStatus.FOUND: MatchStatus.FOUND,
@@ -304,9 +239,8 @@ class PaperMatchService:
                             titles[index],
                             statuses.get(item.status, MatchStatus.FAILED),
                             item.paper,
-                            item.error,
+                            item.limitations,
                         )
-                    execution.extend(found.execution)
 
         # 内容解析全部完成后再写缓存，不能让可选写入耗尽后续查询的预算。
         if writes or title_entries:
@@ -330,6 +264,6 @@ class PaperMatchService:
                     query.titles[index],
                     item.status,
                     deepcopy(item.paper),
-                    item.error,
+                    list(dict.fromkeys(item.limitations)),
                 )
-        return MatchResult(items, execution)
+        return MatchResult(items)

@@ -21,6 +21,9 @@ from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.paper import Paper
 from scholar.main import setup_exception_handlers
 from policy_fakes import make_policy_store
+from title_fakes import MemoryRedis
+from scholar.core.storage.qdrant.paper_repository import to_paper
+from scholar.domain.repositories.local_paper_repository import PaperCandidate
 
 FROM_SOURCE_SECRET = "scholar-test-secret"
 AUTHORIZED = {"X-From-Source": FROM_SOURCE_SECRET}
@@ -63,91 +66,55 @@ def create_app(*, from_source_secret):
     return app
 
 
-class FakeIndices:
-    """模拟健康检查所需的索引别名查询。"""
-
-    def __init__(self, es):
-        self.es = es
-
-    async def exists_alias(self, *, name):
-        self.es.checked_aliases.append(name)
-        return self.es.alias_exists
-
-
-class FakeElasticsearch:
-    """在 Scholar 与 ES 的调用边界记录 DSL 并返回确定响应。"""
+class FakePaperRepository:
+    """在现有论文仓储与健康检查边界返回确定结果，不依赖历史 ES 装配。"""
 
     def __init__(self):
         self.alias_exists = False
         self.checked_aliases = []
         self.info_calls = 0
         self.search_calls = []
-        self.msearch_calls = []
+        self.lookup_calls = []
         self.lookup_documents = {
             ("arxiv_id", "2201.00001"): [PAPER_A],
             ("doi", "10.5555/p1.first"): [PAPER_A],
             ("doi", "10.5555/p1.ambiguous"): [PAPER_AMBIGUOUS_A, PAPER_AMBIGUOUS_B],
         }
         self.lookup_errors = {("doi", "10.5555/p1.error")}
-        self.indices = FakeIndices(self)
 
-    async def info(self):
-        self.info_calls += 1
-        return {"name": "fake"}
+    async def collection_exists(self, name):
+        self.checked_aliases.append(name)
+        return self.alias_exists
 
-    async def search(self, *, index, size, track_total_hits, query=None, **kwargs):
-        self.search_calls.append({"index": index, "query": query})
-        return {"hits": {"hits": []}}
+    async def search(self, **kwargs):
+        self.search_calls.append(kwargs)
+        return []
 
-    async def msearch(self, *, searches):
-        self.msearch_calls.append(searches)
-        responses = []
-        for position in range(1, len(searches), 2):
-            field, value = next(iter(searches[position]["query"]["term"].items()))
-            if (field, value) in self.lookup_errors:
-                responses.append(
-                    {"error": {"type": "search_phase_execution_exception"}}
-                )
-                continue
-            documents = self.lookup_documents.get((field, value), [])
-            responses.append(
-                {"hits": {"hits": [{"_source": document} for document in documents]}}
-            )
-        return {"responses": responses}
+    async def match_titles(self, titles, **kwargs):
+        return [PaperLookupMatch([]) for _ in titles]
+
+    async def lookup(self, ids):
+        self.lookup_calls.append(ids)
+        results = []
+        for identity in ids:
+            key = ("arxiv_id" if identity.kind == "arxiv" else "doi", identity.value)
+            if key in self.lookup_errors:
+                results.append(PaperLookupMatch([], ProviderError("private lookup diagnostic")))
+            else:
+                results.append(PaperLookupMatch([to_paper(document) for document in self.lookup_documents.get(key, [])]))
+        return results
 
 
-class FakeRedis:
+class FakeRedis(MemoryRedis):
     """提供请求级缓存命中和 Redis ping 的可观察行为。"""
 
     def __init__(self):
-        self.values = {}
+        super().__init__()
         self.ping_calls = 0
-
-    async def get(self, key):
-        return self.values.get(key)
-
-    async def mget(self, keys):
-        return [self.values.get(key) for key in keys]
-
-    async def set(self, key, value, *, ex):
-        self.values[key] = value
 
     async def ping(self):
         self.ping_calls += 1
         return True
-
-    def pipeline(self, *, transaction):
-        return self
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_args):
-        return None
-
-    async def execute(self):
-        return []
-
 
 class MissingPapers:
     async def lookup(self, ids, *, api_key=None):
@@ -156,12 +123,12 @@ class MissingPapers:
 
 @pytest.fixture
 def scholar_client():
-    es, redis = FakeElasticsearch(), FakeRedis()
+    es, redis = FakePaperRepository(), FakeRedis()
     container.reset_singletons()
     container.policy_store.override(providers.Object(make_policy_store()))
     container.config.from_dict(
         {
-            "SCHOLAR_INDEX_ALIAS": "test-scholar-papers",
+            "SCHOLAR_COLLECTION_ALIAS": "test-scholar-papers",
             "FROM_SOURCE_SECRET": FROM_SOURCE_SECRET,
             "SCHOLAR_EMBEDDING_TIMEOUT_SECONDS": 0.1,
             "SCHOLAR_QUERY_CACHE_TTL_SECONDS": 60,
@@ -184,9 +151,8 @@ def scholar_client():
     container.embedding_client.override(
         providers.Object(AsyncMock(embed=AsyncMock(return_value=[[0.0] * 768])))
     )
-    container.vector_repository.override(providers.Object(AsyncMock(search=AsyncMock(return_value=[]))))
-    container.qdrant.override(providers.Object(AsyncMock(collection_exists=AsyncMock(return_value=True))))
-    container.elasticsearch.override(providers.Object(es))
+    container.paper_repository.override(providers.Object(es))
+    container.qdrant.override(providers.Object(es))
     container.redis.override(providers.Object(redis))
     container.s2_provider.override(providers.Object(MissingPapers()))
     openalex_http = httpx.AsyncClient(
@@ -210,9 +176,8 @@ def scholar_client():
         container.policy_store.reset_last_overriding()
         container.unwire()
         container.embedding_client.reset_override()
-        container.vector_repository.reset_override()
+        container.paper_repository.reset_override()
         container.qdrant.reset_override()
-        container.elasticsearch.reset_override()
         container.redis.reset_override()
         container.s2_provider.reset_override()
         container.openalex_http.reset_override()
@@ -229,7 +194,7 @@ def test_discovery_accepts_non_cs_field_and_reports_unavailable_capability(schol
     assert response.status_code == 503
 
 
-def test_search_sends_domain_and_inclusive_date_bounds_to_es(scholar_client):
+def test_search_sends_domain_and_inclusive_date_bounds_to_repository(scholar_client):
     client, es, _ = scholar_client
     response = client.post(
         "/scholar/papers/search",
@@ -245,16 +210,10 @@ def test_search_sends_domain_and_inclusive_date_bounds_to_es(scholar_client):
 
     assert response.status_code == 200
     assert response.json()["data"]["papers"] == []
-    query = es.search_calls[0]["query"]["bool"]
-    assert {
-        "bool": {
-            "should": [{"wildcard": {"categories": "cs.*"}}],
-            "minimum_should_match": 1,
-        }
-    } in query["filter"]
-    assert {
-        "range": {"submitted_date": {"gte": "2023-01-01", "lte": "2023-12-31"}}
-    } in query["filter"]
+    call = es.search_calls[0]
+    assert call["categories"] == ["cs.*"]
+    assert call["published_after"] == date(2023, 1, 1)
+    assert call["published_before"] == date(2023, 12, 31)
 
 
 def test_search_cache_reuses_identical_request_and_isolates_changed_inputs(
@@ -286,34 +245,6 @@ def test_search_cache_reuses_identical_request_and_isolates_changed_inputs(
         changed_query.status_code,
         changed_field.status_code,
     ] == [200, 200, 200, 200]
-    assert (
-        next(e for e in first.json()["data"]["execution"] if e["source"] == "arxiv")[
-            "cache_hit"
-        ]
-        is False
-    )
-    assert (
-        next(e for e in repeated.json()["data"]["execution"] if e["source"] == "arxiv")[
-            "cache_hit"
-        ]
-        is True
-    )
-    assert (
-        next(
-            e
-            for e in changed_query.json()["data"]["execution"]
-            if e["source"] == "arxiv"
-        )["cache_hit"]
-        is False
-    )
-    assert (
-        next(
-            e
-            for e in changed_field.json()["data"]["execution"]
-            if e["source"] == "arxiv"
-        )["cache_hit"]
-        is False
-    )
 
 
 def test_lookup_preserves_input_order_duplicates_and_per_identifier_status(
@@ -358,19 +289,16 @@ def test_lookup_preserves_input_order_duplicates_and_per_identifier_status(
     ]
     assert [item["paper"]["arxiv_id"] for item in items[:3]] == ["2201.00001"] * 3
 
-    searches = es.msearch_calls[0]
-    assert [
-        searches[position]["query"]["term"] for position in range(1, len(searches), 2)
-    ] == [
-        {"arxiv_id": "2201.00001"},
-        {"doi": "10.5555/p1.first"},
-        {"arxiv_id": "not-a-paper"},
-        {"doi": "10.5555/p1.ambiguous"},
-        {"arxiv_id": "2202.99999"},
+    assert [(identity.kind, identity.value) for identity in es.lookup_calls[0]] == [
+        ("arxiv", "2201.00001"),
+        ("doi", "10.5555/p1.first"),
+        ("arxiv", "not-a-paper"),
+        ("doi", "10.5555/p1.ambiguous"),
+        ("arxiv", "2202.99999"),
     ]
 
 
-def test_lookup_keeps_successes_when_one_msearch_item_fails(scholar_client):
+def test_lookup_keeps_successes_when_one_item_fails(scholar_client):
     client, _, _ = scholar_client
     response = client.post(
         "/scholar/papers/lookup",
@@ -383,11 +311,13 @@ def test_lookup_keeps_successes_when_one_msearch_item_fails(scholar_client):
     assert result["items"][0]["status"] == "found"
     assert result["items"][0]["paper"]["arxiv_id"] == "2201.00001"
     assert result["items"][1]["status"] == "failed"
-    assert "search_phase_execution_exception" in result["items"][1]["error"]
-    assert result["execution"][0]["status"] == "partial"
+    assert result["items"][1]["limitations"] == [
+        {"source": "arxiv", "reason": "source_unavailable"},
+        {"source": "openalex", "reason": "credentials_required"},
+    ]
 
 
-def test_lookup_whole_failure_exposes_original_error_to_the_caller(scholar_client):
+def test_lookup_whole_failure_keeps_diagnostics_in_audit(scholar_client):
     client, _, _ = scholar_client
     response = client.post(
         "/scholar/papers/lookup",
@@ -396,7 +326,7 @@ def test_lookup_whole_failure_exposes_original_error_to_the_caller(scholar_clien
     )
 
     assert response.status_code == 503
-    assert "search_phase_execution_exception" in response.json()["msg"]
+    assert "private lookup diagnostic" not in response.json()["msg"]
     assert response.json()["data"] is None
 
 
@@ -423,19 +353,19 @@ def test_lookup_keeps_base_facts_or_raises_when_s2_fails(
         assert response.status_code == 200
         item = response.json()["data"]["items"][0]
         assert item["paper"]["title"] == "First paper"
-        assert "429" in item["error"]
+        assert item["limitations"] == []
     else:
         assert response.status_code == 429
         assert response.json()["code"] == 429
-        assert "429" in response.json()["msg"]
+        assert "rate limited" in response.json()["msg"]
         assert response.json()["data"] is None
 
 
 @pytest.mark.parametrize("failure", ["deadline", "bad_gateway", "read_timeout"])
-def test_search_reports_vector_failure_with_actual_status_and_stage(scholar_client, failure):
+def test_search_reports_actual_failure_status_without_stage(scholar_client, failure):
     client, _, _ = scholar_client
 
-    class SlowVectors:
+    class SlowVectors(FakePaperRepository):
         async def search(self, **kwargs):
             if failure == "bad_gateway":
                 raise UnexpectedResponse(502, "Bad Gateway", b"proxy failed", httpx.Headers())
@@ -444,7 +374,7 @@ def test_search_reports_vector_failure_with_actual_status_and_stage(scholar_clie
             await asyncio.Event().wait()
 
     with (
-        container.vector_repository.override(providers.Object(SlowVectors())),
+        container.paper_repository.override(providers.Object(SlowVectors())),
         container.config.SCHOLAR_REQUEST_TIMEOUT_SECONDS.override(0.03),
     ):
         response = client.post("/scholar/papers/search", headers=AUTHORIZED, json={"query": "slow vectors"})
@@ -452,15 +382,15 @@ def test_search_reports_vector_failure_with_actual_status_and_stage(scholar_clie
     status = 502 if failure == "bad_gateway" else 504
     assert response.status_code == status
     assert response.json()["code"] == status
-    assert "arxiv" in response.json()["msg"]
-    assert "qdrant.search" in response.json()["msg"]
+    assert "arxiv" not in response.json()["msg"]
+    assert "qdrant.search" not in response.json()["msg"]
 
 
 def test_search_keeps_found_papers_when_enrichment_exhausts_deadline(scholar_client, monkeypatch):
     client, es, _ = scholar_client
 
     async def found(**kwargs):
-        return {"hits": {"hits": [{"_source": PAPER_A}]}}
+        return [PaperCandidate(to_paper(PAPER_A), 1.0)]
 
     class SlowEnrichment:
         async def lookup(self, ids, *, api_key=None):
@@ -477,9 +407,7 @@ def test_search_keeps_found_papers_when_enrichment_exhausts_deadline(scholar_cli
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["papers"][0]["arxiv_id"] == PAPER_A["arxiv_id"]
-    s2 = next(item for item in data["enrichment_execution"] if item["source"] == "s2")
-    assert s2["status"] == "failed"
-    assert "deadline" in s2["error"]
+    assert data["limitations"] == []
 
 
 def test_lookup_queue_admission_rejection_is_429(scholar_client):
@@ -494,7 +422,7 @@ def test_lookup_queue_admission_rejection_is_429(scholar_client):
 
     assert response.status_code == 429
     assert response.json()["code"] == 429
-    assert "4 waiting ahead" in response.json()["msg"]
+    assert "rate limited" in response.json()["msg"]
 
 
 def test_multisource_without_openalex_key_keeps_arxiv_success(scholar_client):
@@ -507,10 +435,6 @@ def test_multisource_without_openalex_key_keeps_arxiv_success(scholar_client):
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["papers"] == []  # 正常空召回仍是来源成功。
-    assert {e["source"]: e["status"] for e in data["execution"]} == {
-        "openalex": "not_executed",
-        "arxiv": "completed",
-    }
 
 
 @pytest.mark.parametrize("abstract", ["The original abstract", None])
@@ -564,7 +488,7 @@ def test_hf_supplies_paper_when_general_sources_fail_and_reuses_cache(scholar_cl
     for response in responses:
         result = response.json()["data"]
         item = result["items"][0]
-        assert set(item) == {"identifier", "status", "paper", "error"}
+        assert set(item) == {"identifier", "status", "paper", "limitations"}
         assert item["status"] == "found"
         expected_metadata = {
             "upvotes": 0, "ai_keywords": ["reinforcement learning", "multi-stage training", "cold-start data", "Qwen", "Llama"],
@@ -578,12 +502,6 @@ def test_hf_supplies_paper_when_general_sources_fail_and_reuses_cache(scholar_cl
         assert item["paper"]["title"] == "HF fallback title"
         assert item["paper"]["abstract"] == abstract
         assert item["paper"]["authors"] == ["First Author et al."]
-        assert {entry["source"]: entry["status"] for entry in result["execution"]} == {
-            "arxiv": "completed",
-            "s2": "failed",
-            "openalex": "failed",
-            "huggingface": "completed",
-        }
     assert len(requests) == 1
     assert requests[0].url.path == "/api/papers/2501.12948"
 
@@ -701,10 +619,8 @@ def test_search_and_lookup_share_redis_cache_across_users_and_credentials(schola
         )
 
     assert first.status_code == 200
-    assert first.json()["data"]["execution"][0]["cache_hit"] is False
     for response in (repeated, another_user, changed_key):
         assert response.status_code == 200
-        assert response.json()["data"]["execution"][0]["cache_hit"] is True
     assert without_key.status_code == 503
     assert without_key.json()["code"] == 503
     assert "BYOK" in without_key.json()["msg"]
@@ -716,7 +632,6 @@ def test_search_and_lookup_share_redis_cache_across_users_and_credentials(schola
     for response in (shared_lookup, lookup_without_key):
         assert response.status_code == 200
         assert response.json()["data"]["items"][0]["status"] == "not_found"
-        assert response.json()["data"]["execution"][-1]["cache_hit"] is True
     assert len(searcher.lookup_calls) == 1
     assert searcher.lookup_calls[0][1] == "user-secret"
     assert "user-secret" not in str(redis.values)
@@ -761,7 +676,6 @@ def test_discovery_shares_redis_cache_across_credentials_and_preserves_window(sc
     for response in (changed_key,):
         assert response.status_code == 200
         assert response.json()["data"]["window_start"] == "2026-10-26"
-        assert response.json()["data"]["execution"][0]["cache_hit"]
     assert repeated.status_code == 503
     assert "BYOK" in repeated.json()["msg"]
     assert len(provider.calls) == 1
@@ -821,11 +735,8 @@ def test_pdf_recovery_is_shared_by_public_exits_and_preserves_cached_candidates(
     assert all(paper["metadata"] == {"s2": {"citation_count": 0}} for paper in papers)
     assert len(requests) == 1
     assert requests[0].url.path == "/v2/10.1234/paper0"
-    executions = repeated.json()["data"]["enrichment_execution" if operation == "search" else "execution"]
-    assert executions[-1]["source"] == "unpaywall"
-    assert executions[-1]["cache_hit"] is True
     assert candidates == original
-    assert len([key for key in redis.values if key.startswith("scholar:pdf:")]) == 1
+    assert sum("unpaywall" in key for key in redis.values) == 1
 
 
 def test_s2_byok_overrides_platform_only_for_current_http_call(scholar_client):
@@ -864,6 +775,9 @@ def test_hf_search_requires_byok_while_local_results_can_use_platform_enrichment
         async def search(self, **kwargs):
             return PaperSearchBatch([local])
 
+        async def match_titles(self, **kwargs):
+            return PaperSearchBatch([])
+
     class HuggingFace:
         async def search(self, **kwargs):
             search_keys.append(kwargs["api_key"])
@@ -883,6 +797,6 @@ def test_hf_search_requires_byok_while_local_results_can_use_platform_enrichment
 
     assert response.status_code == 200
     assert search_keys == (["user-hf"] if user_key else [])
-    assert detail_keys == ([] if user_key else ["platform-hf"])
-    execution = {item["source"]: item["status"] for item in response.json()["data"]["execution"]}
-    assert execution["huggingface"] == ("completed" if user_key else "not_executed")
+    assert detail_keys == [user_key or "platform-hf"]
+    limitations = response.json()["data"]["limitations"]
+    assert any(item == {"source": "huggingface", "reason": "credentials_required"} for item in limitations) == (user_key is None)

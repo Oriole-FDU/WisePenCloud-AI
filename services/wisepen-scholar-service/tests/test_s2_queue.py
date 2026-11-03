@@ -27,7 +27,6 @@ from scholar.domain.errors import ProviderBusy
 from scholar.domain.interfaces.paper_lookup import PaperLookupMatch
 from scholar.domain.models.identifiers import IdentifierKind, parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.application.source_execution import SourceExecutionStatus
 from scholar.core.providers import S2Provider, S2Transport
 
 
@@ -214,10 +213,7 @@ async def test_busy_batch_is_not_executed_and_preserves_source_fallback(queue_bo
             })
             result = await PaperLookupService(runner, pdf=make_pdf_service(), policies=make_policy_store()).lookup(
                 PaperLookup(["2401.00001"]))
-            execution = next(item for item in result.execution if item.source == "s2")
-            assert execution.status == SourceExecutionStatus.NOT_EXECUTED
-            assert execution.queued_ahead == 4
-            assert result.items[0].error is None
+            assert result.items[0].limitations == []
         finally:
             for task in waiting:
                 task.cancel()
@@ -247,8 +243,6 @@ async def test_completed_cache_and_identical_inflight_calls_do_not_submit_again(
             results = await asyncio.gather(service.lookup(query), service.lookup(query))
             assert all(len(result.items) == 2 for result in results)
             cached = await service.lookup(query)
-            assert cached.execution[0].cache_hit
-            assert cached.execution[0].queued_ahead is None
             assert len(sent) == 1
         finally:
             await transport.aclose()
@@ -353,7 +347,6 @@ async def test_byok_inflight_isolated_but_completed_papers_shared_across_keys(qu
             release.set()
             await asyncio.gather(*tasks)
             cached = await service.lookup(query)
-            assert cached.execution[0].cache_hit is True
             assert len(sent) == 2
         finally:
             for task in tasks:

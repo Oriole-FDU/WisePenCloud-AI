@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
 from collections.abc import Awaitable, Callable
@@ -25,10 +25,7 @@ from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import normalize_arxiv, normalize_doi
 from scholar.domain.models.paper import Paper
 from scholar.utils import normalize_title
-from scholar.application.source_execution import (
-    SourceExecution,
-    SourceExecutionStatus,
-)
+from scholar.application.limitations import LimitationReason, ResultLimitation
 from scholar.domain.repositories.query_cache import QueryCacheRepository
 
 
@@ -50,9 +47,8 @@ class PaperSearch:
 @dataclass
 class SearchResult:
     papers: list[Paper]
-    execution: list[SourceExecution]
+    limitations: list[ResultLimitation]
     identity_conflicts: list[str]
-    enrichment_execution: list[SourceExecution] = field(default_factory=list)
 
 
 @dataclass
@@ -98,13 +94,13 @@ class PaperSearchService:
         policy = policies.fields[query.field]
         # 搜索的可用性先于缓存判断；平台凭证只在后续富化阶段使用。
         skipped = {
-            source: SourceExecution(source, False, SourceExecutionStatus.NOT_EXECUTED, f"{source} search requires user BYOK")
+            source
             for source in policy.searchers
             if self.searchers[source].requires_byok and not credentials.get(source)
         }
         plan = [source for source in policy.searchers if source not in skipped]
         if not plan:
-            raise ServiceException(ScholarErrorCode.CAPABILITY_UNAVAILABLE, "; ".join(item.error for item in skipped.values()))
+            raise ServiceException(ScholarErrorCode.CAPABILITY_UNAVAILABLE, "Search requires user BYOK for: " + ", ".join(source for source in policy.searchers if source in skipped))
 
         # 完整标题通道独立于普通来源回退；默认来源成功也不能跳过本地精确项。
         title_plan = [source for source in plan if self.searchers[source].title_matcher is not None]
@@ -141,36 +137,29 @@ class PaperSearchService:
                     task.cancel()
             await asyncio.gather(*title_tasks, return_exceptions=True)
 
-        ranked, execution, failures = {}, [], []
+        ranked, failures, limitations = {}, {}, []
         for source, result in zip(plan[: len(results)], results, strict=True):
             if isinstance(result, BaseException):
                 # 只隔离已知外部失败；程序错误和取消直接传播。
                 if not isinstance(result, ProviderError):
                     raise result
-                failures.append(result)
+                failures[source] = result
                 ranked[source] = []
-                execution.append(
-                    SourceExecution(
-                        source,
-                        False,
-                        SourceExecutionStatus.FAILED,
-                        str(result),
-                    )
-                )
             else:
-                # 后续会合并标题候选和排序，不能改写来源缓存持有的列表。
-                ranked[source] = result[0][:]
-                execution.append(result[1])
+                ranked[source] = result.papers[:]
+                if result.retrieval_degraded:
+                    limitations.append(ResultLimitation(source, LimitationReason.RETRIEVAL_DEGRADED))
 
-        title_execution, title_sources = [], set()
+        title_sources = set()
         for source, result in zip(title_plan, title_results, strict=True):
             if isinstance(result, BaseException):
                 if not isinstance(result, ProviderError):
                     raise result
-                title_execution.append(SourceExecution(f"{source}.title", False, SourceExecutionStatus.FAILED, str(result)))
+                # 辅助标题通道失败只审计，普通检索仍可独立完成。
+                warning("Scholar title recall failed.", source=source, operation="title_search",
+                        exc=result, cause=result.__cause__)
                 continue
-            exact, event = result
-            title_execution.append(replace(event, source=f"{source}.title"))
+            exact = result.papers
             if exact:
                 title_sources.add(source)
             existing = ranked.setdefault(source, [])
@@ -184,7 +173,17 @@ class PaperSearchService:
 
         # 空的精确通道不能掩盖普通检索失败；已有精确论文则保留结果并报告失败。
         if len(failures) == len(results) and not title_sources:
-            raise failures[0]
+            raise next(iter(failures.values()))
+
+        # 默认回退完成后不公开前序失败；多源缺口及仅标题命中仍限制召回完整性。
+        for source, error in failures.items():
+            warning("Scholar search source failed.", source=source, operation="search",
+                    exc=error, cause=error.__cause__)
+        if query.source_scope == SourceScope.MULTI_SOURCE or len(failures) == len(results):
+            limitations.extend(ResultLimitation.from_error(source, error) for source, error in failures.items())
+        if query.source_scope == SourceScope.MULTI_SOURCE:
+            limitations.extend(ResultLimitation(source, LimitationReason.CREDENTIALS_REQUIRED)
+                               for source in policy.searchers if source in skipped)
 
         normalized = normalize_title(query.query)
         exact_identities = [
@@ -206,7 +205,7 @@ class PaperSearchService:
             if not isinstance(result, BaseException)
         } | title_sources
         targets = [self.lookup_runner.target(None, paper) for paper in papers]
-        enrichment_execution = await self.lookup_runner.run(
+        await self.lookup_runner.run(
             targets,
             # 通用来源中已有成功者则跳过通用富化链，否则补跑尚未执行的通用来源。
             common_sources=(
@@ -222,15 +221,11 @@ class PaperSearchService:
             credentials=self.platform_credentials | credentials,
             deadline=deadline,
         )
-        papers, pdf_execution = await self.pdf.recover(
+        papers = await self.pdf.recover(
             [target.paper for target in targets], deadline=deadline,
         )
-        if pdf_execution is not None:
-            enrichment_execution.append(pdf_execution)
         enriched_papers = [project_paper(paper) for paper in papers]
-        executions = skipped | {item.source: item for item in execution}
-        execution = [executions[source] for source in policy.searchers if source in executions] + title_execution
-        return SearchResult(enriched_papers, execution, conflicts, enrichment_execution)
+        return SearchResult(enriched_papers, list(dict.fromkeys(limitations)), conflicts)
 
     async def _search_source(
         self,
@@ -240,7 +235,7 @@ class PaperSearchService:
         deadline: float | None,
         *,
         exact_title: bool = False,
-    ) -> tuple[list[Paper], SourceExecution]:
+    ) -> PaperSearchBatch:
         binding = self.searchers[source]
         cache_key = self._cache_key(source, binding, query) + (":title" if exact_title else "")
 
@@ -251,7 +246,7 @@ class PaperSearchService:
             async with budget:
                 cached = await self.query_cache.get(cache_key)
                 if cached is not None:
-                    return cached, SourceExecution(source, True)
+                    return PaperSearchBatch(cached)
 
                 # 缓存来源的一批候选；用户 limit 只在融合/返回时裁剪，避免改数量重新请求上游。
                 stage = "search"
@@ -274,7 +269,7 @@ class PaperSearchService:
 
         # 写缓存只复用剩余预算；写入失败不能撤销已完成的检索或触发来源回退。
         # 降级结果不缓存为完整检索，避免编码恢复后继续命中旧降级结果。
-        if batch.partial_error is None:
+        if not batch.retrieval_degraded:
             stage = "query_cache.put"
             try:
                 async with asyncio.timeout_at(deadline):
@@ -284,16 +279,7 @@ class PaperSearchService:
             except (RedisError, TimeoutError) as error:
                 warning("Scholar cache write failed.", source=source, operation=stage,
                         error_type=type(error).__name__, error=str(error))
-        return batch.papers, SourceExecution(
-            source,
-            False,
-            (
-                SourceExecutionStatus.PARTIAL
-                if batch.partial_error
-                else SourceExecutionStatus.COMPLETED
-            ),
-            batch.partial_error,
-        )
+        return batch
 
     @staticmethod
     def _cache_key(

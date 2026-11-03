@@ -11,7 +11,8 @@ class TitleMatch:
     """一个标题的候选；每个内部列表是同一论文的身份别名，多组表示歧义。"""
 
     candidates: list[list[PaperIdentifier]] = field(default_factory=list)
-    error: str | None = None
+    # 保留原始异常及 cause，供用例分类和审计，不能直接序列化给调用方。
+    error: Exception | None = None
 
 
 class TitleResolver(Protocol):

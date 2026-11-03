@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from datetime import date
 from enum import StrEnum
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import Field
+import httpx
+
+from common.core.exceptions import RpcError
+from common.logger import warning
 
 from wisepen_mcp.capabilities.core.tool_metadata import get_tool_config_value
 from wisepen_mcp.service_client import ScholarClient
@@ -48,6 +54,25 @@ class DiscoverySort(StrEnum):
     TRENDING = "trending"
 
 
+async def _scholar_call(request: Awaitable[dict[str, Any]]) -> dict[str, Any]:
+    """Scholar 的公开说明可透传；RPC 地址、异常链和网络阶段只写审计。"""
+    try:
+        return await request
+    except RpcError as error:
+        warning("Scholar tool RPC failed.", exc=error, cause=error.cause)
+        if error.code is not None:
+            # 已收到 R 响应，msg 已由 Scholar 公共出口收敛，保留 BYOK 等说明。
+            status, message = error.code, error.msg
+        elif isinstance(error.cause, (TimeoutError, httpx.TimeoutException)):
+            status, message = 504, "Scholar request timed out; try again later."
+        else:
+            status, message = error.status or 503, "Scholar service is unavailable; try again later."
+        raise ToolError(f"Scholar request failed ({status}): {message}") from error
+    except TimeoutError as error:
+        warning("Scholar tool RPC timed out.", exc=error)
+        raise ToolError("Scholar request failed (504): Scholar request timed out; try again later.") from error
+
+
 def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
     @mcp.tool(
         name="search_papers",
@@ -59,6 +84,8 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             "Sources: Built upon three general platforms (arXiv is always available without keys; OpenAlex and Semantic Scholar platform keys are reserved for metadata enrichment, so direct searching on them requires user BYOK) "
             "plus domain-specific sources (some require user BYOK for search). "
             "Scholar handles query normalization, multi-source routing, and metadata fusion. "
+            "limitations contains only unresolved source restrictions or degraded retrieval; identity_conflicts describes ambiguous identities. "
+            "Recovered failures and automatic enrichment diagnostics are audited internally. "
             "Results already include configured field enrichment and, when available, "
             "metadata.arxiv.categories, raw journal_ref, and author comments. "
             "journal_ref and comments are source text, not normalized publication or peer-review status."
@@ -115,7 +142,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             ),
         ] = SearchSourceScope.DEFAULT,
     ) -> dict[str, Any]:
-        return await scholar_client.search_papers(
+        return await _scholar_call(scholar_client.search_papers(
             query=query,
             field=field.value,
             published_after=published_after,
@@ -125,7 +152,7 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             openalex_api_key=_secret(ctx, "openalex_api_key"),
             huggingface_api_key=_secret(ctx, "huggingface_api_key"),
             s2_api_key=_secret(ctx, "s2_api_key"),
-        )
+        ))
 
     @mcp.tool(
         name="match_papers",
@@ -134,7 +161,8 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             "Titles must match in full after formatting normalization, including subtitles; "
             "same-title papers may be ambiguous. Batch titles in one call. "
             "Returns the same paper information and configured field enrichment as lookup_papers. "
-            "Per-title external failures, including rate limits, preserve other results. "
+            "Per-title status and limitations preserve partial results, ambiguity, and actionable failures such as rate limits. "
+            "Automatic enrichment failures do not downgrade a found paper. "
             "Use search_papers for topics or incomplete titles, and lookup_papers for stable identifiers."
         ),
     )
@@ -143,12 +171,12 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
         titles: Annotated[list[str], Field(min_length=1, max_length=20, description="Complete paper titles, including subtitles; batch 1 to 20 titles.")],
         field: Annotated[SearchField, Field(description="Academic discipline used for the same domain-specific enrichment as lookup_papers.")] = SearchField.GENERAL,
     ) -> dict[str, Any]:
-        return await scholar_client.match_papers(
+        return await _scholar_call(scholar_client.match_papers(
             titles=titles, field=field.value,
             openalex_api_key=_secret(ctx, "openalex_api_key"),
             huggingface_api_key=_secret(ctx, "huggingface_api_key"),
             s2_api_key=_secret(ctx, "s2_api_key"),
-        )
+        ))
 
     @mcp.tool(
         name="lookup_papers",
@@ -159,7 +187,8 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             "use it for exact identifier queries, not as routine post-processing to obtain fuller search results. "
             "IMPORTANT: Batch as many identifiers as possible in a single call (up to 20) instead of calling this tool one-by-one in a loop, "
             "to minimize network roundtrips and avoid rate-limiting by scholarly providers. "
-            "Scholar normalizes identifiers and stops general-source fallback when an exact paper match is found."
+            "Scholar normalizes identifiers and stops general-source fallback when an exact paper match is found. "
+            "Read each item status and limitations for unresolved failures or ambiguity; found papers omit recovered failure history."
         ),
     )
     async def lookup_papers(
@@ -185,13 +214,13 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             ),
         ] = SearchField.GENERAL,
     ) -> dict[str, Any]:
-        return await scholar_client.lookup_papers(
+        return await _scholar_call(scholar_client.lookup_papers(
             identifiers=identifiers,
             field=field.value,
             openalex_api_key=_secret(ctx, "openalex_api_key"),
             huggingface_api_key=_secret(ctx, "huggingface_api_key"),
             s2_api_key=_secret(ctx, "s2_api_key"),
-        )
+        ))
 
     @mcp.tool(
         name="discover_papers",
@@ -231,13 +260,13 @@ def register_scholar_tools(mcp: FastMCP, scholar_client: ScholarClient) -> None:
             ),
         ] = 10,
     ) -> dict[str, Any]:
-        return await scholar_client.discover_papers(
+        return await _scholar_call(scholar_client.discover_papers(
             field=field.value,
             period=period.value,
             sort=sort.value,
             limit=limit,
             huggingface_api_key=_secret(ctx, "huggingface_api_key"),
-        )
+        ))
 
 
 def _secret(ctx: Context, key: str) -> str | None:

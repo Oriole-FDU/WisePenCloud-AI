@@ -25,7 +25,6 @@ from scholar.domain.interfaces.paper_discoverer import (
 )
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.application.source_execution import SourceExecutionStatus
 
 
 class FakeDiscoveryCache:
@@ -107,8 +106,6 @@ async def test_cache_write_failure_keeps_discovered_papers_and_window(failed_cac
 
     assert result.papers[0].arxiv_id == "2501.12948"
     assert (result.window_start, result.window_end) == (date(2026, 11, 1), date(2026, 11, 2))
-    assert result.execution[0].status == SourceExecutionStatus.COMPLETED
-    assert result.execution[0].error is None
 
 
 class FixedDateTime(datetime):
@@ -144,7 +141,6 @@ async def test_discovery_projects_cold_and_cached_results_without_changing_facts
     assert repeated.papers[0].metadata == {"huggingface": {
         "upvotes": 0, "ai_keywords": ["reinforcement learning"],
     }}
-    assert repeated.execution[0].cache_hit is True
     assert len(channel.calls) == 1
     assert paper == original
 
@@ -178,9 +174,6 @@ async def test_configured_policy_routes_and_returns_actual_window(monkeypatch):
         date(2026, 10, 27),
     )
     assert channel.calls == [(DiscoveryPeriod.DAILY, DiscoverySort.RECENT, 100)]
-    assert result.execution[0].source == "configured-channel"
-    assert result.execution[0].cache_hit is False
-    assert result.execution[0].status == SourceExecutionStatus.COMPLETED
 
 
 @pytest.mark.asyncio
@@ -257,18 +250,6 @@ async def test_cache_tracks_daily_weekly_and_monthly_utc_windows(monkeypatch):
     november_week = await run(period=DiscoveryPeriod.WEEKLY)
     november_month = await run(period=DiscoveryPeriod.MONTHLY)
 
-    assert first_daily.execution[0].cache_hit is False
-    assert repeated_daily.execution[0].cache_hit is True
-    assert first_weekly.execution[0].cache_hit is False
-    assert repeated_weekly.execution[0].cache_hit is True
-    assert first_monthly.execution[0].cache_hit is False
-    assert repeated_monthly.execution[0].cache_hit is True
-    assert next_daily.execution[0].cache_hit is False
-    assert same_week.execution[0].cache_hit is True
-    assert same_month.execution[0].cache_hit is True
-    assert november_daily.execution[0].cache_hit is False
-    assert november_week.execution[0].cache_hit is False
-    assert november_month.execution[0].cache_hit is False
     assert (first_weekly.window_start, first_weekly.window_end) == (
         date(2026, 10, 26),
         date(2026, 11, 1),
@@ -309,7 +290,6 @@ async def test_provider_error_propagates_and_failed_discovery_is_not_cached():
     result = await service.discover(query, credentials={'huggingface': 'user-key'})
 
     assert result.papers[0].arxiv_id == "2401.00001"
-    assert result.execution[0].cache_hit is False
     assert len(cache.put_calls) == 1
     assert len(channel.calls) == 2
 
@@ -427,7 +407,6 @@ async def test_discovery_candidate_cache_reused_across_limits_and_credentials():
     , credentials={'huggingface': 'user-key'})
     assert len(small.papers) == 2
     assert len(larger.papers) == 8
-    assert larger.execution[0].cache_hit
     assert len(channel.calls) == 1
     byok = await service.discover(
         PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE, limit=8),
@@ -440,6 +419,5 @@ async def test_discovery_candidate_cache_reused_across_limits_and_credentials():
     with pytest.raises(ServiceException, match="BYOK"):
         await without_credentials.discover(PaperDiscoveryQuery(AcademicField.COMPUTER_SCIENCE, limit=8))
     assert len(cache.get_calls) == reads
-    assert byok.execution[0].cache_hit
     assert byok.papers == larger.papers
     assert len(channel.calls) == 1

@@ -11,25 +11,25 @@ WisePen Scholar Service 遵循标准 RESTful 规范，所有对外学术接口�
 - 内部 RPC 调用：由 `wisepen-mcp-service` 通过 Nacos 动态寻址调用。
 
 ### 2. 请求头 (Headers)
-| Header 名称 | 必填 | 说明 |
-|---|---|---|
-| `Content-Type` | 是 | 必须为 `application/json` |
-| `X-From-Source` | 是 | 服务内部可信鉴权密钥，必须与配置中的 `FROM_SOURCE_SECRET` 一致 |
-| `X-OpenAlex-Api-Key` | 否 | 用户自备 OpenAlex API 密钥（BYOK），未提供时禁用 OpenAlex 搜索 |
-| `X-HuggingFace-Api-Key` | 否 | 用户自备 HuggingFace Token（BYOK），未提供时禁用 HF 搜索与发现 |
-| `X-S2-Api-Key` | 否 | 用户自备 Semantic Scholar API 密钥，享受独立免排队的高速通道 |
+| Header 名称             | 必填 | 说明                                                           |
+|-------------------------|------|----------------------------------------------------------------|
+| `Content-Type`          | 是   | 必须为 `application/json`                                      |
+| `X-From-Source`         | 是   | 服务内部可信鉴权密钥，必须与配置中的 `FROM_SOURCE_SECRET` 一致 |
+| `X-OpenAlex-Api-Key`    | 否   | 用户自备 OpenAlex API 密钥（BYOK），未提供时禁用 OpenAlex 搜索 |
+| `X-HuggingFace-Api-Key` | 否   | 用户自备 HuggingFace Token（BYOK），未提供时禁用 HF 搜索与发现 |
+| `X-S2-Api-Key`          | 否   | 用户自备 Semantic Scholar API 密钥，享受独立免排队的高速通道   |
 
 ### 3. 通用响应封包 (`R<T>`)
 所有业务接口返回统一包装类型：
 ```json
 {
-  "code": 0,
+  "code": 200,
   "msg": "success",
   "data": { ... }
 }
 ```
-- `code`: `0` 表示业务执行成功；非 `0` 表示异常状态（通常与 HTTP 状态码对齐，如 429, 503, 504）。
-- `msg`: 描述信息，错误时展示可读的原因。
+- `code`: `200` 表示业务执行成功；非 `200` 表示异常状态（通常与 HTTP 状态码对齐，如 429, 503, 504）。
+- `msg`: 整次失败时仅返回简短、稳定的可行动说明，异常原文和阶段信息只进入日志。
 - `data`: 业务载荷，发生整次请求级失败时为 `null`。
 
 ---
@@ -56,9 +56,11 @@ WisePen Scholar Service 遵循标准 RESTful 规范，所有对外学术接口�
 #### 响应体示例
 ```json
 {
-  "code": 0,
+  "code": 200,
   "msg": "success",
   "data": {
+    "limitations": [],
+    "identity_conflicts": [],
     "papers": [
       {
         "arxiv_id": "2301.12345",
@@ -90,18 +92,7 @@ WisePen Scholar Service 遵循标准 RESTful 规范，所有对外学术接口�
           }
         }
       }
-    ],
-    "execution": {
-      "providers": [
-        {
-          "source": "arxiv",
-          "status": "success",
-          "latency_ms": 142.5,
-          "error": null,
-          "queued_ahead": null
-        }
-      ]
-    }
+    ]
   }
 }
 ```
@@ -126,7 +117,7 @@ WisePen Scholar Service 遵循标准 RESTful 规范，所有对外学术接口�
 #### 响应体示例
 ```json
 {
-  "code": 0,
+  "code": 200,
   "msg": "success",
   "data": {
     "items": [
@@ -153,31 +144,15 @@ WisePen Scholar Service 遵循标准 RESTful 规范，所有对外学术接口�
             }
           }
         },
-        "error": null
+        "limitations": []
       },
       {
         "identifier": "invalid-doi-99999",
         "status": "not_found",
         "paper": null,
-        "error": "Identifier not resolved in any provider"
+        "limitations": []
       }
-    ],
-    "execution": {
-      "providers": [
-        {
-          "source": "arxiv",
-          "status": "cached",
-          "latency_ms": 1.2,
-          "error": null
-        },
-        {
-          "source": "s2",
-          "status": "success",
-          "latency_ms": 230.1,
-          "error": null
-        }
-      ]
-    }
+    ]
   }
 }
 ```
@@ -201,7 +176,7 @@ WisePen Scholar Service 遵循标准 RESTful 规范，所有对外学术接口�
 #### 响应体示例
 ```json
 {
-  "code": 0,
+  "code": 200,
   "msg": "success",
   "data": {
     "items": [
@@ -221,18 +196,9 @@ WisePen Scholar Service 遵循标准 RESTful 规范，所有对外学术接口�
           "source": "arxiv",
           "metadata": { ... }
         },
-        "error": null
+        "limitations": []
       }
-    ],
-    "execution": {
-      "providers": [
-        {
-          "source": "redis_title_index",
-          "status": "success",
-          "latency_ms": 0.8
-        }
-      ]
-    }
+    ]
   }
 }
 ```
@@ -293,10 +259,25 @@ WisePen Scholar Service 遵循标准 RESTful 规范，所有对外学术接口�
 
 ## 四、 错误处理与 HTTP 状态码映射
 
-| 状态码 | 触发条件 | 说明与客户端建议 |
-|---|---|---|
-| `200` | 正常成功 | 业务正常交付（即使部分项未找到，也保留在 `items` 中交付） |
-| `400` / `422` | 参数格式或校验错误 | 如标识符列表超过 20 项、日期格式错误或请求了未知模型 |
-| `429` | 触发并发或配额限流 | 如 S2 平台请求队列拥堵、前方排队批次超过阈值（`ProviderBusy`） |
-| `503` | 基础能力不可用 | 如领域未配置 discoverer、缺少必填的搜索 BYOK 凭证或 Qdrant 存储离线 |
-| `504` | 请求超时 | 执行总耗时耗尽了 `SCHOLAR_REQUEST_TIMEOUT_SECONDS`（默认 25 秒） |
+| 状态码        | 触发条件           | 说明与客户端建议                                                    |
+|---------------|--------------------|---------------------------------------------------------------------|
+| `200`         | 正常成功           | 业务正常交付（即使部分项未找到，也保留在 `items` 中交付）           |
+| `400` / `422` | 参数格式或校验错误 | 如标识符列表超过 20 项、日期格式错误或请求了未知模型                |
+| `429`         | 触发并发或配额限流 | 如 S2 平台请求队列拥堵、前方排队批次超过阈值（`ProviderBusy`）      |
+| `503`         | 基础能力不可用     | 如领域未配置 discoverer、缺少必填的搜索 BYOK 凭证或 Qdrant 存储离线 |
+| `504`         | 请求超时           | 执行总耗时耗尽了 `SCHOLAR_REQUEST_TIMEOUT_SECONDS`（默认 25 秒）    |
+
+
+### 结果限制与内部审计
+
+四个论文入口不返回 `execution`、`enrichment_execution`、缓存命中、耗时或排队轨迹。
+
+- search 在顶层返回 `limitations`；lookup 和 match 在各条目返回 `limitations`，不再返回条目 `error`。
+- 限制项为 `{ "source": "openalex", "reason": "rate_limited" }`，按来源和原因去重。
+- 原因枚举：`rate_limited`（限流/准入拒绝）、`credentials_required`（需要用户 BYOK）、`credential_rejected`（凭证被拒绝）、`source_unavailable`（请求未完成，含超时）、`retrieval_degraded`（如 BM25 降级）。
+- 默认来源回退成功后限制为空；多源检索缺口保留限制。自动补全指标或 PDF 失败仅审计，不影响已有论文的成功状态。
+- lookup/match 保留逐项顺序和重复项。`failed` 不等于 `not_found`；`ambiguous` 不返回任选论文。search 的 `identity_conflicts` 继续表达无法安全合并的业务歧义。
+- discover 返回 `papers`、`window_start`、`window_end`，不附加补全状态。
+- 整次依赖失败保留 HTTP 状态，包括 429、504；`msg` 不含异常原文、URL 或内部操作名称。match 的逐项失败继续以成功封包返回，包含全部条目。
+
+技术诊断复用现有审计日志：来源、操作、原始异常及 cause；不会为诊断信息增加公开 DTO 或审计存储。

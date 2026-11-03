@@ -11,7 +11,7 @@ from typing import Any
 from redis.exceptions import RedisError
 from common.logger import warning
 
-from scholar.domain.errors import ProviderBusy, ProviderError
+from scholar.domain.errors import ProviderError
 from scholar.domain.interfaces.paper_lookup import PaperLookupProvider
 from scholar.domain.models.identifiers import (
     IdentifierKind,
@@ -20,16 +20,11 @@ from scholar.domain.models.identifiers import (
     identities_conflict,
 )
 from scholar.domain.models.paper import Paper
-from scholar.application.source_execution import (
-    SourceExecution,
-    SourceExecutionStatus,
-)
 from scholar.domain.repositories.paper_cache import (
     CachedPaperLookup,
     PaperCache,
 )
 from scholar.core.providers import ProviderPolicy
-from scholar.core.providers.s2.transport import s2_queued_ahead
 
 
 @dataclass
@@ -52,8 +47,7 @@ class LookupTarget:
     cache_hit: bool = False
     general_found: bool = False
     ambiguous: bool = False
-    errors: list[Exception] = field(default_factory=list)
-    domain_errors: list[Exception] = field(default_factory=list)
+    errors: dict[str, Exception] = field(default_factory=dict)
 
 
 @dataclass
@@ -63,7 +57,6 @@ class _SourceBatch:
     ambiguous: set[PaperIdentifier] = field(default_factory=set)
     cache_hits: set[PaperIdentifier] = field(default_factory=set)
     cache_writes: list[tuple[CachedPaperLookup, int]] = field(default_factory=list)
-    queued_ahead: int | None = None
 
 
 @dataclass
@@ -121,28 +114,21 @@ class LookupRunner:
         domain_sources: list[str],
         credentials: dict[str, str] | None = None,
         deadline: float | None = None,
-    ) -> list[SourceExecution]:
+    ) -> None:
         credentials = credentials or {}
-        execution = []
 
         # 已由通用来源取得的论文无需补信号；arXiv 的 S2 事实由离线同步负责。
         for target in targets:
             if target.paper is not None and target.paper.source in common_sources:
                 target.general_found = True
 
-        # 先读完各来源缓存，再允许任何外部查询；后序命中不能被前序网络请求挡住。
+        # 先读完各来源缓存，后序命中不能被前序网络请求挡住。
         for source in dict.fromkeys([*common_sources, *domain_sources]):
-            before = [len(target.errors) for target in targets]
-            event = await self._apply(
+            await self._apply(
                 source, [target for target in targets if not target.general_found] if source in common_sources else targets,
                 credentials.get(source), deadline,
                 resolve_common=source in common_sources, cache_only=True,
             )
-            if event.status != SourceExecutionStatus.NOT_EXECUTED:
-                execution.append(event)
-            if source in domain_sources:
-                for target, offset in zip(targets, before, strict=True):
-                    target.domain_errors.extend(target.errors[offset:])
         for target in targets:
             if target.cache_hit:
                 target.general_found = True
@@ -157,41 +143,17 @@ class LookupRunner:
             ]
             if not pending:
                 break
-            execution.append(
-                await self._apply(
-                    source, pending, credentials.get(source), deadline,
-                    resolve_common=True,
-                )
+            await self._apply(
+                source, pending, credentials.get(source), deadline,
+                resolve_common=True,
             )
 
-        # 通用来源互相替代，领域来源提供增量；前面的成功不能跳过领域来源。
+        # 领域来源提供增量，失败只审计；仍保留身份歧义，不能任选候选。
         for source in domain_sources:
-            before = [len(target.errors) for target in targets]
-            execution.append(
-                await self._apply(source, [target for target in targets if not target.cache_hit], credentials.get(source), deadline)
+            await self._apply(
+                source, [target for target in targets if not target.cache_hit],
+                credentials.get(source), deadline,
             )
-            for target, offset in zip(targets, before, strict=True):
-                target.domain_errors.extend(target.errors[offset:])
-        # 同一来源可能同时有缓存命中和未命中项，合并为一次来源执行报告。
-        merged = {}
-        for event in execution:
-            previous = merged.get(event.source)
-            if previous is None:
-                merged[event.source] = event
-            else:
-                previous.cache_hit |= event.cache_hit
-                previous.queued_ahead = event.queued_ahead if event.queued_ahead is not None else previous.queued_ahead
-                previous.error = previous.error or event.error
-                statuses = {previous.status, event.status}
-                if SourceExecutionStatus.PARTIAL in statuses or {
-                    SourceExecutionStatus.COMPLETED, SourceExecutionStatus.FAILED,
-                }.issubset(statuses):
-                    previous.status = SourceExecutionStatus.PARTIAL
-                elif event.status != SourceExecutionStatus.NOT_EXECUTED:
-                    previous.status = event.status
-                if previous.error and previous.status == SourceExecutionStatus.COMPLETED:
-                    previous.status = SourceExecutionStatus.PARTIAL
-        return list(merged.values())
 
     async def _apply(
         self,
@@ -202,10 +164,9 @@ class LookupRunner:
         *,
         resolve_common: bool = False,
         cache_only: bool = False,
-    ) -> SourceExecution:
+    ) -> None:
         binding = self.bindings[source]
         positions: dict[PaperIdentifier, list[LookupTarget]] = {}
-        unsupported = False
         for target in targets:
             if target.ambiguous or source in target.observed_sources:
                 continue
@@ -234,20 +195,11 @@ class LookupRunner:
                 ),
                 None,
             )
-            if identifier is None:
-                unsupported = True
-            else:
+            if identifier is not None:
                 positions.setdefault(identifier, []).append(target)
 
         if not positions:
-            return SourceExecution(
-                source,
-                False,
-                SourceExecutionStatus.NOT_EXECUTED,
-                "Source does not support the known paper identities"
-                if unsupported
-                else None,
-            )
+            return
 
         known_ids = {
             identity: tuple(
@@ -267,23 +219,22 @@ class LookupRunner:
         except TimeoutError as error:
             if not budget.expired():
                 raise
-            # 只隔离本次搜索持有的超时；共享任务仍由其他等待者继续使用。
-            failure = ProviderError(f"{source} enrichment exceeded the search request deadline")
+            # 只隔离本次用例持有的超时；共享任务仍由其他等待者继续使用。
+            failure = ProviderError(f"{source} lookup exceeded the request deadline")
             # 整批读取失败时，HTTP 仍需通过原始原因识别 504。
             failure.__cause__ = error
-            warning("Scholar enrichment timed out.", source=source, error=str(failure))
             batch = _SourceBatch(errors=dict.fromkeys(positions, failure))
 
-        failures = 0
-        first_error = None
+        # 这里只消费已知外部失败；错误按来源保留，最终论文成功即可消除公开限制。
+        for error in dict.fromkeys(batch.errors.values()):
+            warning("Scholar lookup source failed.", source=source,
+                    operation="paper_cache.get_many" if cache_only else "lookup",
+                    exc=error, cause=error.__cause__)
         for identifier, entries in positions.items():
             error = batch.errors.get(identifier)
             if error is not None:
-                if not isinstance(error, ProviderBusy):
-                    failures += 1
-                first_error = first_error or error
                 for target in entries:
-                    target.errors.append(error)
+                    target.errors[source] = error
                     if cache_only:
                         target.observed_sources.add(source)
             if identifier in batch.ambiguous:
@@ -318,23 +269,6 @@ class LookupRunner:
             except (RedisError, TimeoutError) as error:
                 warning("Scholar cache write failed.", source=source, operation="paper_cache.put_many",
                         error_type=type(error).__name__, error=str(error))
-
-        successes = len(batch.records) + len(batch.ambiguous)
-        if successes and first_error:
-            status = SourceExecutionStatus.PARTIAL
-        elif successes:
-            status = SourceExecutionStatus.COMPLETED
-        elif failures:
-            status = SourceExecutionStatus.FAILED
-        else:
-            status = SourceExecutionStatus.NOT_EXECUTED
-        return SourceExecution(
-            source,
-            bool(batch.cache_hits),
-            status,
-            str(first_error) if first_error is not None else None,
-            queued_ahead=batch.queued_ahead,
-        )
 
     async def _shared(
         self,
@@ -426,20 +360,15 @@ class LookupRunner:
         if cache_only or not pending:
             return batch
 
-        token = s2_queued_ahead.set(None)
         try:
-            try:
-                matches = await binding.provider.lookup(pending, api_key=api_key)
-            except ProviderError as error:
-                batch.errors.update(dict.fromkeys(pending, error))
-                return batch
-        finally:
-            batch.queued_ahead = s2_queued_ahead.get()
-            s2_queued_ahead.reset(token)
+            matches = await binding.provider.lookup(pending, api_key=api_key)
+        except ProviderError as error:
+            batch.errors.update(dict.fromkeys(pending, error))
+            return batch
 
         for identifier, match in zip(pending, matches, strict=True):
             if match.error is not None:
-                batch.errors[identifier] = ProviderError(match.error)
+                batch.errors[identifier] = match.error
                 continue
             if len(match.papers) > 1:
                 # 歧义：不产生缓存别名，也不让后续来源基于任一候选继续关联。

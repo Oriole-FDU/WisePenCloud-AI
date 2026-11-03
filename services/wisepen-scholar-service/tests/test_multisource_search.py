@@ -28,9 +28,6 @@ from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField
 from scholar.domain.models.identifiers import IdentifierKind
 from scholar.domain.models.paper import Paper, PaperSource
-from scholar.application.source_execution import (
-    SourceExecutionStatus,
-)
 from scholar.core.providers.arxiv import ARXIV_CATEGORIES, ArxivProvider
 from scholar.core.providers.openalex import OPENALEX_FILTERS
 
@@ -99,13 +96,11 @@ async def test_bulk_candidates_reused_across_limits_and_byok_overrides_platform(
     larger = await search.search(PaperSearch("same", limit=10), credentials={"openalex": "user-a"})
     assert len(small.papers) == 2
     assert len(larger.papers) == 10
-    assert larger.execution[0].cache_hit
     assert [call["api_key"] for call in provider.calls] == ["user-a"]
     assert provider.calls[0]["limit"] == 200
     shared = await search.search(
         PaperSearch("same"), credentials={"openalex": "user-key"}
     )
-    assert shared.execution[0].cache_hit
     assert len(provider.calls) == 1
     with pytest.raises(ServiceException, match="BYOK"):
         await search.search(PaperSearch("same"))
@@ -114,8 +109,17 @@ async def test_bulk_candidates_reused_across_limits_and_byok_overrides_platform(
 
 
 @pytest.mark.asyncio
-async def test_byok_quota_failure_uses_normal_search_fallback_without_platform_retry():
-    quota = FakeSearcher(ProviderError("429 quota exhausted"))
+@pytest.mark.parametrize("status", [429, 504])
+async def test_byok_quota_failure_uses_normal_search_fallback_without_platform_retry(monkeypatch, status):
+    audited = []
+    monkeypatch.setattr("scholar.application.search.warning", lambda message, **fields: audited.append(fields))
+    request = httpx.Request("GET", "https://upstream.test/private-stage")
+    failure = ProviderError("upstream diagnostic")
+    failure.__cause__ = (
+        httpx.ReadTimeout("upstream timed out", request=request) if status == 504 else
+        httpx.HTTPStatusError("quota exhausted", request=request, response=httpx.Response(status, request=request))
+    )
+    quota = FakeSearcher(failure)
     fallback = FakeSearcher([paper(PaperSource.ARXIV, arxiv_id="2501.12948")])
     search = PaperSearchService(
         {"openalex": SearchBinding(quota, requires_byok=True), "arxiv": SearchBinding(fallback)},
@@ -127,10 +131,9 @@ async def test_byok_quota_failure_uses_normal_search_fallback_without_platform_r
     result = await search.search(PaperSearch("reasoning"), credentials={"openalex": "user-key"})
     assert [call["api_key"] for call in quota.calls] == ["user-key"]
     assert result.papers[0].arxiv_id == "2501.12948"
-    assert [item.status for item in result.execution] == [
-        SourceExecutionStatus.FAILED,
-        SourceExecutionStatus.COMPLETED,
-    ]
+    assert result.limitations == []
+    assert any(fields.get("source") == "openalex" and isinstance(fields.get("exc"), ProviderError) for fields in audited)
+    assert any(fields.get("cause") is failure.__cause__ for fields in audited)
 
 
 def paper(
@@ -221,7 +224,6 @@ async def test_default_routing_uses_mapped_openalex_or_preserves_local_arxiv_ord
     assert len(oa.calls) == 1
     assert arxiv.calls[0]["field"] == AcademicField.GENERAL
     assert [item.title for item in fallback_result.papers] == ["First", "Second"]
-    assert openalex_result.execution[0].source == PaperSource.OPENALEX
 
 
 @pytest.mark.asyncio
@@ -261,19 +263,15 @@ async def test_multisource_missing_key_keeps_successful_local_source():
         PaperSearch("question", source_scope=SourceScope.MULTI_SOURCE)
     )
     assert result.papers == []
-    assert {e.source: e.status for e in result.execution} == {
-        "openalex": SourceExecutionStatus.NOT_EXECUTED,
-        "arxiv": SourceExecutionStatus.COMPLETED,
-    }
     assert len(arxiv.calls) == 1
     assert openalex.calls == []
+    assert [(item.source, item.reason) for item in result.limitations] == [("openalex", "credentials_required")]
     single = await search.search(
         PaperSearch(
             "law", field=AcademicField.LAW, source_scope=SourceScope.MULTI_SOURCE
         ),
         credentials={"openalex": "law-key"},
     )
-    assert [e.source for e in single.execution] == ["openalex"]
 
 
 @pytest.mark.asyncio
@@ -297,14 +295,11 @@ async def test_openalex_cache_shared_only_when_user_supplies_byok():
     )
 
     assert first_a.papers[0].title == "Shared paper"
-    assert not first_a.execution[0].cache_hit
     for result in (changed_key, cached_a):
         assert result.papers == first_a.papers
-        assert result.execution[0].cache_hit
     assert len(openalex.calls) == 1
     assert openalex.calls[0]["api_key"] == "key-a"
     assert without_key.papers == []
-    assert without_key.execution[0].status == SourceExecutionStatus.NOT_EXECUTED
     assert len(cache.put_calls) == 2
 
 
@@ -371,8 +366,6 @@ async def test_multisource_fuses_by_exact_ids_and_keeps_identifier_conflicts_vis
     assert len(result.papers) == 5
     assert len([paper for paper in result.papers if paper.title == "same title"]) == 2
     assert result.identity_conflicts
-    assert result.execution[0].status == SourceExecutionStatus.COMPLETED
-    assert result.execution[1].status == SourceExecutionStatus.COMPLETED
 
 
 @pytest.mark.asyncio
@@ -410,11 +403,14 @@ async def test_multisource_keeps_records_separate_when_one_doi_matches_many():
     ]
 
 
-@pytest.mark.parametrize("message", ["Connection timed out", "429 Too Many Requests"])
+@pytest.mark.parametrize(("status", "reason"), [(429, "rate_limited"), (401, "credential_rejected"), (503, "source_unavailable")])
 @pytest.mark.asyncio
-async def test_multisource_retains_success_and_reports_provider_failure(message):
+async def test_multisource_retains_success_and_reports_provider_failure(status, reason):
     arxiv_result = paper(PaperSource.ARXIV, arxiv_id="2401.00001")
-    openalex = FakeSearcher(ProviderError(message))
+    request = httpx.Request("GET", "https://openalex.test/works")
+    failure = ProviderError("upstream diagnostic text")
+    failure.__cause__ = httpx.HTTPStatusError("private upstream details", request=request, response=httpx.Response(status, request=request))
+    openalex = FakeSearcher(failure)
     search = service(
         arxiv=FakePaperRepository([arxiv_result]),
         openalex=openalex,
@@ -427,11 +423,7 @@ async def test_multisource_retains_success_and_reports_provider_failure(message)
     )
 
     assert result.papers == [replace(arxiv_result, pdf_url="https://arxiv.org/pdf/2401.00001")]
-    assert {e.source: e.status for e in result.execution} == {
-        "arxiv": SourceExecutionStatus.COMPLETED,
-        "openalex": SourceExecutionStatus.FAILED,
-    }
-    assert result.execution[0].error == message
+    assert [(item.source, item.reason) for item in result.limitations] == [("openalex", reason)]
 
 
 @pytest.mark.asyncio
@@ -448,10 +440,7 @@ async def test_multisource_deadline_keeps_the_completed_source():
     )
 
     assert result.papers[0].arxiv_id == found.arxiv_id
-    failures = [item for item in result.execution if item.status == SourceExecutionStatus.FAILED]
-    assert len(failures) == 1
-    assert failures[0].source == "openalex"
-    assert "deadline" in failures[0].error
+    assert [(item.source, item.reason) for item in result.limitations] == [("openalex", "source_unavailable")]
 
 
 @pytest.mark.asyncio
@@ -493,9 +482,6 @@ async def test_cache_write_failure_keeps_search_success_without_fallback(cache_k
     result = await search.search(PaperSearch("cached write failure"), timeout=0.05)
 
     assert result.papers[0].title == found.title
-    event = next(item for item in result.execution if item.source == "openalex")
-    assert event.status == SourceExecutionStatus.COMPLETED
-    assert event.error is None
     assert fallback.calls == []
 
 
@@ -611,11 +597,6 @@ async def test_medicine_can_register_pubmed_wos_and_special_enrichment_by_config
         ),
         credentials={"openalex": "user-key"},
     )
-    assert [item.source for item in combined.execution] == [
-        "pubmed",
-        "web_of_science",
-        "openalex",
-    ]
     assert len(combined.papers) == 1
     assert combined.papers[0].title == "PubMed basis"
     assert set(combined.papers[0].metadata) == {
@@ -677,14 +658,10 @@ async def test_default_falls_back_only_on_provider_failure_and_stops_on_empty_re
     pdf=make_pdf_service())
     result = await search.search(PaperSearch("fallback"))
     assert result.papers[0].source == "secondary"
-    assert [e.status for e in result.execution] == [
-        SourceExecutionStatus.FAILED,
-        SourceExecutionStatus.COMPLETED,
-    ]
+    assert result.limitations == []
     primary.search_result = []
     result = await search.search(PaperSearch("empty is success"))
     assert result.papers == []
-    assert len(result.execution) == 1
     assert len(secondary.calls) == 1
     primary.search_result = TypeError("program bug")
     with pytest.raises(TypeError, match="program bug"):

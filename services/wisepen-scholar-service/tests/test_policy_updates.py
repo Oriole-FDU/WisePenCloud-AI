@@ -118,7 +118,6 @@ async def test_source_priority_updates_on_same_service_and_reuses_source_caches(
         await listener("", "DEFAULT_GROUP", "scholar-test.yaml", yaml.safe_dump(payload))
         after = await service.search(query, credentials=credentials)
         assert after.papers[0].source == "huggingface"
-        assert after.execution[0].cache_hit
         assert (arxiv.search_calls, hf.search_calls) == (1, 1)
         without_key = await service.search(query)
         assert without_key.papers[0].source == "arxiv"

@@ -21,7 +21,6 @@ from scholar.domain.interfaces.paper_searcher import PaperSearchBatch
 from scholar.domain.models.fields import AcademicField, FieldPolicy
 from scholar.domain.models.identifiers import parse_identifier
 from scholar.domain.models.paper import Paper
-from scholar.application.source_execution import SourceExecutionStatus
 from offline.publish import point_payload
 
 
@@ -90,7 +89,6 @@ async def test_exact_paper_survives_ordinary_failure_but_empty_exact_channel_doe
     else:
         result = await search.search(PaperSearch("Attention Is All You Need"))
         assert result.papers[0].arxiv_id == "1706.03762"
-        assert result.execution[0].status == SourceExecutionStatus.FAILED
 
 
 @pytest.mark.asyncio

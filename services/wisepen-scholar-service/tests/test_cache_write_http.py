@@ -79,7 +79,12 @@ async def test_http_returns_success_after_cache_write_failure(scholar_http, oper
     data = response.json()["data"]
     paper = data["items"][0]["paper"] if operation == "lookup" else data["papers"][0]
     assert paper["title"] == "Retrieved paper"
-    assert all(event["status"] == "completed" and event["error"] is None for event in data["execution"])
+    assert set(data) == ({"items"} if operation == "lookup" else {"papers", "limitations", "identity_conflicts"} if operation == "search" else {"papers", "window_start", "window_end"})
+    if operation == "lookup":
+        assert data["items"][0]["limitations"] == []
+        assert "error" not in data["items"][0]
+    elif operation == "search":
+        assert data["limitations"] == []
 
 
 @pytest.mark.asyncio
@@ -100,3 +105,67 @@ async def test_http_read_deadline_remains_504(scholar_http, operation, payload):
 
     assert response.status_code == 504
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("failure", "expected_status", "message"), [
+    ("rate_limit", 429, "rate limited"),
+    ("busy", 429, "rate limited"),
+    ("timeout", 504, "timed out"),
+    ("qdrant_timeout", 504, "timed out"),
+    ("qdrant_gateway", 502, "unavailable"),
+    ("credentials", 401, "credentials"),
+    ("missing_credentials", 503, "API key"),
+])
+async def test_http_dependency_failures_keep_actionable_status_and_audit_details(scholar_http, monkeypatch, failure, expected_status, message):
+    from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
+    from scholar.domain.errors import ProviderBusy, ProviderCredentialsRequired, ProviderError
+
+    audited = []
+    monkeypatch.setattr("scholar.main.warning", lambda event, **fields: audited.append(fields))
+    client, _, provider = scholar_http
+    diagnostic = "private diagnostic at internal-stage https://upstream.test/detail"
+    request = httpx.Request("GET", "https://upstream.test/detail")
+    if failure == "busy":
+        error = ProviderBusy(4, 3)
+    elif failure == "missing_credentials":
+        error = ProviderCredentialsRequired(diagnostic)
+    else:
+        cause = {
+            "rate_limit": httpx.HTTPStatusError(diagnostic, request=request, response=httpx.Response(429, request=request)),
+            "timeout": httpx.ReadTimeout(diagnostic, request=request),
+            "qdrant_timeout": ResponseHandlingException(httpx.ReadTimeout(diagnostic)),
+            "qdrant_gateway": UnexpectedResponse(502, "Bad Gateway", diagnostic.encode(), httpx.Headers()),
+            "credentials": httpx.HTTPStatusError(diagnostic, request=request, response=httpx.Response(401, request=request)),
+        }[failure]
+        error = ProviderError(diagnostic)
+        error.__cause__ = cause
+    provider.search.side_effect = error
+    response = await client.post("/papers/search", json={"query": "failure"})
+    assert response.status_code == expected_status
+    assert response.json()["code"] == expected_status
+    assert message in response.json()["msg"]
+    assert response.json()["data"] is None
+    assert "internal-stage" not in response.text and "upstream.test" not in response.text
+    assert any(fields.get("exc") is error for fields in audited)
+
+
+@pytest.mark.asyncio
+async def test_http_partial_lookup_has_only_unrecovered_item_limitations(scholar_http):
+    from scholar.domain.errors import ProviderError
+
+    client, _, provider = scholar_http
+    found = provider.lookup.return_value[0].papers[0]
+    request = httpx.Request("GET", "https://upstream.test/private-stage")
+    error = ProviderError("private stage diagnostic")
+    error.__cause__ = httpx.HTTPStatusError("quota", request=request, response=httpx.Response(429, request=request))
+    provider.lookup.return_value = [PaperLookupMatch([found]), PaperLookupMatch([], error)]
+    response = await client.post("/papers/lookup", json={"identifiers": ["1706.03762", "1706.03763", "1706.03763"]})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert set(data) == {"items"}
+    assert [item["status"] for item in data["items"]] == ["found", "failed", "failed"]
+    assert data["items"][0]["limitations"] == []
+    assert data["items"][1]["limitations"] == [{"source": "arxiv", "reason": "rate_limited"}]
+    assert data["items"][2] == data["items"][1]
+    assert "private" not in response.text

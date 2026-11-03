@@ -1,4 +1,5 @@
 """从 lookup 公共入口验证完整论文查询、缓存复用和逐项结果。"""
+from scholar.domain.errors import ProviderError
 from policy_fakes import make_policy_store
 
 from pdf_fakes import make_pdf_service
@@ -113,7 +114,7 @@ async def test_lookup_batches_normalized_ids_and_preserves_order_ambiguity_and_i
                     make_paper(doi=doi.value, title="Second"),
                 ]
             ),
-            failed: PaperLookupMatch([], error="msearch item rejected"),
+            failed: PaperLookupMatch([], error=ProviderError("msearch item rejected")),
         }
     )
     lookup = service(
@@ -145,7 +146,7 @@ async def test_lookup_batches_normalized_ids_and_preserves_order_ambiguity_and_i
         LookupStatus.NOT_FOUND,
     ]
     assert [item.paper for item in result.items[:2]] == [local, local]
-    assert result.items[3].error == "msearch item rejected"
+    assert [(item.source, item.reason) for item in result.items[3].limitations] == [("arxiv", "source_unavailable")]
     assert provider.calls == [([arxiv, doi, failed, missing], None)]
 
 
@@ -434,7 +435,7 @@ async def test_exact_common_match_stops_fallback_without_research_signals(source
 
     assert result.items[0].status == LookupStatus.FOUND
     assert result.items[0].paper == base
-    assert result.items[0].error is None
+    assert result.items[0].limitations == []
     assert matched.calls == [([identity], None)]
     assert fallback.calls == []
 
@@ -454,7 +455,6 @@ async def test_later_common_cache_hit_prevents_earlier_provider_request():
     found = await lookup.lookup(PaperLookup([identity.value]))
     assert found.items[0].status == LookupStatus.FOUND
     assert arxiv.calls == s2.calls == []
-    assert found.execution[0].cache_hit
 
 
 @pytest.mark.asyncio
