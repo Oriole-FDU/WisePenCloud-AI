@@ -60,7 +60,12 @@ class PatchTableContent(BaseModel):
     headerRows: int = Field(ge=0, description="Number of header rows.")
     headerCols: int = Field(ge=0, description="Number of header columns.")
     rows: list[list[list[PatchInlineItem]]] = Field(
-        description="Rows, then cells, then inline items inside each cell."
+        description=(
+            "Three-level array indexed as rows[row_index][cell_index][inline_item_index]. "
+            "Each cell is an array of inline items. Example 2x2: "
+            '[[[{"type":"text","text":"A"}], [{"type":"text","text":"B"}]], '
+            '[[{"type":"text","text":"C"}], [{"type":"text","text":"D"}]]]'
+        )
     )
 
 
