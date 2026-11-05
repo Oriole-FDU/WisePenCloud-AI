@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from chat.application.execution_bindings import ExecutionBindings
 from chat.application.tools.core.definition import ClientToolResult
 from chat.application.tools.core.execution.executor import ToolExecutor
 from chat.application.tools.core.execution.result import ToolExecutionResult
@@ -18,8 +19,10 @@ class ToolDispatcher:
         self,
         invocations: list[ToolInvocation],
         tool_scope: ToolScope,
+        *,
+        bindings: ExecutionBindings | None = None,
     ) -> list[ToolExecutionResult]:
-        executor = ToolExecutor(tool_scope, output_cache=self._output_cache)
+        executor = ToolExecutor(tool_scope, output_cache=self._output_cache, bindings=bindings)
         results = await asyncio.gather(
             *[executor.execute_one(invocation) for invocation in invocations],
             return_exceptions=False,

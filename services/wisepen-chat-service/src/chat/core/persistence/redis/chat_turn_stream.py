@@ -1,4 +1,5 @@
 import redis.asyncio as redis
+import json
 
 from chat.core.config.app_settings import settings
 
@@ -18,6 +19,32 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
 else
   return 0
 end
+"""
+
+_SUBMIT_SUBAGENT_COMMAND = """
+local previous = redis.call("HGET", KEYS[2], ARGV[2])
+if previous then
+  local a = cjson.decode(previous)
+  local b = cjson.decode(ARGV[3])
+  if a.run_id ~= b.run_id or a.kind ~= b.kind or a.input ~= b.input then return "" end
+  return previous
+end
+if ARGV[5] ~= "1" or redis.call("GET", KEYS[1]) ~= ARGV[1] then return "" end
+if redis.call("HLEN", KEYS[2]) >= 256 then return "" end
+redis.call("HSET", KEYS[2], ARGV[2], ARGV[3])
+redis.call("EXPIRE", KEYS[2], ARGV[4])
+return ARGV[3]
+"""
+
+_FINISH_SUBAGENT_COMMAND = """
+local previous = redis.call("HGET", KEYS[1], ARGV[1])
+if not previous then return 0 end
+local command = cjson.decode(previous)
+command.status = ARGV[2]
+command.detail = ARGV[3]
+redis.call("HSET", KEYS[1], ARGV[1], cjson.encode(command))
+redis.call("EXPIRE", KEYS[1], ARGV[4])
+return 1
 """
 
 
@@ -79,6 +106,28 @@ class RedisChatTurnStream:
 
     async def is_turn_cancel_requested(self, turn_id: str) -> bool:
         return await self.redis.get(self._cancel_key(turn_id)) == "1"
+
+    def _subagent_commands_key(self, turn_id):
+        return f"chat:turn:{turn_id}:subagent_commands"
+
+    async def submit_subagent_command(self, user_id, session_id, turn_id, command, *, allow_new=True):
+        result = await self.redis.eval(
+            _SUBMIT_SUBAGENT_COMMAND, 2, self._active_turn_key(user_id, session_id),
+            self._subagent_commands_key(turn_id), turn_id, command["command_id"],
+            json.dumps({**command, "status": "accepted"}, ensure_ascii=False), self.stream_ttl,
+            "1" if allow_new else "0",
+        )
+        return json.loads(result) if result else None
+
+    async def pending_subagent_commands(self, turn_id):
+        values = await self.redis.hvals(self._subagent_commands_key(turn_id))
+        return [command for value in values if (command := json.loads(value))["status"] == "accepted"]
+
+    async def finish_subagent_command(self, turn_id, command_id, status, detail=None):
+        await self.redis.eval(
+            _FINISH_SUBAGENT_COMMAND, 1, self._subagent_commands_key(turn_id),
+            command_id, status, detail or "", self.stream_ttl,
+        )
 
     async def append_frame(self, turn_id: str, frame: str, *, terminal: bool = False) -> str:
         # 将一个 SSE frame 写到当前 turn 的事件流里

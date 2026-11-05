@@ -28,6 +28,7 @@ class ResourceClient:
         resource_id: str,
         user_id: str | int,
         group_role_map: Mapping[str, GroupRoleType],
+        target_version: int | None = None,
     ) -> ResourcePermission:
         resource_id = (resource_id or "").strip()
         try:
@@ -38,6 +39,7 @@ class ResourceClient:
                     "resourceId": resource_id,
                     "userId": int(user_id),
                     "groupRoles": self._serialize_group_roles(group_role_map),
+                    **({"targetVersion": target_version} if target_version is not None else {}),
                 },
             )
         except RpcError as e:

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from copy import deepcopy
 
-from chat.application.tools.core.definition import Tool, ToolSelectionMode
+from chat.application.tools.core.definition import Tool, ToolSelectionMode, ToolExecutionTarget, ToolRiskLevel
 from chat.application.tools.core.llm.renderer import schema_renderer
 from chat.application.tools.client_tools import ClientToolCapability, client_tool_from_capability
 from chat.domain.error_codes import ChatErrorCode
@@ -73,6 +74,24 @@ class ToolScope:
             "client_tool_capabilities": list(self._client_tool_capabilities),
         }
 
+    def for_child(self, *, excluded_names: frozenset[str] = frozenset(), policy=None) -> ToolScope:
+        tools = {name: tool for name, tool in self._tools.items()
+                 if name not in excluded_names
+                 and tool.definition.policy.execution_target == ToolExecutionTarget.SERVER
+                 and tool.definition.policy.risk_level != ToolRiskLevel.HIGH}
+        context = deepcopy(self._context)
+        if policy is not None:
+            tools = {name: tool for name, tool in tools.items() if policy.enable_use_tool
+                     and policy.tool_selection_overrides.get(name) is not False
+                     and (tool.definition.policy.selection_mode != ToolSelectionMode.USER_SELECTABLE
+                          or policy.tool_selection_overrides.get(name, policy.tool_selection_default_enabled))}
+            context["allowed_skill_ids"] = sorted(set(context.get("allowed_skill_ids", []))
+                                                  & set(policy.on_demand_skill_ids or []))
+            if not policy.enable_use_skill or not context["allowed_skill_ids"]:
+                for name in ("load_skill", "load_skill_asset"):
+                    tools.pop(name, None)
+        return ToolScope(tools=tools, context=context, configs=deepcopy(self._configs))
+
 class ToolRegistry:
     """全局工具注册表，负责派生请求级工具视图"""
 
@@ -132,9 +151,13 @@ class ToolRegistry:
         tool_selection_default_enabled: bool = True,
         tool_selection_overrides: dict[str, bool] | None = None,
         client_tool_capabilities: list[ClientToolCapability] | None = None,
+        enable_use_tool: bool = True,
         user_id: str,
     ) -> ToolScope:
         context = dict(tool_context or {})
+        if not enable_use_tool:
+            return ToolScope(tools={}, context=context)
+
         expose_tool_name_set = expose_tool_name_set or set()
         tool_selection_overrides = dict(tool_selection_overrides or {})
         client_tool_capabilities = list(client_tool_capabilities or [])
@@ -200,7 +223,17 @@ class ToolRegistry:
         )
 
     # 恢复当前工具推导（从暂停的任务缓存中）
-    async def recover_derived(self, staging_data: dict[str, Any], user_id: str) -> ToolScope:
+    async def recover_derived(
+        self,
+        staging_data: dict[str, Any],
+        user_id: str,
+        *,
+        enable_use_tool: bool = True,
+    ) -> ToolScope:
+        context = dict(staging_data.get("context") or {})
+        if not enable_use_tool:
+            return ToolScope(tools={}, context=context)
+
         tool_names = list(staging_data.get("tool_names") or [])
         client_tool_capabilities = list(staging_data.get("client_tool_capabilities") or [])
         tools = await self.system_tools()
@@ -218,8 +251,19 @@ class ToolRegistry:
                 )
             tools[client_tool_capability.name] = client_tool_from_capability(client_tool_capability)
 
-        # 如果有此前存在的 Tool 现在未找到，则报错
-        missing_names = [name for name in tool_names if name not in tools]
+        # 恢复时重新检查用户当前的工具配置，避免沿用暂停快照中的旧配置和密钥
+        configured_tool_name_set, tool_configs = await self._resolve_tool_config(user_id, tools)
+
+        # 如果有此前存在的 Tool 现在未找到或已不可用，则报错
+        missing_names = [
+            name
+            for name in tool_names
+            if name not in tools
+            or (
+                tools[name].definition.config_spec is not None
+                and name not in configured_tool_name_set
+            )
+        ]
         if missing_names:
             raise ServiceException(
                 ChatErrorCode.TOOL_NOT_FOUND,
@@ -230,8 +274,8 @@ class ToolRegistry:
 
         return ToolScope(
             tools=selected_tools,
-            context=dict(staging_data.get("context") or {}),
-            configs=dict(staging_data.get("configs") or {}),
+            context=context,
+            configs=tool_configs,
             client_tool_capabilities=client_tool_capabilities,
         )
 
