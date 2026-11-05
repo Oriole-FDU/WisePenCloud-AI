@@ -248,8 +248,8 @@ class ChatTurnFinalizer:
                 model_name=settings.models.summary.model,
                 messages=prompt,
                 temperature=0.5,
-                api_base=settings.models.fallback.base_url,
-                api_key=settings.models.fallback.api_key,
+                api_base=settings.integrations.common_llm_provider.base_url,
+                api_key=settings.integrations.common_llm_provider.api_key,
             )
             new_title = (response.content or "").strip().strip('"\'""''')
             if not new_title:
@@ -317,8 +317,8 @@ class ChatTurnFinalizer:
                 model_name=settings.models.summary.model,
                 messages=summarize_prompt,
                 temperature=0.3,  # 低温，保证摘要稳定性
-                api_base=settings.models.fallback.base_url,
-                api_key=settings.models.fallback.api_key,
+                api_base=settings.integrations.common_llm_provider.base_url,
+                api_key=settings.integrations.common_llm_provider.api_key,
             )
             new_summary = message_response.content or ""
         except Exception as e:

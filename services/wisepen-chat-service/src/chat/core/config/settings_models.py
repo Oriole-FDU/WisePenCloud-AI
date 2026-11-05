@@ -40,7 +40,7 @@ class MessagingSettings(ConfigModel):
     kafka: KafkaSettings
 
 
-class FallbackModelSettings(ConfigModel):
+class ProviderConnectionSettings(ConfigModel):
     base_url: str = Field(min_length=1)
     api_key: str = Field(min_length=1)
 
@@ -48,6 +48,7 @@ class FallbackModelSettings(ConfigModel):
 class MemoryModelSettings(ConfigModel):
     llm_model: str = Field(min_length=1)
     embedding_model: str = Field(min_length=1)
+    embedding_dims: int = Field(default=1024, ge=1)
 
 
 class SummaryModelSettings(ConfigModel):
@@ -59,7 +60,6 @@ class RerankerModelSettings(ConfigModel):
 
 
 class ModelSettings(ConfigModel):
-    fallback: FallbackModelSettings
     memory: MemoryModelSettings
     summary: SummaryModelSettings
     reranker: RerankerModelSettings
@@ -80,6 +80,8 @@ class SpeechSettings(ConfigModel):
 
 
 class IntegrationSettings(ConfigModel):
+    common_llm_provider: ProviderConnectionSettings
+    common_embedding_provider: ProviderConnectionSettings
     zero_entropy: ZeroEntropySettings
     speech: SpeechSettings | None = None
 
@@ -104,7 +106,7 @@ class ContextCompressionSettings(ConfigModel):
 
 class LongTermMemorySettings(ConfigModel):
     limit: int = Field(default=10, ge=1)
-    threshold: float = Field(default=0.2, ge=0, le=1)
+    threshold: float = Field(default=0.6, ge=0, le=1)
 
 
 class ContextSettings(ConfigModel):

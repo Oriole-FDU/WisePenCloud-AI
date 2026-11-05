@@ -18,16 +18,17 @@ class Mem0Adapter(MemoryProvider):
                 "provider": "openai",
                 "config": {
                     "model": settings.models.memory.embedding_model,
-                    "api_key": settings.models.fallback.api_key,
-                    "openai_base_url": settings.models.fallback.base_url,
+                    "embedding_dims": settings.models.memory.embedding_dims,
+                    "api_key": settings.integrations.common_embedding_provider.api_key,
+                    "openai_base_url": settings.integrations.common_embedding_provider.base_url,
                 },
             },
             "llm": {
                 "provider": "openai",
                 "config": {
                     "model": settings.models.memory.llm_model,
-                    "api_key": settings.models.fallback.api_key,
-                    "openai_base_url": settings.models.fallback.base_url,
+                    "api_key": settings.integrations.common_llm_provider.api_key,
+                    "openai_base_url": settings.integrations.common_llm_provider.base_url,
                 },
             },
             "vector_store": {
