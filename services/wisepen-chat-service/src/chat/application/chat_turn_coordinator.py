@@ -154,11 +154,11 @@ class ChatTurnCoordinator:
             cancel_requested=cancel_requested,
         ):
             yield event
-        await self._persist_message_and_token_bill(
+        persisted_messages = await self._persist_turn_messages(
             chat_turn_context,
             skip_first_user_message=False,
         )
-        self._set_post_completion_tasks(background_tasks, chat_turn_context)
+        self._set_post_completion_tasks(background_tasks, chat_turn_context, persisted_messages)
 
         await self._suspended_chat_repo.delete_by_id(suspended_chat_id)
 
@@ -371,11 +371,11 @@ class ChatTurnCoordinator:
                 cancel_requested=cancel_requested,
         ):
             yield event
-        await self._persist_message_and_token_bill(
+        persisted_messages = await self._persist_turn_messages(
             chat_turn_context,
             skip_first_user_message=True,
         )
-        self._set_post_completion_tasks(background_tasks, chat_turn_context)
+        self._set_post_completion_tasks(background_tasks, chat_turn_context, persisted_messages)
 
     async def query_llm(
             self,
@@ -441,55 +441,67 @@ class ChatTurnCoordinator:
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
 
-    async def _persist_message_and_token_bill(
+    async def _persist_turn_messages(
         self,
         chat_turn_context: ChatTurnContext,
         *,
         skip_first_user_message: bool,
-    ) -> None:
-        """在流完成事件发送前持久化本轮消息并完成用量记录。"""
-        await self._turn_finalizer.persist_message_and_token_bill(
+    ) -> List[ChatMessage]:
+        """流结束后同步落 Redis 热上下文与 MongoDB，返回占位符裁剪后的消息供后置任务使用"""
+        return await self._turn_finalizer.persist_messages(
             user_id=chat_turn_context.user_id,
             session_id=chat_turn_context.session_id,
             chat_record_messages=chat_turn_context.chat_record_messages,
             memory_policy=chat_turn_context.agent_spec.memory_policy,
-            model_info=chat_turn_context.model_info,
-            token_usage=chat_turn_context.token_usage,
-            billing_resource_id=chat_turn_context.billing_resource_id,
-            preferred_billing_group_id=chat_turn_context.preferred_billing_group_id,
             skip_first_user_message=skip_first_user_message,
-            identity_type=chat_turn_context.identity_type,
         )
 
     def _set_post_completion_tasks(
         self,
         background_tasks,
         chat_turn_context: ChatTurnContext,
+        persisted_messages: List[ChatMessage],
     ) -> None:
-        # 摘要和标题不影响答案落库，放到完成事件发送后执行。
-        if background_tasks is not None:
-            # 调用轻量级模型生成并更新会话的全局摘要
-            if (chat_turn_context.agent_spec.memory_policy.enable_chat_memory
-                    and chat_turn_context.agent_spec.memory_policy.enable_chat_memory_summary
-                    and chat_turn_context.windowed_history_messages is not None
-                    and chat_turn_context.windowed_history_messages.needs_compression):
-                background_tasks.add_task(
-                    self._turn_finalizer.summarize_and_compress,
-                    session_id=chat_turn_context.session_id,
-                    windowed_history_messages=chat_turn_context.windowed_history_messages,
-                    chat_record_messages=chat_turn_context.chat_record_messages,
-                    existing_summary=chat_turn_context.session_summary,
-                    memory_policy=chat_turn_context.agent_spec.memory_policy,
-                )
-            # 自动生成标题
-            if chat_turn_context.agent_spec.auto_generate_title:
-                background_tasks.add_task(
-                    self._turn_finalizer.auto_generate_title,
-                    session_id=chat_turn_context.session_id,
-                    user_id=chat_turn_context.user_id,
-                    # chat_record_messages的首条消息即为用户查询
-                    user_query=str(chat_turn_context.chat_record_messages[0].content)
-                )
+        # 长期记忆、计费、摘要和标题都不影响下一轮对话，因此可延后执行
+        # 计费
+        background_tasks.add_task(
+            self._turn_finalizer.send_token_billing,
+            user_id=chat_turn_context.user_id,
+            model_info=chat_turn_context.model_info,
+            token_usage=chat_turn_context.token_usage,
+            billing_resource_id=chat_turn_context.billing_resource_id,
+            preferred_billing_group_id=chat_turn_context.preferred_billing_group_id,
+            identity_type=chat_turn_context.identity_type,
+        )
+        # Memory 摄入
+        background_tasks.add_task(
+            self._turn_finalizer.ingest_long_term_memory,
+            user_id=chat_turn_context.user_id,
+            messages=persisted_messages,
+            memory_policy=chat_turn_context.agent_spec.memory_policy,
+        )
+        # 调用轻量级模型生成并更新会话的全局摘要
+        if (chat_turn_context.agent_spec.memory_policy.enable_chat_memory
+                and chat_turn_context.agent_spec.memory_policy.enable_chat_memory_summary
+                and chat_turn_context.windowed_history_messages is not None
+                and chat_turn_context.windowed_history_messages.needs_compression):
+            background_tasks.add_task(
+                self._turn_finalizer.summarize_and_compress,
+                session_id=chat_turn_context.session_id,
+                windowed_history_messages=chat_turn_context.windowed_history_messages,
+                chat_record_messages=chat_turn_context.chat_record_messages,
+                existing_summary=chat_turn_context.session_summary,
+                memory_policy=chat_turn_context.agent_spec.memory_policy,
+            )
+        # 自动生成标题
+        if chat_turn_context.agent_spec.auto_generate_title:
+            background_tasks.add_task(
+                self._turn_finalizer.auto_generate_title,
+                session_id=chat_turn_context.session_id,
+                user_id=chat_turn_context.user_id,
+                # chat_record_messages的首条消息即为用户查询
+                user_query=str(chat_turn_context.chat_record_messages[0].content)
+            )
 
     async def close_unfinished_before_start(
         self,

@@ -59,25 +59,27 @@ class ChatTurnFinalizer:
         skip_first_user_message: bool = False,
         identity_type: Optional[IdentityType] = None,
     ) -> None:
-        """完成正式消息持久化，并在成功后执行计费。"""
-        await self.persist_messages(
+        """一次性提交整轮对话: 落盘、长期记忆摄入与计费"""
+        persisted_messages = await self.persist_messages(
             user_id=user_id,
             session_id=session_id,
             chat_record_messages=chat_record_messages,
             memory_policy=memory_policy,
             skip_first_user_message=skip_first_user_message,
         )
-        try:
-            await self.send_token_billing(
-                user_id=user_id,
-                model_info=model_info,
-                token_usage=token_usage,
-                billing_resource_id=billing_resource_id,
-                preferred_billing_group_id=preferred_billing_group_id,
-                identity_type=identity_type,
-            )
-        except Exception as exc:
-            error("chat token billing failed.", session_id=session_id, exc=exc)
+        await self.ingest_long_term_memory(
+            user_id=user_id,
+            messages=persisted_messages,
+            memory_policy=memory_policy,
+        )
+        await self.send_token_billing(
+            user_id=user_id,
+            model_info=model_info,
+            token_usage=token_usage,
+            billing_resource_id=billing_resource_id,
+            preferred_billing_group_id=preferred_billing_group_id,
+            identity_type=identity_type,
+        )
 
     async def persist_user_message(
         self,
@@ -112,49 +114,52 @@ class ChatTurnFinalizer:
         if token_usage.total_tokens == 0:
             return
 
-        # 计费只看本次实际使用的 Provider：用户自带 Provider 与免费官方模型都只累计用量，不扣钱包余额
-        service_fee_rate = self._service_fee_rate(identity_type)
-        billing_multiplier = Decimal("1") + service_fee_rate
-        billable_tokens = model_info.billable_tokens(token_usage, billing_multiplier)
-        input_billing_ratio = model_info.input_billing_ratio * billing_multiplier
-        cached_input_billing_ratio = model_info.cached_input_billing_ratio * billing_multiplier
-        output_billing_ratio = model_info.output_billing_ratio * billing_multiplier
+        try:
+            # 计费只看本次实际使用的 Provider：用户自带 Provider 与免费官方模型都只累计用量，不扣钱包余额
+            service_fee_rate = self._service_fee_rate(identity_type)
+            billing_multiplier = Decimal("1") + service_fee_rate
+            billable_tokens = model_info.billable_tokens(token_usage, billing_multiplier)
+            input_billing_ratio = model_info.input_billing_ratio * billing_multiplier
+            cached_input_billing_ratio = model_info.cached_input_billing_ratio * billing_multiplier
+            output_billing_ratio = model_info.output_billing_ratio * billing_multiplier
 
-        await self.provider_repo.increment_usage(
-            provider_id=model_info.provider_id,
-            user_id=model_info.provider_owner_user_id,
-            input_tokens=token_usage.input_tokens,
-            cached_input_tokens=token_usage.cached_input_tokens,
-            output_tokens=token_usage.output_tokens,
-            billable_tokens=billable_tokens,
-        )
+            await self.provider_repo.increment_usage(
+                provider_id=model_info.provider_id,
+                user_id=model_info.provider_owner_user_id,
+                input_tokens=token_usage.input_tokens,
+                cached_input_tokens=token_usage.cached_input_tokens,
+                output_tokens=token_usage.output_tokens,
+                billable_tokens=billable_tokens,
+            )
 
-        if billable_tokens <= 0:
-            preferred_billing_group_id = None
+            if billable_tokens <= 0:
+                preferred_billing_group_id = None
 
-        value = {
-            "userId": user_id,
-            "resourceId": billing_resource_id,
-            "preferredGroupId": int(preferred_billing_group_id) if preferred_billing_group_id else None,
-            "usageTokens": token_usage.total_tokens,
-            "billableTokens": billable_tokens,
-            "billingDetail": {
-                "inputTokens": token_usage.input_tokens,
-                "cachedInputTokens": token_usage.cached_input_tokens,
-                "outputTokens": token_usage.output_tokens,
-                "inputBillingRatio": str(input_billing_ratio),
-                "cachedInputBillingRatio": str(cached_input_billing_ratio),
-                "outputBillingRatio": str(output_billing_ratio),
-                "usageSource": token_usage.usage_source.value,
-                "modelName": model_info.model.display_name,
-                "providerName": model_info.provider.name,
-                "providerScope": model_info.provider_scope.value,
-            },
-            "traceId": uuid.uuid4().hex,
-            "requestTime": datetime.now(timezone.utc).isoformat(),
-        }
+            value = {
+                "userId": user_id,
+                "resourceId": billing_resource_id,
+                "preferredGroupId": int(preferred_billing_group_id) if preferred_billing_group_id else None,
+                "usageTokens": token_usage.total_tokens,
+                "billableTokens": billable_tokens,
+                "billingDetail": {
+                    "inputTokens": token_usage.input_tokens,
+                    "cachedInputTokens": token_usage.cached_input_tokens,
+                    "outputTokens": token_usage.output_tokens,
+                    "inputBillingRatio": str(input_billing_ratio),
+                    "cachedInputBillingRatio": str(cached_input_billing_ratio),
+                    "outputBillingRatio": str(output_billing_ratio),
+                    "usageSource": token_usage.usage_source.value,
+                    "modelName": model_info.model.display_name,
+                    "providerName": model_info.provider.name,
+                    "providerScope": model_info.provider_scope.value,
+                },
+                "traceId": uuid.uuid4().hex,
+                "requestTime": datetime.now(timezone.utc).isoformat(),
+            }
 
-        await self.kafka_producer.send(topic=KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value)
+            await self.kafka_producer.send(topic=KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value)
+        except Exception as exc:
+            error("chat token billing failed.", user_id=user_id, exc=exc)
 
     @staticmethod
     def _service_fee_rate(identity_type: Optional[IdentityType]) -> Decimal:
@@ -171,8 +176,8 @@ class ChatTurnFinalizer:
         chat_record_messages: List[ChatMessage],
         memory_policy: AgentMemoryPolicy,
         skip_first_user_message: bool = False,
-    ) -> None:
-        """后台统一处理所有存储逻辑: Redis 追加 → placeholder 裁剪 → MongoDB 落盘 → Memory 摄入"""
+    ) -> List[ChatMessage]:
+        """处理本轮消息落盘: Redis 追加 → placeholder 裁剪 → MongoDB 落盘，返回裁剪后的消息供长期记忆摄入"""
 
         # Redis 热上下文保留原始消息，因此先按原始内容填充 token 计数
         await self._fill_content_token_count(chat_record_messages)
@@ -201,12 +206,21 @@ class ChatTurnFinalizer:
                 error("chat record message archive failed.", session_id=session_id, exc=e)
                 raise ServiceException(ChatErrorCode.CHAT_MESSAGE_PERSIST_FAILED) from e
 
-        # Memory 摄入 (摄入占位符处理的消息内容)
-        if memory_policy.enable_long_term_memory:
-            try:
-                await self.memory.add_interaction(user_id=user_id, messages=chat_record_messages)
-            except Exception as e:
-                error("chat record message write long-term memory failed.", user_id=user_id, exc=e)
+        return chat_record_messages
+
+    async def ingest_long_term_memory(
+        self,
+        user_id: str,
+        messages: List[ChatMessage],
+        memory_policy: AgentMemoryPolicy,
+    ) -> None:
+        """Memory 摄入 (摄入占位符处理的消息内容)，由轮次结束后的后台任务调用"""
+        if not memory_policy.enable_long_term_memory:
+            return
+        try:
+            await self.memory.add_interaction(user_id=user_id, messages=messages)
+        except Exception as e:
+            error("chat record message write long-term memory failed.", user_id=user_id, exc=e)
 
 
     async def auto_generate_title(self, session_id: str, user_id: str, user_query: str) -> None:
