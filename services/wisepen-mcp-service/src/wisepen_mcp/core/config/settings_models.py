@@ -50,8 +50,14 @@ class WebSearchProvidersSettings(ConfigModel):
 
 
 class WebSearchRerankerSettings(ConfigModel):
-    zero_entropy_api_key: str = Field(min_length=1)
+    """重排配置；整段不配或 api-key 为空都表示不启用重排"""
+
+    zero_entropy_api_key: str = ""
     model: str = "zerank-2"
+
+    @property
+    def is_enabled(self) -> bool:
+        return bool(self.zero_entropy_api_key.strip())
 
 
 class WebSearchSettings(ConfigModel):
@@ -59,7 +65,9 @@ class WebSearchSettings(ConfigModel):
     providers: WebSearchProvidersSettings = Field(
         default_factory=WebSearchProvidersSettings
     )
-    reranker: WebSearchRerankerSettings
+    reranker: WebSearchRerankerSettings = Field(
+        default_factory=WebSearchRerankerSettings
+    )
 
 
 class McpServiceSettings(ConfigModel):

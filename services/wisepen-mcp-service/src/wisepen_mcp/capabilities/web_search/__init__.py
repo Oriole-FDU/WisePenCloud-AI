@@ -2,6 +2,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 from zeroentropy import AsyncZeroEntropy
 
+from common.logger import info
 from common.utils.ranking import RankingPipeline
 from common.utils.ranking.fusion import WeightedRrfFusion
 from common.utils.ranking.rerankers import ZeroEntropyReranker, ZeroEntropyRerankerConfig
@@ -24,6 +25,19 @@ from .search_tools import (
 from ...core.config.app_settings import settings
 
 
+def _build_web_search_reranker() -> ZeroEntropyReranker | None:
+    """未配置 ZeroEntropy api-key 时返回 None """
+    reranker_settings = settings.web_search.reranker
+    if not reranker_settings.is_enabled:
+        info("web search reranker disabled: web-search.reranker not configured.")
+        return None
+
+    return ZeroEntropyReranker(
+        client=AsyncZeroEntropy(api_key=reranker_settings.zero_entropy_api_key),
+        config=ZeroEntropyRerankerConfig(model=reranker_settings.model),
+    )
+
+
 def register_web_search_tools(
     mcp: FastMCP,
 ) -> None:
@@ -41,15 +55,10 @@ def register_web_search_tools(
         ),
     )
 
-    web_search_zero_entropy_reranker = ZeroEntropyReranker(
-        client=AsyncZeroEntropy(api_key=settings.web_search.reranker.zero_entropy_api_key),
-        config=ZeroEntropyRerankerConfig(model=settings.web_search.reranker.model),
-    )
-
     web_search_ranking_pipeline = RankingPipeline(
         scorers=(web_search_fielded_bm25_scorer,),
         fusion=WeightedRrfFusion(),
-        reranker=web_search_zero_entropy_reranker,
+        reranker=_build_web_search_reranker(),
     )
 
     web_search_http_client = httpx.AsyncClient(
