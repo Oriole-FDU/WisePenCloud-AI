@@ -48,7 +48,6 @@ class FallbackModelSettings(ConfigModel):
 class MemoryModelSettings(ConfigModel):
     llm_model: str = Field(min_length=1)
     embedding_model: str = Field(min_length=1)
-    reranker_model: str = Field(min_length=1)
 
 
 class SummaryModelSettings(ConfigModel):
@@ -105,7 +104,7 @@ class ContextCompressionSettings(ConfigModel):
 
 class LongTermMemorySettings(ConfigModel):
     limit: int = Field(default=10, ge=1)
-    threshold: float = Field(default=0.6, ge=0, le=1)
+    threshold: float = Field(default=0.2, ge=0, le=1)
 
 
 class ContextSettings(ConfigModel):

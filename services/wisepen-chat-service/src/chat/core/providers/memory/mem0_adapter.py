@@ -30,14 +30,6 @@ class Mem0Adapter(MemoryProvider):
                     "openai_base_url": settings.models.fallback.base_url,
                 },
             },
-            "reranker": {
-                "provider": "zero_entropy",
-                "config": {
-                    "model": settings.models.memory.reranker_model,
-                    "api_key": settings.integrations.zero_entropy.api_key,
-                    "top_k": 5
-                }
-            },
             "vector_store": {
                 "provider": "qdrant",
                 "config": {
@@ -65,7 +57,17 @@ class Mem0Adapter(MemoryProvider):
     ) -> List[str]:
 
         def _sync_search():
-            raw_results = self.client.search(query, user_id=user_id, limit=limit)
+            kwargs: Dict[str, Any] = {}
+            if score_threshold is not None:
+                # mem0 2.x 的内置阈值，作用在语义相似度分上（0~1）
+                kwargs["threshold"] = score_threshold
+
+            raw_results = self.client.search(
+                query,
+                filters={"user_id": user_id},
+                top_k=limit,
+                **kwargs,
+            )
             debug("mem0 raw search results returned.", query=query, user_id=user_id, raw_results=raw_results)
 
             # 兼容 Mem0 返回字典 {"results": [...]} 或直接返回列表的情况
@@ -74,11 +76,6 @@ class Mem0Adapter(MemoryProvider):
             else:
                 results = raw_results or []
 
-            if not results:
-                return []
-            if score_threshold is not None:
-                # 按分数阈值过滤，忽略 limit 参数
-                return [r["memory"] for r in results if r.get("rerank_score") >= score_threshold]
             return [r["memory"] for r in results]
 
         try:
@@ -111,7 +108,7 @@ class Mem0Adapter(MemoryProvider):
     async def get_all(self, user_id: str) -> List[Dict[str, Any]]:
 
         def _sync_get_all():
-            result = self.client.get_all(user_id=user_id)
+            result = self.client.get_all(filters={"user_id": user_id})
             # Mem0 返回格式: {"results": [...]} 或直接 list
             if isinstance(result, dict):
                 return result.get("results", [])
