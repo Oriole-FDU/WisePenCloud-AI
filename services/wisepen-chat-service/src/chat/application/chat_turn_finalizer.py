@@ -46,27 +46,33 @@ class ChatTurnFinalizer:
         self.provider_repo = provider_repo
         self.kafka_producer = kafka_producer
 
-    async def persist_message_and_token_bill(
+    async def run_memory(
         self,
+        *,
         user_id: str,
-        session_id: str,
         chat_record_messages: List[ChatMessage],
         memory_policy: AgentMemoryPolicy,
+    ) -> None:
+        """写入长期记忆；失败不影响已经完成的对话。"""
+        if not memory_policy.enable_long_term_memory:
+            return
+        try:
+            await self.memory.add_interaction(user_id=user_id, messages=chat_record_messages)
+        except Exception as exc:
+            error("chat record message write long-term memory failed.", user_id=user_id, exc=exc)
+
+    async def run_billing(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
         model_info: ModelRequestInfo,
         token_usage: TokenUsage,
         billing_resource_id: Optional[str] = None,
         preferred_billing_group_id: Optional[str] = None,
-        skip_first_user_message: bool = False,
         identity_type: Optional[IdentityType] = None,
     ) -> None:
-        """完成正式消息持久化，并在成功后执行计费。"""
-        await self.persist_messages(
-            user_id=user_id,
-            session_id=session_id,
-            chat_record_messages=chat_record_messages,
-            memory_policy=memory_policy,
-            skip_first_user_message=skip_first_user_message,
-        )
+        """发送用量计费；失败不影响已经完成的对话。"""
         try:
             await self.send_token_billing(
                 user_id=user_id,
@@ -166,13 +172,12 @@ class ChatTurnFinalizer:
 
     async def persist_messages(
         self,
-        user_id: str,
         session_id: str,
         chat_record_messages: List[ChatMessage],
         memory_policy: AgentMemoryPolicy,
         skip_first_user_message: bool = False,
-    ) -> None:
-        """后台统一处理所有存储逻辑: Redis 追加 → placeholder 裁剪 → MongoDB 落盘 → Memory 摄入"""
+    ) -> List[ChatMessage]:
+        """处理完成本轮所需的消息存储：Redis 热上下文和 MongoDB 归档。"""
 
         # Redis 热上下文保留原始消息，因此先按原始内容填充 token 计数
         await self._fill_content_token_count(chat_record_messages)
@@ -201,13 +206,7 @@ class ChatTurnFinalizer:
                 error("chat record message archive failed.", session_id=session_id, exc=e)
                 raise ServiceException(ChatErrorCode.CHAT_MESSAGE_PERSIST_FAILED) from e
 
-        # Memory 摄入 (摄入占位符处理的消息内容)
-        if memory_policy.enable_long_term_memory:
-            try:
-                await self.memory.add_interaction(user_id=user_id, messages=chat_record_messages)
-            except Exception as e:
-                error("chat record message write long-term memory failed.", user_id=user_id, exc=e)
-
+        return chat_record_messages
 
     async def auto_generate_title(self, session_id: str, user_id: str, user_query: str) -> None:
         """首轮对话后自动为 'New Chat' 会话生成简洁标题"""

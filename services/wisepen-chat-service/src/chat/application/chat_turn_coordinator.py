@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Set, Awaitable, Callable
 
@@ -154,11 +155,13 @@ class ChatTurnCoordinator:
             cancel_requested=cancel_requested,
         ):
             yield event
-        await self._persist_message_and_token_bill(
-            chat_turn_context,
+        persisted_messages = await self._turn_finalizer.persist_messages(
+            session_id=chat_turn_context.session_id,
+            chat_record_messages=chat_turn_context.chat_record_messages,
+            memory_policy=chat_turn_context.agent_spec.memory_policy,
             skip_first_user_message=False,
         )
-        self._set_post_completion_tasks(background_tasks, chat_turn_context)
+        self._set_post_completion_tasks(background_tasks, chat_turn_context, persisted_messages)
 
         await self._suspended_chat_repo.delete_by_id(suspended_chat_id)
 
@@ -371,11 +374,13 @@ class ChatTurnCoordinator:
                 cancel_requested=cancel_requested,
         ):
             yield event
-        await self._persist_message_and_token_bill(
-            chat_turn_context,
+        persisted_messages = await self._turn_finalizer.persist_messages(
+            session_id=chat_turn_context.session_id,
+            chat_record_messages=chat_turn_context.chat_record_messages,
+            memory_policy=chat_turn_context.agent_spec.memory_policy,
             skip_first_user_message=True,
         )
-        self._set_post_completion_tasks(background_tasks, chat_turn_context)
+        self._set_post_completion_tasks(background_tasks, chat_turn_context, persisted_messages)
 
     async def query_llm(
             self,
@@ -441,54 +446,66 @@ class ChatTurnCoordinator:
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
 
-    async def _persist_message_and_token_bill(
-        self,
-        chat_turn_context: ChatTurnContext,
-        *,
-        skip_first_user_message: bool,
-    ) -> None:
-        """在流完成事件发送前持久化本轮消息并完成用量记录。"""
-        await self._turn_finalizer.persist_message_and_token_bill(
-            user_id=chat_turn_context.user_id,
-            session_id=chat_turn_context.session_id,
-            chat_record_messages=chat_turn_context.chat_record_messages,
-            memory_policy=chat_turn_context.agent_spec.memory_policy,
-            model_info=chat_turn_context.model_info,
-            token_usage=chat_turn_context.token_usage,
-            billing_resource_id=chat_turn_context.billing_resource_id,
-            preferred_billing_group_id=chat_turn_context.preferred_billing_group_id,
-            skip_first_user_message=skip_first_user_message,
-            identity_type=chat_turn_context.identity_type,
-        )
-
     def _set_post_completion_tasks(
         self,
         background_tasks,
         chat_turn_context: ChatTurnContext,
+        persisted_messages: list[ChatMessage],
     ) -> None:
-        # 摘要和标题不影响答案落库，放到完成事件发送后执行。
+        # 消息已落库；记忆、计费、摘要和标题并发运行，不阻塞终止帧。
         if background_tasks is not None:
-            # 调用轻量级模型生成并更新会话的全局摘要
-            if (chat_turn_context.agent_spec.memory_policy.enable_chat_memory
-                    and chat_turn_context.agent_spec.memory_policy.enable_chat_memory_summary
-                    and chat_turn_context.windowed_history_messages is not None
-                    and chat_turn_context.windowed_history_messages.needs_compression):
-                background_tasks.add_task(
-                    self._turn_finalizer.summarize_and_compress,
+            background_tasks.add_task(
+                self._run_post_completion_tasks,
+                chat_turn_context,
+                persisted_messages,
+            )
+
+    async def _run_post_completion_tasks(
+        self,
+        chat_turn_context: ChatTurnContext,
+        persisted_messages: list[ChatMessage],
+    ) -> None:
+        tasks = [
+            self._turn_finalizer.run_memory(
+                user_id=chat_turn_context.user_id,
+                chat_record_messages=persisted_messages,
+                memory_policy=chat_turn_context.agent_spec.memory_policy,
+            ),
+            self._turn_finalizer.run_billing(
+                user_id=chat_turn_context.user_id,
+                session_id=chat_turn_context.session_id,
+                model_info=chat_turn_context.model_info,
+                token_usage=chat_turn_context.token_usage,
+                billing_resource_id=chat_turn_context.billing_resource_id,
+                preferred_billing_group_id=chat_turn_context.preferred_billing_group_id,
+                identity_type=chat_turn_context.identity_type,
+            )
+        ]
+        if (chat_turn_context.agent_spec.memory_policy.enable_chat_memory
+                and chat_turn_context.agent_spec.memory_policy.enable_chat_memory_summary
+                and chat_turn_context.windowed_history_messages is not None
+                and chat_turn_context.windowed_history_messages.needs_compression):
+            tasks.append(self._turn_finalizer.summarize_and_compress(
+                session_id=chat_turn_context.session_id,
+                windowed_history_messages=chat_turn_context.windowed_history_messages,
+                chat_record_messages=chat_turn_context.chat_record_messages,
+                existing_summary=chat_turn_context.session_summary,
+                memory_policy=chat_turn_context.agent_spec.memory_policy,
+            ))
+        if chat_turn_context.agent_spec.auto_generate_title:
+            tasks.append(self._turn_finalizer.auto_generate_title(
+                session_id=chat_turn_context.session_id,
+                user_id=chat_turn_context.user_id,
+                user_query=str(chat_turn_context.chat_record_messages[0].content),
+            ))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                error(
+                    "chat post-completion task failed.",
                     session_id=chat_turn_context.session_id,
-                    windowed_history_messages=chat_turn_context.windowed_history_messages,
-                    chat_record_messages=chat_turn_context.chat_record_messages,
-                    existing_summary=chat_turn_context.session_summary,
-                    memory_policy=chat_turn_context.agent_spec.memory_policy,
-                )
-            # 自动生成标题
-            if chat_turn_context.agent_spec.auto_generate_title:
-                background_tasks.add_task(
-                    self._turn_finalizer.auto_generate_title,
-                    session_id=chat_turn_context.session_id,
-                    user_id=chat_turn_context.user_id,
-                    # chat_record_messages的首条消息即为用户查询
-                    user_query=str(chat_turn_context.chat_record_messages[0].content)
+                    exc=result,
                 )
 
     async def close_unfinished_before_start(
@@ -532,22 +549,31 @@ class ChatTurnCoordinator:
             )
         )
 
-        # 完成后处理
-        await self._turn_finalizer.persist_message_and_token_bill(
-            user_id=unfinished_chat.user_id,
+        persisted_messages = await self._turn_finalizer.persist_messages(
             session_id=unfinished_chat.session_id,
             chat_record_messages=unfinished_chat.context.chat_record_messages,
             memory_policy=unfinished_chat.context.agent_spec.memory_policy,
-            model_info=unfinished_chat.context.model_info,
-            token_usage=unfinished_chat.context.token_usage,
-            billing_resource_id=getattr(unfinished_chat.context, "billing_resource_id", None),
-            preferred_billing_group_id=getattr(
-                unfinished_chat.context,
-                "preferred_billing_group_id",
-                getattr(unfinished_chat.context, "billing_group_id", None),
-            ),
             skip_first_user_message=True,
-            identity_type=identity_type,
+        )
+        await asyncio.gather(
+            self._turn_finalizer.run_memory(
+                user_id=unfinished_chat.user_id,
+                chat_record_messages=persisted_messages,
+                memory_policy=unfinished_chat.context.agent_spec.memory_policy,
+            ),
+            self._turn_finalizer.run_billing(
+                user_id=unfinished_chat.user_id,
+                session_id=unfinished_chat.session_id,
+                model_info=unfinished_chat.context.model_info,
+                token_usage=unfinished_chat.context.token_usage,
+                billing_resource_id=getattr(unfinished_chat.context, "billing_resource_id", None),
+                preferred_billing_group_id=getattr(
+                    unfinished_chat.context,
+                    "preferred_billing_group_id",
+                    getattr(unfinished_chat.context, "billing_group_id", None),
+                ),
+                identity_type=identity_type,
+            ),
         )
         # 调用轻量级模型生成并更新会话的全局摘要
         if (unfinished_chat.context.agent_spec.memory_policy.enable_chat_memory
