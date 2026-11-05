@@ -60,9 +60,9 @@ class ChatRequest(BaseModel):
     """
     session_id: str = Field(..., description="目标会话 ID；必须属于当前登录用户。")
     query: str = Field(..., description="本轮用户输入；不能为空，会作为最新 user message 进入 prompt。")
-    model: Optional[str] = Field(
-        default=None,
-        description="可选模型 ID；未传时使用服务默认模型；若会话 Agent 禁止请求覆盖，则以 Agent 默认模型为准。",
+    model: str = Field(
+        ...,
+        description="模型 ID；若会话 Agent 禁止请求覆盖，则以 Agent 默认模型为准。",
     )
     provider_id: Optional[str] = Field(
         default=None,

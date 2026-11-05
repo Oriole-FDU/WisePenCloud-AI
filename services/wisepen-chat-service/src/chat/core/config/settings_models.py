@@ -43,7 +43,6 @@ class MessagingSettings(ConfigModel):
 class FallbackModelSettings(ConfigModel):
     base_url: str = Field(min_length=1)
     api_key: str = Field(min_length=1)
-    default_model_id: str = Field(min_length=1)
 
 
 class MemoryModelSettings(ConfigModel):
