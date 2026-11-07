@@ -17,6 +17,9 @@ from common.utils.markdown import (
     Section,
 )
 
+_DEFAULT_MAX_CHARS = 20_000_000
+
+
 @lru_cache(maxsize=1)
 def _repository():
     """惰性创建 Redis 仓储，避免业务层持有依赖。"""
@@ -51,14 +54,10 @@ async def put_tool_content(
     *,
     session_id: str,
     text: str,
-    max_chars: int | None = None,
+    max_chars: int = _DEFAULT_MAX_CHARS,
 ) -> tuple[str, int] | None:
     """解析并持久化正文和结构；空白或超限正文不进入 Redis。"""
 
-    from chat.core.config.app_settings import settings
-
-    if max_chars is None:
-        max_chars = settings.tools.content.max_chars
     if max_chars < 1:
         raise ValueError("max_chars must be greater than 0")
     if not text or text.isspace() or len(text) > max_chars:

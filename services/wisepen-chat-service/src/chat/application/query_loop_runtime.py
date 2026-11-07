@@ -186,7 +186,7 @@ class QueryLoopRuntime:
         _client_tool_results = client_tool_results
         _tool_approval_status = tool_approval_status
 
-        max_iterations = agent_max_iterations or settings.AGENT_MAX_ITERATIONS
+        max_iterations = agent_max_iterations or settings.agent.max_iterations
         for iteration in range(start_iteration, max_iterations):
             # 请求取消检查点
             if cancel_requested is not None and await cancel_requested():
@@ -578,7 +578,7 @@ class QueryLoopRuntime:
         self, session_id: str
     ) -> AsyncIterator[StreamEvent]:
         """Agent 循环超出最大迭代次数时的兜底文本输出"""
-        warning_text = f"Agent 推理超出最大迭代次数{settings.AGENT_MAX_ITERATIONS}，未能生成最终答案"
+        warning_text = f"Agent 推理超出最大迭代次数{settings.agent.max_iterations}，未能生成最终答案"
         warn("tool calling loop exhausted.", session_id=session_id)
         text_id = f"txt_{uuid.uuid4().hex}"
         yield StepStartEvent()
