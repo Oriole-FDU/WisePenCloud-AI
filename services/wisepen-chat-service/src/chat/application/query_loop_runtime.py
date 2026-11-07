@@ -39,13 +39,12 @@ from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.core.exceptions import ServiceException
 from common.logger import warn
 
-_CACHED_TOOL_OUTPUT_TOOL_NAMES = frozenset({
-    "inspect_cached_tool_output_structure",
-    "read_cached_tool_output_by_page",
-    "read_cached_tool_output_by_range",
-    "read_cached_tool_output_by_section",
-    "search_cached_tool_output_by_regex",
-    "search_cached_tool_output_by_semantics",
+_TOOL_OUTPUT_TOOL_NAMES = frozenset({
+    "inspect_tool_output_structure",
+    "read_tool_output_range",
+    "read_tool_output_section",
+    "search_tool_output_regex",
+    "search_tool_output_bm25",
 })
 
 
@@ -187,7 +186,7 @@ class QueryLoopRuntime:
         _client_tool_results = client_tool_results
         _tool_approval_status = tool_approval_status
 
-        max_iterations = agent_max_iterations or settings.agent.max_iterations
+        max_iterations = agent_max_iterations or settings.AGENT_MAX_ITERATIONS
         for iteration in range(start_iteration, max_iterations):
             # 请求取消检查点
             if cancel_requested is not None and await cancel_requested():
@@ -195,7 +194,7 @@ class QueryLoopRuntime:
                 return
 
             tool_scope.suppress_schemas(
-                _CACHED_TOOL_OUTPUT_TOOL_NAMES,
+                _TOOL_OUTPUT_TOOL_NAMES,
                 suppressed=not _has_cached_tool_output(messages),
             )
 
@@ -579,7 +578,7 @@ class QueryLoopRuntime:
         self, session_id: str
     ) -> AsyncIterator[StreamEvent]:
         """Agent 循环超出最大迭代次数时的兜底文本输出"""
-        warning_text = f"Agent 推理超出最大迭代次数{settings.agent.max_iterations}，未能生成最终答案"
+        warning_text = f"Agent 推理超出最大迭代次数{settings.AGENT_MAX_ITERATIONS}，未能生成最终答案"
         warn("tool calling loop exhausted.", session_id=session_id)
         text_id = f"txt_{uuid.uuid4().hex}"
         yield StepStartEvent()
@@ -617,9 +616,21 @@ def _has_cached_tool_output(messages: list[ChatMessage]) -> bool:
             continue
         if not isinstance(output_payload, dict):
             continue
-        contents = output_payload.get("contents")
-        if not isinstance(contents, list):
-            continue
-        if any(isinstance(item, dict) and item.get("content_id") for item in contents):
+        if _contains_content_id(output_payload):
             return True
+    return False
+
+
+def _contains_content_id(value: object) -> bool:
+    """递归识别树内 claim-check 回执，避免依赖旧的顶层 contents 协议。"""
+    if isinstance(value, dict):
+        if any(
+            isinstance(item, str) and item
+            and (key == "content_id" or key.endswith("_content_id"))
+            for key, item in value.items()
+        ):
+            return True
+        return any(_contains_content_id(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_content_id(item) for item in value)
     return False
