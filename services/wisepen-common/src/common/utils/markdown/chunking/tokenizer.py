@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import gzip
 from functools import lru_cache
 from importlib.resources import files
 from typing import Protocol
@@ -33,12 +34,12 @@ def _local_encoding() -> tiktoken.Encoding:
     # 读取打包的 BPE 表文件，解析为 {token_bytes: rank} 映射。
     data = (
         files("common.utils.markdown")
-        .joinpath("chunking/data/o200k_base.tiktoken")
+        .joinpath("chunking/data/o200k_base.tiktoken.gz")
         .read_bytes()
     )
     ranks = {
         base64.b64decode(token): int(rank)
-        for token, rank in (line.split() for line in data.splitlines())
+        for token, rank in (line.split() for line in gzip.decompress(data).splitlines())
     }
 
     # 直接构造 Encoding，确保完全离线可用。

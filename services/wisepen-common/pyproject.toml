@@ -43,4 +43,4 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.package-data]
-"common.utils.markdown.chunking" = ["data/*.tiktoken", "data/README.md"]
+"common.utils.markdown.chunking" = ["data/*.tiktoken.gz", "data/README.md"]
