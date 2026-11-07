@@ -255,7 +255,12 @@ class ToolRegistry:
             legacy_config_name = name.removeprefix("system_").removeprefix("sandbox_")
             entity = configs.get(name) or configs.get(legacy_config_name)
             # 检查用户是否有配置、是否启用、必填项是否完整
-            if entity is None or not entity.enabled: continue # 不满足的跳过
+            if entity is None:
+                # 空 required_keys 表示配置可选；没有配置记录时仍允许工具使用本地能力。
+                if not config_spec.required_keys:
+                    configured_tool_names.add(name)
+                continue
+            if not entity.enabled: continue # 不满足的跳过
             missing: list[str] = []
             for key in config_spec.required_keys:
                 source = entity.secret_config if key in config_spec.secret_keys else entity.config

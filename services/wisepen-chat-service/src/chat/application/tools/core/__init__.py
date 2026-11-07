@@ -33,7 +33,6 @@ from chat.application.tools.core.llm.renderer import (
 )
 
 from chat.application.tools.core.execution.result import (
-    CacheableText,
     ToolExecutionError,
     ToolOutput,
     ToolExecutionResult,
@@ -90,7 +89,6 @@ __all__ = [
     "tool_result_renderer",
 
     # execution result
-    "CacheableText",
     "ToolExecutionError",
     "ToolOutput",
     "ToolExecutionResult",
