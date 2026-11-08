@@ -24,5 +24,12 @@ class ResourceAclEntity(BeanieDocument):
                 [("resource_id", ASCENDING)],
                 unique=True,
                 name="resource_acl_resource_unique",
-            )
+            ),
+            IndexModel([("owner_id", ASCENDING)], name="resource_acl_owner"),
+            IndexModel(
+                [("readable_users", ASCENDING)], name="resource_acl_readable_user"
+            ),
+            IndexModel(
+                [("group_acls.group_id", ASCENDING)], name="resource_acl_group"
+            ),
         ]

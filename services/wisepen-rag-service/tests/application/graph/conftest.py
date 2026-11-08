@@ -11,6 +11,7 @@ import pytest
 from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.graph import GraphRetrieval, GraphTraversal
+from rag.core.filters import FilterOperator, MetadataFilter, MetadataFilters
 from rag.domain.models import RelationSpec
 from rag.domain.storage.graph import (
     GraphDirection,
@@ -21,6 +22,26 @@ from rag.domain.storage.graph import (
     relationship_vector_text,
 )
 from rag.domain.storage.vector import VectorMatch
+
+
+def _authorized_revisions(filters):
+    if isinstance(filters, MetadataFilter):
+        if (
+            filters.key == "content_revision"
+            and filters.operator is FilterOperator.IN
+        ):
+            return filters.value
+        return None
+    if isinstance(filters, MetadataFilters):
+        return next(
+            (
+                revisions
+                for child in filters.filters
+                if (revisions := _authorized_revisions(child)) is not None
+            ),
+            None,
+        )
+    return None
 
 
 class MemoryGraph:
@@ -161,13 +182,16 @@ async def graph_env(
 
     def vector_reader(matches):
         async def query(request):
+            revisions = _authorized_revisions(request.filters)
+            assert revisions is not None
             return [
                 replace(
                     match,
                     embedding=match.embedding if request.include_embedding else None,
                 )
-                for match in matches[: request.top_k]
-            ]
+                for match in matches
+                if match.metadata.get("content_revision") in revisions
+            ][: request.top_k]
 
         return SimpleNamespace(query=AsyncMock(side_effect=query))
 

@@ -7,8 +7,10 @@ import pytest
 from beanie import init_beanie
 from pymongo.asynchronous.database import AsyncDatabase
 
+from common.core.domain import GroupRoleType
 from rag.core.persistence.mongo.acl import MongoResourceAclRepository
 from rag.domain.entities import ResourceAclEntity
+from rag.domain.models.acl import PermissionScope
 
 
 @pytest.fixture
@@ -60,4 +62,25 @@ async def test_get_resource_acls_restores_complete_projection(repository):
     assert acl.group_acls[0].readable_users == ["reader"]
     assert acl.group_acls[0].market_offer_version is None
     collection.find.assert_called_once_with({"resource_id": {"$in": ["resource"]}})
+    cursor.to_list.assert_awaited_once_with(length=None)
+
+
+async def test_get_read_candidates_uses_positive_scope_fields(repository):
+    acl_repository, collection, cursor = repository
+    candidates = await acl_repository.get_read_candidates(
+        PermissionScope.from_group_roles(
+            "reader", {"group": GroupRoleType.MEMBER}
+        )
+    )
+
+    assert candidates["resource"].resource_id == "resource"
+    collection.find.assert_called_once_with(
+        {
+            "$or": [
+                {"owner_id": "reader"},
+                {"readable_users": "reader"},
+                {"group_acls.group_id": {"$in": ["group"]}},
+            ]
+        }
+    )
     cursor.to_list.assert_awaited_once_with(length=None)

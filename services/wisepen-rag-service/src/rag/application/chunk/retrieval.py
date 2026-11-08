@@ -10,6 +10,7 @@ from common.utils.retrieval import (
     Reranker,
     RetrievalPipeline,
 )
+from rag.application.common.authorized_vector_reader import AuthorizedVectorReader
 from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.core.filters import MetadataFilters
 from rag.domain.storage.graph import GraphReader
@@ -52,11 +53,16 @@ class ChunkRetrieval:
         sparse_top_k: int | None = None,
         candidate_limit: int = 60,
     ) -> list[ChunkHit]:
-        """一次召回、授权准备和排序；授权过滤后不补召回或重新观察发布/ACL。"""
+        """先用 snapshot 限定向量查询，再组装命中并排序；错误定位不回填候选预算。"""
         include_embedding = diversity != "off"
+        allowed_vector_reader = AuthorizedVectorReader(
+            reader=self._vector_reader,
+            snapshot_reader=self._snapshot_reader,
+            snapshot=snapshot,
+        )
         # 已连接的仓储与客户端共享；本次只组装固定配置的召回组件，不新建连接。
         retriever = ChunkRetriever.from_storage(
-            reader=self._vector_reader,
+            reader=allowed_vector_reader,
             embedding_client=self._embedding_client,
             mode=mode,
             fusion=self._fusion,

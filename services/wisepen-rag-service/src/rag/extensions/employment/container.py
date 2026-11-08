@@ -68,6 +68,7 @@ class EmploymentContainer(containers.DeclarativeContainer):
         storage=storage,
         metadata_index_fields=[
             IndexableField("resource_id", IndexKind.KEYWORD),
+            IndexableField("content_revision", IndexKind.KEYWORD),
             IndexableField("year", IndexKind.INTEGER),
             IndexableField("employee", IndexKind.KEYWORD),
         ],

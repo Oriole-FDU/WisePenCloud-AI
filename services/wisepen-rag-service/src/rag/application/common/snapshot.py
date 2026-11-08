@@ -1,9 +1,13 @@
 """一次调用内的资源版本与权限快照，以及供 application 用例共享的内容读取入口。"""
 
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from rag.domain.models import Chunk, ContentRevision, Document
-from rag.domain.models.acl import PermissionScope
+from rag.domain.models.acl import PermissionScope, ResourceAcl
 from rag.domain.storage.acl import ResourceAclRepository
 from rag.domain.storage.content import ContentReader
 from rag.domain.storage.publication import PublicationStore
@@ -17,10 +21,24 @@ class ResourceSnapshot:
     _revisions: dict[str, ContentRevision | None] = field(
         default_factory=dict, init=False, repr=False, compare=False
     )  # None 缓存不可见决定；不保存正文或额外拒绝原因。
+    _authorized_revision_cache: _AuthorizedRevisionCache = field(
+        default_factory=lambda: _AuthorizedRevisionCache(),
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     @property
     def revisions(self):
         return self._revisions
+
+
+@dataclass(slots=True)
+class _AuthorizedRevisionCache:
+    """权限身份固定的快照内保存一次完整检索池解析结果。"""
+
+    revisions: tuple[str, ...] | None = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
 
 
 class ResourceSnapshotReader:
@@ -36,6 +54,28 @@ class ResourceSnapshotReader:
         self._store = store
         self._resource_acls = resource_acls
         self._reader = reader
+
+    async def authorized_content_revisions(
+        self, *, snapshot: ResourceSnapshot
+    ) -> list[str]:
+        """解析并缓存本次快照可检索的 applied revision，供向量查询前过滤。"""
+        cache = snapshot._authorized_revision_cache
+        async with cache.lock:
+            if cache.revisions is not None:
+                return list(cache.revisions)
+
+            candidates = await self._resource_acls.get_read_candidates(snapshot.scope)
+            await self._resolve(
+                list(candidates), snapshot=snapshot, known_acls=candidates
+            )
+            cache.revisions = tuple(
+                dict.fromkeys(
+                    revision.content_revision
+                    for revision in snapshot._revisions.values()
+                    if revision is not None
+                )
+            )
+            return list(cache.revisions)
 
     async def read_documents(
         self, resource_ids: list[str], *, snapshot: ResourceSnapshot
@@ -81,11 +121,15 @@ class ResourceSnapshotReader:
             chunk
             for chunk in chunks
             if chunk.resource_id in revisions
-               and chunk.content_revision == revisions[chunk.resource_id].content_revision
+            and chunk.content_revision == revisions[chunk.resource_id].content_revision
         ]
 
     async def _resolve(
-        self, resource_ids: list[str], *, snapshot: ResourceSnapshot
+        self,
+        resource_ids: list[str],
+        *,
+        snapshot: ResourceSnapshot,
+        known_acls: Mapping[str, ResourceAcl] | None = None,
     ) -> dict[str, ContentRevision | None]:
         """只解析尚未观察的资源；不可见也缓存，I/O 失败不写入决定。"""
         unique_ids = list(dict.fromkeys(resource_ids))
@@ -101,11 +145,13 @@ class ResourceSnapshotReader:
                 for state in states
                 if not state.destroyed and state.applied_revision is not None
             }
-            acls = (
-                await self._resource_acls.get_resource_acls(list(applied))
-                if applied
-                else {}
-            )
+            acls = known_acls
+            if acls is None:
+                acls = (
+                    await self._resource_acls.get_resource_acls(list(applied))
+                    if applied
+                    else {}
+                )
             # 两次 I/O 完成后才缓存决定，基础设施失败不能变成“已观察不可见”。
             for resource_id in pending:
                 revision = applied.get(resource_id)

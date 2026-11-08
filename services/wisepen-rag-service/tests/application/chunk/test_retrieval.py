@@ -7,12 +7,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from common.core.domain import GroupRoleType
 from common.utils.retrieval import ModelReranker, RrfFusion
-from rag.domain.models.acl import PermissionScope, ResourceAcl
+from rag.domain.models.acl import GroupResourceAcl, PermissionScope, ResourceAcl
 from rag.application.common.snapshot import ResourceSnapshot
 from rag.application.chunk import ChunkRetrieval
 from rag.domain.models import ContentRevision
-from rag.core.filters import MetadataFilter, MetadataFilters
+from rag.core.filters import FilterOperator, MetadataFilter, MetadataFilters
 from rag.domain.storage.vector import VectorMatch
 
 
@@ -29,17 +30,40 @@ def match(chunk, score=1.0, embedding=None, **metadata):
     )
 
 
+def _authorized_revisions(filters):
+    if isinstance(filters, MetadataFilter):
+        if (
+            filters.key == "content_revision"
+            and filters.operator is FilterOperator.IN
+        ):
+            return filters.value
+        return None
+    if isinstance(filters, MetadataFilters):
+        return next(
+            (
+                revisions
+                for child in filters.filters
+                if (revisions := _authorized_revisions(child)) is not None
+            ),
+            None,
+        )
+    return None
+
+
 @pytest.fixture
 def retrieval_deps(snapshot_reader):
     matches = []
 
     async def query(request):
+        revisions = _authorized_revisions(request.filters)
+        assert revisions is not None
         return [
             replace(
                 item, embedding=item.embedding if request.include_embedding else None
             )
-            for item in matches[: request.top_k]
-        ]
+            for item in matches
+            if item.metadata.get("content_revision") in revisions
+        ][: request.top_k]
 
     reader = SimpleNamespace(query=AsyncMock(side_effect=query))
     embedding = SimpleNamespace(
@@ -151,7 +175,7 @@ async def test_application_only_exposes_applied_authorized_chunk_text(
     }
     assert hits[0].section_path == ["标题"] and hits[0].section_id == "section"
     assert publication_store.get_states.await_count == 1
-    assert read_acl_repository.get_resource_acls.await_count == 1
+    assert read_acl_repository.get_read_candidates.await_count == 1
     # 两条召回查询之后不会因为部分不可见而补召回。
     assert retrieval_deps.reader.query.await_count == 2
 
@@ -282,7 +306,7 @@ async def test_new_snapshot_observes_new_version_without_mixing_old_chunks(
     old_again = await retrieval_deps.usecase.retrieve("query", snapshot=old_snapshot)
     # 快照固定版本和授权，不固定再次召回时产生的排名分数。
     assert [hit.chunk_id for hit in old_again] == [hit.chunk_id for hit in old_hits]
-    assert old_again[0].score == pytest.approx(2 / 62)
+    assert old_again[0].score == pytest.approx(2 / 61)
     hits = await retrieval_deps.usecase.retrieve(
         "query", snapshot=ResourceSnapshot(PermissionScope("reader"))
     )
@@ -315,7 +339,11 @@ async def test_call_configuration_focus_and_diversity_are_explicit(
         (8, True),
         (9, False),
     ]
-    assert all(request.filters is filters for request in requests)
+    assert all(
+        request.filters is not None
+        and any(child is filters for child in request.filters.filters)
+        for request in requests
+    )
     assert all(
         request.include_embedding == (diversity != "off") for request in requests
     )
@@ -330,10 +358,14 @@ async def test_call_configuration_focus_and_diversity_are_explicit(
         assert hits[0].score == pytest.approx(2 / 61)
 
 
-async def test_candidate_limit_applies_before_preparation_and_reranking(
-        retrieval_deps, visible_chunks
+async def test_authorization_filter_applies_before_candidate_limit_and_reranking(
+        retrieval_deps, visible_chunks, make_read_document, make_read_chunk
 ):
-    retrieval_deps.matches[:] = [match(chunk) for chunk in visible_chunks]
+    hidden = make_read_chunk(make_read_document("hidden"))
+    retrieval_deps.matches[:] = [
+        match(hidden, score=2.0),
+        *(match(chunk) for chunk in visible_chunks),
+    ]
     hits = await retrieval_deps.usecase.retrieve(
         "query", snapshot=ResourceSnapshot(PermissionScope("reader")), candidate_limit=2
     )
@@ -345,6 +377,37 @@ async def test_candidate_limit_applies_before_preparation_and_reranking(
         "正文 0",
         "正文 1",
     ]
+
+
+async def test_market_version_acl_excludes_revision_before_vector_query(
+        retrieval_deps, visible_chunks, read_acls
+):
+    read_acls["visible"] = ResourceAcl(
+        "visible",
+        2,
+        "owner",
+        group_acls=[
+            GroupResourceAcl(
+                "market",
+                default_readable=True,
+                market_offer_version=2,
+            )
+        ],
+    )
+    retrieval_deps.matches[:] = [match(visible_chunks[0])]
+
+    hits = await retrieval_deps.usecase.retrieve(
+        "query",
+        snapshot=ResourceSnapshot(
+            PermissionScope.from_group_roles(
+                "reader", {"market": GroupRoleType.MEMBER}
+            )
+        ),
+        mode="sparse",
+    )
+
+    assert hits == []
+    retrieval_deps.reader.query.assert_not_awaited()
 
 
 @pytest.mark.parametrize("failure", ["read", "diversity"])
@@ -421,10 +484,11 @@ async def test_one_shared_usecase_serves_concurrent_snapshots_and_configs(
     ]
     assert {
                (request.top_k, request.include_embedding) for request in dense_requests
-           } == {(7, False), (9, True)}
+           } == {(7, False)}
     assert retrieval_deps.client.rerank.await_count == 1
     assert retrieval_deps.client.rerank.call_args.kwargs["query"] == "allowed"
-    assert read_acl_repository.get_resource_acls.await_count == 2
+    assert read_acl_repository.get_read_candidates.await_count == 2
+    assert len(dense_requests) == 1
 
 
 @pytest.mark.parametrize(

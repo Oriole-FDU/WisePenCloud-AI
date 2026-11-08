@@ -47,8 +47,9 @@ candidate_limit≥top_k 的约束。dense-only 扩展集合必须选择 DENSE。
 
 ## 3. 授权准备与结果
 
-候选只有定位和 provider 分数。用例先筛掉无有效 resource_id/content_revision 的投影，再批量 read_chunks，核对 record_id 定位的
-Chunk 与候选资源/revision；当前授权 raw_text 才进入重排和响应。
+向量查询前，用例从 snapshot 解析可读的 applied revision 集合，并将精确 content_revision 条件与业务 filters 取交集；Qdrant
+在应用 candidate_limit 前执行该 ACL/版本条件。返回候选只有定位和 provider 分数。prepare 再批量 read_chunks，核对 record_id
+定位的 Chunk 与候选资源/revision；当前授权 raw_text 才进入重排和响应。
 
 ChunkHit 字段：chunk_id、resource_id、content_revision、section_id、section_path、text、rank、score、seed_entities、metadata。text
 是完整 raw_text，metadata 来自当前授权 Chunk，响应组装时排除模块常量 `_CHUNK_HIT_EXCLUDED_METADATA_KEYS` 中的内部字段（当前为
@@ -63,11 +64,12 @@ filters，不修改核心 GraphNode.relations 或 metadata 中的本体提示。
 
 ## 4. 过滤与失败合同
 
-过滤使用[通用条件模型](models.md)，Qdrant 在召回预算前执行平面字段条件。业务工具映射参数即可，不在授权后再实现过滤解释器。普通用例不额外保证同
+过滤使用[通用条件模型](models.md)，业务 filters 与 snapshot 派生的 ACL revision 条件均在召回预算前由 Qdrant 执行。业务工具映射参数即可，
+不在授权后再实现过滤解释器。普通用例不额外保证同
 revision 被直接改写业务字段后的投影新鲜度；业务字段变更提高 version。
 
-隐藏、destroyed、旧 revision、缺失 Chunk 和错误定位省略，过滤后不补召回。空候选不调用重排。重排异常保持原顺序降级，召回、embedding、授权读取或
-MMR 缺向量等异常传播。
+无 applied revision、destroyed 或 ACL 不允许的 revision 在向量查询前排除；缺失 Chunk 和错误定位在 prepare 中省略，均不补召回。
+空候选不调用重排。重排异常保持原顺序降级，召回、embedding、授权读取或 MMR 缺向量等异常传播。
 
 Chunk 图事实损坏会记录警告并返回空 seed_entities，不撤销正文命中；已启用的全图连接读取或关系来源解析错误直接传播，不能当作空连接；图用例自身的事实解析错误也传播。MMR
 使用已存向量，不重新 embedding 正文。结果不裁剪 token，不做父块扩张或结果缓存；调用方根据 section_id

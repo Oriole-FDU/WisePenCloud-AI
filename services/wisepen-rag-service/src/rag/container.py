@@ -144,7 +144,8 @@ class Container(containers.DeclarativeContainer):
                 VectorCollection,
                 storage=vector_storage,
                 metadata_index_fields=[
-                    IndexableField("resource_id", IndexKind.KEYWORD)
+                    IndexableField("resource_id", IndexKind.KEYWORD),
+                    IndexableField("content_revision", IndexKind.KEYWORD),
                 ],
             ),
             providers.Singleton(
@@ -152,7 +153,12 @@ class Container(containers.DeclarativeContainer):
                 storage=entity_vector_storage,
                 metadata_index_fields=[
                     IndexableField(name, IndexKind.KEYWORD)
-                    for name in ("resource_id", "chunk_id", "ontology_name")
+                    for name in (
+                        "resource_id",
+                        "content_revision",
+                        "chunk_id",
+                        "ontology_name",
+                    )
                 ],
             ),
             providers.Singleton(
@@ -160,7 +166,12 @@ class Container(containers.DeclarativeContainer):
                 storage=relationship_vector_storage,
                 metadata_index_fields=[
                     IndexableField(name, IndexKind.KEYWORD)
-                    for name in ("resource_id", "chunk_id", "ontology_name")
+                    for name in (
+                        "resource_id",
+                        "content_revision",
+                        "chunk_id",
+                        "ontology_name",
+                    )
                 ],
             ),
         ),

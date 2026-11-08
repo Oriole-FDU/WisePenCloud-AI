@@ -92,5 +92,17 @@ async def test_query_filters_against_qdrant_local_filter_engine():
                 )
             )
             assert {match.record_id for match in matches} == expected
+
+        # The access revision condition must run before the provider top_k budget.
+        matches = await storage.query(
+            VectorQuery(
+                embedding=[1.0, 0.0],
+                top_k=1,
+                filters=MetadataFilters(
+                    [MetadataFilter("content_revision", ["new"], FilterOperator.IN)]
+                ),
+            )
+        )
+        assert [match.record_id for match in matches] == ["c"]
     finally:
         await client.close()

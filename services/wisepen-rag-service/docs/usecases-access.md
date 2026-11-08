@@ -92,5 +92,6 @@ Singleton Retriever 或跨用户复用。
 
 批量输入去重保序，缺失、不可见和错误身份仅省略对应对象，不回退其他版本；空输入无 I/O。基础设施查询、连接或解码错误传播，不伪装成“不可见”，也不写入可见性决定。
 
-普通检索还需核对向量候选的定位身份；图检索还需核对当前事实。Reader 负责授权事实边界，不能以 vector filters 代替
-ACL。后续操作见[向量](usecases-vector.md)、[图](usecases-graph.md)和[章节读取](usecases-reading.md)。
+向量召回前，ResourceSnapshotReader 从本地 ACL 与 applied revision 解析当前快照可读的 content_revision 集合，RAG 将其作为
+强制过滤条件与业务 filters 取交集；业务 filters 本身仍不是 ACL。普通检索继续核对向量候选的定位身份，图检索继续核对当前事实，
+正文读取仍通过 Reader 校验授权与版本。后续操作见[向量](usecases-vector.md)、[图](usecases-graph.md)和[章节读取](usecases-reading.md)。

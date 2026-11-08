@@ -3,7 +3,7 @@
 from collections.abc import Mapping, Sequence
 from typing import Protocol
 
-from rag.domain.models.acl import ResourceAcl
+from rag.domain.models.acl import PermissionScope, ResourceAcl
 
 
 class ResourceAclRepository(Protocol):
@@ -13,6 +13,12 @@ class ResourceAclRepository(Protocol):
         self,
         resource_ids: Sequence[str],
     ) -> Mapping[str, ResourceAcl]: ...
+
+    async def get_read_candidates(
+        self, scope: PermissionScope
+    ) -> Mapping[str, ResourceAcl]:
+        """返回可能允许该 scope 读取的 ACL；精确判权仍由 ResourceAcl.can_read 完成。"""
+        ...
 
     async def save(self, resource_acl: ResourceAcl) -> bool:
         ...

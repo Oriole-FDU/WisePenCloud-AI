@@ -29,6 +29,13 @@ from rag.domain.storage.graph import GraphDirection, GraphVectorKind
 from rag.domain.storage.vector import VectorMatch
 
 
+def _contains_filter(filters, expected):
+    return filters is expected or (
+        isinstance(filters, MetadataFilters)
+        and any(_contains_filter(child, expected) for child in filters.filters)
+    )
+
+
 @pytest.mark.parametrize("mode", ["local", "global", "hybrid", "traversal"])
 async def test_grouped_sources_keep_descriptions_keywords_and_metadata_authorized(
         graph_env, storage, read_acls, mode
@@ -135,6 +142,25 @@ async def test_modes_group_sources_once_and_keep_full_material(graph_env, mode):
         if call.kwargs["limit"] is not None
     ]
     assert len(limited_calls) == (mode is not GraphRetrievalMode.GLOBAL)
+
+
+async def test_accessible_graph_sources_are_filtered_before_candidate_limit(
+        graph_env, read_acls
+):
+    env = graph_env
+    read_acls["a"] = ResourceAcl("a", 1, "other")
+    env.entities[:] = [env.match(0, score=0.99), env.match(1, score=0.7)]
+
+    result = await env.retrieval.retrieve(
+        "query",
+        snapshot=env.snapshot(),
+        mode=GraphRetrievalMode.LOCAL,
+        candidate_limit=1,
+        neighbor_relation_types=[],
+    )
+
+    resources = {hit.resource_id for hit in result.chunks}
+    assert "b" in resources and "a" not in resources
 
 
 async def test_shared_context_adds_global_endpoint_sources_without_their_relations(
@@ -423,7 +449,7 @@ async def test_source_filters_match_vector_graph_and_authoritative_chunk(graph_e
         "query", snapshot=env.snapshot(), mode="local", filters=filters
     )
     assert {source.resource_id for source in hits.chunks} == {"c"}
-    assert env.entity_reader.query.call_args.args[0].filters is filters
+    assert _contains_filter(env.entity_reader.query.call_args.args[0].filters, filters)
     assert env.graph.get_nodes.call_args.kwargs["filters"] is filters
     assert env.graph.get_neighbors.call_args_list[0].kwargs["filters"] is filters
 
@@ -627,7 +653,7 @@ async def test_retrieval_chunk_seeds_and_traversal_can_read_multiple_written_ont
             if mode is GraphRetrievalMode.GLOBAL
             else env.entity_reader
         )
-        assert reader.query.call_args.args[0].filters is filters
+        assert _contains_filter(reader.query.call_args.args[0].filters, filters)
     groups = await env.traversal.traverse(
         [nodes[0].id], snapshot=env.snapshot(), filters=filters
     )

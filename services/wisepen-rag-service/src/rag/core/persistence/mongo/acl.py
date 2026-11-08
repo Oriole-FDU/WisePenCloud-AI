@@ -6,7 +6,7 @@ from typing import Any
 from pymongo.errors import DuplicateKeyError
 
 from rag.domain.entities import ResourceAclEntity
-from rag.domain.models.acl import GroupResourceAcl, ResourceAcl
+from rag.domain.models.acl import GroupResourceAcl, PermissionScope, ResourceAcl
 from rag.domain.storage.acl import ResourceAclRepository
 
 
@@ -28,6 +28,23 @@ class MongoResourceAclRepository(ResourceAclRepository):
         records = await self._collection.find(
             {"resource_id": {"$in": unique_resource_ids}}
         ).to_list(length=None)
+        return {record["resource_id"]: _to_domain(record) for record in records}
+
+    async def get_read_candidates(
+        self, scope: PermissionScope
+    ) -> Mapping[str, ResourceAcl]:
+        """用正向授权字段缩小候选；最终允许与否仍由应用层 can_read 判定。"""
+        alternatives = [
+            {"owner_id": scope.user_id},
+            {"readable_users": scope.user_id},
+        ]
+        if scope.joined_group_ids:
+            alternatives.append(
+                {"group_acls.group_id": {"$in": list(scope.joined_group_ids)}}
+            )
+        records = await self._collection.find({"$or": alternatives}).to_list(
+            length=None
+        )
         return {record["resource_id"]: _to_domain(record) for record in records}
 
     async def save(self, resource_acl: ResourceAcl) -> bool:

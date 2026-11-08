@@ -61,6 +61,18 @@ def read_acls():
 
 @pytest.fixture
 def read_acl_repository(read_acls):
+    def candidates(scope):
+        return {
+            resource_id: acl
+            for resource_id, acl in read_acls.items()
+            if acl.owner_id == scope.user_id
+            or scope.user_id in acl.readable_users
+            or any(
+                group_acl.group_id in scope.joined_group_ids
+                for group_acl in acl.group_acls
+            )
+        }
+
     return SimpleNamespace(
         get_resource_acls=AsyncMock(
             side_effect=lambda resource_ids: {
@@ -68,7 +80,8 @@ def read_acl_repository(read_acls):
                 for resource_id in resource_ids
                 if resource_id in read_acls
             }
-        )
+        ),
+        get_read_candidates=AsyncMock(side_effect=candidates),
     )
 
 

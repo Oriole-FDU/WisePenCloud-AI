@@ -7,6 +7,7 @@ from itertools import zip_longest
 from common.utils.ai_clients.embedding import EmbeddingClient
 from common.utils.retrieval import Candidate, Fusion, Reranker, RetrievalPipeline
 from rag.application.chunk.hit import ChunkHit, PreparedChunk, build_chunk_hits
+from rag.application.common.authorized_vector_reader import AuthorizedVectorReader
 from rag.application.common.snapshot import ResourceSnapshot, ResourceSnapshotReader
 from rag.core.filters import MetadataFilters
 from rag.domain.models import GraphEdge, GraphNode
@@ -71,14 +72,32 @@ class GraphRetrieval:
         related_chunk_number: int = 5,
         filters: MetadataFilters | None = None,
     ) -> GraphRetrievalResult:
-        """local 只补关系，global 只补端点；授权丢弃后不补召回。"""
+        """local 只补关系，global 只补端点；snapshot 先约束来源向量召回。"""
         # 预算由调用方保证；这里只把方向归一为枚举。
         direction = GraphDirection(neighbor_direction)
 
+        authorized_entity_reader = (
+            AuthorizedVectorReader(
+                reader=self._entity_reader,
+                snapshot_reader=self._snapshot_reader,
+                snapshot=snapshot,
+            )
+            if self._entity_reader is not None
+            else None
+        )
+        authorized_relationship_reader = (
+            AuthorizedVectorReader(
+                reader=self._relationship_reader,
+                snapshot_reader=self._snapshot_reader,
+                snapshot=snapshot,
+            )
+            if self._relationship_reader is not None
+            else None
+        )
         retriever = GraphRetriever.from_storage(
             embedding_client=self._embedding_client,
-            entity_reader=self._entity_reader,
-            relationship_reader=self._relationship_reader,
+            entity_reader=authorized_entity_reader,
+            relationship_reader=authorized_relationship_reader,
             mode=mode,
             entity_top_k=entity_top_k,
             relationship_top_k=relationship_top_k,
