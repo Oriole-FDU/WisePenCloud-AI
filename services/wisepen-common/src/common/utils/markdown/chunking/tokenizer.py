@@ -1,4 +1,4 @@
-"""Common 的离线 token 预算接口，与 embedding provider 解耦。"""
+"""Common 的离线 token 预算接口与默认实现"""
 
 from __future__ import annotations
 
@@ -12,25 +12,23 @@ import tiktoken
 
 
 class TokenCounter(Protocol):
-    """结构装箱依赖 count；不可再按词句切分时使用 split。"""
-
     name: str
 
     def count(self, text: str) -> int:
-        """返回文本的 token 数量。"""
+        """返回文本的 token 数量"""
         ...
 
     def split(self, text: str, max_tokens: int) -> list[str]:
-        """将文本按 token 上限切分为多个片段。"""
+        """将文本按 token 上限切分为多个片段"""
         ...
 
 
 @lru_cache(maxsize=1)
 def _local_encoding() -> tiktoken.Encoding:
-    """加载随包分发的 o200k_base BPE 表，构建离线 Encoding。
-
+    """加载随包分发的 o200k_base BPE 表，构建离线 Encoding
     避免 get_encoding() 在冷启动或离线环境下尝试下载或访问用户缓存。
     """
+
     # 读取打包的 BPE 表文件，解析为 {token_bytes: rank} 映射。
     data = (
         files("common.utils.markdown")
@@ -42,7 +40,7 @@ def _local_encoding() -> tiktoken.Encoding:
         for token, rank in (line.split() for line in gzip.decompress(data).splitlines())
     }
 
-    # 直接构造 Encoding，确保完全离线可用。
+    # 直接构造 Encoding，离线可用
     return tiktoken.Encoding(
         name="o200k_base",
         pat_str=(
@@ -62,25 +60,31 @@ def _local_encoding() -> tiktoken.Encoding:
 
 
 class TiktokenTokenCounter:
-    """使用固定 o200k_base 表计数，缓存属于调用实例。"""
+    """使用固定 o200k_base 表计数，缓存属于调用实例
+
+    计数采用实例级 FIFO 缓存（上限 4096 条），split 按 Unicode 字符边界
+    二分逼近，保证每个片段不超过 max_tokens，且不破坏汉字/emoji
+    """
 
     def __init__(self, encoding_name: str = "o200k_base") -> None:
-        """初始化计数器；仅支持内置的 o200k_base 编码。"""
+        """仅支持内置的 o200k_base 编码"""
         if encoding_name != "o200k_base":
             raise ValueError("only the bundled o200k_base encoding is supported")
 
         self.name = f"tiktoken:{encoding_name}"
         self._encoding = _local_encoding()
-        # 实例级缓存，避免重复编码相同文本；限制大小防止内存膨胀。
+
+        # splitter/packer 在循环里会反复数同一段文本，缓存能省掉大量重复编码
+        # 如表格分组时 build_group(...).text 被数很多次
         self._counts: dict[str, int] = {}
 
-    def _count_cached(self, text: str) -> int:
-        """带缓存的 token 计数；缓存满时移除最早插入的条目。"""
+    def count(self, text: str) -> int:
+        """带缓存的 token 计数；缓存满时移除最早插入的条目"""
         cached = self._counts.get(text)
         if cached is not None:
             return cached
 
-        # 文档中的 special-token 拼写是普通正文，不是 tokenizer 控制符。
+        # 文档中的 special-token 拼写是普通正文，不是 tokenizer 控制符
         value = len(self._encoding.encode(text, disallowed_special=()))
 
         if len(self._counts) >= 4096:
@@ -89,14 +93,9 @@ class TiktokenTokenCounter:
         self._counts[text] = value
         return value
 
-    def count(self, text: str) -> int:
-        """返回文本的 token 数量（带缓存）。"""
-        return self._count_cached(text)
-
     def split(self, text: str, max_tokens: int) -> list[str]:
-        """按 Unicode 字符边界拆分文本，不通过 token decode 破坏汉字/emoji。
-
-        采用二分逼近的方式，保证每个片段不超过 max_tokens。
+        """按 Unicode 字符边界拆分文本，不通过 token decode 破坏汉字/emoji
+        采用二分逼近的方式，保证每个片段不超过 max_tokens
         """
         if max_tokens <= 0:
             raise ValueError("max_tokens must be positive")
@@ -105,10 +104,10 @@ class TiktokenTokenCounter:
         start = 0
 
         while start < len(text):
-            # 初始猜测：按每 token 最多 4 个字符估算结束位置。
+            # 初始猜测：按每 token 最多 4 个字符估算结束位置
             end = min(len(text), start + max_tokens * 4)
 
-            # 若超出 token 限制，则二分缩小 end，直到满足要求。
+            # 若超出 token 限制，则二分缩小 end，直到满足要求
             while self.count(text[start:end]) > max_tokens:
                 if end == start + 1:
                     raise ValueError("a Unicode character exceeds max_tokens")
@@ -121,5 +120,5 @@ class TiktokenTokenCounter:
 
 
 def default_token_counter() -> TokenCounter:
-    """创建 Common 默认的 token 计数器，不依赖网络。"""
+    """创建 Common 默认的 token 计数器"""
     return TiktokenTokenCounter()

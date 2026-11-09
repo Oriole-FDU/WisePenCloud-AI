@@ -1,3 +1,5 @@
+"""结构单元的装箱"""
+
 from __future__ import annotations
 
 import hashlib
@@ -5,7 +7,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from ..parsing.parser import MarkdownNode, SourceSpan
+from ..model import Span, MarkdownNode
 
 if TYPE_CHECKING:
     from .chunker import ChunkingPolicy, Section
@@ -13,30 +15,25 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class MarkdownChunk:
-    """按结构顺序生成的 retrieval unit。
+    """按结构顺序生成的 retrieval unit"""
 
-    Chunker 不依赖 source_spans 做尺寸或合法性判断。Chat cache 可以在
-    adapter 层消费它们，把 chunk 投影成自己的字符范围索引。
-    """
-
-    chunk_id: str
-    text: str
-    chunk_index: int
-    node_ids: list[str] = field(default_factory=list)
-    section_path: list[str] = field(default_factory=list)
-    content_token_count: int = 0
-    overflow: bool = False
-    source_spans: list[SourceSpan] = field(default_factory=list)
-    section_id: str | None = None
-    anchor_labels: list[str] = field(default_factory=list)
-    content_hash: str = ""
+    chunk_id: str # 稳定 ID chunk:<序号>:<文本哈希前16位>
+    text: str # chunk 正文
+    chunk_index: int # 全局顺序号（跨章节连续）
+    node_ids: list[str] = field(default_factory=list) # 来源节点 ID，去重保序，记录这个 chunk 由哪些原始节点拼来
+    section_path: list[str] = field(default_factory=list) # 所在章节路径（如 `["第一章","1.1"]`）
+    content_token_count: int = 0 # 实际 token 数
+    overflow: bool = False # 是否超硬阈值
+    source_spans: list[Span] = field(default_factory=list) # 原文区间
+    section_id: str | None = None # 所在章节 ID
+    anchor_labels: list[str] = field(default_factory=list) # 涉及的编号题注标签
+    content_hash: str = "" # 全文 SHA-256
 
 
 class ChunkPacker:
-    """按顺序组合同一章节的结构单元，构建最终 Chunk 事实。"""
+    """按顺序组合同一章节的结构单元，构建最终 Chunk"""
 
     def __init__(self, policy: ChunkingPolicy) -> None:
-        """保存分块策略，供后续打包与阈值判断使用。"""
         self._policy = policy
 
     def pack(
@@ -46,18 +43,15 @@ class ChunkPacker:
         section: Section | None = None,
         start_index: int = 0,
     ) -> list[MarkdownChunk]:
-        """将正文节点按顺序打包为 Chunk；start_index 延续全局 Chunk 顺序。
+        """将正文节点按顺序打包为 Chunk"""
 
-        仅接收正文单元；若节点自身超过拆分阈值，则强制独立成块，
-        避免因 BPE 非可加性导致与相邻节点混合后 token 数不可控。
-        """
         chunks: list[MarkdownChunk] = []
-        selected: list[MarkdownNode] = []
-        current_text = ""
-        current_tokens = 0
+        selected = []  # 当前正在攒的 chunk 里的节点
+        current_text = ""  # 当前 chunk 拼好的文本
+        current_tokens = 0  # 当前 chunk 的 token 数
 
         def flush() -> None:
-            """将当前已选节点封装为一个 Chunk，并清空暂存状态。"""
+            """将当前已选节点封装为一个 Chunk，并清空暂存状态"""
             if selected:
                 chunks.append(
                     self._build_chunk(
@@ -71,7 +65,7 @@ class ChunkPacker:
         for node in nodes:
             node_tokens = self._policy.token_counter.count(node.text)
 
-            # 不可拆单元必须独立输出，不能因 BPE 非可加性与邻居混合。
+            # 节点自己就超硬阈值 → 强制独立成块
             if node_tokens > self._policy.split_threshold_tokens:
                 flush()
                 chunks.append(
@@ -84,11 +78,11 @@ class ChunkPacker:
                 current_text, current_tokens = "", 0
                 continue
 
-            # 尝试将当前节点追加到已有候选文本中。
+            # 正常节点 → 尝试追加
             candidate = f"{current_text}\n{node.text}" if selected else node.text
             candidate_tokens = self._policy.token_counter.count(candidate)
 
-            # 若策略不允许追加，则先封存当前 Chunk，再以该节点重新开始。
+            # 不允许追加 → flush() 封存当前 chunk，然后以这个节点重新开始
             if selected and not self._policy.should_append(
                 current_tokens=current_tokens,
                 candidate_tokens=candidate_tokens,
@@ -99,7 +93,7 @@ class ChunkPacker:
             selected.append(node)
             current_text, current_tokens = candidate, candidate_tokens
 
-        # 处理末尾未封存的节点。
+        # 处理末尾未封存的节点
         flush()
         return chunks
 
@@ -110,10 +104,9 @@ class ChunkPacker:
         section: Section | None,
         chunk_index: int,
     ) -> MarkdownChunk:
-        """根据节点序列构造最终 Chunk。
+        """根据节点序列构造最终 Chunk"""
 
-        最终文本的 token 数与 Overflow 状态以实际拼接结果为准
-        """
+        # text 和 content_token_count 都基于最终拼接结果算
         text = "\n".join(node.text for node in nodes)
         content_token_count = self._policy.token_counter.count(text)
         content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
