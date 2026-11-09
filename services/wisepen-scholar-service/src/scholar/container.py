@@ -68,12 +68,17 @@ class Container(containers.DeclarativeContainer):
     unpaywall_http = providers.Singleton(httpx.AsyncClient, timeout=5)
 
     # --- Embedding 服务 ---------------------------------------------------
-    # 本地编码服务与主进程同机，端口由 bootstrap 决定；固定不重试。
+    # 本地编码服务与主进程同机，绕过环境代理以避免 loopback 请求被转发；固定不重试。
     embedding_api = providers.Singleton(
         AsyncOpenAI,
         api_key="local",
         base_url=f"http://127.0.0.1:{bootstrap_settings.SERVICE_PORT}/v1",
         timeout=config.SCHOLAR_EMBEDDING_TIMEOUT_SECONDS,
+        http_client=providers.Factory(
+            httpx.AsyncClient,
+            timeout=config.SCHOLAR_EMBEDDING_TIMEOUT_SECONDS,
+            trust_env=False,
+        ),
         max_retries=0,
         default_headers=providers.Callable(
             lambda secret: {"X-From-Source": secret}, config.FROM_SOURCE_SECRET
