@@ -30,7 +30,6 @@ from chat.core.persistence import (
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
     RedisChatTurnStream,
-    RedisToolContentRepository,
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
@@ -47,17 +46,14 @@ from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
-from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
-from chat.application.tools.core.output_cache.cache_store import ToolContentStore
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.application.tools.session_tools.load_image_attachment_tool import LoadImageAttachmentTool
-from chat.application.tools.session_tools.cached_tool_output_tools import (
-    CachedToolOutputInspectStructureTool,
-    CachedToolOutputReadByPageTool,
-    CachedToolOutputReadByRangeTool,
-    CachedToolOutputReadBySectionTool,
-    CachedToolOutputSearchByRegexTool,
-    CachedToolOutputSearchBySemanticsTool,
+from chat.application.tools.session_tools.tool_output import (
+    InspectToolOutputStructureTool,
+    ReadToolOutputRangeTool,
+    ReadToolOutputSectionTool,
+    SearchToolOutputBM25Tool,
+    SearchToolOutputRegexTool,
 )
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
@@ -126,22 +122,8 @@ class Container(containers.DeclarativeContainer):
     hot_context_repo = providers.Singleton(RedisHotContext)
     mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache)
     chat_turn_stream_repo = providers.Singleton(RedisChatTurnStream)
-    tool_content_repo = providers.Singleton(
-        RedisToolContentRepository,
-        ttl_seconds=settings.tools.content.default_ttl_seconds,
-    )
-    tool_content_store = providers.Singleton(
-        ToolContentStore,
-        tool_content_repository=tool_content_repo,
-        max_chars=settings.tools.content.max_chars,
-    )
-    tool_output_cache = providers.Singleton(
-        ToolOutputCache,
-        tool_content_store=tool_content_store,
-    )
     tool_dispatcher = providers.Singleton(
         ToolDispatcher,
-        output_cache=tool_output_cache,
     )
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
@@ -263,41 +245,31 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
-    inspect_cached_tool_output_structure_tool = providers.Singleton(
-        CachedToolOutputInspectStructureTool,
-        store=tool_content_store,
+    inspect_tool_output_structure_tool = providers.Singleton(
+        InspectToolOutputStructureTool,
     )
-    read_cached_tool_output_by_page_tool = providers.Singleton(
-        CachedToolOutputReadByPageTool,
-        store=tool_content_store,
+    read_tool_output_range_tool = providers.Singleton(
+        ReadToolOutputRangeTool,
     )
-    read_cached_tool_output_by_range_tool = providers.Singleton(
-        CachedToolOutputReadByRangeTool,
-        store=tool_content_store,
+    read_tool_output_section_tool = providers.Singleton(
+        ReadToolOutputSectionTool,
     )
-    read_cached_tool_output_by_section_tool = providers.Singleton(
-        CachedToolOutputReadBySectionTool,
-        store=tool_content_store,
+    search_tool_output_regex_tool = providers.Singleton(
+        SearchToolOutputRegexTool,
     )
-    search_cached_tool_output_by_regex_tool = providers.Singleton(
-        CachedToolOutputSearchByRegexTool,
-        store=tool_content_store,
-    )
-    search_cached_tool_output_by_semantics_tool = providers.Singleton(
-        CachedToolOutputSearchBySemanticsTool,
-        store=tool_content_store,
+    search_tool_output_bm25_tool = providers.Singleton(
+        SearchToolOutputBM25Tool,
     )
     tool_providers = providers.List(
         search_history_tool,
         load_image_attachment_tool,
         load_skill_tool,
         load_skill_asset_tool,
-        inspect_cached_tool_output_structure_tool,
-        read_cached_tool_output_by_page_tool,
-        read_cached_tool_output_by_range_tool,
-        read_cached_tool_output_by_section_tool,
-        search_cached_tool_output_by_regex_tool,
-        search_cached_tool_output_by_semantics_tool,
+        inspect_tool_output_structure_tool,
+        read_tool_output_range_tool,
+        read_tool_output_section_tool,
+        search_tool_output_regex_tool,
+        search_tool_output_bm25_tool,
     )
 
     tool_registry = providers.Singleton(
