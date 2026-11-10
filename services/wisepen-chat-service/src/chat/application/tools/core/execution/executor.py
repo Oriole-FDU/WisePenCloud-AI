@@ -8,23 +8,23 @@ from datetime import datetime, timezone
 from typing import Any
 
 from chat.application.tools.core.definition import ClientToolResult, ToolRiskLevel
-from chat.application.tools.core.execution.hooks.builtin import (
-    JsonSchemaCheck,
-    RequiredContextCheck,
-)
+from chat.application.tools.core.execution.hooks.builtin import JsonSchemaCheck, RequiredContextCheck
 from chat.application.tools.core.execution.result import (
+    ToolOutput,
     ToolExecutionError,
     ToolExecutionResult,
-    ToolOutput,
 )
+
 from chat.application.tools.core.llm.invocation import ToolInvocation
+from chat.application.tools.core.output_cache import ToolOutputCache
 from chat.application.tools.core.registry import ToolScope
 from pydantic import BaseModel
 
 
 class ToolExecutor:
-    def __init__(self, tool_scope: ToolScope) -> None:
+    def __init__(self, tool_scope: ToolScope, *, output_cache: ToolOutputCache) -> None:
         self._tool_scope = tool_scope
+        self._output_cache = output_cache
 
     async def execute_client_one(self, invocation: ToolInvocation, client_tool_result: ClientToolResult) -> ToolExecutionResult:
         started_at = datetime.now(timezone.utc)
@@ -83,7 +83,7 @@ class ToolExecutor:
                 )
 
             tool_config = self._tool_scope.config_for(invocation.tool_name)
-            # config_spec 也描述可选项；只有 required_keys 才阻止无配置调用。
+            # config_spec 也描述可选项；只有 required_keys 才阻止无配置调用
             if (
                 tool.definition.config_spec is not None
                 and tool.definition.config_spec.required_keys
@@ -132,6 +132,9 @@ class ToolExecutor:
             )
 
             output = self._coerce_tool_output(output)
+
+            # 处理工具缓存
+            output = await self._output_cache.cache_tool_output(output, tool=tool, session_id=self._tool_scope.context.get("session_id"))
 
             return ToolExecutionResult(tool_invocation=invocation, tool_output=output,
                                        started_at=started_at, finished_at=datetime.now(timezone.utc),
@@ -190,25 +193,11 @@ class ToolExecutor:
 
         if isinstance(output, Mapping):
             value = dict(output)
-            return ToolOutput(
-                content=json.dumps(
-                    value,
-                    ensure_ascii=False,
-                    default=_json_default,
-                ),
-            )
+            return ToolOutput(content=json.dumps(value, ensure_ascii=False, default=_json_default))
 
         if isinstance(output, Sequence) and not isinstance(output, str | bytes | bytearray):
             value = list(output)
-            return ToolOutput(
-                # default 负责递归展开列表元素，
-                # 保持工具的 list 视图而不是强迫每个工具重复做 asdict 转换。
-                content=json.dumps(
-                    value,
-                    ensure_ascii=False,
-                    default=_json_default,
-                ),
-            )
+            return ToolOutput(content=json.dumps(value, ensure_ascii=False, default=_json_default))
 
         raise ToolExecutionError(
             reason="Tool Output Invalid",

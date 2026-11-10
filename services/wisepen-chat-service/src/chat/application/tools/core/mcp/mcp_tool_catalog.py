@@ -13,6 +13,7 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.core.mcp.mcp_client import McpClient, McpServerConnection
 from chat.application.tools.core.mcp.remote_tool import McpRemoteTool
+from chat.application.tools.core.output_cache import ToolOutputCache
 from chat.core.config.app_settings import settings
 from chat.domain.entities.mcp_tool_server_config import McpToolSnapshot, McpToolStatus, UserMcpServerConfig
 from chat.domain.error_codes import ChatErrorCode
@@ -28,10 +29,12 @@ class McpToolCatalog:
         mcp_client: McpClient,
         mcp_tool_discovery_cache_repo: McpToolDiscoveryCacheRepository,
         mcp_server_config_repo: McpServerConfigRepository,
+        output_cache: ToolOutputCache,
     ) -> None:
         self._mcp_client = mcp_client
         self._mcp_tool_discovery_cache_repo = mcp_tool_discovery_cache_repo
         self._mcp_server_config_repo = mcp_server_config_repo
+        self._output_cache = output_cache
 
     async def load_user_mcp_tools(self, user_id: str) -> dict[str, McpRemoteTool]:
         tools: dict[str, McpRemoteTool] = {}
@@ -105,6 +108,7 @@ class McpToolCatalog:
                         preflight_hooks=(),
                     ),
                     failure_reason="MCP Tool Execution Failed",
+                    output_cache=self._output_cache,
                 )
                 tools[tool.definition.llm_spec.name] = tool # McpRemoteTool 加入 Tool 列表
         return tools

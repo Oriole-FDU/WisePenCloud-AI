@@ -143,6 +143,7 @@ class ToolContentSettings(ConfigModel):
     preview_per_char_budget: int = Field(default=4_000, ge=1)
     preview_total_char_budget: int = Field(default=12_000, ge=1)
     read_window_char_budget: int = Field(default=24_000, ge=1)
+    max_chars: int = Field(default=20_000_000, ge=1)
     default_ttl_seconds: int = Field(default=3600, ge=1)
 
 

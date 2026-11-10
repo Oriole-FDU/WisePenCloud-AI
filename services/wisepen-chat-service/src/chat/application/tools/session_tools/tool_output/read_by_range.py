@@ -13,7 +13,7 @@ from chat.application.tools.core import (
     ToolSelectionMode,
     ToolUISpec,
 )
-from chat.application.tools.core.output_cache.cache_store import get_tool_content
+from chat.application.tools.core.output_cache.cache_store import ToolContentStore
 from chat.core.config.app_settings import settings
 
 _TIMEOUT_SECONDS = 300.0
@@ -64,7 +64,8 @@ class ToolOutputRangeResult:
 
 
 class ReadToolOutputRangeTool:
-    def __init__(self) -> None:
+    def __init__(self, *, tool_content_store: ToolContentStore) -> None:
+        self.tool_content_store = tool_content_store
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="read_tool_output_range",
@@ -115,7 +116,7 @@ class ReadToolOutputRangeTool:
         try:
             content_id = kwargs["content_id"]
             # 只允许读取当前会话持有的 content，避免 LLM 猜测其他会话的 content_id。
-            stored = await get_tool_content(
+            stored = await self.tool_content_store.get_tool_content(
                 content_id=content_id,
                 session_id=context["session_id"],
             )

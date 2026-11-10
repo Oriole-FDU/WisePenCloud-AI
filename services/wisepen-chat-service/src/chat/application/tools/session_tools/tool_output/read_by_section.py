@@ -15,7 +15,7 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent,
-    get_tool_content,
+    ToolContentStore,
 )
 from chat.application.tools.session_tools.tool_output.read_by_range import (
     ToolOutputWindow,
@@ -84,7 +84,8 @@ class ToolOutputSectionResult:
 
 
 class ReadToolOutputSectionTool:
-    def __init__(self) -> None:
+    def __init__(self, *, tool_content_store: ToolContentStore) -> None:
+        self.tool_content_store = tool_content_store
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="read_tool_output_section",
@@ -128,7 +129,7 @@ class ReadToolOutputSectionTool:
             scope = kwargs["scope"]
             start_offset = kwargs["start_offset"]
 
-            stored = await get_tool_content(
+            stored = await self.tool_content_store.get_tool_content(
                 content_id=content_id,
                 session_id=context["session_id"],
             )

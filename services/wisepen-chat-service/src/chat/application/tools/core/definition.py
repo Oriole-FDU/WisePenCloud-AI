@@ -173,6 +173,8 @@ class ToolDefinition:
     source_spec: ToolSourceSpec = field(default_factory=ToolSourceSpec)
     config_spec: ToolConfigSpec | None = None
     preflight_hooks: tuple['ToolPreflightHook', ...] = ()
+    # None = 不缓存；() = 只缓存根；非空 = 按这些路径缓存
+    claim_check_paths: tuple[str, ...] | None = None
 
 
 class Tool(Protocol):

@@ -15,7 +15,7 @@ from chat.application.tools.core import (
     ToolSelectionMode,
     ToolUISpec,
 )
-from chat.application.tools.core.output_cache.cache_store import get_tool_content
+from chat.application.tools.core.output_cache.cache_store import ToolContentStore
 
 _TIMEOUT_SECONDS = 300.0
 _PARAMETERS_SCHEMA: dict[str, Any] = {
@@ -45,7 +45,8 @@ class ToolOutputStructureResult:
 
 
 class InspectToolOutputStructureTool:
-    def __init__(self) -> None:
+    def __init__(self, *, tool_content_store: ToolContentStore) -> None:
+        self.tool_content_store = tool_content_store
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="inspect_tool_output_structure",
@@ -100,7 +101,7 @@ class InspectToolOutputStructureTool:
         del config
         try:
             content_id = kwargs["content_id"]
-            stored = await get_tool_content(
+            stored = await self.tool_content_store.get_tool_content(
                 content_id=content_id,
                 session_id=context["session_id"],
             )

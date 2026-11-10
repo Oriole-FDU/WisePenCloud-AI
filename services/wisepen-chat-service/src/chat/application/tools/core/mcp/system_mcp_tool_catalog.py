@@ -15,6 +15,7 @@ from chat.application.tools.core import (
     ToolUISpec,
 )
 from chat.application.tools.core.mcp.remote_tool import McpRemoteTool
+from chat.application.tools.core.output_cache import ToolOutputCache
 from chat.core.config.app_settings import settings
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.service_client import McpServiceClient
@@ -428,9 +429,11 @@ class SystemMcpToolCatalog:
         *,
         mcp_service_client: McpServiceClient,
         sandbox_mcp_service_client: McpServiceClient,
+        output_cache: ToolOutputCache,
     ) -> None:
         self._mcp_service_client = mcp_service_client
         self._sandbox_mcp_service_client = sandbox_mcp_service_client
+        self._output_cache = output_cache
         self._tool_cache: dict[ToolSource, tuple[float, list[McpToolDescriptor]]] = {}
 
     async def _load_tools(
@@ -479,8 +482,8 @@ class SystemMcpToolCatalog:
         ))
         return tools
 
-    @staticmethod
     def _build_remote_tools(
+        self,
         descriptors: list[McpToolDescriptor],
         client: McpServiceClient,
         configs: list[dict[str, Any]],
@@ -515,5 +518,6 @@ class SystemMcpToolCatalog:
                     preflight_hooks=(),
                 ),
                 failure_reason=overlay["failure_reason"],
+                output_cache=self._output_cache,
             )
         return tools

@@ -18,7 +18,7 @@ from chat.application.tools.core import (
 )
 from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent,
-    get_tool_content,
+    ToolContentStore,
 )
 
 _MAX_CONTENT_IDS = 16
@@ -75,7 +75,8 @@ class _CachedChunk:
 
 
 class SearchToolOutputBM25Tool:
-    def __init__(self) -> None:
+    def __init__(self, *, tool_content_store: ToolContentStore) -> None:
+        self.tool_content_store = tool_content_store
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="search_tool_output_bm25",
@@ -123,6 +124,7 @@ class SearchToolOutputBM25Tool:
             stored_items = await _load_stored_items(
                 content_ids=kwargs["content_ids"],
                 session_id=context["session_id"],
+                store=self.tool_content_store,
             )
             return await _search_chunks(
                 stored_items=stored_items,
@@ -143,12 +145,13 @@ async def _load_stored_items(
     *,
     content_ids: list[str],
     session_id: str,
+    store: ToolContentStore,
 ) -> list[StoredToolContent]:
     """按输入顺序加载当前会话可访问的缓存正文，并去除重复 ID。"""
 
     stored_items: list[StoredToolContent] = []
     for content_id in dict.fromkeys(content_ids):  # 去重并保持顺序
-        stored = await get_tool_content(
+        stored = await store.get_tool_content(
             content_id=content_id,
             session_id=session_id,
         )

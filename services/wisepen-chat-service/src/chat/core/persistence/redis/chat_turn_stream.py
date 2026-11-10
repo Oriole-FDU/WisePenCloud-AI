@@ -1,6 +1,7 @@
-import redis.asyncio as redis
+from redis.asyncio import Redis
 
 from chat.core.config.app_settings import settings
+from chat.core.persistence.redis.base import RedisRepository
 
 
 _RELEASE_IF_OWNER = """
@@ -21,11 +22,11 @@ end
 """
 
 
-class RedisChatTurnStream:
+class RedisChatTurnStream(RedisRepository):
     """保存 running turn 租约和可重放 SSE 事件流"""
 
-    def __init__(self) -> None:
-        self.redis = redis.from_url(settings.persistence.redis.url, decode_responses=True)
+    def __init__(self, *, redis_client: Redis) -> None:
+        super().__init__(redis_client=redis_client)
         self.active_turn_ttl = int(settings.chat_turn.active_ttl_seconds)
         self.stream_ttl = int(settings.chat_turn.stream_ttl_seconds)
 
@@ -41,7 +42,7 @@ class RedisChatTurnStream:
     async def acquire_active_turn(self, user_id: str, session_id: str, turn_id: str) -> bool:
         # 原子写入，等价于 Redis 命令 SET chat:session:{user_id}:{session_id}:active_turn {turn_id} NX EX 1800
         # key 表示 这个用户的这个会话当前正在跑哪个 turn，用于防止一个会话有多个 trun 出现
-        return bool(await self.redis.set(
+        return bool(await self._redis.set(
             self._active_turn_key(user_id, session_id),
             turn_id,
             nx=True, # 只有 key 不存在时才写入，避免发生竞态问题
@@ -50,11 +51,11 @@ class RedisChatTurnStream:
 
     async def get_active_turn(self, user_id: str, session_id: str) -> str | None:
         # 获取当前对话的 turn
-        return await self.redis.get(self._active_turn_key(user_id, session_id))
+        return await self._redis.get(self._active_turn_key(user_id, session_id))
 
     async def renew_active_turn(self, user_id: str, session_id: str, turn_id: str) -> bool:
         # 续期当前对话的 turn
-        result = await self.redis.eval(
+        result = await self._redis.eval(
             _RENEW_IF_OWNER,
             1,
             self._active_turn_key(user_id, session_id),
@@ -65,7 +66,7 @@ class RedisChatTurnStream:
 
     async def release_active_turn(self, user_id: str, session_id: str, turn_id: str) -> bool:
         # 释放当前对话的 turn，在 turn 自然结束或被中止后
-        result = await self.redis.eval(
+        result = await self._redis.eval(
             _RELEASE_IF_OWNER,
             1,
             self._active_turn_key(user_id, session_id),
@@ -75,15 +76,15 @@ class RedisChatTurnStream:
 
     async def request_turn_cancel(self, turn_id: str) -> None:
         # 取消请求只需要一个短期标记，runner 会在安全点读取并自行收尾。
-        await self.redis.set(self._cancel_key(turn_id), "1", ex=self.stream_ttl)
+        await self._redis.set(self._cancel_key(turn_id), "1", ex=self.stream_ttl)
 
     async def is_turn_cancel_requested(self, turn_id: str) -> bool:
-        return await self.redis.get(self._cancel_key(turn_id)) == "1"
+        return await self._redis.get(self._cancel_key(turn_id)) == "1"
 
     async def append_frame(self, turn_id: str, frame: str, *, terminal: bool = False) -> str:
         # 将一个 SSE frame 写到当前 turn 的事件流里
         stream_key = self._stream_key(turn_id)
-        event_id = await self.redis.xadd(
+        event_id = await self._redis.xadd(
             stream_key,
             {
                 "frame": frame, # 原样保存
@@ -91,7 +92,7 @@ class RedisChatTurnStream:
             },
         )
         # 等价于 Redis：XADD chat:turn:turn_xxx:events * frame "data: {...}\n\n" terminal 0
-        await self.redis.expire(stream_key, self.stream_ttl)
+        await self._redis.expire(stream_key, self.stream_ttl)
         return event_id
 
     async def iter_frames(self, turn_id: str):
@@ -100,7 +101,7 @@ class RedisChatTurnStream:
         last_id = "0-0"
 
         # 先完整重放已有事件，再阻塞等待新事件，支持页面断开后重新订阅
-        entries = await self.redis.xrange(stream_key, min="-", max="+") # XRANGE - + 是读取这个 stream 里已有的所有事件
+        entries = await self._redis.xrange(stream_key, min="-", max="+") # XRANGE - + 是读取这个 stream 里已有的所有事件
         for event_id, fields in entries:
             last_id = event_id
             yield fields.get("frame") or "", fields.get("terminal") == "1"
@@ -110,7 +111,7 @@ class RedisChatTurnStream:
         # 如果已有事件重放完了，但还没结束，就进入循环
         while True:
             # 从 last_id 之后继续读，如果暂时没有新事件，最多等 4 秒，一次最多读 50 条
-            result = await self.redis.xread({stream_key: last_id}, block=4000, count=50)
+            result = await self._redis.xread({stream_key: last_id}, block=4000, count=50)
             if not result:
                 continue # 继续循环
 

@@ -1,14 +1,15 @@
 from copy import deepcopy
 from typing import Any
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import best_match
+
 from chat.application.tools.core.definition import ToolParametersSchema, ToolPolicy
 from chat.application.tools.core.execution.hooks.base import (
     ToolPreflightHook,
     ToolPreflightResult,
 )
 from chat.application.tools.core.llm.invocation import ToolInvocation
-from jsonschema import Draft202012Validator
-from jsonschema.exceptions import best_match
 
 
 class RequiredContextCheck(ToolPreflightHook):
@@ -32,8 +33,6 @@ class JsonSchemaCheck(ToolPreflightHook):
 
     async def check(self, invocation: ToolInvocation, policy: ToolPolicy,
                     parameters_schema: ToolParametersSchema, context: dict[str, Any]) -> ToolPreflightResult:
-        # JSON Schema 的 default 不是 jsonschema 校验器的内建行为；在统一校验边界
-        # 注入后，所有工具都能直接消费已补全的参数，不必各自在 execute 层重复兜底。
         arguments = _inject_schema_defaults(
             invocation.tool_call_arguments,
             parameters_schema.raw,
@@ -54,7 +53,7 @@ class JsonSchemaCheck(ToolPreflightHook):
 
 
 def _inject_schema_defaults(instance: Any, schema: dict[str, Any]) -> Any:
-    """递归复制 JSON Schema 默认值，保留调用方显式传入的字段。"""
+    """在 Tool Call 有默认值的参数缺省值时注入其 JSON Schema 的默认值"""
 
     if isinstance(instance, dict):
         properties = schema.get("properties")

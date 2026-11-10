@@ -598,6 +598,7 @@ class QueryLoopRuntime:
 
 
 def _has_cached_tool_output(messages: list[ChatMessage]) -> bool:
+    """只有当历史里确实存在被缓存（截断）的工具输出时，才把读取缓存的那批工具暴露给模型；没有缓存内容时，这些读取工具一律隐藏"""
     for msg in messages:
         if msg.role != Role.TOOL or not msg.content:
             continue
@@ -622,7 +623,7 @@ def _has_cached_tool_output(messages: list[ChatMessage]) -> bool:
 
 
 def _contains_content_id(value: object) -> bool:
-    """递归识别树内 claim-check 回执，避免依赖旧的顶层 contents 协议。"""
+    """递归扫描一棵 JSON 树，只要发现任意一个 dict 里有 content_id 或 *_content_id 键、且值是非空字符串，就返回 True"""
     if isinstance(value, dict):
         if any(
             isinstance(item, str) and item

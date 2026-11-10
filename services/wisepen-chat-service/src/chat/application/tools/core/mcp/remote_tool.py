@@ -12,7 +12,7 @@ from chat.application.tools.core import (
     ToolOutput,
 )
 from chat.application.tools.core.llm.renderer import normalize_json_value
-from chat.application.tools.core.output_cache import process_cacheable_output
+from chat.application.tools.core.output_cache import ToolOutputCache
 from chat.domain.entities import VisionImage
 
 _MCP_CACHE_PATHS_KEY = "__mcp_cache_paths__"
@@ -28,12 +28,14 @@ class McpRemoteTool(Tool):
         remote_name: str,
         definition: ToolDefinition,
         failure_reason: str,
+        output_cache: ToolOutputCache,
     ) -> None:
         self._mcp_client = mcp_client
         self._server = server
         self._remote_name = remote_name
         self._definition = definition
         self._failure_reason = failure_reason
+        self._output_cache = output_cache
 
     @property
     def definition(self) -> ToolDefinition:
@@ -77,7 +79,11 @@ class McpRemoteTool(Tool):
                     detail_reason=output.content or f"MCP tool '{self._remote_name}' returned an error.",
                     retryable=False,
                 )
-            output = await _process_mcp_cache_envelope(output, context=context)
+            output = await _process_mcp_cache_envelope(
+                output,
+                context=context,
+                cache=self._output_cache,
+            )
             return output
         except ToolExecutionError:
             raise
@@ -93,47 +99,48 @@ async def _process_mcp_cache_envelope(
     output: ToolOutput,
     *,
     context: dict[str, Any],
+    cache: ToolOutputCache,
 ) -> ToolOutput:
-    """识别 MCP 业务信封，在 Chat Host 内完成缓存并只返回脱壳 payload。"""
+    """识别 MCP 缓存信封并完成缓存
+    信封是 MCP 侧对「业务载荷 + 可缓存路径」的显式标记:
+    {"__mcp_cache_paths__": ["text"], "payload": {...}}
+    只接受恰好这两个字段的信封，避免把普通业务对象误判为信封
+    """
 
     try:
         envelope = json.loads(output.content)
     except (TypeError, json.JSONDecodeError):
         return output
 
-    if not _is_mcp_cache_envelope(envelope):
+    # 信封必须恰好包含这两个字段，否则按普通输出处理
+    if (
+        not isinstance(envelope, dict)
+        or set(envelope) != {_MCP_CACHE_PATHS_KEY, _MCP_CACHE_PAYLOAD_KEY}
+    ):
         return output
 
-    paths = tuple(envelope[_MCP_CACHE_PATHS_KEY])
+    paths = envelope[_MCP_CACHE_PATHS_KEY]
+    if not isinstance(paths, list) or not all(
+        isinstance(path, str) and bool(path.strip()) for path in paths
+    ):
+        return output
+
     payload = envelope[_MCP_CACHE_PAYLOAD_KEY]
     session_id = context.get("session_id")
     if isinstance(session_id, str) and session_id:
         try:
-            payload = await process_cacheable_output(
+            payload = await cache.cache_long_strings(
                 payload,
-                paths=paths,
+                paths=tuple(paths),
                 session_id=session_id,
             )
         except Exception:  # noqa: BLE001 - cache enhancement must not fail the MCP result
-            # 缓存属于输出增强；Store 故障不能让远程 MCP 主结果失败。
+            # 缓存属于输出增强；Store 故障不能让远程 MCP 主结果失败
             payload = envelope[_MCP_CACHE_PAYLOAD_KEY]
 
     return ToolOutput(
         content=json.dumps(payload, ensure_ascii=False),
         images=output.images,
-    )
-
-
-def _is_mcp_cache_envelope(value: Any) -> bool:
-    """只接受当前 MCP 信封的两个字段，避免误吞普通业务对象。"""
-
-    if not isinstance(value, dict):
-        return False
-    if set(value) != {_MCP_CACHE_PATHS_KEY, _MCP_CACHE_PAYLOAD_KEY}:
-        return False
-    paths = value[_MCP_CACHE_PATHS_KEY]
-    return isinstance(paths, list) and all(
-        isinstance(path, str) and bool(path.strip()) for path in paths
     )
 
 

@@ -2,6 +2,7 @@
 
 from typing import List
 
+import redis.asyncio as redis
 from dependency_injector import containers, providers
 from v2.nacos import NacosNamingService
 
@@ -30,6 +31,7 @@ from chat.core.persistence import (
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
     RedisChatTurnStream,
+    RedisToolContentRepository,
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
@@ -46,6 +48,10 @@ from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
+from chat.application.tools.core.output_cache import (
+    ToolContentStore,
+    ToolOutputCache,
+)
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.application.tools.session_tools.load_image_attachment_tool import LoadImageAttachmentTool
 from chat.application.tools.session_tools.tool_output import (
@@ -119,12 +125,17 @@ class Container(containers.DeclarativeContainer):
     tool_config_repo = providers.Singleton(MongoToolConfigRepository)
     suspended_chat_repo = providers.Singleton(MongoSuspendedChatRepository)
     mcp_server_config_repo = providers.Singleton(MongoMcpServerConfigRepository)
-    hot_context_repo = providers.Singleton(RedisHotContext)
-    mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache)
-    chat_turn_stream_repo = providers.Singleton(RedisChatTurnStream)
-    tool_dispatcher = providers.Singleton(
-        ToolDispatcher,
-    )
+
+    redis_client = providers.Singleton(redis.from_url, settings.persistence.redis.url, decode_responses=True,)
+    hot_context_repo = providers.Singleton(RedisHotContext, redis_client=redis_client)
+    mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache, redis_client=redis_client)
+    chat_turn_stream_repo = providers.Singleton(RedisChatTurnStream, redis_client=redis_client)
+    tool_content_repo = providers.Singleton(RedisToolContentRepository, redis_client=redis_client)
+
+    tool_content_store = providers.Singleton(ToolContentStore,tool_content_repository=tool_content_repo,)
+    output_cache = providers.Singleton(ToolOutputCache, tool_content_store=tool_content_store)
+
+    tool_dispatcher = providers.Singleton(ToolDispatcher, output_cache=output_cache)
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
     service_discovery = providers.Singleton(
@@ -180,11 +191,13 @@ class Container(containers.DeclarativeContainer):
         mcp_client=mcp_client,
         mcp_tool_discovery_cache_repo=mcp_tool_discovery_cache_repo,
         mcp_server_config_repo=mcp_server_config_repo,
+        output_cache=output_cache,
     )
     system_mcp_tool_catalog = providers.Singleton(
         SystemMcpToolCatalog,
         mcp_service_client=mcp_service_client,
         sandbox_mcp_service_client=sandbox_mcp_service_client,
+        output_cache=output_cache,
     )
 
     # OssFileLoader
@@ -247,18 +260,23 @@ class Container(containers.DeclarativeContainer):
     )
     inspect_tool_output_structure_tool = providers.Singleton(
         InspectToolOutputStructureTool,
+        tool_content_store=tool_content_store,
     )
     read_tool_output_range_tool = providers.Singleton(
         ReadToolOutputRangeTool,
+        tool_content_store=tool_content_store,
     )
     read_tool_output_section_tool = providers.Singleton(
         ReadToolOutputSectionTool,
+        tool_content_store=tool_content_store,
     )
     search_tool_output_regex_tool = providers.Singleton(
         SearchToolOutputRegexTool,
+        tool_content_store=tool_content_store,
     )
     search_tool_output_bm25_tool = providers.Singleton(
         SearchToolOutputBM25Tool,
+        tool_content_store=tool_content_store,
     )
     tool_providers = providers.List(
         search_history_tool,
