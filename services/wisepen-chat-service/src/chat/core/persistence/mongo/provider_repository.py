@@ -12,19 +12,20 @@ from common.core.exceptions import ServiceException
 
 
 class MongoProviderRepository(ProviderRepository):
-    """用户 Provider 的 MongoDB 仓储实现。"""
+    """Provider 的 MongoDB 仓储实现
+    scope 显式区分 SYSTEM 与 USER，USER 作用域下由 owner_user_id 指定归属用户
+    """
 
     async def get_provider(
         self,
         provider_id: PydanticObjectId,
-        user_id: Optional[str] = None,
+        scope: ProviderScope,
+        owner_user_id: Optional[str] = None,
     ) -> Provider:
-        scope = self._scope_for(user_id)
-
         provider = await Provider.find_one(
             Provider.id == provider_id,
             Provider.scope == scope,
-            Provider.owner_user_id == user_id,
+            Provider.owner_user_id == owner_user_id,
         )
         if provider is None:
             raise ServiceException(ChatErrorCode.PROVIDER_NOT_FOUND)
@@ -33,24 +34,24 @@ class MongoProviderRepository(ProviderRepository):
 
     async def list_providers(
         self,
-        user_id: Optional[str] = None,
+        scope: ProviderScope,
+        owner_user_id: Optional[str] = None,
     ) -> List[Provider]:
-        scope = self._scope_for(user_id)
-
         return await Provider.find(
             Provider.scope == scope,
-            Provider.owner_user_id == user_id,
+            Provider.owner_user_id == owner_user_id,
         ).sort("-is_active", "-updated_at").to_list()
 
     async def create_provider(
         self,
         provider: Provider,
-        user_id: Optional[str] = None,
+        scope: ProviderScope,
+        owner_user_id: Optional[str] = None,
     ) -> Provider:
         now = datetime.now(timezone.utc)
 
-        provider.scope = self._scope_for(user_id)
-        provider.owner_user_id = user_id
+        provider.scope = scope
+        provider.owner_user_id = owner_user_id if scope is ProviderScope.USER else None
         provider.api_key_fingerprint = self._mask_api_key(provider.api_key)
         provider.created_at = provider.created_at or now
         provider.updated_at = now
@@ -66,9 +67,10 @@ class MongoProviderRepository(ProviderRepository):
         self,
         provider_id: PydanticObjectId,
         updates: dict[str, Any],
-        user_id: Optional[str] = None,
+        scope: ProviderScope,
+        owner_user_id: Optional[str] = None,
     ) -> Provider:
-        provider = await self.get_provider(provider_id, user_id)
+        provider = await self.get_provider(provider_id, scope, owner_user_id)
 
         if "name" in updates:
             provider.name = updates["name"]
@@ -94,13 +96,14 @@ class MongoProviderRepository(ProviderRepository):
     async def remove_provider(
         self,
         provider_id: PydanticObjectId,
-        user_id: Optional[str] = None,
+        scope: ProviderScope,
+        owner_user_id: Optional[str] = None,
     ) -> None:
-        provider = await self.get_provider(provider_id, user_id)
+        provider = await self.get_provider(provider_id, scope, owner_user_id)
 
         mapping_filters = [
             ModelProviderMapping.provider_id == provider_id,
-            ModelProviderMapping.owner_user_id == user_id,
+            ModelProviderMapping.owner_user_id == owner_user_id,
         ]
 
         mapping_count = await ModelProviderMapping.find(*mapping_filters).count()
@@ -112,7 +115,8 @@ class MongoProviderRepository(ProviderRepository):
     async def increment_usage(
         self,
         provider_id: PydanticObjectId,
-        user_id: Optional[str],
+        scope: ProviderScope,
+        owner_user_id: Optional[str],
         input_tokens: int,
         cached_input_tokens: int,
         output_tokens: int,
@@ -124,8 +128,8 @@ class MongoProviderRepository(ProviderRepository):
         result = await Provider.get_pymongo_collection().update_one(
             {
                 "_id": provider_id,
-                "scope": self._scope_for(user_id).value,
-                "owner_user_id": user_id,
+                "scope": scope.value,
+                "owner_user_id": owner_user_id,
             },
             {
                 "$inc": {
@@ -139,10 +143,6 @@ class MongoProviderRepository(ProviderRepository):
         )
         if result.matched_count == 0:
             raise ServiceException(ChatErrorCode.PROVIDER_NOT_FOUND)
-
-    @staticmethod
-    def _scope_for(user_id: Optional[str]) -> ProviderScope:
-        return ProviderScope.USER if user_id is not None else ProviderScope.SYSTEM
 
     @staticmethod
     def _mask_api_key(api_key: str) -> str:

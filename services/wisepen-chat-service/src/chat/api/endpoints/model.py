@@ -124,7 +124,7 @@ async def list_available_models(
     llm_provider_resolver: LLMProviderResolver = Depends(Provide[Container.llm_provider_resolver]),
 ):
     system_model_infos = await model_repo.list_models_and_mappings(ModelScope.SYSTEM, user_id)
-    system_providers = await provider_repo.list_providers(None)
+    system_providers = await provider_repo.list_providers(ProviderScope.SYSTEM)
     system_providers = {
         str(provider.id): provider
         for provider in system_providers
@@ -132,7 +132,7 @@ async def list_available_models(
     }
 
     user_model_infos = await model_repo.list_models_and_mappings(ModelScope.USER, user_id)
-    user_providers = await provider_repo.list_providers(user_id)
+    user_providers = await provider_repo.list_providers(ProviderScope.USER, user_id)
     user_providers = {
         str(provider.id): provider
         for provider in user_providers
@@ -171,7 +171,7 @@ async def list_user_providers(
     user_id: str = Depends(require_login),
     provider_repo: ProviderRepository = Depends(Provide[Container.provider_repo]),
 ):
-    providers = await provider_repo.list_providers(user_id)
+    providers = await provider_repo.list_providers(ProviderScope.USER, user_id)
     return R.success(data=ListUserProvidersResponse(
         providers=[to_provider_response(provider) for provider in providers],
     ))
@@ -204,8 +204,10 @@ async def create_user_provider(
             api_key=req.api_key,
             type=req.type,
             is_active=req.is_active,
-        )
-    , user_id)
+        ),
+        scope=ProviderScope.USER,
+        owner_user_id=user_id
+    )
     return R.success()
 
 
@@ -231,7 +233,7 @@ async def update_user_provider(
 ):
     provider_id = PydanticObjectId(req.provider_id)
     updates = req.model_dump(exclude={"provider_id"}, exclude_unset=True)
-    await provider_repo.update_provider(provider_id, updates, user_id)
+    await provider_repo.update_provider(provider_id, updates, ProviderScope.USER, user_id)
     return R.success()
 
 
@@ -256,7 +258,7 @@ async def delete_user_provider(
     provider_repo: ProviderRepository = Depends(Provide[Container.provider_repo]),
 ):
     provider_id = PydanticObjectId(req.provider_id)
-    await provider_repo.remove_provider(provider_id, user_id)
+    await provider_repo.remove_provider(provider_id, ProviderScope.USER, user_id)
     return R.success()
 
 
@@ -281,7 +283,8 @@ async def list_models_by_provider_id(
 ):
     model_infos = await model_repo.list_models_by_provider_id(
         PydanticObjectId(provider_id),
-        user_id,
+        only_system_model = False,
+        owner_user_id=user_id,
     )
     return R.success(data=ListModelsResponse(
         models=[
@@ -347,8 +350,10 @@ async def create_user_model(
             support_tools=req.support_tools,
             context_window_tokens=req.context_window_tokens,
             max_output_tokens=req.max_output_tokens,
-        )
-    , user_id)
+        ),
+        scope=ModelScope.USER,
+        owner_user_id=user_id
+    )
     return R.success()
 
 
@@ -374,7 +379,7 @@ async def update_user_model(
 ):
     model_id = PydanticObjectId(req.model_id)
     updates = req.model_dump(exclude={"model_id"}, exclude_unset=True)
-    await model_repo.update_model(model_id, updates, user_id)
+    await model_repo.update_model(model_id, updates, ModelScope.USER, user_id)
     return R.success()
 
 
@@ -399,7 +404,7 @@ async def delete_user_model(
     model_repo: ModelRepository = Depends(Provide[Container.model_repo]),
 ):
     model_id = PydanticObjectId(req.model_id)
-    await model_repo.delete_model(model_id, user_id)
+    await model_repo.delete_model(model_id, ModelScope.USER, user_id)
     return R.success()
 
 
@@ -427,7 +432,8 @@ async def bind_model_provider(
         PydanticObjectId(req.model_id),
         PydanticObjectId(req.provider_id),
         req.provider_model_name,
-        user_id,
+        only_system_model=False,
+        owner_user_id=user_id,
         input_billing_ratio=Decimal(req.input_billing_ratio),
         cached_input_billing_ratio=Decimal(req.cached_input_billing_ratio),
         output_billing_ratio=Decimal(req.output_billing_ratio),
@@ -457,5 +463,10 @@ async def unbind_model_provider(
     user_id: str = Depends(require_login),
     model_repo: ModelRepository = Depends(Provide[Container.model_repo]),
 ):
-    await model_repo.unbind_model_from_provider(PydanticObjectId(req.model_id), PydanticObjectId(req.provider_id), user_id)
+    await model_repo.unbind_model_from_provider(
+        PydanticObjectId(req.model_id),
+        PydanticObjectId(req.provider_id),
+        only_system_model=False,
+        owner_user_id=user_id
+    )
     return R.success()

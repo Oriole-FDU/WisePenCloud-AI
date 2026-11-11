@@ -125,7 +125,8 @@ class ChatTurnFinalizer:
 
             await self.provider_repo.increment_usage(
                 provider_id=model_info.provider_id,
-                user_id=model_info.provider_owner_user_id,
+                scope=model_info.provider_scope,
+                owner_user_id=model_info.provider_owner_user_id,
                 input_tokens=token_usage.input_tokens,
                 cached_input_tokens=token_usage.cached_input_tokens,
                 output_tokens=token_usage.output_tokens,
