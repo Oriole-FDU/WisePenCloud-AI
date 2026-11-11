@@ -80,6 +80,9 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             error("file loader start failed.", exc=e)
 
+    # Web 抓取的共享 session 与应用同生命周期。
+    await container.init_resources()
+
     info("service ready.", service=bootstrap_settings.SERVICE_NAME, port=bootstrap_settings.SERVICE_PORT)
 
     # --- 运行阶段 ---
@@ -111,6 +114,7 @@ async def lifespan(app: FastAPI):
         await nacos_client_manager.deregister_instance()
     except Exception as e:
         error("nacos instance deregister failed.", exc=e)
+    await container.shutdown_resources()
 
 container.wire(modules=[
     attachment_endpoints,
