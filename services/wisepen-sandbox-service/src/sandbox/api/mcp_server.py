@@ -7,6 +7,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field, TypeAdapter
 
+from common.mcp import TOOL_CONFIG_META_KEY, TOOL_CONTEXT_META_KEY
 from sandbox.application.command_task_service import CommandTaskService
 from sandbox.application.file_service import (
     AttachmentImportResult,
@@ -33,14 +34,13 @@ from sandbox.domain.interfaces import (
 MAX_COMMAND_TIMEOUT_SECONDS = 600
 MAX_PATH_LENGTH = 1024
 MAX_WRITE_CONTENT_CHARS = 1_000_000
-WISEPEN_TOOL_CONFIG_META_KEY = "com.wisepen/tool_config"
-WISEPEN_TOOL_CONTEXT_META_KEY = "com.wisepen/tool_context"
+
 
 def get_tool_config_value(ctx: Context, key: str) -> object | None:
     meta = ctx.request_context.meta
     if not meta:
         return None
-    tool_config = (meta.model_extra or {}).get(WISEPEN_TOOL_CONFIG_META_KEY)
+    tool_config = (meta.model_extra or {}).get(TOOL_CONFIG_META_KEY)
     return tool_config.get(key) if isinstance(tool_config, Mapping) else None
 
 
@@ -48,7 +48,7 @@ def get_tool_context_value(ctx: Context, key: str) -> object | None:
     meta = ctx.request_context.meta
     if not meta:
         return None
-    tool_context = (meta.model_extra or {}).get(WISEPEN_TOOL_CONTEXT_META_KEY)
+    tool_context = (meta.model_extra or {}).get(TOOL_CONTEXT_META_KEY)
     return tool_context.get(key) if isinstance(tool_context, Mapping) else None
 
 

@@ -12,13 +12,12 @@ from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from common.cloud.service_discovery import LoadBalancingStrategy, ServiceDiscovery
 from common.core.constants import CommonConstants, SecurityConstants
 from common.gray.context import GrayContextHolder
+from common.mcp import TOOL_CONFIG_META_KEY, TOOL_CONTEXT_META_KEY
 from common.security.context import SecurityContextHolder
 
 
 _DEFAULT_SERVICE_NAME = "wisepen-mcp-service"
 _MCP_PATH = "/mcp/"
-WISEPEN_TOOL_CONFIG_META_KEY = "com.wisepen/tool_config"
-WISEPEN_TOOL_CONTEXT_META_KEY = "com.wisepen/tool_context"
 
 
 class McpServiceClient:
@@ -77,9 +76,9 @@ class McpServiceClient:
     ) -> CallToolResult:
         meta: dict[str, Any] = {}
         if tool_config:
-            meta[WISEPEN_TOOL_CONFIG_META_KEY] = dict(tool_config)
+            meta[TOOL_CONFIG_META_KEY] = dict(tool_config)
         if tool_context:
-            meta[WISEPEN_TOOL_CONTEXT_META_KEY] = dict(tool_context)
+            meta[TOOL_CONTEXT_META_KEY] = dict(tool_context)
 
         timeout = self._timeout if timeout_seconds is None else timeout_seconds
         async with AsyncClient(
