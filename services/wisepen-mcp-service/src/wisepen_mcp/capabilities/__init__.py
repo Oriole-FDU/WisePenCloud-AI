@@ -5,7 +5,6 @@ from wisepen_mcp.capabilities.note_ai import register_note_ai_tools
 from wisepen_mcp.capabilities.skill_creator import register_skill_creator_tools
 from wisepen_mcp.capabilities.user_resource import register_user_resource_tools
 from wisepen_mcp.capabilities.web_search import register_web_search_tools
-from wisepen_mcp.capabilities.web_search.search_tools import BaseSearchTool
 from wisepen_mcp.service_client import AIAssetClient, DocumentClient, NoteClient, NoteCollabClient, ResourceClient
 
 

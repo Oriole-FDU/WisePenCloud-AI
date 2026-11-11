@@ -12,11 +12,6 @@ class WebSearchProviderSettings(ConfigModel):
 
 
 class WebSearchProvidersSettings(ConfigModel):
-    fourget: WebSearchProviderSettings = Field(
-        default_factory=lambda: WebSearchProviderSettings.model_validate(
-            {"base-url": "http://127.0.0.1:8088"}
-        )
-    )
     exa: WebSearchProviderSettings = Field(
         default_factory=lambda: WebSearchProviderSettings.model_validate(
             {"base-url": "https://api.exa.ai"}
@@ -60,6 +55,11 @@ class WebSearchRerankerSettings(ConfigModel):
         return bool(self.zero_entropy_api_key.strip())
 
 
+class WebSearchPlatformDefaultSettings(ConfigModel):
+    api_key: str = ""
+    base_url: str = Field(default="https://api.deepseek.com", min_length=1)
+
+
 class WebSearchSettings(ConfigModel):
     timeout_seconds: float = Field(default=15.0, gt=0)
     providers: WebSearchProvidersSettings = Field(
@@ -67,6 +67,9 @@ class WebSearchSettings(ConfigModel):
     )
     reranker: WebSearchRerankerSettings = Field(
         default_factory=WebSearchRerankerSettings
+    )
+    platform_default: WebSearchPlatformDefaultSettings = Field(
+        default_factory=WebSearchPlatformDefaultSettings
     )
 
 

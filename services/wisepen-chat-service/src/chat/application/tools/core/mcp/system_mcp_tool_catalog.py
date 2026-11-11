@@ -40,6 +40,26 @@ _WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
     secret_keys=("api_key",),
 )
 
+_WEB_SEARCH_OPTIONAL_API_KEY_CONFIG = ToolConfigSpec(
+    schema={
+        "type": "object",
+        "properties": {
+            "api_key": {
+                "type": "string",
+                "title": "DeepSeek API Key",
+                "description": (
+                    "Optional. Your own DeepSeek API key; leave empty to use the "
+                    "platform-managed search key."
+                ),
+                "writeOnly": True,
+            },
+        },
+        "additionalProperties": False,
+    },
+    required_keys=(),
+    secret_keys=("api_key",),
+)
+
 _WEB_SEARCH_POLICY = ToolPolicy(
     expose_by_default=True,
     risk_level=ToolRiskLevel.LOW,
@@ -178,8 +198,9 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
     # Web Search Tools
     {
         "tool_name": "default_web_search",
-        "ui_spec": ToolUISpec(display_name="默认 Web 搜索"),
+        "ui_spec": ToolUISpec(display_name="默认 Web 搜索「由 Deepseek 提供」"),
         "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_OPTIONAL_API_KEY_CONFIG,
         "failure_reason": "Default Web Search Failed",
     },{
         "tool_name": "exa_search",

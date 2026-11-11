@@ -1,114 +1,121 @@
 from __future__ import annotations
 
-import asyncio
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import httpx
-from ddgs import DDGS
-
 from common.core.exceptions import ServiceException
-from common.logger import warn
-from common.utils.ranking import RankingPipeline
+
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
-from ..search_tools import (
-    BaseSearchTool,
-    SearchResponse,
-    SearchResult,
-)
+from ..model import SearchRecency, SearchResponse, SearchResult
+from ..search_tools import BaseSearchTool
+
 
 class PlatformSearchTool(BaseSearchTool):
-    """平台默认搜索工具，优先 4get，失败或无结果时降级至 DDGS"""
+    """平台托管的默认搜索，通过 DeepSeek Search 返回摘要证据与来源评分"""
 
     tool_name = "default_web_search"
     provider_name = None
-    requires_api_key = False
+    requires_api_key = False  # 调用方 key 可选，未配置时由平台密钥兜底
 
-    def __init__(
-        self,
-        *,
-        http_client: httpx.AsyncClient,
-        ranking_pipeline: RankingPipeline,
-        ddg_proxy: str | None = None,
-    ) -> None:
-        super().__init__(ranking_pipeline=ranking_pipeline)
+    def __init__(self, *, http_client: httpx.AsyncClient) -> None:
         self._http_client = http_client
-        self._ddg_proxy = ddg_proxy
 
-    async def search_web(self, *, query: str, max_results: int, api_key: str | None) -> SearchResponse:
-        try:
-            response = await self._search_fourget(query=query, max_results=max_results)
-            if response.results:
-                return SearchResponse(results=response.results, answer=response.answer)
-
-        except ServiceException as exc:
-            warn("web search provider fallback.", from_provider="fourget", to_provider="ddgs", reason=exc.msg,)
-
-        response = await self._search_ddg(query=query, max_results=max_results)
-
-        return SearchResponse(results=response.results, answer=response.answer)
-
-    async def _search_fourget(
+    async def search_web(
         self,
         *,
         query: str,
         max_results: int,
+        api_key: str | None,
+        recency: SearchRecency | None = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
     ) -> SearchResponse:
+        # 优先使用调用方配置的 DeepSeek key；未配置时回退到平台托管密钥
+        api_key = (api_key or "").strip() or settings.web_search.platform_default.api_key.strip()
+        if not api_key:
+            raise ServiceException(McpErrorCode.WEB_SEARCH_CONFIG_MISSING, "Platform Web Search API key is not configured.")
+
+        # 使用官方平铺语法组合域名
+        if include_domains:
+            query += " " + " OR ".join(f"site:{domain}" for domain in include_domains)
+        if exclude_domains:
+            query += " " + " ".join(f"-site:{domain}" for domain in exclude_domains)
+
+        if recency is not None:
+            days = {
+                SearchRecency.DAY: 1,
+                SearchRecency.WEEK: 7,
+                SearchRecency.MONTH: 30,
+                SearchRecency.YEAR: 365,
+            }[recency]
+            after = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+            query = f"{query} after:{after.isoformat()}"
+
+        # 拒绝超长查询，避免截断关键词或搜索操作符
+        if len(query) > 128:
+            raise ServiceException(
+                McpErrorCode.WEB_SEARCH_INVALID,
+                "DeepSeek query must be at most 128 characters, including domain and "
+                "recency filters. Shorten the query or reduce the domains and try again.",
+            )
+
+        url = f"{settings.web_search.platform_default.base_url.rstrip('/')}/v1/tools/search"
+        payload = {
+            "query": query,
+            "count": max_results,
+            "need_content": False, # Search 只返回摘要证据
+        }
+
         try:
-            response = await self._http_client.get(f"{settings.web_search.providers.fourget.base_url.rstrip('/')}/api/v1/web", params={"s": query})
+            response = await self._http_client.post(url, headers={"Authorization": f"Bearer {api_key}"}, json=payload)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
-            if status_code >= 500:
-                raise ServiceException(McpErrorCode.WEB_SEARCH_UNAVAILABLE, f"fourget remote service unavailable: HTTP {status_code}") from exc
-            raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, f"fourget request failed: HTTP {status_code}") from exc
+            if status_code == 400:
+                raise ServiceException(McpErrorCode.WEB_SEARCH_INVALID, "DeepSeek search parameters are invalid; check the query and try again.") from exc
+            if status_code in {401, 402, 403}:
+                raise ServiceException(McpErrorCode.WEB_SEARCH_CREDENTIAL_INVALID, f"DeepSeek credential unavailable or account balance insufficient: HTTP {status_code}") from exc
+            if status_code in {408, 429} or status_code >= 500:
+                raise ServiceException(McpErrorCode.WEB_SEARCH_UNAVAILABLE, f"DeepSeek remote service unavailable: HTTP {status_code}") from exc
+            raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, f"DeepSeek request failed: HTTP {status_code}") from exc
         except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
-            raise ServiceException(McpErrorCode.WEB_SEARCH_UNAVAILABLE, f"fourget network request failed: {exc}") from exc
+            raise ServiceException(McpErrorCode.WEB_SEARCH_UNAVAILABLE, "DeepSeek network request failed.") from exc
         except httpx.HTTPError as exc:
-            raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, f"fourget request failed: {exc}") from exc
+            raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, "DeepSeek request failed.") from exc
 
         try:
             data = response.json()
-            if not isinstance(data, dict):
-                raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, "fourget response is not a JSON object.")
+            # 只有合法的 results 空数组代表无结果
+            if not isinstance(data, dict) or not isinstance(data["results"], list):
+                raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, "DeepSeek response must contain a results array.")
+            return self.map_response(data)
         except ValueError as exc:
-            raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, "fourget response is not valid JSON.") from exc
-
-        answer_lines: list[str] = []
-        for answer in data["answer"]:
-            answer_lines.append(str(answer["title"]))
-            for node in answer["description"]: answer_lines.append(str(node["value"]))
-
-        try:
-            return SearchResponse(
-                results=[
-                    SearchResult(title=item.get("title"), url=item.get("url"), snippet=item.get("description"))
-                    for item in data["web"]
-                ],
-                answer="\n".join(answer_lines)
-            )
+            raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, "DeepSeek response is not valid JSON.") from exc
         except (KeyError, TypeError, AttributeError) as exc:
-            raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, "fourget response JSON shape is invalid.") from exc
+            raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, "DeepSeek response JSON shape is invalid.") from exc
 
-    async def _search_ddg(
-        self,
-        *,
-        query: str,
-        max_results: int,
-    ) -> SearchResponse:
-        ddg = DDGS(proxy=self._ddg_proxy) if self._ddg_proxy else DDGS()
-
-        try:
-            items = await asyncio.to_thread(ddg.text, query, max_results=max_results)
-        except Exception as exc:
-            raise ServiceException(McpErrorCode.WEB_SEARCH_UNAVAILABLE, f"ddgs request failed: {exc}") from exc
-
-        try:
-            return SearchResponse(
-                results=[
-                    SearchResult(title=item.get("title"), url=item.get("href"), snippet=item.get("body"))
-                    for item in items
-                ]
-            )
-        except (TypeError, AttributeError) as exc:
-            raise ServiceException(McpErrorCode.WEB_SEARCH_FAILED, "ddgs response shape is invalid.") from exc
+    @staticmethod
+    def map_response(data: dict[str, Any]) -> SearchResponse:
+        results: list[SearchResult] = []
+        for item in data["results"]:
+            # 单条长摘要优先，短摘要仅补缺
+            evidence = (item.get("summary") or "").strip() or (item.get("snippet") or "").strip()
+            metadata = {
+                key: item[key]
+                for key in ["rerank_score", "authority"]
+                if item.get(key) is not None
+            }
+            site_name = (item.get("site_name") or "").strip()
+            if site_name:
+                metadata["site_name"] = site_name
+            results.append(SearchResult(
+                title=item["title"],
+                url=item["url"],
+                published_date=item.get("date"),
+                evidences=[evidence] if evidence else [],
+                metadata=metadata,
+            ))
+        return SearchResponse(results=results)
