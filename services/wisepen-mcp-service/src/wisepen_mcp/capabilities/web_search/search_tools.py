@@ -7,7 +7,6 @@ from functools import wraps
 from typing import Annotated, Any, ClassVar
 
 from common.core.exceptions import ServiceException
-from common.mcp import cacheable_tool_output
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 from pydantic.fields import FieldInfo
@@ -195,7 +194,7 @@ class BaseSearchTool(ABC):
         mcp.tool(
             name=self.tool_name,
             description=description,
-        )(cacheable_tool_output(paths=("results.evidences.*", "summary"))(execute))
+        )(execute)
 
     async def execute(
         self,

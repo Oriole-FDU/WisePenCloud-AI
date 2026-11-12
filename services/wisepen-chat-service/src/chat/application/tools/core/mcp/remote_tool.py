@@ -12,9 +12,7 @@ from chat.application.tools.core import (
     ToolOutput,
 )
 from chat.application.tools.core.llm.renderer import normalize_json_value
-from chat.application.tools.core.output_cache import ToolOutputCache
 from chat.domain.entities import VisionImage
-from common.mcp import unpack_cache_envelope
 
 
 class McpRemoteTool(Tool):
@@ -26,14 +24,12 @@ class McpRemoteTool(Tool):
         remote_name: str,
         definition: ToolDefinition,
         failure_reason: str,
-        output_cache: ToolOutputCache,
     ) -> None:
         self._mcp_client = mcp_client
         self._server = server
         self._remote_name = remote_name
         self._definition = definition
         self._failure_reason = failure_reason
-        self._output_cache = output_cache
 
     @property
     def definition(self) -> ToolDefinition:
@@ -77,11 +73,6 @@ class McpRemoteTool(Tool):
                     detail_reason=output.content or f"MCP tool '{self._remote_name}' returned an error.",
                     retryable=False,
                 )
-            output = await _process_mcp_cache_envelope(
-                output,
-                context=context,
-                cache=self._output_cache,
-            )
             return output
         except ToolExecutionError:
             raise
@@ -91,36 +82,6 @@ class McpRemoteTool(Tool):
                 detail_reason=str(e),
                 retryable=False,
             ) from e
-
-
-async def _process_mcp_cache_envelope(
-    output: ToolOutput,
-    *,
-    context: dict[str, Any],
-    cache: ToolOutputCache,
-) -> ToolOutput:
-    """解包 MCP 缓存信封并完成缓存"""
-
-    unpacked = unpack_cache_envelope(output.content)
-    if unpacked is None: return output
-
-    paths, payload = unpacked
-    session_id = context.get("session_id")
-    if isinstance(session_id, str) and session_id:
-        try:
-            payload = await cache.cache_long_strings(
-                payload,
-                paths=paths,
-                session_id=session_id,
-            )
-        except Exception:  # noqa: BLE001 - cache enhancement must not fail the MCP result
-            # 缓存属于输出增强；Store 故障不能让远程 MCP 主结果失败
-            pass
-
-    return ToolOutput(
-        content=json.dumps(payload, ensure_ascii=False),
-        images=output.images,
-    )
 
 
 def _tool_output_from_result(result: CallToolResult) -> ToolOutput:

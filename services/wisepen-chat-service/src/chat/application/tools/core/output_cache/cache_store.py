@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
-from common.utils.markdown import (
+from common.utils.text_chunking import (
     Anchor,
     MarkdownChunk,
     MarkdownChunker,
@@ -36,18 +36,29 @@ class ToolContentStore:
         self._tool_content_repository = tool_content_repository
         self._max_chars = settings.tools.content.max_chars
 
-    async def put_tool_content(self, *, session_id: str, text: str) -> tuple[str, int] | None:
+    async def put_tool_content(
+        self,
+        *,
+        session_id: str,
+        text: str,
+        is_chunk: bool = True,
+    ) -> tuple[str, int] | None:
         if not text or text.isspace() or len(text) > self._max_chars:
             return None  # 空白或超限直接跳过
 
-        result = MarkdownChunker().chunk(text)
+        if is_chunk:
+            result = MarkdownChunker().chunk(text)
+            chunks, sections, anchors = result.chunks, result.sections, result.anchors
+        else:
+            chunks, sections, anchors = [], [], []
+
         stored = StoredToolContent(
             content_id=f"cnt_{uuid.uuid4().hex[:16]}",
             session_id=session_id,
             text=text,
-            chunks=result.chunks,
-            sections=result.sections,
-            anchors=result.anchors,
+            chunks=chunks,
+            sections=sections,
+            anchors=anchors,
         )
         await self._tool_content_repository.put(stored)
         return stored.content_id, len(text)

@@ -134,7 +134,12 @@ class ToolExecutor:
             output = self._coerce_tool_output(output)
 
             # 处理工具缓存
-            output = await self._output_cache.cache_tool_output(output, tool=tool, session_id=self._tool_scope.context.get("session_id"))
+            output = await self._output_cache.cache_tool_output(
+                output,
+                strategy=tool.definition.output_cache_strategy,
+                paths=tool.definition.claim_check_paths,
+                session_id=self._tool_scope.context.get("session_id"),
+            )
 
             return ToolExecutionResult(tool_invocation=invocation, tool_output=output,
                                        started_at=started_at, finished_at=datetime.now(timezone.utc),

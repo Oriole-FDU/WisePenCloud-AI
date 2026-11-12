@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from common.utils.markdown import OutlineFormatter
+from common.utils.text_chunking import OutlineFormatter
 
 from chat.application.tools.core import (
     ToolDefinition,
@@ -108,6 +108,12 @@ class InspectToolOutputStructureTool:
             if stored is None:
                 raise ToolExecutionError(
                     reason="cached_tool_output_not_found",
+                    retryable=False,
+                )
+            if not stored.sections:
+                raise ToolExecutionError(
+                    reason="cached_content_has_no_section_structure",
+                    detail_reason="This cached output has no section structure; use read_tool_output_range instead.",
                     retryable=False,
                 )
 

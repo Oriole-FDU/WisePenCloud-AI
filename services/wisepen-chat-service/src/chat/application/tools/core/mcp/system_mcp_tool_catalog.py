@@ -5,6 +5,7 @@ import time
 from typing import Any, List, Literal
 
 from chat.application.tools.core import (
+    OutputCacheStrategy,
     ToolConfigSpec,
     ToolDefinition,
     ToolLLMSpec,
@@ -15,7 +16,6 @@ from chat.application.tools.core import (
     ToolUISpec,
 )
 from chat.application.tools.core.mcp.remote_tool import McpRemoteTool
-from chat.application.tools.core.output_cache import ToolOutputCache
 from chat.core.config.app_settings import settings
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.service_client import McpServiceClient
@@ -65,7 +65,6 @@ _WEB_SEARCH_POLICY = ToolPolicy(
     risk_level=ToolRiskLevel.LOW,
     timeout_seconds=100.0,
     persist_output=True,
-    max_output_chars=None,
 )
 
 _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
@@ -180,8 +179,9 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
             risk_level=ToolRiskLevel.LOW,
             timeout_seconds=20.0,
             persist_output=True,
-            max_output_chars=None,
         ),
+        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
+        "claim_check_paths": ("text",),
         "failure_reason": "Note Resource Text Read Failed",
     }, {
         "tool_name": "read_document_resource_text",
@@ -191,8 +191,9 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
             risk_level=ToolRiskLevel.LOW,
             timeout_seconds=20.0,
             persist_output=True,
-            max_output_chars=None,
         ),
+        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
+        "claim_check_paths": ("text",),
         "failure_reason": "Document Resource Text Read Failed",
     },
     # Web Search Tools
@@ -201,42 +202,56 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         "ui_spec": ToolUISpec(display_name="默认 Web 搜索「由 Deepseek 提供」"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_OPTIONAL_API_KEY_CONFIG,
+        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
+        "claim_check_paths": ("results.evidences.*", "summary"),
         "failure_reason": "Default Web Search Failed",
     },{
         "tool_name": "exa_search",
         "ui_spec": ToolUISpec(display_name="Exa 搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
+        "claim_check_paths": ("results.evidences.*", "summary"),
         "failure_reason": "Exa Search Failed",
     },{
         "tool_name": "tavily_search",
         "ui_spec": ToolUISpec(display_name="Tavily 搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
+        "claim_check_paths": ("results.evidences.*", "summary"),
         "failure_reason": "Tavily Search Failed",
     },{
         "tool_name": "anysearch_search",
         "ui_spec": ToolUISpec(display_name="AnySearch 搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
+        "claim_check_paths": ("results.evidences.*", "summary"),
         "failure_reason": "AnySearch Search Failed",
     },{
         "tool_name": "baidu_qianfan_search",
         "ui_spec": ToolUISpec(display_name="百度千帆搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
+        "claim_check_paths": ("results.evidences.*", "summary"),
         "failure_reason": "Baidu Qianfan Search Failed",
     },{
         "tool_name": "tinyfish_search",
         "ui_spec": ToolUISpec(display_name="TinyFish 搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
+        "claim_check_paths": ("results.evidences.*", "summary"),
         "failure_reason": "TinyFish Search Failed",
     },{
         "tool_name": "firecrawl_search",
         "ui_spec": ToolUISpec(display_name="Firecrawl 搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
+        "claim_check_paths": ("results.evidences.*", "summary"),
         "failure_reason": "Firecrawl Search Failed",
     }
 ]
@@ -252,8 +267,8 @@ _SANDBOX_TOOL_CONFIGS: list[dict[str, Any]] = [
             timeout_seconds=620.0,
             persist_output=True,
             required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
         ),
+        "output_cache_strategy": OutputCacheStrategy.OPAQUE,
         "failure_reason": "Sandbox Command Execution Failed",
     },
     {
@@ -278,8 +293,8 @@ _SANDBOX_TOOL_CONFIGS: list[dict[str, Any]] = [
             timeout_seconds=620.0,
             persist_output=True,
             required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
         ),
+        "output_cache_strategy": OutputCacheStrategy.OPAQUE,
         "failure_reason": "Sandbox Command Result Read Failed",
     },
     {
@@ -304,8 +319,8 @@ _SANDBOX_TOOL_CONFIGS: list[dict[str, Any]] = [
             timeout_seconds=30.0,
             persist_output=True,
             required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
         ),
+        "output_cache_strategy": OutputCacheStrategy.OPAQUE,
         "failure_reason": "Sandbox File Read Failed",
     },
     {
@@ -343,8 +358,8 @@ _SANDBOX_TOOL_CONFIGS: list[dict[str, Any]] = [
             timeout_seconds=30.0,
             persist_output=True,
             required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
         ),
+        "output_cache_strategy": OutputCacheStrategy.OPAQUE,
         "failure_reason": "Sandbox File Search Failed",
     },
     {
@@ -369,8 +384,8 @@ _SANDBOX_TOOL_CONFIGS: list[dict[str, Any]] = [
             timeout_seconds=30.0,
             persist_output=True,
             required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
         ),
+        "output_cache_strategy": OutputCacheStrategy.OPAQUE,
         "failure_reason": "Sandbox File Grep Failed",
     },
     {
@@ -450,11 +465,9 @@ class SystemMcpToolCatalog:
         *,
         mcp_service_client: McpServiceClient,
         sandbox_mcp_service_client: McpServiceClient,
-        output_cache: ToolOutputCache,
     ) -> None:
         self._mcp_service_client = mcp_service_client
         self._sandbox_mcp_service_client = sandbox_mcp_service_client
-        self._output_cache = output_cache
         self._tool_cache: dict[ToolSource, tuple[float, list[McpToolDescriptor]]] = {}
 
     async def _load_tools(
@@ -537,8 +550,9 @@ class SystemMcpToolCatalog:
                     ui_spec=overlay.get("ui_spec"),
                     config_spec=overlay.get("config_spec"),
                     preflight_hooks=(),
+                    output_cache_strategy=overlay.get("output_cache_strategy", OutputCacheStrategy.NONE),
+                    claim_check_paths=overlay.get("claim_check_paths", ()),
                 ),
                 failure_reason=overlay["failure_reason"],
-                output_cache=self._output_cache,
             )
         return tools

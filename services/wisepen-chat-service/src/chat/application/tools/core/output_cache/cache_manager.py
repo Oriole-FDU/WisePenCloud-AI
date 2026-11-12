@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from chat.application.tools.core.definition import Tool
+from chat.application.tools.core.definition import OutputCacheStrategy
 from chat.application.tools.core.execution.result import ToolOutput
 from chat.application.tools.core.output_cache.cache_store import ToolContentStore
 from chat.core.config.app_settings import settings
@@ -23,27 +23,32 @@ class ToolOutputCache:
 
         self._store = tool_content_store
 
-    async def cache_tool_output(self, output: ToolOutput, *, tool: Tool, session_id: str | None) -> ToolOutput:
-        paths = tool.definition.claim_check_paths
-        if paths is None or not session_id: return output
+    async def cache_tool_output(self,
+        output: ToolOutput,
+        *,
+        strategy: OutputCacheStrategy,
+        session_id: str | None,
+        paths: tuple[str, ...] = (),
+    ) -> ToolOutput:
+        if not session_id: return output
+        # 不透明输出
+        if strategy is OutputCacheStrategy.OPAQUE:
+            return await self.cache_long_output(output, session_id=session_id)
+        # 长文本
+        if strategy is OutputCacheStrategy.LONG_TEXT:
+            return await self.cache_long_texts(output, paths=paths, session_id=session_id)
+        return output
 
-        # 解析 content 为 JSON 字符串，不能解析则当纯文本
+    async def cache_long_texts(self, output: ToolOutput, *, paths: tuple[str, ...], session_id: str) -> ToolOutput:
+        """把 paths 指向的超过预览预算的长字符串缓存，并替换为成缩略文本"""
+
+        # 解析 content 为 JSON，不能解析则当纯文本
         try:
             json_output = json.loads(output.content)
         except json.JSONDecodeError:
             json_output = None
 
-        result = await self.cache_long_strings(
-            value=json_output if json_output is not None else output.content,
-            paths=paths,
-            session_id=session_id
-        )
-
-        content = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
-        return ToolOutput(content=content, images=output.images)
-
-    async def cache_long_strings(self, value: Any, *, paths: tuple[str, ...], session_id: str) -> Any:
-        """把 JSON 中 paths 指向的超过预览预算的长字符串替换为成缩略文本"""
+        value = json_output if json_output is not None else output.content
 
         # 原地替换需要父容器而字符串没有，包装为单元素字符串列表，末尾 root[0] 再取出
         root = [value] if isinstance(value, str) else value
@@ -54,7 +59,29 @@ class ToolOutputCache:
             for site, budget in zip(sites, budgets, strict=True):
                 await self._store_claim(site, budget, session_id=session_id)
 
-        return root[0] if isinstance(value, str) else root
+        result = root[0] if isinstance(value, str) else root
+        return ToolOutput(
+            content=result if isinstance(result, str) else json.dumps(result, ensure_ascii=False),
+            images=output.images,
+        )
+
+    async def cache_long_output(self, output: ToolOutput, *, session_id: str) -> ToolOutput:
+        """把整份不透明输出当一段文本缓存，并替换为成缩略文本"""
+        text = output.content
+        if len(text) <= self._per_char_budget: return output
+
+        receipt = await self._store_text(text, session_id=session_id, is_chunk=False)
+        if receipt is None: return output
+
+        content_id, total_length = receipt
+        return ToolOutput(
+            content=json.dumps({
+                "preview": self._build_preview(text, self._per_char_budget),
+                "content_id": content_id,
+                "total_length": total_length,
+            }, ensure_ascii=False),
+            images=output.images,
+        )
 
 
     def _find_cacheable_sites(self, root: _Container, paths: tuple[str, ...]) -> list[tuple[_Container, _Slot, str]]:
@@ -159,27 +186,13 @@ class ToolOutputCache:
         if len(text) <= budget:
             return
 
-        if budget <= len(_TRUNCATION_MARKER):
-            preview = text[:budget]  # 预算小到连截断标记 \n...[truncated]...\n 都放不下，就只留头部
-        else:
-            # 否则把预算在头 + 标记 + 尾之间分配
-            available = budget - len(_TRUNCATION_MARKER) # 去掉标记后还能放多少字
-            tail_len = available // 2 # 尾拿一半，头拿剩下（奇数时头比尾多 1）
-            preview = (text[: available - tail_len] + _TRUNCATION_MARKER + text[len(text) - tail_len :])
-
-        try:
-            receipt = await self._store.put_tool_content(
-                session_id=session_id, text=text # 把全文写进 Redis
-            )
-        except Exception as exc:  # noqa: BLE001 - 缓存故障不得破坏工具主结果
-            warn("tool output claim-check store failed.", e=exc)
-            return
-        if receipt is None:  # Store 选择不接管（比如空白、超最大长度），一样跳过
+        receipt = await self._store_text(text, session_id=session_id, is_chunk=True)
+        if receipt is None:
             return
 
         content_id, total_length = receipt
         replacement = { # 组装要写回的三个字段
-            preview_key: preview,
+            preview_key: self._build_preview(text, budget),
             id_key: content_id,
             length_key: total_length,
         }
@@ -190,4 +203,33 @@ class ToolOutputCache:
         else:
             # list 的情况，直接替换下标
             parent[slot] = replacement
+
+    def _build_preview(self, text: str, budget: int) -> str:
+        """按 budget 截断文本：头尾各留一部分，中间放截断标记"""
+        if budget <= len(_TRUNCATION_MARKER):
+            return text[:budget]  # 预算小到连截断标记都放不下，就只留头部
+        available = budget - len(_TRUNCATION_MARKER) # 去掉标记后还能放多少字
+        tail_len = available // 2 # 尾拿一半，头拿剩下（奇数时头比尾多 1）
+        return text[: available - tail_len] + _TRUNCATION_MARKER + text[len(text) - tail_len :]
+
+    async def _store_text(
+        self,
+        text: str,
+        *,
+        session_id: str,
+        is_chunk: bool,
+    ) -> tuple[str, int] | None:
+        """把全文写进 Store，返回 (content_id, total_length)
+        Store 不接管或失败时返回 None
+        """
+        try:
+            receipt = await self._store.put_tool_content(
+                session_id=session_id, text=text, is_chunk=is_chunk
+            )
+        except Exception as exc:  # noqa: BLE001 - 缓存故障不得破坏工具主结果
+            warn("tool output claim-check store failed.", e=exc)
+            return None
+        if receipt is None:  # Store 选择不接管（比如空白、超最大长度），一样跳过
+            return None
+        return receipt
 

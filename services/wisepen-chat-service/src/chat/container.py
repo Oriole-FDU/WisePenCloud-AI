@@ -200,13 +200,11 @@ class Container(containers.DeclarativeContainer):
         mcp_client=mcp_client,
         mcp_tool_discovery_cache_repo=mcp_tool_discovery_cache_repo,
         mcp_server_config_repo=mcp_server_config_repo,
-        output_cache=output_cache,
     )
     system_mcp_tool_catalog = providers.Singleton(
         SystemMcpToolCatalog,
         mcp_service_client=mcp_service_client,
         sandbox_mcp_service_client=sandbox_mcp_service_client,
-        output_cache=output_cache,
     )
 
     # OssFileLoader

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from common.utils.markdown import MarkdownChunk
+from common.utils.text_chunking import MarkdownChunk
 from common.utils.retrieval import BM25Retriever, Candidate
 
 from chat.application.tools.core import (
@@ -168,6 +168,13 @@ async def _search_chunks(
     top_k: int,
 ) -> list[ToolOutputBM25Chunk]:
     """将已加载正文的自然 chunk 交给公共 BM25 实现并投影结果。"""
+
+    if stored_items and not any(stored.chunks for stored in stored_items):
+        raise ToolExecutionError(
+            reason="cached_content_has_no_chunk_structure",
+            detail_reason="None of the cached outputs have chunk structure; use search_tool_output_regex or read_tool_output_range instead.",
+            retryable=False,
+        )
 
     candidates = [
         _candidate(content_id=stored.content_id, chunk=chunk)

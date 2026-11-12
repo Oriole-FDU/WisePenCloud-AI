@@ -135,6 +135,12 @@ class ReadToolOutputSectionTool:
             )
             if stored is None:
                 return ToolOutputSectionResult.missing(content_id, section_id, start_offset)
+            if not stored.sections:
+                raise ToolExecutionError(
+                    reason="cached_content_has_no_section_structure",
+                    detail_reason="This cached output has no section structure; use read_tool_output_range instead.",
+                    retryable=False,
+                )
             return _read_by_section(
                 stored=stored,
                 section_id=section_id,

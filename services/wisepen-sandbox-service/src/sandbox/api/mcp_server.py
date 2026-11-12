@@ -7,7 +7,10 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field, TypeAdapter
 
-from common.mcp import TOOL_CONFIG_META_KEY, TOOL_CONTEXT_META_KEY
+from common.mcp import (
+    TOOL_CONFIG_META_KEY,
+    TOOL_CONTEXT_META_KEY,
+)
 from sandbox.application.command_task_service import CommandTaskService
 from sandbox.application.file_service import (
     AttachmentImportResult,
