@@ -1,9 +1,11 @@
 # src/chat/container.py
 
+from collections.abc import AsyncIterator
 from typing import List
 
 import redis.asyncio as redis
 from dependency_injector import containers, providers
+from scrapling.fetchers import AsyncStealthySession, FetcherSession
 from v2.nacos import NacosNamingService
 
 from chat.core.config.app_settings import settings
@@ -33,6 +35,7 @@ from chat.core.persistence import (
     RedisChatTurnStream,
     RedisFrontendToolResponseRepository,
     RedisToolContentRepository,
+    RedisWebContentCacheRepository,
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
@@ -64,6 +67,9 @@ from chat.application.tools.session_tools.tool_output import (
     SearchToolOutputBM25Tool,
     SearchToolOutputRegexTool,
 )
+from chat.application.tools.web_tools import WebCrawlTool, WebFetchTool
+from chat.application.tools.web_tools.common import WebContentCache
+from chat.application.tools.web_tools.fetchers import StaticPageFetcher, StealthyPageFetcher
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
@@ -74,6 +80,38 @@ from common.kafka.producer import KafkaProducerClient
 async def _provide_nacos_naming() -> NacosNamingService:
     """延迟到首次 await，避免在 import 阶段触发 async Nacos 建连。"""
     return await nacos_client_manager.get_naming_client()
+
+
+async def _provide_web_fetch_static_session() -> AsyncIterator[FetcherSession]:
+    async with FetcherSession(
+        impersonate="chrome",
+        stealthy_headers=True,
+        follow_redirects=False,
+        timeout=30.0,
+        retries=1,
+    ) as session:
+        yield session
+
+
+async def _provide_web_fetch_browser_session() -> AsyncIterator[AsyncStealthySession]:
+    # 浏览器仅在静态抓取失败或正文质量不足时使用。
+    session = AsyncStealthySession(
+        headless=True,
+        max_pages=3,
+        timeout=30_000,
+        disable_resources=False,
+        block_ads=True,
+        network_idle=False,
+        load_dom=True,
+        wait=500,
+        solve_cloudflare=False,
+        retries=2,
+    )
+    await session.start()
+    try:
+        yield session
+    finally:
+        await session.close()
 
 
 def _build_registry(
@@ -138,6 +176,14 @@ class Container(containers.DeclarativeContainer):
         redis_client=redis_client,
     )
     tool_content_repo = providers.Singleton(RedisToolContentRepository, redis_client=redis_client)
+    web_content_cache_repository = providers.Singleton(
+        RedisWebContentCacheRepository,
+        redis_client=redis_client,
+    )
+    web_content_cache = providers.Singleton(
+        WebContentCache,
+        repository=web_content_cache_repository,
+    )
 
     tool_content_store = providers.Singleton(ToolContentStore,tool_content_repository=tool_content_repo,)
     output_cache = providers.Singleton(ToolOutputCache, tool_content_store=tool_content_store)
@@ -285,6 +331,28 @@ class Container(containers.DeclarativeContainer):
         SearchToolOutputBM25Tool,
         tool_content_store=tool_content_store,
     )
+    web_fetch_static_session = providers.Resource(_provide_web_fetch_static_session)
+    web_fetch_browser_session = providers.Resource(_provide_web_fetch_browser_session)
+    web_static_page_fetcher = providers.Singleton(
+        StaticPageFetcher,
+        session=web_fetch_static_session,
+    )
+    web_browser_page_fetcher = providers.Singleton(
+        StealthyPageFetcher,
+        session=web_fetch_browser_session,
+    )
+    web_fetch_tool = providers.Singleton(
+        WebFetchTool,
+        static_fetcher=web_static_page_fetcher,
+        stealthy_fetcher=web_browser_page_fetcher,
+        cache=web_content_cache,
+    )
+    web_crawl_tool = providers.Singleton(
+        WebCrawlTool,
+        static_fetcher=web_static_page_fetcher,
+        stealthy_fetcher=web_browser_page_fetcher,
+        cache=web_content_cache,
+    )
     tool_providers = providers.List(
         search_history_tool,
         load_image_attachment_tool,
@@ -295,6 +363,8 @@ class Container(containers.DeclarativeContainer):
         read_tool_output_section_tool,
         search_tool_output_regex_tool,
         search_tool_output_bm25_tool,
+        web_fetch_tool,
+        web_crawl_tool,
     )
 
     tool_registry = providers.Singleton(

@@ -10,6 +10,7 @@ from .redis.mcp_tool_discovery_cache import RedisMcpToolDiscoveryCache
 from .redis.chat_turn_stream import RedisChatTurnStream
 from .redis.frontend_tool_response import RedisFrontendToolResponseRepository
 from .redis.tool_content_repository import RedisToolContentRepository
+from .redis.web_content_cache_repository import RedisWebContentCacheRepository
 
 __all__ = [
     "MongoMessageRepository",
@@ -24,4 +25,5 @@ __all__ = [
     "RedisChatTurnStream",
     "RedisFrontendToolResponseRepository",
     "RedisToolContentRepository",
+    "RedisWebContentCacheRepository",
 ]

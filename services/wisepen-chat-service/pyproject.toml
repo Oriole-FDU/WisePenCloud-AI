@@ -28,6 +28,13 @@ dependencies = [
     "regex",
     "wisepen-common",
     "httpx",
+    "dnspython",
+    "scrapling[fetchers]",
+    "trafilatura",
+    "charset-normalizer",
+    "lxml",
+    "pdf-inspector>=0.2.5",
+    "werkzeug",
     "jieba>=0.42.1",
     "blingfire>=0.1.8",
 ]
