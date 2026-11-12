@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
+from common.mcp import cacheable_tool_output
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -25,6 +26,7 @@ def register_read_note_resource_text_tool(
             "read the structured snapshot first and then call apply_current_note_edits."
         ),
     )
+    @cacheable_tool_output(paths=("text",))
     async def read_note_resource_text(
         resource_id: Annotated[str, Field(min_length=1, description="Note resource id returned by search_user_resources or selected by the user.")],
     ) -> dict[str, Any]:
