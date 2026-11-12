@@ -37,6 +37,9 @@ class ChatErrorCode(IErrorCode):
     MCP_TOOL_SERVER_UNREACHABLE = (40035, "MCP 工具服务器不可用")
     SUSPENDED_CHAT_NOT_FOUND = (40036, "SuspendedChat 不存在")
     SUSPENDED_CHAT_STATE_INVALID = (40037, "SuspendedChat 状态不合法")
+    CHAT_TOOL_RESPONSE_WAIT_EXPIRED = (40043, "前端工具响应等待已超时，请使用恢复接口")
+    CHAT_TOOL_RESPONSE_INVALID = (40045, "前端工具响应与当前待处理调用不匹配")
+    CHAT_TOOL_RESPONSE_PUBLISH_FAILED = (40046, "前端工具响应投递失败，请重试")
 
     # --- 语音相关 ---
     SPEECH_PROVIDER_NOT_CONFIGURED = (40041, "语音识别 Provider 未配置")

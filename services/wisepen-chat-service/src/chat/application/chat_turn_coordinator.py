@@ -29,9 +29,10 @@ from chat.application.agents import (
     AgentResolver,
     DefaultAgentResolver, AgentSpec, DEFAULT_AGENT_ID,
 )
-from chat.application.events import StepFinishEvent, ErrorEvent
+from chat.application.events import ErrorEvent, StepFinishEvent
 from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
+from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.client_tools import ClientToolCapability
@@ -78,6 +79,7 @@ class ChatTurnCoordinator:
             kafka_producer: KafkaProducerClient,
             tool_policy_builder: ChatTurnToolPolicyBuilder,
             oss_file_loader: OssFileLoader,
+            frontend_tool_response_broker: FrontendToolResponseBroker,
             agent_resolver: AgentResolver | None = None,
             redis_client: redis.Redis | None = None,
     ):
@@ -93,6 +95,7 @@ class ChatTurnCoordinator:
             llm_provider_resolver=llm_provider_resolver,
             token_counter=token_counter,
             tool_dispatcher=tool_dispatcher,
+            frontend_tool_response_broker=frontend_tool_response_broker,
         )
         self._turn_finalizer = ChatTurnFinalizer(
             text_llm=text_llm,
@@ -408,7 +411,7 @@ class ChatTurnCoordinator:
                             yield to_vercel_sse(event)
                             yield to_vercel_sse(ErrorEvent(error_text="本轮对话已被用户取消"))
                             return
-                        # SSE流需要中断（因调用客户端工具、需要工具调用批准等）
+                        # 只有等待前端工具结果超时才会挂起
                         if event.suspension is not None:
                             chat_turn_context.messages_for_llm.extend(event.intermediate_messages)
                             suspended_turn_context = SuspendedTurnContext(
@@ -433,7 +436,7 @@ class ChatTurnCoordinator:
                         chat_turn_context.chat_record_messages.append(event.final_assistant_message)
                 yield to_vercel_sse(event)
 
-                # 切断SSE流
+                # 超时挂起时切断 SSE
                 if isinstance(event, StepFinishEvent) and event.suspension is not None:
                     return
         except ServiceException as e:

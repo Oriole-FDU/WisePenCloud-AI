@@ -70,7 +70,9 @@ class ChatTurnStreamManager:
         # 订阅某个具体 turn_id 的 Redis Stream，并把里面的 SSE frame 原样 yield 给 HTTP 响应
         try:
             async for frame, _terminal in self._stream_repo.iter_frames(turn_id):
-                yield frame
+                # 以 : 开头是 SSE 规范的注释行，EventSource 和 AI SDK 的 SSE 解析器都会直接忽略
+                # frame 为 None 时是为了保持 TCP 活跃才发送包
+                yield frame if frame is not None else ": keep-alive\n\n"
         except asyncio.CancelledError:
             info("chat turn stream subscriber cancelled.", turn_id=turn_id)
             return
@@ -83,7 +85,6 @@ class ChatTurnStreamManager:
         turn_id: str,
         build_chat_gen: Callable[[BackgroundTasks, str], AsyncIterator[str]],
     ) -> None:
-        # 创建一个后台执行环境
         background_tasks = BackgroundTasks()
 
         try:
@@ -104,9 +105,16 @@ class ChatTurnStreamManager:
 
             await self._stream_repo.append_frame(turn_id, message_finish())
             await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
+        except asyncio.CancelledError:
+            await self._stream_repo.release_active_turn(user_id, session_id, turn_id)
+            await self._stream_repo.append_frame(turn_id, sse_error(error_text="本轮对话已被取消或运行租约已失效"))
+            await self._stream_repo.append_frame(turn_id, message_finish())
+            await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
         except Exception as exc:
             error("chat turn runner failed.", turn_id=turn_id, session_id=session_id, exc=exc)
+            await self._stream_repo.release_active_turn(user_id, session_id, turn_id)
             await self._stream_repo.append_frame(turn_id, sse_error(error_text=str(exc)))
+            await self._stream_repo.append_frame(turn_id, message_finish())
             await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
         finally:
             self._tasks.pop(turn_id, None)

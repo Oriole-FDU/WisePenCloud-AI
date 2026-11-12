@@ -29,9 +29,9 @@ class KafkaConsumerClient:
         self._consumer: Optional[AIOKafkaConsumer] = None
         self._task: Optional[asyncio.Task] = None
 
-    async def start(self) -> None:
+    async def start(self) -> bool:
         if self._task is not None:
-            return
+            return True
         self._consumer = AIOKafkaConsumer(
             self.topic,
             bootstrap_servers=self.bootstrap_servers,
@@ -43,9 +43,10 @@ class KafkaConsumerClient:
         except Exception as e:
             error("kafka consumer start failed.", topic=self.topic, group_id=self.group_id, exc=e)
             self._consumer = None
-            return
+            return False
         self._task = asyncio.create_task(self._consume_loop(), name=f"kafka-consumer-{self.topic}")
         info("kafka consumer started.", topic=self.topic, group_id=self.group_id)
+        return True
 
     async def stop(self) -> None:
         if self._task is not None:

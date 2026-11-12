@@ -113,7 +113,9 @@ class RedisChatTurnStream(RedisRepository):
             # 从 last_id 之后继续读，如果暂时没有新事件，最多等 4 秒，一次最多读 50 条
             result = await self._redis.xread({stream_key: last_id}, block=4000, count=50)
             if not result:
-                continue # 继续循环
+                # 空闲的长连接会被中间层掐掉，需要保活
+                yield None, False # 等待期间发送 SSE comment 心跳，不写入 Redis Stream
+                continue
 
             for _, stream_entries in result:
                 for event_id, fields in stream_entries:

@@ -11,6 +11,7 @@ from common.logger import info
 from chat.api.schemas.chat import ActiveChatTurnResponse, ChatCancelRequest, ChatRequest, ChatRecoverRequest
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
+from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
 from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
 from chat.application.tools.client_tools import ClientToolCapability
 from chat.container import Container
@@ -142,6 +143,40 @@ async def chat_turn_stream(
         headers=_SSE_HEADERS,
     )
 
+def _to_domain_client_results(req: ChatRecoverRequest) -> list[ClientToolResult]:
+    return [
+        ClientToolResult(
+            tool_call_id=item.tool_call_id,
+            is_error=item.error_text is not None,
+            output=item.error_text if item.error_text is not None else item.output,
+        )
+        for item in req.client_tool_results
+    ]
+
+
+def _to_domain_approval_status(req: ChatRecoverRequest) -> list[ToolApprovalStatus]:
+    return [
+        ToolApprovalStatus(tool_call_id=item.tool_call_id, approved=item.approved)
+        for item in req.tool_approval_status
+    ]
+
+
+@router.post("/completions/respond", summary="向仍在等待的 Chat Turn 提交前端工具结果或审批状态")
+@inject
+async def chat_turn_respond(
+    req: ChatRecoverRequest,
+    user_id: str = Depends(require_login),
+    response_broker: FrontendToolResponseBroker = Depends(Provide[Container.frontend_tool_response_broker]),
+    session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    await session_repo.get_session_for_user(req.session_id, user_id)
+    await response_broker.submit(
+        session_id=req.session_id,
+        client_tool_results=_to_domain_client_results(req),
+        tool_approval_status=_to_domain_approval_status(req),
+    )
+    return R.success()
+
 
 @router.post("/completions/recover", summary="提交外部工具结果或审批状态并恢复对话")
 @inject
@@ -155,27 +190,18 @@ async def chat_recover(
     await session_repo.get_session_for_user(req.session_id, user_id)
     identity_type = SecurityContextHolder.get_identity_type()
 
+    active_turn_id = await turn_stream_manager.active_turn_id(user_id=user_id, session_id=req.session_id)
+    if active_turn_id is not None:
+        raise ServiceException(ChatErrorCode.CHAT_TURN_IN_PROGRESS)
+
     turn_id = await turn_stream_manager.start_turn(
         user_id=user_id,
         session_id=req.session_id,
         build_chat_gen=lambda background_tasks, turn_id: coordinator.handle_suspended_chat_recover(
             user_id=user_id,
             session_id=req.session_id,
-            client_tool_results=[
-                ClientToolResult(
-                    tool_call_id=item.tool_call_id,
-                    is_error=item.error_text is not None,
-                    output=item.error_text if item.error_text is not None else item.output,
-                )
-                for item in req.client_tool_results
-            ],
-            tool_approval_status=[
-                ToolApprovalStatus(
-                    tool_call_id=item.tool_call_id,
-                    approved=item.approved,
-                )
-                for item in req.tool_approval_status
-            ],
+            client_tool_results=_to_domain_client_results(req),
+            tool_approval_status=_to_domain_approval_status(req),
             background_tasks=background_tasks,
             cancel_requested=lambda: turn_stream_manager.is_turn_cancel_requested(turn_id),
             identity_type=identity_type,

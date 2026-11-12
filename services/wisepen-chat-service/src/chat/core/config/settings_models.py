@@ -137,6 +137,16 @@ class AgentSettings(ConfigModel):
 class ChatTurnSettings(ConfigModel):
     active_ttl_seconds: int = Field(default=30 * 60, ge=1)
     stream_ttl_seconds: int = Field(default=60 * 60, ge=1)
+    frontend_response_timeout_seconds: int = Field(default=10 * 60, ge=1)
+
+    @model_validator(mode="after")
+    def validate_lease_outlives_frontend_wait(self) -> ChatTurnSettings:
+        # 前端等待期间 runner 不产帧、不续租，租约必须比一次等待活得更久
+        if self.active_ttl_seconds <= self.frontend_response_timeout_seconds:
+            raise ValueError(
+                "active-ttl-seconds 必须大于 frontend-response-timeout-seconds"
+            )
+        return self
 
 
 class ToolContentSettings(ConfigModel):

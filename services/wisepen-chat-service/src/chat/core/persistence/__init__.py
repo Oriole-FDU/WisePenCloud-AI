@@ -8,6 +8,7 @@ from .mongo.mcp_server_config_repository import MongoMcpServerConfigRepository
 from .redis.hot_context import RedisHotContext
 from .redis.mcp_tool_discovery_cache import RedisMcpToolDiscoveryCache
 from .redis.chat_turn_stream import RedisChatTurnStream
+from .redis.frontend_tool_response import RedisFrontendToolResponseRepository
 from .redis.tool_content_repository import RedisToolContentRepository
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     "RedisHotContext",
     "RedisMcpToolDiscoveryCache",
     "RedisChatTurnStream",
+    "RedisFrontendToolResponseRepository",
     "RedisToolContentRepository",
 ]

@@ -34,6 +34,7 @@ from chat.api.endpoints import chat as chat_endpoints
 from chat.api.endpoints import session as session_endpoints
 from chat.api.endpoints import memory as memory_endpoints
 from chat.api.endpoints import model as model_endpoints
+from chat.api.endpoints import model_admin as model_admin_endpoints
 from chat.api.endpoints import speech as speech_endpoints
 from chat.api.endpoints import tool as tool_endpoints
 from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig, UserMcpServerConfig, SuspendedChat
@@ -71,6 +72,8 @@ async def lifespan(app: FastAPI):
     # 启动 Kafka Producer
     kafka_producer = container.kafka_producer()
     await kafka_producer.start()
+    frontend_response_consumer = container.frontend_tool_response_consumer()
+    await frontend_response_consumer.start()
 
     # 启动 Oss File 加载器
     oss_file_loader = container.oss_file_loader()
@@ -88,7 +91,8 @@ async def lifespan(app: FastAPI):
     # --- 关闭阶段 ---
     info("service stopping.", service=bootstrap_settings.SERVICE_NAME)
 
-    # 关闭 Kafka Producer
+    # 关闭 Kafka 消费者，再关闭 Producer
+    await frontend_response_consumer.stop()
     kafka_producer = container.kafka_producer()
     await kafka_producer.stop()
 
@@ -118,6 +122,7 @@ container.wire(modules=[
     session_endpoints,
     memory_endpoints,
     model_endpoints,
+    model_admin_endpoints,
     speech_endpoints,
     tool_endpoints,
 ])  # 注入依赖到路由模块

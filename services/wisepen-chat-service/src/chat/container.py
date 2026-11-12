@@ -31,12 +31,15 @@ from chat.core.persistence import (
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
     RedisChatTurnStream,
+    RedisFrontendToolResponseRepository,
     RedisToolContentRepository,
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
+from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
+from chat.mq import FrontendToolResponseConsumer
 from chat.application.agents import (
     DefaultAgentResolver,
     CompositeAgentResolver,
@@ -130,6 +133,10 @@ class Container(containers.DeclarativeContainer):
     hot_context_repo = providers.Singleton(RedisHotContext, redis_client=redis_client)
     mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache, redis_client=redis_client)
     chat_turn_stream_repo = providers.Singleton(RedisChatTurnStream, redis_client=redis_client)
+    frontend_tool_response_repo = providers.Singleton(
+        RedisFrontendToolResponseRepository,
+        redis_client=redis_client,
+    )
     tool_content_repo = providers.Singleton(RedisToolContentRepository, redis_client=redis_client)
 
     tool_content_store = providers.Singleton(ToolContentStore,tool_content_repository=tool_content_repo,)
@@ -299,6 +306,18 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Application 层组件
+    frontend_tool_response_broker = providers.Singleton(
+        FrontendToolResponseBroker,
+        response_repo=frontend_tool_response_repo,
+        kafka_producer=kafka_producer,
+        timeout_seconds=settings.chat_turn.frontend_response_timeout_seconds,
+    )
+    frontend_tool_response_consumer = providers.Singleton(
+        FrontendToolResponseConsumer,
+        bootstrap_servers=settings.messaging.kafka.bootstrap_servers,
+        service_name=bootstrap_settings.SERVICE_NAME,
+        broker=frontend_tool_response_broker,
+    )
     chat_turn_coordinator = providers.Factory(
         ChatTurnCoordinator,
         llm_provider_resolver=llm_provider_resolver,
@@ -317,6 +336,7 @@ class Container(containers.DeclarativeContainer):
         suspended_chat_repo=suspended_chat_repo,
         agent_resolver=agent_resolver,
         oss_file_loader=oss_file_loader,
+        frontend_tool_response_broker=frontend_tool_response_broker,
     )
 
     chat_turn_stream_manager = providers.Singleton(
