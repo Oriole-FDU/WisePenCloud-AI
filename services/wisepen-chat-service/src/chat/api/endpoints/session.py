@@ -192,17 +192,16 @@ async def get_session_messages(
     page_messages, total_turns = await message_repo.list_session_message_turns_page(session_id, page=page, size=size)
     messages_for_ui = list(page_messages)
 
-    # 仅在最新回合展示待处理SuspendedChat内容
+    # 仅在最新回合补上挂起回合的工具待处理状态
     tool_states = {}
     if page == 1:
         pending = await suspended_chat_repo.find_suspended_by_session(session_id, user_id)
         if pending is not None:
-            pending_messages = list(pending.context.chat_record_messages)
+            # 挂起回合的消息已逐步落盘，分页里已包含；这里只补工具待处理状态
             for item in pending.context.turn_suspension.classified_tool_invocation_plan.approval_required_tools:
                 tool_states[item.tool_call_id] = "approval-requested"
             for item in pending.context.turn_suspension.classified_tool_invocation_plan.client_tools:
                 tool_states[item.tool_call_id] = "input-available"
-            messages_for_ui.extend(pending_messages)
 
     ui_messages = convert_to_ui_messages(messages_for_ui, tool_states=tool_states)
 

@@ -12,7 +12,6 @@ from pymongo import ASCENDING, IndexModel
 
 if TYPE_CHECKING:
     from chat.application.agents import AgentSpec
-    from chat.application.chat_context_assembler import WindowedMessages
     from chat.application.events import TurnSuspension
     from chat.domain.entities import ChatMessage
     from chat.domain.repositories.model_repo import ModelRequestInfo
@@ -22,10 +21,9 @@ class SuspendedTurnContext:
     model_info: ModelRequestInfo
     agent_spec: AgentSpec
     session_summary: Optional[str]
-    windowed_history_messages: WindowedMessages
     tool_scope_data: dict[str, Any]
     messages_for_llm: List[ChatMessage]
-    chat_record_messages: List[ChatMessage]
+    user_message: ChatMessage
     token_usage: Any
     billing_resource_id: Optional[str]
     preferred_billing_group_id: Optional[str]

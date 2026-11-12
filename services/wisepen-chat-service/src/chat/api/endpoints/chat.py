@@ -7,8 +7,10 @@ from dependency_injector.wiring import inject, Provide
 
 from common.core.domain import R
 from common.security import require_login, SecurityContextHolder
-from common.logger import info
-from chat.api.schemas.chat import ActiveChatTurnResponse, ChatCancelRequest, ChatRequest, ChatRecoverRequest
+from common.logger import error, info
+from chat.api.schemas.chat import ActiveChatTurnResponse, ChatCancelRequest, ChatCompactRequest, ChatRequest, ChatRecoverRequest
+from chat.application.agents import AgentResolver
+from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
 from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
@@ -17,6 +19,7 @@ from chat.application.tools.client_tools import ClientToolCapability
 from chat.container import Container
 from chat.domain.repositories import SessionRepository
 from chat.domain.error_codes import ChatErrorCode
+from chat.domain.interfaces.context_compact import ContextCompactor
 from common.core.exceptions import ServiceException
 
 router = APIRouter()
@@ -225,4 +228,45 @@ async def chat_cancel(
 ):
     await session_repo.get_session_for_user(req.session_id, user_id)
     await turn_stream_manager.cancel_turn(user_id=user_id, session_id=req.session_id)
+    return R.success()
+
+
+@router.post("/completions/compact", summary="立即压缩当前会话上下文")
+@inject
+async def chat_compact(
+    req: ChatCompactRequest,
+    user_id: str = Depends(require_login),
+    context_compactor: ContextCompactor = Depends(Provide[Container.context_compactor]),
+    context_assembler: ChatContextAssembler = Depends(Provide[Container.context_assembler]),
+    agent_resolver: AgentResolver = Depends(Provide[Container.agent_resolver]),
+    turn_stream_manager: ChatTurnStreamManager = Depends(Provide[Container.chat_turn_stream_manager]),
+    session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    session = await session_repo.get_session_for_user(req.session_id, user_id)
+
+    active_turn_id = await turn_stream_manager.active_turn_id(user_id=user_id, session_id=req.session_id)
+    if active_turn_id is not None:
+        raise ServiceException(ChatErrorCode.CHAT_TURN_IN_PROGRESS)
+
+    agent = await agent_resolver.resolve(session.agent_id, session.agent_version)
+    if agent is None:
+        raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
+
+    memory_policy = agent.spec.memory_policy
+    if not (memory_policy.enable_chat_memory and memory_policy.enable_chat_memory_summary):
+        return R.success()
+
+    history = await context_assembler.get_chat_history_record_messages(req.session_id)
+    await context_compactor.compact(
+        session_id=req.session_id,
+        history=history,
+        existing_summary=session.current_summary,
+        summary_prompt=memory_policy.summary_prompt,
+    )
+
+    # 压缩后上下文已缩小，清空占用指示器，等下一次 LLM 调用重新写入
+    try:
+        await session_repo.update_context_tokens(req.session_id, 0)
+    except Exception as e:
+        error("chat context tokens reset failed.", session_id=req.session_id, exc=e)
     return R.success()

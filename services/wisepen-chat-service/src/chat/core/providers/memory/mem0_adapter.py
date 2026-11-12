@@ -92,8 +92,8 @@ class Mem0Adapter(MemoryProvider):
         # Mem0 需要的是 [{"role": "user", "content": "..."}, ...] 格式
         formatted_msgs = []
         for message in messages:
-            # 只有 Role.USER Message 才应存入长期记忆
-            if message.role == Role.USER:
+            # 只摄入用户提问与最终 assistant 回复，中间工具/过程消息不记录
+            if message.role in (Role.USER, Role.ASSISTANT):
                 formatted_msgs.append({
                     "role": message.role.value, "content": message.content
                 })

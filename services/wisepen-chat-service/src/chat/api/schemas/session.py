@@ -73,6 +73,7 @@ class SessionResponse(BaseModel):
     last_selected_skill_ids: List[str] = Field(default_factory=list)
     last_tool_selection_default_enabled: Optional[bool] = None
     last_tool_selection_overrides: dict[str, bool] = Field(default_factory=dict)
+    context_tokens: int = 0
 
     @classmethod
     def from_entity(cls, session: ChatSession) -> "SessionResponse":
@@ -97,6 +98,7 @@ class SessionResponse(BaseModel):
             last_selected_skill_ids=list(session.last_selected_skill_ids),
             last_tool_selection_default_enabled=session.last_tool_selection_default_enabled,
             last_tool_selection_overrides=dict(session.last_tool_selection_overrides),
+            context_tokens=session.context_tokens,
         )
 
 

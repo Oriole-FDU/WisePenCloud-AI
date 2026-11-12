@@ -14,6 +14,7 @@ from chat.core.providers import (
     GeminiAdapter,
     OpenAIAdapter,
     QwenAdapter,
+    DefaultLlmCompactor,
     Mem0Adapter,
     OssFileLoader,
     IflytekSpeechProvider,
@@ -35,6 +36,7 @@ from chat.core.persistence import (
     RedisToolContentRepository,
 )
 from chat.domain.repositories import ToolConfigRepository
+from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
@@ -215,6 +217,13 @@ class Container(containers.DeclarativeContainer):
         cache_ttl_seconds=settings.asset_cache.ttl_seconds,
         gc_interval_seconds=settings.asset_cache.gc_interval_seconds,
     )
+    context_assembler = providers.Singleton(
+        ChatContextAssembler,
+        message_repo=message_repo,
+        session_repo=session_repo,
+        hot_context_repo=hot_context_repo,
+        oss_file_loader=oss_file_loader,
+    )
     default_agent_resolver = providers.Singleton(DefaultAgentResolver)
     remote_agent_resolver = providers.Singleton(
         RemoteAgentResolver,
@@ -318,6 +327,12 @@ class Container(containers.DeclarativeContainer):
         service_name=bootstrap_settings.SERVICE_NAME,
         broker=frontend_tool_response_broker,
     )
+    context_compactor = providers.Singleton(
+        DefaultLlmCompactor,
+        text_llm=litellm_adapter,
+        session_repo=session_repo,
+        hot_context_repo=hot_context_repo,
+    )
     chat_turn_coordinator = providers.Factory(
         ChatTurnCoordinator,
         llm_provider_resolver=llm_provider_resolver,
@@ -335,8 +350,9 @@ class Container(containers.DeclarativeContainer):
         tool_policy_builder=chat_turn_tool_policy_builder,
         suspended_chat_repo=suspended_chat_repo,
         agent_resolver=agent_resolver,
-        oss_file_loader=oss_file_loader,
+        context_assembler=context_assembler,
         frontend_tool_response_broker=frontend_tool_response_broker,
+        context_compactor=context_compactor,
     )
 
     chat_turn_stream_manager = providers.Singleton(

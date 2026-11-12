@@ -37,10 +37,11 @@ class RedisHotContext(RedisRepository, HotContextRepository):
         return [ChatMessage(**json.loads(msg)) for msg in raw_msgs]
 
     async def load_messages(self, session_id: str, messages: List[ChatMessage]) -> None:
-        """将历史明细批量写入 Redis，重建热缓存。"""
-        if not messages:
-            return
+        """用给定消息重建热缓存；传入空列表表示清空。"""
         key = self._get_key(session_id)
+        if not messages:
+            await self._redis.delete(key)
+            return
         serialized = self._serialize(messages)
         async with self._redis.pipeline(transaction=True) as pipe:
             await pipe.delete(key)
