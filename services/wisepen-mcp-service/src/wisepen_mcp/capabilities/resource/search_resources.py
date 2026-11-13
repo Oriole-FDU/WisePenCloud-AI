@@ -14,9 +14,9 @@ _ALLOWED_RESOURCE_TYPES = frozenset({"NOTE", "PDF", "DOC", "DOCX", "PPT", "PPTX"
 _DEFAULT_RESOURCE_TYPES = ["NOTE", "PDF", "DOC", "DOCX", "PPT", "PPTX", "XLS", "XLSX"]
 
 
-def register_search_user_resources_tool(mcp: FastMCP, resource_client: ResourceClient) -> None:
+def register_search_resources_tool(mcp: FastMCP, resource_client: ResourceClient) -> None:
     @mcp.tool(
-        name="search_user_resources",
+        name="search_resources",
         description=(
             "Search the current user's visible Wisepen Note and document resources. This tool excludes AIAsset "
             "resources such as Skill and Agent. Results include resource_id values that can be passed to "
@@ -24,7 +24,7 @@ def register_search_user_resources_tool(mcp: FastMCP, resource_client: ResourceC
             "read_document_resource_text for document resources."
         ),
     )
-    async def search_user_resources(
+    async def search_resources(
         query: Annotated[str, Field(min_length=1, description="Search keyword or phrase.")],
         resource_types: Annotated[
             list[str] | None,
@@ -40,32 +40,30 @@ def register_search_user_resources_tool(mcp: FastMCP, resource_client: ResourceC
         if not resolved_types:
             raise ServiceException(McpErrorCode.RESOURCE_REQUEST_INVALID, "resource_types contains no supported resource type.")
 
-        page = await resource_client.search_user_resources(
+        page = await resource_client.search_resources(
             keyword=query,
             resource_types=resolved_types,
             page=1,
             size=limit,
         )
         items = []
-        for item in page.get("list") or []:
-            if not isinstance(item, dict):
-                continue
-            resource_type = item.get("resourceType")
+        for item in page.items:
+            resource_type = item.resource_type
             if isinstance(resource_type, dict):
                 resource_type = resource_type.get("value") or resource_type.get("name") or resource_type.get("extension")
             items.append({
-                "resource_id": item.get("resourceId") or "",
+                "resource_id": item.resource_id,
                 "resource_type": str(resource_type or "").strip().upper(),
-                "resource_name": item.get("resourceName") or "",
-                "highlight_content": item.get("highlightContent") or "",
-                "update_time": item.get("updateTime"),
+                "resource_name": item.resource_name,
+                "highlight_content": item.highlight_content,
+                "update_time": item.update_time,
             })
         return {
             "query": query,
             "resource_types": resolved_types,
-            "total": int(page.get("total") or 0),
+            "total": page.total,
             "items": items,
         }
 
 
-__all__ = ["register_search_user_resources_tool"]
+__all__ = ["register_search_resources_tool"]

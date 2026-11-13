@@ -6,7 +6,7 @@ from common.http.rpc_client import RpcClient
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.core.config.bootstrap_settings import bootstrap_settings
 from wisepen_mcp.core.config.nacos import nacos_client_manager
-from wisepen_mcp.service_client import AIAssetClient, DocumentClient, NoteClient, NoteCollabClient, ResourceClient
+from wisepen_mcp.service_client import AIAssetClient, DocumentClient, NoteClient, NoteCollabClient, ResourceClient, UserClient
 
 
 async def _provide_nacos_naming() -> NacosNamingService:
@@ -47,6 +47,10 @@ class Container(containers.DeclarativeContainer):
     )
     note_client = providers.Singleton(
         NoteClient,
+        rpc=rpc_client,
+    )
+    user_client = providers.Singleton(
+        UserClient,
         rpc=rpc_client,
     )
 

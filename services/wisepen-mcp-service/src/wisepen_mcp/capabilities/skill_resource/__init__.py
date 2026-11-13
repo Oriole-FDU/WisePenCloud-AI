@@ -9,7 +9,7 @@ from .update_skill_info import register_update_skill_info_tool
 from .upload_skill_draft_asset import register_upload_skill_draft_asset_tool
 
 
-def register_skill_creator_tools(
+def register_skill_resource_tools(
     mcp: FastMCP,
     ai_asset_client: AIAssetClient,
 ) -> None:
@@ -19,4 +19,4 @@ def register_skill_creator_tools(
     register_upload_skill_draft_asset_tool(mcp, ai_asset_client)
 
 
-__all__ = ["register_skill_creator_tools"]
+__all__ = ["register_skill_resource_tools"]

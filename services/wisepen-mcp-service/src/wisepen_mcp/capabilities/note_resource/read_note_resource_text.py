@@ -6,6 +6,7 @@ from common.core.exceptions import ServiceException
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
+from wisepen_mcp.domain.entities import ResourceType
 from wisepen_mcp.domain.error_codes import McpErrorCode
 from wisepen_mcp.service_client import NoteClient, ResourceClient
 
@@ -26,7 +27,7 @@ def register_read_note_resource_text_tool(
         ),
     )
     async def read_note_resource_text(
-        resource_id: Annotated[str, Field(min_length=1, description="Note resource id returned by search_user_resources or selected by the user.")],
+        resource_id: Annotated[str, Field(min_length=1, description="Note resource id returned by search_resources or selected by the user.")],
     ) -> dict[str, Any]:
         user_id = SecurityContextHolder.get_user_id()
         if not user_id:
@@ -48,20 +49,16 @@ def register_read_note_resource_text_tool(
             user_id=str(user_id),
             group_roles=group_roles,
         )
-        resource_type = resource_info.get("resourceType")
-        if isinstance(resource_type, dict):
-            resource_type = resource_type.get("value") or resource_type.get("name") or resource_type.get("extension")
-        resource_type = str(resource_type or "").strip().upper()
-        if resource_type != "NOTE":
-            raise ServiceException(McpErrorCode.RESOURCE_REQUEST_INVALID, f"unsupported note resource type: {resource_type}")
+        if resource_info.resource_type is not ResourceType.NOTE:
+            raise ServiceException(McpErrorCode.RESOURCE_REQUEST_INVALID, f"unsupported note resource type: {resource_info.resource_type}")
 
         text_payload = await note_client.get_search_text(resource_id)
         return {
             "resource_id": resource_id,
-            "resource_type": resource_type,
-            "resource_name": resource_info.get("resourceName") or "",
+            "resource_type": resource_info.resource_type.name,
+            "resource_name": resource_info.resource_name,
             "content_type": "text/plain",
-            "text": str(text_payload.get("searchText") or ""),
+            "text": text_payload.search_text,
         }
 
 

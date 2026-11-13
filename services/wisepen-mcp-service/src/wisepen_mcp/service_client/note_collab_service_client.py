@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-import httpx
-
 from common.core.exceptions import RpcError
 from common.http.rpc_client import RpcClient
 
@@ -37,7 +35,22 @@ class NoteCollabClient:
             timeout=self._read_timeout,
         )
         if response.status_code < 200 or response.status_code >= 300:
-            raise self._build_rpc_error(_READ_XML_PATH, response)
+            msg = response.text[:500]
+            code: int | None = None
+            try:
+                body = response.json()
+                if isinstance(body, dict):
+                    msg = str(body.get("msg") or msg)
+                    code = int(body["code"]) if "code" in body else None
+            except Exception:
+                pass
+            raise RpcError(
+                service_name=self._service_name,
+                path=_READ_XML_PATH,
+                status=response.status_code,
+                code=code,
+                msg=msg,
+            )
         return response.text
 
     async def apply_note_ai_diff(self, resource_id: str, request: Mapping[str, Any]) -> dict[str, Any]:
@@ -56,20 +69,5 @@ class NoteCollabClient:
             )
         return data
 
-    def _build_rpc_error(self, path: str, response: httpx.Response) -> RpcError:
-        msg = response.text[:500]
-        code: int | None = None
-        try:
-            body = response.json()
-            if isinstance(body, dict):
-                msg = str(body.get("msg") or msg)
-                code = int(body["code"]) if "code" in body else None
-        except Exception:
-            pass
-        return RpcError(
-            service_name=self._service_name,
-            path=path,
-            status=response.status_code,
-            code=code,
-            msg=msg,
-        )
+
+__all__ = ["NoteCollabClient"]

@@ -15,7 +15,7 @@ def register_read_current_note_for_edit_tool(mcp: FastMCP, note_collab_client: N
         name="read_current_note_for_edit",
         description=(
             "Read any visible Wisepen note as an XML editing snapshot, whether or not it is currently open. Obtain "
-            "resource_id from application_context.workspace_open_resource, search_user_resources, create_note, or an "
+            "resource_id from application_context.workspace_open_resource, search_resources, create_note, or an "
             "explicit user selection. Reuse the returned version and block ids when applying suggestions. For quick "
             "text-only loading that does not support editing, use read_note_resource_text instead."
         ),
