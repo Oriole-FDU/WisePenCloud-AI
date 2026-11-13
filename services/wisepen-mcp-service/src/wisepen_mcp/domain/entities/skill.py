@@ -38,8 +38,8 @@ class SkillAssetUploadTicket(ApiModel):
     path: str = ""
     name: str = ""
     object_key: str = ""
-    put_url: str = ""
-    callback_header: str = ""
+    put_url: str | None = None
+    callback_header: str | None = None
     flash_uploaded: bool = False
 
     @classmethod

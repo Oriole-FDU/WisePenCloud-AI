@@ -64,7 +64,7 @@ class SearchHitItem(ApiModel):
     resource_id: str = ""
     resource_type: Any = None
     resource_name: str = ""
-    highlight_content: str = ""
+    highlight_content: str | None = None
     update_time: Any = None
 
 

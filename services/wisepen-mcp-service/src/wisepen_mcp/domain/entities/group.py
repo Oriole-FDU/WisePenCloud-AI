@@ -22,7 +22,7 @@ class GroupItemInfo(ApiModel):
     group_name: str = ""
     group_type: GroupType | None = None
     group_desc: str = ""
-    group_cover_url: str = ""
+    group_cover_url: str | None = None
     owner_id: str = ""
     owner_info: dict[str, Any] | None = None
     member_count: int | None = None

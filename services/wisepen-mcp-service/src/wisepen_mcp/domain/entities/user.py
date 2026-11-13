@@ -1,8 +1,6 @@
 from enum import Enum
 from typing import Any
 
-from pydantic import Field
-
 from wisepen_mcp.domain.entities.base import ApiModel
 
 
@@ -52,7 +50,7 @@ class UserDetailInfo(ApiModel):
     user_id: str = ""
     user_info: dict[str, Any] | None = None
     user_profile: dict[str, Any] | None = None
-    readonly_fields: list[str] = Field(default_factory=list)
+    readonly_fields: list[str] | None = None
 
 
 class WalletDetail(ApiModel):
@@ -77,9 +75,9 @@ class MessageInfo(ApiModel):
     message_id: str = ""
     delivery_scope: MessageDeliveryScope | None = None
     message_type: MessageType | None = None
-    title: str = ""
-    content: str = ""
-    jump_url: str = ""
+    title: str | None = None
+    content: str | None = None
+    jump_url: str | None = None
     extra: str | None = None
     read_time: Any = None
     create_time: Any = None
