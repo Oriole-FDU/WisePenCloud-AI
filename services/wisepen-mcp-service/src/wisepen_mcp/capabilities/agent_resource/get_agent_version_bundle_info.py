@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -11,6 +12,12 @@ from wisepen_mcp.service_client import AIAssetClient
 
 
 def register_get_agent_version_bundle_info_tool(mcp: FastMCP, ai_asset_client: AIAssetClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="get_agent_version_bundle_info",
+        policy=ToolPolicyMeta(expose_by_default=True, risk_level=ToolRiskLevel.LOW, timeout_seconds=15.0, persist_output=True),
+        ui_spec=ToolUISpecMeta(display_name="读取 Agent 版本包", description="读取 Agent 版本包信息。"),
+        failure_reason="Agent Version Bundle Info Load Failed",
+    ))
     @mcp.tool(
         name="get_agent_version_bundle_info",
         description=(

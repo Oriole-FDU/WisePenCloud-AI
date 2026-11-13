@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -15,6 +16,12 @@ def register_get_document_source_file_tool(
     document_client: DocumentClient,
     resource_client: ResourceClient,
 ) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="get_document_source_file",
+        policy=ToolPolicyMeta(expose_by_default=True, risk_level=ToolRiskLevel.LOW, timeout_seconds=20.0, persist_output=True),
+        ui_spec=ToolUISpecMeta(display_name="获取文档源文件", description="获取文档源文件的限时下载地址。"),
+        failure_reason="Document Source File Load Failed",
+    ))
     @mcp.tool(
         name="get_document_source_file",
         description=(

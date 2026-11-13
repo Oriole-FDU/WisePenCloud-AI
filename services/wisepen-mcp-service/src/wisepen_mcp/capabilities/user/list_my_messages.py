@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -9,6 +10,12 @@ from wisepen_mcp.service_client import UserClient
 
 
 def register_list_my_messages_tool(mcp: FastMCP, user_client: UserClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="list_my_messages",
+        policy=ToolPolicyMeta(expose_by_default=True, risk_level=ToolRiskLevel.LOW, timeout_seconds=15.0, persist_output=True),
+        ui_spec=ToolUISpecMeta(display_name="列出我的消息", description="列出当前用户的消息。"),
+        failure_reason="Message List Failed",
+    ))
     @mcp.tool(
         name="list_my_messages",
         description="List the current user's in-app messages, newest first. Includes both direct messages and visible system messages.",

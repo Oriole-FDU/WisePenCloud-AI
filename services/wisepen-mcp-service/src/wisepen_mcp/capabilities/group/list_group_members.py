@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -9,6 +10,12 @@ from wisepen_mcp.service_client import UserClient
 
 
 def register_list_group_members_tool(mcp: FastMCP, user_client: UserClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="list_group_members",
+        policy=ToolPolicyMeta(expose_by_default=True, risk_level=ToolRiskLevel.LOW, timeout_seconds=15.0, persist_output=True),
+        ui_spec=ToolUISpecMeta(display_name="列出小组成员", description="列出指定小组的成员。"),
+        failure_reason="Group Member List Failed",
+    ))
     @mcp.tool(
         name="list_group_members",
         description=(

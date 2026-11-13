@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -24,6 +25,12 @@ def _tag_node_to_dict(node: TagTreeNode) -> dict[str, Any]:
 
 
 def register_get_resource_tag_tree_tool(mcp: FastMCP, resource_client: ResourceClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="get_resource_tag_tree",
+        policy=ToolPolicyMeta(expose_by_default=True, risk_level=ToolRiskLevel.LOW, timeout_seconds=15.0, persist_output=True),
+        ui_spec=ToolUISpecMeta(display_name="读取资源标签树", description="读取个人或小组的资源标签树。"),
+        failure_reason="Resource Tag Tree Load Failed",
+    ))
     @mcp.tool(
         name="get_resource_tag_tree",
         description=(

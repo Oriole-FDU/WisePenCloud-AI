@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -16,6 +17,12 @@ _QUERY_LOGIC_VALUES = frozenset({"AND", "OR"})
 
 
 def register_list_resources_tool(mcp: FastMCP, resource_client: ResourceClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="list_resources",
+        policy=ToolPolicyMeta(expose_by_default=True, risk_level=ToolRiskLevel.LOW, timeout_seconds=15.0, persist_output=True),
+        ui_spec=ToolUISpecMeta(display_name="列出资源", description="列出个人或小组的资源。"),
+        failure_reason="Resource List Failed",
+    ))
     @mcp.tool(
         name="list_resources",
         description=(

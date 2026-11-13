@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -12,6 +13,12 @@ from wisepen_mcp.service_client import AIAssetClient
 
 
 def register_update_agent_spec_tool(mcp: FastMCP, ai_asset_client: AIAssetClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="update_agent_spec",
+        policy=ToolPolicyMeta(expose_by_default=True, risk_level=ToolRiskLevel.HIGH, timeout_seconds=30.0, persist_output=True),
+        ui_spec=ToolUISpecMeta(display_name="更新 Agent 配置", description="整体替换 Agent 的运行配置。"),
+        failure_reason="Agent Spec Update Failed",
+    ))
     @mcp.tool(
         name="update_agent_spec",
         description=(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -9,6 +10,12 @@ from wisepen_mcp.service_client import ResourceClient
 
 
 def register_get_resource_base_info_tool(mcp: FastMCP, resource_client: ResourceClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="get_resource_base_info",
+        policy=ToolPolicyMeta(expose_by_default=True, risk_level=ToolRiskLevel.LOW, timeout_seconds=15.0, persist_output=True),
+        ui_spec=ToolUISpecMeta(display_name="读取资源基本信息", description="读取单个资源的基本信息。"),
+        failure_reason="Resource Base Info Load Failed",
+    ))
     @mcp.tool(
         name="get_resource_base_info",
         description=(
