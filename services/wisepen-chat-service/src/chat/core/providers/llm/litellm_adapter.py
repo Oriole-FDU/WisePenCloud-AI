@@ -200,6 +200,12 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
                                 acc["name"] += tool_call_delta.function.name
                             if tool_call_delta.function.arguments: # 累加 arguments
                                 acc["arguments"] += tool_call_delta.function.arguments
+                                yield LLMStreamEvent(
+                                    type=LLMEventType.TOOL_CALL_ARGS_DELTA,
+                                    call_id=acc["id"],
+                                    tool_name=acc["name"],
+                                    delta=tool_call_delta.function.arguments,
+                                )
 
         except litellm.ContextWindowExceededError:
             raise ServiceException(ChatErrorCode.CONTEXT_LIMIT_EXCEEDED)

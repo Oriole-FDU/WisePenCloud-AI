@@ -16,6 +16,7 @@ from chat.application.events import (
     TextEndEvent,
     TextStartEvent,
     ToolInputAvailableEvent,
+    ToolInputDeltaEvent,
     ToolInputStartEvent,
     ToolOutputAvailableEvent,
     ToolApprovalRequiredEvent,
@@ -71,6 +72,9 @@ class _StepEventInterpreter:
         # LLMProvider 的原生载荷
         self.provider_payload: dict | None = None
 
+        # 已发过 ToolInputStartEvent 的 call_id，避免重复发 start
+        self.started_tool_calls: set[str] = set()
+
         self._text_started: bool = False
         self._reasoning_started: bool = False
 
@@ -88,6 +92,17 @@ class _StepEventInterpreter:
         # 在一整轮模型输出结束后才能进入工具执行阶段
         if item.type == LLMEventType.TOOL_CALLS:
             self.tool_calls.extend(item.tool_calls or [])
+            return
+
+        # 处理工具调用参数的流式增量
+        if item.type == LLMEventType.TOOL_CALL_ARGS_DELTA:
+            call_id = item.call_id or ""
+            # 首次看到某 call_id 先补 start，再逐段 delta
+            if call_id and call_id not in self.started_tool_calls:
+                self.started_tool_calls.add(call_id)
+                yield ToolInputStartEvent(call_id=call_id, tool_name=item.tool_name or "")
+            if item.delta:
+                yield ToolInputDeltaEvent(call_id=call_id, delta=item.delta)
             return
 
         # 若 reasoning_delta 有值
@@ -442,11 +457,12 @@ class QueryLoopRuntime:
                     )
 
                 for invocation in invocations:
-                    # 为每个 parsed tool_call 产生两阶段 input 事件（start + available）
-                    yield ToolInputStartEvent(
-                        call_id=invocation.tool_call_id,
-                        tool_name=invocation.tool_name,
-                    )
+                    # 流式阶段已发过 start 的调用不再重复发，只补最终 available
+                    if invocation.tool_call_id not in event_interpreter.started_tool_calls:
+                        yield ToolInputStartEvent(
+                            call_id=invocation.tool_call_id,
+                            tool_name=invocation.tool_name,
+                        )
                     yield ToolInputAvailableEvent(
                         call_id=invocation.tool_call_id,
                         tool_name=invocation.tool_name,
