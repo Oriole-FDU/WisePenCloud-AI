@@ -8,8 +8,15 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field, TypeAdapter
 
 from common.mcp import (
+    OutputCacheSpecMeta,
+    OutputCacheStrategy,
     TOOL_CONFIG_META_KEY,
     TOOL_CONTEXT_META_KEY,
+    ToolMeta,
+    ToolPolicyMeta,
+    ToolRiskLevel,
+    ToolUISpecMeta,
+    wisepen_mcp_meta,
 )
 from sandbox.application.command_task_service import CommandTaskService
 from sandbox.application.file_service import (
@@ -37,6 +44,8 @@ from sandbox.domain.interfaces import (
 MAX_COMMAND_TIMEOUT_SECONDS = 600
 MAX_PATH_LENGTH = 1024
 MAX_WRITE_CONTENT_CHARS = 1_000_000
+
+_OPAQUE_OUTPUT_CACHE = OutputCacheSpecMeta(strategy=OutputCacheStrategy.OPAQUE)
 
 
 def get_tool_config_value(ctx: Context, key: str) -> object | None:
@@ -79,6 +88,18 @@ def create_sandbox_mcp_server(
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="start_command",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=15.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="启动沙箱命令"),
+        failure_reason="Sandbox Command Start Failed",
+    ))
     @mcp.tool(name="start_command", description="Start a shell command in a user's session workspace and return its task ID without waiting.")
     async def start_command(
         ctx: Context,
@@ -93,6 +114,18 @@ def create_sandbox_mcp_server(
         )
         return {"task_id": task.task_id, "status": task.status.value}
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="get_command_result",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=620.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Command Result Read Failed",
+    ))
     @mcp.tool(name="get_command_result", description="Get a command task result, optionally waiting for completion.")
     async def get_command_result(
         task_id: Annotated[str, Field(min_length=1, description="Random command task ID.")],
@@ -102,6 +135,18 @@ def create_sandbox_mcp_server(
         task = await task_service.get_command_result(task_id, wait=wait, wait_timeout_seconds=wait_timeout_seconds)
         return _result(task)
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="kill_command",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=15.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="终止沙箱命令"),
+        failure_reason="Sandbox Command Termination Failed",
+    ))
     @mcp.tool(name="kill_command", description="Request termination of a running command task. A successful response means AIO accepted the request; it does not wait for remote process confirmation.")
     async def kill_command(
         task_id: Annotated[str, Field(min_length=1, description="Random command task ID.")],
@@ -109,6 +154,18 @@ def create_sandbox_mcp_server(
         task = await task_service.kill_command(task_id)
         return {"task_id": task.task_id, "status": task.status.value}
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="execute_command",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=620.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Command Execution Failed",
+    ))
     @mcp.tool(name="execute_command", description="Execute a shell command in a user's session workspace and wait for its final result.")
     async def execute_command(
         ctx: Context,
@@ -126,6 +183,19 @@ def create_sandbox_mcp_server(
     if file_service is None:
         return mcp
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="read_file",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="读取沙箱文件"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox File Read Failed",
+    ))
     @mcp.tool(name="read_file", description="Read file content from a workspace-relative path. Line indexes are zero-based and end_line is exclusive.")
     async def read_file(
         ctx: Context,
@@ -140,6 +210,18 @@ def create_sandbox_mcp_server(
             start_line=start_line, end_line=end_line,
         )
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="write_file",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="写入沙箱文件"),
+        failure_reason="Sandbox File Write Failed",
+    ))
     @mcp.tool(name="write_file", description="Write file content. Use base64 encoding for binary content and upload_file for user attachments.")
     async def write_file(
         ctx: Context,
@@ -159,6 +241,18 @@ def create_sandbox_mcp_server(
             trailing_newline=trailing_newline,
         )
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="replace_in_file",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="替换沙箱文件内容"),
+        failure_reason="Sandbox File Replace Failed",
+    ))
     @mcp.tool(name="replace_in_file", description="Replace an exact string in a file.")
     async def replace_in_file(
         ctx: Context,
@@ -173,6 +267,19 @@ def create_sandbox_mcp_server(
             old_str=old_str, new_str=new_str,
         )
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="search_in_file",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="搜索沙箱文件"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox File Search Failed",
+    ))
     @mcp.tool(name="search_in_file", description="Search file content with a regular expression.")
     async def search_in_file(
         ctx: Context,
@@ -186,6 +293,19 @@ def create_sandbox_mcp_server(
             regex=regex,
         )
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="find_files",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="查找沙箱文件"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox File Find Failed",
+    ))
     @mcp.tool(name="find_files", description="Find files by a filename glob.")
     async def find_files(
         ctx: Context,
@@ -199,6 +319,19 @@ def create_sandbox_mcp_server(
             glob=glob,
         )
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="grep_files",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="检索沙箱文件内容"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox File Grep Failed",
+    ))
     @mcp.tool(name="grep_files", description="Search file contents with regex or fixed-string matching.")
     async def grep_files(
         ctx: Context,
@@ -229,6 +362,19 @@ def create_sandbox_mcp_server(
             multiline=multiline, offset=offset, file_type=type, recursive=recursive,
         )
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="glob_files",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="Glob 沙箱文件"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox File Glob Failed",
+    ))
     @mcp.tool(name="glob_files", description="Match files using an advanced glob with optional metadata and sorting.")
     async def glob_files(
         ctx: Context,
@@ -252,6 +398,18 @@ def create_sandbox_mcp_server(
             sort_by=sort_by, sort_desc=sort_desc,
         )
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="list_files",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="列出沙箱文件"),
+        failure_reason="Sandbox File List Failed",
+    ))
     @mcp.tool(name="list_files", description="List files and directories with optional recursion, metadata and sorting.")
     async def list_files(
         ctx: Context,
@@ -276,6 +434,18 @@ def create_sandbox_mcp_server(
             sort_desc=sort_desc,
         )
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="upload_file",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=150.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id", "temporary_attachment_refs"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="导入附件到沙箱"),
+        failure_reason="Sandbox Attachment Import Failed",
+    ))
     @mcp.tool(name="upload_file", description="Upload a current-session attachment into the sandbox workspace. The source is an attachment_id; arbitrary URLs are not accepted.")
     async def upload_file(
         ctx: Context,
@@ -292,6 +462,18 @@ def create_sandbox_mcp_server(
             destination_path=destination_path, temporary_attachment_refs=attachments,
         )
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="download_file",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=150.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="导出沙箱文件"),
+        failure_reason="Sandbox File Export Failed",
+    ))
     @mcp.tool(name="download_file", description="Download a sandbox file through private object storage and return a temporary OSS URL. This does not create a chat attachment.")
     async def download_file(
         ctx: Context,
@@ -303,6 +485,21 @@ def create_sandbox_mcp_server(
             path=path,
         )
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="upload_file_to_cloud_drive",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=150.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(
+            display_name="上传沙箱文件到云盘",
+            description="将沙箱中的文档或 HTML 文件上传为新的云盘资源。",
+        ),
+        failure_reason="Sandbox Cloud Resource Upload Failed",
+    ))
     @mcp.tool(
         name="upload_file_to_cloud_drive",
         description=(

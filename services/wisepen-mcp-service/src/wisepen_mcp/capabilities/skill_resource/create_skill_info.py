@@ -4,6 +4,7 @@ import re
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolSelectionMode, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from wisepen_mcp.domain.error_codes import McpErrorCode
@@ -15,6 +16,20 @@ _NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 
 
 def register_create_skill_info_tool(mcp: FastMCP, ai_asset_client: AIAssetClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="create_skill_info",
+        policy=ToolPolicyMeta(
+            expose_by_default=False,
+            selection_mode=ToolSelectionMode.CONTEXTUAL,
+            risk_level=ToolRiskLevel.HIGH,
+            timeout_seconds=15.0,
+            persist_output=True,
+            required_context_keys=("allowed_skill_ids",),
+            required_allowed_builtin_skill_ids=("builtin:skill-creator",),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="创建 Skill 信息", description="创建新的 Skill 草稿信息。"),
+        failure_reason="Skill Info Create Failed",
+    ))
     @mcp.tool(
         name="create_skill_info",
         description=(

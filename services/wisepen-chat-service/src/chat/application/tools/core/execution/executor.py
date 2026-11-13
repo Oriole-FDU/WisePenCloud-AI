@@ -136,8 +136,8 @@ class ToolExecutor:
             # 处理工具缓存
             output = await self._output_cache.cache_tool_output(
                 output,
-                strategy=tool.definition.output_cache_strategy,
-                paths=tool.definition.claim_check_paths,
+                strategy=tool.definition.output_cache_spec.strategy,
+                paths=tool.definition.output_cache_spec.cache_paths,
                 session_id=self._tool_scope.context.get("session_id"),
             )
 

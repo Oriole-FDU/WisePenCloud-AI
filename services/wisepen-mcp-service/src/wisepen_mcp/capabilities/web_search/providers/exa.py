@@ -13,11 +13,26 @@ from ..model import (
     SearchResponse,
     SearchResult,
 )
-from ..search_tools import BaseSearchTool
+from ..search_tools import (
+    BaseSearchTool,
+    ToolMeta,
+    ToolUISpecMeta,
+    _WEB_SEARCH_OUTPUT_CACHE_SPEC,
+    _WEB_SEARCH_POLICY_META,
+    _WEB_SEARCH_REQUIRED_API_KEY_CONFIG,
+)
 
 
 class ExaSearchTool(BaseSearchTool):
     tool_name = "exa_search"
+    tool_meta = ToolMeta(
+        tool_name="exa_search",
+        policy=_WEB_SEARCH_POLICY_META,
+        ui_spec=ToolUISpecMeta(display_name="Exa 搜索"),
+        config_spec=_WEB_SEARCH_REQUIRED_API_KEY_CONFIG,
+        output_cache_spec=_WEB_SEARCH_OUTPUT_CACHE_SPEC,
+        failure_reason="Exa Search Failed",
+    )
     provider_name = "exa"
 
     async def search_web(

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -11,6 +12,17 @@ from wisepen_mcp.service_client import NoteCollabClient
 
 
 def register_read_current_note_for_edit_tool(mcp: FastMCP, note_collab_client: NoteCollabClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="read_current_note_for_edit",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=10.0,
+            persist_output=True,
+        ),
+        ui_spec=ToolUISpecMeta(display_name="读取笔记编辑上下文", description="读取当前用户可见笔记的结构化编辑上下文。"),
+        failure_reason="Note Read For Edit Failed",
+    ))
     @mcp.tool(
         name="read_current_note_for_edit",
         description=(

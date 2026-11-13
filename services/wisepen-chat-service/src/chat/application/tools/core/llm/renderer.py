@@ -36,7 +36,7 @@ def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: Tool
     # 只有 OutputCacheStrategy 是 NONE（未缓存）才强制截断，OPAQUE / LONG_TEXT 均不截断
     force_truncate = (
         tool_definition is not None
-        and tool_definition.output_cache_strategy is OutputCacheStrategy.NONE
+        and tool_definition.output_cache_spec.strategy is OutputCacheStrategy.NONE
     )
     if tool_result.tool_execution_error is not None:
         error = tool_result.tool_execution_error

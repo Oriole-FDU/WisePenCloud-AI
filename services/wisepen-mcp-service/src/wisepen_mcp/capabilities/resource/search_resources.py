@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -15,6 +16,17 @@ _DEFAULT_RESOURCE_TYPES = ["NOTE", "PDF", "DOC", "DOCX", "PPT", "PPTX", "XLS", "
 
 
 def register_search_resources_tool(mcp: FastMCP, resource_client: ResourceClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="search_resources",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=15.0,
+            persist_output=True,
+        ),
+        ui_spec=ToolUISpecMeta(display_name="搜索用户资源", description="搜索当前用户可见的笔记和文档资源。"),
+        failure_reason="User Resource Search Failed",
+    ))
     @mcp.tool(
         name="search_resources",
         description=(

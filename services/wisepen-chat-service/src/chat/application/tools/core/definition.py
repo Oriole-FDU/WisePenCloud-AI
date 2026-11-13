@@ -44,6 +44,15 @@ class OutputCacheStrategy(StrEnum):
     LONG_TEXT = "long_text"
     OPAQUE = "opaque"
 
+
+@dataclass(frozen=True)
+class OutputCacheSpec:
+    """输出缓存策略"""
+    strategy: OutputCacheStrategy = OutputCacheStrategy.NONE
+    # 仅 LONG_TEXT 使用；() = 只缓存根，非空 = 按这些路径缓存
+    cache_paths: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True)
 class ToolParametersSchema:
     raw: dict[str, Any]
@@ -178,9 +187,7 @@ class ToolDefinition:
     source_spec: ToolSourceSpec = field(default_factory=ToolSourceSpec)
     config_spec: ToolConfigSpec | None = None
     preflight_hooks: tuple['ToolPreflightHook', ...] = ()
-    output_cache_strategy: OutputCacheStrategy = OutputCacheStrategy.NONE # 输出缓存策略
-    # 仅 LONG_TEXT 使用；() = 只缓存根，非空 = 按这些路径缓存
-    claim_check_paths: tuple[str, ...] = ()
+    output_cache_spec: OutputCacheSpec = field(default_factory=OutputCacheSpec)
 
 
 class Tool(Protocol):

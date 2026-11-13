@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, List, Literal
+from collections.abc import Awaitable, Callable
+from typing import Literal, TypeVar
 
 from chat.application.tools.core import (
+    OutputCacheSpec,
     OutputCacheStrategy,
     ToolConfigSpec,
     ToolDefinition,
@@ -20,443 +22,54 @@ from chat.core.config.app_settings import settings
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.service_client import McpServiceClient
 from common.logger import error
+from common.mcp import ToolMeta
 
 ToolSource = Literal["system", "sandbox"]
 
-_WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
-    schema={
-        "type": "object",
-        "properties": {
-            "api_key": {
-                "type": "string",
-                "title": "API Key",
-                "description": "API key for the configured search provider.",
-                "writeOnly": True,
-            },
-        },
-        "additionalProperties": False,
-    },
-    required_keys=("api_key",),
-    secret_keys=("api_key",),
-)
-
-_WEB_SEARCH_OPTIONAL_API_KEY_CONFIG = ToolConfigSpec(
-    schema={
-        "type": "object",
-        "properties": {
-            "api_key": {
-                "type": "string",
-                "title": "DeepSeek API Key",
-                "description": (
-                    "Optional. Your own DeepSeek API key; leave empty to use the "
-                    "platform-managed search key."
-                ),
-                "writeOnly": True,
-            },
-        },
-        "additionalProperties": False,
-    },
-    required_keys=(),
-    secret_keys=("api_key",),
-)
-
-_WEB_SEARCH_POLICY = ToolPolicy(
-    expose_by_default=True,
-    risk_level=ToolRiskLevel.LOW,
-    timeout_seconds=100.0,
-    persist_output=True,
-)
-
-_SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
-        "tool_name": "create_skill_info",
-        "ui_spec": ToolUISpec(display_name="创建 Skill 信息", description="创建新的 Skill 草稿信息。"),
-        "policy": ToolPolicy(
-            expose_by_default=False,
-            selection_mode=ToolSelectionMode.CONTEXTUAL,
-            risk_level=ToolRiskLevel.HIGH,
-            timeout_seconds=15.0,
-            persist_output=True,
-            required_context_keys=("allowed_skill_ids",),
-            required_allowed_builtin_skill_ids=("builtin:skill-creator",),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Skill Info Create Failed",
-    }, {
-        "tool_name": "get_skill_info",
-        "ui_spec": ToolUISpec(display_name="读取 Skill 信息", description="读取 Skill 草稿信息。"),
-        "policy": ToolPolicy(
-            expose_by_default=False,
-            selection_mode=ToolSelectionMode.CONTEXTUAL,
-            risk_level=ToolRiskLevel.LOW,
-            timeout_seconds=15.0,
-            persist_output=True,
-            required_context_keys=("allowed_skill_ids",),
-            required_allowed_builtin_skill_ids=("builtin:skill-creator",),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Skill Info Load Failed",
-    }, {
-        "tool_name": "update_skill_info",
-        "ui_spec": ToolUISpec(display_name="更新 Skill 信息", description="更新 Skill 草稿的名称和描述。"),
-        "policy": ToolPolicy(
-            expose_by_default=False,
-            selection_mode=ToolSelectionMode.CONTEXTUAL,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=15.0,
-            persist_output=True,
-            required_context_keys=("allowed_skill_ids",),
-            required_allowed_builtin_skill_ids=("builtin:skill-creator",),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Skill Info Update Failed",
-    }, {
-        "tool_name": "upload_skill_draft_asset",
-        "ui_spec": ToolUISpec(display_name="上传 Skill 资源", description="向 Skill 草稿上传文本资源。"),
-        "policy": ToolPolicy(
-            expose_by_default=False,
-            selection_mode=ToolSelectionMode.CONTEXTUAL,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=30.0,
-            persist_output=True,
-            required_context_keys=("allowed_skill_ids",),
-            required_allowed_builtin_skill_ids=("builtin:skill-creator",),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Skill Draft Asset Upload Failed",
-    },
-    # AI Note
-    {
-        "tool_name": "create_note",
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=15.0,
-            persist_output=True,
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "ui_spec": ToolUISpec(display_name="创建笔记", description="为当前用户创建一个新的空笔记。"),
-        "failure_reason": "Note Create Failed",
-    }, {
-        "tool_name": "read_current_note_for_edit",
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.LOW,
-            timeout_seconds=10.0,
-            persist_output=True,
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "ui_spec": ToolUISpec(display_name="读取笔记编辑上下文", description="读取当前用户可见笔记的结构化编辑上下文。"),
-        "failure_reason": "Note Read For Edit Failed",
-    }, {
-        "tool_name": "apply_current_note_edits",
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=15.0,
-            persist_output=True,
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "ui_spec": ToolUISpec(display_name="应用笔记编辑", description="将结构化编辑建议应用到当前用户可编辑的笔记。"),
-        "failure_reason": "Note Edit Apply Failed",
-    },
-    # User Resource Tools
-    {
-        "tool_name": "search_user_resources",
-        "ui_spec": ToolUISpec(display_name="搜索用户资源", description="搜索当前用户可见的笔记和文档资源。"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.LOW,
-            timeout_seconds=15.0,
-            persist_output=True,
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "User Resource Search Failed",
-    }, {
-        "tool_name": "read_note_resource_text",
-        "ui_spec": ToolUISpec(display_name="快速读取笔记文本", description="读取当前用户可见（无需已经打开）笔记的纯文本内容，用于快速了解，不能用于编辑。"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.LOW,
-            timeout_seconds=20.0,
-            persist_output=True,
-        ),
-        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
-        "claim_check_paths": ("text",),
-        "failure_reason": "Note Resource Text Read Failed",
-    }, {
-        "tool_name": "read_document_resource_text",
-        "ui_spec": ToolUISpec(display_name="读取文档资源文本", description="读取当前用户可见（无需已经打开）文档资源的转换或抽取文本。"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.LOW,
-            timeout_seconds=20.0,
-            persist_output=True,
-        ),
-        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
-        "claim_check_paths": ("text",),
-        "failure_reason": "Document Resource Text Read Failed",
-    },
-    # Web Search Tools
-    {
-        "tool_name": "default_web_search",
-        "ui_spec": ToolUISpec(display_name="默认 Web 搜索「由 Deepseek 提供」"),
-        "policy": _WEB_SEARCH_POLICY,
-        "config_spec": _WEB_SEARCH_OPTIONAL_API_KEY_CONFIG,
-        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
-        "claim_check_paths": ("results.evidences.*", "summary"),
-        "failure_reason": "Default Web Search Failed",
-    },{
-        "tool_name": "exa_search",
-        "ui_spec": ToolUISpec(display_name="Exa 搜索"),
-        "policy": _WEB_SEARCH_POLICY,
-        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
-        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
-        "claim_check_paths": ("results.evidences.*", "summary"),
-        "failure_reason": "Exa Search Failed",
-    },{
-        "tool_name": "tavily_search",
-        "ui_spec": ToolUISpec(display_name="Tavily 搜索"),
-        "policy": _WEB_SEARCH_POLICY,
-        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
-        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
-        "claim_check_paths": ("results.evidences.*", "summary"),
-        "failure_reason": "Tavily Search Failed",
-    },{
-        "tool_name": "anysearch_search",
-        "ui_spec": ToolUISpec(display_name="AnySearch 搜索"),
-        "policy": _WEB_SEARCH_POLICY,
-        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
-        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
-        "claim_check_paths": ("results.evidences.*", "summary"),
-        "failure_reason": "AnySearch Search Failed",
-    },{
-        "tool_name": "baidu_qianfan_search",
-        "ui_spec": ToolUISpec(display_name="百度千帆搜索"),
-        "policy": _WEB_SEARCH_POLICY,
-        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
-        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
-        "claim_check_paths": ("results.evidences.*", "summary"),
-        "failure_reason": "Baidu Qianfan Search Failed",
-    },{
-        "tool_name": "tinyfish_search",
-        "ui_spec": ToolUISpec(display_name="TinyFish 搜索"),
-        "policy": _WEB_SEARCH_POLICY,
-        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
-        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
-        "claim_check_paths": ("results.evidences.*", "summary"),
-        "failure_reason": "TinyFish Search Failed",
-    },{
-        "tool_name": "firecrawl_search",
-        "ui_spec": ToolUISpec(display_name="Firecrawl 搜索"),
-        "policy": _WEB_SEARCH_POLICY,
-        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
-        "output_cache_strategy": OutputCacheStrategy.LONG_TEXT,
-        "claim_check_paths": ("results.evidences.*", "summary"),
-        "failure_reason": "Firecrawl Search Failed",
-    }
-]
+T = TypeVar("T")
 
 
-_SANDBOX_TOOL_CONFIGS: list[dict[str, Any]] = [
-    {
-        "tool_name": "execute_command",
-        "ui_spec": ToolUISpec(display_name="执行沙箱命令"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=620.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
+def _to_tool_policy(meta: ToolMeta) -> ToolPolicy:
+    return ToolPolicy(
+        expose_by_default=meta.policy.expose_by_default,
+        selection_mode=ToolSelectionMode(meta.policy.selection_mode.value),
+        risk_level=ToolRiskLevel(meta.policy.risk_level.value),
+        timeout_seconds=meta.policy.timeout_seconds,
+        persist_output=meta.policy.persist_output,
+        required_context_keys=meta.policy.required_context_keys,
+        required_allowed_builtin_skill_ids=meta.policy.required_allowed_builtin_skill_ids,
+        max_output_chars=(
+            settings.tools.result_max_chars
+            if meta.output_cache_spec.strategy.value == "none"
+            else None
         ),
-        "output_cache_strategy": OutputCacheStrategy.OPAQUE,
-        "failure_reason": "Sandbox Command Execution Failed",
-    },
-    {
-        "tool_name": "start_command",
-        "ui_spec": ToolUISpec(display_name="启动沙箱命令"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=15.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Sandbox Command Start Failed",
-    },
-    {
-        "tool_name": "get_command_result",
-        "ui_spec": ToolUISpec(display_name="读取沙箱命令结果"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=620.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-        ),
-        "output_cache_strategy": OutputCacheStrategy.OPAQUE,
-        "failure_reason": "Sandbox Command Result Read Failed",
-    },
-    {
-        "tool_name": "kill_command",
-        "ui_spec": ToolUISpec(display_name="终止沙箱命令"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=15.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Sandbox Command Termination Failed",
-    },
-    {
-        "tool_name": "read_file",
-        "ui_spec": ToolUISpec(display_name="读取沙箱文件"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.LOW,
-            timeout_seconds=30.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-        ),
-        "output_cache_strategy": OutputCacheStrategy.OPAQUE,
-        "failure_reason": "Sandbox File Read Failed",
-    },
-    {
-        "tool_name": "write_file",
-        "ui_spec": ToolUISpec(display_name="写入沙箱文件"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=30.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Sandbox File Write Failed",
-    },
-    {
-        "tool_name": "replace_in_file",
-        "ui_spec": ToolUISpec(display_name="替换沙箱文件内容"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=30.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Sandbox File Replace Failed",
-    },
-    {
-        "tool_name": "search_in_file",
-        "ui_spec": ToolUISpec(display_name="搜索沙箱文件"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.LOW,
-            timeout_seconds=30.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-        ),
-        "output_cache_strategy": OutputCacheStrategy.OPAQUE,
-        "failure_reason": "Sandbox File Search Failed",
-    },
-    {
-        "tool_name": "find_files",
-        "ui_spec": ToolUISpec(display_name="查找沙箱文件"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.LOW,
-            timeout_seconds=30.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Sandbox File Find Failed",
-    },
-    {
-        "tool_name": "grep_files",
-        "ui_spec": ToolUISpec(display_name="检索沙箱文件内容"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.LOW,
-            timeout_seconds=30.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-        ),
-        "output_cache_strategy": OutputCacheStrategy.OPAQUE,
-        "failure_reason": "Sandbox File Grep Failed",
-    },
-    {
-        "tool_name": "glob_files",
-        "ui_spec": ToolUISpec(display_name="Glob 沙箱文件"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.LOW,
-            timeout_seconds=30.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Sandbox File Glob Failed",
-    },
-    {
-        "tool_name": "list_files",
-        "ui_spec": ToolUISpec(display_name="列出沙箱文件"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.LOW,
-            timeout_seconds=30.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Sandbox File List Failed",
-    },
-    {
-        "tool_name": "upload_file",
-        "ui_spec": ToolUISpec(display_name="导入附件到沙箱"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=150.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id", "temporary_attachment_refs"),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Sandbox Attachment Import Failed",
-    },
-    {
-        "tool_name": "download_file",
-        "ui_spec": ToolUISpec(display_name="导出沙箱文件"),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=150.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Sandbox File Export Failed",
-    },
-    {
-        "tool_name": "upload_file_to_cloud_drive",
-        "ui_spec": ToolUISpec(
-            display_name="上传沙箱文件到云盘",
-            description="将沙箱中的文档或 HTML 文件上传为新的云盘资源。",
-        ),
-        "policy": ToolPolicy(
-            expose_by_default=True,
-            risk_level=ToolRiskLevel.MEDIUM,
-            timeout_seconds=150.0,
-            persist_output=True,
-            required_context_keys=("user_id", "session_id"),
-            max_output_chars=settings.tools.result_max_chars,
-        ),
-        "failure_reason": "Sandbox Cloud Resource Upload Failed",
-    },
-]
+    )
+
+
+def _to_ui_spec(meta: ToolMeta) -> ToolUISpec | None:
+    if meta.ui_spec is None:
+        return None
+    return ToolUISpec(
+        display_name=meta.ui_spec.display_name,
+        description=meta.ui_spec.description,
+    )
+
+
+def _to_config_spec(meta: ToolMeta) -> ToolConfigSpec | None:
+    if meta.config_spec is None:
+        return None
+    return ToolConfigSpec(
+        schema=meta.config_spec.config_schema,
+        required_keys=meta.config_spec.required_keys,
+        secret_keys=meta.config_spec.secret_keys,
+    )
+
+
+def _to_output_cache_spec(meta: ToolMeta) -> OutputCacheSpec:
+    return OutputCacheSpec(
+        strategy=OutputCacheStrategy(meta.output_cache_spec.strategy.value),
+        cache_paths=meta.output_cache_spec.cache_paths,
+    )
 
 
 class SystemMcpToolCatalog:
@@ -469,49 +82,55 @@ class SystemMcpToolCatalog:
         self._mcp_service_client = mcp_service_client
         self._sandbox_mcp_service_client = sandbox_mcp_service_client
         self._tool_cache: dict[ToolSource, tuple[float, list[McpToolDescriptor]]] = {}
+        self._meta_cache: dict[ToolSource, tuple[float, list[ToolMeta]]] = {}
 
-    async def _load_tools(
+    async def _load(
         self,
         source: ToolSource,
-        client: McpServiceClient,
-    ) -> list[McpToolDescriptor]:
+        cache: dict[ToolSource, tuple[float, list[T]]],
+        fetch: Callable[[], Awaitable[list[T]]],
+        *,
+        label: str,
+    ) -> list[T]:
         ttl = max(0.0, settings.mcp.system_list_tools_cache_ttl_seconds)
         now = time.monotonic()
-        cached = self._tool_cache.get(source)
+        cached = cache.get(source)
 
-        # 缓存未过期时直接返回该来源的工具描述。
+        # 缓存未过期时直接返回
         if cached is not None:
-            cached_at, descriptors = cached
+            cached_at, values = cached
             if cached_at + ttl > now:
-                return list(descriptors)
+                return list(values)
 
         try:
-            descriptors = await client.list_tools()
+            values = await fetch()
         except Exception as exc:
-            error("load internal mcp tools failed.", source=source, exc=exc)
-            # 当前请求失败时继续使用该来源上一次成功的结果。
+            error(f"load internal mcp {label} failed.", source=source, exc=exc)
+            # 当前请求失败时继续使用该来源上一次成功的结果
             return list(cached[1]) if cached is not None else []
 
-        # 只有成功拉取后才刷新时间，避免网络请求耗时消耗缓存 TTL。
-        self._tool_cache[source] = (time.monotonic(), list(descriptors))
-        return list(descriptors)
+        # 只有成功拉取后才刷新时间，避免网络请求耗时消耗缓存 TTL
+        cache[source] = (time.monotonic(), list(values))
+        return list(values)
 
     async def load_system_tools(self) -> dict[str, McpRemoteTool]:
-        system_descriptors, sandbox_descriptors = await asyncio.gather(
-            self._load_tools("system", self._mcp_service_client),
-            self._load_tools("sandbox", self._sandbox_mcp_service_client),
+        system_descriptors, sandbox_descriptors, system_metas, sandbox_metas = await asyncio.gather(
+            self._load("system", self._tool_cache, self._mcp_service_client.list_tools, label="tools"),
+            self._load("sandbox", self._tool_cache, self._sandbox_mcp_service_client.list_tools, label="tools"),
+            self._load("system", self._meta_cache, self._mcp_service_client.list_tool_metas, label="tool metas"),
+            self._load("sandbox", self._meta_cache, self._sandbox_mcp_service_client.list_tool_metas, label="tool metas"),
         )
         tools: dict[str, McpRemoteTool] = {}
         tools.update(self._build_remote_tools(
             system_descriptors,
             self._mcp_service_client,
-            _SYSTEM_TOOL_CONFIGS,
+            system_metas,
             prefix="system_",
         ))
         tools.update(self._build_remote_tools(
             sandbox_descriptors,
             self._sandbox_mcp_service_client,
-            _SANDBOX_TOOL_CONFIGS,
+            sandbox_metas,
             prefix="sandbox_",
         ))
         return tools
@@ -520,22 +139,21 @@ class SystemMcpToolCatalog:
         self,
         descriptors: list[McpToolDescriptor],
         client: McpServiceClient,
-        configs: list[dict[str, Any]],
+        metas: list[ToolMeta],
         *,
         prefix: str,
     ) -> dict[str, McpRemoteTool]:
-        # 每个客户端只向对应 MCP 服务发现工具；注册到 Chat 时统一加来源前缀。
-        config_by_remote_name = {item["tool_name"]: item for item in configs}
+        meta_by_name = {meta.tool_name: meta for meta in metas}
         tools: dict[str, McpRemoteTool] = {}
         for descriptor in descriptors:
-            overlay = config_by_remote_name.get(descriptor.name)
-            if overlay is None:
+            meta = meta_by_name.get(descriptor.name)
+            if meta is None:
                 continue
             try:
                 parameters_schema = ToolParametersSchema(descriptor.input_schema)
             except (TypeError, ValueError):
                 continue
-            registered_name = f"{prefix}{overlay['tool_name']}"
+            registered_name = f"{prefix}{meta.tool_name}"
             tools[registered_name] = McpRemoteTool(
                 mcp_client=client,
                 server=None,
@@ -546,13 +164,11 @@ class SystemMcpToolCatalog:
                         description=(descriptor.description or "").strip(),
                         parameters_schema=parameters_schema,
                     ),
-                    policy=overlay["policy"],
-                    ui_spec=overlay.get("ui_spec"),
-                    config_spec=overlay.get("config_spec"),
-                    preflight_hooks=(),
-                    output_cache_strategy=overlay.get("output_cache_strategy", OutputCacheStrategy.NONE),
-                    claim_check_paths=overlay.get("claim_check_paths", ()),
+                    policy=_to_tool_policy(meta),
+                    ui_spec=_to_ui_spec(meta),
+                    config_spec=_to_config_spec(meta),
+                    output_cache_spec=_to_output_cache_spec(meta),
                 ),
-                failure_reason=overlay["failure_reason"],
+                failure_reason=meta.failure_reason,
             )
         return tools

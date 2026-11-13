@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
+from common.mcp import OutputCacheSpecMeta, OutputCacheStrategy, ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -16,6 +17,18 @@ def register_read_note_resource_text_tool(
     resource_client: ResourceClient,
     note_client: NoteClient,
 ) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="read_note_resource_text",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=20.0,
+            persist_output=True,
+        ),
+        ui_spec=ToolUISpecMeta(display_name="快速读取笔记文本", description="读取当前用户可见（无需已经打开）笔记的纯文本内容，用于快速了解，不能用于编辑。"),
+        output_cache_spec=OutputCacheSpecMeta(strategy=OutputCacheStrategy.LONG_TEXT, cache_paths=("text",)),
+        failure_reason="Note Resource Text Read Failed",
+    ))
     @mcp.tool(
         name="read_note_resource_text",
         description=(

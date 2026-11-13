@@ -7,6 +7,16 @@ from functools import wraps
 from typing import Annotated, Any, ClassVar
 
 from common.core.exceptions import ServiceException
+from common.mcp import (
+    OutputCacheSpecMeta,
+    OutputCacheStrategy,
+    ToolConfigSpecMeta,
+    ToolMeta,
+    ToolPolicyMeta,
+    ToolRiskLevel,
+    ToolUISpecMeta,
+    register_tool_meta,
+)
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 from pydantic.fields import FieldInfo
@@ -46,6 +56,55 @@ TOOL_DESCRIPTION = (
     "grounded in the same source. Use separate links when claims rely on different "
     "sources. Cite only sources whose evidence actually supports the nearby claim; "
     "do not add links merely to decorate the answer.\n"
+)
+
+
+_WEB_SEARCH_POLICY_META = ToolPolicyMeta(
+    expose_by_default=True,
+    risk_level=ToolRiskLevel.LOW,
+    timeout_seconds=100.0,
+    persist_output=True,
+)
+_WEB_SEARCH_OUTPUT_CACHE_SPEC = OutputCacheSpecMeta(
+    strategy=OutputCacheStrategy.LONG_TEXT,
+    cache_paths=("results.evidences.*", "summary"),
+)
+
+_WEB_SEARCH_REQUIRED_API_KEY_CONFIG = ToolConfigSpecMeta(
+    config_schema={
+        "type": "object",
+        "properties": {
+            "api_key": {
+                "type": "string",
+                "title": "API Key",
+                "description": "API key for the configured search provider.",
+                "writeOnly": True,
+            },
+        },
+        "additionalProperties": False,
+    },
+    required_keys=("api_key",),
+    secret_keys=("api_key",),
+)
+
+_WEB_SEARCH_OPTIONAL_API_KEY_CONFIG = ToolConfigSpecMeta(
+    config_schema={
+        "type": "object",
+        "properties": {
+            "api_key": {
+                "type": "string",
+                "title": "DeepSeek API Key",
+                "description": (
+                    "Optional. Your own DeepSeek API key; leave empty to use the "
+                    "platform-managed search key."
+                ),
+                "writeOnly": True,
+            },
+        },
+        "additionalProperties": False,
+    },
+    required_keys=(),
+    secret_keys=("api_key",),
 )
 
 
@@ -111,6 +170,7 @@ def _request_parameters(hidden: set[str]) -> list[inspect.Parameter]:
 
 class BaseSearchTool(ABC):
     tool_name: ClassVar[str]
+    tool_meta: ClassVar[ToolMeta]
     provider_name: ClassVar[str | None] = None
     description: ClassVar[str] = TOOL_DESCRIPTION
     requires_api_key: ClassVar[bool] = True
@@ -195,6 +255,7 @@ class BaseSearchTool(ABC):
             name=self.tool_name,
             description=description,
         )(execute)
+        register_tool_meta(self.tool_meta)
 
     async def execute(
         self,

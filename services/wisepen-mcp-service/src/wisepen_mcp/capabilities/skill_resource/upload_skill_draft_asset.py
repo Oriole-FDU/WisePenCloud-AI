@@ -6,6 +6,7 @@ from pathlib import PurePosixPath
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolSelectionMode, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from wisepen_mcp.domain.entities import SkillAssetUploadInitAsset
@@ -27,6 +28,20 @@ _ASSET_TYPE_BY_SUFFIX = {
 
 
 def register_upload_skill_draft_asset_tool(mcp: FastMCP, ai_asset_client: AIAssetClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="upload_skill_draft_asset",
+        policy=ToolPolicyMeta(
+            expose_by_default=False,
+            selection_mode=ToolSelectionMode.CONTEXTUAL,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("allowed_skill_ids",),
+            required_allowed_builtin_skill_ids=("builtin:skill-creator",),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="上传 Skill 资源", description="向 Skill 草稿上传文本资源。"),
+        failure_reason="Skill Draft Asset Upload Failed",
+    ))
     @mcp.tool(
         name="upload_skill_draft_asset",
         description=(

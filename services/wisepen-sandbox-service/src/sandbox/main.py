@@ -5,6 +5,7 @@ import inspect
 from contextlib import asynccontextmanager, suppress
 
 from common.logger import error, info, setup_logging_intercept
+from common.mcp import assert_tool_meta_consistent
 from common.observability import setup_observability
 from sandbox.core.config.bootstrap_settings import bootstrap_settings
 
@@ -138,6 +139,8 @@ mcp_app = mcp_server.streamable_http_app()
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
     async with mcp_server.session_manager.run():
+        tools = await mcp_server.list_tools()
+        assert_tool_meta_consistent({tool.name for tool in tools})
         async with lifespan(app):
             yield
 

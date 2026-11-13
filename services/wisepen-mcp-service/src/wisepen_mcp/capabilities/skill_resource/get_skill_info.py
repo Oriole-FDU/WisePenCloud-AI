@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolSelectionMode, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from wisepen_mcp.domain.error_codes import McpErrorCode
@@ -11,6 +12,20 @@ from pydantic import Field
 
 
 def register_get_skill_info_tool(mcp: FastMCP, ai_asset_client: AIAssetClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="get_skill_info",
+        policy=ToolPolicyMeta(
+            expose_by_default=False,
+            selection_mode=ToolSelectionMode.CONTEXTUAL,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=15.0,
+            persist_output=True,
+            required_context_keys=("allowed_skill_ids",),
+            required_allowed_builtin_skill_ids=("builtin:skill-creator",),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="读取 Skill 信息", description="读取 Skill 草稿信息。"),
+        failure_reason="Skill Info Load Failed",
+    ))
     @mcp.tool(
         name="get_skill_info",
         description=(

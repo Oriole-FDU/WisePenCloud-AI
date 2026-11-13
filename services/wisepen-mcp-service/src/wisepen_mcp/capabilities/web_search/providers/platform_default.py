@@ -10,13 +10,28 @@ from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
 from ..model import SearchRecency, SearchResponse, SearchResult
-from ..search_tools import BaseSearchTool
+from ..search_tools import (
+    BaseSearchTool,
+    ToolMeta,
+    ToolUISpecMeta,
+    _WEB_SEARCH_OPTIONAL_API_KEY_CONFIG,
+    _WEB_SEARCH_OUTPUT_CACHE_SPEC,
+    _WEB_SEARCH_POLICY_META,
+)
 
 
 class PlatformSearchTool(BaseSearchTool):
     """平台托管的默认搜索，通过 DeepSeek Search 返回摘要证据与来源评分"""
 
     tool_name = "default_web_search"
+    tool_meta = ToolMeta(
+        tool_name="default_web_search",
+        policy=_WEB_SEARCH_POLICY_META,
+        ui_spec=ToolUISpecMeta(display_name="默认 Web 搜索「由 Deepseek 提供」"),
+        config_spec=_WEB_SEARCH_OPTIONAL_API_KEY_CONFIG,
+        output_cache_spec=_WEB_SEARCH_OUTPUT_CACHE_SPEC,
+        failure_reason="Default Web Search Failed",
+    )
     provider_name = None
     requires_api_key = False  # 调用方 key 可选，未配置时由平台密钥兜底
 

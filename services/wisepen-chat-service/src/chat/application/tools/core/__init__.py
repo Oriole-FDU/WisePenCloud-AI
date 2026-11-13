@@ -11,6 +11,7 @@ from chat.application.tools.core.definition import (
     ToolRiskLevel,
     ToolExecutionTarget,
     ToolTimeoutStrategy,
+    OutputCacheSpec,
     OutputCacheStrategy,
 )
 
@@ -72,6 +73,7 @@ __all__ = [
     "ToolRiskLevel",
     "ToolExecutionTarget",
     "ToolTimeoutStrategy",
+    "OutputCacheSpec",
     "OutputCacheStrategy",
 
     # registry / scope

@@ -36,7 +36,7 @@ If the request names a heading, paragraph, list item, table, or phrase, locate t
 Use a Note `resource_id` from one of these trusted sources:
 
 - `application_context.workspace_open_resource.resource_id` when the intended note is open;
-- a Note result returned by `search_user_resources`;
+- a Note result returned by `search_resources`;
 - the result of `create_note` when the user asks to create a new note;
 - an explicit Note selection supplied by the user or application.
 

@@ -12,11 +12,26 @@ from ..model import (
     SearchResponse,
     SearchResult,
 )
-from ..search_tools import BaseSearchTool
+from ..search_tools import (
+    BaseSearchTool,
+    ToolMeta,
+    ToolUISpecMeta,
+    _WEB_SEARCH_OUTPUT_CACHE_SPEC,
+    _WEB_SEARCH_POLICY_META,
+    _WEB_SEARCH_REQUIRED_API_KEY_CONFIG,
+)
 
 
 class AnySearchTool(BaseSearchTool):
     tool_name = "anysearch_search"
+    tool_meta = ToolMeta(
+        tool_name="anysearch_search",
+        policy=_WEB_SEARCH_POLICY_META,
+        ui_spec=ToolUISpecMeta(display_name="AnySearch 搜索"),
+        config_spec=_WEB_SEARCH_REQUIRED_API_KEY_CONFIG,
+        output_cache_spec=_WEB_SEARCH_OUTPUT_CACHE_SPEC,
+        failure_reason="AnySearch Search Failed",
+    )
     provider_name = "anysearch"
 
     def __init__(self, *, http_client: httpx.AsyncClient) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from common.core.exceptions import ServiceException
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field
@@ -127,6 +128,17 @@ PatchOperation = Annotated[
 
 
 def register_apply_current_note_edits_tool(mcp: FastMCP, note_collab_client: NoteCollabClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="apply_current_note_edits",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=15.0,
+            persist_output=True,
+        ),
+        ui_spec=ToolUISpecMeta(display_name="应用笔记编辑", description="将结构化编辑建议应用到当前用户可编辑的笔记。"),
+        failure_reason="Note Edit Apply Failed",
+    ))
     @mcp.tool(
         name="apply_current_note_edits",
         description=(

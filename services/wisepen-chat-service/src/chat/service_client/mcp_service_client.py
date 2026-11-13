@@ -11,8 +11,9 @@ from mcp.types import CallToolResult
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from common.cloud.service_discovery import LoadBalancingStrategy, ServiceDiscovery
 from common.core.constants import CommonConstants, SecurityConstants
+from common.core.exceptions import RpcError
 from common.gray.context import GrayContextHolder
-from common.mcp import TOOL_CONFIG_META_KEY, TOOL_CONTEXT_META_KEY
+from common.mcp import TOOL_CONFIG_META_KEY, TOOL_CONTEXT_META_KEY, ToolMeta
 from common.security.context import SecurityContextHolder
 
 
@@ -64,6 +65,30 @@ class McpServiceClient:
             descriptors.append(McpToolDescriptor(name=name, description=description, input_schema=input_schema))
         return descriptors
 
+    async def list_tool_metas(self) -> list[ToolMeta]:
+        async with AsyncClient(
+            headers=self._build_headers(),
+            timeout=self._timeout,
+        ) as http_client:
+            response = await http_client.get(f"{await self._resolve_base_url()}/internal/tools/meta")
+
+        body = response.json()
+        if not isinstance(body, dict) or int(body.get("code")) != 200:
+            raise RpcError(
+                service_name=self._service_name,
+                path="/internal/tools/meta",
+                status=response.status_code,
+                msg=f"unexpected meta payload: {body!r}",
+            )
+        data = body.get("data")
+        if not isinstance(data, list):
+            raise RpcError(
+                service_name=self._service_name,
+                path="/internal/tools/meta",
+                msg=f"unexpected meta data: {data!r}",
+            )
+        return [ToolMeta.model_validate(item) for item in data]
+
     async def call_tool(
         self,
         server: Any,
@@ -99,8 +124,11 @@ class McpServiceClient:
                     )
 
     async def _resolve_url(self) -> str:
+        return f"{await self._resolve_base_url()}{self._mcp_path}"
+
+    async def _resolve_base_url(self) -> str:
         instance = await self._discovery.pick(self._service_name, strategy=self._strategy)
-        return f"http://{instance.ip}:{instance.port}{self._mcp_path}"
+        return f"http://{instance.ip}:{instance.port}"
 
     def _build_headers(self) -> dict[str, str]:
         headers: dict[str, str] = {}

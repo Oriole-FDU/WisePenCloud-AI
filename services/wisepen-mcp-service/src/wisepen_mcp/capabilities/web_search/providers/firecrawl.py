@@ -13,11 +13,26 @@ from ..model import (
     SearchResponse,
     SearchResult,
 )
-from ..search_tools import BaseSearchTool
+from ..search_tools import (
+    BaseSearchTool,
+    ToolMeta,
+    ToolUISpecMeta,
+    _WEB_SEARCH_OUTPUT_CACHE_SPEC,
+    _WEB_SEARCH_POLICY_META,
+    _WEB_SEARCH_REQUIRED_API_KEY_CONFIG,
+)
 
 
 class FirecrawlSearchTool(BaseSearchTool):
     tool_name = "firecrawl_search"
+    tool_meta = ToolMeta(
+        tool_name="firecrawl_search",
+        policy=_WEB_SEARCH_POLICY_META,
+        ui_spec=ToolUISpecMeta(display_name="Firecrawl 搜索"),
+        config_spec=_WEB_SEARCH_REQUIRED_API_KEY_CONFIG,
+        output_cache_spec=_WEB_SEARCH_OUTPUT_CACHE_SPEC,
+        failure_reason="Firecrawl Search Failed",
+    )
     provider_name = "firecrawl"
     # include_domains 与 exclude_domains 互斥
     description = BaseSearchTool.description + (
