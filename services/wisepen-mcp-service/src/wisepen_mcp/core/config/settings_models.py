@@ -44,17 +44,6 @@ class WebSearchProvidersSettings(ConfigModel):
     )
 
 
-class WebSearchRerankerSettings(ConfigModel):
-    """重排配置；整段不配或 api-key 为空都表示不启用重排"""
-
-    zero_entropy_api_key: str = ""
-    model: str = "zerank-2"
-
-    @property
-    def is_enabled(self) -> bool:
-        return bool(self.zero_entropy_api_key.strip())
-
-
 class WebSearchPlatformDefaultSettings(ConfigModel):
     api_key: str = ""
     base_url: str = Field(default="https://api.deepseek.com", min_length=1)
@@ -64,9 +53,6 @@ class WebSearchSettings(ConfigModel):
     timeout_seconds: float = Field(default=15.0, gt=0)
     providers: WebSearchProvidersSettings = Field(
         default_factory=WebSearchProvidersSettings
-    )
-    reranker: WebSearchRerankerSettings = Field(
-        default_factory=WebSearchRerankerSettings
     )
     platform_default: WebSearchPlatformDefaultSettings = Field(
         default_factory=WebSearchPlatformDefaultSettings
