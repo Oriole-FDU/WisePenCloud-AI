@@ -21,7 +21,7 @@ from chat.domain.interfaces.context_compact import ContextCompactor
 from chat.domain.interfaces.llm import TextCompletionProvider, TokenUsage
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, \
-    ProviderRepository, SuspendedChatRepository
+    ProviderRepository, SuspendedChatRepository, RedirectQueueRepository
 from common.core.exceptions import ServiceException
 from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
@@ -75,6 +75,7 @@ class ChatTurnCoordinator:
             message_repo: MessageRepository,
             hot_context_repo: HotContextRepository,
             suspended_chat_repo: SuspendedChatRepository,
+            redirect_queue: RedirectQueueRepository,
             tool_registry: ToolRegistry,
             tool_dispatcher: ToolDispatcher,
             kafka_producer: KafkaProducerClient,
@@ -110,6 +111,7 @@ class ChatTurnCoordinator:
         self._redis = redis_client or redis.from_url(settings.persistence.redis.url, decode_responses=True)
 
         self._suspended_chat_repo = suspended_chat_repo
+        self._redirect_queue = redirect_queue
 
     async def handle_suspended_chat_recover(
             self,
@@ -387,6 +389,25 @@ class ChatTurnCoordinator:
                 async with persist_lock: await coro
             persist_tasks.append(asyncio.create_task(_run()))
 
+        async def drain_pending_user_messages() -> list[ChatMessage]:
+            # 检查是否有积压的用户追加消息
+            queries = await self._redirect_queue.drain_all(
+                chat_turn_context.user_id, chat_turn_context.session_id,
+            )
+            if not queries: return []
+            # 包装为用户消息
+            messages = [
+                ChatMessage(session_id=chat_turn_context.session_id, role=Role.USER, content=query)
+                for query in queries
+            ]
+            # 持久化用户追加消息
+            schedule(self._turn_finalizer.persist_message_delta(
+                session_id=chat_turn_context.session_id,
+                delta_messages=messages,
+                memory_policy=chat_turn_context.agent_spec.memory_policy,
+            ))
+            return messages
+
         try:
             async for event in self._query_loop_runtime.stream_chat_with_tool_calling(
                 messages=chat_turn_context.messages_for_llm,
@@ -398,6 +419,7 @@ class ChatTurnCoordinator:
                 client_tool_results=client_tool_results,
                 tool_approval_status=tool_approval_status,
                 cancel_requested=cancel_requested,
+                pending_user_messages=drain_pending_user_messages,
             ):
                 # QueryLoopRuntime 产出的事件如果是 StepFinishEvent 额外处理消息累积
                 if isinstance(event, StepFinishEvent):

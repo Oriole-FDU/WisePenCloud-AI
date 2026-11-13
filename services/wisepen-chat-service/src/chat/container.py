@@ -32,6 +32,7 @@ from chat.core.persistence import (
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
     RedisChatTurnStream,
+    RedisChatTurnQueue,
     RedisFrontendToolResponseRepository,
     RedisToolContentRepository,
 )
@@ -135,6 +136,7 @@ class Container(containers.DeclarativeContainer):
     hot_context_repo = providers.Singleton(RedisHotContext, redis_client=redis_client)
     mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache, redis_client=redis_client)
     chat_turn_stream_repo = providers.Singleton(RedisChatTurnStream, redis_client=redis_client)
+    chat_turn_queue_repo = providers.Singleton(RedisChatTurnQueue, redis_client=redis_client)
     frontend_tool_response_repo = providers.Singleton(
         RedisFrontendToolResponseRepository,
         redis_client=redis_client,
@@ -347,6 +349,7 @@ class Container(containers.DeclarativeContainer):
         kafka_producer=kafka_producer,
         tool_policy_builder=chat_turn_tool_policy_builder,
         suspended_chat_repo=suspended_chat_repo,
+        redirect_queue=chat_turn_queue_repo,
         agent_resolver=agent_resolver,
         context_assembler=context_assembler,
         frontend_tool_response_broker=frontend_tool_response_broker,

@@ -4,12 +4,13 @@ from dependency_injector.wiring import inject, Provide
 from chat.api.schemas.session import (
     SessionResponse, CreateSessionRequest, RenameSessionRequest,
     PinSessionRequest, SetSessionAgentRequest, UIMessageResponse,
+    ForkSessionRequest,
 )
 from chat.api.converters import convert_to_ui_messages
 from chat.api.tool_response_converter import build_tool_response
 from chat.application.agents import AgentResolver
 from chat.application.tools.core import ToolRegistry
-from chat.domain.entities import ChatSession
+from chat.domain.entities import ChatSession, ChatMessage
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.repositories import (
     MessageRepository,
@@ -162,6 +163,55 @@ async def delete_session(
 ):
     await session_repo.delete_session(session_id, user_id)
     return R.success()
+
+
+@router.post(
+    "/forkSession",
+    response_model=R[SessionResponse],
+    status_code=200,
+    summary="复制会话（fork）",
+    description="""
+- 用途：把源会话的全部历史消息复制到一个新会话，用于分支继续对话。
+- 约束：当前用户必须已登录；源会话必须属于当前用户。
+- 处理：新建会话并继承标题、绑定 Agent、附件引用、Skill/Tool 偏好；不继承置顶、摘要与上下文占用；按时间顺序复制全部消息。
+- 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND。
+- 响应：返回新建会话信息。
+""",
+)
+@inject
+async def fork_session(
+        req: ForkSessionRequest,
+        user_id: str = Depends(require_login),
+        session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+        message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
+):
+    source = await session_repo.get_session_for_user(req.session_id, user_id)
+
+    new_session = ChatSession(
+        user_id=user_id,
+        title=source.title,
+        agent_id=source.agent_id,
+        agent_version=source.agent_version,
+        temporary_attachment_refs=[ref.model_copy(deep=True) for ref in source.temporary_attachment_refs],
+        resource_attachment_refs=[ref.model_copy(deep=True) for ref in source.resource_attachment_refs],
+        last_selected_skill_ids=list(source.last_selected_skill_ids),
+        last_tool_selection_default_enabled=source.last_tool_selection_default_enabled,
+        last_tool_selection_overrides=dict(source.last_tool_selection_overrides),
+    )
+    created = await session_repo.create_session(new_session)
+
+    source_messages = await message_repo.list_session_messages_all(req.session_id)
+    clones: list[ChatMessage] = []
+    for message in source_messages:
+        data = message.model_dump()
+        data.pop("id", None)
+        data.pop("_id", None)
+        data["session_id"] = str(created.id)
+        clones.append(ChatMessage(**data))
+
+    if clones:
+        await message_repo.save_messages(clones)
+    return R.success(data=SessionResponse.from_entity(created))
 
 
 @router.get(

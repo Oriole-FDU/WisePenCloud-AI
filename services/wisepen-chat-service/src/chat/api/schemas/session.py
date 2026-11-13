@@ -19,6 +19,10 @@ class PinSessionRequest(BaseModel):
     set_pin: bool = Field(default=False, description="是否置顶")
 
 
+class ForkSessionRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, description="源会话 ID；fork 会复制其全部历史消息到一个新会话。")
+
+
 class TemporaryAttachmentRefResponse(BaseModel):
     attachment_id: str
     attachment_type: str

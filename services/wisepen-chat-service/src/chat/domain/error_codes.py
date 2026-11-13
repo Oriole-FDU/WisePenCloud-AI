@@ -49,6 +49,9 @@ class ChatErrorCode(IErrorCode):
     LLM_GENERATION_FAILED = (40051, "大模型生成失败")
     CHAT_TURN_LOCK_FAILED = (40052, "Session 处理锁获取失败")
     CHAT_MESSAGE_PERSIST_FAILED = (40053, "聊天消息持久化失败")
+    CHAT_MESSAGE_NOT_FOUND = (40054, "目标消息不存在")
+    CHAT_REWRITE_TARGET_INVALID = (40055, "重写目标必须是用户消息")
+    CHAT_REDIRECT_NO_ACTIVE_TURN = (40056, "当前没有正在运行的对话，无法重新引导")
 
     # --- 记忆相关 ---
     MEMORY_NOT_FOUND = (40061, "目标记忆不存在")

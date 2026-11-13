@@ -175,6 +175,7 @@ class QueryLoopRuntime:
         client_tool_results: list[ClientToolResult] = None,
         tool_approval_status: List[ToolApprovalStatus] = None,
         cancel_requested: Callable[[], Awaitable[bool]] | None = None,
+        pending_user_messages: Callable[[], Awaitable[List[ChatMessage]]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         # 解析获取当前模型的 LLMProvider
         llm_provider = self._llm_provider_resolver.resolve(model_info)
@@ -232,16 +233,31 @@ class QueryLoopRuntime:
             assert step_finish_event is not None
             if step_finish_event.aborted:
                 return
+            # 如果存在挂起，则返回
+            if step_finish_event.suspension is not None:
+                step_finish_event.suspension.iteration = iteration # 保存当前轮次数
+                return
+
+            # 如果已经完成
+            if step_finish_event.is_finished:
+                # 压入最终的回复信息（如果有）
+                if step_finish_event.final_assistant_message is not None:
+                    messages.append(step_finish_event.final_assistant_message)
+            else: # 尚未完成
+                # 统一追加消息
+                messages.extend(step_finish_event.intermediate_messages)
+
+
+            if pending_user_messages is not None:
+                # 若存在引导信息
+                injected = await pending_user_messages()
+                if injected:
+                    messages.extend(injected) # 追加引导信息
+                    continue # 继续循环回答，而不是结束 turn，无论对话是否已经完成
+
             # 如果已经完成则返回
             if step_finish_event.is_finished:
                 return
-            # 如果存在挂起，则返回
-            if  step_finish_event.suspension is not None:
-                step_finish_event.suspension.iteration = iteration # 保存当前轮次数
-                return
-            else:
-                # 统一追加消息并决定是否继续下一轮
-                messages.extend(step_finish_event.intermediate_messages)
         else:
             # 超出最大迭代次数时兜底
             async for event in self._emit_exhausted_warning(session_id):

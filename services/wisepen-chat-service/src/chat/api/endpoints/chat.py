@@ -8,7 +8,7 @@ from dependency_injector.wiring import inject, Provide
 from common.core.domain import R
 from common.security import require_login, SecurityContextHolder
 from common.logger import error, info
-from chat.api.schemas.chat import ActiveChatTurnResponse, ChatCancelRequest, ChatCompactRequest, ChatRequest, ChatRecoverRequest
+from chat.api.schemas.chat import ActiveChatTurnResponse, ChatCancelRequest, ChatCompactRequest, ChatRedirectRequest, ChatRequest, ChatRecoverRequest, ChatRewriteRequest
 from chat.application.agents import AgentResolver
 from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
@@ -17,7 +17,7 @@ from chat.application.frontend_tool_response_broker import FrontendToolResponseB
 from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
 from chat.application.tools.client_tools import ClientToolCapability
 from chat.container import Container
-from chat.domain.repositories import SessionRepository
+from chat.domain.repositories import SessionRepository, RedirectQueueRepository, MessageRepository, HotContextRepository
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces.context_compact import ContextCompactor
 from common.core.exceptions import ServiceException
@@ -228,6 +228,100 @@ async def chat_cancel(
 ):
     await session_repo.get_session_for_user(req.session_id, user_id)
     await turn_stream_manager.cancel_turn(user_id=user_id, session_id=req.session_id)
+    return R.success()
+
+
+@router.post(
+    "/completions/rewrite",
+    summary="重写指定 user 消息并重新生成后续回复",
+    description="""
+- 用途：编辑某条历史 user 消息并丢弃其后的所有记录，用新文本作为新的 user 消息重新生成。
+- 约束：目标会话必须属于当前用户；当前会话不能有正在运行的 turn；message_id 必须指向该会话中的一条 user 消息。
+- 处理：删除该 user 消息及之后的所有消息，重置 Redis 热上下文（下一轮自动按截断后的 Mongo 回填）、清空会话摘要与上下文占用指示，然后以 new_query 开启一轮新的 Chat Turn。
+- 失败：会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；有运行中 turn -> ChatErrorCode.CHAT_TURN_IN_PROGRESS；消息不存在 -> ChatErrorCode.CHAT_MESSAGE_NOT_FOUND；目标不是 user 消息 -> ChatErrorCode.CHAT_REWRITE_TARGET_INVALID。
+""",
+)
+@inject
+async def chat_rewrite(
+    req: ChatRewriteRequest,
+    user_id: str = Depends(require_login),
+    coordinator: ChatTurnCoordinator = Depends(Provide[Container.chat_turn_coordinator]),
+    turn_stream_manager: ChatTurnStreamManager = Depends(Provide[Container.chat_turn_stream_manager]),
+    session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+    message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
+    hot_context_repo: HotContextRepository = Depends(Provide[Container.hot_context_repo]),
+):
+    if not req.new_query: raise ServiceException(ChatErrorCode.CHAT_REQUEST_INVALID)
+    await session_repo.get_session_for_user(req.session_id, user_id)
+
+    active_turn_id = await turn_stream_manager.active_turn_id(user_id=user_id, session_id=req.session_id)
+    if active_turn_id is not None:
+        raise ServiceException(ChatErrorCode.CHAT_TURN_IN_PROGRESS)
+
+    # 校验模型参数
+    resolved_model_id = PydanticObjectId(req.model)
+    resolved_provider_id = PydanticObjectId(req.provider_id) if req.provider_id else None
+    identity_type = SecurityContextHolder.get_identity_type()
+
+    # 删除锚点 user 消息及其后的所有消息，并重置热上下文与摘要，再以 new_query 开新一轮
+    await message_repo.delete_messages_after_target_user_message(req.session_id, req.message_id)
+    # 清空 Redis 热上下文，下一轮 get_chat_history_record_messages 会按截断后的 Mongo 自动回填
+    await hot_context_repo.load_messages(req.session_id, [])
+    # 摘要可能总结了已删除的消息，第一期直接置空（接受代价）
+    await session_repo.update_session_summary(req.session_id, None, None)
+    await session_repo.update_context_tokens(req.session_id, 0)
+
+    turn_id = await turn_stream_manager.start_turn(
+        user_id=user_id,
+        session_id=req.session_id,
+        build_chat_gen=lambda background_tasks, turn_id: coordinator.handle_new_chat_start(
+            user_id=user_id,
+            session_id=req.session_id,
+            user_query=req.new_query,
+            background_tasks=background_tasks,
+            model_id=resolved_model_id,
+            provider_id=resolved_provider_id,
+            cancel_requested=lambda: turn_stream_manager.is_turn_cancel_requested(turn_id),
+            identity_type=identity_type,
+        ),
+    )
+
+    return StreamingResponse(
+        _turn_stream_generator(turn_stream_manager.subscribe_turn(turn_id)),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
+
+@router.post(
+    "/completions/redirect",
+    summary="打断当前 turn 并注入新的引导消息",
+    description="""
+- 用途：在 turn 运行期间用新消息重新引导；引导消息入队，会在当前 ReAct 循环的下一个步骤边界被注入为新的 user 消息，继续循环而不结束 turn。
+- 约束：目标会话必须属于当前用户；query 不能为空；当前会话必须存在运行中的 turn，否则拒绝。
+- 处理：把 query 入队到 session 的引导队列；运行中的 turn 在步骤边界（工具结果返回后 / 上一步结束时）排空队列并追加为 user 消息继续生成。
+- 失败：会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；无运行中 turn -> ChatErrorCode.CHAT_REDIRECT_NO_ACTIVE_TURN。
+- 响应：立即返回 ack。
+""",
+)
+@inject
+async def chat_redirect(
+    req: ChatRedirectRequest,
+    user_id: str = Depends(require_login),
+    turn_stream_manager: ChatTurnStreamManager = Depends(Provide[Container.chat_turn_stream_manager]),
+    redirect_queue: RedirectQueueRepository = Depends(Provide[Container.chat_turn_queue_repo]),
+    session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    if not req.query:
+        raise ServiceException(ChatErrorCode.CHAT_REQUEST_INVALID)
+
+    await session_repo.get_session_for_user(req.session_id, user_id)
+
+    active_turn_id = await turn_stream_manager.active_turn_id(user_id=user_id, session_id=req.session_id)
+    if active_turn_id is None:
+        raise ServiceException(ChatErrorCode.CHAT_REDIRECT_NO_ACTIVE_TURN)
+
+    await redirect_queue.enqueue(user_id, req.session_id, req.query)
     return R.success()
 
 
