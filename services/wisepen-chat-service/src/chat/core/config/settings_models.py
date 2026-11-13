@@ -55,18 +55,9 @@ class SummaryModelSettings(ConfigModel):
     model: str = Field(min_length=1)
 
 
-class RerankerModelSettings(ConfigModel):
-    model: str = Field(min_length=1)
-
-
 class ModelSettings(ConfigModel):
     memory: MemoryModelSettings
     summary: SummaryModelSettings
-    reranker: RerankerModelSettings
-
-
-class ZeroEntropySettings(ConfigModel):
-    api_key: str = Field(min_length=1)
 
 
 class IflytekSpeechSettings(ConfigModel):
@@ -82,7 +73,6 @@ class SpeechSettings(ConfigModel):
 class IntegrationSettings(ConfigModel):
     common_llm_provider: ProviderConnectionSettings
     common_embedding_provider: ProviderConnectionSettings
-    zero_entropy: ZeroEntropySettings
     speech: SpeechSettings | None = None
 
 
