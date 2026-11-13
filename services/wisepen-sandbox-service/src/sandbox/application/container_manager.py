@@ -160,6 +160,39 @@ class ContainerManager:
                 f"docker workspace export failed: {stderr}",
             )
 
+    async def copy_scripts_to_container(
+        self,
+        container_id: str,
+        source_dir: str,
+        container_dir: str,
+    ) -> None:
+        """将脚本源目录复制到容器内专用脚本目录"""
+        source_dir = Path(source_dir)
+        if not source_dir.is_dir():
+            raise ServiceException(
+                SandboxErrorCode.DOCKER_RUNTIME_FAILED,
+                f"scripts source directory does not exist: {source_dir}",
+            )
+
+        # 先建立容器内脚本专用目录，权限与 workspace 一致，保证 AI 侧可读可执行
+        returncode, _, stderr = await self.run_docker_command(
+            "exec", container_id, "mkdir", "-m", "777", "-p", container_dir,
+        )
+        if returncode != 0:
+            raise ServiceException(
+                SandboxErrorCode.DOCKER_RUNTIME_FAILED,
+                f"docker mkdir scripts directory failed: {stderr}",
+            )
+
+        returncode, _, stderr = await self.run_docker_command(
+            "cp", f"{source_dir}/.", f"{container_id}:{container_dir}",
+        )
+        if returncode != 0:
+            raise ServiceException(
+                SandboxErrorCode.DOCKER_RUNTIME_FAILED,
+                f"docker cp scripts failed: {stderr}",
+            )
+
     async def run_docker_command(self, *args: str) -> tuple[int, str, str]:
         try:
             process = await asyncio.create_subprocess_exec(

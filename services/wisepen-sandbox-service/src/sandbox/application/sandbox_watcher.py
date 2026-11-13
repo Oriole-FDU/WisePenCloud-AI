@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta, datetime, timezone
+from pathlib import Path
 
 from common.logger import error, warn
 from sandbox.application.container_manager import ContainerManager, ContainerStatus
@@ -11,6 +12,12 @@ from sandbox.core.config.app_settings import settings
 from sandbox.core.providers import SandboxProviderManager
 from sandbox.domain.entities import SandboxDocument, SandboxState
 from sandbox.domain.repositories import SandboxRepository
+
+
+# 内置脚本随 sandbox 包一起分发
+# 目标目录为容器内的专用脚本目录
+_BUILTIN_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "builtin_scripts"
+_CONTAINER_SCRIPTS_DIR = "/builtin_scripts"
 
 
 class Watcher:
@@ -148,6 +155,10 @@ class Watcher:
                     environment=sandbox_provision.container_environment,
                 )
                 base_url = await self._container_manager.get_container_base_url(container_id)
+                # 预热时把内置脚本加载进容器专用目录，供 AI 在会话中访问
+                await self._container_manager.copy_scripts_to_container(
+                    container_id, str(_BUILTIN_SCRIPTS_DIR), _CONTAINER_SCRIPTS_DIR,
+                )
                 sandbox = SandboxDocument(
                     container_id=container_id,
                     metadata=sandbox_provision.provider_metadata,
