@@ -132,8 +132,4 @@ class GetHistoricalChatMessagesTool:
             [f"-(role={m.role.value} created={m.created_at.isoformat()}): {m.content}" for m in results]
         )
 
-        # 字符截断，防止超长结果在后续迭代中撑爆上下文水位
-        if len(raw) > settings.tools.result_max_chars:
-            raw = raw[:settings.tools.result_max_chars] + "\n...[truncated]"
-
         return raw

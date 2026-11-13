@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
-from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
+from common.mcp import OutputCacheSpecMeta, OutputCacheStrategy, ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -17,6 +17,7 @@ def register_list_my_wallet_transactions_tool(mcp: FastMCP, user_client: UserCli
         tool_name="list_my_wallet_transactions",
         policy=ToolPolicyMeta(expose_by_default=True, risk_level=ToolRiskLevel.LOW, timeout_seconds=15.0, persist_output=True),
         ui_spec=ToolUISpecMeta(display_name="列出钱包流水", description="列出当前用户的钱包流水。"),
+        output_cache_spec=OutputCacheSpecMeta(strategy=OutputCacheStrategy.ALWAYS_KEEP_RAW),
         failure_reason="Wallet Transaction List Failed",
     ))
     @mcp.tool(

@@ -40,7 +40,8 @@ class ToolSelectionMode(StrEnum):
     CONTEXTUAL = "contextual"
 
 class OutputCacheStrategy(StrEnum):
-    NONE = "none"
+    NO_CACHE = "no_cache"
+    ALWAYS_KEEP_RAW = "always_keep_raw"
     LONG_TEXT = "long_text"
     OPAQUE = "opaque"
 
@@ -48,7 +49,7 @@ class OutputCacheStrategy(StrEnum):
 @dataclass(frozen=True)
 class OutputCacheSpec:
     """输出缓存策略"""
-    strategy: OutputCacheStrategy = OutputCacheStrategy.NONE
+    strategy: OutputCacheStrategy = OutputCacheStrategy.NO_CACHE
     # 仅 LONG_TEXT 使用；() = 只缓存根，非空 = 按这些路径缓存
     cache_paths: tuple[str, ...] = ()
 

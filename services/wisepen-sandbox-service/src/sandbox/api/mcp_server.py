@@ -408,6 +408,7 @@ def create_sandbox_mcp_server(
             required_context_keys=("user_id", "session_id"),
         ),
         ui_spec=ToolUISpecMeta(display_name="列出沙箱文件"),
+        output_cache_spec=OutputCacheSpecMeta(strategy=OutputCacheStrategy.ALWAYS_KEEP_RAW),
         failure_reason="Sandbox File List Failed",
     ))
     @mcp.tool(name="list_files", description="List files and directories with optional recursion, metadata and sorting.")

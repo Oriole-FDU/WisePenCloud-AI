@@ -4,7 +4,7 @@ import re
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
-from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
+from common.mcp import OutputCacheSpecMeta, OutputCacheStrategy, ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -20,6 +20,7 @@ def register_list_group_resource_daily_metrics_tool(mcp: FastMCP, user_client: U
         tool_name="list_group_resource_daily_metrics",
         policy=ToolPolicyMeta(expose_by_default=True, risk_level=ToolRiskLevel.LOW, timeout_seconds=20.0, persist_output=True),
         ui_spec=ToolUISpecMeta(display_name="小组资源每日指标", description="列出指定小组的资源每日指标。"),
+        output_cache_spec=OutputCacheSpecMeta(strategy=OutputCacheStrategy.ALWAYS_KEEP_RAW),
         failure_reason="Group Resource Daily Metrics Load Failed",
     ))
     @mcp.tool(

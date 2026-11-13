@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from common.core.exceptions import ServiceException
-from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
+from common.mcp import OutputCacheSpecMeta, OutputCacheStrategy, ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
@@ -25,6 +25,7 @@ def register_search_resources_tool(mcp: FastMCP, resource_client: ResourceClient
             persist_output=True,
         ),
         ui_spec=ToolUISpecMeta(display_name="搜索用户资源", description="搜索当前用户可见的笔记和文档资源。"),
+        output_cache_spec=OutputCacheSpecMeta(strategy=OutputCacheStrategy.ALWAYS_KEEP_RAW),
         failure_reason="User Resource Search Failed",
     ))
     @mcp.tool(

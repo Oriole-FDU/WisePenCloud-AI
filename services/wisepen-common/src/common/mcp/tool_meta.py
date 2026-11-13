@@ -18,7 +18,8 @@ class ToolSelectionMode(StrEnum):
 
 
 class OutputCacheStrategy(StrEnum):
-    NONE = "none"
+    NO_CACHE = "no_cache"
+    ALWAYS_KEEP_RAW = "always_keep_raw"
     LONG_TEXT = "long_text"
     OPAQUE = "opaque"
 
@@ -33,6 +34,7 @@ class ToolPolicyMeta(BaseModel):
     persist_output: bool = False
     required_context_keys: tuple[str, ...] = ()
     required_allowed_builtin_skill_ids: tuple[str, ...] = ()
+    max_output_chars: int | None = None # 输出最大字符数（超过后截断）
 
 
 class ToolUISpecMeta(BaseModel):
@@ -49,7 +51,7 @@ class ToolConfigSpecMeta(BaseModel):
 class OutputCacheSpecMeta(BaseModel):
     """输出缓存策略"""
 
-    strategy: OutputCacheStrategy = OutputCacheStrategy.NONE
+    strategy: OutputCacheStrategy = OutputCacheStrategy.NO_CACHE
     cache_paths: tuple[str, ...] = ()
 
 

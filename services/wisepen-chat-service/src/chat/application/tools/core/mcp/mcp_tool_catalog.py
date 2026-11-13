@@ -81,7 +81,6 @@ class McpToolCatalog:
                     timeout_seconds=settings.mcp.default_timeout_seconds,
                     persist_output=True,
                     allow_parallel=False,
-                    max_output_chars=settings.tools.result_max_chars,
                 )
 
                 # 构建 McpRemoteTool

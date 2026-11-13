@@ -38,11 +38,9 @@ def _to_tool_policy(meta: ToolMeta) -> ToolPolicy:
         persist_output=meta.policy.persist_output,
         required_context_keys=meta.policy.required_context_keys,
         required_allowed_builtin_skill_ids=meta.policy.required_allowed_builtin_skill_ids,
-        max_output_chars=(
-            settings.tools.result_max_chars
-            if meta.output_cache_spec.strategy.value == "none"
-            else None
-        ),
+        max_output_chars=meta.policy.max_output_chars
+            if meta.policy.max_output_chars is not None
+            else settings.tools.result_max_chars,
     )
 
 

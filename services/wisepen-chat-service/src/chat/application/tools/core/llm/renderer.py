@@ -33,10 +33,10 @@ class RenderToolResult:
 
 def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: ToolDefinition | None) -> RenderToolResult:
     max_output_chars = tool_definition.policy.max_output_chars if tool_definition is not None else None
-    # 只有 OutputCacheStrategy 是 NONE（未缓存）才强制截断，OPAQUE / LONG_TEXT 均不截断
+    # 只有 NO_CACHE（未缓存、内联输出）才可能截断；ALWAYS_KEEP_RAW 原样输出，LONG_TEXT / OPAQUE 走缓存，均不截断
     force_truncate = (
         tool_definition is not None
-        and tool_definition.output_cache_spec.strategy is OutputCacheStrategy.NONE
+        and tool_definition.output_cache_spec.strategy is OutputCacheStrategy.NO_CACHE
     )
     if tool_result.tool_execution_error is not None:
         error = tool_result.tool_execution_error
