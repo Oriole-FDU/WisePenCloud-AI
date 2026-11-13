@@ -118,7 +118,7 @@ class AgentSpec(BaseModel):
     # 启用标题自动生成
     auto_generate_title: bool = True
     # ReAct 最大迭代轮次
-    agent_max_iterations: Optional[int] = Field(default=None, ge=1, lt=10)
+    agent_max_iterations: Optional[int] = Field(default=None, ge=1, lt=100)
 
     # 模型策略
     model_policy: AgentModelPolicy = Field(default_factory=AgentModelPolicy)

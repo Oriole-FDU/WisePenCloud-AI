@@ -131,7 +131,7 @@ class VisionSettings(ConfigModel):
 
 
 class AgentSettings(ConfigModel):
-    max_iterations: int = Field(default=25, ge=1)
+    max_iterations: int = Field(default=100, ge=1)
 
 
 class ChatTurnSettings(ConfigModel):

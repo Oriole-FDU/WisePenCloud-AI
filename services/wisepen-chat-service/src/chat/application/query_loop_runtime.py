@@ -211,7 +211,8 @@ class QueryLoopRuntime:
         _tool_approval_status = tool_approval_status
 
         max_iterations = agent_max_iterations or settings.agent.max_iterations
-        for iteration in range(start_iteration, max_iterations):
+        iteration = start_iteration
+        while True:
             # 请求取消检查点
             if cancel_requested is not None and await cancel_requested():
                 yield StepFinishEvent(is_finished=False, token_usage=TokenUsage(), aborted=True)
@@ -253,30 +254,39 @@ class QueryLoopRuntime:
                 step_finish_event.suspension.iteration = iteration # 保存当前轮次数
                 return
 
-            # 如果已经完成
+            iteration += 1
+
+            # 如果模型完成了最终输出
             if step_finish_event.is_finished:
                 # 压入最终的回复信息（如果有）
                 if step_finish_event.final_assistant_message is not None:
                     messages.append(step_finish_event.final_assistant_message)
-            else: # 尚未完成
+            else: # 模型最终输出尚未完成
                 # 统一追加消息
                 messages.extend(step_finish_event.intermediate_messages)
-
 
             if pending_user_messages is not None:
                 # 若存在引导信息
                 injected = await pending_user_messages()
                 if injected:
                     messages.extend(injected) # 追加引导信息
+                    max_iterations += iteration # 提升上限
                     continue # 继续循环回答，而不是结束 turn，无论对话是否已经完成
 
             # 如果已经完成则返回
             if step_finish_event.is_finished:
                 return
-        else:
-            # 超出最大迭代次数时兜底
-            async for event in self._emit_exhausted_warning(session_id):
-                yield event
+
+            if iteration >= max_iterations:
+                # 超出最大迭代次数时兜底
+                async for event in self._emit_force_finish(
+                    session_id=session_id,
+                    messages=messages,
+                    model_info=model_info,
+                    llm_provider=llm_provider,
+                ):
+                    yield event
+                return
 
     """
     Agent Step：发起一次流式推理 → 解析 → 若需要则执行工具
@@ -661,26 +671,75 @@ class QueryLoopRuntime:
             )
         return usage
 
-    async def _emit_exhausted_warning(
-        self, session_id: str
+    async def _emit_force_finish(
+        self,
+        *,
+        session_id: str,
+        messages: list[ChatMessage],
+        model_info: ModelRequestInfo,
+        llm_provider: LLMProvider,
     ) -> AsyncIterator[StreamEvent]:
-        """Agent 循环超出最大迭代次数时的兜底文本输出"""
-        warning_text = f"Agent 推理超出最大迭代次数{settings.agent.max_iterations}，未能生成最终答案"
-        warn("tool calling loop exhausted.", session_id=session_id)
+        """Agent 循环超出最大迭代次数时优雅收尾
+        不带工具地做最后一次推理，合成最终回答
+        """
+        force_messages = list(messages)
+        force_messages.append(ChatMessage(
+            session_id=session_id,
+            role=Role.USER,
+            content=(
+                "You have reached the maximum number of steps for this task. "
+                "Stop calling tools. Based on everything completed so far, write a final answer "
+                "for the user and clearly note what was not completed."
+            ),
+        ))
+
         text_id = f"txt_{uuid.uuid4().hex}"
+        assistant_content = ""
+        token_usage = TokenUsage()
+        provider_payload = None
+
         yield StepStartEvent()
         yield TextStartEvent(text_id=text_id)
-        yield TextDeltaEvent(text_id=text_id, delta=warning_text)
+        try:
+            async for event in llm_provider.stream_chat_completion(
+                messages=force_messages,
+                model_request=model_info,
+                tools=None, # 强制不带工具
+            ):
+                if event.type == LLMEventType.USAGE and event.usage:
+                    token_usage.add(event.usage)
+                elif event.type == LLMEventType.STATE:
+                    provider_payload = event.provider_payload
+                elif event.type == LLMEventType.TEXT_DELTA and event.delta:
+                    assistant_content += event.delta
+                    yield TextDeltaEvent(text_id=text_id, delta=event.delta)
+        except Exception as exc:
+            warn("chat force-finish stream failed.", session_id=session_id, exc=exc)
         yield TextEndEvent(text_id=text_id)
+
         final_message = ChatMessage(
             session_id=session_id,
             role=Role.ASSISTANT,
-            content=warning_text,
+            model_info=MessageModelInfo.from_model_request(model_info),
+            content=assistant_content or "已达到本轮步数上限",
+            provider_payload=provider_payload,
         )
+        token_usage = await self._resolve_usage_with_fallback(
+            usage=token_usage,
+            messages=force_messages,
+            assistant_msg=final_message,
+            model_info=model_info,
+            tools=None,
+        )
+        final_message.input_tokens = token_usage.input_tokens
+        final_message.cached_input_tokens = token_usage.cached_input_tokens
+        final_message.output_tokens = token_usage.output_tokens
+        final_message.usage_source = token_usage.usage_source
+
         yield StepFinishEvent(
             is_finished=True,
             final_assistant_message=final_message,
-            token_usage=TokenUsage(),
+            token_usage=token_usage,
         )
 
 
