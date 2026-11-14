@@ -9,6 +9,7 @@ from chat.api.schemas.session import (
 from chat.api.converters import convert_to_ui_messages
 from chat.api.tool_response_converter import build_tool_response
 from chat.application.agents import AgentResolver
+from chat.application.agents.resolver import resolve_session_agent
 from chat.application.tools.core import ToolRegistry
 from chat.domain.entities import ChatSession, ChatMessage
 from chat.domain.error_codes import ChatErrorCode
@@ -35,7 +36,7 @@ router = APIRouter()
 - 用途：获取当前用户的单个聊天会话详情，用于进入会话或刷新会话状态。
 - 请求：session_id 指定目标会话。
 - 约束：当前用户必须已登录；目标会话必须属于当前用户。
-- 处理：按当前用户和会话 ID 查询会话，并组装基础信息、未删除的临时附件、资源附件、绑定 Agent 信息，以及上次保存的 Skill / Tool 选择偏好；Tool 覆盖项会按当前用户可见、已启用且已完成配置的工具过滤；不读取历史消息。
+- 处理：按当前用户和会话 ID 查询会话，返回基础信息、附件和上次保存的 Skill / Tool 选择偏好。调试会话只返回草稿标识和版本，不返回草稿 Spec。Tool 覆盖项仅保留用户可用的工具。
 - 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND。
 - 响应：返回会话详情，用于前端恢复当前会话状态和上次用户选择。
 """,
@@ -52,10 +53,11 @@ async def get_session(
     # 会话存在性、归属校验
     session = await session_repo.get_session_for_user(session_id, user_id)
     response = SessionResponse.from_entity(session)
-    # 解析当前会话绑定的 Agent
-    agent = await agent_resolver.resolve(session.agent_id, session.agent_version)
-    if agent is not None:
-        response.agent = agent
+    # 调试会话只返回绑定信息，执行时再按 owner 权限读取草稿。
+    if not session.is_draft_debug:
+        agent = await agent_resolver.resolve(session.agent_id, session.agent_version)
+        if agent is not None:
+            response.agent = agent
 
     response.last_selected_skill_ids = session.last_selected_skill_ids
     response.last_tool_selection_default_enabled = session.last_tool_selection_default_enabled
@@ -89,10 +91,10 @@ async def get_session(
     summary="创建会话",
     description="""
 - 用途：为当前用户创建一个新的聊天会话。
-- 请求：title 可选指定会话标题，未传时使用默认标题；agent_id 可选指定要绑定的已发布 Agent。
-- 约束：当前用户必须已登录；agent_id 非空时必须能解析到可用 Agent。
-- 处理：创建会话主记录；当 agent_id 可用时写入 Agent ID 和版本；不创建任何初始消息或附件。
-- 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；Agent 不存在或未发布 -> ChatErrorCode.AGENT_NOT_FOUND；请求参数校验失败 -> ResultCode.PARAM_ERROR。
+- 请求：title 可选；agent_id 指定 Agent；仅草稿调试时额外传 draft_version。
+- 约束：当前用户必须已登录。草稿调试仅限资源 owner，指定版本必须仍是 DRAFT 并有有效指令。
+- 处理：普通会话绑定已发布版；调试会话绑定指定草稿。两者都不创建初始消息或附件。
+- 失败：普通 Agent 不可用 -> ChatErrorCode.AGENT_NOT_FOUND；草稿不可用或无权调试 -> ChatErrorCode.AGENT_DRAFT_UNAVAILABLE。
 - 响应：返回新建会话信息。
 """,
 )
@@ -103,8 +105,16 @@ async def create_session(
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
         agent_resolver: AgentResolver = Depends(Provide[Container.agent_resolver]),
 ):
-    session = ChatSession(user_id=user_id, title=req.title or "New Chat")
-    if req.agent_id:
+    session = ChatSession(
+        user_id=user_id,
+        title=req.title or "New Chat",
+        is_draft_debug=req.draft_version is not None,
+    )
+    if session.is_draft_debug:
+        session.agent_id = req.agent_id
+        session.agent_version = req.draft_version
+        await resolve_session_agent(agent_resolver, session)
+    elif req.agent_id:
         agent = await agent_resolver.resolve(req.agent_id)
         if agent is None:
             raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
@@ -172,9 +182,9 @@ async def delete_session(
     summary="复制会话（fork）",
     description="""
 - 用途：把源会话的全部历史消息复制到一个新会话，用于分支继续对话。
-- 约束：当前用户必须已登录；源会话必须属于当前用户。
+- 约束：当前用户必须已登录；源会话必须属于当前用户且不是草稿调试会话。
 - 处理：新建会话并继承标题、绑定 Agent、附件引用、Skill/Tool 偏好；不继承置顶、摘要与上下文占用；按时间顺序复制全部消息。
-- 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND。
+- 失败：会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；草稿调试会话 -> ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN。
 - 响应：返回新建会话信息。
 """,
 )
@@ -186,6 +196,8 @@ async def fork_session(
         message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
 ):
     source = await session_repo.get_session_for_user(req.session_id, user_id)
+    if source.is_draft_debug:
+        raise ServiceException(ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN)
 
     new_session = ChatSession(
         user_id=user_id,
@@ -319,9 +331,9 @@ async def pin_session(
     description="""
 - 用途：在会话开始前绑定、切换或清除会话使用的 Agent。
 - 请求：session_id 指定目标会话；agent_id 为空时清除绑定，非空时指定目标 Agent。
-- 约束：当前用户必须已登录；目标会话必须属于当前用户；agent_id 非空时必须能解析到可用 Agent。
+- 约束：当前用户必须已登录；目标会话必须属于当前用户且不是草稿调试会话；agent_id 非空时必须能解析到已发布 Agent。
 - 处理：校验会话归属和消息状态后写入 Agent ID 与版本，或清空 Agent 绑定；不修改历史消息或附件。
-- 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；Agent 不存在或未发布 -> ChatErrorCode.AGENT_NOT_FOUND；请求参数校验失败 -> ResultCode.PARAM_ERROR。
+- 失败：会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；Agent 不存在或未发布 -> ChatErrorCode.AGENT_NOT_FOUND；草稿调试会话 -> ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN。
 - 响应：返回更新后的会话信息。
 """,
 )
@@ -331,14 +343,11 @@ async def set_session_agent(
         req: SetSessionAgentRequest,
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
-        # message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
         agent_resolver: AgentResolver = Depends(Provide[Container.agent_resolver]),
 ):
-    await session_repo.get_session_for_user(session_id, user_id)
-
-    # 不再限制已有消息的会话不能切换 Agent
-    # if await message_repo.has_session_messages(session_id):
-    #     raise ServiceException(ChatErrorCode.SESSION_AGENT_CHANGE_FORBIDDEN)
+    session = await session_repo.get_session_for_user(session_id, user_id)
+    if session.is_draft_debug:
+        raise ServiceException(ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN)
 
     if not req.agent_id:
         session = await session_repo.set_session_agent(session_id, user_id, None, None)

@@ -2,6 +2,7 @@ from typing import Optional, List, Tuple
 from datetime import datetime, timezone
 
 from beanie import PydanticObjectId
+from beanie.operators import NE
 
 from common.core.exceptions import ServiceException
 from chat.domain.repositories import SessionRepository
@@ -39,7 +40,7 @@ class MongoSessionRepository(SessionRepository):
 
     async def list_sessions_for_user(self, user_id: str, page: int, size: int) -> Tuple[List[ChatSession], int]:
         """分页拉取用户会话列表，按 updated_at 降序，返回 (当页列表, 总数)"""
-        query = ChatSession.find(ChatSession.user_id == user_id)
+        query = ChatSession.find(ChatSession.user_id == user_id, NE(ChatSession.is_draft_debug, True))
         total = await query.count()
         items = await query.sort(
             "-is_pinned",    

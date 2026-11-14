@@ -228,6 +228,7 @@ class Container(containers.DeclarativeContainer):
     remote_agent_resolver = providers.Singleton(
         RemoteAgentResolver,
         ai_asset_client=ai_asset_client,
+        resource_client=resource_client,
     )
     agent_resolver = providers.Singleton(
         CompositeAgentResolver,

@@ -8,6 +8,7 @@ from chat.domain.entities import ChatSession, ResourceAttachmentRef, TemporaryAt
 class CreateSessionRequest(BaseModel):
     title: Optional[str] = Field(default="New Chat", description="会话标题")
     agent_id: Optional[str] = Field(default=None, description="绑定的 Agent 资源 ID")
+    draft_version: Optional[int] = Field(default=None, gt=0, strict=True, description="仅创建草稿调试会话时传入")
 
 class SetSessionAgentRequest(BaseModel):
     agent_id: Optional[str] = Field(default=None, description="绑定的 Agent 资源 ID")
@@ -73,6 +74,7 @@ class SessionResponse(BaseModel):
     resource_attachment_refs: List[ResourceAttachmentRefResponse] = Field(default_factory=list)
     agent_id: Optional[str] = None
     agent_version: Optional[int] = None
+    is_draft_debug: bool = False
     agent: Optional[Agent] = None
     last_selected_skill_ids: List[str] = Field(default_factory=list)
     last_tool_selection_default_enabled: Optional[bool] = None
@@ -99,6 +101,7 @@ class SessionResponse(BaseModel):
             ],
             agent_id=session.agent_id,
             agent_version=session.agent_version,
+            is_draft_debug=session.is_draft_debug,
             last_selected_skill_ids=list(session.last_selected_skill_ids),
             last_tool_selection_default_enabled=session.last_tool_selection_default_enabled,
             last_tool_selection_overrides=dict(session.last_tool_selection_overrides),

@@ -39,6 +39,7 @@ class ChatSession(Document):
     summary_updated_at: Optional[datetime] = None
     agent_id: Optional[str] = None
     agent_version: Optional[int] = None
+    is_draft_debug: bool = False
     last_selected_skill_ids: List[str] = Field(default_factory=list)
     last_tool_selection_default_enabled: Optional[bool] = None
     last_tool_selection_overrides: dict[str, bool] = Field(default_factory=dict)

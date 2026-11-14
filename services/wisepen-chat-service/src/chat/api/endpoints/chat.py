@@ -10,6 +10,7 @@ from common.security import require_login, SecurityContextHolder
 from common.logger import error, info
 from chat.api.schemas.chat import ActiveChatTurnResponse, ChatCancelRequest, ChatCompactRequest, ChatRedirectRequest, ChatRequest, ChatRecoverRequest, ChatRewriteRequest
 from chat.application.agents import AgentResolver
+from chat.application.agents.resolver import resolve_session_agent
 from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
@@ -250,9 +251,12 @@ async def chat_rewrite(
     session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
     message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
     hot_context_repo: HotContextRepository = Depends(Provide[Container.hot_context_repo]),
+    agent_resolver: AgentResolver = Depends(Provide[Container.agent_resolver]),
 ):
     if not req.new_query: raise ServiceException(ChatErrorCode.CHAT_REQUEST_INVALID)
-    await session_repo.get_session_for_user(req.session_id, user_id)
+    session = await session_repo.get_session_for_user(req.session_id, user_id)
+    if session.is_draft_debug:
+        await resolve_session_agent(agent_resolver, session)
 
     active_turn_id = await turn_stream_manager.active_turn_id(user_id=user_id, session_id=req.session_id)
     if active_turn_id is not None:
@@ -342,7 +346,7 @@ async def chat_compact(
     if active_turn_id is not None:
         raise ServiceException(ChatErrorCode.CHAT_TURN_IN_PROGRESS)
 
-    agent = await agent_resolver.resolve(session.agent_id, session.agent_version)
+    agent = await resolve_session_agent(agent_resolver, session)
     if agent is None:
         raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
 
