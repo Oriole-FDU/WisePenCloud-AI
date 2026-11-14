@@ -14,7 +14,7 @@ from urllib.parse import quote
 import httpx
 
 from common.core.exceptions import ServiceException, RpcError
-from common.logger import info
+from common.logger import info, warn
 from pydantic import BaseModel
 
 from sandbox.application.workspace_manager import WorkspaceManager
@@ -525,11 +525,13 @@ class SandboxFileService:
                 if not upload.put_url:
                     raise RuntimeError("File Storage did not return an OSS upload URL")
                 # 将临时文件上传到 OSS
+                # 导出场景允许回调失败（203），由 File Storage 状态补偿兜底
                 await self._upload_from_file(
                     upload.put_url,
                     workspace_file.source,
                     size=workspace_file.info.size,
                     callback_header=upload.callback_header,
+                    allow_callback_failure=True,
                 )
             # 构建下载文件名响应头
             content_disposition = f"attachment; filename*=UTF-8''{quote(workspace_file.filename)}"
@@ -651,6 +653,7 @@ class SandboxFileService:
         *,
         size: int,
         callback_header: str | None = None,
+        allow_callback_failure: bool = False,
     ) -> None:
         source.seek(0)
 
@@ -674,12 +677,21 @@ class SandboxFileService:
             response = await client.put(put_url, content=chunks(), headers=headers) # 通过异步生成器执行 PUT
 
         if callback_header and response.status_code != 200: # 非 callback 模式接受所有 2xx
-            raise RpcError(
-                service_name="oss",
-                path=put_url,
-                status=response.status_code,
-                msg=f"OSS callback upload failed: status={response.status_code} body={response.text[:500]!r}"
-            )
+            if allow_callback_failure and response.status_code == 203:
+                # 203 表示对象已成功写入 OSS、仅回调失败
+                # 调用方可通过 File Storage 的状态补偿（HEAD 校验）兜底
+                warn(
+                    "oss upload accepted but callback failed.",
+                    status=response.status_code,
+                    body=response.text[:500],
+                )
+            else:
+                raise RpcError(
+                    service_name="oss",
+                    path=put_url,
+                    status=response.status_code,
+                    msg=f"OSS callback upload failed: status={response.status_code} body={response.text[:500]!r}"
+                )
 
         if response.status_code < 200 or response.status_code >= 300:
             raise RpcError(
