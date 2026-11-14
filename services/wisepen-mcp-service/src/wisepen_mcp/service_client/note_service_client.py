@@ -4,6 +4,7 @@ from typing import Any
 
 from common.core.exceptions import RpcError
 from common.http.rpc_client import RpcClient
+from wisepen_mcp.domain.entities import NoteSearchText
 
 
 _NOTE_SERVICE_NAME = "wisepen-note-service"
@@ -43,7 +44,7 @@ class NoteClient:
             )
         return data.strip()
 
-    async def get_search_text(self, resource_id: str) -> dict[str, Any]:
+    async def get_search_text(self, resource_id: str) -> NoteSearchText:
         data = await self._rpc.get(
             self._service_name,
             _GET_NOTE_SEARCH_TEXT_PATH,
@@ -55,7 +56,7 @@ class NoteClient:
                 path=_GET_NOTE_SEARCH_TEXT_PATH,
                 msg=f"unexpected data payload: {data!r}",
             )
-        return data
+        return NoteSearchText.model_validate(data)
 
 
 __all__ = ["NoteClient"]

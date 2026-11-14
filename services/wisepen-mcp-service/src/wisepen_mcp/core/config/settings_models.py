@@ -12,11 +12,6 @@ class WebSearchProviderSettings(ConfigModel):
 
 
 class WebSearchProvidersSettings(ConfigModel):
-    fourget: WebSearchProviderSettings = Field(
-        default_factory=lambda: WebSearchProviderSettings.model_validate(
-            {"base-url": "http://127.0.0.1:8088"}
-        )
-    )
     exa: WebSearchProviderSettings = Field(
         default_factory=lambda: WebSearchProviderSettings.model_validate(
             {"base-url": "https://api.exa.ai"}
@@ -49,9 +44,9 @@ class WebSearchProvidersSettings(ConfigModel):
     )
 
 
-class WebSearchRerankerSettings(ConfigModel):
-    zero_entropy_api_key: str = ""
-    model: str = "zerank-2"
+class WebSearchPlatformDefaultSettings(ConfigModel):
+    api_key: str = ""
+    base_url: str = Field(default="https://api.deepseek.com", min_length=1)
 
 
 class WebSearchSettings(ConfigModel):
@@ -59,8 +54,8 @@ class WebSearchSettings(ConfigModel):
     providers: WebSearchProvidersSettings = Field(
         default_factory=WebSearchProvidersSettings
     )
-    reranker: WebSearchRerankerSettings = Field(
-        default_factory=WebSearchRerankerSettings
+    platform_default: WebSearchPlatformDefaultSettings = Field(
+        default_factory=WebSearchPlatformDefaultSettings
     )
 
 
@@ -70,4 +65,4 @@ class McpServiceSettings(ConfigModel):
     service_discovery: ServiceDiscoverySettings = Field(
         default_factory=ServiceDiscoverySettings
     )
-    web_search: WebSearchSettings = Field(default_factory=WebSearchSettings)
+    web_search: WebSearchSettings

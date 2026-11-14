@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 from common.core.config.app_settings import (
     ConfigModel,
@@ -40,35 +41,24 @@ class MessagingSettings(ConfigModel):
     kafka: KafkaSettings
 
 
-class FallbackModelSettings(ConfigModel):
+class ProviderConnectionSettings(ConfigModel):
     base_url: str = Field(min_length=1)
     api_key: str = Field(min_length=1)
-    default_model_id: str = Field(min_length=1)
 
 
 class MemoryModelSettings(ConfigModel):
     llm_model: str = Field(min_length=1)
     embedding_model: str = Field(min_length=1)
-    reranker_model: str = Field(min_length=1)
+    embedding_dims: int = Field(default=1024, ge=1)
 
 
 class SummaryModelSettings(ConfigModel):
     model: str = Field(min_length=1)
 
 
-class RerankerModelSettings(ConfigModel):
-    model: str = Field(min_length=1)
-
-
 class ModelSettings(ConfigModel):
-    fallback: FallbackModelSettings
     memory: MemoryModelSettings
     summary: SummaryModelSettings
-    reranker: RerankerModelSettings
-
-
-class ZeroEntropySettings(ConfigModel):
-    api_key: str = Field(min_length=1)
 
 
 class IflytekSpeechSettings(ConfigModel):
@@ -82,7 +72,8 @@ class SpeechSettings(ConfigModel):
 
 
 class IntegrationSettings(ConfigModel):
-    zero_entropy: ZeroEntropySettings
+    common_llm_provider: ProviderConnectionSettings
+    common_embedding_provider: ProviderConnectionSettings
     speech: SpeechSettings | None = None
 
 
@@ -131,25 +122,30 @@ class VisionSettings(ConfigModel):
 
 
 class AgentSettings(ConfigModel):
-    max_iterations: int = Field(default=25, ge=1)
+    max_iterations: int = Field(default=100, ge=1)
 
 
 class ChatTurnSettings(ConfigModel):
     active_ttl_seconds: int = Field(default=30 * 60, ge=1)
     stream_ttl_seconds: int = Field(default=60 * 60, ge=1)
+    frontend_response_timeout_seconds: int = Field(default=10 * 60, ge=1)
+
+    @model_validator(mode="after")
+    def validate_lease_outlives_frontend_wait(self) -> ChatTurnSettings:
+        # 前端等待期间 runner 不产帧、不续租，租约必须比一次等待活得更久
+        if self.active_ttl_seconds <= self.frontend_response_timeout_seconds:
+            raise ValueError(
+                "active-ttl-seconds 必须大于 frontend-response-timeout-seconds"
+            )
+        return self
 
 
 class ToolContentSettings(ConfigModel):
     preview_per_char_budget: int = Field(default=4_000, ge=1)
     preview_total_char_budget: int = Field(default=12_000, ge=1)
     read_window_char_budget: int = Field(default=24_000, ge=1)
-    read_total_char_budget: int = Field(default=48_000, ge=1)
-    semantic_search_window_char_budget: int = Field(default=4_000, ge=1)
-    semantic_search_total_char_budget: int = Field(default=24_000, ge=1)
-    regex_context_side_char_budget: int = Field(default=1_500, ge=0)
-    regex_total_char_budget: int = Field(default=24_000, ge=1)
-    default_ttl_seconds: int = Field(default=3600, ge=1)
     max_chars: int = Field(default=20_000_000, ge=1)
+    default_ttl_seconds: int = Field(default=3600, ge=1)
 
 
 class ToolSettings(ConfigModel):
@@ -175,12 +171,43 @@ class AssetCacheSettings(ConfigModel):
     gc_interval_seconds: int = Field(default=30 * 60, ge=1)
 
 
+class ContentSafetySettings(ConfigModel):
+    """内容安全阻断配置
+    model / base-url / api-key 任一为空即整体禁用。
+
+    mode=chat 走 OpenAI 兼容对话模型（JSON 输出）
+    mode=decision 走决策模型（SystemOne 协议）
+    """
+
+    mode: Literal["chat", "decision"] = "chat"
+    model: str = Field(default="")
+    base_url: str = Field(default="")
+    api_key: str = Field(default="")
+    timeout_seconds: float = Field(default=0.8, gt=0)
+    output_chunk_chars: int = Field(default=60, ge=1)
+    # decision 模式：违规概率达到该值即判定为违规
+    block_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    escalation_threshold: int = Field(default=5, ge=1)
+    window_seconds: int = Field(default=24 * 3600, ge=1)
+    ban_ttl_seconds: int = Field(default=24 * 3600, ge=1)
+    refusal_output: str = Field(
+        default="抱歉，这个问题我无法继续回答。如果您有其他问题，我很乐意继续帮助您。"
+    )
+    refusal_banned: str = Field(
+        default="由于一些原因，您的对话功能已暂时受限，将于 24 小时后自动恢复。如有疑问，请联系客服。"
+    )
+    @property
+    def enabled(self) -> bool:
+        return bool(self.model and self.base_url and self.api_key)
+
+
 class ChatSettings(ConfigModel):
     security: InternalSecuritySettings
     persistence: PersistenceSettings
     messaging: MessagingSettings
     models: ModelSettings
     integrations: IntegrationSettings
+    content_safety: ContentSafetySettings | None = None
     billing: BillingSettings = Field(default_factory=BillingSettings)
     context: ContextSettings = Field(default_factory=ContextSettings)
     vision: VisionSettings = Field(default_factory=VisionSettings)

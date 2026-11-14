@@ -55,6 +55,12 @@ class MongoSessionRepository(SessionRepository):
             session.summary_updated_at = summary_updated_at
             await session.save()
 
+    async def update_context_tokens(self, session_id: str, context_tokens: int) -> None:
+        session = await ChatSession.get(PydanticObjectId(session_id))
+        if session:
+            session.context_tokens = context_tokens
+            await session.save()
+
     async def delete_session(self, session_id: str, user_id: str) -> None:
         session = await self._safe_get_session(session_id, user_id)
         await session.delete()

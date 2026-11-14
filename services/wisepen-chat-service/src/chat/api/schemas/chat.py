@@ -65,6 +65,23 @@ class SubagentControlRequest(BaseModel):
 class SubagentInputRequest(SubagentControlRequest):
     input: str = Field(min_length=1, max_length=32000)
 
+class ChatRewriteRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, description="目标会话 ID；必须属于当前登录用户。")
+    message_id: str = Field(..., min_length=1, description="被重写的 user 消息 ID；该消息及其后的记录都会被丢弃。")
+    new_query: str = Field(..., min_length=1, description="重写后的用户输入；会作为新的 user 消息进入 prompt。")
+    model: str = Field(..., description="模型 ID。")
+    provider_id: Optional[str] = Field(default=None, description="可选 Provider ID。")
+
+
+class ChatRedirectRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, description="目标会话 ID；必须属于当前登录用户。")
+    query: str = Field(..., min_length=1, description="打断后的引导消息；会作为 user 消息注入当前正在运行的 turn。")
+
+
+class ChatCompactRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, description="目标会话 ID；必须属于当前登录用户。")
+
+
 class ChatRequest(BaseModel):
     """
     聊天请求传输对象
@@ -72,9 +89,9 @@ class ChatRequest(BaseModel):
     session_id: str = Field(..., description="目标会话 ID；必须属于当前登录用户。")
     query: str = Field(..., description="本轮用户输入；不能为空，会作为最新 user message 进入 prompt。")
     subagents: SubagentOptions | None = None
-    model: Optional[str] = Field(
-        default=None,
-        description="可选模型 ID；未传时使用服务默认模型；若会话 Agent 禁止请求覆盖，则以 Agent 默认模型为准。",
+    model: str = Field(
+        ...,
+        description="模型 ID；若会话 Agent 禁止请求覆盖，则以 Agent 默认模型为准。",
     )
     provider_id: Optional[str] = Field(
         default=None,

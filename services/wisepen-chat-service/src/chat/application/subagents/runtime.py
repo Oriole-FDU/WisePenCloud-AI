@@ -350,7 +350,6 @@ class SubagentRuntime:
                             run.status = "interrupted" if self.interrupted() else "cancelled"
                             run.messages.extend(event.intermediate_messages)
                         elif event.is_finished:
-                            run.messages.append(event.final_assistant_message)
                             run.status = "incomplete" if event.final_assistant_message.metadata.get("incomplete") else "completed"
                     self.emit("event", run, event=json.loads(to_vercel_sse(event)[6:]))
             if deadline.expired():

@@ -7,7 +7,7 @@ from chat.application.tools.core.definition import ClientToolResult
 from chat.application.tools.core.execution.executor import ToolExecutor
 from chat.application.tools.core.execution.result import ToolExecutionResult
 from chat.application.tools.core.llm.invocation import ToolInvocation
-from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
+from chat.application.tools.core.output_cache import ToolOutputCache
 from chat.application.tools.core.registry import ToolScope
 
 

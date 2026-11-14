@@ -39,8 +39,26 @@ RUN uv sync --frozen --no-dev --package ${SERVICE_PROJECT} \
 FROM python:3.11-slim-bookworm
 
 ARG SERVICE_PROJECT
+
+# 加速构建过程
+ARG DEBIAN_MIRROR_BASE=https://mirrors.aliyun.com
+ARG DOCKER_CE_MIRROR=https://mirrors.aliyun.com/docker-ce/linux/debian
+ARG DOCKER_CLI_VERSION=5:27.5.1-1~debian.12~bookworm
 RUN if [ "$SERVICE_PROJECT" = "wisepen-sandbox-service" ]; then \
-        apt-get update && apt-get install -y --no-install-recommends docker.io && \
+        for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
+            if [ -f "$source_file" ]; then \
+                sed -Ei "s|https?://deb\\.debian\\.org|${DEBIAN_MIRROR_BASE}|g" "$source_file"; \
+            fi; \
+        done && \
+        install -m 0755 -d /etc/apt/keyrings && \
+        python -c 'import pathlib, sys, urllib.request; pathlib.Path(sys.argv[2]).write_bytes(urllib.request.urlopen(sys.argv[1], timeout=30).read())' \
+            "${DOCKER_CE_MIRROR}/gpg" /etc/apt/keyrings/docker.asc && \
+        . /etc/os-release && \
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] ${DOCKER_CE_MIRROR} ${VERSION_CODENAME} stable" \
+            > /etc/apt/sources.list.d/docker-ce.list && \
+        apt-get update && \
+        apt-get install -y --no-install-recommends docker-ce-cli="${DOCKER_CLI_VERSION}" && \
+        docker --version && \
         rm -rf /var/lib/apt/lists/*; \
     fi
 

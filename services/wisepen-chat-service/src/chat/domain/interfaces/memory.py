@@ -13,12 +13,17 @@ class MemoryProvider(ABC):
         limit: int = 5,
         score_threshold: Optional[float] = None,
     ) -> List[str]:
-        """根据语义相似度检索相关事实。score_threshold 不为 None 时按分数过滤，忽略 limit"""
+        """根据语义相似度检索相关事实。score_threshold 非 None 时作为 mem0 的语义阈值过滤（limit 仍限制最大返回条数）"""
         pass
 
     @abstractmethod
     async def add_interaction(self, user_id: str, messages: List[ChatMessage]):
         """将新一轮对话摄入长期记忆"""
+        pass
+
+    @abstractmethod
+    async def add_memory(self, user_id: str, content: str) -> None:
+        """写入一条长期记忆（模型主动记录的事实/偏好）"""
         pass
 
     @abstractmethod

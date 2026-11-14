@@ -2,6 +2,7 @@
 
 from typing import List
 
+import redis.asyncio as redis
 from dependency_injector import containers, providers
 from v2.nacos import NacosNamingService
 
@@ -13,6 +14,7 @@ from chat.core.providers import (
     GeminiAdapter,
     OpenAIAdapter,
     QwenAdapter,
+    DefaultLlmCompactor,
     Mem0Adapter,
     OssFileLoader,
     IflytekSpeechProvider,
@@ -30,36 +32,61 @@ from chat.core.persistence import (
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
     RedisChatTurnStream,
+    RedisChatTurnQueue,
+    RedisFrontendToolResponseRepository,
     RedisToolContentRepository,
 )
 from chat.domain.repositories import ToolConfigRepository
+from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
+from chat.application.content_safety import ContentSafetyChecker, create_content_safety_client
+from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
+from chat.mq import FrontendToolResponseConsumer
 from chat.application.agents import (
     DefaultAgentResolver,
     CompositeAgentResolver,
     RemoteAgentResolver,
 )
-from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
-from chat.application.tools.skill_tools import LoadSkillAssetTool
-from chat.application.tools.skill_tools import LoadSkillTool
+from chat.application.skills.skill_matcher import DefaultSkillMatcher
+from chat.application.builtin_tools.skill_tools import LoadSkillAssetTool
+from chat.application.builtin_tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
 from chat.application.subagents.tools import subagent_tools
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
-from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
-from chat.application.tools.core.output_cache.cache_store import ToolContentStore
-from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
-from chat.application.tools.session_tools.load_image_attachment_tool import LoadImageAttachmentTool
-from chat.application.tools.session_tools.cached_tool_output_tools import (
-    CachedToolOutputInspectStructureTool,
-    CachedToolOutputReadByPageTool,
-    CachedToolOutputReadByRangeTool,
-    CachedToolOutputReadBySectionTool,
-    CachedToolOutputSearchByRegexTool,
-    CachedToolOutputSearchBySemanticsTool,
+from chat.application.tools.core.output_cache import (
+    ToolContentStore,
+    ToolOutputCache,
 )
+from chat.application.builtin_tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
+from chat.application.builtin_tools.session_tools.load_image_attachment_tool import LoadImageAttachmentTool
+from chat.application.builtin_tools.output_cache_tools import (
+    InspectToolOutputStructureTool,
+    ReadToolOutputRangeTool,
+    ReadToolOutputSectionTool,
+    SearchToolOutputBM25Tool,
+    SearchToolOutputRegexTool,
+)
+from chat.application.builtin_tools.byok_tools.bind_model_provider import BindModelProviderTool
+from chat.application.builtin_tools.byok_tools.create_my_model import CreateMyModelTool
+from chat.application.builtin_tools.byok_tools.create_my_provider import CreateMyProviderTool
+from chat.application.builtin_tools.byok_tools.delete_my_model import DeleteMyModelTool
+from chat.application.builtin_tools.byok_tools.delete_my_provider import DeleteMyProviderTool
+from chat.application.builtin_tools.byok_tools.list_available_models import ListAvailableModelsTool
+from chat.application.builtin_tools.byok_tools.list_my_providers import ListMyProvidersTool
+from chat.application.builtin_tools.byok_tools.unbind_model_provider import UnbindModelProviderTool
+from chat.application.builtin_tools.byok_tools.update_my_model import UpdateMyModelTool
+from chat.application.builtin_tools.byok_tools.update_my_provider import UpdateMyProviderTool
+from chat.application.builtin_tools.session_tools.compact_session import CompactSessionTool
+from chat.application.builtin_tools.session_tools.get_session_messages import GetSessionMessagesTool
+from chat.application.builtin_tools.session_tools.list_sessions import ListSessionsTool
+from chat.application.builtin_tools.session_tools.rename_session import RenameSessionTool
+from chat.application.builtin_tools.memory_tools.add_memory import AddMemoryTool
+from chat.application.builtin_tools.memory_tools.delete_memory import DeleteMemoryTool
+from chat.application.builtin_tools.memory_tools.list_memories import ListMemoriesTool
+from chat.application.builtin_tools.memory_tools.search_memories import SearchMemoriesTool
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
@@ -126,26 +153,22 @@ class Container(containers.DeclarativeContainer):
     tool_config_repo = providers.Singleton(MongoToolConfigRepository)
     suspended_chat_repo = providers.Singleton(MongoSuspendedChatRepository)
     mcp_server_config_repo = providers.Singleton(MongoMcpServerConfigRepository)
-    hot_context_repo = providers.Singleton(RedisHotContext)
-    mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache)
-    chat_turn_stream_repo = providers.Singleton(RedisChatTurnStream)
-    tool_content_repo = providers.Singleton(
-        RedisToolContentRepository,
-        ttl_seconds=settings.tools.content.default_ttl_seconds,
+
+    redis_client = providers.Singleton(redis.from_url, settings.persistence.redis.url, decode_responses=True,)
+    hot_context_repo = providers.Singleton(RedisHotContext, redis_client=redis_client)
+    mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache, redis_client=redis_client)
+    chat_turn_stream_repo = providers.Singleton(RedisChatTurnStream, redis_client=redis_client)
+    chat_turn_queue_repo = providers.Singleton(RedisChatTurnQueue, redis_client=redis_client)
+    frontend_tool_response_repo = providers.Singleton(
+        RedisFrontendToolResponseRepository,
+        redis_client=redis_client,
     )
-    tool_content_store = providers.Singleton(
-        ToolContentStore,
-        tool_content_repository=tool_content_repo,
-        max_chars=settings.tools.content.max_chars,
-    )
-    tool_output_cache = providers.Singleton(
-        ToolOutputCache,
-        tool_content_store=tool_content_store,
-    )
-    tool_dispatcher = providers.Singleton(
-        ToolDispatcher,
-        output_cache=tool_output_cache,
-    )
+    tool_content_repo = providers.Singleton(RedisToolContentRepository, redis_client=redis_client)
+
+    tool_content_store = providers.Singleton(ToolContentStore,tool_content_repository=tool_content_repo,)
+    output_cache = providers.Singleton(ToolOutputCache, tool_content_store=tool_content_store)
+
+    tool_dispatcher = providers.Singleton(ToolDispatcher, output_cache=output_cache)
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
     service_discovery = providers.Singleton(
@@ -216,6 +239,13 @@ class Container(containers.DeclarativeContainer):
         cache_ttl_seconds=settings.asset_cache.ttl_seconds,
         gc_interval_seconds=settings.asset_cache.gc_interval_seconds,
     )
+    context_assembler = providers.Singleton(
+        ChatContextAssembler,
+        message_repo=message_repo,
+        session_repo=session_repo,
+        hot_context_repo=hot_context_repo,
+        oss_file_loader=oss_file_loader,
+    )
     default_agent_resolver = providers.Singleton(DefaultAgentResolver)
     remote_agent_resolver = providers.Singleton(
         RemoteAgentResolver,
@@ -243,6 +273,27 @@ class Container(containers.DeclarativeContainer):
         bootstrap_servers=settings.messaging.kafka.bootstrap_servers,
     )
 
+    context_compactor = providers.Singleton(
+        DefaultLlmCompactor,
+        text_llm=litellm_adapter,
+        session_repo=session_repo,
+        hot_context_repo=hot_context_repo,
+    )
+    content_safety_client = providers.Singleton(
+        create_content_safety_client,
+        provider=litellm_adapter,
+    )
+    content_safety = providers.Singleton(
+        ContentSafetyChecker,
+        client=content_safety_client,
+        redis=redis_client,
+    )
+    chat_turn_stream_manager = providers.Singleton(
+        ChatTurnStreamManager,
+        stream_repo=chat_turn_stream_repo,
+        content_safety=content_safety,
+    )
+
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期
     # GetHistoricalChatMessagesTool
     search_history_tool = providers.Singleton(
@@ -266,41 +317,82 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
-    inspect_cached_tool_output_structure_tool = providers.Singleton(
-        CachedToolOutputInspectStructureTool,
-        store=tool_content_store,
+    inspect_tool_output_structure_tool = providers.Singleton(
+        InspectToolOutputStructureTool,
+        tool_content_store=tool_content_store,
     )
-    read_cached_tool_output_by_page_tool = providers.Singleton(
-        CachedToolOutputReadByPageTool,
-        store=tool_content_store,
+    read_tool_output_range_tool = providers.Singleton(
+        ReadToolOutputRangeTool,
+        tool_content_store=tool_content_store,
     )
-    read_cached_tool_output_by_range_tool = providers.Singleton(
-        CachedToolOutputReadByRangeTool,
-        store=tool_content_store,
+    read_tool_output_section_tool = providers.Singleton(
+        ReadToolOutputSectionTool,
+        tool_content_store=tool_content_store,
     )
-    read_cached_tool_output_by_section_tool = providers.Singleton(
-        CachedToolOutputReadBySectionTool,
-        store=tool_content_store,
+    search_tool_output_regex_tool = providers.Singleton(
+        SearchToolOutputRegexTool,
+        tool_content_store=tool_content_store,
     )
-    search_cached_tool_output_by_regex_tool = providers.Singleton(
-        CachedToolOutputSearchByRegexTool,
-        store=tool_content_store,
+    search_tool_output_bm25_tool = providers.Singleton(
+        SearchToolOutputBM25Tool,
+        tool_content_store=tool_content_store,
     )
-    search_cached_tool_output_by_semantics_tool = providers.Singleton(
-        CachedToolOutputSearchBySemanticsTool,
-        store=tool_content_store,
+    # BYOK（Provider / Model 配置）
+    list_my_providers_tool = providers.Singleton(ListMyProvidersTool, provider_repo=provider_repo)
+    create_my_provider_tool = providers.Singleton(CreateMyProviderTool, provider_repo=provider_repo)
+    update_my_provider_tool = providers.Singleton(UpdateMyProviderTool, provider_repo=provider_repo)
+    delete_my_provider_tool = providers.Singleton(DeleteMyProviderTool, provider_repo=provider_repo)
+    list_available_models_tool = providers.Singleton(ListAvailableModelsTool, model_repo=model_repo, provider_repo=provider_repo)
+    create_my_model_tool = providers.Singleton(CreateMyModelTool, model_repo=model_repo)
+    update_my_model_tool = providers.Singleton(UpdateMyModelTool, model_repo=model_repo)
+    delete_my_model_tool = providers.Singleton(DeleteMyModelTool, model_repo=model_repo)
+    bind_model_provider_tool = providers.Singleton(BindModelProviderTool, model_repo=model_repo)
+    unbind_model_provider_tool = providers.Singleton(UnbindModelProviderTool, model_repo=model_repo)
+    # Session
+    list_sessions_tool = providers.Singleton(ListSessionsTool, session_repo=session_repo)
+    rename_session_tool = providers.Singleton(RenameSessionTool, session_repo=session_repo)
+    get_session_messages_tool = providers.Singleton(GetSessionMessagesTool, session_repo=session_repo, message_repo=message_repo)
+    compact_session_tool = providers.Singleton(
+        CompactSessionTool,
+        session_repo=session_repo,
+        agent_resolver=agent_resolver,
+        context_compactor=context_compactor,
+        context_assembler=context_assembler,
+        turn_stream_manager=chat_turn_stream_manager,
     )
+    # Memory
+    search_memories_tool = providers.Singleton(SearchMemoriesTool, memory=memory_provider)
+    add_memory_tool = providers.Singleton(AddMemoryTool, memory=memory_provider)
+    list_memories_tool = providers.Singleton(ListMemoriesTool, memory=memory_provider)
+    delete_memory_tool = providers.Singleton(DeleteMemoryTool, memory=memory_provider)
     tool_providers = providers.List(
         search_history_tool,
         load_image_attachment_tool,
         load_skill_tool,
         load_skill_asset_tool,
-        inspect_cached_tool_output_structure_tool,
-        read_cached_tool_output_by_page_tool,
-        read_cached_tool_output_by_range_tool,
-        read_cached_tool_output_by_section_tool,
-        search_cached_tool_output_by_regex_tool,
-        search_cached_tool_output_by_semantics_tool,
+        inspect_tool_output_structure_tool,
+        read_tool_output_range_tool,
+        read_tool_output_section_tool,
+        search_tool_output_regex_tool,
+        search_tool_output_bm25_tool,
+        list_my_providers_tool,
+        create_my_provider_tool,
+        update_my_provider_tool,
+        delete_my_provider_tool,
+        list_available_models_tool,
+        create_my_model_tool,
+        update_my_model_tool,
+        delete_my_model_tool,
+        bind_model_provider_tool,
+        unbind_model_provider_tool,
+        list_sessions_tool,
+        rename_session_tool,
+        get_session_messages_tool,
+        compact_session_tool,
+        search_memories_tool,
+        add_memory_tool,
+        list_memories_tool,
+        delete_memory_tool,
     )
 
     tool_registry = providers.Singleton(
@@ -312,6 +404,18 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Application 层组件
+    frontend_tool_response_broker = providers.Singleton(
+        FrontendToolResponseBroker,
+        response_repo=frontend_tool_response_repo,
+        kafka_producer=kafka_producer,
+        timeout_seconds=settings.chat_turn.frontend_response_timeout_seconds,
+    )
+    frontend_tool_response_consumer = providers.Singleton(
+        FrontendToolResponseConsumer,
+        bootstrap_servers=settings.messaging.kafka.bootstrap_servers,
+        service_name=bootstrap_settings.SERVICE_NAME,
+        broker=frontend_tool_response_broker,
+    )
     chat_turn_coordinator = providers.Factory(
         ChatTurnCoordinator,
         llm_provider_resolver=llm_provider_resolver,
@@ -328,15 +432,14 @@ class Container(containers.DeclarativeContainer):
         kafka_producer=kafka_producer,
         tool_policy_builder=chat_turn_tool_policy_builder,
         suspended_chat_repo=suspended_chat_repo,
+        redirect_queue=chat_turn_queue_repo,
         agent_resolver=agent_resolver,
-        oss_file_loader=oss_file_loader,
+        context_assembler=context_assembler,
+        frontend_tool_response_broker=frontend_tool_response_broker,
+        context_compactor=context_compactor,
         turn_stream_repo=chat_turn_stream_repo,
         resource_client=resource_client,
-    )
-
-    chat_turn_stream_manager = providers.Singleton(
-        ChatTurnStreamManager,
-        stream_repo=chat_turn_stream_repo,
+        redis_client=redis_client,
     )
 
 

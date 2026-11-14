@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import is_dataclass, asdict
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
-
-from pydantic import BaseModel
+from typing import Any
 
 from chat.application.execution_bindings import ExecutionBindings
 from chat.application.tools.core.definition import ClientToolResult, ToolRiskLevel
@@ -18,8 +17,9 @@ from chat.application.tools.core.execution.result import (
 )
 
 from chat.application.tools.core.llm.invocation import ToolInvocation
-from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
+from chat.application.tools.core.output_cache import ToolOutputCache
 from chat.application.tools.core.registry import ToolScope
+from pydantic import BaseModel
 
 
 class ToolExecutor:
@@ -53,11 +53,7 @@ class ToolExecutor:
                     retryable=False,
                 )
 
-            output = await self._output_cache.process(
-                tool_output=self._coerce_tool_output(client_tool_result.output),
-                invocation=invocation,
-                session_id=self._tool_scope.context["session_id"], # 会话 ID
-            )
+            output = self._coerce_tool_output(client_tool_result.output)
 
             return ToolExecutionResult(tool_invocation=invocation, tool_output=output,
                                        started_at=started_at, finished_at=datetime.now(timezone.utc),
@@ -90,7 +86,12 @@ class ToolExecutor:
                 )
 
             tool_config = self._tool_scope.config_for(invocation.tool_name)
-            if tool.definition.config_spec is not None and tool_config is None:
+            # config_spec 也描述可选项；只有 required_keys 才阻止无配置调用
+            if (
+                tool.definition.config_spec is not None
+                and tool.definition.config_spec.required_keys
+                and tool_config is None
+            ):
                 raise ToolExecutionError(
                     reason="Tool Config Missing",
                     detail_reason=f"Tool '{invocation.tool_name}' requires user configuration.",
@@ -135,10 +136,14 @@ class ToolExecutor:
                 tool_name=invocation.tool_name,
             )
 
-            output = await self._output_cache.process(
-                tool_output=self._coerce_tool_output(output),
-                invocation=invocation,
-                session_id=self._tool_scope.context["session_id"], # 会话 ID
+            output = self._coerce_tool_output(output)
+
+            # 处理工具缓存
+            output = await self._output_cache.cache_tool_output(
+                output,
+                strategy=tool.definition.output_cache_spec.strategy,
+                paths=tool.definition.output_cache_spec.cache_paths,
+                session_id=self._tool_scope.context.get("session_id"),
             )
 
             return ToolExecutionResult(tool_invocation=invocation, tool_output=output,
@@ -197,13 +202,25 @@ class ToolExecutor:
             return ToolOutput(content=json.dumps(asdict(output), ensure_ascii=False))
 
         if isinstance(output, Mapping):
-            return ToolOutput(content=json.dumps(dict(output), ensure_ascii=False))
+            value = dict(output)
+            return ToolOutput(content=json.dumps(value, ensure_ascii=False, default=_json_default))
 
         if isinstance(output, Sequence) and not isinstance(output, str | bytes | bytearray):
-            return ToolOutput(content=json.dumps(list(output), ensure_ascii=False))
+            value = list(output)
+            return ToolOutput(content=json.dumps(value, ensure_ascii=False, default=_json_default))
 
         raise ToolExecutionError(
             reason="Tool Output Invalid",
             detail_reason=f"Tool output is not supported: {type(output).__qualname__}",
             retryable=False,
         )
+
+
+def _json_default(value: object) -> object:
+    """将容器内的 dataclass 或 Pydantic 模型转换为 JSON 可编码值。"""
+
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")

@@ -26,6 +26,28 @@ class AioProviderSettings(ConfigModel):
     image: str = Field(min_length=1)
     request_timeout_seconds: float = Field(default=5.0, gt=0)
     file_transfer_timeout_seconds: float = Field(default=120.0, gt=0)
+    derive_image: bool = Field(
+        default=True,
+        description="预热前是否从基础镜像派生一层自定义镜像（false 时直接使用基础镜像）",
+    )
+
+    @model_validator(mode="after")
+    def validate_image_tag(self) -> "AioProviderSettings":
+        # 基础镜像不能使用 latest 版本
+
+        # 使用 digest 引用（repo@sha256:...），合法
+        if "@" in self.image:
+            return self
+        # 最后一个 '/' 之后的 tag（避开 registry 端口里的冒号）非空且非 latest，合法
+        last_slash = self.image.rfind("/")
+        last_colon = self.image.rfind(":")
+        tag = self.image[last_colon + 1 :] if last_colon > last_slash else ""
+        # 没有 tag 或 tag 是 latest，报错
+        if not tag or tag == "latest":
+            raise ValueError(
+                "sandbox provider image must pin a concrete version tag or digest, not 'latest'"
+            )
+        return self
 
 
 class ProviderSettings(ConfigModel):

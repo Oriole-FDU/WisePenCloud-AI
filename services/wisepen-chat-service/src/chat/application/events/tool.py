@@ -20,6 +20,13 @@ class ToolInputAvailableEvent(StreamEvent):
 
 
 @dataclass(frozen=True)
+class ToolInputDeltaEvent(StreamEvent):
+    """工具调用参数的一段原始 JSON 字符串增量。"""
+    call_id: str
+    delta: str
+
+
+@dataclass(frozen=True)
 class ToolOutputAvailableEvent(StreamEvent):
     """工具调用输出已可用。"""
     call_id: str

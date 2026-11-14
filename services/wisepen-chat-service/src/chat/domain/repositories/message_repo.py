@@ -39,6 +39,20 @@ class MessageRepository(ABC):
         pass
 
     @abstractmethod
+    async def delete_messages_after_target_user_message(self, session_id: str, user_message_id: str) -> ChatMessage:
+        """
+        删除指定 user 消息及其之后的所有消息，返回被删除的 user 消息
+        """
+        pass
+
+    @abstractmethod
+    async def list_session_messages_all(self, session_id: str) -> List[ChatMessage]:
+        """
+        按时间正序返回会话全部消息，用于 fork 复制
+        """
+        pass
+
+    @abstractmethod
     async def search_messages_by_text(
         self,
         keyword: str,

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Set
 
 from chat.application.agents.models import AgentToolAndSkillPolicy
-from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
+from chat.application.skills import SkillMatcher
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.skill import SkillMeta
 
@@ -13,12 +13,11 @@ _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
 _SESSION_TOOL_NAMES = frozenset({"get_historical_chat_messages"})
 _IMAGE_ATTACHMENT_TOOL_NAMES = frozenset({"load_image_attachment"})
 _CACHED_TOOL_OUTPUT_TOOL_NAMES = frozenset({
-    "inspect_cached_tool_output_structure",
-    "read_cached_tool_output_by_page",
-    "read_cached_tool_output_by_range",
-    "read_cached_tool_output_by_section",
-    "search_cached_tool_output_by_regex",
-    "search_cached_tool_output_by_semantics",
+    "inspect_tool_output_structure",
+    "read_tool_output_range",
+    "read_tool_output_section",
+    "search_tool_output_regex",
+    "search_tool_output_bm25",
 })
 
 

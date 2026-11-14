@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any
 
-from chat.application.tools.core.definition import ToolLLMSpec, ToolDefinition
+from chat.application.tools.core.definition import ToolLLMSpec, ToolDefinition, OutputCacheStrategy
 from chat.application.tools.core.execution.result import ToolExecutionResult
 from chat.domain.entities import VisionImage
 
@@ -33,6 +33,11 @@ class RenderToolResult:
 
 def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: ToolDefinition | None) -> RenderToolResult:
     max_output_chars = tool_definition.policy.max_output_chars if tool_definition is not None else None
+    # 只有 NO_CACHE（未缓存、内联输出）才可能截断；ALWAYS_KEEP_RAW 原样输出，LONG_TEXT / OPAQUE 走缓存，均不截断
+    force_truncate = (
+        tool_definition is not None
+        and tool_definition.output_cache_spec.strategy is OutputCacheStrategy.NO_CACHE
+    )
     if tool_result.tool_execution_error is not None:
         error = tool_result.tool_execution_error
         output = render_tool_output({
@@ -53,7 +58,7 @@ def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: Tool
         else:
             content = tool_output.content
             truncated = False
-            if max_output_chars is not None and max_output_chars > 0 and len(content) > max_output_chars:
+            if force_truncate and max_output_chars is not None and max_output_chars > 0 and len(content) > max_output_chars:
                 content = content[:max_output_chars] + "\n...[truncated]"
                 truncated = True
             output = render_tool_output({

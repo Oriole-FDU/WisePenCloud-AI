@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI
 from starlette.types import ASGIApp
 
+from common.mcp import build_tool_meta_router
 from sandbox.api.endpoints import health
 
 
@@ -28,6 +29,7 @@ def create_app(
     )
 
     app.include_router(health.router)
+    app.include_router(build_tool_meta_router())
     if mcp_app is not None:
         app.mount("/mcp", mcp_app)
     return app

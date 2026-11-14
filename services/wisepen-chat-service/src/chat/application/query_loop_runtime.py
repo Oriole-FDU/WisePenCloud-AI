@@ -1,7 +1,7 @@
 import asyncio
 import json
 import uuid
-from typing import AsyncIterator, Iterator, List, Optional, Union
+from typing import AsyncIterator, Awaitable, Callable, Iterator, List, Optional, Union
 
 from jsonschema import Draft202012Validator, SchemaError, ValidationError
 
@@ -17,11 +17,13 @@ from chat.application.events import (
     TextEndEvent,
     TextStartEvent,
     ToolInputAvailableEvent,
+    ToolInputDeltaEvent,
     ToolInputStartEvent,
     ToolOutputAvailableEvent,
     ToolApprovalRequiredEvent,
     TurnSuspension,
 )
+from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
 from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
@@ -40,13 +42,12 @@ from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.core.exceptions import ServiceException
 from common.logger import warn
 
-_CACHED_TOOL_OUTPUT_TOOL_NAMES = frozenset({
-    "inspect_cached_tool_output_structure",
-    "read_cached_tool_output_by_page",
-    "read_cached_tool_output_by_range",
-    "read_cached_tool_output_by_section",
-    "search_cached_tool_output_by_regex",
-    "search_cached_tool_output_by_semantics",
+_TOOL_OUTPUT_TOOL_NAMES = frozenset({
+    "inspect_tool_output_structure",
+    "read_tool_output_range",
+    "read_tool_output_section",
+    "search_tool_output_regex",
+    "search_tool_output_bm25",
 })
 
 
@@ -72,6 +73,9 @@ class _StepEventInterpreter:
         # LLMProvider 的原生载荷
         self.provider_payload: dict | None = None
 
+        # 已发过 ToolInputStartEvent 的 call_id，避免重复发 start
+        self.started_tool_calls: set[str] = set()
+
         self._text_started: bool = False
         self._reasoning_started: bool = False
 
@@ -89,6 +93,17 @@ class _StepEventInterpreter:
         # 在一整轮模型输出结束后才能进入工具执行阶段
         if item.type == LLMEventType.TOOL_CALLS:
             self.tool_calls.extend(item.tool_calls or [])
+            return
+
+        # 处理工具调用参数的流式增量
+        if item.type == LLMEventType.TOOL_CALL_ARGS_DELTA:
+            call_id = item.call_id or ""
+            # 首次看到某 call_id 先补 start，再逐段 delta
+            if call_id and call_id not in self.started_tool_calls:
+                self.started_tool_calls.add(call_id)
+                yield ToolInputStartEvent(call_id=call_id, tool_name=item.tool_name or "")
+            if item.delta:
+                yield ToolInputDeltaEvent(call_id=call_id, delta=item.delta)
             return
 
         # 若 reasoning_delta 有值
@@ -149,10 +164,17 @@ class QueryLoopRuntime:
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
     """
 
-    def __init__(self, llm_provider_resolver: LLMProviderResolver, token_counter: TokenCounter, tool_dispatcher: ToolDispatcher) -> None:
+    def __init__(
+        self,
+        llm_provider_resolver: LLMProviderResolver,
+        token_counter: TokenCounter,
+        tool_dispatcher: ToolDispatcher,
+        frontend_tool_response_broker: FrontendToolResponseBroker,
+    ) -> None:
         self._llm_provider_resolver = llm_provider_resolver
         self._token_counter = token_counter
         self._tool_dispatcher = tool_dispatcher
+        self._frontend_tool_response_broker = frontend_tool_response_broker
 
     def prepare_model(self, model_info):
         provider = self._llm_provider_resolver.resolve(model_info)
@@ -180,6 +202,7 @@ class QueryLoopRuntime:
         client_tool_results: list[ClientToolResult] = None,
         tool_approval_status: List[ToolApprovalStatus] = None,
         bindings: ExecutionBindings | None = None,
+        pending_user_messages: Callable[[], Awaitable[List[ChatMessage]]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         bindings = bindings or ExecutionBindings()
         # 解析获取当前模型的 LLMProvider
@@ -193,7 +216,8 @@ class QueryLoopRuntime:
         _tool_approval_status = tool_approval_status
 
         max_iterations = agent_max_iterations or settings.agent.max_iterations
-        for iteration in range(start_iteration, max_iterations):
+        iteration = start_iteration
+        while True:
             if bindings.before_step is not None:
                 await bindings.before_step()
             # 请求取消检查点
@@ -202,7 +226,7 @@ class QueryLoopRuntime:
                 return
 
             tool_scope.suppress_schemas(
-                _CACHED_TOOL_OUTPUT_TOOL_NAMES,
+                _TOOL_OUTPUT_TOOL_NAMES,
                 suppressed=not _has_cached_tool_output(messages),
             )
 
@@ -254,25 +278,50 @@ class QueryLoopRuntime:
             assert step_finish_event is not None
             if step_finish_event.aborted:
                 return
+            # 如果存在挂起，则返回
+            if step_finish_event.suspension is not None:
+                step_finish_event.suspension.iteration = iteration # 保存当前轮次数
+                return
+
+            iteration += 1
+
+            # 如果模型完成了最终输出
+            if step_finish_event.is_finished:
+                # 压入最终的回复信息（如果有）
+                if step_finish_event.final_assistant_message is not None:
+                    messages.append(step_finish_event.final_assistant_message)
+            else: # 模型最终输出尚未完成
+                # 统一追加消息
+                messages.extend(step_finish_event.intermediate_messages)
+
+            if pending_user_messages is not None:
+                # 若存在引导信息
+                injected = await pending_user_messages()
+                if injected:
+                    messages.extend(injected) # 追加引导信息
+                    max_iterations += iteration # 提升上限
+                    continue # 继续循环回答，而不是结束 turn，无论对话是否已经完成
+
             # 如果已经完成则返回
             if step_finish_event.is_finished:
                 return
-            # 如果存在挂起，则返回
-            if  step_finish_event.suspension is not None:
-                step_finish_event.suspension.iteration = iteration # 保存当前轮次数
+
+            if iteration >= max_iterations:
+                if bindings.join_children is not None:
+                    messages.extend(await bindings.join_children())
+                if await bindings.is_cancel_requested():
+                    yield StepFinishEvent(is_finished=False, token_usage=TokenUsage(), aborted=True)
+                    return
+                # 超出最大迭代次数时兜底
+                async for event in self._emit_force_finish(
+                    session_id=session_id,
+                    messages=messages,
+                    model_info=model_info,
+                    llm_provider=llm_provider,
+                    bindings=bindings,
+                ):
+                    yield event
                 return
-            else:
-                # 统一追加消息并决定是否继续下一轮
-                messages.extend(step_finish_event.intermediate_messages)
-        else:
-            if bindings.join_children is not None:
-                await bindings.join_children()
-            if await bindings.is_cancel_requested():
-                yield StepFinishEvent(is_finished=False, token_usage=TokenUsage(), aborted=True)
-                return
-            # 超出最大迭代次数时兜底
-            async for event in self._emit_exhausted_warning(session_id, max_iterations):
-                yield event
 
     """
     Agent Step：发起一次流式推理 → 解析 → 若需要则执行工具
@@ -450,26 +499,40 @@ class QueryLoopRuntime:
                 if await bindings.is_cancel_requested():
                     raise asyncio.CancelledError
 
-                for invocation in invocations:
-                    # 为每个 parsed tool_call 产生两阶段 input 事件（start + available）
-                    yield ToolInputStartEvent(
-                        call_id=invocation.tool_call_id,
-                        tool_name=invocation.tool_name,
+                # 把tool_invocations 分组为 approval_required, server, client
+                classified_tool_invocations = classify_tools(invocations, tool_scope)
+
+                # 是否有工具需要在客户端执行或需要审批
+                has_frontend_tools = bool(
+                    classified_tool_invocations.approval_required_tools or classified_tool_invocations.client_tools
+                )
+
+                # 先注册等待槽，再发送可见工具事件
+                # 避免在 broker 的 waiter 注册前发送前端响应导致竞态问题
+                response_wait = None
+                if has_frontend_tools:
+                    response_wait = await self._frontend_tool_response_broker.open_wait(
+                        session_id=session_id,
+                        client_tool_call_ids=[invocation.tool_call_id for invocation in classified_tool_invocations.client_tools],
+                        approval_tool_call_ids=[invocation.tool_call_id for invocation in classified_tool_invocations.approval_required_tools],
                     )
+
+                for invocation in invocations:
+                    # 流式阶段已发过 start 的调用不再重复发，只补最终 available
+                    if invocation.tool_call_id not in event_interpreter.started_tool_calls:
+                        yield ToolInputStartEvent(
+                            call_id=invocation.tool_call_id,
+                            tool_name=invocation.tool_name,
+                        )
                     yield ToolInputAvailableEvent(
                         call_id=invocation.tool_call_id,
                         tool_name=invocation.tool_name,
                         input=invocation.tool_call_arguments,
                     )
 
-                # 把tool_invocations 分组为 approval_required, server, client
-                classified_tool_invocations = classify_tools(invocations, tool_scope)
-                # 如果有工具需要在客户端执行或需要审批
-                if classified_tool_invocations.approval_required_tools or classified_tool_invocations.client_tools:
-                    if bindings.close_children is not None:
-                        await bindings.close_children()
-                    if await bindings.is_cancel_requested():
-                        raise asyncio.CancelledError
+                resolved_client_results = None
+                resolved_approval_status = None
+                if has_frontend_tools: # 有工具需要在客户端执行或需要审批
                     # 对所有在执行前需要审批的工具发送 ToolApprovalRequiredEvent
                     for invocation in classified_tool_invocations.approval_required_tools:
                         tool = tool_scope.get(invocation.tool_name)
@@ -479,65 +542,47 @@ class QueryLoopRuntime:
                             input=invocation.tool_call_arguments,
                             tool_desc=tool.definition.llm_spec.description,
                         )
-                    # 中断请求
-                    yield StepFinishEvent(
-                        is_finished=False,
-                        intermediate_messages=new_messages,
-                        token_usage=token_usage,
-                        suspension=TurnSuspension(
-                            classified_tool_invocation_plan=classified_tool_invocations,
-                            iteration=iteration,
-                        ),
-                    )
-                    return
 
-                # 请求取消检查点
-                if await bindings.is_cancel_requested():
-                    raise asyncio.CancelledError
-                # 通过工具 core 并发执行并归约结果
-                output = await self._tool_dispatcher.dispatch(classified_tool_invocations.server_tools, tool_scope, bindings=bindings)
-                tool_outputs.extend(output)
+                    # 像等待后端工具一样等待前端结果
+                    response = await self._frontend_tool_response_broker.receive(
+                        response_wait,
+                        cancel_requested=bindings.is_cancel_requested,
+                    )
+                    if response is None:
+                        if bindings.close_children is not None:
+                            await bindings.close_children()
+                        # 未能等待到结果，中断请求，挂起当前应用
+                        yield StepFinishEvent(
+                            is_finished=False,
+                            intermediate_messages=new_messages,
+                            token_usage=token_usage,
+                            suspension=TurnSuspension(
+                                classified_tool_invocation_plan=classified_tool_invocations,
+                                iteration=iteration,
+                            ),
+                        )
+                        return
+
+                    resolved_client_results, resolved_approval_status = response
+                # 执行工具
+                tool_outputs.extend(await self._execute_step_tools(
+                    classified_tool_invocations=classified_tool_invocations,
+                    client_tool_results=resolved_client_results,
+                    tool_approval_status=resolved_approval_status,
+                    tool_scope=tool_scope,
+                    bindings=bindings,
+                ))
             else: # 当前有客户端工具的调用结果和工具批准状态
                 # 无需再为每个 parsed tool_call 产生两阶段 input 事件（历史上已经产生了）
-
-                # 把tool_invocations 分组为 approval_required, server, client
                 classified_tool_invocations = classify_tools(invocations, tool_scope)
-
-                # 首次 step 只要包含客户端或审批工具就会整体挂起，server tools 也在此处补执行。
-                if classified_tool_invocations.server_tools:
-                    if await bindings.is_cancel_requested():
-                        raise asyncio.CancelledError
-                    output = await self._tool_dispatcher.dispatch(
-                        classified_tool_invocations.server_tools,
-                        tool_scope,
-                        bindings=bindings,
-                    )
-                    tool_outputs.extend(output)
-
-                # 如果有工具需要审批
-                if classified_tool_invocations.approval_required_tools:
-                    # 检查审批状态
-                    if tool_approval_status is None: tool_approval_status = []
-                    for invocation in classified_tool_invocations.approval_required_tools:
-                        invocation.is_approved = next((item.approved for item in tool_approval_status if item.tool_call_id == invocation.tool_call_id), False)
-
-                    # 请求取消检查点
-                    if await bindings.is_cancel_requested():
-                        raise asyncio.CancelledError
-
-                    # 通过工具 core 并发执行并归约结果
-                    output = await self._tool_dispatcher.dispatch(classified_tool_invocations.approval_required_tools, tool_scope, bindings=bindings)
-                    tool_outputs.extend(output)
-                # 如果有客户端工具
-                if classified_tool_invocations.client_tools:
-                    # 通过工具 core 并发执行并归约结果
-                    if client_tool_results is None: client_tool_results = []
-
-                    # 请求取消检查点
-                    if await bindings.is_cancel_requested():
-                        raise asyncio.CancelledError
-                    output = await self._tool_dispatcher.client_dispatch(classified_tool_invocations.client_tools, client_tool_results, tool_scope)
-                    tool_outputs.extend(output)
+                # 执行工具
+                tool_outputs.extend(await self._execute_step_tools(
+                    classified_tool_invocations=classified_tool_invocations,
+                    client_tool_results=client_tool_results,
+                    tool_approval_status=tool_approval_status,
+                    tool_scope=tool_scope,
+                    bindings=bindings,
+                ))
 
             for result in tool_outputs:
                 tool = tool_scope.get(result.tool_invocation.tool_name)
@@ -574,6 +619,55 @@ class QueryLoopRuntime:
                 aborted=True,
             )
             return
+
+    async def _execute_step_tools(
+        self,
+        *,
+        classified_tool_invocations,
+        client_tool_results: list[ClientToolResult] | None,
+        tool_approval_status: list[ToolApprovalStatus] | None,
+        tool_scope: ToolScope,
+        bindings: ExecutionBindings,
+    ) -> list[ToolExecutionResult]:
+        """执行当前工具调用"""
+        tool_outputs: list[ToolExecutionResult] = []
+
+        # 执行服务端工具
+        if classified_tool_invocations.server_tools:
+            # 请求取消检查点
+            if await bindings.is_cancel_requested():
+                raise asyncio.CancelledError
+            # dispatch 并发执行并归约结果
+            output = await self._tool_dispatcher.dispatch(classified_tool_invocations.server_tools, tool_scope, bindings=bindings)
+            tool_outputs.extend(output)
+
+        # 执行已审批的工具
+        if classified_tool_invocations.approval_required_tools:
+            # 请求取消检查点
+            if await bindings.is_cancel_requested():
+                raise asyncio.CancelledError
+            # 检查审批状态
+            if tool_approval_status is None: tool_approval_status = []
+            for invocation in classified_tool_invocations.approval_required_tools:
+                invocation.is_approved = next(
+                    (item.approved for item in tool_approval_status if item.tool_call_id == invocation.tool_call_id),
+                    False,
+                )
+            # dispatch 并发执行并归约结果
+            output = await self._tool_dispatcher.dispatch(classified_tool_invocations.approval_required_tools, tool_scope, bindings=bindings)
+            tool_outputs.extend(output)
+
+        # 执行客户端工具（组装结果）
+        if classified_tool_invocations.client_tools:
+            # 请求取消检查点
+            if await bindings.is_cancel_requested():
+                raise asyncio.CancelledError
+            if client_tool_results is None: client_tool_results = []
+            # client_dispatch 并发执行并归约结果
+            output = await self._tool_dispatcher.client_dispatch(classified_tool_invocations.client_tools, client_tool_results, tool_scope)
+            tool_outputs.extend(output)
+
+        return tool_outputs
 
     def _build_aborted_tool_messages(
         self,
@@ -630,31 +724,109 @@ class QueryLoopRuntime:
             )
         return usage
 
-    async def _emit_exhausted_warning(
-        self, session_id: str, max_iterations: int
+    async def _emit_force_finish(
+        self,
+        *,
+        session_id: str,
+        messages: list[ChatMessage],
+        model_info: ModelRequestInfo,
+        llm_provider: LLMProvider,
+        bindings: ExecutionBindings,
     ) -> AsyncIterator[StreamEvent]:
-        """Agent 循环超出最大迭代次数时的兜底文本输出"""
-        warning_text = f"Agent 推理超出最大迭代次数{max_iterations}，未能生成最终答案"
-        warn("tool calling loop exhausted.", session_id=session_id)
+        """Agent 循环超出最大迭代次数时优雅收尾
+        不带工具地做最后一次推理，合成最终回答
+        """
+        force_messages = list(messages)
+        force_messages.append(ChatMessage(
+            session_id=session_id,
+            role=Role.USER,
+            content=(
+                "You have reached the maximum number of steps for this task. "
+                "Stop calling tools. Based on everything completed so far, write a final answer "
+                "for the user and clearly note what was not completed."
+            ),
+        ))
+
         text_id = f"txt_{uuid.uuid4().hex}"
+        assistant_content = ""
+        token_usage = TokenUsage()
+        provider_payload = None
+        request_id = f"request_{uuid.uuid4().hex}"
+        usage_observed = False
+        generation_failed = False
+
         yield StepStartEvent()
         yield TextStartEvent(text_id=text_id)
-        yield TextDeltaEvent(text_id=text_id, delta=warning_text)
+        try:
+            async for event in llm_provider.stream_chat_completion(
+                messages=force_messages,
+                model_request=model_info,
+                tools=None, # 强制不带工具
+            ):
+                if await bindings.is_cancel_requested():
+                    raise asyncio.CancelledError
+                if event.type == LLMEventType.USAGE and event.usage:
+                    usage_observed = True
+                    token_usage.add(event.usage)
+                elif event.type == LLMEventType.STATE:
+                    provider_payload = event.provider_payload
+                elif event.type == LLMEventType.TEXT_DELTA and event.delta:
+                    assistant_content += event.delta
+                    yield TextDeltaEvent(text_id=text_id, delta=event.delta)
+        except asyncio.CancelledError:
+            if bindings.record_usage is not None:
+                await bindings.record_usage(
+                    request_id=request_id, model_info=model_info,
+                    provenance="observed" if usage_observed else "unknown",
+                    token_usage=token_usage if usage_observed else None,
+                )
+            yield TextEndEvent(text_id=text_id)
+            yield StepFinishEvent(is_finished=False, token_usage=token_usage, aborted=True)
+            return
+        except Exception as exc:
+            generation_failed = True
+            warn("chat force-finish stream failed.", session_id=session_id, exc=exc)
         yield TextEndEvent(text_id=text_id)
+
         final_message = ChatMessage(
             session_id=session_id,
             role=Role.ASSISTANT,
-            content=warning_text,
+            model_info=MessageModelInfo.from_model_request(model_info),
+            content=assistant_content or "已达到本轮步数上限",
+            provider_payload=provider_payload,
             metadata={"incomplete": True},
         )
+        reported_usage = token_usage if usage_observed else None
+        if not (usage_observed and token_usage.total_tokens == 0 and bindings.record_usage is not None):
+            token_usage = await self._resolve_usage_with_fallback(
+                usage=token_usage,
+                messages=force_messages,
+                assistant_msg=final_message,
+                model_info=model_info,
+                tools=None,
+            )
+        final_message.input_tokens = token_usage.input_tokens
+        final_message.cached_input_tokens = token_usage.cached_input_tokens
+        final_message.output_tokens = token_usage.output_tokens
+        final_message.usage_source = token_usage.usage_source
+        if bindings.record_usage is not None:
+            recorded_usage = reported_usage if generation_failed else token_usage
+            await bindings.record_usage(
+                request_id=request_id, model_info=model_info, token_usage=recorded_usage,
+                provenance=("unknown" if recorded_usage is None else "observed"
+                            if recorded_usage.usage_source == TokenUsageSource.PROVIDER else "estimated"),
+            )
+        messages.append(final_message)
+
         yield StepFinishEvent(
             is_finished=True,
             final_assistant_message=final_message,
-            token_usage=TokenUsage(),
+            token_usage=token_usage,
         )
 
 
 def _has_cached_tool_output(messages: list[ChatMessage]) -> bool:
+    """只有当历史里确实存在被缓存（截断）的工具输出时，才把读取缓存的那批工具暴露给模型；没有缓存内容时，这些读取工具一律隐藏"""
     for msg in messages:
         if msg.role != Role.TOOL or not msg.content:
             continue
@@ -673,9 +845,21 @@ def _has_cached_tool_output(messages: list[ChatMessage]) -> bool:
             continue
         if not isinstance(output_payload, dict):
             continue
-        contents = output_payload.get("contents")
-        if not isinstance(contents, list):
-            continue
-        if any(isinstance(item, dict) and item.get("content_id") for item in contents):
+        if _contains_content_id(output_payload):
             return True
+    return False
+
+
+def _contains_content_id(value: object) -> bool:
+    """递归扫描一棵 JSON 树，只要发现任意一个 dict 里有 content_id 或 *_content_id 键、且值是非空字符串，就返回 True"""
+    if isinstance(value, dict):
+        if any(
+            isinstance(item, str) and item
+            and (key == "content_id" or key.endswith("_content_id"))
+            for key, item in value.items()
+        ):
+            return True
+        return any(_contains_content_id(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_content_id(item) for item in value)
     return False

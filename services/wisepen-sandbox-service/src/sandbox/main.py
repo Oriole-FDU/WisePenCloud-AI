@@ -4,7 +4,8 @@ import asyncio
 import inspect
 from contextlib import asynccontextmanager, suppress
 
-from common.logger import error, info, setup_logging_intercept
+from common.logger import error, info, setup_logging_intercept, warn
+from common.mcp import assert_tool_meta_consistent
 from common.observability import setup_observability
 from sandbox.core.config.bootstrap_settings import bootstrap_settings
 
@@ -73,6 +74,24 @@ async def lifespan(app: FastAPI):
         # 单实例启动：遗留任务记为 LOST，确认命令结束或硬超时后才解除回收保护。
         await container.command_task_service().reconcile_interrupted_tasks()
 
+        # 预热前确保派生镜像存在；失败时退回基础镜像，不阻塞服务启动。
+        # 冷启动只付一次构建延迟，后续 warm 直接复用本地派生镜像。
+        try:
+            provider_id = settings.provider.active_id
+            provider_cfg = settings.provider.settings[provider_id]
+            resolved = await container.image_builder().ensure_image(
+                provider_cfg.image, provider_id.value, enabled=provider_cfg.derive_image,
+            )
+            if resolved.derived:
+                info("sandbox derived image ready", image=resolved.image)
+            else:
+                warn(
+                    "sandbox starting with bare base image (derived layer unavailable)",
+                    image=resolved.image,
+                )
+        except Exception as exc:
+            error("sandbox image ensure failed at startup", exc=exc)
+
         # 启动沙箱状态 watcher，并保存任务引用供应用运行期间访问。
         watcher = container.watcher()
         watcher_task = asyncio.create_task(watcher.run())
@@ -138,6 +157,8 @@ mcp_app = mcp_server.streamable_http_app()
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
     async with mcp_server.session_manager.run():
+        tools = await mcp_server.list_tools()
+        assert_tool_meta_consistent({tool.name for tool in tools})
         async with lifespan(app):
             yield
 

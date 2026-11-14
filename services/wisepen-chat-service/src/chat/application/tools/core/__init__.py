@@ -11,6 +11,8 @@ from chat.application.tools.core.definition import (
     ToolRiskLevel,
     ToolExecutionTarget,
     ToolTimeoutStrategy,
+    OutputCacheSpec,
+    OutputCacheStrategy,
 )
 
 from chat.application.tools.core.registry import (
@@ -33,7 +35,6 @@ from chat.application.tools.core.llm.renderer import (
 )
 
 from chat.application.tools.core.execution.result import (
-    CacheableText,
     ToolExecutionError,
     ToolOutput,
     ToolExecutionResult,
@@ -72,6 +73,8 @@ __all__ = [
     "ToolRiskLevel",
     "ToolExecutionTarget",
     "ToolTimeoutStrategy",
+    "OutputCacheSpec",
+    "OutputCacheStrategy",
 
     # registry / scope
     "ToolRegistry",
@@ -90,7 +93,6 @@ __all__ = [
     "tool_result_renderer",
 
     # execution result
-    "CacheableText",
     "ToolExecutionError",
     "ToolOutput",
     "ToolExecutionResult",

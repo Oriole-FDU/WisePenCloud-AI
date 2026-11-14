@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 
 from chat.application.tools.core import (
+    OutputCacheSpec,
+    OutputCacheStrategy,
     ToolDefinition,
     ToolLLMSpec,
     ToolParametersSchema,
@@ -79,7 +81,6 @@ class McpToolCatalog:
                     timeout_seconds=settings.mcp.default_timeout_seconds,
                     persist_output=True,
                     allow_parallel=False,
-                    max_output_chars=settings.tools.result_max_chars,
                 )
 
                 # 构建 McpRemoteTool
@@ -103,6 +104,7 @@ class McpToolCatalog:
                             remote_name=descriptor.name,
                         ),
                         preflight_hooks=(),
+                        output_cache_spec=OutputCacheSpec(strategy=OutputCacheStrategy.OPAQUE),
                     ),
                     failure_reason="MCP Tool Execution Failed",
                 )

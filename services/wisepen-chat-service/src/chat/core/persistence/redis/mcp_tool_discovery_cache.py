@@ -1,17 +1,17 @@
 import json
 from datetime import datetime, timezone
 
-import redis.asyncio as redis
+from redis.asyncio import Redis
 
-from chat.core.config.app_settings import settings
+from chat.core.persistence.redis.base import RedisRepository
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.domain.repositories.mcp_tool_discovery_cache_repo import McpToolDiscoveryCacheRepository
 from common.logger import warn
 
 
-class RedisMcpToolDiscoveryCache(McpToolDiscoveryCacheRepository):
-    def __init__(self) -> None:
-        self.redis = redis.from_url(settings.persistence.redis.url, decode_responses=True)
+class RedisMcpToolDiscoveryCache(RedisRepository, McpToolDiscoveryCacheRepository):
+    def __init__(self, *, redis_client: Redis) -> None:
+        super().__init__(redis_client=redis_client)
 
     def _get_user_key(self, *, user_id: str, server_id: str, config_updated_at: datetime) -> str:
         if config_updated_at.tzinfo is None:
@@ -39,7 +39,7 @@ class RedisMcpToolDiscoveryCache(McpToolDiscoveryCacheRepository):
             config_updated_at=config_updated_at,
         )
         try:
-            value = await self.redis.get(key)
+            value = await self._redis.get(key)
             if value is None:
                 return None
             return self._deserialize(str(value))
@@ -63,6 +63,6 @@ class RedisMcpToolDiscoveryCache(McpToolDiscoveryCacheRepository):
         )
         try:
             ttl = max(1, int(ttl_seconds))
-            await self.redis.set(key, self._serialize(tools), ex=ttl)
+            await self._redis.set(key, self._serialize(tools), ex=ttl)
         except Exception as e:
             warn("set user MCP tool discovery cache failed.", key=key, exc=e)

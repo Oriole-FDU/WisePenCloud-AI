@@ -59,6 +59,7 @@ class LLMEventType(str, Enum):
     TEXT_DELTA = "TEXT_DELTA"
     REASONING_DELTA = "REASONING_DELTA"
     TOOL_CALLS = "TOOL_CALLS"
+    TOOL_CALL_ARGS_DELTA = "TOOL_CALL_ARGS_DELTA"
     USAGE = "USAGE"
     STATE = "STATE"
 
@@ -66,6 +67,8 @@ class LLMEventType(str, Enum):
 class LLMStreamEvent:
     type: LLMEventType
     delta: str | None = None
+    call_id: str | None = None
+    tool_name: str | None = None
     tool_calls: list[ToolCallMessage] | None = None
     usage: TokenUsage | None = None
     provider_payload: dict[str, Any] | None = None

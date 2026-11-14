@@ -6,7 +6,7 @@ from chat.api.vercel_formats import (
     step_start, step_finish,
     text_start, text_delta, text_end,
     reasoning_start, reasoning_delta, reasoning_end,
-    tool_input_start, tool_input_available, tool_output_available,
+    tool_input_start, tool_input_delta, tool_input_available, tool_output_available,
     tool_error, tool_denied, tool_approval_request, error,
 )
 from chat.application.events import (
@@ -14,7 +14,7 @@ from chat.application.events import (
     StepStartEvent, StepFinishEvent,
     TextStartEvent, TextDeltaEvent, TextEndEvent,
     ReasoningStartEvent, ReasoningDeltaEvent, ReasoningEndEvent,
-    ToolInputStartEvent, ToolInputAvailableEvent, ToolOutputAvailableEvent,
+    ToolInputStartEvent, ToolInputDeltaEvent, ToolInputAvailableEvent, ToolOutputAvailableEvent,
     ToolErrorEvent, ToolDeniedEvent, ToolApprovalRequiredEvent,
 )
 
@@ -49,6 +49,8 @@ def to_vercel_sse(event: StreamEvent) -> str:
         return tool_input_available(
             tool_call_id=event.call_id, tool_name=event.tool_name, input=event.input
         )
+    if isinstance(event, ToolInputDeltaEvent):
+        return tool_input_delta(tool_call_id=event.call_id, input_text_delta=event.delta)
     if isinstance(event, ToolOutputAvailableEvent):
         return tool_output_available(tool_call_id=event.call_id, output=event.output)
     if isinstance(event, ToolErrorEvent):

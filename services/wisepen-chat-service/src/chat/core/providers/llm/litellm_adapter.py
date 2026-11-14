@@ -37,8 +37,8 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
     """
 
     def __init__(self):
-        self._default_api_base = settings.models.fallback.base_url
-        self._default_api_key = settings.models.fallback.api_key
+        self._default_api_base = settings.integrations.common_llm_provider.base_url
+        self._default_api_key = settings.integrations.common_llm_provider.api_key
 
     @property
     def provider_type(self) -> ProviderType:
@@ -200,6 +200,12 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
                                 acc["name"] += tool_call_delta.function.name
                             if tool_call_delta.function.arguments: # 累加 arguments
                                 acc["arguments"] += tool_call_delta.function.arguments
+                                yield LLMStreamEvent(
+                                    type=LLMEventType.TOOL_CALL_ARGS_DELTA,
+                                    call_id=acc["id"],
+                                    tool_name=acc["name"],
+                                    delta=tool_call_delta.function.arguments,
+                                )
 
         except litellm.ContextWindowExceededError:
             raise ServiceException(ChatErrorCode.CONTEXT_LIMIT_EXCEEDED)

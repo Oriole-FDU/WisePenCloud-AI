@@ -1,7 +1,10 @@
 from typing import List, Optional, Tuple
 from datetime import datetime
+from beanie import PydanticObjectId
 from beanie.odm.operators.find.evaluation import Text
 
+from common.core.exceptions import ServiceException
+from chat.domain.error_codes import ChatErrorCode
 from chat.domain.repositories import MessageRepository
 from chat.domain.entities import ChatMessage, Role
 
@@ -87,6 +90,26 @@ class MongoMessageRepository(MessageRepository):
 
     async def has_session_messages(self, session_id: str) -> bool:
         return await ChatMessage.find_one(ChatMessage.session_id == session_id) is not None
+
+    async def delete_messages_after_target_user_message(self, session_id: str, user_message_id: str) -> ChatMessage:
+        anchor = await ChatMessage.find_one(
+            ChatMessage.id == PydanticObjectId(user_message_id),
+            ChatMessage.session_id == session_id,
+        )
+        if anchor is None:
+            raise ServiceException(ChatErrorCode.CHAT_MESSAGE_NOT_FOUND)
+        if anchor.role != Role.USER:
+            raise ServiceException(ChatErrorCode.CHAT_REWRITE_TARGET_INVALID)
+
+        # 删除锚点 user 消息及之后的所有消息（含该轮 assistant/tool 与后续轮次）
+        await ChatMessage.find(
+            ChatMessage.session_id == session_id,
+            ChatMessage.created_at >= anchor.created_at,
+        ).delete()
+        return anchor
+
+    async def list_session_messages_all(self, session_id: str) -> List[ChatMessage]:
+        return await ChatMessage.find(ChatMessage.session_id == session_id).sort("+created_at").to_list()
 
     async def search_messages_by_text(
         self,

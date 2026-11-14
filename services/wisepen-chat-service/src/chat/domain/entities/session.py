@@ -42,6 +42,7 @@ class ChatSession(Document):
     last_selected_skill_ids: List[str] = Field(default_factory=list)
     last_tool_selection_default_enabled: Optional[bool] = None
     last_tool_selection_overrides: dict[str, bool] = Field(default_factory=dict)
+    context_tokens: int = 0  # 最近一次 LLM 调用的输入 token 数，作为当前上下文占用指示
 
     class Settings:
         name = "wisepen_chat_session"  # MongoDB 集合名

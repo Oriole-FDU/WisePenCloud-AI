@@ -1,6 +1,5 @@
 ﻿import json
 import base64
-from dataclasses import field, dataclass
 from typing import Any, Dict, List, Optional
 
 from common.core.exceptions import ServiceException
@@ -39,16 +38,6 @@ _CURRENT_NOTE_CITATION_PROMPT = (
     "`read_current_note_for_edit`, and omit the link if no exact block ID is available."
 )
 
-
-@dataclass
-class WindowedMessages:
-    messages_keep: List[ChatMessage] = field(default_factory=list)
-    messages_compress_candidates: List[ChatMessage] = field(default_factory=list)
-    needs_compression: bool = False
-
-    def get_messages(self) -> List[ChatMessage]:
-        # 会话历史
-        return self.messages_compress_candidates + self.messages_keep
 
 class ChatContextAssembler:
     """负责短期上下文的全生命周期管理：Redis 热缓存读取与降级回填、上下文裁剪、Prompt 组装"""
@@ -102,37 +91,6 @@ class ChatContextAssembler:
             return session.current_summary if session else None
         except Exception:
             return None
-
-    async def build_windowed_messages(
-        self,
-        chat_history_record_messages: List[ChatMessage],
-        prompt_budget_tokens: int,
-        high_watermark_ratio: Optional[float] = None,
-        low_watermark_ratio: Optional[float] = None,
-    ) -> WindowedMessages:
-        """
-        从后往前累加Token，构建不超过高水位预算的动态滑动窗口。若超过高水位，则触发摘要。
-        """
-        high_ratio = high_watermark_ratio or settings.context.compression.high_watermark_ratio
-        low_ratio = low_watermark_ratio or settings.context.compression.low_watermark_ratio
-        high_budget = int(prompt_budget_tokens * high_ratio)
-        low_budget = int(prompt_budget_tokens * low_ratio)
-
-        contents_token_count = 0
-
-        windowed_messages = WindowedMessages()
-
-        for msg in reversed(chat_history_record_messages):
-            contents_token_count += msg.content_token_count or 0
-            if contents_token_count <= low_budget:
-                windowed_messages.messages_keep.insert(0, msg)  # 保留在 messages_keep
-            else:
-                windowed_messages.messages_compress_candidates.insert(0, msg)  # 超出低水位，进入 messages_compress_candidates
-
-        # 当整体 Token 超过高水位时，触发需要压缩的标志
-        windowed_messages.needs_compression = contents_token_count >= high_budget # 由于高水位线（如 80%）预留了安全 Buffer，即便把它们全发给模型，也不会触发 Token 溢出报错
-
-        return windowed_messages
 
     def build_message_attachment_refs(
         self,

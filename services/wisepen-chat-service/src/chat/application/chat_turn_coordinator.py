@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
 import asyncio
+from dataclasses import dataclass, field
 import uuid
 from contextlib import aclosing
 from typing import Optional, List, Dict, Any, Set, Awaitable, Callable
@@ -19,13 +19,13 @@ from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
-from chat.core.providers import OssFileLoader
+from chat.domain.interfaces.context_compact import ContextCompactor
 from chat.domain.interfaces.llm import TextCompletionProvider, TokenUsage
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, \
-    ProviderRepository, SuspendedChatRepository
+    ProviderRepository, SuspendedChatRepository, RedirectQueueRepository
 from common.core.exceptions import ServiceException
-from chat.application.chat_context_assembler import ChatContextAssembler, WindowedMessages
+from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.query_loop_runtime import QueryLoopRuntime
 from chat.application.execution_bindings import ExecutionBindings
@@ -38,9 +38,10 @@ from chat.application.agents import (
     AgentResolver,
     DefaultAgentResolver, AgentSpec, DEFAULT_AGENT_ID,
 )
-from chat.application.events import StepFinishEvent, ErrorEvent
+from chat.application.events import ErrorEvent, StepFinishEvent
 from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
+from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.client_tools import ClientToolCapability
@@ -57,10 +58,8 @@ class ChatTurnContext:
     model_info: ModelRequestInfo = None
     agent_spec: AgentSpec = None
     session_summary: Optional[str] = None
-    windowed_history_messages: WindowedMessages = None
     tool_scope: ToolScope = None
     messages_for_llm: list[ChatMessage] = field(default_factory=list)
-    chat_record_messages: list[ChatMessage] = field(default_factory=list)
     token_usage: TokenUsage = field(default_factory=TokenUsage)
     root_execution_id: str | None = None
     turn_id: str | None = None
@@ -70,6 +69,8 @@ class ChatTurnContext:
     billing_resource_id: Optional[str] = None
     preferred_billing_group_id: Optional[str] = None
     identity_type: Optional[IdentityType] = None
+    user_message: ChatMessage | None = None
+    final_assistant_message: ChatMessage | None = None
 
 class ChatTurnCoordinator:
     """
@@ -89,11 +90,14 @@ class ChatTurnCoordinator:
             message_repo: MessageRepository,
             hot_context_repo: HotContextRepository,
             suspended_chat_repo: SuspendedChatRepository,
+            redirect_queue: RedirectQueueRepository,
             tool_registry: ToolRegistry,
             tool_dispatcher: ToolDispatcher,
             kafka_producer: KafkaProducerClient,
             tool_policy_builder: ChatTurnToolPolicyBuilder,
-            oss_file_loader: OssFileLoader,
+            context_assembler: ChatContextAssembler,
+            frontend_tool_response_broker: FrontendToolResponseBroker,
+            context_compactor: ContextCompactor,
             agent_resolver: AgentResolver | None = None,
             redis_client: redis.Redis | None = None,
             subagent_repo: MongoSubagentRepository | None = None,
@@ -103,15 +107,13 @@ class ChatTurnCoordinator:
         self._memory = memory
         self._model_repo = model_repo
         self._session_repo = session_repo
-        self._context_assembler = ChatContextAssembler(
-            message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo,
-            oss_file_loader=oss_file_loader
-        )
+        self._context_assembler = context_assembler
         self._tool_registry = tool_registry
         self._query_loop_runtime = QueryLoopRuntime(
             llm_provider_resolver=llm_provider_resolver,
             token_counter=token_counter,
             tool_dispatcher=tool_dispatcher,
+            frontend_tool_response_broker=frontend_tool_response_broker,
         )
         self._turn_finalizer = ChatTurnFinalizer(
             text_llm=text_llm,
@@ -121,14 +123,16 @@ class ChatTurnCoordinator:
             provider_repo=provider_repo,
             kafka_producer=kafka_producer
         )
+        self._context_compactor = context_compactor
         self._tool_policy_builder = tool_policy_builder
         self._agent_resolver = agent_resolver or DefaultAgentResolver()
         self._redis = redis_client or redis.from_url(settings.persistence.redis.url, decode_responses=True)
 
         self._suspended_chat_repo = suspended_chat_repo
         self._subagent_repo = subagent_repo or MongoSubagentRepository()
-        self._turn_stream_repo = turn_stream_repo or RedisChatTurnStream()
+        self._turn_stream_repo = turn_stream_repo or RedisChatTurnStream(redis_client=self._redis)
         self._resource_client = resource_client
+        self._redirect_queue = redirect_queue
 
     async def handle_suspended_chat_recover(
             self,
@@ -166,12 +170,12 @@ class ChatTurnCoordinator:
             model_info=suspended_chat.context.model_info,
             agent_spec=current_spec,
             session_summary=suspended_chat.context.session_summary,
-            windowed_history_messages=suspended_chat.context.windowed_history_messages,
             tool_scope=tool_scope,
-            # messages_for_llm 已包含挂起前的 assistant 工具调用，恢复时直接续接该上下文。
+            # messages_for_llm 已包含挂起前的 assistant 工具调用，恢复时直接续接该上下文
             messages_for_llm=list(suspended_chat.context.messages_for_llm),
-            # 挂起前的消息和 token 由首次批次处理；恢复批次只记录新增工具结果和回复。
-            chat_record_messages=[],
+            # 用户消息
+            user_message=suspended_chat.context.user_message,
+            # 挂起前的 token 已由首次批次计费，恢复批次只累计新增用量
             token_usage=TokenUsage(),
             root_execution_id=getattr(suspended_chat.context, "root_execution_id", None),
             turn_id=turn_id, subagent_state=state,
@@ -199,7 +203,6 @@ class ChatTurnCoordinator:
         )) as stream:
             async for event in stream:
                 yield event
-        await self._persist_message_and_token_bill(chat_turn_context, skip_first_user_message=False)
         self._set_post_completion_tasks(background_tasks, chat_turn_context)
 
         await self._suspended_chat_repo.delete_by_id(suspended_chat_id)
@@ -273,7 +276,6 @@ class ChatTurnCoordinator:
         await self.close_unfinished_before_start(
             user_id=user_id,
             session_id=session_id,
-            identity_type=identity_type,
         )
 
         # 如果禁止覆盖，且指定了模型和供应商
@@ -297,14 +299,6 @@ class ChatTurnCoordinator:
             model_info=chat_turn_context.model_info,
         )
 
-        # Token窗口尺寸
-        context_limit = chat_turn_context.model_info.context_window_tokens or settings.context.token_limit
-        output_reserve = chat_turn_context.model_info.max_output_tokens or settings.context.default_output_reserve_tokens
-        prompt_budget_tokens = max(
-            context_limit - output_reserve,
-            settings.context.min_prompt_budget_tokens,
-        )
-
         # 加载会话历史 (若启用)
         # 从 Redis 读取最近对话, 如果 Redis 缓存失效，会自动从 MongoDB 回填最近的 N 条历史，确保对话连贯性
         if memory_policy.enable_chat_memory:
@@ -323,18 +317,23 @@ class ChatTurnCoordinator:
                 score_threshold=memory_policy.long_term_memory_score_threshold,
             )
 
+        # Token窗口尺寸
+        context_limit = chat_turn_context.model_info.context_window_tokens or settings.context.token_limit
+
         # 加载会话的历史摘要 (若启用，前提是必须启用会话历史)
         if memory_policy.enable_chat_memory and memory_policy.enable_chat_memory_summary:
-            chat_turn_context.session_summary = await self._context_assembler.get_session_summary(session_id)
+            existing_summary = await self._context_assembler.get_session_summary(session_id)
 
-            # 窗口化消息以用于压缩
-            # 从后往前累加 Token，低水位内保留为 messages_keep，更早的未压缩明细进入 messages_compress_candidates
-            # candidates 当前轮仍会进入 prompt，本轮结束后会被合并进新摘要，并在下一轮不再作为明细注入
-            chat_turn_context.windowed_history_messages = await self._context_assembler.build_windowed_messages(
-                chat_history_record_messages,
-                prompt_budget_tokens=prompt_budget_tokens,
+            # 接近高水位时把最老历史并入摘要，Redis 只保留低水位内的近期明细；未达水位原样返回
+            chat_history_record_messages, chat_turn_context.session_summary = await self._context_compactor.auto_compact(
+                session_id=session_id,
+                history=chat_history_record_messages,
+                existing_summary=existing_summary,
+                context_tokens=session.context_tokens,
+                context_window_tokens=context_limit,
                 high_watermark_ratio=memory_policy.high_watermark_ratio,
                 low_watermark_ratio=memory_policy.low_watermark_ratio,
+                summary_prompt=memory_policy.summary_prompt,
             )
 
         temp_attachments, resource_attachments = await self._session_repo.get_session_attachments(session_id, user_id)
@@ -396,8 +395,8 @@ class ChatTurnCoordinator:
                         + "\nDynamic children use instructions; published agents require an exact candidate version.",
             ))
 
-        # 构造 chat_record_messages
-        # chat_record_messages 将用于记录本轮对话的历史，以供后续对话使用
+        # 构造并持久化用户消息
+        # 该消息也作为长期记忆摄入与标题生成的输入
         user_message_metadata = {
             "relevant_facts": relevant_facts,
             "frontend_states": frontend_states or {},
@@ -412,16 +411,16 @@ class ChatTurnCoordinator:
             user_defined_attachment_ids=user_defined_attachment_ids,
         )
 
-        chat_turn_context.chat_record_messages = [ChatMessage(
+        user_message = ChatMessage(
             session_id=session_id, role=Role.USER, content=user_query,
             metadata=user_message_metadata,
             attachments=current_attachment_refs,
-        )]
+        )
         await self._turn_finalizer.persist_user_message(
-            chat_message=chat_turn_context.chat_record_messages[0],
+            chat_message=user_message,
             memory_policy=memory_policy,
         )
-
+        chat_turn_context.user_message = user_message
         chat_turn_context.token_usage = TokenUsage()
         async with aclosing(self.query_llm(
                 chat_turn_context=chat_turn_context,
@@ -432,7 +431,6 @@ class ChatTurnCoordinator:
         )) as stream:
             async for event in stream:
                 yield event
-        await self._persist_message_and_token_bill(chat_turn_context, skip_first_user_message=True)
         self._set_post_completion_tasks(background_tasks, chat_turn_context)
 
     async def query_llm(
@@ -498,6 +496,35 @@ class ChatTurnCoordinator:
             bindings: ExecutionBindings | None = None,
     ):
         # 流式推理
+
+        # 落盘与指示器写入按顺序串行后台执行，不阻塞 SSE 流
+        persist_lock = asyncio.Lock()
+        persist_tasks: list[asyncio.Task] = []
+
+        def schedule(coro: Awaitable[None]) -> None:
+            async def _run() -> None:
+                async with persist_lock: await coro
+            persist_tasks.append(asyncio.create_task(_run()))
+
+        async def drain_pending_user_messages() -> list[ChatMessage]:
+            # 检查是否有积压的用户追加消息
+            queries = await self._redirect_queue.drain_all(
+                chat_turn_context.user_id, chat_turn_context.session_id,
+            )
+            if not queries: return []
+            # 包装为用户消息
+            messages = [
+                ChatMessage(session_id=chat_turn_context.session_id, role=Role.USER, content=query)
+                for query in queries
+            ]
+            # 持久化用户追加消息
+            schedule(self._turn_finalizer.persist_message_delta(
+                session_id=chat_turn_context.session_id,
+                delta_messages=messages,
+                memory_policy=chat_turn_context.agent_spec.memory_policy,
+            ))
+            return messages
+
         try:
             async for event in self._query_loop_runtime.stream_chat_with_tool_calling(
                 messages=chat_turn_context.messages_for_llm,
@@ -509,6 +536,7 @@ class ChatTurnCoordinator:
                 client_tool_results=client_tool_results,
                 tool_approval_status=tool_approval_status,
                 bindings=bindings,
+                pending_user_messages=drain_pending_user_messages,
             ):
                 # QueryLoopRuntime 产出的事件如果是 StepFinishEvent 额外处理消息累积
                 if isinstance(event, StepFinishEvent):
@@ -517,19 +545,23 @@ class ChatTurnCoordinator:
                             if message is not None:
                                 message.metadata["root_execution_id"] = chat_turn_context.root_execution_id
                     chat_turn_context.token_usage.add(event.token_usage) # 计费
+                    # 上下文指示器：记录最近一次 LLM 调用的输入 token 数
+                    if event.token_usage.input_tokens > 0:
+                        schedule(self._turn_finalizer.update_context_tokens(chat_turn_context.session_id, event.token_usage.input_tokens))
                     if not event.is_finished:
-                        # 向 chat_record_messages 追加中间消息（Tool Calls）
-                        # 子任務整合提示只給本輪模型，不能冒充真人訊息進入歷史或長期記憶。
-                        chat_turn_context.chat_record_messages.extend(
-                            message for message in event.intermediate_messages
-                            if not message.metadata.get("subagent_results")
-                        )
+                        # 中间消息（Tool Calls）逐步落盘
+                        schedule(self._turn_finalizer.persist_message_delta(
+                            session_id=chat_turn_context.session_id,
+                            delta_messages=[message for message in event.intermediate_messages
+                                            if not message.metadata.get("subagent_results")],
+                            memory_policy=chat_turn_context.agent_spec.memory_policy,
+                        ))
                         if event.aborted:
                             chat_turn_context.result_status = "cancelled"
                             yield to_vercel_sse(event)
                             yield to_vercel_sse(ErrorEvent(error_text="本轮对话已被用户取消"))
                             return
-                        # SSE流需要中断（因调用客户端工具、需要工具调用批准等）
+                        # 只有等待前端工具结果超时才会挂起
                         if event.suspension is not None:
                             chat_turn_context.messages_for_llm.extend(event.intermediate_messages)
                             if bindings.snapshot_subagents is not None:
@@ -538,10 +570,9 @@ class ChatTurnCoordinator:
                                 model_info=chat_turn_context.model_info,
                                 agent_spec=chat_turn_context.agent_spec,
                                 session_summary=chat_turn_context.session_summary,
-                                windowed_history_messages=chat_turn_context.windowed_history_messages,
                                 tool_scope_data=chat_turn_context.tool_scope.to_suspension_data(),
                                 messages_for_llm=chat_turn_context.messages_for_llm,
-                                chat_record_messages=chat_turn_context.chat_record_messages,
+                                user_message=chat_turn_context.user_message,
                                 token_usage=chat_turn_context.token_usage,
                                 turn_suspension=event.suspension,
                                 root_execution_id=chat_turn_context.root_execution_id,
@@ -557,11 +588,17 @@ class ChatTurnCoordinator:
                     else:
                         if event.final_assistant_message.metadata.get("incomplete"):
                             chat_turn_context.result_status = "incomplete"
-                        # 向 chat_record_messages 追加最终回复消息
-                        chat_turn_context.chat_record_messages.append(event.final_assistant_message)
+                        # 记录最终回复并落盘
+                        chat_turn_context.final_assistant_message = event.final_assistant_message
+                        if event.final_assistant_message is not None:
+                            schedule(self._turn_finalizer.persist_message_delta(
+                                session_id=chat_turn_context.session_id,
+                                delta_messages=[event.final_assistant_message],
+                                memory_policy=chat_turn_context.agent_spec.memory_policy,
+                            ))
                 yield to_vercel_sse(event)
 
-                # 切断SSE流
+                # 超时挂起时切断 SSE
                 if isinstance(event, StepFinishEvent) and event.suspension is not None:
                     return
         except ServiceException as e:
@@ -569,6 +606,9 @@ class ChatTurnCoordinator:
             error("chat stream generation failed.", session_id=chat_turn_context.session_id, exc=e)
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
+        finally:
+            if persist_tasks:
+                await asyncio.gather(*persist_tasks, return_exceptions=True)
 
     async def _history_policy(self, user_id, session_id):
         session = await self._session_repo.get_session_for_user(session_id, user_id)
@@ -662,69 +702,53 @@ class ChatTurnCoordinator:
             raise ServiceException(ChatErrorCode.CHAT_REQUEST_INVALID, custom_msg="Subagent owner is inactive or command conflicts.")
         return result
 
-    async def _persist_message_and_token_bill(
-        self,
-        chat_turn_context: ChatTurnContext,
-        *,
-        skip_first_user_message: bool,
-    ) -> None:
-        """在流完成事件发送前持久化本轮消息并完成用量记录。"""
-        await self._turn_finalizer.persist_message_and_token_bill(
-            user_id=chat_turn_context.user_id,
-            session_id=chat_turn_context.session_id,
-            chat_record_messages=chat_turn_context.chat_record_messages,
-            memory_policy=chat_turn_context.agent_spec.memory_policy,
-            model_info=chat_turn_context.model_info,
-            token_usage=chat_turn_context.token_usage,
-            billing_resource_id=chat_turn_context.billing_resource_id,
-            preferred_billing_group_id=chat_turn_context.preferred_billing_group_id,
-            skip_first_user_message=skip_first_user_message,
-            skip_billing=chat_turn_context.usage_managed,
-            identity_type=chat_turn_context.identity_type,
-        )
 
     def _set_post_completion_tasks(
         self,
         background_tasks,
         chat_turn_context: ChatTurnContext,
     ) -> None:
-        # 摘要和标题不影响答案落库，放到完成事件发送后执行。
-        if background_tasks is not None:
-            # 调用轻量级模型生成并更新会话的全局摘要
-            if (chat_turn_context.agent_spec.memory_policy.enable_chat_memory
-                    and chat_turn_context.agent_spec.memory_policy.enable_chat_memory_summary
-                    and chat_turn_context.windowed_history_messages is not None
-                    and chat_turn_context.windowed_history_messages.needs_compression):
-                background_tasks.add_task(
-                    self._turn_finalizer.summarize_and_compress,
-                    session_id=chat_turn_context.session_id,
-                    windowed_history_messages=chat_turn_context.windowed_history_messages,
-                    chat_record_messages=chat_turn_context.chat_record_messages,
-                    existing_summary=chat_turn_context.session_summary,
-                    memory_policy=chat_turn_context.agent_spec.memory_policy,
-                )
-            # 自动生成标题
-            if chat_turn_context.agent_spec.auto_generate_title:
-                background_tasks.add_task(
-                    self._turn_finalizer.auto_generate_title,
-                    session_id=chat_turn_context.session_id,
-                    user_id=chat_turn_context.user_id,
-                    # chat_record_messages的首条消息即为用户查询
-                    user_query=str(chat_turn_context.chat_record_messages[0].content)
-                )
+        # 长期记忆、计费和标题都不影响下一轮对话，因此可延后执行
+        # 计费
+        if not chat_turn_context.usage_managed:
+            background_tasks.add_task(
+                self._turn_finalizer.send_token_billing,
+                user_id=chat_turn_context.user_id,
+                model_info=chat_turn_context.model_info,
+                token_usage=chat_turn_context.token_usage,
+                billing_resource_id=chat_turn_context.billing_resource_id,
+                preferred_billing_group_id=chat_turn_context.preferred_billing_group_id,
+                identity_type=chat_turn_context.identity_type,
+            )
+        # 用户提问 + 最终回复成对摄入长期记忆
+        if (chat_turn_context.user_message is not None
+                and chat_turn_context.final_assistant_message is not None):
+            background_tasks.add_task(
+                self._turn_finalizer.ingest_long_term_memory,
+                user_id=chat_turn_context.user_id,
+                messages=[chat_turn_context.user_message, chat_turn_context.final_assistant_message],
+                memory_policy=chat_turn_context.agent_spec.memory_policy,
+            )
+        # 自动生成标题
+        if (chat_turn_context.user_message is not None
+                and chat_turn_context.agent_spec.auto_generate_title):
+            background_tasks.add_task(
+                self._turn_finalizer.auto_generate_title,
+                session_id=chat_turn_context.session_id,
+                user_id=chat_turn_context.user_id,
+                user_query=str(chat_turn_context.user_message.content)
+            )
 
     async def close_unfinished_before_start(
         self,
         user_id: str,
         session_id: str,
-        identity_type: Optional[IdentityType] = None,
     ) -> None:
         unfinished_chat: SuspendedChat | None = await self._suspended_chat_repo.find_suspended_by_session(session_id, user_id)
         if unfinished_chat is None:
             return # 没有未完成的对话，无需关闭
         unfinished_chat_id = str(unfinished_chat.id)
         subagent_state = getattr(unfinished_chat.context, "subagent_state", None)
-        first_new_message = len(unfinished_chat.context.chat_record_messages)
 
         pending_messages = []
         pending_messages.extend(
@@ -740,8 +764,10 @@ class ChatTurnCoordinator:
             for invocation in unfinished_chat.context.turn_suspension.classified_tool_invocation_plan.server_tools
         )
 
+        # 挂起前消息已在每步边界落盘，且挂起时已计费/记忆/标题，这里只落盘中断标记
+        closing_messages: List[ChatMessage] = []
         for invocation, message in pending_messages:
-            unfinished_chat.context.chat_record_messages.append(
+            closing_messages.append(
                 ChatMessage(
                     session_id=session_id, role=Role.TOOL,
                     tool_call_id=invocation.tool_call_id, tool_name=invocation.tool_name,
@@ -749,7 +775,7 @@ class ChatTurnCoordinator:
                 )
             )
 
-        unfinished_chat.context.chat_record_messages.append(
+        closing_messages.append(
             ChatMessage(
                 session_id=session_id, role=Role.ASSISTANT,
                 content="本轮对话已中断，未能生成完整回复",
@@ -758,24 +784,10 @@ class ChatTurnCoordinator:
             )
         )
 
-        # 完成后处理
-        await self._turn_finalizer.persist_message_and_token_bill(
-            user_id=unfinished_chat.user_id,
+        await self._turn_finalizer.persist_message_delta(
             session_id=unfinished_chat.session_id,
-            chat_record_messages=(unfinished_chat.context.chat_record_messages[first_new_message:]
-                                  if subagent_state is not None else unfinished_chat.context.chat_record_messages),
+            delta_messages=closing_messages,
             memory_policy=unfinished_chat.context.agent_spec.memory_policy,
-            model_info=unfinished_chat.context.model_info,
-            token_usage=unfinished_chat.context.token_usage,
-            skip_first_user_message=subagent_state is None,
-            skip_billing=subagent_state is not None,
-            billing_resource_id=getattr(unfinished_chat.context, "billing_resource_id", None),
-            preferred_billing_group_id=getattr(
-                unfinished_chat.context,
-                "preferred_billing_group_id",
-                getattr(unfinished_chat.context, "billing_group_id", None),
-            ),
-            identity_type=identity_type,
         )
         if subagent_state is not None:
             root = await self._subagent_repo.get_root(
@@ -784,18 +796,6 @@ class ChatTurnCoordinator:
             if root is not None:
                 root.status = "interrupted"
                 await self._subagent_repo.save_root(root)
-        # 调用轻量级模型生成并更新会话的全局摘要
-        if (unfinished_chat.context.agent_spec.memory_policy.enable_chat_memory
-                and unfinished_chat.context.agent_spec.memory_policy.enable_chat_memory_summary
-                and unfinished_chat.context.windowed_history_messages is not None
-                and unfinished_chat.context.windowed_history_messages.needs_compression):
-            await self._turn_finalizer.summarize_and_compress(
-                session_id=unfinished_chat.session_id,
-                windowed_history_messages=unfinished_chat.context.windowed_history_messages,
-                chat_record_messages=unfinished_chat.context.chat_record_messages,
-                existing_summary=unfinished_chat.context.session_summary,
-                memory_policy=unfinished_chat.context.agent_spec.memory_policy,
-            )
 
         await self._suspended_chat_repo.delete_by_id(unfinished_chat_id)
 

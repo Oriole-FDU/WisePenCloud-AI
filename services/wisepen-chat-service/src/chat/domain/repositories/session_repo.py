@@ -26,6 +26,9 @@ class SessionRepository(ABC):
     async def update_session_summary(self, session_id: str, current_summary: str, summary_updated_at: datetime) -> None: pass
 
     @abstractmethod
+    async def update_context_tokens(self, session_id: str, context_tokens: int) -> None: pass
+
+    @abstractmethod
     async def delete_session(self, session_id: str, user_id: str) -> None: pass
 
     @abstractmethod

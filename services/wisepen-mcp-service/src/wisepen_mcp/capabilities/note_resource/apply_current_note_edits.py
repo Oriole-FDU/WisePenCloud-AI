@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+from typing import Annotated, Any, Literal
+
+from common.core.exceptions import ServiceException
+from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, wisepen_mcp_meta
+from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
+from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel, ConfigDict, Field
+from wisepen_mcp.domain.error_codes import McpErrorCode
+from wisepen_mcp.service_client import NoteCollabClient
+
+
+PatchInlineMark = Literal["bold", "italic", "underline", "strike", "code"]
+PatchBlockAttrPrimitive = str | int | float | bool
+
+
+class PatchTextInlineItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["text"] = Field(description="Plain inline text item.")
+    text: str = Field(description="Text content.")
+    marks: list[PatchInlineMark] | None = Field(default=None, description="Optional inline marks.")
+    textColor: str | None = Field(default=None, description="Optional text color.")
+    backgroundColor: str | None = Field(default=None, description="Optional background color.")
+
+
+class PatchLinkInlineItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["link"] = Field(description="Inline link item.")
+    text: str = Field(description="Visible link text.")
+    href: Annotated[str, Field(min_length=1, description="Link target URL.")]
+    marks: list[PatchInlineMark] | None = Field(default=None, description="Optional inline marks.")
+
+
+class PatchInlineMathItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["inlineMath"] = Field(description="Inline math item.")
+    expression: str = Field(description="Math expression.")
+
+
+PatchInlineItem = Annotated[
+    PatchTextInlineItem | PatchLinkInlineItem | PatchInlineMathItem,
+    Field(discriminator="type"),
+]
+
+
+class PatchInlineContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["inline"] = Field(description="Inline content for paragraph-like blocks.")
+    items: list[PatchInlineItem] = Field(description="Ordered inline content items.")
+
+
+class PatchTableContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["table"] = Field(description="Table content.")
+    headerRows: int = Field(ge=0, description="Number of header rows.")
+    headerCols: int = Field(ge=0, description="Number of header columns.")
+    rows: list[list[list[PatchInlineItem]]] = Field(
+        description=(
+            "Three-level array indexed as rows[row_index][cell_index][inline_item_index]. "
+            "Each cell is an array of inline items. Example 2x2: "
+            '[[[{"type":"text","text":"A"}], [{"type":"text","text":"B"}]], '
+            '[[{"type":"text","text":"C"}], [{"type":"text","text":"D"}]]]'
+        )
+    )
+
+
+PatchContent = Annotated[
+    PatchInlineContent | PatchTableContent,
+    Field(discriminator="kind"),
+]
+
+
+class InsertBlockCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Annotated[str, Field(min_length=1, description="Block type, such as paragraph or heading.")]
+    attrs: dict[str, PatchBlockAttrPrimitive] | None = Field(default=None, description="Optional block attrs.")
+    content: PatchContent = Field(description="New block content.")
+
+
+class ReplaceContentOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    opId: Annotated[str, Field(min_length=1, description="Unique id for this operation within the patch.")]
+    kind: Literal["replaceContent"] = Field(description="Replace content of an existing block id.")
+    blockId: Annotated[str, Field(min_length=1, description="Block id returned by read_current_note_for_edit.")]
+    content: PatchContent = Field(description="Replacement content.")
+
+
+class DeleteBlockOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    opId: Annotated[str, Field(min_length=1, description="Unique id for this operation within the patch.")]
+    kind: Literal["deleteBlock"] = Field(description="Delete an existing block id.")
+    blockId: Annotated[str, Field(min_length=1, description="Block id returned by read_current_note_for_edit.")]
+
+
+class InsertBlockOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    opId: Annotated[str, Field(min_length=1, description="Unique id for this operation within the patch.")]
+    kind: Literal["insertBlock"] = Field(description="Insert a block relative to an existing block id.")
+    anchorBlockId: Annotated[str, Field(min_length=1, description="Anchor block id returned by read_current_note_for_edit.")]
+    position: Literal["before", "after"] = Field(description="Insert before or after anchorBlockId.")
+    block: InsertBlockCandidate = Field(description="Block to insert.")
+
+
+class AppendRootBlockOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    opId: Annotated[str, Field(min_length=1, description="Unique id for this operation within the patch.")]
+    kind: Literal["appendRootBlock"] = Field(
+        description="Append a top-level suggestion block to a note that has no suitable anchor."
+    )
+    block: InsertBlockCandidate = Field(description="Top-level block to append.")
+
+
+PatchOperation = Annotated[
+    ReplaceContentOperation | DeleteBlockOperation | InsertBlockOperation | AppendRootBlockOperation,
+    Field(discriminator="kind"),
+]
+
+
+def register_apply_current_note_edits_tool(mcp: FastMCP, note_collab_client: NoteCollabClient) -> None:
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="apply_current_note_edits",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=15.0,
+            persist_output=True,
+        ),
+        ui_spec=ToolUISpecMeta(display_name="应用笔记编辑", description="将结构化编辑建议应用到当前用户可编辑的笔记。"),
+        failure_reason="Note Edit Apply Failed",
+    ))
+    @mcp.tool(
+        name="apply_current_note_edits",
+        description=(
+            "Apply structured edit suggestions to any editable Wisepen note, whether or not it is currently open. "
+            "Use the resource_id, yjs-v1 version, and block ids returned by read_current_note_for_edit. Existing-block "
+            "operations use blockId or anchorBlockId. For an empty or newly created note with no anchor, use "
+            "appendRootBlock. Suggestions remain subject to user acceptance or rejection."
+        ),
+    )
+    async def apply_current_note_edits(
+        resource_id: Annotated[str, Field(description="Note resource id used for the latest structured read.")],
+        patch_id: Annotated[str, Field(description="Stable idempotency id for this exact edit attempt.")],
+        version: Annotated[str, Field(pattern=r"^yjs-v1:", description="yjs-v1 version from read_current_note_for_edit.")],
+        operations: Annotated[
+            list[PatchOperation],
+            Field(min_length=1, max_length=200, description="Structured note edit operations."),
+        ],
+    ) -> dict[str, Any]:
+        if not SecurityContextHolder.get_user_id():
+            raise PermissionException(PermissionErrorCode.NOT_LOGIN)
+        resource_id = resource_id.strip()
+        if not resource_id:
+            raise ServiceException(McpErrorCode.NOTE_AI_REQUEST_INVALID, "resource_id must not be blank.")
+        return await note_collab_client.apply_note_ai_diff(
+            resource_id,
+            {
+                "patchId": patch_id,
+                "version": version,
+                "operations": [
+                    operation.model_dump(mode="json", exclude_none=True)
+                    for operation in operations
+                ],
+            },
+        )
+
+
+__all__ = ["register_apply_current_note_edits_tool"]

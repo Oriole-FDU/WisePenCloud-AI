@@ -120,27 +120,52 @@ class ModelRequestInfo:
 class ModelRepository(ABC):
 
     @abstractmethod
-    async def get_model(self, model_id: PydanticObjectId, user_id: Optional[str] = None) -> Model: pass
+    async def get_model(
+        self,
+        model_id: PydanticObjectId,
+        scope: ModelScope,
+        owner_user_id: Optional[str] = None,
+    ) -> Model: pass
 
     @abstractmethod
-    async def list_models_and_mappings(self, model_scope: ModelScope, user_id: Optional[str] = None) -> List[ModelInfo]: pass
+    async def list_models_and_mappings(
+            self,
+            scope: ModelScope,
+            owner_user_id: Optional[str] = None
+    ) -> List[ModelInfo]: pass
 
     @abstractmethod
-    async def list_models_by_provider_id(self, provider_id: PydanticObjectId, user_id: Optional[str] = None) -> List[ModelInfo]: pass
+    async def list_models_by_provider_id(
+            self,
+            provider_id: PydanticObjectId,
+            only_system_model: Optional[bool] = False,
+            owner_user_id: Optional[str] = None
+    ) -> List[ModelInfo]: pass
 
     @abstractmethod
-    async def create_model(self, model: Model, user_id: Optional[str] = None) -> Model: pass
+    async def create_model(
+            self,
+            model: Model,
+            scope: ModelScope,
+            owner_user_id: Optional[str] = None
+    ) -> Model: pass
 
     @abstractmethod
     async def update_model(
         self,
         model_id: PydanticObjectId,
         updates: dict[str, Any],
-        user_id: Optional[str] = None,
+        scope: ModelScope,
+        owner_user_id: Optional[str] = None,
     ) -> Model: pass
 
     @abstractmethod
-    async def delete_model(self, model_id: PydanticObjectId, user_id: Optional[str] = None) -> None: pass
+    async def delete_model(
+        self,
+        model_id: PydanticObjectId,
+        scope: ModelScope,
+        owner_user_id: Optional[str] = None,
+    ) -> None: pass
 
     @abstractmethod
     async def bind_model_to_provider(
@@ -148,7 +173,8 @@ class ModelRepository(ABC):
         model_id: PydanticObjectId,
         provider_id: PydanticObjectId,
         provider_model_name: str,
-        user_id: Optional[str] = None,
+        only_system_model: Optional[bool] = False,
+        owner_user_id: Optional[str] = None,
         input_billing_ratio: Decimal = Decimal("1"),
         cached_input_billing_ratio: Decimal = Decimal("1"),
         output_billing_ratio: Decimal = Decimal("1"),
@@ -162,7 +188,8 @@ class ModelRepository(ABC):
         self,
         model_id: PydanticObjectId,
         provider_id: PydanticObjectId,
-        user_id: Optional[str] = None,
+        only_system_model: Optional[bool] = False,
+        owner_user_id: Optional[str] = None,
     ) -> None:
         pass
 

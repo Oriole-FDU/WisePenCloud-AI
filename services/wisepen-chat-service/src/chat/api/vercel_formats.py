@@ -72,6 +72,10 @@ def tool_input_available(tool_call_id: str, tool_name: str, input: Dict) -> str:
     return _sse({"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": input})
 
 
+def tool_input_delta(tool_call_id: str, input_text_delta: str) -> str:
+    return _sse({"type": "tool-input-delta", "toolCallId": tool_call_id, "inputTextDelta": input_text_delta})
+
+
 def tool_output_available(tool_call_id: str, output: str) -> str:
     return _sse({"type": "tool-output-available", "toolCallId": tool_call_id, "output": output})
 

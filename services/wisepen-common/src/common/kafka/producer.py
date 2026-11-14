@@ -26,14 +26,16 @@ class KafkaProducerClient:
             await self._producer.stop()
             info("kafka producer stopped.")
 
-    async def send(self, topic: str, value: Dict, headers: List[Tuple[str, bytes]] = None):
+    async def send(self, topic: str, value: Dict, headers: List[Tuple[str, bytes]] = None, key: bytes | None = None) -> bool:
         if not self._producer:
             error("kafka publish failed because producer is not started", topic=topic)
-            return
+            return False
         try:
-            await self._producer.send_and_wait(topic, value=value, headers=headers)
+            await self._producer.send_and_wait(topic, value=value, headers=headers, key=key)
+            return True
         except Exception as e:
             error("kafka publish failed.", topic=topic, exc=e)
+            return False
 
     async def send_confirmed(self, topic: str, value: Dict, headers=None) -> dict:
         """分開入列與 broker 確認；入列後的失敗不代表 broker 沒有寫入。"""

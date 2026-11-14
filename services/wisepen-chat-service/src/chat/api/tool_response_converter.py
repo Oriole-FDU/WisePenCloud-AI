@@ -20,7 +20,7 @@ def build_tool_response(tool: Tool, entity: UserToolConfig | None) -> ToolRespon
         )
 
     # 检查用户是否有配置、必填项是否完整
-    configured = False
+    configured = not config_spec.required_keys
     missing_keys: list[str] = []
     if entity is not None:
         for key in config_spec.required_keys:
@@ -34,7 +34,7 @@ def build_tool_response(tool: Tool, entity: UserToolConfig | None) -> ToolRespon
         display_name=ui_spec.display_name if ui_spec is not None else definition.llm_spec.name.replace("_", " ").strip().title(),
         description=ui_spec.description if ui_spec is not None and ui_spec.description is not None else definition.llm_spec.description,
         selection_mode=definition.policy.selection_mode,
-        requires_config=True,
+        requires_config=bool(config_spec.required_keys),
         configured=configured,
         enabled=entity.enabled if entity is not None else True,
         source=definition.source_spec,

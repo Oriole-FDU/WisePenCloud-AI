@@ -7,7 +7,7 @@ import string
 from typing import Any, BinaryIO, TypeVar
 
 import httpx
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from sandbox.domain.entities import CommandTaskStatus
 from sandbox.domain.interfaces import (
@@ -36,16 +36,6 @@ from sandbox.domain.interfaces import (
 FileResultT = TypeVar("FileResultT", bound=BaseModel)
 
 
-class AIOAdapterConfig(BaseModel):
-    """AIO Provider 的专属配置"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    image: str
-    request_timeout_seconds: float = 5.0
-    file_transfer_timeout_seconds: float = 120.0
-
-
 class AIOAdapter(SandboxProvider):
     """AIO 沙箱 Provider 适配器"""
 
@@ -67,11 +57,10 @@ class AIOAdapter(SandboxProvider):
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> AIOAdapter:
-        adapter_config = AIOAdapterConfig.model_validate(config)
         return cls(
-            image=adapter_config.image,
-            request_timeout_seconds=adapter_config.request_timeout_seconds,
-            file_transfer_timeout_seconds=adapter_config.file_transfer_timeout_seconds,
+            image=config.get("image"),
+            request_timeout_seconds=config.get("request_timeout_seconds", 5.0),
+            file_transfer_timeout_seconds=config.get("file_transfer_timeout_seconds", 120.0),
         )
 
     def create_provision(self) -> SandboxProvision:

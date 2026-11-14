@@ -4,7 +4,6 @@ from decimal import Decimal
 import uuid
 
 from chat.application.agents import AgentMemoryPolicy
-from chat.application.chat_context_assembler import WindowedMessages
 from chat.application.token_counter import TokenCounter
 from common.logger import error
 from common.core.domain import IdentityType
@@ -24,7 +23,7 @@ from common.kafka.producer import KafkaProducerClient
 
 class ChatTurnFinalizer:
     """
-    负责对话完成后的全部写入操作: Token计费、持久化（Redis 追加、MongoDB 持久化归档、Memory 长期记忆摄入）、标题生成、摘要压缩
+    负责对话完成后的全部写入操作: Token计费、持久化（Redis 追加、MongoDB 持久化归档、Memory 长期记忆摄入）、标题生成
     """
 
     def __init__(
@@ -47,42 +46,6 @@ class ChatTurnFinalizer:
         self.provider_repo = provider_repo
         self.kafka_producer = kafka_producer
 
-    async def persist_message_and_token_bill(
-        self,
-        user_id: str,
-        session_id: str,
-        chat_record_messages: List[ChatMessage],
-        memory_policy: AgentMemoryPolicy,
-        model_info: ModelRequestInfo,
-        token_usage: TokenUsage,
-        billing_resource_id: Optional[str] = None,
-        preferred_billing_group_id: Optional[str] = None,
-        skip_first_user_message: bool = False,
-        skip_billing: bool = False,
-        identity_type: Optional[IdentityType] = None,
-    ) -> None:
-        """完成正式消息持久化，并在成功后执行计费。"""
-        await self.persist_messages(
-            user_id=user_id,
-            session_id=session_id,
-            chat_record_messages=chat_record_messages,
-            memory_policy=memory_policy,
-            skip_first_user_message=skip_first_user_message,
-        )
-        if skip_billing:
-            return
-        try:
-            await self.send_token_billing(
-                user_id=user_id,
-                model_info=model_info,
-                token_usage=token_usage,
-                billing_resource_id=billing_resource_id,
-                preferred_billing_group_id=preferred_billing_group_id,
-                identity_type=identity_type,
-            )
-        except Exception as exc:
-            error("chat token billing failed.", session_id=session_id, exc=exc)
-
     async def persist_user_message(
         self,
         *,
@@ -90,13 +53,14 @@ class ChatTurnFinalizer:
         memory_policy: AgentMemoryPolicy,
     ) -> None:
         """在模型执行前持久化本轮第一条用户消息"""
-        if not memory_policy.enable_persistence_chat_memory:
-            return
         try:
             await self._fill_content_token_count([chat_message])
-            if chat_message.content:
-                chat_message.build_search_tokens()
-            await self.message_repo.save_messages([chat_message])
+            if memory_policy.enable_chat_memory:
+                await self.hot_context_repo.append_messages(chat_message.session_id, [chat_message])
+            if memory_policy.enable_persistence_chat_memory:
+                if chat_message.content:
+                    chat_message.build_search_tokens()
+                await self.message_repo.save_messages([chat_message])
         except Exception as e:
             error("chat user message archive failed.", session_id=chat_message.session_id, exc=e)
             raise ServiceException(ChatErrorCode.CHAT_MESSAGE_PERSIST_FAILED) from e
@@ -116,49 +80,53 @@ class ChatTurnFinalizer:
         if token_usage.total_tokens == 0:
             return
 
-        # 计费只看本次实际使用的 Provider：用户自带 Provider 与免费官方模型都只累计用量，不扣钱包余额
-        service_fee_rate = self._service_fee_rate(identity_type)
-        billing_multiplier = Decimal("1") + service_fee_rate
-        billable_tokens = model_info.billable_tokens(token_usage, billing_multiplier)
-        input_billing_ratio = model_info.input_billing_ratio * billing_multiplier
-        cached_input_billing_ratio = model_info.cached_input_billing_ratio * billing_multiplier
-        output_billing_ratio = model_info.output_billing_ratio * billing_multiplier
+        try:
+            # 计费只看本次实际使用的 Provider：用户自带 Provider 与免费官方模型都只累计用量，不扣钱包余额
+            service_fee_rate = self._service_fee_rate(identity_type)
+            billing_multiplier = Decimal("1") + service_fee_rate
+            billable_tokens = model_info.billable_tokens(token_usage, billing_multiplier)
+            input_billing_ratio = model_info.input_billing_ratio * billing_multiplier
+            cached_input_billing_ratio = model_info.cached_input_billing_ratio * billing_multiplier
+            output_billing_ratio = model_info.output_billing_ratio * billing_multiplier
 
-        await self.provider_repo.increment_usage(
-            provider_id=model_info.provider_id,
-            user_id=model_info.provider_owner_user_id,
-            input_tokens=token_usage.input_tokens,
-            cached_input_tokens=token_usage.cached_input_tokens,
-            output_tokens=token_usage.output_tokens,
-            billable_tokens=billable_tokens,
-        )
+            await self.provider_repo.increment_usage(
+                provider_id=model_info.provider_id,
+                scope=model_info.provider_scope,
+                owner_user_id=model_info.provider_owner_user_id,
+                input_tokens=token_usage.input_tokens,
+                cached_input_tokens=token_usage.cached_input_tokens,
+                output_tokens=token_usage.output_tokens,
+                billable_tokens=billable_tokens,
+            )
 
-        if billable_tokens <= 0:
-            preferred_billing_group_id = None
+            if billable_tokens <= 0:
+                preferred_billing_group_id = None
 
-        value = {
-            "userId": user_id,
-            "resourceId": billing_resource_id,
-            "preferredGroupId": int(preferred_billing_group_id) if preferred_billing_group_id else None,
-            "usageTokens": token_usage.total_tokens,
-            "billableTokens": billable_tokens,
-            "billingDetail": {
-                "inputTokens": token_usage.input_tokens,
-                "cachedInputTokens": token_usage.cached_input_tokens,
-                "outputTokens": token_usage.output_tokens,
-                "inputBillingRatio": str(input_billing_ratio),
-                "cachedInputBillingRatio": str(cached_input_billing_ratio),
-                "outputBillingRatio": str(output_billing_ratio),
-                "usageSource": token_usage.usage_source.value,
-                "modelName": model_info.model.display_name,
-                "providerName": model_info.provider.name,
-                "providerScope": model_info.provider_scope.value,
-            },
-            "traceId": uuid.uuid4().hex,
-            "requestTime": datetime.now(timezone.utc).isoformat(),
-        }
+            value = {
+                "userId": user_id,
+                "resourceId": billing_resource_id,
+                "preferredGroupId": int(preferred_billing_group_id) if preferred_billing_group_id else None,
+                "usageTokens": token_usage.total_tokens,
+                "billableTokens": billable_tokens,
+                "billingDetail": {
+                    "inputTokens": token_usage.input_tokens,
+                    "cachedInputTokens": token_usage.cached_input_tokens,
+                    "outputTokens": token_usage.output_tokens,
+                    "inputBillingRatio": str(input_billing_ratio),
+                    "cachedInputBillingRatio": str(cached_input_billing_ratio),
+                    "outputBillingRatio": str(output_billing_ratio),
+                    "usageSource": token_usage.usage_source.value,
+                    "modelName": model_info.model.display_name,
+                    "providerName": model_info.provider.name,
+                    "providerScope": model_info.provider_scope.value,
+                },
+                "traceId": uuid.uuid4().hex,
+                "requestTime": datetime.now(timezone.utc).isoformat(),
+            }
 
-        await self.kafka_producer.send(topic=KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value)
+            await self.kafka_producer.send(topic=KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value)
+        except Exception as exc:
+            error("chat token billing failed.", user_id=user_id, exc=exc)
 
     @staticmethod
     def _service_fee_rate(identity_type: Optional[IdentityType]) -> Decimal:
@@ -172,7 +140,8 @@ class ChatTurnFinalizer:
                                  billing_resource_id=None, preferred_billing_group_id=None):
         try:
             await self.provider_repo.increment_usage(
-                provider_id=model_info.provider_id, user_id=model_info.provider_owner_user_id,
+                provider_id=model_info.provider_id, scope=model_info.provider_scope,
+                owner_user_id=model_info.provider_owner_user_id,
                 input_tokens=usage.input_tokens, cached_input_tokens=usage.cached_input_tokens,
                 output_tokens=usage.output_tokens, billable_tokens=usage.billable_tokens,
             )
@@ -204,49 +173,62 @@ class ChatTurnFinalizer:
         usage.billing_status = result["status"]
         usage.receipt = {key: result[key] for key in ("topic", "partition", "offset") if key in result}
 
-    async def persist_messages(
+    async def update_context_tokens(self, session_id: str, context_tokens: int) -> None:
+        """更新会话的上下文占用指示器。"""
+        try:
+            await self.session_repo.update_context_tokens(session_id, context_tokens)
+        except Exception as exc:
+            error("chat context tokens update failed.", session_id=session_id, exc=exc)
+
+    async def persist_message_delta(
         self,
-        user_id: str,
+        *,
         session_id: str,
-        chat_record_messages: List[ChatMessage],
+        delta_messages: List[ChatMessage],
         memory_policy: AgentMemoryPolicy,
-        skip_first_user_message: bool = False,
     ) -> None:
-        """后台统一处理所有存储逻辑: Redis 追加 → placeholder 裁剪 → MongoDB 落盘 → Memory 摄入"""
+        """处理本轮消息落盘: Redis 追加 → placeholder 裁剪 → MongoDB 落盘"""
+
+        if not delta_messages: return
 
         # Redis 热上下文保留原始消息，因此先按原始内容填充 token 计数
-        await self._fill_content_token_count(chat_record_messages)
+        await self._fill_content_token_count(delta_messages)
 
         # Redis 追加
         if memory_policy.enable_chat_memory:
             try:
-                await self.hot_context_repo.append_messages(session_id, chat_record_messages)
+                await self.hot_context_repo.append_messages(session_id, delta_messages)
             except Exception as e:
                 error("chat record message hot-context append failed.", session_id=session_id, exc=e)
 
         # 处理持久化占位符，如果有占位符应使用占位符替换原本的内容
-        chat_record_messages = ChatMessage.for_persistence(chat_record_messages)
+        delta_messages = ChatMessage.for_persistence(delta_messages)
         # MongoDB / Memory 使用占位符裁剪后的内容，token 计数也应与裁剪后的内容一致
-        await self._fill_content_token_count(chat_record_messages, force=True)
+        await self._fill_content_token_count(delta_messages, force=True)
 
         # MongoDB 落盘 (落占位符处理的消息内容)
         if memory_policy.enable_persistence_chat_memory:
             try:
-                messages_for_archive = chat_record_messages[1:] if skip_first_user_message else chat_record_messages
-                for msg in messages_for_archive:
+                for msg in delta_messages:
                     if msg.content: msg.build_search_tokens() # 构建搜索向量 (缓解中文分词问题)
 
-                await self.message_repo.save_messages(messages_for_archive)
+                await self.message_repo.save_messages(delta_messages)
             except Exception as e:
                 error("chat record message archive failed.", session_id=session_id, exc=e)
-                raise ServiceException(ChatErrorCode.CHAT_MESSAGE_PERSIST_FAILED) from e
 
-        # Memory 摄入 (摄入占位符处理的消息内容)
-        if memory_policy.enable_long_term_memory:
-            try:
-                await self.memory.add_interaction(user_id=user_id, messages=chat_record_messages)
-            except Exception as e:
-                error("chat record message write long-term memory failed.", user_id=user_id, exc=e)
+    async def ingest_long_term_memory(
+        self,
+        user_id: str,
+        messages: List[ChatMessage],
+        memory_policy: AgentMemoryPolicy,
+    ) -> None:
+        """长期记忆摄入：由轮次结束后的后台任务调用，摄入本轮用户提问与最终回复"""
+        if not memory_policy.enable_long_term_memory:
+            return
+        try:
+            await self.memory.add_interaction(user_id=user_id, messages=messages)
+        except Exception as e:
+            error("chat record message write long-term memory failed.", user_id=user_id, exc=e)
 
 
     async def auto_generate_title(self, session_id: str, user_id: str, user_query: str) -> None:
@@ -274,8 +256,8 @@ class ChatTurnFinalizer:
                 model_name=settings.models.summary.model,
                 messages=prompt,
                 temperature=0.5,
-                api_base=settings.models.fallback.base_url,
-                api_key=settings.models.fallback.api_key,
+                api_base=settings.integrations.common_llm_provider.base_url,
+                api_key=settings.integrations.common_llm_provider.api_key,
             )
             new_title = (response.content or "").strip().strip('"\'""''')
             if not new_title:
@@ -284,91 +266,6 @@ class ChatTurnFinalizer:
             await self.session_repo.rename_session(session_id, user_id, new_title)
         except Exception as e:
             error("chat title generation failed.", session_id=session_id, exc=e)
-
-    async def summarize_and_compress(
-        self,
-        session_id: str,
-        existing_summary: Optional[str],
-        windowed_history_messages: WindowedMessages | None,
-        chat_record_messages: List[ChatMessage] | None,
-        memory_policy: AgentMemoryPolicy,
-    ) -> None:
-        """
-        增量摘要压缩
-        """
-        if windowed_history_messages is None or chat_record_messages is None:
-            return
-
-        # 处理持久化占位符，如果有占位符应使用占位符替换原本的内容
-        chat_record_messages = ChatMessage.for_persistence(chat_record_messages)
-        await self._fill_content_token_count(chat_record_messages, force=True)
-
-        # 构建摘要输入，将 existing_summary（上一轮摘要，如有）作为前缀，拼接 messages_compress_candidates 明细，让轻量模型生成覆盖范围更广的全局摘要
-        oldest_text = "\n".join(
-            [f"{m.role.value}: {m.content}" for m in windowed_history_messages.messages_compress_candidates]
-        )
-        user_content_parts = []
-        if existing_summary:
-            user_content_parts.append(
-                f"[Existing Summary of earlier conversation]:\n{existing_summary}"
-            )
-        user_content_parts.append(
-            f"[New conversation to incorporate]:\n{oldest_text}"
-        )
-        user_content_parts.append(
-            "Please generate a single, updated summary that incorporates both the existing summary "
-            "and the new conversation above."
-        )
-
-        summarize_prompt = [
-            ChatMessage(
-                session_id=session_id,
-                role=Role.SYSTEM,
-                content=memory_policy.summary_prompt or (
-                    "You are a conversation summarizer. "
-                    "Produce a concise but complete summary preserving key facts, "
-                    "user preferences, decisions, and important context. "
-                    "Output only the summary text, no preamble or labels."
-                )
-            ),
-            ChatMessage(
-                session_id=session_id,
-                role=Role.USER,
-                content="\n\n".join(user_content_parts)
-            )
-        ]
-
-        try:
-            message_response = await self.text_llm.chat_completion(
-                model_name=settings.models.summary.model,
-                messages=summarize_prompt,
-                temperature=0.3,  # 低温，保证摘要稳定性
-                api_base=settings.models.fallback.base_url,
-                api_key=settings.models.fallback.api_key,
-            )
-            new_summary = message_response.content or ""
-        except Exception as e:
-            error("chat summary generation failed.", session_id=session_id, exc=e)
-            return
-
-        if not new_summary.strip():
-            return
-
-        # 持久化新摘要到 MongoDB，同时写入压缩时间戳
-        try:
-            await self.session_repo.update_session_summary(session_id=session_id, current_summary=new_summary,
-                                                           summary_updated_at=datetime.now(timezone.utc))
-        except Exception as e:
-            error("chat summary persist failed.", session_id=session_id, exc=e)
-
-        # Redis 重载 messages_keep
-        try:
-            await self.hot_context_repo.load_messages(
-                session_id=session_id,
-                messages=windowed_history_messages.messages_keep + chat_record_messages,
-            )
-        except Exception as e:
-            error("redis hot context reload failed.", session_id=session_id, exc=e)
 
     async def _fill_content_token_count(self, messages: List[ChatMessage], force: bool = False) -> None:
         for msg in messages:

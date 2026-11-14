@@ -91,10 +91,19 @@ class AnthropicAdapter(LLMProvider):
         try:
             async with client.messages.stream(**without_none(request_kwargs)) as stream:
                 # 流式调用
+                current_tool_block: dict[str, str] = {}
                 async for event in stream:
                     event_type = getattr(event, "type", "")
+                    # content_block_start 标记一个内容块开始；tool_use 块携带 call_id 与 name
+                    if event_type == "content_block_start":
+                        block = getattr(event, "content_block", None)
+                        if getattr(block, "type", "") == "tool_use":
+                            current_tool_block = {
+                                "id": getattr(block, "id", "") or "",
+                                "name": getattr(block, "name", "") or "",
+                            }
                     # content_block_delta 是内容块的增量事件，可能是普通文本、工具参数 JSON 片段、thinking 片段等
-                    if event_type == "content_block_delta":
+                    elif event_type == "content_block_delta":
                         delta = getattr(event, "delta", None)
                         delta_type = getattr(delta, "type", "")
                         # 文本增量
@@ -107,8 +116,16 @@ class AnthropicAdapter(LLMProvider):
                             thinking_delta = getattr(delta, "thinking", "")
                             if thinking_delta: # 传递 LLMStreamEvent REASONING_DELTA
                                 yield LLMStreamEvent(type=LLMEventType.REASONING_DELTA, delta=thinking_delta)
-                        # 没有处理 tool_use 等增量
-                        # 工具调用可在最终完整消息拿到后再解析
+                        # 工具调用参数增量
+                        elif delta_type == "input_json_delta":
+                            partial = getattr(delta, "partial_json", "") or ""
+                            if partial:
+                                yield LLMStreamEvent(
+                                    type=LLMEventType.TOOL_CALL_ARGS_DELTA,
+                                    call_id=current_tool_block.get("id", ""),
+                                    tool_name=current_tool_block.get("name", ""),
+                                    delta=partial,
+                                )
 
                 final_message = await stream.get_final_message() # 最终消息
         except Exception as e:
