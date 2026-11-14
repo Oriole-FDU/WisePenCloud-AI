@@ -30,6 +30,7 @@ from chat.application.agents import (
     AgentResolver,
     DefaultAgentResolver, AgentSpec, DEFAULT_AGENT_ID,
 )
+from chat.application.agents.resolver import resolve_session_agent
 from chat.application.events import ErrorEvent, StepFinishEvent
 from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
@@ -126,6 +127,9 @@ class ChatTurnCoordinator:
         suspended_chat: SuspendedChat | None = await self._suspended_chat_repo.find_suspended_by_session(session_id, user_id)
         if suspended_chat is None:
             raise ServiceException(ChatErrorCode.SUSPENDED_CHAT_NOT_FOUND)
+        session = await self._session_repo.get_session_for_user(session_id, user_id)
+        if session.is_draft_debug:
+            await resolve_session_agent(self._agent_resolver, session)
         suspended_chat_id = str(suspended_chat.id)
         tool_scope = await self._tool_registry.recover_derived(suspended_chat.context.tool_scope_data, user_id)
 
@@ -192,16 +196,20 @@ class ChatTurnCoordinator:
         # 获取当前对话的 Agent
         session = await self._session_repo.get_session_for_user(session_id, user_id)
         if (
-            session.agent_id
+            not session.is_draft_debug
+            and session.agent_id
             and session.agent_id != DEFAULT_AGENT_ID
             and (session.agent_version is None or session.agent_version <= 0)
         ):
             raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
-        agent = await self._agent_resolver.resolve(session.agent_id, session.agent_version)
+        agent = await resolve_session_agent(self._agent_resolver, session)
         if agent is None:
             raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
 
         chat_turn_context.agent_spec = agent.spec
+        if session.is_draft_debug:
+            memory_policy = agent.spec.memory_policy.model_copy(update={"enable_long_term_memory": False})
+            chat_turn_context.agent_spec = agent.spec.model_copy(update={"memory_policy": memory_policy})
         if (
             user_defined_on_demand_skill_ids is not None
             or tool_selection_default_enabled is not None

@@ -236,9 +236,10 @@ async def chat_cancel(
     summary="重写指定 user 消息并重新生成后续回复",
     description="""
 - 用途：编辑某条历史 user 消息并丢弃其后的所有记录，用新文本作为新的 user 消息重新生成。
-- 约束：目标会话必须属于当前用户；当前会话不能有正在运行的 turn；message_id 必须指向该会话中的一条 user 消息。
+- 请求：session_id 和 message_id 指定会话和原消息，new_query 为替换后的文本，model 和可选的 provider_id 用于重新生成。
+- 约束：目标必须是当前用户的普通会话；不能有正在运行的 turn；message_id 必须指向该会话中的一条 user 消息。
 - 处理：删除该 user 消息及之后的所有消息，重置 Redis 热上下文（下一轮自动按截断后的 Mongo 回填）、清空会话摘要与上下文占用指示，然后以 new_query 开启一轮新的 Chat Turn。
-- 失败：会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；有运行中 turn -> ChatErrorCode.CHAT_TURN_IN_PROGRESS；消息不存在 -> ChatErrorCode.CHAT_MESSAGE_NOT_FOUND；目标不是 user 消息 -> ChatErrorCode.CHAT_REWRITE_TARGET_INVALID。
+- 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；请求参数校验失败 -> ResultCode.PARAM_ERROR；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；草稿调试会话 -> ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN；有运行中 turn -> ChatErrorCode.CHAT_TURN_IN_PROGRESS；消息不存在 -> ChatErrorCode.CHAT_MESSAGE_NOT_FOUND；目标不是 user 消息 -> ChatErrorCode.CHAT_REWRITE_TARGET_INVALID。
 """,
 )
 @inject
@@ -252,7 +253,9 @@ async def chat_rewrite(
     hot_context_repo: HotContextRepository = Depends(Provide[Container.hot_context_repo]),
 ):
     if not req.new_query: raise ServiceException(ChatErrorCode.CHAT_REQUEST_INVALID)
-    await session_repo.get_session_for_user(req.session_id, user_id)
+    session = await session_repo.get_session_for_user(req.session_id, user_id)
+    if session.is_draft_debug:
+        raise ServiceException(ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN)
 
     active_turn_id = await turn_stream_manager.active_turn_id(user_id=user_id, session_id=req.session_id)
     if active_turn_id is not None:
@@ -325,7 +328,16 @@ async def chat_redirect(
     return R.success()
 
 
-@router.post("/completions/compact", summary="立即压缩当前会话上下文")
+@router.post(
+    "/completions/compact",
+    summary="立即压缩当前普通会话上下文",
+    description="""
+- 请求：session_id 指定要压缩上下文的普通会话。
+- 约束：会话必须属于当前用户，且没有正在运行的 turn。草稿调试会话不支持压缩。
+- 处理：按会话 Agent 的记忆策略尝试压缩上下文；未启用会话记忆或历史摘要时直接返回成功。
+- 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；请求参数校验失败 -> ResultCode.PARAM_ERROR；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；草稿调试会话 -> ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN；有运行中 turn -> ChatErrorCode.CHAT_TURN_IN_PROGRESS；无法加载会话 Agent -> ChatErrorCode.AGENT_NOT_FOUND。
+""",
+)
 @inject
 async def chat_compact(
     req: ChatCompactRequest,
@@ -337,6 +349,8 @@ async def chat_compact(
     session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
     session = await session_repo.get_session_for_user(req.session_id, user_id)
+    if session.is_draft_debug:
+        raise ServiceException(ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN)
 
     active_turn_id = await turn_stream_manager.active_turn_id(user_id=user_id, session_id=req.session_id)
     if active_turn_id is not None:

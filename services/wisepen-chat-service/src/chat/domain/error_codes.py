@@ -11,6 +11,8 @@ class ChatErrorCode(IErrorCode):
     CHAT_TURN_IN_PROGRESS = (40006, "当前会话已有正在运行的对话")
     CHAT_ACTIVE_TURN_NOT_FOUND = (40007, "当前会话没有正在运行的对话")
     CHAT_WALLET_BLOCKED = (40008, "当前余额或额度不足，无法使用付费模型")
+    AGENT_DRAFT_UNAVAILABLE = (40009, "Agent 草稿不可用或无权调试，请确认当前草稿后重试")
+    DRAFT_SESSION_OPERATION_FORBIDDEN = (40010, "草稿调试会话不支持此操作")
 
     # --- Provider 相关 ---
     PROVIDER_NOT_FOUND = (40011, "供应商不存在")
