@@ -106,6 +106,16 @@ class Mem0Adapter(MemoryProvider):
 
         await asyncio.to_thread(_sync_add)
 
+    async def add_memory(self, user_id: str, content: str) -> None:
+
+        def _sync_add():
+            self.client.add([{"role": "user", "content": content}], user_id=user_id)
+
+        try:
+            await asyncio.to_thread(_sync_add)
+        except Exception as e:
+            raise ServiceException(ChatErrorCode.MEMORY_OPERATION_FAILED, custom_msg=str(e))
+
     async def get_all(self, user_id: str) -> List[Dict[str, Any]]:
 
         def _sync_get_all():

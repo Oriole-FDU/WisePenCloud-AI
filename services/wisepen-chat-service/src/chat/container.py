@@ -67,6 +67,24 @@ from chat.application.tools.session_tools.tool_output import (
     SearchToolOutputBM25Tool,
     SearchToolOutputRegexTool,
 )
+from chat.application.tools.byok_tools.bind_model_provider import BindModelProviderTool
+from chat.application.tools.byok_tools.create_my_model import CreateMyModelTool
+from chat.application.tools.byok_tools.create_my_provider import CreateMyProviderTool
+from chat.application.tools.byok_tools.delete_my_model import DeleteMyModelTool
+from chat.application.tools.byok_tools.delete_my_provider import DeleteMyProviderTool
+from chat.application.tools.byok_tools.list_available_models import ListAvailableModelsTool
+from chat.application.tools.byok_tools.list_my_providers import ListMyProvidersTool
+from chat.application.tools.byok_tools.unbind_model_provider import UnbindModelProviderTool
+from chat.application.tools.byok_tools.update_my_model import UpdateMyModelTool
+from chat.application.tools.byok_tools.update_my_provider import UpdateMyProviderTool
+from chat.application.tools.session_tools.compact_session import CompactSessionTool
+from chat.application.tools.session_tools.get_session_messages import GetSessionMessagesTool
+from chat.application.tools.session_tools.list_sessions import ListSessionsTool
+from chat.application.tools.session_tools.rename_session import RenameSessionTool
+from chat.application.tools.memory_tools.add_memory import AddMemoryTool
+from chat.application.tools.memory_tools.delete_memory import DeleteMemoryTool
+from chat.application.tools.memory_tools.list_memories import ListMemoriesTool
+from chat.application.tools.memory_tools.search_memories import SearchMemoriesTool
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
@@ -251,6 +269,17 @@ class Container(containers.DeclarativeContainer):
         bootstrap_servers=settings.messaging.kafka.bootstrap_servers,
     )
 
+    context_compactor = providers.Singleton(
+        DefaultLlmCompactor,
+        text_llm=litellm_adapter,
+        session_repo=session_repo,
+        hot_context_repo=hot_context_repo,
+    )
+    chat_turn_stream_manager = providers.Singleton(
+        ChatTurnStreamManager,
+        stream_repo=chat_turn_stream_repo,
+    )
+
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期
     # GetHistoricalChatMessagesTool
     search_history_tool = providers.Singleton(
@@ -294,6 +323,34 @@ class Container(containers.DeclarativeContainer):
         SearchToolOutputBM25Tool,
         tool_content_store=tool_content_store,
     )
+    # BYOK（Provider / Model 配置）
+    list_my_providers_tool = providers.Singleton(ListMyProvidersTool, provider_repo=provider_repo)
+    create_my_provider_tool = providers.Singleton(CreateMyProviderTool, provider_repo=provider_repo)
+    update_my_provider_tool = providers.Singleton(UpdateMyProviderTool, provider_repo=provider_repo)
+    delete_my_provider_tool = providers.Singleton(DeleteMyProviderTool, provider_repo=provider_repo)
+    list_available_models_tool = providers.Singleton(ListAvailableModelsTool, model_repo=model_repo, provider_repo=provider_repo)
+    create_my_model_tool = providers.Singleton(CreateMyModelTool, model_repo=model_repo)
+    update_my_model_tool = providers.Singleton(UpdateMyModelTool, model_repo=model_repo)
+    delete_my_model_tool = providers.Singleton(DeleteMyModelTool, model_repo=model_repo)
+    bind_model_provider_tool = providers.Singleton(BindModelProviderTool, model_repo=model_repo)
+    unbind_model_provider_tool = providers.Singleton(UnbindModelProviderTool, model_repo=model_repo)
+    # Session
+    list_sessions_tool = providers.Singleton(ListSessionsTool, session_repo=session_repo)
+    rename_session_tool = providers.Singleton(RenameSessionTool, session_repo=session_repo)
+    get_session_messages_tool = providers.Singleton(GetSessionMessagesTool, session_repo=session_repo, message_repo=message_repo)
+    compact_session_tool = providers.Singleton(
+        CompactSessionTool,
+        session_repo=session_repo,
+        agent_resolver=agent_resolver,
+        context_compactor=context_compactor,
+        context_assembler=context_assembler,
+        turn_stream_manager=chat_turn_stream_manager,
+    )
+    # Memory
+    search_memories_tool = providers.Singleton(SearchMemoriesTool, memory=memory_provider)
+    add_memory_tool = providers.Singleton(AddMemoryTool, memory=memory_provider)
+    list_memories_tool = providers.Singleton(ListMemoriesTool, memory=memory_provider)
+    delete_memory_tool = providers.Singleton(DeleteMemoryTool, memory=memory_provider)
     tool_providers = providers.List(
         search_history_tool,
         load_image_attachment_tool,
@@ -304,6 +361,24 @@ class Container(containers.DeclarativeContainer):
         read_tool_output_section_tool,
         search_tool_output_regex_tool,
         search_tool_output_bm25_tool,
+        list_my_providers_tool,
+        create_my_provider_tool,
+        update_my_provider_tool,
+        delete_my_provider_tool,
+        list_available_models_tool,
+        create_my_model_tool,
+        update_my_model_tool,
+        delete_my_model_tool,
+        bind_model_provider_tool,
+        unbind_model_provider_tool,
+        list_sessions_tool,
+        rename_session_tool,
+        get_session_messages_tool,
+        compact_session_tool,
+        search_memories_tool,
+        add_memory_tool,
+        list_memories_tool,
+        delete_memory_tool,
     )
 
     tool_registry = providers.Singleton(
@@ -327,12 +402,6 @@ class Container(containers.DeclarativeContainer):
         service_name=bootstrap_settings.SERVICE_NAME,
         broker=frontend_tool_response_broker,
     )
-    context_compactor = providers.Singleton(
-        DefaultLlmCompactor,
-        text_llm=litellm_adapter,
-        session_repo=session_repo,
-        hot_context_repo=hot_context_repo,
-    )
     chat_turn_coordinator = providers.Factory(
         ChatTurnCoordinator,
         llm_provider_resolver=llm_provider_resolver,
@@ -354,11 +423,6 @@ class Container(containers.DeclarativeContainer):
         context_assembler=context_assembler,
         frontend_tool_response_broker=frontend_tool_response_broker,
         context_compactor=context_compactor,
-    )
-
-    chat_turn_stream_manager = providers.Singleton(
-        ChatTurnStreamManager,
-        stream_repo=chat_turn_stream_repo,
     )
 
 

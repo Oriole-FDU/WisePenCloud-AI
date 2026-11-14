@@ -22,6 +22,11 @@ class MemoryProvider(ABC):
         pass
 
     @abstractmethod
+    async def add_memory(self, user_id: str, content: str) -> None:
+        """写入一条长期记忆（模型主动记录的事实/偏好）"""
+        pass
+
+    @abstractmethod
     async def get_all(self, user_id: str) -> List[Dict[str, Any]]:
         """返回指定用户的全部记忆条目（包含 id、memory、metadata 等字段）"""
         pass
