@@ -1,11 +1,13 @@
 import asyncio
 import json
 import uuid
+from contextlib import aclosing
 from typing import Awaitable, Callable
 from datetime import datetime, timezone
 
 from chat.api.vercel_formats import _sse
 from chat.api.vercel_sse_mapper import to_vercel_sse
+from chat.application.content_safety.checker import TurnOutputSafety
 from chat.application.events import StepFinishEvent, TextDeltaEvent
 from chat.application.execution_bindings import ExecutionBindings
 from chat.application.subagents.models import SubagentOptions
@@ -51,12 +53,14 @@ class SubagentRuntime:
 
     def __init__(self, *, options: SubagentOptions, context, loop, bindings: ExecutionBindings,
                  emit: Callable[[str], None], bill: Callable[[int], Awaitable[None]], repository,
-                 stream_repo, ensure_session, resolve_agent, resolve_model, billing_multiplier):
+                 stream_repo, ensure_session, resolve_agent, resolve_model, billing_multiplier,
+                 output_review: TurnOutputSafety | None = None):
         self.options, self.context, self.loop = options, context, loop
         self.root_execution_id = context.root_execution_id
         self.sequence = 0
         self.runs: dict[str, SubagentRun] = {}
         self.tasks: dict[str, asyncio.Task] = {}
+        self.blocked_runs: set[str] = set()
         self.collected: set[str] = set()
         self.inputs: dict[str, list[dict]] = {}
         self.seen_commands: set[str] = set()
@@ -65,6 +69,7 @@ class SubagentRuntime:
         self.resolve_agent = resolve_agent
         self.resolve_model = resolve_model
         self.billing_multiplier = billing_multiplier
+        self.output_review = output_review
         self.specs = {}
         self.models = {}
         self.candidates = {}
@@ -76,7 +81,8 @@ class SubagentRuntime:
         self.control_failed = False
         original_cancel = bindings.cancel_requested
         async def cancelled():
-            return self.control_failed or (original_cancel is not None and await original_cancel())
+            return (self.control_failed or (self.output_review is not None and self.output_review.verdict is not None)
+                    or (original_cancel is not None and await original_cancel()))
         bindings.cancel_requested = cancelled
         self.monitor = None
 
@@ -98,7 +104,7 @@ class SubagentRuntime:
                 if run.status == "running":
                     run.status = "interrupted"
                     run.error = "Previous owner ended; external results are unknown. Work was not replayed."
-                    await self.repository.save_run(run.for_storage())
+                    await self._save_run(run)
                 allowed = self.context.agent_spec.memory_policy.enable_persistence_chat_memory
                 if run.agent_id:
                     try:
@@ -124,6 +130,14 @@ class SubagentRuntime:
             self.root.sequence = self.sequence
             self.root.total_runs = max(self.root.total_runs, len(self.runs))
             await self.repository.save_root(self.root.model_copy(deep=True))
+
+    async def _save_run(self, run: SubagentRun) -> None:
+        saved = run.for_storage()
+        if self.output_review is not None:
+            # Provider 原生载荷可能额外携带未公开的文本。续用本来就使用可携历史。
+            for message in saved.messages:
+                message.provider_payload = None
+        await self.repository.save_run(saved)
 
     def view(self, run):
         return run.public_view()
@@ -191,7 +205,7 @@ class SubagentRuntime:
                 record.token_usage = sum(item.token_usage or 0 for item in record.usage)
                 statuses = {item.billing_status for item in record.usage}
                 record.billing_status = next((status for status in ("unknown", "failed", "confirmed") if status in statuses), "not_attempted")
-                await self.repository.save_run(record.for_storage())
+                await self._save_run(record)
         if usage.token_usage:
             # 先保存嘗試識別與 unknown，再接觸外部系統；程序中斷也不能自動補送。
             usage.attempted_at = datetime.now(timezone.utc)
@@ -320,7 +334,7 @@ class SubagentRuntime:
         self.specs[run.run_id] = spec
         self.models[run.run_id] = model_info
         try:
-            await self.repository.save_run(run.for_storage())
+            await self._save_run(run)
             await self._save_root()
         except BaseException:
             del self.runs[run.run_id]
@@ -336,23 +350,35 @@ class SubagentRuntime:
     async def _run(self, run, scope):
         deadline = asyncio.timeout(self.options.run_timeout_seconds)
         bindings = ExecutionBindings(cancel_requested=self.bindings.cancel_requested, lease_lost=self.bindings.lease_lost)
+        if self.output_review is not None:
+            def on_block():
+                self.blocked_runs.add(run.run_id)
+                run.status = "cancelled"
+                run.history_available = False
+                run.output = ""
+                self.emit("state", run)
+
+            bindings.review_model_output = lambda events: self.output_review.review_model_output(events, on_block)
         self._bind(bindings, run.run_id, scope, run.messages)
         try:
             async with deadline:
-                async for event in self.loop.stream_chat_with_tool_calling(
+                async with aclosing(self.loop.stream_chat_with_tool_calling(
                     messages=run.messages, tool_scope=scope, session_id=self.context.session_id,
                     agent_max_iterations=self.options.max_iterations, model_info=self.models[run.run_id],
                     bindings=bindings,
-                ):
-                    if isinstance(event, TextDeltaEvent):
-                        run.output += event.delta
-                    if isinstance(event, StepFinishEvent):
-                        if event.aborted:
-                            run.status = "interrupted" if self.interrupted() else "cancelled"
-                            run.messages.extend(event.intermediate_messages)
-                        elif event.is_finished:
-                            run.status = "incomplete" if event.final_assistant_message.metadata.get("incomplete") else "completed"
-                    self.emit("event", run, event=json.loads(to_vercel_sse(event)[6:]))
+                )) as stream:
+                    async for event in stream:
+                        if isinstance(event, StepFinishEvent):
+                            if event.aborted:
+                                run.status = "interrupted" if self.interrupted() else "cancelled"
+                                run.messages.extend(event.intermediate_messages)
+                            elif event.is_finished:
+                                run.status = "incomplete" if event.final_assistant_message.metadata.get("incomplete") else "completed"
+                        if self.output_review is not None and self.output_review.verdict is not None:
+                            continue
+                        if isinstance(event, TextDeltaEvent):
+                            run.output += event.delta
+                        self.emit("event", run, event=json.loads(to_vercel_sse(event)[6:]))
             if deadline.expired():
                 run.status = "timed_out"
                 run.error = "Subagent run timed out; external side effects may have completed."
@@ -367,7 +393,7 @@ class SubagentRuntime:
             run.error = "Subagent execution failed; partial output is retained."
         finally:
             await self.close_branch(run.run_id)
-            await self.repository.save_run(run.for_storage())
+            await self._save_run(run)
             self.emit("state", run)
             for command in self.inputs.pop(run.run_id, []):
                 await self._finish_command(command, "rejected", "Run ended before a safe iteration boundary.")
@@ -462,19 +488,25 @@ class SubagentRuntime:
     async def close_branch(self, actor, include_actor=False):
         selected = [run_id for run_id in self.runs
                     if self._descendant(actor, run_id) or (include_actor and run_id == actor)]
-        tasks = [self.tasks[run_id] for run_id in selected
-                 if run_id in self.tasks and self.tasks[run_id] is not asyncio.current_task()]
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        tasks = {run_id: self.tasks[run_id] for run_id in selected
+                 if run_id in self.tasks and self.tasks[run_id] is not asyncio.current_task()}
+        settling = []
+        for run_id, task in tasks.items():
+            # 命中的生成已经停止，保留它的用量记录和收尾。
+            if run_id in self.blocked_runs:
+                settling.append(asyncio.shield(task))
+            else:
+                if not task.done():
+                    task.cancel()
+                settling.append(task)
+        await asyncio.gather(*settling, return_exceptions=True)
         for run_id in selected:
             run = self.runs[run_id]
             if run.status == "running":
                 run.status = "interrupted" if self.interrupted() else "cancelled"
                 run.error = "Subagent cancelled before completion; external side effects are not rolled back."
             # 被第二次取消打斷 finalizer 的 task 也必須留下終態；不重送任何帳務。
-            await self.repository.save_run(run.for_storage())
+            await self._save_run(run)
             self.emit("state", run)
 
     async def close(self):

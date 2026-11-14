@@ -1,7 +1,8 @@
 import asyncio
 import json
 import uuid
-from typing import AsyncIterator, Awaitable, Callable, Iterator, List, Optional, Union
+from contextlib import aclosing
+from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterator, List, Optional, Union
 
 from jsonschema import Draft202012Validator, SchemaError, ValidationError
 
@@ -187,6 +188,14 @@ class QueryLoopRuntime:
             raise ServiceException(ChatErrorCode.MODEL_RUNTIME_OPTIONS_INVALID, custom_msg=str(exc))
         return model_info.with_runtime_options(options)
 
+    @staticmethod
+    def _model_events(
+        llm_provider: LLMProvider, messages: list[ChatMessage], model_info: ModelRequestInfo,
+        tools: list[dict] | None, bindings: ExecutionBindings,
+    ) -> AsyncGenerator[LLMStreamEvent, None]:
+        events = llm_provider.stream_chat_completion(messages=messages, model_request=model_info, tools=tools)
+        return bindings.review_model_output(events) if bindings.review_model_output is not None else events
+
     """
     ReAct 循环主入口 (QueryLoop)
     """
@@ -366,21 +375,18 @@ class QueryLoopRuntime:
                 if model_info.support_tools and llm_provider.supports_tools() else []
             try:
                 # 调用模型流式接口，Provider 内部负责原生协议解析并产出 LLMStreamEvent 事件
-                async for llm_provider_event in llm_provider.stream_chat_completion(
-                    messages=messages,
-                    model_request=model_info,
-                    tools=tool_schemas or None,
-                ):
-                    # 请求取消检查点
-                    if await bindings.is_cancel_requested():
-                        raise asyncio.CancelledError
-                    if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
-                        usage_observed = True
-                        token_usage.add(llm_provider_event.usage)
+                async with aclosing(self._model_events(llm_provider, messages, model_info, tool_schemas or None, bindings)) as stream:
+                    async for llm_provider_event in stream:
+                        if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
+                            usage_observed = True
+                            token_usage.add(llm_provider_event.usage)
+                        if await bindings.is_cancel_requested():
+                            raise asyncio.CancelledError
 
-                    # 把 LLMStreamEvent 事件交给解释器，产出 StreamEvent
-                    for event in event_interpreter.consume(llm_provider_event):
-                        yield event
+                        for event in event_interpreter.consume(llm_provider_event):
+                            yield event
+                if bindings.review_model_output is not None and await bindings.is_cancel_requested():
+                    raise asyncio.CancelledError
             except ServiceException:
                 await report_usage("observed" if usage_observed else "unknown", token_usage if usage_observed else None)
                 raise  # 已经是业务异常，直接向上传播
@@ -758,21 +764,20 @@ class QueryLoopRuntime:
         yield StepStartEvent()
         yield TextStartEvent(text_id=text_id)
         try:
-            async for event in llm_provider.stream_chat_completion(
-                messages=force_messages,
-                model_request=model_info,
-                tools=None, # 强制不带工具
-            ):
-                if await bindings.is_cancel_requested():
-                    raise asyncio.CancelledError
-                if event.type == LLMEventType.USAGE and event.usage:
-                    usage_observed = True
-                    token_usage.add(event.usage)
-                elif event.type == LLMEventType.STATE:
-                    provider_payload = event.provider_payload
-                elif event.type == LLMEventType.TEXT_DELTA and event.delta:
-                    assistant_content += event.delta
-                    yield TextDeltaEvent(text_id=text_id, delta=event.delta)
+            async with aclosing(self._model_events(llm_provider, force_messages, model_info, None, bindings)) as stream:
+                async for event in stream:
+                    if event.type == LLMEventType.USAGE and event.usage:
+                        usage_observed = True
+                        token_usage.add(event.usage)
+                    if await bindings.is_cancel_requested():
+                        raise asyncio.CancelledError
+                    if event.type == LLMEventType.STATE:
+                        provider_payload = event.provider_payload
+                    elif event.type == LLMEventType.TEXT_DELTA and event.delta:
+                        assistant_content += event.delta
+                        yield TextDeltaEvent(text_id=text_id, delta=event.delta)
+            if bindings.review_model_output is not None and await bindings.is_cancel_requested():
+                raise asyncio.CancelledError
         except asyncio.CancelledError:
             if bindings.record_usage is not None:
                 await bindings.record_usage(

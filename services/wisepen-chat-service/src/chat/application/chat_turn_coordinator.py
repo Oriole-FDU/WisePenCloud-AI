@@ -29,6 +29,7 @@ from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.query_loop_runtime import QueryLoopRuntime
 from chat.application.execution_bindings import ExecutionBindings
+from chat.application.content_safety.checker import TurnOutputSafety
 from chat.application.subagents.models import SubagentOptions
 from chat.application.subagents.runtime import SubagentRuntime
 from chat.application.subagents.tools import SUBAGENT_TOOL_NAMES
@@ -145,6 +146,7 @@ class ChatTurnCoordinator:
             turn_id: str | None = None,
             lease_lost: Callable[[], bool] | None = None,
             identity_type: Optional[IdentityType] = None,
+            output_review: TurnOutputSafety | None = None,
     ):
         suspended_chat: SuspendedChat | None = await self._suspended_chat_repo.find_suspended_by_session(session_id, user_id)
         if suspended_chat is None:
@@ -200,6 +202,7 @@ class ChatTurnCoordinator:
             start_iteration=suspended_chat.context.turn_suspension.iteration,
             bindings=ExecutionBindings(cancel_requested=cancel_requested, lease_lost=lease_lost),
             subagents=SubagentOptions.model_validate(state["options"]) if state is not None else None,
+            output_review=output_review,
         )) as stream:
             async for event in stream:
                 yield event
@@ -231,6 +234,7 @@ class ChatTurnCoordinator:
             turn_id: str | None = None,
             lease_lost: Callable[[], bool] | None = None,
             identity_type: Optional[IdentityType] = None,
+            output_review: TurnOutputSafety | None = None,
     ):
         chat_turn_context = ChatTurnContext()
         chat_turn_context.session_id = session_id
@@ -428,6 +432,7 @@ class ChatTurnCoordinator:
                 tool_approval_status=None,
                 bindings=ExecutionBindings(cancel_requested=cancel_requested, lease_lost=lease_lost),
                 subagents=subagents,
+                output_review=output_review,
         )) as stream:
             async for event in stream:
                 yield event
@@ -437,6 +442,7 @@ class ChatTurnCoordinator:
             self, chat_turn_context: ChatTurnContext, client_tool_results, tool_approval_status,
             start_iteration: int = 0, bindings: ExecutionBindings | None = None,
             subagents: SubagentOptions | None = None,
+            output_review: TurnOutputSafety | None = None,
     ):
         bindings = bindings or ExecutionBindings()
         if subagents is None or (chat_turn_context.subagent_state is None
@@ -448,6 +454,7 @@ class ChatTurnCoordinator:
         frames = asyncio.Queue()
         runtime = SubagentRuntime(options=subagents, context=chat_turn_context, loop=self._query_loop_runtime,
                                   bindings=bindings, emit=frames.put_nowait,
+                                  output_review=output_review,
                                   bill=lambda usage, model_info: self._turn_finalizer.send_usage_billing(
                                       user_id=chat_turn_context.user_id, model_info=model_info,
                                       usage=usage, billing_resource_id=chat_turn_context.billing_resource_id,
@@ -464,24 +471,36 @@ class ChatTurnCoordinator:
         chat_turn_context.usage_managed = True
         runtime.attach()
 
+        settling = False
+
         async def produce():
+            nonlocal settling
             try:
-                async for frame in self._query_llm(chat_turn_context, client_tool_results, tool_approval_status, start_iteration, bindings):
-                    frames.put_nowait(frame)
+                async with aclosing(self._query_llm(
+                    chat_turn_context, client_tool_results, tool_approval_status, start_iteration, bindings,
+                )) as stream:
+                    async for frame in stream:
+                        frames.put_nowait(frame)
             except Exception:
                 chat_turn_context.result_status = "failed"
                 raise
             finally:
+                settling = True
                 try:
                     await runtime.close()
                 finally:
                     frames.put_nowait(None)
 
         producer = asyncio.create_task(produce())
+        stopped_for_safety = False
         try:
             while (frame := await frames.get()) is not None:
+                # 子代理命中时，父模型可能正等待下一帧，无法自行检查取消标记。
+                if output_review is not None and output_review.verdict is not None and not (settling or stopped_for_safety):
+                    stopped_for_safety = producer.cancel()
                 yield frame
-            await producer
+            if not (stopped_for_safety and producer.cancelled()):
+                await producer
         finally:
             if not producer.done():
                 producer.cancel()

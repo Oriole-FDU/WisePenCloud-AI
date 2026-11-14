@@ -127,7 +127,7 @@ async def chat_completions(
     turn_id = await turn_stream_manager.start_turn(
         user_id=user_id,
         session_id=req.session_id,
-        build_chat_gen=lambda background_tasks, turn_id: coordinator.handle_new_chat_start(
+        build_chat_gen=lambda background_tasks, turn_id, output_review: coordinator.handle_new_chat_start(
             user_id=user_id,
             session_id=req.session_id,
             user_query=req.query,
@@ -137,6 +137,7 @@ async def chat_completions(
             billing_context_group_id=req.billing_context_group_id,
             runtime_options=req.runtime_options,
             subagents=req.subagents,
+            output_review=output_review,
             turn_id=turn_id,
             frontend_states=req.frontend_states,
             user_defined_attachment_ids=req.user_defined_attachment_ids,
@@ -254,7 +255,7 @@ async def chat_recover(
     turn_id = await turn_stream_manager.start_turn(
         user_id=user_id,
         session_id=req.session_id,
-        build_chat_gen=lambda background_tasks, turn_id: coordinator.handle_suspended_chat_recover(
+        build_chat_gen=lambda background_tasks, turn_id, output_review: coordinator.handle_suspended_chat_recover(
             user_id=user_id,
             session_id=req.session_id,
             client_tool_results=_to_domain_client_results(req),
@@ -263,6 +264,7 @@ async def chat_recover(
             cancel_requested=lambda: turn_stream_manager.is_turn_cancel_requested(turn_id),
             turn_id=turn_id,
             lease_lost=lambda: turn_stream_manager.is_turn_lease_lost(turn_id),
+            output_review=output_review,
             identity_type=identity_type,
         ),
     )
@@ -334,7 +336,7 @@ async def chat_rewrite(
     turn_id = await turn_stream_manager.start_turn(
         user_id=user_id,
         session_id=req.session_id,
-        build_chat_gen=lambda background_tasks, turn_id: coordinator.handle_new_chat_start(
+        build_chat_gen=lambda background_tasks, turn_id, _output_review: coordinator.handle_new_chat_start(
             user_id=user_id,
             session_id=req.session_id,
             user_query=req.new_query,

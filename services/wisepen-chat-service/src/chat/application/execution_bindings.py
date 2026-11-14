@@ -1,7 +1,9 @@
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from chat.domain.entities import ChatMessage
+from chat.domain.interfaces.llm import LLMStreamEvent
 
 @dataclass
 class ExecutionBindings:
@@ -15,6 +17,7 @@ class ExecutionBindings:
     record_usage: Callable[..., Awaitable[None]] | None = None
     snapshot_subagents: Callable[[], Awaitable[dict]] | None = None
     lease_lost: Callable[[], bool] | None = None
+    review_model_output: Callable[[AsyncGenerator[LLMStreamEvent, None]], AsyncGenerator[LLMStreamEvent, None]] | None = None
 
     async def is_cancel_requested(self) -> bool:
         return self.cancel_requested is not None and await self.cancel_requested()

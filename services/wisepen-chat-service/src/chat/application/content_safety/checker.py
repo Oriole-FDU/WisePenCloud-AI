@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional
+from typing import Any, Optional
 
 from chat.api.vercel_formats import text_delta, text_end, text_start
 from chat.application.content_safety.client import (
@@ -13,6 +14,7 @@ from chat.application.content_safety.client import (
 )
 from chat.core.config.settings_models import ContentSafetySettings
 from chat.domain.error_codes import ChatErrorCode
+from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent
 from common.core.exceptions import ServiceException
 from common.logger import info, warn
 
@@ -66,15 +68,79 @@ class _OutputWatcher:
         if verdict is not None and verdict.blocked and self.verdict is None:
             self.verdict = verdict
 
-    @property
-    def blocked(self) -> bool:
-        """是否已判定为违规"""
-        return self.verdict is not None
-
     async def aclose(self) -> None:
         """等待所有后台判定任务结束，任务异常不影响主流程"""
         if self.tasks:
             await asyncio.gather(*self.tasks, return_exceptions=True)
+
+
+class TurnOutputSafety:
+    """同一个 turn 的主输出和所有子代理共享一次阻断决定。"""
+
+    def __init__(self, client: SafetyClassifier, config: ContentSafetySettings) -> None:
+        self._client = client
+        self._threshold = config.output_chunk_chars
+        self.verdict: ContentSafetyVerdict | None = None
+
+    async def review_model_output(
+        self, events: AsyncGenerator[LLMStreamEvent, None], on_block: Callable[[], None],
+    ) -> AsyncGenerator[LLMStreamEvent, None]:
+        """先审查子代理的文本和推理，再交给消息解释器。"""
+        pending: list[str] = []
+        kind: LLMEventType | None = None
+        length = 0
+
+        async def flush() -> LLMStreamEvent | None:
+            nonlocal length
+            if not pending or kind is None or self.verdict is not None:
+                return None
+            text = "".join(pending)
+            pending.clear()
+            length = 0
+            if text.strip():
+                verdict = await self._client.check(text, kind="output")
+                if verdict is not None and verdict.blocked:
+                    on_block()
+                    if self.verdict is None:
+                        self.verdict = verdict
+            if self.verdict is None:
+                return LLMStreamEvent(type=kind, delta=text)
+            return None
+
+        try:
+            async for event in events:
+                if event.type == LLMEventType.USAGE:
+                    yield event
+                    continue
+                if self.verdict is not None:
+                    return
+                if event.type in (LLMEventType.TEXT_DELTA, LLMEventType.REASONING_DELTA):
+                    if kind != event.type:
+                        if (approved := await flush()) is not None:
+                            yield approved
+                        if self.verdict is not None:
+                            return
+                        kind = event.type
+                    if event.delta:
+                        pending.append(event.delta)
+                        length += len(event.delta)
+                    if length >= self._threshold:
+                        if (approved := await flush()) is not None:
+                            yield approved
+                        if self.verdict is not None:
+                            return
+                elif event.type == LLMEventType.STATE:
+                    yield event
+                else:
+                    if (approved := await flush()) is not None:
+                        yield approved
+                    if self.verdict is not None:
+                        return
+                    yield event
+            if (approved := await flush()) is not None:
+                yield approved
+        finally:
+            await events.aclose()
 
 
 class ContentSafetyChecker:
@@ -85,6 +151,11 @@ class ContentSafetyChecker:
         self._config = client.config
         self._redis = redis
         self.enabled = client.enabled
+
+    def start_output_review(self) -> TurnOutputSafety | None:
+        if self.enabled and self._config is not None:
+            return TurnOutputSafety(self._client, self._config)
+        return None
 
     async def is_banned(self, user_id: str) -> bool:
         """非阻塞地查询用户是否已被封禁（存在封禁键即视为封禁）"""
@@ -116,6 +187,7 @@ class ContentSafetyChecker:
         user_id: str,
         session_id: str,
         request_cancel: Callable[[], Awaitable[None]],
+        output_review: TurnOutputSafety | None = None,
     ) -> AsyncIterator[str]:
         """监听 SSE 帧，命中即取消本次请求并注入拒答帧，丢弃后续帧"""
         if not self.enabled:
@@ -136,30 +208,29 @@ class ContentSafetyChecker:
         hit = False
         try:
             async for frame in frames:
-                if hit:
-                    continue  # 丢弃后续帧，让取消流程把上游正常收尾
-
-                kind, text, text_id = _parse_frame(frame)
-                if kind == "text-start":
-                    current_text_id = text_id
-                    text_open = True
-                elif kind == "text-delta":
-                    if text_id is not None:
-                        current_text_id = text_id
-                    watcher.feed(text)
-                elif kind == "reasoning-delta":
-                    watcher.feed(text)
-                elif kind == "text-end":
-                    text_open = False
-
-                if watcher.blocked:
+                child_verdict = output_review.verdict if output_review is not None else None
+                if not hit and (verdict := child_verdict or watcher.verdict) is not None:
                     hit = True
-                    await self._record_hit(user_id, session_id, watcher.verdict)
+                    await self._record_hit(user_id, session_id, verdict)
                     await request_cancel()
                     for refusal_frame in self._refusal_frames(current_text_id, text_open):
                         yield refusal_frame
+                if hit:
+                    # 子代理终态只含已审查的输出，也携带客户端收尾所需的用量。
+                    if child_verdict is not None and _is_subagent_terminal_state(frame):
+                        yield frame
                     continue
 
+                kind, text, text_id = _parse_frame(frame)
+                if kind in ("text-delta", "reasoning-delta"):
+                    watcher.feed(text)
+                if kind == "text-start":
+                    current_text_id = text_id
+                    text_open = True
+                elif kind == "text-delta" and text_id is not None:
+                    current_text_id = text_id
+                elif kind == "text-end":
+                    text_open = False
                 yield frame
         finally:
             await watcher.aclose()
@@ -212,19 +283,17 @@ class ContentSafetyChecker:
         return f"wisepen:chat:content-safety:blocked:{user_id}"
 
 
+def _is_subagent_terminal_state(frame: str) -> bool:
+    payload = _frame_payload(frame)
+    if payload.get("type") != "data-subagent":
+        return False
+    data = payload["data"]
+    return data["kind"] == "state" and data["run"]["status"] != "running"
+
+
 def _parse_frame(frame: str) -> tuple[str, str, Optional[str]]:
     """解析 SSE 帧，返回 (kind, text, text_id)。"""
-    if not isinstance(frame, str) or not frame.startswith("data: "):
-        return "other", "", None
-    payload = frame[len("data: "):].strip()
-    if not payload:
-        return "other", "", None
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError:
-        return "other", "", None
-    if not isinstance(data, dict):
-        return "other", "", None
+    data = _frame_payload(frame)
     t = data.get("type")
     if t == "text-delta":
         return "text-delta", data.get("delta") or "", data.get("id")
@@ -235,3 +304,13 @@ def _parse_frame(frame: str) -> tuple[str, str, Optional[str]]:
     if t == "text-end":
         return "text-end", "", data.get("id")
     return "other", "", None
+
+
+def _frame_payload(frame: str) -> dict:
+    if not isinstance(frame, str) or not frame.startswith("data: "):
+        return {}
+    try:
+        data = json.loads(frame[len("data: "):])
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}

@@ -6,6 +6,7 @@ from fastapi import BackgroundTasks
 
 from chat.api.vercel_formats import message_finish, message_start, stream_done, error as sse_error
 from chat.application.content_safety import ContentSafetyChecker
+from chat.application.content_safety.checker import TurnOutputSafety
 from chat.core.persistence.redis.chat_turn_stream import RedisChatTurnStream
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
@@ -31,7 +32,7 @@ class ChatTurnStreamManager:
         *,
         user_id: str,
         session_id: str,
-        build_chat_gen: Callable[[BackgroundTasks, str], AsyncIterator[str]],
+        build_chat_gen: Callable[[BackgroundTasks, str, TurnOutputSafety | None], AsyncIterator[str]],
     ) -> str:
         # 封禁用户在申请租约、启动后台 runner 之前就被拒绝，所有发起 turn 的入口共用这条规则
         if self._content_safety is not None:
@@ -98,12 +99,13 @@ class ChatTurnStreamManager:
         user_id: str,
         session_id: str,
         turn_id: str,
-        build_chat_gen: Callable[[BackgroundTasks, str], AsyncIterator[str]],
+        build_chat_gen: Callable[[BackgroundTasks, str, TurnOutputSafety | None], AsyncIterator[str]],
     ) -> None:
         background_tasks = BackgroundTasks()
         runner = asyncio.current_task()
         heartbeat_done = asyncio.Event()
-        chat_gen = build_chat_gen(background_tasks, turn_id)
+        output_review = self._content_safety.start_output_review() if self._content_safety is not None else None
+        chat_gen = build_chat_gen(background_tasks, turn_id, output_review)
 
         async def heartbeat():
             interval = max(0.02, min(self._stream_repo.active_turn_ttl / 3, 10))
@@ -136,6 +138,7 @@ class ChatTurnStreamManager:
                     user_id=user_id,
                     session_id=session_id,
                     request_cancel=lambda: self._stream_repo.request_turn_cancel(turn_id),
+                    output_review=output_review,
                 )
 
             async for frame in frames:
