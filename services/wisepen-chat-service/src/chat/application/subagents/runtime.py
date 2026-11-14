@@ -39,6 +39,7 @@ def portable_history(messages):
             result.append(ChatMessage(
                 session_id=source.session_id, role=source.role, content=source.content,
                 tool_calls=source.tool_calls, tool_call_id=source.tool_call_id, tool_name=source.tool_name,
+                persisted_output_placeholder=source.persisted_output_placeholder,
                 imgs=[image.model_copy(deep=True) for image in source.imgs],
                 attachments=[attachment.model_copy(deep=True) for attachment in source.attachments],
             ))
