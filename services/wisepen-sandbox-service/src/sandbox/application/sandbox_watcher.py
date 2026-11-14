@@ -7,6 +7,7 @@ from pathlib import Path
 from common.logger import error, warn
 from sandbox.application.container_manager import ContainerManager, ContainerStatus
 from sandbox.application.host_health_checker import HostHealthChecker, PressureState
+from sandbox.application.image_builder import ImageBuilder
 from sandbox.application.workspace_manager import WorkspaceManager
 from sandbox.core.config.app_settings import settings
 from sandbox.core.providers import SandboxProviderManager
@@ -30,12 +31,14 @@ class Watcher:
         sandbox_provider_manager: SandboxProviderManager,
         container_manager: ContainerManager,
         workspace_manager: WorkspaceManager,
+        image_builder: ImageBuilder,
         host_health_checker: HostHealthChecker | None = None,
     ) -> None:
         self._sandbox_repository = sandbox_repository
         self._sandbox_provider_manager = sandbox_provider_manager
         self._container_manager = container_manager
         self._workspace_manager = workspace_manager
+        self._image_builder = image_builder
         self._host_health_checker = host_health_checker or HostHealthChecker(container_manager)
         self._stop = asyncio.Event()
         self._lock = asyncio.Lock()
@@ -146,12 +149,25 @@ class Watcher:
         failures = 0
 
         provider_id = settings.provider.active_id
+        # 预热前确保派生镜像存在（用于初始化失败时的周期性重试）
+        # 失败时退回基础镜像，不阻塞预热
+        provider_cfg = settings.provider.settings[provider_id]
+        resolved = await self._image_builder.ensure_image(
+            provider_cfg.image, provider_id.value, enabled=provider_cfg.derive_image,
+        )
+        if not resolved.derived:
+            warn(
+                "sandbox warm using bare base image (derived layer unavailable)",
+                provider=provider_id.value,
+                image=resolved.image,
+            )
+
         while created < plan_quantity and failures < settings.pool.warmup.max_retries:
             sandbox_provision = self._sandbox_provider_manager.create_provision(provider_id)
             container_id: str | None = None
             try:
                 container_id = await self._container_manager.create(
-                    sandbox_provision.image,
+                    resolved.image,
                     environment=sandbox_provision.container_environment,
                 )
                 base_url = await self._container_manager.get_container_base_url(container_id)
