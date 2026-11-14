@@ -26,13 +26,13 @@ class TokenCounter(Protocol):
 @lru_cache(maxsize=1)
 def _local_encoding() -> tiktoken.Encoding:
     """加载随包分发的 o200k_base BPE 表，构建离线 Encoding
-    避免 get_encoding() 在冷启动或离线环境下尝试下载或访问用户缓存。
+    避免 get_encoding() 在冷启动或离线环境下尝试下载或访问用户缓存
     """
 
-    # 读取打包的 BPE 表文件，解析为 {token_bytes: rank} 映射。
+    # 读取打包的 BPE 表文件，解析为 {token_bytes: rank} 映射
     data = (
-        files("common.utils.markdown")
-        .joinpath("chunking/data/o200k_base.tiktoken.gz")
+        files(__package__)
+        .joinpath("data/o200k_base.tiktoken.gz")
         .read_bytes()
     )
     ranks = {
