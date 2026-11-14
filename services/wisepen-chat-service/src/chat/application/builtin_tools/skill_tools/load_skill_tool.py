@@ -16,8 +16,8 @@ from chat.application.tools.core import (
     ToolSelectionMode,
     ToolUISpec,
 )
-from chat.application.tools.skill_tools.common import AllowedSkillIdCheck, build_skill_output_placeholder, SkillPermissionCheck
-from chat.application.tools.skill_tools.utils.builtin_skills import get_builtin_skill, is_builtin_skill_id, read_builtin_skill_asset
+from chat.application.builtin_tools.skill_tools.common import AllowedSkillIdCheck, build_skill_output_placeholder, SkillPermissionCheck
+from chat.application.skills.builtin_skills import get_builtin_skill, is_builtin_skill_id, read_builtin_skill_asset
 
 
 class LoadSkillTool:

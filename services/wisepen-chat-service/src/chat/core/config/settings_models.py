@@ -170,12 +170,35 @@ class AssetCacheSettings(ConfigModel):
     gc_interval_seconds: int = Field(default=30 * 60, ge=1)
 
 
+class ContentSafetySettings(ConfigModel):
+    """内容安全阻断配置。model / base-url / api-key 任一为空即整体禁用。"""
+
+    model: str = Field(default="")
+    base_url: str = Field(default="")
+    api_key: str = Field(default="")
+    timeout_seconds: float = Field(default=0.8, gt=0)
+    output_chunk_chars: int = Field(default=60, ge=1)
+    escalation_threshold: int = Field(default=5, ge=1)
+    window_seconds: int = Field(default=24 * 3600, ge=1)
+    ban_ttl_seconds: int = Field(default=24 * 3600, ge=1)
+    refusal_output: str = Field(
+        default="抱歉，这个问题我无法继续回答。如果您有其他问题，我很乐意继续帮助您。"
+    )
+    refusal_banned: str = Field(
+        default="由于一些原因，您的对话功能已暂时受限，将于 24 小时后自动恢复。如有疑问，请联系客服。"
+    )
+    @property
+    def enabled(self) -> bool:
+        return bool(self.model and self.base_url and self.api_key)
+
+
 class ChatSettings(ConfigModel):
     security: InternalSecuritySettings
     persistence: PersistenceSettings
     messaging: MessagingSettings
     models: ModelSettings
     integrations: IntegrationSettings
+    content_safety: ContentSafetySettings | None = None
     billing: BillingSettings = Field(default_factory=BillingSettings)
     context: ContextSettings = Field(default_factory=ContextSettings)
     vision: VisionSettings = Field(default_factory=VisionSettings)

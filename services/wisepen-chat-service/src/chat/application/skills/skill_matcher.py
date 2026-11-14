@@ -6,7 +6,7 @@ from common.logger import error
 from chat.core.config.app_settings import settings
 from chat.domain.entities.skill import SkillMeta
 from chat.service_client import AIAssetClient
-from chat.application.tools.skill_tools.utils.builtin_skills import get_builtin_skill_meta, is_builtin_skill_id
+from chat.application.skills.builtin_skills import get_builtin_skill_meta, is_builtin_skill_id
 
 
 ALWAYS_AVAILABLE_BUILTIN_SKILL_IDS = {

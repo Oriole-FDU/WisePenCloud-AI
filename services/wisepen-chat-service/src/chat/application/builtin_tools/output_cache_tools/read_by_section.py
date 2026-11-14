@@ -17,7 +17,7 @@ from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent,
     ToolContentStore,
 )
-from chat.application.tools.session_tools.tool_output.read_by_range import (
+from chat.application.builtin_tools.output_cache_tools.read_by_range import (
     ToolOutputWindow,
 )
 from chat.core.config.app_settings import settings

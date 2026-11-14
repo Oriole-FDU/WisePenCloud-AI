@@ -132,9 +132,9 @@ class ImageBuilder:
             "--build-arg", f"SANDBOX_RUNTIME_USER={runtime_user or 'root'}",
             str(dockerfile_path.parent),
         ]
-        returncode, _, stderr = await self._docker.run_docker_command(*args)
+        returncode, stdout, stderr = await self._docker.run_docker_command(*args)
         if returncode != 0:
-            error("docker build failed", derived=derived_tag, stderr=stderr)
+            error("docker build failed", derived=derived_tag, stdout=stdout, stderr=stderr)
             return False
         return True
 

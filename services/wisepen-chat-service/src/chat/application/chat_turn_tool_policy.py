@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Set
 
 from chat.application.agents.models import AgentToolAndSkillPolicy
-from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
+from chat.application.skills import SkillMatcher
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.skill import SkillMeta
 

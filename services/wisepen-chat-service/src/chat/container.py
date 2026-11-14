@@ -41,6 +41,7 @@ from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
+from chat.application.content_safety import ContentSafetyClient, ContentSafetyChecker
 from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
 from chat.mq import FrontendToolResponseConsumer
 from chat.application.agents import (
@@ -48,9 +49,9 @@ from chat.application.agents import (
     CompositeAgentResolver,
     RemoteAgentResolver,
 )
-from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
-from chat.application.tools.skill_tools import LoadSkillAssetTool
-from chat.application.tools.skill_tools import LoadSkillTool
+from chat.application.skills.skill_matcher import DefaultSkillMatcher
+from chat.application.builtin_tools.skill_tools import LoadSkillAssetTool
+from chat.application.builtin_tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
@@ -58,33 +59,33 @@ from chat.application.tools.core.output_cache import (
     ToolContentStore,
     ToolOutputCache,
 )
-from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
-from chat.application.tools.session_tools.load_image_attachment_tool import LoadImageAttachmentTool
-from chat.application.tools.session_tools.tool_output import (
+from chat.application.builtin_tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
+from chat.application.builtin_tools.session_tools.load_image_attachment_tool import LoadImageAttachmentTool
+from chat.application.builtin_tools.output_cache_tools import (
     InspectToolOutputStructureTool,
     ReadToolOutputRangeTool,
     ReadToolOutputSectionTool,
     SearchToolOutputBM25Tool,
     SearchToolOutputRegexTool,
 )
-from chat.application.tools.byok_tools.bind_model_provider import BindModelProviderTool
-from chat.application.tools.byok_tools.create_my_model import CreateMyModelTool
-from chat.application.tools.byok_tools.create_my_provider import CreateMyProviderTool
-from chat.application.tools.byok_tools.delete_my_model import DeleteMyModelTool
-from chat.application.tools.byok_tools.delete_my_provider import DeleteMyProviderTool
-from chat.application.tools.byok_tools.list_available_models import ListAvailableModelsTool
-from chat.application.tools.byok_tools.list_my_providers import ListMyProvidersTool
-from chat.application.tools.byok_tools.unbind_model_provider import UnbindModelProviderTool
-from chat.application.tools.byok_tools.update_my_model import UpdateMyModelTool
-from chat.application.tools.byok_tools.update_my_provider import UpdateMyProviderTool
-from chat.application.tools.session_tools.compact_session import CompactSessionTool
-from chat.application.tools.session_tools.get_session_messages import GetSessionMessagesTool
-from chat.application.tools.session_tools.list_sessions import ListSessionsTool
-from chat.application.tools.session_tools.rename_session import RenameSessionTool
-from chat.application.tools.memory_tools.add_memory import AddMemoryTool
-from chat.application.tools.memory_tools.delete_memory import DeleteMemoryTool
-from chat.application.tools.memory_tools.list_memories import ListMemoriesTool
-from chat.application.tools.memory_tools.search_memories import SearchMemoriesTool
+from chat.application.builtin_tools.byok_tools.bind_model_provider import BindModelProviderTool
+from chat.application.builtin_tools.byok_tools.create_my_model import CreateMyModelTool
+from chat.application.builtin_tools.byok_tools.create_my_provider import CreateMyProviderTool
+from chat.application.builtin_tools.byok_tools.delete_my_model import DeleteMyModelTool
+from chat.application.builtin_tools.byok_tools.delete_my_provider import DeleteMyProviderTool
+from chat.application.builtin_tools.byok_tools.list_available_models import ListAvailableModelsTool
+from chat.application.builtin_tools.byok_tools.list_my_providers import ListMyProvidersTool
+from chat.application.builtin_tools.byok_tools.unbind_model_provider import UnbindModelProviderTool
+from chat.application.builtin_tools.byok_tools.update_my_model import UpdateMyModelTool
+from chat.application.builtin_tools.byok_tools.update_my_provider import UpdateMyProviderTool
+from chat.application.builtin_tools.session_tools.compact_session import CompactSessionTool
+from chat.application.builtin_tools.session_tools.get_session_messages import GetSessionMessagesTool
+from chat.application.builtin_tools.session_tools.list_sessions import ListSessionsTool
+from chat.application.builtin_tools.session_tools.rename_session import RenameSessionTool
+from chat.application.builtin_tools.memory_tools.add_memory import AddMemoryTool
+from chat.application.builtin_tools.memory_tools.delete_memory import DeleteMemoryTool
+from chat.application.builtin_tools.memory_tools.list_memories import ListMemoriesTool
+from chat.application.builtin_tools.memory_tools.search_memories import SearchMemoriesTool
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
@@ -275,9 +276,19 @@ class Container(containers.DeclarativeContainer):
         session_repo=session_repo,
         hot_context_repo=hot_context_repo,
     )
+    content_safety_client = providers.Singleton(
+        ContentSafetyClient,
+        provider=litellm_adapter,
+    )
+    content_safety = providers.Singleton(
+        ContentSafetyChecker,
+        client=content_safety_client,
+        redis=redis_client,
+    )
     chat_turn_stream_manager = providers.Singleton(
         ChatTurnStreamManager,
         stream_repo=chat_turn_stream_repo,
+        content_safety=content_safety,
     )
 
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期

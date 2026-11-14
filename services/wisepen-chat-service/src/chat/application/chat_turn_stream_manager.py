@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator, Callable
 from fastapi import BackgroundTasks
 
 from chat.api.vercel_formats import message_finish, message_start, stream_done, error as sse_error
+from chat.application.content_safety import ContentSafetyChecker
 from chat.core.persistence.redis.chat_turn_stream import RedisChatTurnStream
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
@@ -14,8 +15,14 @@ from common.logger import error, info
 class ChatTurnStreamManager:
     """管理 running turn 租约、后台 runner 和 SSE 事件订阅。"""
 
-    def __init__(self, *, stream_repo: RedisChatTurnStream) -> None:
+    def __init__(
+        self,
+        *,
+        stream_repo: RedisChatTurnStream,
+        content_safety: ContentSafetyChecker | None = None,
+    ) -> None:
         self._stream_repo = stream_repo
+        self._content_safety = content_safety
         self._tasks: dict[str, asyncio.Task] = {}
 
     async def start_turn(
@@ -25,6 +32,10 @@ class ChatTurnStreamManager:
         session_id: str,
         build_chat_gen: Callable[[BackgroundTasks, str], AsyncIterator[str]],
     ) -> str:
+        # 封禁用户在申请租约、启动后台 runner 之前就被拒绝，所有发起 turn 的入口共用这条规则
+        if self._content_safety is not None:
+            await self._content_safety.ensure_not_banned(user_id)
+
         turn_id = f"turn_{uuid.uuid4().hex}" # 对话轮次 ID 同时作为运行租约的值和事件流标识
         acquired = await self._stream_repo.acquire_active_turn(user_id, session_id, turn_id) # 申请租约
         if not acquired: # 无法申请租约，说明有在运行的 turn，报错
@@ -91,7 +102,17 @@ class ChatTurnStreamManager:
             # 后台执行器统一负责消息生命周期帧，页面连接只转发。
             await self._stream_repo.append_frame(turn_id, message_start(f"msg_{uuid.uuid4().hex}"))
 
-            async for frame in build_chat_gen(background_tasks, turn_id):
+            frames = build_chat_gen(background_tasks, turn_id)
+            if self._content_safety is not None: # 若内容安全审计已启用
+                # 监听 SSE 帧，命中即置取消位并注入拒答
+                frames = self._content_safety.watch_frames(
+                    frames,
+                    user_id=user_id,
+                    session_id=session_id,
+                    request_cancel=lambda: self._stream_repo.request_turn_cancel(turn_id),
+                )
+
+            async for frame in frames:
                 # 业务输出帧写入前检查租约，避免旧 runner 在会话所有权失效后继续写内容
                 renewed = await self._stream_repo.renew_active_turn(user_id, session_id, turn_id) # 续期
                 if not renewed: # 无法续期，中止任务

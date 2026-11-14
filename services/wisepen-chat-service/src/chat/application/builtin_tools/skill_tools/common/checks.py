@@ -3,7 +3,7 @@ from typing import Any
 from chat.application.tools.core.definition import ToolParametersSchema, ToolPolicy
 from chat.application.tools.core.execution.hooks.base import ToolPreflightHook, ToolPreflightResult
 from chat.application.tools.core.llm.invocation import ToolInvocation
-from chat.application.tools.skill_tools.utils.builtin_skills import is_builtin_skill_id
+from chat.application.skills.builtin_skills import is_builtin_skill_id
 from chat.service_client import ResourceClient
 from common.security import SecurityContextHolder
 

@@ -56,3 +56,6 @@ class ChatErrorCode(IErrorCode):
     # --- 记忆相关 ---
     MEMORY_NOT_FOUND = (40061, "目标记忆不存在")
     MEMORY_OPERATION_FAILED = (40062, "记忆操作失败")
+
+    # --- 内容安全 ---
+    CONTENT_SAFETY_BLOCKED = (40057, "内容安全拦截")
