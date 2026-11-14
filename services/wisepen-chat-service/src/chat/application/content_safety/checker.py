@@ -6,12 +6,13 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
-from chat.api.vercel_formats import text_delta, text_end, text_start
+from chat.api.vercel_formats import error as sse_error, text_delta, text_end, text_start
 from chat.application.content_safety.client import (
     ContentSafetyVerdict,
     SafetyClassifier,
 )
 from chat.core.config.settings_models import ContentSafetySettings
+from chat.domain.entities import TurnCancelReason, TurnCancelSignal
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 from common.logger import info, warn
@@ -115,9 +116,9 @@ class ContentSafetyChecker:
         *,
         user_id: str,
         session_id: str,
-        request_cancel: Callable[[], Awaitable[None]],
+        request_cancel: Callable[[TurnCancelSignal], Awaitable[None]],
     ) -> AsyncIterator[str]:
-        """监听 SSE 帧，命中即取消本次请求并注入拒答帧，丢弃后续帧"""
+        """监听 SSE 帧，命中即置安全取消标记、注入拒答帧与安全拦截错误帧，丢弃后续帧"""
         if not self.enabled:
             async for frame in frames:
                 yield frame
@@ -154,10 +155,26 @@ class ContentSafetyChecker:
 
                 if watcher.blocked:
                     hit = True
-                    await self._record_hit(user_id, session_id, watcher.verdict)
-                    await request_cancel()
+                    verdict = watcher.verdict
+                    await self._record_hit(user_id, session_id, verdict)
+                    await request_cancel(
+                        TurnCancelSignal(
+                            reason=TurnCancelReason.CONTENT_SAFETY,
+                            meta={
+                                "refusal": self._config.refusal_output,
+                                "category": verdict.category,
+                                "severity": verdict.severity,
+                                "reason": verdict.reason,
+                            },
+                        )
+                    )
                     for refusal_frame in self._refusal_frames(current_text_id, text_open):
                         yield refusal_frame
+                    # 抛一个带 errorCode 的特定错误，前端据此感知这是一次安全拦截
+                    yield sse_error(
+                        error_text=ChatErrorCode.CONTENT_SAFETY_BLOCKED.msg,
+                        error_code=ChatErrorCode.CONTENT_SAFETY_BLOCKED.name,
+                    )
                     continue
 
                 yield frame

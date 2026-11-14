@@ -14,7 +14,7 @@ from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.logger import error
 
 from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role
+from chat.domain.entities import ChatMessage, Role, TurnCancelSignal
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
 from chat.domain.interfaces.context_compact import ContextCompactor
@@ -120,7 +120,7 @@ class ChatTurnCoordinator:
             client_tool_results: list[ClientToolResult],
             tool_approval_status: List[ToolApprovalStatus],
             background_tasks: BackgroundTasks,
-            cancel_requested: Callable[[], Awaitable[bool]] | None = None,
+            cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
             identity_type: Optional[IdentityType] = None,
     ):
         suspended_chat: SuspendedChat | None = await self._suspended_chat_repo.find_suspended_by_session(session_id, user_id)
@@ -182,7 +182,7 @@ class ChatTurnCoordinator:
             tool_selection_overrides: Optional[Dict[str, bool]] = None,
             user_defined_on_demand_skill_ids: Optional[Set[str]] = None,
             client_tool_capabilities: list[ClientToolCapability] | None = None,
-            cancel_requested: Callable[[], Awaitable[bool]] | None = None,
+            cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
             identity_type: Optional[IdentityType] = None,
     ):
         chat_turn_context = ChatTurnContext()
@@ -376,7 +376,7 @@ class ChatTurnCoordinator:
             client_tool_results: list[ClientToolResult] | None,
             tool_approval_status: List[ToolApprovalStatus] | None,
             start_iteration: int = 0,
-            cancel_requested: Callable[[], Awaitable[bool]] | None = None,
+            cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
     ):
         # 流式推理
 

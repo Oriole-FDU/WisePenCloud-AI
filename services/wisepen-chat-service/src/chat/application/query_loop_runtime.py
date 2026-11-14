@@ -32,7 +32,7 @@ from chat.application.tools.core.execution.result import ToolExecutionResult
 from chat.application.tools.core.llm.invocation import ToolInvocation, classify_tools
 from chat.application.tools.core.llm.renderer import tool_result_renderer
 from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role
+from chat.domain.entities import ChatMessage, Role, TurnCancelReason, TurnCancelSignal
 from chat.domain.entities.message import MessageModelInfo, ToolCallMessage
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
@@ -48,6 +48,14 @@ _TOOL_OUTPUT_TOOL_NAMES = frozenset({
     "search_tool_output_regex",
     "search_tool_output_bm25",
 })
+
+
+class TurnCancelledError(asyncio.CancelledError):
+    """携带取消信号的内部控制流异常，仅由单步流式推理的取消检查点抛出"""
+
+    def __init__(self, signal: TurnCancelSignal) -> None:
+        super().__init__()
+        self.signal = signal
 
 
 class _StepEventInterpreter:
@@ -189,7 +197,7 @@ class QueryLoopRuntime:
         start_iteration: int = 0,
         client_tool_results: list[ClientToolResult] = None,
         tool_approval_status: List[ToolApprovalStatus] = None,
-        cancel_requested: Callable[[], Awaitable[bool]] | None = None,
+        cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
         pending_user_messages: Callable[[], Awaitable[List[ChatMessage]]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         # 解析获取当前模型的 LLMProvider
@@ -302,7 +310,7 @@ class QueryLoopRuntime:
         tool_scope: ToolScope,
         client_tool_results: list[ClientToolResult] | None = None,
         tool_approval_status: List[ToolApprovalStatus] | None = None,
-        cancel_requested: Callable[[], Awaitable[bool]] | None = None,
+        cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
     ) -> AsyncIterator[Union[StreamEvent, StepFinishEvent]]:
         # 发 step 开始事件
         yield StepStartEvent()
@@ -328,8 +336,9 @@ class QueryLoopRuntime:
                     tools=tool_schemas or None,
                 ):
                     # 请求取消检查点
-                    if cancel_requested is not None and await cancel_requested():
-                        raise asyncio.CancelledError
+                    if cancel_requested is not None:
+                        signal = await cancel_requested()
+                        if signal is not None: raise TurnCancelledError(signal)
                     if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
                         token_usage.add(llm_provider_event.usage)
 
@@ -338,18 +347,27 @@ class QueryLoopRuntime:
                         yield event
             except ServiceException:
                 raise  # 已经是业务异常，直接向上传播
-            except asyncio.CancelledError: # 补全取消消息
+            except asyncio.CancelledError as exc: # 补全取消消息
+                signal = exc.signal if isinstance(exc, TurnCancelledError) else None
                 for event in event_interpreter.close():
                     yield event
+
+                if signal is not None and signal.reason == TurnCancelReason.CONTENT_SAFETY:
+                    content_safety_meta = signal.meta or {}
+                    content= (event_interpreter.assistant_content or "") + (content_safety_meta.get("refusal") or "")
+                    metadata={"content_safety_blocked": True, **content_safety_meta}
+                else:
+                    content = event_interpreter.assistant_content or ""
+                    metadata = {"aborted_by_user": True}
                 assistant_msg = ChatMessage(
                     session_id=session_id,
                     role=Role.ASSISTANT,
                     model_info=MessageModelInfo.from_model_request(model_info),
-                    content=event_interpreter.assistant_content or "",
+                    content=content,
                     reasoning_content=event_interpreter.assistant_reasoning or None,
                     provider_payload=event_interpreter.provider_payload,
                     tool_calls=event_interpreter.tool_calls,
-                    metadata={"aborted_by_user": True},
+                    metadata=metadata,
                 )
                 token_usage = await self._resolve_usage_with_fallback(
                     usage=token_usage,
@@ -574,7 +592,7 @@ class QueryLoopRuntime:
         client_tool_results: list[ClientToolResult] | None,
         tool_approval_status: list[ToolApprovalStatus] | None,
         tool_scope: ToolScope,
-        cancel_requested: Callable[[], Awaitable[bool]] | None,
+        cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None,
     ) -> list[ToolExecutionResult]:
         """执行当前工具调用"""
         tool_outputs: list[ToolExecutionResult] = []

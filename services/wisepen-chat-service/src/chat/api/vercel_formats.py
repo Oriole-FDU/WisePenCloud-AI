@@ -123,8 +123,11 @@ def source_url(source_id: str, url: str) -> str:
 # 错误 / 中止
 # =============================================================================
 
-def error(error_text: str) -> str:
-    return _sse({"type": "error", "errorText": error_text})
+def error(error_text: str, error_code: str | None = None) -> str:
+    payload = {"type": "error", "errorText": error_text}
+    if error_code:
+        payload["errorCode"] = error_code
+    return _sse(payload)
 
 
 def abort(reason: str) -> str:
