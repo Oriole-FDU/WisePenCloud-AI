@@ -19,11 +19,13 @@ class AgentResolver(Protocol):
         ...
 
 
-async def resolve_session_agent(resolver: AgentResolver, session: "ChatSession") -> Agent | None:
+async def resolve_session_agent(
+    resolver: AgentResolver, session: "ChatSession", *, require_prompt: bool = True,
+) -> Agent | None:
     if not session.is_draft_debug:
         return await resolver.resolve(session.agent_id, session.agent_version)
     agent = await resolver.resolve_draft(session.user_id, session.agent_id, session.agent_version)
-    if agent is None:
+    if agent is None or (require_prompt and not agent.spec.system_prompt.strip()):
         raise ServiceException(ChatErrorCode.AGENT_DRAFT_UNAVAILABLE)
     return agent
 
@@ -83,8 +85,7 @@ class RemoteAgentResolver:
         if (agent is None
                 or agent.agent_id != agent_id
                 or agent.version != draft_version
-                or agent.version_status.upper() != "DRAFT"
-                or not agent.spec.system_prompt.strip()):
+                or agent.version_status.upper() != "DRAFT"):
             return None
         return agent
 

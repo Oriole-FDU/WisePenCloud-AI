@@ -92,7 +92,7 @@ async def get_session(
     description="""
 - 用途：为当前用户创建一个新的聊天会话。
 - 请求：title 可选；agent_id 指定 Agent；仅草稿调试时额外传 draft_version。
-- 约束：当前用户必须已登录。草稿调试仅限资源 owner，指定版本必须仍是 DRAFT 并有有效指令。
+- 约束：当前用户必须已登录。草稿调试仅限资源 owner，指定版本必须仍是 DRAFT。可以先建会话上传附件，执行时才要求草稿有有效指令。
 - 处理：普通会话绑定已发布版；调试会话绑定指定草稿。两者都不创建初始消息或附件。
 - 失败：普通 Agent 不可用 -> ChatErrorCode.AGENT_NOT_FOUND；草稿不可用或无权调试 -> ChatErrorCode.AGENT_DRAFT_UNAVAILABLE。
 - 响应：返回新建会话信息。
@@ -113,7 +113,7 @@ async def create_session(
     if session.is_draft_debug:
         session.agent_id = req.agent_id
         session.agent_version = req.draft_version
-        await resolve_session_agent(agent_resolver, session)
+        await resolve_session_agent(agent_resolver, session, require_prompt=False)
     elif req.agent_id:
         agent = await agent_resolver.resolve(req.agent_id)
         if agent is None:

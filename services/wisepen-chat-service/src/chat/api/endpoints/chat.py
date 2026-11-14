@@ -10,7 +10,6 @@ from common.security import require_login, SecurityContextHolder
 from common.logger import error, info
 from chat.api.schemas.chat import ActiveChatTurnResponse, ChatCancelRequest, ChatCompactRequest, ChatRedirectRequest, ChatRequest, ChatRecoverRequest, ChatRewriteRequest
 from chat.application.agents import AgentResolver
-from chat.application.agents.resolver import resolve_session_agent
 from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
@@ -237,9 +236,9 @@ async def chat_cancel(
     summary="重写指定 user 消息并重新生成后续回复",
     description="""
 - 用途：编辑某条历史 user 消息并丢弃其后的所有记录，用新文本作为新的 user 消息重新生成。
-- 约束：目标会话必须属于当前用户；当前会话不能有正在运行的 turn；message_id 必须指向该会话中的一条 user 消息。
+- 约束：目标必须是当前用户的普通会话；不能有正在运行的 turn；message_id 必须指向该会话中的一条 user 消息。
 - 处理：删除该 user 消息及之后的所有消息，重置 Redis 热上下文（下一轮自动按截断后的 Mongo 回填）、清空会话摘要与上下文占用指示，然后以 new_query 开启一轮新的 Chat Turn。
-- 失败：会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；有运行中 turn -> ChatErrorCode.CHAT_TURN_IN_PROGRESS；消息不存在 -> ChatErrorCode.CHAT_MESSAGE_NOT_FOUND；目标不是 user 消息 -> ChatErrorCode.CHAT_REWRITE_TARGET_INVALID。
+- 失败：会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；草稿调试会话 -> ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN；有运行中 turn -> ChatErrorCode.CHAT_TURN_IN_PROGRESS；消息不存在 -> ChatErrorCode.CHAT_MESSAGE_NOT_FOUND；目标不是 user 消息 -> ChatErrorCode.CHAT_REWRITE_TARGET_INVALID。
 """,
 )
 @inject
@@ -251,12 +250,11 @@ async def chat_rewrite(
     session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
     message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
     hot_context_repo: HotContextRepository = Depends(Provide[Container.hot_context_repo]),
-    agent_resolver: AgentResolver = Depends(Provide[Container.agent_resolver]),
 ):
     if not req.new_query: raise ServiceException(ChatErrorCode.CHAT_REQUEST_INVALID)
     session = await session_repo.get_session_for_user(req.session_id, user_id)
     if session.is_draft_debug:
-        await resolve_session_agent(agent_resolver, session)
+        raise ServiceException(ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN)
 
     active_turn_id = await turn_stream_manager.active_turn_id(user_id=user_id, session_id=req.session_id)
     if active_turn_id is not None:
@@ -329,7 +327,7 @@ async def chat_redirect(
     return R.success()
 
 
-@router.post("/completions/compact", summary="立即压缩当前会话上下文")
+@router.post("/completions/compact", summary="立即压缩当前普通会话上下文")
 @inject
 async def chat_compact(
     req: ChatCompactRequest,
@@ -341,12 +339,14 @@ async def chat_compact(
     session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
     session = await session_repo.get_session_for_user(req.session_id, user_id)
+    if session.is_draft_debug:
+        raise ServiceException(ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN)
 
     active_turn_id = await turn_stream_manager.active_turn_id(user_id=user_id, session_id=req.session_id)
     if active_turn_id is not None:
         raise ServiceException(ChatErrorCode.CHAT_TURN_IN_PROGRESS)
 
-    agent = await resolve_session_agent(agent_resolver, session)
+    agent = await agent_resolver.resolve(session.agent_id, session.agent_version)
     if agent is None:
         raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
 
