@@ -36,9 +36,9 @@ router = APIRouter()
 - 用途：获取当前用户的单个聊天会话详情，用于进入会话或刷新会话状态。
 - 请求：session_id 指定目标会话。
 - 约束：当前用户必须已登录；目标会话必须属于当前用户。
-- 处理：按当前用户和会话 ID 查询会话，返回基础信息、附件和上次保存的 Skill / Tool 选择偏好。调试会话只返回草稿标识和版本，不返回草稿 Spec。Tool 覆盖项仅保留用户可用的工具。
+- 处理：按当前用户和会话 ID 查询会话，返回基础信息、未删除的临时附件和资源附件，以及上次保存的 Skill / Tool 选择偏好；不读取历史消息。Tool 覆盖项按当前用户可见、已启用且已完成配置的工具过滤。
 - 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND。
-- 响应：返回会话详情，用于前端恢复当前会话状态和上次用户选择。
+- 响应：返回会话详情，用于前端恢复会话状态和上次用户选择。普通会话可返回解析到的 Agent 详情；调试会话保留 Agent ID 和草稿版本，不返回草稿 Spec。
 """,
 )
 @inject
@@ -91,10 +91,10 @@ async def get_session(
     summary="创建会话",
     description="""
 - 用途：为当前用户创建一个新的聊天会话。
-- 请求：title 可选；agent_id 指定 Agent；仅草稿调试时额外传 draft_version。
-- 约束：当前用户必须已登录。草稿调试仅限资源 owner，指定版本必须仍是 DRAFT。可以先建会话上传附件，执行时才要求草稿有有效指令。
-- 处理：普通会话绑定已发布版；调试会话绑定指定草稿。两者都不创建初始消息或附件。
-- 失败：普通 Agent 不可用 -> ChatErrorCode.AGENT_NOT_FOUND；草稿不可用或无权调试 -> ChatErrorCode.AGENT_DRAFT_UNAVAILABLE。
+- 请求：title 可选，未传或为空时使用 New Chat；agent_id 可选，传入时指定 Agent 资源；创建草稿调试会话时须同时传 agent_id 和正整数 draft_version。
+- 约束：当前用户必须已登录。普通会话若指定 Agent，该 Agent 必须有可用的已发布版本。草稿调试仅限资源 owner，指定版本必须仍是 DRAFT；可以先建会话上传附件，执行时才要求草稿有有效指令。
+- 处理：普通会话指定 Agent 时绑定其已发布版，未指定时不绑定；调试会话绑定指定草稿。两者都不创建初始消息或附件。
+- 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；请求参数校验失败 -> ResultCode.PARAM_ERROR；普通会话指定的 Agent 无法解析到可用的已发布版本 -> ChatErrorCode.AGENT_NOT_FOUND；草稿不可用或无权调试 -> ChatErrorCode.AGENT_DRAFT_UNAVAILABLE。
 - 响应：返回新建会话信息。
 """,
 )
@@ -184,7 +184,7 @@ async def delete_session(
 - 用途：把源会话的全部历史消息复制到一个新会话，用于分支继续对话。
 - 约束：当前用户必须已登录；源会话必须属于当前用户且不是草稿调试会话。
 - 处理：新建会话并继承标题、绑定 Agent、附件引用、Skill/Tool 偏好；不继承置顶、摘要与上下文占用；按时间顺序复制全部消息。
-- 失败：会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；草稿调试会话 -> ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN。
+- 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；请求参数校验失败 -> ResultCode.PARAM_ERROR；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；草稿调试会话 -> ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN。
 - 响应：返回新建会话信息。
 """,
 )
@@ -329,11 +329,11 @@ async def pin_session(
     status_code=200,
     summary="设置会话 Agent",
     description="""
-- 用途：在会话开始前绑定、切换或清除会话使用的 Agent。
+- 用途：绑定、切换或清除普通会话使用的 Agent；已有消息的普通会话也可以切换。
 - 请求：session_id 指定目标会话；agent_id 为空时清除绑定，非空时指定目标 Agent。
 - 约束：当前用户必须已登录；目标会话必须属于当前用户且不是草稿调试会话；agent_id 非空时必须能解析到已发布 Agent。
-- 处理：校验会话归属和消息状态后写入 Agent ID 与版本，或清空 Agent 绑定；不修改历史消息或附件。
-- 失败：会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；Agent 不存在或未发布 -> ChatErrorCode.AGENT_NOT_FOUND；草稿调试会话 -> ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN。
+- 处理：校验会话归属和类型后写入 Agent ID 与已发布版本，或清空 Agent 绑定；不修改历史消息或附件。
+- 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；请求参数校验失败 -> ResultCode.PARAM_ERROR；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；指定的 Agent 无法解析到可用的已发布版本 -> ChatErrorCode.AGENT_NOT_FOUND；草稿调试会话 -> ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN。
 - 响应：返回更新后的会话信息。
 """,
 )
@@ -346,6 +346,7 @@ async def set_session_agent(
         agent_resolver: AgentResolver = Depends(Provide[Container.agent_resolver]),
 ):
     session = await session_repo.get_session_for_user(session_id, user_id)
+    # 普通会话已有消息时仍可切换 Agent；草稿调试会话固定绑定创建时的草稿。
     if session.is_draft_debug:
         raise ServiceException(ChatErrorCode.DRAFT_SESSION_OPERATION_FORBIDDEN)
 
