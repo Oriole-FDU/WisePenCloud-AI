@@ -41,7 +41,7 @@ from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
-from chat.application.content_safety import ContentSafetyClient, ContentSafetyChecker
+from chat.application.content_safety import ContentSafetyChecker, create_content_safety_client
 from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
 from chat.mq import FrontendToolResponseConsumer
 from chat.application.agents import (
@@ -277,7 +277,7 @@ class Container(containers.DeclarativeContainer):
         hot_context_repo=hot_context_repo,
     )
     content_safety_client = providers.Singleton(
-        ContentSafetyClient,
+        create_content_safety_client,
         provider=litellm_adapter,
     )
     content_safety = providers.Singleton(

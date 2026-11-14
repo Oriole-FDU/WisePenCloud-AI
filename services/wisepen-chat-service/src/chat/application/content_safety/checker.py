@@ -7,7 +7,10 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 from chat.api.vercel_formats import text_delta, text_end, text_start
-from chat.application.content_safety.client import ContentSafetyClient, ContentSafetyVerdict
+from chat.application.content_safety.client import (
+    ContentSafetyVerdict,
+    SafetyClassifier,
+)
 from chat.core.config.settings_models import ContentSafetySettings
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
@@ -24,7 +27,7 @@ class _OutputWatcher:
     命中结果缓存在 verdict 里，供上层在下一帧时读取
     """
 
-    client: ContentSafetyClient
+    client: SafetyClassifier
     config: ContentSafetySettings
 
     # 已累积的输出文本，checked_len 之前的部分已经（或正在）交给安全模型
@@ -77,7 +80,7 @@ class _OutputWatcher:
 class ContentSafetyChecker:
     """内容安全审查器"""
 
-    def __init__(self, client: ContentSafetyClient, redis: Any) -> None:
+    def __init__(self, client: SafetyClassifier, redis: Any) -> None:
         self._client = client
         self._config = client.config
         self._redis = redis

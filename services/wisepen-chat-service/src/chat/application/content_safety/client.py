@@ -3,7 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
+
+import httpx
 
 from chat.core.config.app_settings import settings
 from chat.core.config.settings_models import ContentSafetySettings
@@ -42,8 +46,20 @@ class ContentSafetyVerdict:
     reason: str = ""
     severity: str = "medium"
 
-class ContentSafetyClient:
-    """用独立小模型做文本内容安全判定；未配置或任何异常时返回 None（放行）"""
+
+class SafetyClassifier(ABC):
+    """内容安全判定通道"""
+
+    config: ContentSafetySettings | None
+    enabled: bool
+
+    @abstractmethod
+    async def check(self, text: str, kind: str = "text") -> ContentSafetyVerdict | None:
+        """判定一段文本；未配置或任何异常时返回 None（放行）"""
+
+
+class ContentSafetyClient(SafetyClassifier):
+    """用通用对话模型做文本内容安全判定；未配置或任何异常时返回 None（放行）"""
 
     def __init__(
         self,
@@ -114,3 +130,116 @@ class ContentSafetyClient:
         return ContentSafetyVerdict(
             blocked=True, category=category, reason=reason, severity=severity
         )
+
+
+# 决策模型的类别选项，key 与对话模型的 category 保持一致
+_DECISION_CATEGORIES: dict[str, str] = {
+    "politics": "涉政敏感：攻击国家制度、政党、领导人及现行政策；分裂国家、颠覆政权言论",
+    "illegal": "违法犯罪：毒品、枪支、爆炸物等违禁品；诈骗、传销、非法集资、洗钱、赌博；黑客攻击教程",
+    "porn": "色情低俗：露骨色情描写、性行为细节；色情资源导流；软色情；卖淫嫖娼信息",
+    "violence": "暴力血腥：血腥、虐杀、肢解、虐待等暴力内容；宣扬暴力、报复",
+    "extremism": "恐怖极端：宣扬恐怖主义、极端主义；暴恐组织宣传；制作爆炸物教程",
+    "hate": "仇恨歧视：针对种族、民族、地域、宗教、性别、性取向、残障等的侮辱、攻击、煽动仇恨",
+    "minors": "未成年有害：涉及未成年人的色情、性暗示、诱导、欺凌、泄露未成年人信息",
+    "other": "其他违规：明显违反公序良俗或平台规范、但不属于上述类别的敏感内容",
+    "none": "无违规内容",
+}
+
+
+class DecisionModelClient(SafetyClassifier):
+    """用基于 SystemOne 协议的决策模型做判定
+    一次前向直接返回违规概率与类别，不生成文本
+    """
+
+    def __init__(self, config: ContentSafetySettings | None = None) -> None:
+        self.config = config if config is not None else settings.content_safety
+        self.enabled = bool(self.config and self.config.enabled)
+        timeout = self.config.timeout_seconds if self.config else 5.0
+        self._endpoint = f"{(self.config.base_url if self.config else '').rstrip('/')}/systemone"
+        self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout))
+
+    async def check(self, text: str, kind: str = "text") -> ContentSafetyVerdict | None:
+        if not self.enabled:
+            return None
+        text = (text or "").strip()
+        if not text:
+            return None
+        try:
+            payload = await asyncio.wait_for(
+                self._request(text), timeout=self.config.timeout_seconds
+            )
+        except Exception as exc:  # noqa: BLE001
+            warn("content safety check failed.", kind=kind, exc=exc)
+            return None
+        return self._parse(payload)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def _request(self, text: str) -> Any:
+        response = await self._client.post(
+            self._endpoint,
+            headers={"Authorization": f"Bearer {self.config.api_key}"},
+            json={"model": self.config.model, "state": text, "questions": _decision_questions()},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _parse(self, payload: Any) -> ContentSafetyVerdict | None:
+        """把 answers.violation.noul 的概率按 block_threshold 映射成二值判定"""
+        if not isinstance(payload, dict):
+            return None
+        answers = payload.get("answers")
+        if not isinstance(answers, dict):
+            return None
+        try:
+            probability = float((answers.get("violation") or {}).get("noul"))
+        except (TypeError, ValueError):
+            return None
+        if probability < self.config.block_threshold:
+            return ContentSafetyVerdict(blocked=False)
+        category = str((answers.get("category") or {}).get("choice") or "other")
+        # 模型偶尔在判定违规的同时选 none，统一归到 other，避免污染命中统计
+        if category not in _DECISION_CATEGORIES or category == "none":
+            category = "other"
+        severity = "high" if category in _HIGH_SEVERITY_CATEGORIES else "medium"
+        return ContentSafetyVerdict(
+            blocked=True,
+            category=category,
+            reason=f"noul={probability:.2f}",
+            severity=severity,
+        )
+
+
+def _decision_questions() -> dict[str, Any]:
+    """SystemOne 的 typed questions
+    一个是非判断定违规，一个多选定类别
+    """
+    return {
+        "violation": {
+            "type": "noul",
+            "instructions": "判断待判定文本是否包含违规内容",
+            "criteria": {
+                "true": "包含违规内容：涉政敏感、违法犯罪、色情低俗、暴力血腥、恐怖极端、仇恨歧视、未成年有害等",
+                "false": "正常内容，不包含违规内容",
+            },
+        },
+        "category": {
+            "type": "choice",
+            "instructions": "若文本包含违规内容，最贴近哪一类？无违规内容时选 none",
+            "criteria": _DECISION_CATEGORIES,
+        },
+    }
+
+
+def create_content_safety_client(
+    provider: TextCompletionProvider,
+    config: ContentSafetySettings | None = None,
+) -> SafetyClassifier:
+    """按 content-safety.mode 选择判定通道
+    decision 走决策模型，chat 走通用对话模型
+    """
+    resolved = config if config is not None else settings.content_safety
+    if resolved is not None and resolved.mode == "decision":
+        return DecisionModelClient(resolved)
+    return ContentSafetyClient(provider, resolved)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 from common.core.config.app_settings import (
     ConfigModel,
@@ -171,13 +172,21 @@ class AssetCacheSettings(ConfigModel):
 
 
 class ContentSafetySettings(ConfigModel):
-    """内容安全阻断配置。model / base-url / api-key 任一为空即整体禁用。"""
+    """内容安全阻断配置
+    model / base-url / api-key 任一为空即整体禁用。
 
+    mode=chat 走 OpenAI 兼容对话模型（JSON 输出）
+    mode=decision 走决策模型（SystemOne 协议）
+    """
+
+    mode: Literal["chat", "decision"] = "chat"
     model: str = Field(default="")
     base_url: str = Field(default="")
     api_key: str = Field(default="")
     timeout_seconds: float = Field(default=0.8, gt=0)
     output_chunk_chars: int = Field(default=60, ge=1)
+    # decision 模式：违规概率达到该值即判定为违规
+    block_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     escalation_threshold: int = Field(default=5, ge=1)
     window_seconds: int = Field(default=24 * 3600, ge=1)
     ban_ttl_seconds: int = Field(default=24 * 3600, ge=1)
