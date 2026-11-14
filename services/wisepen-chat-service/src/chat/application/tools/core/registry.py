@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from copy import deepcopy
 
-from chat.application.tools.core.definition import Tool, ToolSelectionMode, ToolExecutionTarget, ToolRiskLevel
+from chat.application.tools.core.definition import Tool, ToolPolicy, ToolSelectionMode, ToolExecutionTarget, ToolRiskLevel
 from chat.application.tools.core.llm.renderer import schema_renderer
 from chat.application.tools.client_tools import ClientToolCapability, client_tool_from_capability
 from chat.domain.error_codes import ChatErrorCode
@@ -12,6 +12,13 @@ from common.core.exceptions import ServiceException
 
 if TYPE_CHECKING:
     from chat.application.tools.core.mcp import McpToolCatalog, SystemMcpToolCatalog
+
+
+_SHARED_MEMORY_TOOL_NAMES = frozenset({"add_memory", "delete_memory", "list_memories", "search_memories"})
+
+
+def _has_required_skills(policy: ToolPolicy, allowed_skill_ids: set[str]) -> bool:
+    return allowed_skill_ids.issuperset(policy.required_allowed_builtin_skill_ids)
 
 
 class ToolScope:
@@ -75,21 +82,29 @@ class ToolScope:
         }
 
     def for_child(self, *, excluded_names: frozenset[str] = frozenset(), policy=None) -> ToolScope:
-        tools = {name: tool for name, tool in self._tools.items()
-                 if name not in excluded_names
-                 and tool.definition.policy.execution_target == ToolExecutionTarget.SERVER
-                 and tool.definition.policy.risk_level != ToolRiskLevel.HIGH}
         context = deepcopy(self._context)
+        allowed_skill_ids = set(context.get("allowed_skill_ids") or ())
+        if policy is not None:
+            if policy.enable_use_skill:
+                allowed_skill_ids.intersection_update(policy.on_demand_skill_ids or ())
+            else:
+                allowed_skill_ids.clear()
+            context["allowed_skill_ids"] = sorted(allowed_skill_ids)
+
+        tools = {
+            name: tool for name, tool in self._tools.items()
+            if name not in excluded_names
+            and name not in _SHARED_MEMORY_TOOL_NAMES
+            and tool.definition.policy.execution_target == ToolExecutionTarget.SERVER
+            and tool.definition.policy.risk_level != ToolRiskLevel.HIGH
+            and (allowed_skill_ids or name not in ("load_skill", "load_skill_asset"))
+            and _has_required_skills(tool.definition.policy, allowed_skill_ids)
+        }
         if policy is not None:
             tools = {name: tool for name, tool in tools.items() if policy.enable_use_tool
                      and policy.tool_selection_overrides.get(name) is not False
                      and (tool.definition.policy.selection_mode != ToolSelectionMode.USER_SELECTABLE
                           or policy.tool_selection_overrides.get(name, policy.tool_selection_default_enabled))}
-            context["allowed_skill_ids"] = sorted(set(context.get("allowed_skill_ids", []))
-                                                  & set(policy.on_demand_skill_ids or []))
-            if not policy.enable_use_skill or not context["allowed_skill_ids"]:
-                for name in ("load_skill", "load_skill_asset"):
-                    tools.pop(name, None)
         return ToolScope(tools=tools, context=context, configs=deepcopy(self._configs))
 
 class ToolRegistry:
@@ -158,6 +173,7 @@ class ToolRegistry:
         if not enable_use_tool:
             return ToolScope(tools={}, context=context)
 
+        allowed_skill_ids = set(context.get("allowed_skill_ids") or ())
         expose_tool_name_set = expose_tool_name_set or set()
         tool_selection_overrides = dict(tool_selection_overrides or {})
         client_tool_capabilities = list(client_tool_capabilities or [])
@@ -187,9 +203,6 @@ class ToolRegistry:
 
             # 明确暴露的工具，用于暴露 expose_by_default 为 False 的工具
             explicitly_exposed = name in expose_tool_name_set
-            # 工具要求某个 builtin skill id，而本轮 allowed_skill_ids 满足它
-            skill_exposure_satisfaction = (policy.required_allowed_builtin_skill_ids and
-                             set(policy.required_allowed_builtin_skill_ids).issubset(set(context.get("allowed_skill_ids") or [])))
 
             if policy.selection_mode == ToolSelectionMode.CONTEXTUAL:
                 # 对于 CONTEXTUAL 工具而言，只要用户没有显示禁用，即启用
@@ -201,17 +214,18 @@ class ToolRegistry:
             if not _is_tool_selected: # 未被选中，跳过
                 continue
 
-            if policy.required_allowed_builtin_skill_ids and not skill_exposure_satisfaction: # 暴露的技能不满足工具要求
+            if not _has_required_skills(policy, allowed_skill_ids):
                 continue
+            skill_exposes_tool = bool(policy.required_allowed_builtin_skill_ids)
 
             # CONTEXTUAL 工具必须靠 explicitly_exposed 显式启用 或 加载了要求的 Skill
             if policy.selection_mode == ToolSelectionMode.CONTEXTUAL:
-                if explicitly_exposed or skill_exposure_satisfaction: filtered_tools[name] = tool
+                if explicitly_exposed or skill_exposes_tool: filtered_tools[name] = tool
                 continue
 
             # USER_SELECTABLE 但 expose_by_default 为 False 的工具必须靠 explicitly_exposed 显式启用 或 加载了要求的 Skill
             if not policy.expose_by_default:
-                if explicitly_exposed or skill_exposure_satisfaction: filtered_tools[name] = tool
+                if explicitly_exposed or skill_exposes_tool: filtered_tools[name] = tool
                 continue
             filtered_tools[name] = tool
 
