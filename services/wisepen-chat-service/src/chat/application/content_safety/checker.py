@@ -7,16 +7,24 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from chat.api.vercel_formats import text_delta, text_end, text_start
+from chat.api.vercel_formats import error as sse_error, text_delta, text_end, text_start
 from chat.application.content_safety.client import (
     ContentSafetyVerdict,
     SafetyClassifier,
 )
 from chat.core.config.settings_models import ContentSafetySettings
+from chat.domain.entities import TurnCancelReason, TurnCancelSignal
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent
 from common.core.exceptions import ServiceException
 from common.logger import info, warn
+
+
+def _cancel_signal(refusal: str, verdict: ContentSafetyVerdict) -> TurnCancelSignal:
+    return TurnCancelSignal(
+        reason=TurnCancelReason.CONTENT_SAFETY,
+        meta={"refusal": refusal, "category": verdict.category, "severity": verdict.severity, "reason": verdict.reason},
+    )
 
 
 @dataclass
@@ -80,7 +88,12 @@ class TurnOutputSafety:
     def __init__(self, client: SafetyClassifier, config: ContentSafetySettings) -> None:
         self._client = client
         self._threshold = config.output_chunk_chars
+        self._refusal = config.refusal_output
         self.verdict: ContentSafetyVerdict | None = None
+
+    @property
+    def cancel_signal(self) -> TurnCancelSignal | None:
+        return _cancel_signal(self._refusal, self.verdict) if self.verdict is not None else None
 
     async def review_model_output(
         self, events: AsyncGenerator[LLMStreamEvent, None], on_block: Callable[[], None],
@@ -186,10 +199,10 @@ class ContentSafetyChecker:
         *,
         user_id: str,
         session_id: str,
-        request_cancel: Callable[[], Awaitable[None]],
+        request_cancel: Callable[[TurnCancelSignal], Awaitable[None]],
         output_review: TurnOutputSafety | None = None,
     ) -> AsyncIterator[str]:
-        """监听 SSE 帧，命中即取消本次请求并注入拒答帧，丢弃后续帧"""
+        """监听 SSE 帧，命中即置安全取消标记、注入拒答帧与安全拦截错误帧，丢弃后续帧"""
         if not self.enabled:
             async for frame in frames:
                 yield frame
@@ -212,9 +225,13 @@ class ContentSafetyChecker:
                 if not hit and (verdict := child_verdict or watcher.verdict) is not None:
                     hit = True
                     await self._record_hit(user_id, session_id, verdict)
-                    await request_cancel()
+                    await request_cancel(_cancel_signal(self._config.refusal_output, verdict))
                     for refusal_frame in self._refusal_frames(current_text_id, text_open):
                         yield refusal_frame
+                    yield sse_error(
+                        error_text=ChatErrorCode.CONTENT_SAFETY_BLOCKED.msg,
+                        error_code=ChatErrorCode.CONTENT_SAFETY_BLOCKED.name,
+                    )
                 if hit:
                     # 子代理终态只含已审查的输出，也携带客户端收尾所需的用量。
                     if child_verdict is not None and _is_subagent_terminal_state(frame):

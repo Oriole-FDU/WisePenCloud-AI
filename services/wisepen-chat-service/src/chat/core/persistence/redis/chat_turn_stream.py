@@ -3,6 +3,7 @@ from redis.asyncio import Redis
 
 from chat.core.config.app_settings import settings
 from chat.core.persistence.redis.base import RedisRepository
+from chat.domain.entities import TurnCancelSignal
 
 
 _RELEASE_IF_OWNER = """
@@ -101,12 +102,12 @@ class RedisChatTurnStream(RedisRepository):
         )
         return bool(result)
 
-    async def request_turn_cancel(self, turn_id: str) -> None:
-        # 取消请求只需要一个短期标记，runner 会在安全点读取并自行收尾。
-        await self._redis.set(self._cancel_key(turn_id), "1", ex=self.stream_ttl)
+    async def request_turn_cancel(self, turn_id: str, signal: TurnCancelSignal) -> None:
+        # 取消标记携带类别与meta，runner 在安全点读取并据此收尾。
+        await self._redis.set(self._cancel_key(turn_id), signal.to_redis(), ex=self.stream_ttl)
 
-    async def is_turn_cancel_requested(self, turn_id: str) -> bool:
-        return await self._redis.get(self._cancel_key(turn_id)) == "1"
+    async def is_turn_cancel_requested(self, turn_id: str) -> TurnCancelSignal | None:
+        return TurnCancelSignal.from_redis(await self._redis.get(self._cancel_key(turn_id)))
 
     def _subagent_commands_key(self, turn_id):
         return f"chat:turn:{turn_id}:subagent_commands"

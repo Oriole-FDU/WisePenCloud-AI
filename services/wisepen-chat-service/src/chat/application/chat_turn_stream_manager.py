@@ -8,6 +8,7 @@ from chat.api.vercel_formats import message_finish, message_start, stream_done, 
 from chat.application.content_safety import ContentSafetyChecker
 from chat.application.content_safety.checker import TurnOutputSafety
 from chat.core.persistence.redis.chat_turn_stream import RedisChatTurnStream
+from chat.domain.entities import TurnCancelReason, TurnCancelSignal
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 from common.logger import error, info
@@ -62,7 +63,7 @@ class ChatTurnStreamManager:
         if turn_id is None:
             raise ServiceException(ChatErrorCode.CHAT_ACTIVE_TURN_NOT_FOUND)
 
-        await self._stream_repo.request_turn_cancel(turn_id)
+        await self._stream_repo.request_turn_cancel(turn_id, TurnCancelSignal(reason=TurnCancelReason.USER))
         task = self._tasks.get(turn_id)
 
         if task is None: return turn_id
@@ -73,8 +74,10 @@ class ChatTurnStreamManager:
             task.cancel()
         return turn_id
 
-    async def is_turn_cancel_requested(self, turn_id: str) -> bool:
-        return turn_id in self._lost_leases or await self._stream_repo.is_turn_cancel_requested(turn_id)
+    async def is_turn_cancel_requested(self, turn_id: str) -> TurnCancelSignal | None:
+        if turn_id in self._lost_leases:
+            return TurnCancelSignal(reason=TurnCancelReason.UNKNOWN)
+        return await self._stream_repo.is_turn_cancel_requested(turn_id)
 
     def is_turn_lease_lost(self, turn_id: str) -> bool:
         return turn_id in self._lost_leases
@@ -137,7 +140,7 @@ class ChatTurnStreamManager:
                     frames,
                     user_id=user_id,
                     session_id=session_id,
-                    request_cancel=lambda: self._stream_repo.request_turn_cancel(turn_id),
+                    request_cancel=lambda signal: self._stream_repo.request_turn_cancel(turn_id, signal),
                     output_review=output_review,
                 )
 

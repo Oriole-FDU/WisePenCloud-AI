@@ -13,7 +13,7 @@ from chat.application.execution_bindings import ExecutionBindings
 from chat.application.subagents.models import SubagentOptions
 from chat.application.subagents.tools import SUBAGENT_TOOL_NAMES
 from chat.application.tools.core.execution.result import ToolExecutionError
-from chat.domain.entities import ChatMessage, Role
+from chat.domain.entities import ChatMessage, Role, TurnCancelReason, TurnCancelSignal
 from chat.domain.entities.subagent import SubagentRun, SubagentRoot, ModelUsage
 
 
@@ -80,9 +80,12 @@ class SubagentRuntime:
         self.suspended = False
         self.control_failed = False
         original_cancel = bindings.cancel_requested
-        async def cancelled():
-            return (self.control_failed or (self.output_review is not None and self.output_review.verdict is not None)
-                    or (original_cancel is not None and await original_cancel()))
+        async def cancelled() -> TurnCancelSignal | None:
+            if self.control_failed:
+                return TurnCancelSignal(reason=TurnCancelReason.UNKNOWN)
+            if self.output_review is not None and (signal := self.output_review.cancel_signal) is not None:
+                return signal
+            return await original_cancel() if original_cancel is not None else None
         bindings.cancel_requested = cancelled
         self.monitor = None
 

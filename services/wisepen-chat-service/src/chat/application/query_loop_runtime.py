@@ -34,7 +34,7 @@ from chat.application.tools.core.execution.result import ToolExecutionResult
 from chat.application.tools.core.llm.invocation import ToolInvocation, classify_tools
 from chat.application.tools.core.llm.renderer import tool_result_renderer
 from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role
+from chat.domain.entities import ChatMessage, Role, TurnCancelReason, TurnCancelSignal
 from chat.domain.entities.message import MessageModelInfo, ToolCallMessage
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
@@ -50,6 +50,21 @@ _TOOL_OUTPUT_TOOL_NAMES = frozenset({
     "search_tool_output_regex",
     "search_tool_output_bm25",
 })
+
+
+class TurnCancelledError(asyncio.CancelledError):
+    """携带取消信号的内部控制流异常，仅由单步流式推理的取消检查点抛出"""
+
+    def __init__(self, signal: TurnCancelSignal) -> None:
+        super().__init__()
+        self.signal = signal
+
+
+def _cancelled_reply(content: str, signal: TurnCancelSignal | None) -> tuple[str, dict]:
+    if signal is not None and signal.reason == TurnCancelReason.CONTENT_SAFETY:
+        meta = signal.meta or {}
+        return content + (meta.get("refusal") or ""), {**meta, "content_safety_blocked": True}
+    return content, {"aborted_by_user": True}
 
 
 class _StepEventInterpreter:
@@ -380,29 +395,32 @@ class QueryLoopRuntime:
                         if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
                             usage_observed = True
                             token_usage.add(llm_provider_event.usage)
-                        if await bindings.is_cancel_requested():
-                            raise asyncio.CancelledError
+                        if (signal := await bindings.get_cancel_signal()) is not None:
+                            raise TurnCancelledError(signal)
 
                         for event in event_interpreter.consume(llm_provider_event):
                             yield event
-                if bindings.review_model_output is not None and await bindings.is_cancel_requested():
-                    raise asyncio.CancelledError
+                if bindings.review_model_output is not None and (signal := await bindings.get_cancel_signal()) is not None:
+                    raise TurnCancelledError(signal)
             except ServiceException:
                 await report_usage("observed" if usage_observed else "unknown", token_usage if usage_observed else None)
                 raise  # 已经是业务异常，直接向上传播
-            except asyncio.CancelledError: # 补全取消消息
+            except asyncio.CancelledError as exc: # 补全取消消息
                 await report_usage("observed" if usage_observed else "unknown", token_usage if usage_observed else None)
+                signal = exc.signal if isinstance(exc, TurnCancelledError) else await bindings.get_cancel_signal()
                 for event in event_interpreter.close():
                     yield event
+
+                content, metadata = _cancelled_reply(event_interpreter.assistant_content, signal)
                 assistant_msg = ChatMessage(
                     session_id=session_id,
                     role=Role.ASSISTANT,
                     model_info=MessageModelInfo.from_model_request(model_info),
-                    content=event_interpreter.assistant_content or "",
+                    content=content,
                     reasoning_content=event_interpreter.assistant_reasoning or None,
                     provider_payload=event_interpreter.provider_payload,
                     tool_calls=event_interpreter.tool_calls,
-                    metadata={"aborted_by_user": True},
+                    metadata=metadata,
                 )
                 token_usage = await self._resolve_usage_with_fallback(
                     usage=token_usage,
@@ -769,16 +787,16 @@ class QueryLoopRuntime:
                     if event.type == LLMEventType.USAGE and event.usage:
                         usage_observed = True
                         token_usage.add(event.usage)
-                    if await bindings.is_cancel_requested():
-                        raise asyncio.CancelledError
+                    if (signal := await bindings.get_cancel_signal()) is not None:
+                        raise TurnCancelledError(signal)
                     if event.type == LLMEventType.STATE:
                         provider_payload = event.provider_payload
                     elif event.type == LLMEventType.TEXT_DELTA and event.delta:
                         assistant_content += event.delta
                         yield TextDeltaEvent(text_id=text_id, delta=event.delta)
-            if bindings.review_model_output is not None and await bindings.is_cancel_requested():
-                raise asyncio.CancelledError
-        except asyncio.CancelledError:
+            if bindings.review_model_output is not None and (signal := await bindings.get_cancel_signal()) is not None:
+                raise TurnCancelledError(signal)
+        except asyncio.CancelledError as exc:
             if bindings.record_usage is not None:
                 await bindings.record_usage(
                     request_id=request_id, model_info=model_info,
@@ -786,7 +804,15 @@ class QueryLoopRuntime:
                     token_usage=token_usage if usage_observed else None,
                 )
             yield TextEndEvent(text_id=text_id)
-            yield StepFinishEvent(is_finished=False, token_usage=token_usage, aborted=True)
+            signal = exc.signal if isinstance(exc, TurnCancelledError) else await bindings.get_cancel_signal()
+            aborted_messages = []
+            if signal is not None and signal.reason == TurnCancelReason.CONTENT_SAFETY:
+                content, metadata = _cancelled_reply(assistant_content, signal)
+                aborted_messages.append(ChatMessage(
+                    session_id=session_id, role=Role.ASSISTANT, model_info=MessageModelInfo.from_model_request(model_info),
+                    content=content, metadata=metadata,
+                ))
+            yield StepFinishEvent(is_finished=False, intermediate_messages=aborted_messages, token_usage=token_usage, aborted=True)
             return
         except Exception as exc:
             generation_failed = True

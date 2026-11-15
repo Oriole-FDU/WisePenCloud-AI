@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
 from chat.core.constants import KAFKA_CHAT_TURN_RESPONSE_TOPIC
+from chat.domain.entities import TurnCancelSignal
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 from common.kafka.producer import KafkaProducerClient
@@ -79,7 +80,7 @@ class FrontendToolResponseBroker:
         self,
         waiter: FrontendToolResponseWait,
         *,
-        cancel_requested: Callable[[], Awaitable[bool]] | None = None,
+        cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
     ) -> FrontendToolResults | None:
         """等待接收端工具调用结果
         收到前端工具调用结果时返回 FrontendToolResults，超时返回 None

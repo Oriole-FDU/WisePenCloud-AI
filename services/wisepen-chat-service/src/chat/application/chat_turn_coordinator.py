@@ -16,7 +16,7 @@ from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.logger import error
 
 from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role
+from chat.domain.entities import ChatMessage, Role, TurnCancelSignal
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
 from chat.domain.interfaces.context_compact import ContextCompactor
@@ -142,7 +142,7 @@ class ChatTurnCoordinator:
             client_tool_results: list[ClientToolResult],
             tool_approval_status: List[ToolApprovalStatus],
             background_tasks: BackgroundTasks,
-            cancel_requested: Callable[[], Awaitable[bool]] | None = None,
+            cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
             turn_id: str | None = None,
             lease_lost: Callable[[], bool] | None = None,
             identity_type: Optional[IdentityType] = None,
@@ -229,7 +229,7 @@ class ChatTurnCoordinator:
             tool_selection_overrides: Optional[Dict[str, bool]] = None,
             user_defined_on_demand_skill_ids: Optional[Set[str]] = None,
             client_tool_capabilities: list[ClientToolCapability] | None = None,
-            cancel_requested: Callable[[], Awaitable[bool]] | None = None,
+            cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
             subagents: SubagentOptions | None = None,
             turn_id: str | None = None,
             lease_lost: Callable[[], bool] | None = None,
@@ -478,6 +478,7 @@ class ChatTurnCoordinator:
             try:
                 async with aclosing(self._query_llm(
                     chat_turn_context, client_tool_results, tool_approval_status, start_iteration, bindings,
+                    output_review=output_review,
                 )) as stream:
                     async for frame in stream:
                         frames.put_nowait(frame)
@@ -513,12 +514,14 @@ class ChatTurnCoordinator:
             tool_approval_status: List[ToolApprovalStatus] | None,
             start_iteration: int = 0,
             bindings: ExecutionBindings | None = None,
+            output_review: TurnOutputSafety | None = None,
     ):
         # 流式推理
 
         # 落盘与指示器写入按顺序串行后台执行，不阻塞 SSE 流
         persist_lock = asyncio.Lock()
         persist_tasks: list[asyncio.Task] = []
+        persisted_refusal = False
 
         def schedule(coro: Awaitable[None]) -> None:
             async def _run() -> None:
@@ -576,6 +579,8 @@ class ChatTurnCoordinator:
                             memory_policy=chat_turn_context.agent_spec.memory_policy,
                         ))
                         if event.aborted:
+                            persisted_refusal = any(message.metadata.get("content_safety_blocked")
+                                                    for message in event.intermediate_messages)
                             chat_turn_context.result_status = "cancelled"
                             yield to_vercel_sse(event)
                             yield to_vercel_sse(ErrorEvent(error_text="本轮对话已被用户取消"))
@@ -626,6 +631,19 @@ class ChatTurnCoordinator:
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
         finally:
+            # 在等待子代理或执行工具时也可能命中，此时没有模型中止消息可保存。
+            if not persisted_refusal and output_review is not None and (signal := output_review.cancel_signal) is not None:
+                refusal = ChatMessage(
+                    session_id=chat_turn_context.session_id, role=Role.ASSISTANT,
+                    content=signal.meta["refusal"],
+                    metadata={**signal.meta, "content_safety_blocked": True,
+                              "root_execution_id": chat_turn_context.root_execution_id},
+                )
+                schedule(self._turn_finalizer.persist_message_delta(
+                    session_id=chat_turn_context.session_id,
+                    delta_messages=[refusal],
+                    memory_policy=chat_turn_context.agent_spec.memory_policy,
+                ))
             if persist_tasks:
                 await asyncio.gather(*persist_tasks, return_exceptions=True)
 
