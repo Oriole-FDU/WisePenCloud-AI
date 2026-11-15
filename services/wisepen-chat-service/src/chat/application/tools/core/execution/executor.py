@@ -7,7 +7,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from chat.application.tools.core.definition import ClientToolResult, ToolRiskLevel
+from chat.application.tools.core.definition import ClientToolResult, HIGH_RISK_REASON_FIELD, ToolRiskLevel
 from chat.application.tools.core.execution.hooks.builtin import JsonSchemaCheck, RequiredContextCheck
 from chat.application.tools.core.execution.result import (
     ToolOutput,
@@ -118,6 +118,12 @@ class ToolExecutor:
                 else:
                     preflight_metadata.update(result.metadata)
 
+            # reason 是审批/审计字段，不是真实业务参数
+            # 执行前剥离，避免透传到远端 MCP 工具或内置工具
+            tool_arguments = dict(invocation.tool_call_arguments)
+            if tool.definition.policy.risk_level == ToolRiskLevel.HIGH:
+                tool_arguments.pop(HIGH_RISK_REASON_FIELD, None)
+
             output = await self._run(
                 tool.execute(
                     context={
@@ -125,7 +131,7 @@ class ToolExecutor:
                         **preflight_metadata,
                     },
                     config=tool_config,
-                    **invocation.tool_call_arguments,
+                    **tool_arguments,
                 ),
                 timeout_seconds=tool.definition.policy.timeout_seconds,
                 tool_name=invocation.tool_name,

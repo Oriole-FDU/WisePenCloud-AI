@@ -116,10 +116,11 @@ class Mem0Adapter(MemoryProvider):
         except Exception as e:
             raise ServiceException(ChatErrorCode.MEMORY_OPERATION_FAILED, custom_msg=str(e))
 
-    async def get_all(self, user_id: str) -> List[Dict[str, Any]]:
+    async def get_all(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
 
         def _sync_get_all():
-            result = self.client.get_all(filters={"user_id": user_id})
+            resolved_limit = max(1, limit)
+            result = self.client.get_all(filters={"user_id": user_id}, top_k=resolved_limit)
             # Mem0 返回格式: {"results": [...]} 或直接 list
             if isinstance(result, dict):
                 return result.get("results", [])

@@ -64,5 +64,6 @@ def to_vercel_sse(event: StreamEvent) -> str:
             tool_name=event.tool_name,
             tool_desc=event.tool_desc,
             input=event.input,
+            reason=event.reason,
         )
     raise TypeError(f"Unknown StreamEvent subclass: {type(event).__name__}")

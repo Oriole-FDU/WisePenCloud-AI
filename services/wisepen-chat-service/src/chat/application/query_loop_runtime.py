@@ -25,7 +25,7 @@ from chat.application.events import (
 from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
-from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
+from chat.application.tools.core.definition import ClientToolResult, HIGH_RISK_REASON_FIELD, ToolApprovalStatus
 from chat.application.tools import ToolScope
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.execution.result import ToolExecutionResult
@@ -508,6 +508,7 @@ class QueryLoopRuntime:
                             tool_name=invocation.tool_name,
                             input=invocation.tool_call_arguments,
                             tool_desc=tool.definition.llm_spec.description,
+                            reason=invocation.tool_call_arguments.get(HIGH_RISK_REASON_FIELD),
                         )
 
                     # 像等待后端工具一样等待前端结果

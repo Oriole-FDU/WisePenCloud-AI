@@ -53,3 +53,4 @@ class ToolApprovalRequiredEvent(StreamEvent):
     tool_name: str
     input: dict[str, Any]
     tool_desc: str
+    reason: str | None = None

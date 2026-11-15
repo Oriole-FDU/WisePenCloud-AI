@@ -1,5 +1,5 @@
-from typing import List, Any, Dict
-from fastapi import APIRouter, Depends
+from typing import Any, Dict, List
+from fastapi import APIRouter, Depends, Query
 from dependency_injector.wiring import inject, Provide
 
 from chat.api.schemas.memory import MemoryItemResponse
@@ -19,21 +19,22 @@ router = APIRouter()
     response_model=R[List[MemoryItemResponse]],
     summary="查询长期记忆",
     description="""
-- 用途：查询当前用户的全部长期记忆条目，用于记忆管理面板展示。
-- 请求：无业务请求参数，用户身份来自请求上下文。
+- 用途：查询当前用户的长期记忆条目，用于记忆管理面板展示。
+- 请求：limit 为最多返回条数，默认 50；用户身份来自请求上下文。
 - 约束：当前用户必须已登录；长期记忆 provider 必须可用。
-- 处理：调用 MemoryProvider 读取当前用户全部记忆，并转换为记忆 ID、内容和 metadata；不修改记忆内容。
+- 处理：调用 MemoryProvider 读取当前用户记忆（最多 limit 条），并转换为记忆 ID、内容和 metadata；不修改记忆内容。
 - 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；记忆 provider 调用失败 -> ChatErrorCode.MEMORY_OPERATION_FAILED。
-- 响应：返回当前用户的长期记忆列表。
+- 响应：返回当前用户的长期记忆列表（最多 limit 条）。
 """,
 )
 @inject
 async def list_memories(
+    limit: int = Query(default=50, ge=1, description="最多返回条数"),
     user_id: str = Depends(require_login),
     memory: MemoryProvider = Depends(Provide[Container.memory_provider]),
 ):
     try:
-        items = await memory.get_all(user_id=user_id)
+        items = await memory.get_all(user_id=user_id, limit=limit)
     except Exception as e:
         raise ServiceException(ChatErrorCode.MEMORY_OPERATION_FAILED, custom_msg=str(e))
     return R.success(data=[
