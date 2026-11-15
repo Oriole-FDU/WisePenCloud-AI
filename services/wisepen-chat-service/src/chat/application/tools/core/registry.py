@@ -14,7 +14,9 @@ if TYPE_CHECKING:
     from chat.application.tools.core.mcp import McpToolCatalog, SystemMcpToolCatalog
 
 
-_SHARED_MEMORY_TOOL_NAMES = frozenset({"add_memory", "delete_memory", "list_memories", "search_memories"})
+_SHARED_MEMORY_TOOL_NAMES = frozenset({
+    "add_memory", "delete_memory", "delete_all_memories", "list_memories", "search_memories",
+})
 
 
 def _has_required_skills(policy: ToolPolicy, allowed_skill_ids: set[str]) -> bool:

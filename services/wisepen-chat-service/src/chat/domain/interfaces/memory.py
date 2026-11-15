@@ -27,8 +27,8 @@ class MemoryProvider(ABC):
         pass
 
     @abstractmethod
-    async def get_all(self, user_id: str) -> List[Dict[str, Any]]:
-        """返回指定用户的全部记忆条目（包含 id、memory、metadata 等字段）"""
+    async def get_all(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """返回最多 limit 条记忆条目（包含 id、memory、metadata 等字段）"""
         pass
 
     @abstractmethod

@@ -13,6 +13,7 @@ from chat.application.tools.core.definition import (
     ToolTimeoutStrategy,
     OutputCacheSpec,
     OutputCacheStrategy,
+    HIGH_RISK_REASON_FIELD,
 )
 
 from chat.application.tools.core.registry import (
@@ -75,6 +76,7 @@ __all__ = [
     "ToolTimeoutStrategy",
     "OutputCacheSpec",
     "OutputCacheStrategy",
+    "HIGH_RISK_REASON_FIELD",
 
     # registry / scope
     "ToolRegistry",

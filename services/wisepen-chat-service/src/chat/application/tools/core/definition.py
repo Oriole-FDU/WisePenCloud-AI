@@ -180,6 +180,30 @@ class ToolPolicy:
     allow_parallel: bool = False # 允许并行
 
 
+HIGH_RISK_REASON_FIELD = "_call_reason"
+_HIGH_RISK_REASON_DESCRIPTION = (
+    "Explain why this high-risk action is necessary and what you intend to do. "
+    "The user will review this reason before approving the action."
+)
+
+
+def _inject_high_risk_reason(schema: ToolParametersSchema) -> ToolParametersSchema:
+    """给高危工具的 schema 追加必填的 reason 字段"""
+    raw = dict(schema.raw)
+    properties = dict(raw.get("properties") or {})
+    required = list(raw.get("required") or ())
+    if HIGH_RISK_REASON_FIELD not in properties:
+        properties[HIGH_RISK_REASON_FIELD] = {
+            "type": "string",
+            "description": _HIGH_RISK_REASON_DESCRIPTION,
+        }
+    if HIGH_RISK_REASON_FIELD not in required:
+        required.append(HIGH_RISK_REASON_FIELD)
+    raw["properties"] = properties
+    raw["required"] = required
+    return ToolParametersSchema(raw)
+
+
 @dataclass(frozen=True)
 class ToolDefinition:
     llm_spec: ToolLLMSpec
@@ -189,6 +213,14 @@ class ToolDefinition:
     config_spec: ToolConfigSpec | None = None
     preflight_hooks: tuple['ToolPreflightHook', ...] = ()
     output_cache_spec: OutputCacheSpec = field(default_factory=OutputCacheSpec)
+
+    def __post_init__(self) -> None:
+        # 高危工具统一注入必填 reason
+        if self.policy.risk_level == ToolRiskLevel.HIGH:
+            object.__setattr__(
+                self.llm_spec, "parameters_schema",
+                _inject_high_risk_reason(self.llm_spec.parameters_schema),
+            )
 
 
 class Tool(Protocol):

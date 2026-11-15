@@ -84,6 +84,7 @@ from chat.application.builtin_tools.session_tools.get_session_messages import Ge
 from chat.application.builtin_tools.session_tools.list_sessions import ListSessionsTool
 from chat.application.builtin_tools.session_tools.rename_session import RenameSessionTool
 from chat.application.builtin_tools.memory_tools.add_memory import AddMemoryTool
+from chat.application.builtin_tools.memory_tools.delete_all_memories import DeleteAllMemoriesTool
 from chat.application.builtin_tools.memory_tools.delete_memory import DeleteMemoryTool
 from chat.application.builtin_tools.memory_tools.list_memories import ListMemoriesTool
 from chat.application.builtin_tools.memory_tools.search_memories import SearchMemoriesTool
@@ -358,13 +359,13 @@ class Container(containers.DeclarativeContainer):
         agent_resolver=agent_resolver,
         context_compactor=context_compactor,
         context_assembler=context_assembler,
-        turn_stream_manager=chat_turn_stream_manager,
     )
     # Memory
     search_memories_tool = providers.Singleton(SearchMemoriesTool, memory=memory_provider)
     add_memory_tool = providers.Singleton(AddMemoryTool, memory=memory_provider)
     list_memories_tool = providers.Singleton(ListMemoriesTool, memory=memory_provider)
     delete_memory_tool = providers.Singleton(DeleteMemoryTool, memory=memory_provider)
+    delete_all_memories_tool = providers.Singleton(DeleteAllMemoriesTool, memory=memory_provider)
     tool_providers = providers.List(
         search_history_tool,
         load_image_attachment_tool,
@@ -393,6 +394,7 @@ class Container(containers.DeclarativeContainer):
         add_memory_tool,
         list_memories_tool,
         delete_memory_tool,
+        delete_all_memories_tool,
     )
 
     tool_registry = providers.Singleton(

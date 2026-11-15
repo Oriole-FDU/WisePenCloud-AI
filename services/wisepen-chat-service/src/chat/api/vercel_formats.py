@@ -88,7 +88,7 @@ def tool_denied(tool_call_id: str) -> str:
     return _sse({"type": "data-tool-execution-denied", "toolCallId": tool_call_id})
 
 # 自定义事件 data-tool-approval-request
-def tool_approval_request(approval_id: str, tool_call_id: str, tool_name: str, tool_desc: str, input: Dict) -> str:
+def tool_approval_request(approval_id: str, tool_call_id: str, tool_name: str, tool_desc: str, input: Dict, reason: str | None = None) -> str:
     return _sse({
         "type": "data-tool-approval-request",
         "approvalId": approval_id,
@@ -96,6 +96,7 @@ def tool_approval_request(approval_id: str, tool_call_id: str, tool_name: str, t
         "toolName": tool_name,
         "toolDesc": tool_desc,
         "input": input,
+        "reason": reason,
     })
 
 
