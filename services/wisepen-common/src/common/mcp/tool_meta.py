@@ -22,6 +22,7 @@ class OutputCacheStrategy(StrEnum):
     ALWAYS_KEEP_RAW = "always_keep_raw"
     LONG_TEXT = "long_text"
     OPAQUE = "opaque"
+    ITEMS = "items"
 
 
 class ToolPolicyMeta(BaseModel):

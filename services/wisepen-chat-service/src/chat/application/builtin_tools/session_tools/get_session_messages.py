@@ -1,6 +1,8 @@
 from typing import Any
 
 from chat.application.tools.core import (
+    OutputCacheSpec,
+    OutputCacheStrategy,
     ToolDefinition,
     ToolExecutionError,
     ToolLLMSpec,
@@ -9,7 +11,6 @@ from chat.application.tools.core import (
     ToolRiskLevel,
     ToolUISpec,
 )
-from chat.core.config.app_settings import settings
 from chat.domain.repositories import MessageRepository, SessionRepository
 
 
@@ -37,8 +38,8 @@ class GetSessionMessagesTool:
                 persist_output=True,
                 required_context_keys=("user_id",),
                 timeout_seconds=10.0,
-                max_output_chars=settings.tools.result_max_chars,
             ),
+            output_cache_spec=OutputCacheSpec(strategy=OutputCacheStrategy.ITEMS, cache_paths=("items",)),
             ui_spec=ToolUISpec(display_name="读取会话消息", description="读取某个会话的历史消息。"),
         )
 
@@ -46,7 +47,7 @@ class GetSessionMessagesTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
-    async def execute(self, context: dict[str, Any], config: dict[str, Any] | None = None, **kwargs: Any) -> str:
+    async def execute(self, context: dict[str, Any], config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
         user_id = str(context.get("user_id") or "")
         session_id = str(kwargs.get("session_id") or "").strip()
         if not session_id:
@@ -56,9 +57,10 @@ class GetSessionMessagesTool:
         page = int(kwargs.get("page") or 1)
         size = int(kwargs.get("size") or 20)
         messages, total_turns = await self._message_repo.list_session_message_turns_page(session_id, page=page, size=size)
-        if not messages:
-            return "No messages in this session."
-        lines = [f"Session {session_id} messages (page={page} total_turns={total_turns}):"]
-        for m in messages:
-            lines.append(f"- ({m.role.value}, {m.created_at.isoformat()}): {m.content}")
-        return "\n".join(lines)
+        return {
+            "total_turns": total_turns,
+            "items": [
+                {"role": m.role.value, "created_at": m.created_at.isoformat(), "content": m.content}
+                for m in messages
+            ],
+        }

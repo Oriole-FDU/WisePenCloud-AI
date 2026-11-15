@@ -1,6 +1,8 @@
 from typing import Any
 
 from chat.application.tools.core import (
+    OutputCacheSpec,
+    OutputCacheStrategy,
     ToolDefinition,
     ToolExecutionError,
     ToolLLMSpec,
@@ -9,7 +11,6 @@ from chat.application.tools.core import (
     ToolRiskLevel,
     ToolUISpec,
 )
-from chat.core.config.app_settings import settings
 from chat.domain.interfaces import MemoryProvider
 
 
@@ -35,8 +36,8 @@ class SearchMemoriesTool:
                 persist_output=True,
                 required_context_keys=("user_id",),
                 timeout_seconds=10.0,
-                max_output_chars=settings.tools.result_max_chars,
             ),
+            output_cache_spec=OutputCacheSpec(strategy=OutputCacheStrategy.ITEMS, cache_paths=("items",)),
             ui_spec=ToolUISpec(display_name="检索长期记忆", description="按语义检索当前用户的长期记忆。"),
         )
 
@@ -44,13 +45,11 @@ class SearchMemoriesTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
-    async def execute(self, context: dict[str, Any], config: dict[str, Any] | None = None, **kwargs: Any) -> str:
+    async def execute(self, context: dict[str, Any], config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
         user_id = str(context.get("user_id") or "")
         query = str(kwargs.get("query") or "").strip()
         if not query:
             raise ToolExecutionError(reason="invalid_query", detail_reason="query is required.")
         limit = int(kwargs.get("limit") or 5)
         results = await self._memory.search(user_id, query, limit=limit)
-        if not results:
-            return "No matching memories found."
-        return "Relevant memories:\n" + "\n".join(f"- {r}" for r in results)
+        return {"items": list(results)}

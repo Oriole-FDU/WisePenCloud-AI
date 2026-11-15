@@ -5,8 +5,9 @@ from chat.domain.interfaces import FileLoader
 from chat.service_client import AIAssetClient
 from chat.service_client.resource_service_client import ResourceClient
 
-from chat.core.config.app_settings import settings
 from chat.application.tools.core import (
+    OutputCacheSpec,
+    OutputCacheStrategy,
     ToolDefinition,
     ToolExecutionError,
     ToolLLMSpec,
@@ -63,8 +64,9 @@ class LoadSkillTool:
                 risk_level=ToolRiskLevel.MEDIUM,
                 required_context_keys=("allowed_skill_ids",),
                 timeout_seconds=8.0,
-                max_output_chars=settings.tools.result_max_chars,
             ),
+            # SKILL.md 需一次性完整加载：内联全文、不截断、不缓存
+            output_cache_spec=OutputCacheSpec(strategy=OutputCacheStrategy.ALWAYS_KEEP_RAW),
             ui_spec=ToolUISpec(
                 display_name="加载技能说明",
                 description="按需加载当前可用 Skill 的 SKILL.md 说明。不推荐禁用。",

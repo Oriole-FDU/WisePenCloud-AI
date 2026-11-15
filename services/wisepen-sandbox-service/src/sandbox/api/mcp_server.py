@@ -46,6 +46,8 @@ MAX_PATH_LENGTH = 1024
 MAX_WRITE_CONTENT_CHARS = 1_000_000
 
 _OPAQUE_OUTPUT_CACHE = OutputCacheSpecMeta(strategy=OutputCacheStrategy.OPAQUE)
+_ITEMS_FILE_CONTENT_CACHE = OutputCacheSpecMeta(strategy=OutputCacheStrategy.ITEMS, cache_paths=("content",))
+_ITEMS_COMMAND_OUTPUT_CACHE = OutputCacheSpecMeta(strategy=OutputCacheStrategy.ITEMS, cache_paths=("stdout", "stderr"))
 
 
 def get_tool_config_value(ctx: Context, key: str) -> object | None:
@@ -123,7 +125,7 @@ def create_sandbox_mcp_server(
             persist_output=True,
             required_context_keys=("user_id", "session_id"),
         ),
-        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        output_cache_spec=_ITEMS_COMMAND_OUTPUT_CACHE,
         failure_reason="Sandbox Command Result Read Failed",
     ))
     @mcp.tool(name="get_command_result", description="Get a command task result, optionally waiting for completion.")
@@ -163,7 +165,7 @@ def create_sandbox_mcp_server(
             persist_output=True,
             required_context_keys=("user_id", "session_id"),
         ),
-        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        output_cache_spec=_ITEMS_COMMAND_OUTPUT_CACHE,
         failure_reason="Sandbox Command Execution Failed",
     ))
     @mcp.tool(name="execute_command", description="Execute a shell command in a user's session workspace and wait for its final result.")
@@ -193,7 +195,7 @@ def create_sandbox_mcp_server(
             required_context_keys=("user_id", "session_id"),
         ),
         ui_spec=ToolUISpecMeta(display_name="读取沙箱文件"),
-        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        output_cache_spec=_ITEMS_FILE_CONTENT_CACHE,
         failure_reason="Sandbox File Read Failed",
     ))
     @mcp.tool(name="read_file", description="Read file content from a workspace-relative path. Line indexes are zero-based and end_line is exclusive.")

@@ -1,6 +1,8 @@
 from typing import Any
 
 from chat.application.tools.core import (
+    OutputCacheSpec,
+    OutputCacheStrategy,
     ToolDefinition,
     ToolLLMSpec,
     ToolParametersSchema,
@@ -8,7 +10,6 @@ from chat.application.tools.core import (
     ToolRiskLevel,
     ToolUISpec,
 )
-from chat.core.config.app_settings import settings
 from chat.domain.repositories import SessionRepository
 
 
@@ -33,8 +34,8 @@ class ListSessionsTool:
                 persist_output=True,
                 required_context_keys=("user_id",),
                 timeout_seconds=10.0,
-                max_output_chars=settings.tools.result_max_chars,
             ),
+            output_cache_spec=OutputCacheSpec(strategy=OutputCacheStrategy.ITEMS, cache_paths=("items",)),
             ui_spec=ToolUISpec(display_name="列出会话", description="分页查看当前用户的聊天会话。"),
         )
 
@@ -42,14 +43,20 @@ class ListSessionsTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
-    async def execute(self, context: dict[str, Any], config: dict[str, Any] | None = None, **kwargs: Any) -> str:
+    async def execute(self, context: dict[str, Any], config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
         user_id = str(context.get("user_id") or "")
         page = int(kwargs.get("page") or 1)
         size = int(kwargs.get("size") or 20)
         sessions, total = await self._session_repo.list_sessions_for_user(user_id, page=page, size=size)
-        if not sessions:
-            return "No sessions found."
-        lines = [f"Sessions (total={total}):"]
-        for s in sessions:
-            lines.append(f"- id={s.id} title={s.title} pinned={s.is_pinned} updated={s.updated_at.isoformat()}")
-        return "\n".join(lines)
+        return {
+            "total": total,
+            "items": [
+                {
+                    "id": str(s.id),
+                    "title": s.title,
+                    "pinned": s.is_pinned,
+                    "updated_at": s.updated_at.isoformat(),
+                }
+                for s in sessions
+            ],
+        }

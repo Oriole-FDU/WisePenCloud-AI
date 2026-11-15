@@ -2,6 +2,8 @@
 from typing import Dict, Any, Optional
 
 from chat.application.tools.core import (
+    OutputCacheSpec,
+    OutputCacheStrategy,
     ToolDefinition,
     ToolExecutionError,
     ToolLLMSpec,
@@ -11,7 +13,6 @@ from chat.application.tools.core import (
     ToolSelectionMode,
     ToolUISpec,
 )
-from chat.core.config.app_settings import settings
 from chat.domain.repositories import MessageRepository
 from common.logger import error
 
@@ -67,8 +68,8 @@ class GetHistoricalChatMessagesTool:
                 risk_level=ToolRiskLevel.LOW,
                 required_context_keys=("session_id",),
                 timeout_seconds=5.0,
-                max_output_chars=settings.tools.result_max_chars,
             ),
+            output_cache_spec=OutputCacheSpec(strategy=OutputCacheStrategy.ITEMS, cache_paths=("items",)),
             ui_spec=ToolUISpec(
                 display_name="检索历史对话",
                 description="在上下文被压缩时检索当前会话的历史消息。不推荐禁用。",
@@ -84,7 +85,7 @@ class GetHistoricalChatMessagesTool:
             context: dict[str, Any],
             config: dict[str, Any] | None = None,
             **kwargs: Any,
-    ) -> str:
+    ) -> dict[str, Any]:
         # session_id 从系统注入的 context 读取
         session_id: Optional[str] = context.get("session_id")
         if not session_id:
@@ -126,10 +127,11 @@ class GetHistoricalChatMessagesTool:
             ) from e
 
         if not results:
-            return f"[Got Historical Chat Messages] No historical chat message found for keyword: '{keyword}'."
+            return {"items": []}
 
-        raw = "[Got Historical Chat Messages]\n".join(
-            [f"-(role={m.role.value} created={m.created_at.isoformat()}): {m.content}" for m in results]
-        )
-
-        return raw
+        return {
+            "items": [
+                {"role": m.role.value, "created_at": m.created_at.isoformat(), "content": m.content}
+                for m in results
+            ],
+        }

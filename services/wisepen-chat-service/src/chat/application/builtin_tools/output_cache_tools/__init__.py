@@ -1,6 +1,9 @@
 from chat.application.builtin_tools.output_cache_tools.inspect_structure import (
     InspectToolOutputStructureTool,
 )
+from chat.application.builtin_tools.output_cache_tools.read_by_items import (
+    ReadToolOutputItemsTool,
+)
 from chat.application.builtin_tools.output_cache_tools.read_by_range import (
     ReadToolOutputRangeTool,
 )
@@ -16,6 +19,7 @@ from chat.application.builtin_tools.output_cache_tools.search_by_regex import (
 
 __all__ = [
     "InspectToolOutputStructureTool",
+    "ReadToolOutputItemsTool",
     "ReadToolOutputRangeTool",
     "ReadToolOutputSectionTool",
     "SearchToolOutputBM25Tool",

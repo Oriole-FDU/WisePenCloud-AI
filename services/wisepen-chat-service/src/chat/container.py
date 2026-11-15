@@ -63,6 +63,7 @@ from chat.application.builtin_tools.session_tools.get_historical_chat_messages_t
 from chat.application.builtin_tools.session_tools.load_image_attachment_tool import LoadImageAttachmentTool
 from chat.application.builtin_tools.output_cache_tools import (
     InspectToolOutputStructureTool,
+    ReadToolOutputItemsTool,
     ReadToolOutputRangeTool,
     ReadToolOutputSectionTool,
     SearchToolOutputBM25Tool,
@@ -323,6 +324,10 @@ class Container(containers.DeclarativeContainer):
         ReadToolOutputRangeTool,
         tool_content_store=tool_content_store,
     )
+    read_tool_output_items_tool = providers.Singleton(
+        ReadToolOutputItemsTool,
+        tool_content_store=tool_content_store,
+    )
     read_tool_output_section_tool = providers.Singleton(
         ReadToolOutputSectionTool,
         tool_content_store=tool_content_store,
@@ -340,7 +345,7 @@ class Container(containers.DeclarativeContainer):
     create_my_provider_tool = providers.Singleton(CreateMyProviderTool, provider_repo=provider_repo)
     update_my_provider_tool = providers.Singleton(UpdateMyProviderTool, provider_repo=provider_repo)
     delete_my_provider_tool = providers.Singleton(DeleteMyProviderTool, provider_repo=provider_repo)
-    list_available_models_tool = providers.Singleton(ListAvailableModelsTool, model_repo=model_repo, provider_repo=provider_repo)
+    list_available_models_tool = providers.Singleton(ListAvailableModelsTool, model_repo=model_repo)
     create_my_model_tool = providers.Singleton(CreateMyModelTool, model_repo=model_repo)
     update_my_model_tool = providers.Singleton(UpdateMyModelTool, model_repo=model_repo)
     delete_my_model_tool = providers.Singleton(DeleteMyModelTool, model_repo=model_repo)
@@ -370,6 +375,7 @@ class Container(containers.DeclarativeContainer):
         load_skill_asset_tool,
         inspect_tool_output_structure_tool,
         read_tool_output_range_tool,
+        read_tool_output_items_tool,
         read_tool_output_section_tool,
         search_tool_output_regex_tool,
         search_tool_output_bm25_tool,

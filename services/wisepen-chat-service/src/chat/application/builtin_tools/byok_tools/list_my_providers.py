@@ -1,6 +1,8 @@
 from typing import Any
 
 from chat.application.tools.core import (
+    OutputCacheSpec,
+    OutputCacheStrategy,
     ToolDefinition,
     ToolLLMSpec,
     ToolParametersSchema,
@@ -8,7 +10,6 @@ from chat.application.tools.core import (
     ToolRiskLevel,
     ToolUISpec,
 )
-from chat.core.config.app_settings import settings
 from chat.domain.entities.provider import ProviderScope
 from chat.domain.repositories import ProviderRepository
 
@@ -31,8 +32,8 @@ class ListMyProvidersTool:
                 persist_output=True,
                 required_context_keys=("user_id",),
                 timeout_seconds=10.0,
-                max_output_chars=settings.tools.result_max_chars,
             ),
+            output_cache_spec=OutputCacheSpec(strategy=OutputCacheStrategy.ITEMS, cache_paths=("items",)),
             ui_spec=ToolUISpec(display_name="列出我的 Provider", description="查看当前用户配置的个人 LLM Provider。"),
         )
 
@@ -40,12 +41,12 @@ class ListMyProvidersTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
-    async def execute(self, context: dict[str, Any], config: dict[str, Any] | None = None, **kwargs: Any) -> str:
+    async def execute(self, context: dict[str, Any], config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
         user_id = str(context.get("user_id") or "")
         providers = await self._provider_repo.list_providers(ProviderScope.USER, user_id)
-        if not providers:
-            return "No personal providers configured yet."
-        lines = []
-        for p in providers:
-            lines.append(f"- id={p.id} name={p.name} type={p.type.value} active={p.is_active}")
-        return "Your personal providers:\n" + "\n".join(lines)
+        return {
+            "items": [
+                {"id": str(p.id), "name": p.name, "type": p.type.value, "active": p.is_active}
+                for p in providers
+            ],
+        }
