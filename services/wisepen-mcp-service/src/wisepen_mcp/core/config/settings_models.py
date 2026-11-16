@@ -60,10 +60,7 @@ class WebSearchSettings(ConfigModel):
 
 
 class RedisSettings(ConfigModel):
-    host: str = Field(default="127.0.0.1", min_length=1)
-    port: int = Field(default=6379, gt=0)
-    password: str = ""
-    db: int = Field(default=0, ge=0)
+    url: str = Field(min_length=1)
 
 
 class McpOAuthSettings(ConfigModel):
@@ -80,4 +77,4 @@ class McpServiceSettings(ConfigModel):
     )
     web_search: WebSearchSettings
     oauth: McpOAuthSettings
-    redis: RedisSettings = Field(default_factory=RedisSettings)
+    redis: RedisSettings

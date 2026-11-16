@@ -54,14 +54,11 @@ class Container(containers.DeclarativeContainer):
         UserClient,
         rpc=rpc_client,
     )
-    redis = aioredis.Redis(
-        host=settings.redis.host,
-        port=settings.redis.port,
-        password=settings.redis.password or None,
-        db=settings.redis.db,
+    redis_client = providers.Singleton(
+        aioredis.from_url,
+        settings.redis.url,
         decode_responses=True,
     )
-    redis_client = providers.Singleton(redis)
 
 
 container = Container()
