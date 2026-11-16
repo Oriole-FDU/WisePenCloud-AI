@@ -1,5 +1,7 @@
 import asyncio
 from dataclasses import dataclass, field
+import uuid
+from contextlib import aclosing
 from typing import Optional, List, Dict, Any, Set, Awaitable, Callable
 
 from beanie import PydanticObjectId
@@ -26,6 +28,13 @@ from common.core.exceptions import ServiceException
 from chat.application.chat_context_assembler import ChatContextAssembler
 from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.query_loop_runtime import QueryLoopRuntime
+from chat.application.execution_bindings import ExecutionBindings
+from chat.application.content_safety.checker import TurnOutputSafety
+from chat.application.subagents.models import SubagentOptions
+from chat.application.subagents.runtime import SubagentRuntime
+from chat.application.subagents.tools import SUBAGENT_TOOL_NAMES
+from chat.core.persistence.mongo.subagent_repository import MongoSubagentRepository
+from chat.core.persistence.redis.chat_turn_stream import RedisChatTurnStream
 from chat.application.agents import (
     AgentResolver,
     DefaultAgentResolver, AgentSpec, DEFAULT_AGENT_ID,
@@ -39,6 +48,8 @@ from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.client_tools import ClientToolCapability
 from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
 from common.kafka.producer import KafkaProducerClient
+from common.security import SecurityContextHolder
+from chat.service_client import ResourceClient
 
 
 @dataclass(frozen=False)
@@ -51,6 +62,11 @@ class ChatTurnContext:
     tool_scope: ToolScope = None
     messages_for_llm: list[ChatMessage] = field(default_factory=list)
     token_usage: TokenUsage = field(default_factory=TokenUsage)
+    root_execution_id: str | None = None
+    turn_id: str | None = None
+    usage_managed: bool = False
+    subagent_state: dict | None = None
+    result_status: str = "completed"
     billing_resource_id: Optional[str] = None
     preferred_billing_group_id: Optional[str] = None
     identity_type: Optional[IdentityType] = None
@@ -85,6 +101,9 @@ class ChatTurnCoordinator:
             context_compactor: ContextCompactor,
             agent_resolver: AgentResolver | None = None,
             redis_client: redis.Redis | None = None,
+            subagent_repo: MongoSubagentRepository | None = None,
+            turn_stream_repo: RedisChatTurnStream | None = None,
+            resource_client: ResourceClient | None = None,
     ):
         self._memory = memory
         self._model_repo = model_repo
@@ -111,6 +130,9 @@ class ChatTurnCoordinator:
         self._redis = redis_client or redis.from_url(settings.persistence.redis.url, decode_responses=True)
 
         self._suspended_chat_repo = suspended_chat_repo
+        self._subagent_repo = subagent_repo or MongoSubagentRepository()
+        self._turn_stream_repo = turn_stream_repo or RedisChatTurnStream(redis_client=self._redis)
+        self._resource_client = resource_client
         self._redirect_queue = redirect_queue
 
     async def handle_suspended_chat_recover(
@@ -121,19 +143,34 @@ class ChatTurnCoordinator:
             tool_approval_status: List[ToolApprovalStatus],
             background_tasks: BackgroundTasks,
             cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
+            turn_id: str | None = None,
+            lease_lost: Callable[[], bool] | None = None,
             identity_type: Optional[IdentityType] = None,
+            output_review: TurnOutputSafety | None = None,
     ):
         suspended_chat: SuspendedChat | None = await self._suspended_chat_repo.find_suspended_by_session(session_id, user_id)
         if suspended_chat is None:
             raise ServiceException(ChatErrorCode.SUSPENDED_CHAT_NOT_FOUND)
         suspended_chat_id = str(suspended_chat.id)
-        tool_scope = await self._tool_registry.recover_derived(suspended_chat.context.tool_scope_data, user_id)
+        state = getattr(suspended_chat.context, "subagent_state", None)
+        current_spec = suspended_chat.context.agent_spec
+        if state is not None:
+            session = await self._session_repo.get_session_for_user(session_id, user_id)
+            current_agent = await self._agent_resolver.resolve(session.agent_id, session.agent_version)
+            if current_agent is None:
+                raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
+            current_spec = current_agent.spec
+        tool_scope = await self._tool_registry.recover_derived(
+            suspended_chat.context.tool_scope_data,
+            user_id,
+            enable_use_tool=current_spec.tool_and_skill_policy.enable_use_tool,
+        )
 
         chat_turn_context = ChatTurnContext(
             user_id=user_id,
             session_id=session_id,
             model_info=suspended_chat.context.model_info,
-            agent_spec=suspended_chat.context.agent_spec,
+            agent_spec=current_spec,
             session_summary=suspended_chat.context.session_summary,
             tool_scope=tool_scope,
             # messages_for_llm 已包含挂起前的 assistant 工具调用，恢复时直接续接该上下文
@@ -142,23 +179,33 @@ class ChatTurnCoordinator:
             user_message=suspended_chat.context.user_message,
             # 挂起前的 token 已由首次批次计费，恢复批次只累计新增用量
             token_usage=TokenUsage(),
+            root_execution_id=getattr(suspended_chat.context, "root_execution_id", None),
+            turn_id=turn_id, subagent_state=state,
             billing_resource_id=getattr(suspended_chat.context, "billing_resource_id", None),
             preferred_billing_group_id=getattr(suspended_chat.context, "preferred_billing_group_id", None),
             identity_type=identity_type,
         )
+        if state is not None:
+            chat_turn_context.model_info = await self._resolve_subagent_model(
+                chat_turn_context, chat_turn_context.model_info.model_id, chat_turn_context.model_info.provider_id,
+                chat_turn_context.model_info.runtime_options,
+            )
         await self._ensure_billable_chat_allowed(
             user_id=user_id,
             model_info=chat_turn_context.model_info,
         )
 
-        async for event in self.query_llm(
+        async with aclosing(self.query_llm(
             chat_turn_context=chat_turn_context,
             client_tool_results=client_tool_results,
             tool_approval_status=tool_approval_status,
             start_iteration=suspended_chat.context.turn_suspension.iteration,
-            cancel_requested=cancel_requested,
-        ):
-            yield event
+            bindings=ExecutionBindings(cancel_requested=cancel_requested, lease_lost=lease_lost),
+            subagents=SubagentOptions.model_validate(state["options"]) if state is not None else None,
+            output_review=output_review,
+        )) as stream:
+            async for event in stream:
+                yield event
         self._set_post_completion_tasks(background_tasks, chat_turn_context)
 
         await self._suspended_chat_repo.delete_by_id(suspended_chat_id)
@@ -183,11 +230,18 @@ class ChatTurnCoordinator:
             user_defined_on_demand_skill_ids: Optional[Set[str]] = None,
             client_tool_capabilities: list[ClientToolCapability] | None = None,
             cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
+            subagents: SubagentOptions | None = None,
+            turn_id: str | None = None,
+            lease_lost: Callable[[], bool] | None = None,
             identity_type: Optional[IdentityType] = None,
+            output_review: TurnOutputSafety | None = None,
     ):
         chat_turn_context = ChatTurnContext()
         chat_turn_context.session_id = session_id
         chat_turn_context.user_id = user_id
+        chat_turn_context.turn_id = turn_id
+        if subagents is not None:
+            chat_turn_context.root_execution_id = f"root_{uuid.uuid4().hex}"
         chat_turn_context.identity_type = identity_type
         # 获取当前对话的 Agent
         session = await self._session_repo.get_session_for_user(session_id, user_id)
@@ -309,6 +363,8 @@ class ChatTurnCoordinator:
             user_defined_on_demand_skill_ids=user_defined_on_demand_skill_ids | agent_on_demand_skill_ids,
         )
         available_skills = tool_policy.available_skills
+        if subagents is not None and tool_and_skill_policy.enable_use_tool:
+            tool_policy.expose_tool_name_set.update(SUBAGENT_TOOL_NAMES)
 
         chat_turn_context.tool_scope = await self._tool_registry.derive(
             tool_context=tool_policy.tool_context,
@@ -317,6 +373,7 @@ class ChatTurnCoordinator:
             tool_selection_overrides=tool_policy.tool_selection_overrides,
             user_id=user_id,
             client_tool_capabilities=client_tool_capabilities,
+            enable_use_tool=tool_and_skill_policy.enable_use_tool,
         )
 
         # 提示词组装
@@ -335,6 +392,12 @@ class ChatTurnCoordinator:
             user_defined_attachment_ids=user_defined_attachment_ids, # 用户指定的附件
             support_vision=chat_turn_context.model_info.model.support_vision,
         )
+        if subagents is not None:
+            chat_turn_context.messages_for_llm.insert(1, ChatMessage(
+                session_id=session_id, role=Role.SYSTEM,
+                content="[Subagent candidates]\n" + subagents.model_dump_json()
+                        + "\nDynamic children use instructions; published agents require an exact candidate version.",
+            ))
 
         # 构造并持久化用户消息
         # 该消息也作为长期记忆摄入与标题生成的输入
@@ -344,6 +407,8 @@ class ChatTurnCoordinator:
             "available_skills_id": [skill.skill_id for skill in available_skills] or [],
             "user_defined_attachment_ids": user_defined_attachment_ids or []
         }
+        if chat_turn_context.root_execution_id:
+            user_message_metadata["root_execution_id"] = chat_turn_context.root_execution_id
         current_attachment_refs = self._context_assembler.build_message_attachment_refs(
             temp_attachments=temp_attachments,
             resource_attachments=resource_attachments,
@@ -361,28 +426,102 @@ class ChatTurnCoordinator:
         )
         chat_turn_context.user_message = user_message
         chat_turn_context.token_usage = TokenUsage()
-        async for event in self.query_llm(
+        async with aclosing(self.query_llm(
                 chat_turn_context=chat_turn_context,
                 client_tool_results=None,
                 tool_approval_status=None,
-                cancel_requested=cancel_requested,
-        ):
-            yield event
+                bindings=ExecutionBindings(cancel_requested=cancel_requested, lease_lost=lease_lost),
+                subagents=subagents,
+                output_review=output_review,
+        )) as stream:
+            async for event in stream:
+                yield event
         self._set_post_completion_tasks(background_tasks, chat_turn_context)
 
     async def query_llm(
+            self, chat_turn_context: ChatTurnContext, client_tool_results, tool_approval_status,
+            start_iteration: int = 0, bindings: ExecutionBindings | None = None,
+            subagents: SubagentOptions | None = None,
+            output_review: TurnOutputSafety | None = None,
+    ):
+        bindings = bindings or ExecutionBindings()
+        if subagents is None or (chat_turn_context.subagent_state is None
+                                and not any(chat_turn_context.tool_scope.get(name) for name in SUBAGENT_TOOL_NAMES)):
+            async for frame in self._query_llm(chat_turn_context, client_tool_results, tool_approval_status, start_iteration, bindings):
+                yield frame
+            return
+
+        frames = asyncio.Queue()
+        runtime = SubagentRuntime(options=subagents, context=chat_turn_context, loop=self._query_loop_runtime,
+                                  bindings=bindings, emit=frames.put_nowait,
+                                  output_review=output_review,
+                                  bill=lambda usage, model_info: self._turn_finalizer.send_usage_billing(
+                                      user_id=chat_turn_context.user_id, model_info=model_info,
+                                      usage=usage, billing_resource_id=chat_turn_context.billing_resource_id,
+                                      preferred_billing_group_id=chat_turn_context.preferred_billing_group_id),
+                                  billing_multiplier=1 + self._turn_finalizer._service_fee_rate(chat_turn_context.identity_type),
+                                  repository=self._subagent_repo, stream_repo=self._turn_stream_repo,
+                                  ensure_session=lambda: self._session_repo.get_session_for_user(
+                                      chat_turn_context.session_id, chat_turn_context.user_id),
+                                  resolve_agent=lambda agent_id, version: self.load_subagent_agent(
+                                      chat_turn_context.user_id, agent_id, version),
+                                  resolve_model=lambda model, provider_id, runtime_options: self._resolve_subagent_model(
+                                      chat_turn_context, model, provider_id, runtime_options))
+        await runtime.initialize()
+        chat_turn_context.usage_managed = True
+        runtime.attach()
+
+        settling = False
+
+        async def produce():
+            nonlocal settling
+            try:
+                async with aclosing(self._query_llm(
+                    chat_turn_context, client_tool_results, tool_approval_status, start_iteration, bindings,
+                    output_review=output_review,
+                )) as stream:
+                    async for frame in stream:
+                        frames.put_nowait(frame)
+            except Exception:
+                chat_turn_context.result_status = "failed"
+                raise
+            finally:
+                settling = True
+                try:
+                    await runtime.close()
+                finally:
+                    frames.put_nowait(None)
+
+        producer = asyncio.create_task(produce())
+        stopped_for_safety = False
+        try:
+            while (frame := await frames.get()) is not None:
+                # 子代理命中时，父模型可能正等待下一帧，无法自行检查取消标记。
+                if output_review is not None and output_review.verdict is not None and not (settling or stopped_for_safety):
+                    stopped_for_safety = producer.cancel()
+                yield frame
+            if not (stopped_for_safety and producer.cancelled()):
+                await producer
+        finally:
+            if not producer.done():
+                producer.cancel()
+            await asyncio.gather(producer, return_exceptions=True)
+
+    async def _query_llm(
             self,
             chat_turn_context: ChatTurnContext,
             client_tool_results: list[ClientToolResult] | None,
             tool_approval_status: List[ToolApprovalStatus] | None,
             start_iteration: int = 0,
-            cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
+            bindings: ExecutionBindings | None = None,
+            output_review: TurnOutputSafety | None = None,
     ):
         # 流式推理
 
         # 落盘与指示器写入按顺序串行后台执行，不阻塞 SSE 流
         persist_lock = asyncio.Lock()
         persist_tasks: list[asyncio.Task] = []
+        persisted_refusal = False
 
         def schedule(coro: Awaitable[None]) -> None:
             async def _run() -> None:
@@ -418,11 +557,15 @@ class ChatTurnCoordinator:
                 start_iteration=start_iteration,
                 client_tool_results=client_tool_results,
                 tool_approval_status=tool_approval_status,
-                cancel_requested=cancel_requested,
+                bindings=bindings,
                 pending_user_messages=drain_pending_user_messages,
             ):
                 # QueryLoopRuntime 产出的事件如果是 StepFinishEvent 额外处理消息累积
                 if isinstance(event, StepFinishEvent):
+                    if chat_turn_context.root_execution_id:
+                        for message in [*event.intermediate_messages, event.final_assistant_message]:
+                            if message is not None:
+                                message.metadata["root_execution_id"] = chat_turn_context.root_execution_id
                     chat_turn_context.token_usage.add(event.token_usage) # 计费
                     # 上下文指示器：记录最近一次 LLM 调用的输入 token 数
                     if event.token_usage.input_tokens > 0:
@@ -431,16 +574,22 @@ class ChatTurnCoordinator:
                         # 中间消息（Tool Calls）逐步落盘
                         schedule(self._turn_finalizer.persist_message_delta(
                             session_id=chat_turn_context.session_id,
-                            delta_messages=event.intermediate_messages,
+                            delta_messages=[message for message in event.intermediate_messages
+                                            if not message.metadata.get("subagent_results")],
                             memory_policy=chat_turn_context.agent_spec.memory_policy,
                         ))
                         if event.aborted:
+                            persisted_refusal = any(message.metadata.get("content_safety_blocked")
+                                                    for message in event.intermediate_messages)
+                            chat_turn_context.result_status = "cancelled"
                             yield to_vercel_sse(event)
                             yield to_vercel_sse(ErrorEvent(error_text="本轮对话已被用户取消"))
                             return
                         # 只有等待前端工具结果超时才会挂起
                         if event.suspension is not None:
                             chat_turn_context.messages_for_llm.extend(event.intermediate_messages)
+                            if bindings.snapshot_subagents is not None:
+                                chat_turn_context.subagent_state = await bindings.snapshot_subagents()
                             suspended_turn_context = SuspendedTurnContext(
                                 model_info=chat_turn_context.model_info,
                                 agent_spec=chat_turn_context.agent_spec,
@@ -449,15 +598,20 @@ class ChatTurnCoordinator:
                                 messages_for_llm=chat_turn_context.messages_for_llm,
                                 user_message=chat_turn_context.user_message,
                                 token_usage=chat_turn_context.token_usage,
+                                turn_suspension=event.suspension,
+                                root_execution_id=chat_turn_context.root_execution_id,
+                                subagent_state=chat_turn_context.subagent_state,
                                 billing_resource_id=chat_turn_context.billing_resource_id,
                                 preferred_billing_group_id=chat_turn_context.preferred_billing_group_id,
-                                turn_suspension=event.suspension)
+                            )
                             await self._suspended_chat_repo.create(SuspendedChat(
                                 session_id=chat_turn_context.session_id,
                                 user_id=chat_turn_context.user_id,
                                 context=suspended_turn_context
                             ))
                     else:
+                        if event.final_assistant_message.metadata.get("incomplete"):
+                            chat_turn_context.result_status = "incomplete"
                         # 记录最终回复并落盘
                         chat_turn_context.final_assistant_message = event.final_assistant_message
                         if event.final_assistant_message is not None:
@@ -472,12 +626,119 @@ class ChatTurnCoordinator:
                 if isinstance(event, StepFinishEvent) and event.suspension is not None:
                     return
         except ServiceException as e:
+            chat_turn_context.result_status = "failed"
             error("chat stream generation failed.", session_id=chat_turn_context.session_id, exc=e)
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
         finally:
+            # 在等待子代理或执行工具时也可能命中，此时没有模型中止消息可保存。
+            if not persisted_refusal and output_review is not None and (signal := output_review.cancel_signal) is not None:
+                refusal = ChatMessage(
+                    session_id=chat_turn_context.session_id, role=Role.ASSISTANT,
+                    content=signal.meta["refusal"],
+                    metadata={**signal.meta, "content_safety_blocked": True,
+                              "root_execution_id": chat_turn_context.root_execution_id},
+                )
+                schedule(self._turn_finalizer.persist_message_delta(
+                    session_id=chat_turn_context.session_id,
+                    delta_messages=[refusal],
+                    memory_policy=chat_turn_context.agent_spec.memory_policy,
+                ))
             if persist_tasks:
                 await asyncio.gather(*persist_tasks, return_exceptions=True)
+
+    async def _history_policy(self, user_id, session_id):
+        session = await self._session_repo.get_session_for_user(session_id, user_id)
+        agent = await self._agent_resolver.resolve(session.agent_id, session.agent_version)
+        return agent is not None and agent.spec.memory_policy.enable_persistence_chat_memory
+
+    async def _resolve_subagent_model(self, context, model, provider_id, runtime_options):
+        info = await self._model_repo.resolve_model_for_chat(
+            user_id=context.user_id, model_id=PydanticObjectId(model),
+            provider_id=PydanticObjectId(provider_id) if provider_id is not None else None,
+            runtime_options=runtime_options,
+        )
+        await self._ensure_billable_chat_allowed(
+            user_id=context.user_id, model_info=info,
+        )
+        return info
+
+    async def load_subagent_agent(self, user_id, agent_id, version):
+        permission = await self._resource_client.check_res_permission(
+            resource_id=agent_id, user_id=user_id, group_role_map=SecurityContextHolder.get_group_role_map(),
+            target_version=version,
+        )
+        if not permission or not permission.allows("LOAD"):
+            raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
+        agent = await self._agent_resolver.resolve(agent_id, version)
+        if (agent is None or agent.agent_id != agent_id or agent.version != version
+                or agent.version_status.upper() != "PUBLISHED" or not agent.spec.system_prompt.strip()):
+            raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
+        return agent
+
+    async def _child_history_allowed(self, user_id, run):
+        if not run.history_available:
+            return False
+        if run.agent_id:
+            try:
+                agent = await self.load_subagent_agent(user_id, run.agent_id, run.agent_version)
+                return agent.spec.memory_policy.enable_persistence_chat_memory
+            except Exception:
+                return False
+        return True
+
+    async def list_subagents(self, *, user_id, session_id, root_execution_id=None):
+        allowed = await self._history_policy(user_id, session_id)
+        runs = await self._subagent_repo.list_runs(user_id, session_id, root_execution_id)
+        await self._reconcile_subagent_runs(user_id, session_id, runs)
+        views = []
+        for run in runs:
+            if not allowed or not await self._child_history_allowed(user_id, run):
+                run.history_available = False
+                run = run.for_storage()
+            views.append(run.public_view())
+        root = await self._subagent_repo.get_root(user_id, session_id, root_execution_id) if root_execution_id else None
+        return {"runs": views, "usage": [usage.model_dump(mode="json") for usage in root.usage] if root else []}
+
+    async def subagent_detail(self, *, user_id, session_id, child_id, run_id):
+        allowed = await self._history_policy(user_id, session_id)
+        run = await self._subagent_repo.get_run(user_id, session_id, child_id, run_id)
+        if run is not None:
+            await self._reconcile_subagent_runs(user_id, session_id, [run])
+        if not allowed or run is None or not await self._child_history_allowed(user_id, run):
+            raise ServiceException(ChatErrorCode.CHAT_REQUEST_INVALID, custom_msg="Subagent history is unavailable.")
+        from chat.api.converters.ui_message_converter import convert_to_ui_messages
+        return {"run": run.public_view(), "messages": convert_to_ui_messages(
+            [message for message in run.messages if message.role != Role.SYSTEM],
+        )}
+
+    async def _reconcile_subagent_runs(self, user_id, session_id, runs):
+        active = await self._turn_stream_repo.get_active_turn(user_id, session_id)
+        for run in runs:
+            if run.status == "running" and active != run.turn_id:
+                run.status = "interrupted"
+                run.error = "Previous execution owner is unavailable; external results are unknown. Work was not replayed."
+                await self._subagent_repo.save_run(run.for_storage())
+                root = await self._subagent_repo.get_root(user_id, session_id, run.root_execution_id)
+                if root is not None and root.status == "running" and root.turn_id != active:
+                    root.status = "interrupted"
+                    await self._subagent_repo.save_root(root)
+
+    async def control_subagent(self, *, user_id, child_id, request, kind):
+        await self._session_repo.get_session_for_user(request.session_id, user_id)
+        run = await self._subagent_repo.get_run(user_id, request.session_id, child_id, request.run_id)
+        if run is None or run.root_execution_id != request.root_execution_id:
+            raise ServiceException(ChatErrorCode.CHAT_REQUEST_INVALID, custom_msg="Subagent is not active in this root.")
+        command = {"command_id": request.command_id, "run_id": run.run_id, "kind": kind}
+        if kind == "input":
+            command["input"] = request.input
+        result = await self._turn_stream_repo.submit_subagent_command(
+            user_id, request.session_id, run.turn_id, command, allow_new=run.status == "running",
+        )
+        if result is None:
+            raise ServiceException(ChatErrorCode.CHAT_REQUEST_INVALID, custom_msg="Subagent owner is inactive or command conflicts.")
+        return result
+
 
     def _set_post_completion_tasks(
         self,
@@ -486,15 +747,16 @@ class ChatTurnCoordinator:
     ) -> None:
         # 长期记忆、计费和标题都不影响下一轮对话，因此可延后执行
         # 计费
-        background_tasks.add_task(
-            self._turn_finalizer.send_token_billing,
-            user_id=chat_turn_context.user_id,
-            model_info=chat_turn_context.model_info,
-            token_usage=chat_turn_context.token_usage,
-            billing_resource_id=chat_turn_context.billing_resource_id,
-            preferred_billing_group_id=chat_turn_context.preferred_billing_group_id,
-            identity_type=chat_turn_context.identity_type,
-        )
+        if not chat_turn_context.usage_managed:
+            background_tasks.add_task(
+                self._turn_finalizer.send_token_billing,
+                user_id=chat_turn_context.user_id,
+                model_info=chat_turn_context.model_info,
+                token_usage=chat_turn_context.token_usage,
+                billing_resource_id=chat_turn_context.billing_resource_id,
+                preferred_billing_group_id=chat_turn_context.preferred_billing_group_id,
+                identity_type=chat_turn_context.identity_type,
+            )
         # 用户提问 + 最终回复成对摄入长期记忆
         if (chat_turn_context.user_message is not None
                 and chat_turn_context.final_assistant_message is not None):
@@ -523,6 +785,7 @@ class ChatTurnCoordinator:
         if unfinished_chat is None:
             return # 没有未完成的对话，无需关闭
         unfinished_chat_id = str(unfinished_chat.id)
+        subagent_state = getattr(unfinished_chat.context, "subagent_state", None)
 
         pending_messages = []
         pending_messages.extend(
@@ -553,6 +816,8 @@ class ChatTurnCoordinator:
             ChatMessage(
                 session_id=session_id, role=Role.ASSISTANT,
                 content="本轮对话已中断，未能生成完整回复",
+                metadata={"root_execution_id": unfinished_chat.context.root_execution_id}
+                         if getattr(unfinished_chat.context, "root_execution_id", None) else {},
             )
         )
 
@@ -561,6 +826,13 @@ class ChatTurnCoordinator:
             delta_messages=closing_messages,
             memory_policy=unfinished_chat.context.agent_spec.memory_policy,
         )
+        if subagent_state is not None:
+            root = await self._subagent_repo.get_root(
+                user_id, session_id, unfinished_chat.context.root_execution_id,
+            )
+            if root is not None:
+                root.status = "interrupted"
+                await self._subagent_repo.save_root(root)
 
         await self._suspended_chat_repo.delete_by_id(unfinished_chat_id)
 

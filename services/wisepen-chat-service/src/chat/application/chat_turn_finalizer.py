@@ -17,6 +17,7 @@ from chat.domain.interfaces.llm import TextCompletionProvider, TokenUsage
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository, ProviderRepository
 from chat.domain.repositories.model_repo import ModelRequestInfo
+from chat.domain.entities.subagent import ModelUsage
 from common.kafka.producer import KafkaProducerClient
 
 
@@ -134,6 +135,43 @@ class ChatTurnFinalizer:
         if identity_type == IdentityType.TEACHER:
             return settings.billing.teacher_service_fee_rate
         return Decimal("0")
+
+    async def send_usage_billing(self, *, user_id, model_info, usage: ModelUsage,
+                                 billing_resource_id=None, preferred_billing_group_id=None):
+        try:
+            await self.provider_repo.increment_usage(
+                provider_id=model_info.provider_id, scope=model_info.provider_scope,
+                owner_user_id=model_info.provider_owner_user_id,
+                input_tokens=usage.input_tokens, cached_input_tokens=usage.cached_input_tokens,
+                output_tokens=usage.output_tokens, billable_tokens=usage.billable_tokens,
+            )
+            usage.provider_usage_status = "confirmed"
+        except Exception:
+            usage.provider_usage_status = "unknown"
+        value = {
+            "userId": user_id, "resourceId": billing_resource_id,
+            "preferredGroupId": int(preferred_billing_group_id) if preferred_billing_group_id and usage.billable_tokens > 0 else None,
+            "usageTokens": usage.token_usage, "billableTokens": usage.billable_tokens,
+            "billingDetail": {
+                "inputTokens": usage.input_tokens,
+                "cachedInputTokens": usage.cached_input_tokens,
+                "outputTokens": usage.output_tokens,
+                "inputBillingRatio": usage.input_billing_ratio,
+                "cachedInputBillingRatio": usage.cached_input_billing_ratio,
+                "outputBillingRatio": usage.output_billing_ratio,
+                "usageSource": usage.usage_source,
+                "modelName": model_info.model.display_name,
+                "providerName": model_info.provider.name,
+                "providerScope": model_info.provider_scope.value,
+            },
+            "traceId": usage.request_id, "requestTime": usage.attempted_at.isoformat(),
+        }
+        try:
+            result = await self.kafka_producer.send_confirmed(topic=KAFKA_TOKEN_CONSUMPTION_TOPIC, value=value)
+        except Exception:
+            result = {"status": "unknown"}
+        usage.billing_status = result["status"]
+        usage.receipt = {key: result[key] for key in ("topic", "partition", "offset") if key in result}
 
     async def update_context_tokens(self, session_id: str, context_tokens: int) -> None:
         """更新会话的上下文占用指示器。"""

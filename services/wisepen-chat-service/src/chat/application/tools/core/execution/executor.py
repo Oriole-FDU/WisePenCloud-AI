@@ -7,6 +7,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from chat.application.execution_bindings import ExecutionBindings
 from chat.application.tools.core.definition import ClientToolResult, HIGH_RISK_REASON_FIELD, ToolRiskLevel
 from chat.application.tools.core.execution.hooks.builtin import JsonSchemaCheck, RequiredContextCheck
 from chat.application.tools.core.execution.result import (
@@ -22,9 +23,11 @@ from pydantic import BaseModel
 
 
 class ToolExecutor:
-    def __init__(self, tool_scope: ToolScope, *, output_cache: ToolOutputCache) -> None:
+    def __init__(self, tool_scope: ToolScope, *, output_cache: ToolOutputCache,
+                 bindings: ExecutionBindings | None = None) -> None:
         self._tool_scope = tool_scope
         self._output_cache = output_cache
+        self._bindings = bindings or ExecutionBindings()
 
     async def execute_client_one(self, invocation: ToolInvocation, client_tool_result: ClientToolResult) -> ToolExecutionResult:
         started_at = datetime.now(timezone.utc)
@@ -124,8 +127,10 @@ class ToolExecutor:
             if tool.definition.policy.risk_level == ToolRiskLevel.HIGH:
                 tool_arguments.pop(HIGH_RISK_REASON_FIELD, None)
 
+            # 綁定只替換執行函式；scope 成員、風險與 preflight 仍是實際權限上限。
+            execute = self._bindings.tool_handlers.get(invocation.tool_name, tool.execute)
             output = await self._run(
-                tool.execute(
+                execute(
                     context={
                         **self._tool_scope.context,
                         **preflight_metadata,

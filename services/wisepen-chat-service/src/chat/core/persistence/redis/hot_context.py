@@ -17,10 +17,14 @@ class RedisHotContext(RedisRepository, HotContextRepository):
         return f"wisepen:chat:hot_context:{session_id}"
 
     def _serialize(self, messages: List[ChatMessage]) -> List[str]:
-        return [
-            json.dumps(msg.model_dump(mode="json", exclude={"id", "persisted_output_placeholder"}), ensure_ascii=False)
-            for msg in messages
-        ]
+        serialized = []
+        for msg in messages:
+            data = msg.model_dump(mode="json", exclude={"id"})
+            # 热上下文保留原文，跨回合 fork 时仍需遵守原消息的持久化策略。
+            if msg.persisted_output_placeholder is not None:
+                data["persisted_output_placeholder"] = msg.persisted_output_placeholder
+            serialized.append(json.dumps(data, ensure_ascii=False))
+        return serialized
 
     async def append_messages(self, session_id: str, messages: List[ChatMessage], max_length: int = 50) -> None:
         key = self._get_key(session_id)

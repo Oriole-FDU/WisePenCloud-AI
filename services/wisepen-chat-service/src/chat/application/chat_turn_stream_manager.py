@@ -6,6 +6,7 @@ from fastapi import BackgroundTasks
 
 from chat.api.vercel_formats import message_finish, message_start, stream_done, error as sse_error
 from chat.application.content_safety import ContentSafetyChecker
+from chat.application.content_safety.checker import TurnOutputSafety
 from chat.core.persistence.redis.chat_turn_stream import RedisChatTurnStream
 from chat.domain.entities import TurnCancelReason, TurnCancelSignal
 from chat.domain.error_codes import ChatErrorCode
@@ -25,13 +26,14 @@ class ChatTurnStreamManager:
         self._stream_repo = stream_repo
         self._content_safety = content_safety
         self._tasks: dict[str, asyncio.Task] = {}
+        self._lost_leases: set[str] = set()
 
     async def start_turn(
         self,
         *,
         user_id: str,
         session_id: str,
-        build_chat_gen: Callable[[BackgroundTasks, str], AsyncIterator[str]],
+        build_chat_gen: Callable[[BackgroundTasks, str, TurnOutputSafety | None], AsyncIterator[str]],
     ) -> str:
         # 封禁用户在申请租约、启动后台 runner 之前就被拒绝，所有发起 turn 的入口共用这条规则
         if self._content_safety is not None:
@@ -73,7 +75,12 @@ class ChatTurnStreamManager:
         return turn_id
 
     async def is_turn_cancel_requested(self, turn_id: str) -> TurnCancelSignal | None:
+        if turn_id in self._lost_leases:
+            return TurnCancelSignal(reason=TurnCancelReason.UNKNOWN)
         return await self._stream_repo.is_turn_cancel_requested(turn_id)
+
+    def is_turn_lease_lost(self, turn_id: str) -> bool:
+        return turn_id in self._lost_leases
 
     async def active_turn_id(self, *, user_id: str, session_id: str) -> str | None:
         return await self._stream_repo.get_active_turn(user_id, session_id)
@@ -95,15 +102,38 @@ class ChatTurnStreamManager:
         user_id: str,
         session_id: str,
         turn_id: str,
-        build_chat_gen: Callable[[BackgroundTasks, str], AsyncIterator[str]],
+        build_chat_gen: Callable[[BackgroundTasks, str, TurnOutputSafety | None], AsyncIterator[str]],
     ) -> None:
         background_tasks = BackgroundTasks()
+        runner = asyncio.current_task()
+        heartbeat_done = asyncio.Event()
+        output_review = self._content_safety.start_output_review() if self._content_safety is not None else None
+        chat_gen = build_chat_gen(background_tasks, turn_id, output_review)
+
+        async def heartbeat():
+            interval = max(0.02, min(self._stream_repo.active_turn_ttl / 3, 10))
+            while True:
+                try:
+                    await asyncio.wait_for(heartbeat_done.wait(), timeout=interval)
+                    return
+                except TimeoutError:
+                    pass
+                try:
+                    renewed = await self._stream_repo.renew_active_turn(user_id, session_id, turn_id)
+                except Exception:
+                    renewed = False
+                if not renewed:
+                    self._lost_leases.add(turn_id)
+                    runner.cancel()
+                    return
+
+        lease_task = asyncio.create_task(heartbeat(), name=f"chat-turn-lease:{turn_id}")
 
         try:
             # 后台执行器统一负责消息生命周期帧，页面连接只转发。
             await self._stream_repo.append_frame(turn_id, message_start(f"msg_{uuid.uuid4().hex}"))
 
-            frames = build_chat_gen(background_tasks, turn_id)
+            frames = chat_gen
             if self._content_safety is not None: # 若内容安全审计已启用
                 # 监听 SSE 帧，命中即置取消位并注入拒答
                 frames = self._content_safety.watch_frames(
@@ -111,25 +141,30 @@ class ChatTurnStreamManager:
                     user_id=user_id,
                     session_id=session_id,
                     request_cancel=lambda signal: self._stream_repo.request_turn_cancel(turn_id, signal),
+                    output_review=output_review,
                 )
 
             async for frame in frames:
                 # 业务输出帧写入前检查租约，避免旧 runner 在会话所有权失效后继续写内容
                 renewed = await self._stream_repo.renew_active_turn(user_id, session_id, turn_id) # 续期
                 if not renewed: # 无法续期，中止任务
+                    self._lost_leases.add(turn_id)
                     await self._stream_repo.append_frame(turn_id, sse_error(error_text="当前对话运行租约已失效"))
                     await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
                     return
                 await self._stream_repo.append_frame(turn_id, frame)
 
-            # 在执行后台任务前释放 active_turn
+            # 正式持久化完成後即可釋放；摘要和標題不佔用會話租約。
+            heartbeat_done.set()
+            await asyncio.gather(lease_task, return_exceptions=True)
             await self._stream_repo.release_active_turn(user_id, session_id, turn_id)
 
             await self._stream_repo.append_frame(turn_id, message_finish())
             await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
         except asyncio.CancelledError:
-            await self._stream_repo.release_active_turn(user_id, session_id, turn_id)
-            await self._stream_repo.append_frame(turn_id, sse_error(error_text="本轮对话已被取消或运行租约已失效"))
+            await self._stream_repo.append_frame(turn_id, sse_error(
+                error_text="当前对话运行租约已失效" if turn_id in self._lost_leases else "本轮对话已被取消",
+            ))
             await self._stream_repo.append_frame(turn_id, message_finish())
             await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
         except Exception as exc:
@@ -139,7 +174,14 @@ class ChatTurnStreamManager:
             await self._stream_repo.append_frame(turn_id, message_finish())
             await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
         finally:
+            try:
+                await chat_gen.aclose()
+            finally:
+                heartbeat_done.set()
+                await asyncio.gather(lease_task, return_exceptions=True)
             self._tasks.pop(turn_id, None)
+            await self._stream_repo.release_active_turn(user_id, session_id, turn_id)
+            self._lost_leases.discard(turn_id)
             try:
                 await background_tasks()
             except Exception as exc:

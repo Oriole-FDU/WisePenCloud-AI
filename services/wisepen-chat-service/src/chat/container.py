@@ -53,6 +53,7 @@ from chat.application.skills.skill_matcher import DefaultSkillMatcher
 from chat.application.builtin_tools.skill_tools import LoadSkillAssetTool
 from chat.application.builtin_tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
+from chat.application.subagents.tools import subagent_tools
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
 from chat.application.tools.core.output_cache import (
@@ -114,6 +115,8 @@ def _build_registry(
     )
     for provider in tool_providers:
         registry.register(provider)
+    for tool in subagent_tools():
+        registry.register(tool)
     return registry
 
 
@@ -442,6 +445,9 @@ class Container(containers.DeclarativeContainer):
         context_assembler=context_assembler,
         frontend_tool_response_broker=frontend_tool_response_broker,
         context_compactor=context_compactor,
+        turn_stream_repo=chat_turn_stream_repo,
+        resource_client=resource_client,
+        redis_client=redis_client,
     )
 
 

@@ -2,6 +2,7 @@ from typing import Optional, List, Dict, Any, Set, Self
 from pydantic import BaseModel, Field, model_validator
 
 from chat.application.tools.client_tools import ClientToolCapability
+from chat.application.subagents.models import SubagentOptions
 
 
 class ActiveChatTurnResponse(BaseModel):
@@ -54,6 +55,15 @@ class ChatRecoverRequest(BaseModel):
 class ChatCancelRequest(BaseModel):
     session_id: str = Field(..., min_length=1, description="目标会话 ID；必须属于当前登录用户。")
 
+class SubagentControlRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=128)
+    root_execution_id: str = Field(min_length=1, max_length=128)
+    run_id: str = Field(min_length=1, max_length=128)
+    command_id: str = Field(min_length=1, max_length=128)
+
+
+class SubagentInputRequest(SubagentControlRequest):
+    input: str = Field(min_length=1, max_length=32000)
 
 class ChatRewriteRequest(BaseModel):
     session_id: str = Field(..., min_length=1, description="目标会话 ID；必须属于当前登录用户。")
@@ -78,6 +88,7 @@ class ChatRequest(BaseModel):
     """
     session_id: str = Field(..., description="目标会话 ID；必须属于当前登录用户。")
     query: str = Field(..., description="本轮用户输入；不能为空，会作为最新 user message 进入 prompt。")
+    subagents: SubagentOptions | None = None
     model: str = Field(
         ...,
         description="模型 ID；若会话 Agent 禁止请求覆盖，则以 Agent 默认模型为准。",

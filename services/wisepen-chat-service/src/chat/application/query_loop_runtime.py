@@ -1,10 +1,12 @@
 import asyncio
 import json
 import uuid
-from typing import AsyncIterator, Awaitable, Callable, Iterator, List, Optional, Union
+from contextlib import aclosing
+from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterator, List, Optional, Union
 
 from jsonschema import Draft202012Validator, SchemaError, ValidationError
 
+from chat.application.execution_bindings import ExecutionBindings
 from chat.application.events import (
     ReasoningDeltaEvent,
     ReasoningEndEvent,
@@ -56,6 +58,13 @@ class TurnCancelledError(asyncio.CancelledError):
     def __init__(self, signal: TurnCancelSignal) -> None:
         super().__init__()
         self.signal = signal
+
+
+def _cancelled_reply(content: str, signal: TurnCancelSignal | None) -> tuple[str, dict]:
+    if signal is not None and signal.reason == TurnCancelReason.CONTENT_SAFETY:
+        meta = signal.meta or {}
+        return content + (meta.get("refusal") or ""), {**meta, "content_safety_blocked": True}
+    return content, {"aborted_by_user": True}
 
 
 class _StepEventInterpreter:
@@ -183,6 +192,25 @@ class QueryLoopRuntime:
         self._tool_dispatcher = tool_dispatcher
         self._frontend_tool_response_broker = frontend_tool_response_broker
 
+    def prepare_model(self, model_info):
+        provider = self._llm_provider_resolver.resolve(model_info)
+        manifest = provider.runtime_options_manifest()
+        options = _merge_runtime_options(manifest.get("defaults") or {}, model_info.runtime_options or {})
+        try:
+            Draft202012Validator.check_schema(manifest["json_schema"])
+            Draft202012Validator(manifest["json_schema"]).validate(options)
+        except (SchemaError, ValidationError) as exc:
+            raise ServiceException(ChatErrorCode.MODEL_RUNTIME_OPTIONS_INVALID, custom_msg=str(exc))
+        return model_info.with_runtime_options(options)
+
+    @staticmethod
+    def _model_events(
+        llm_provider: LLMProvider, messages: list[ChatMessage], model_info: ModelRequestInfo,
+        tools: list[dict] | None, bindings: ExecutionBindings,
+    ) -> AsyncGenerator[LLMStreamEvent, None]:
+        events = llm_provider.stream_chat_completion(messages=messages, model_request=model_info, tools=tools)
+        return bindings.review_model_output(events) if bindings.review_model_output is not None else events
+
     """
     ReAct 循环主入口 (QueryLoop)
     """
@@ -197,22 +225,15 @@ class QueryLoopRuntime:
         start_iteration: int = 0,
         client_tool_results: list[ClientToolResult] = None,
         tool_approval_status: List[ToolApprovalStatus] = None,
-        cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
+        bindings: ExecutionBindings | None = None,
         pending_user_messages: Callable[[], Awaitable[List[ChatMessage]]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
+        bindings = bindings or ExecutionBindings()
         # 解析获取当前模型的 LLMProvider
         llm_provider = self._llm_provider_resolver.resolve(model_info)
 
         # 检查模型参数是否正确
-        manifest = llm_provider.runtime_options_manifest()
-        # 合并默认参数
-        runtime_options = _merge_runtime_options(manifest.get("defaults") or {}, model_info.runtime_options or {})
-        try:
-            Draft202012Validator.check_schema(manifest["json_schema"])
-            Draft202012Validator(manifest["json_schema"]).validate(runtime_options)
-        except (SchemaError, ValidationError) as e:
-            raise ServiceException(ChatErrorCode.MODEL_RUNTIME_OPTIONS_INVALID, custom_msg=str(e))
-        model_info = model_info.with_runtime_options(runtime_options)
+        model_info = self.prepare_model(model_info)
 
         # 进入多轮循环
         _client_tool_results = client_tool_results
@@ -221,8 +242,10 @@ class QueryLoopRuntime:
         max_iterations = agent_max_iterations or settings.agent.max_iterations
         iteration = start_iteration
         while True:
+            if bindings.before_step is not None:
+                await bindings.before_step()
             # 请求取消检查点
-            if cancel_requested is not None and await cancel_requested():
+            if await bindings.is_cancel_requested():
                 yield StepFinishEvent(is_finished=False, token_usage=TokenUsage(), aborted=True)
                 return
 
@@ -232,23 +255,45 @@ class QueryLoopRuntime:
             )
 
             step_finish_event: Optional[StepFinishEvent] = None
+            deferred_text = []
             # 把当前 messages、模型参数 和 tool_scope 委派给 _run_single_step()
             # 然后异步消费它的产出
-            async for item in self._run_single_step(
-                messages=messages,
-                session_id=session_id,
-                model_info=model_info,
-                llm_provider=llm_provider,
-                iteration=iteration,
-                tool_scope=tool_scope,
-                client_tool_results=_client_tool_results,
-                tool_approval_status=_tool_approval_status,
-                cancel_requested=cancel_requested,
-            ):
-                # 如果拿到的是 StepFinishEvent 就存到 step_finish_event；否则直接 yield
-                if isinstance(item, StepFinishEvent):
-                    step_finish_event = item
-                yield item
+            try:
+                async for item in self._run_single_step(
+                    messages=messages,
+                    session_id=session_id,
+                    model_info=model_info,
+                    llm_provider=llm_provider,
+                    iteration=iteration,
+                    tool_scope=tool_scope,
+                    client_tool_results=_client_tool_results,
+                    tool_approval_status=_tool_approval_status,
+                    bindings=bindings,
+                ):
+                    # 如果拿到的是 StepFinishEvent 就存到 step_finish_event；否则直接 yield
+                    if isinstance(item, StepFinishEvent):
+                        if item.is_finished and bindings.join_children is not None:
+                            results = await bindings.join_children()
+                            if await bindings.is_cancel_requested():
+                                deferred_text.clear()
+                                item = StepFinishEvent(is_finished=False, token_usage=item.token_usage, aborted=True)
+                            elif results:
+                                item = StepFinishEvent(is_finished=False, intermediate_messages=results, token_usage=item.token_usage)
+                                deferred_text.clear()
+                        if (item.suspension is not None or item.aborted) and bindings.close_children is not None:
+                            await bindings.close_children()
+                        step_finish_event = item
+                        for text_event in deferred_text:
+                            yield text_event
+                        deferred_text.clear()
+                    elif bindings.join_children is not None and isinstance(item, (TextStartEvent, TextDeltaEvent, TextEndEvent)):
+                        deferred_text.append(item)
+                        continue
+                    yield item
+            except (Exception, asyncio.CancelledError):
+                for text_event in deferred_text:
+                    yield text_event
+                raise
 
             # 清空客户端工具调用结果和工具批准状态，以推进正常循环
             _client_tool_results = None
@@ -286,12 +331,18 @@ class QueryLoopRuntime:
                 return
 
             if iteration >= max_iterations:
+                if bindings.join_children is not None:
+                    messages.extend(await bindings.join_children())
+                if await bindings.is_cancel_requested():
+                    yield StepFinishEvent(is_finished=False, token_usage=TokenUsage(), aborted=True)
+                    return
                 # 超出最大迭代次数时兜底
                 async for event in self._emit_force_finish(
                     session_id=session_id,
                     messages=messages,
                     model_info=model_info,
                     llm_provider=llm_provider,
+                    bindings=bindings,
                 ):
                     yield event
                 return
@@ -310,12 +361,14 @@ class QueryLoopRuntime:
         tool_scope: ToolScope,
         client_tool_results: list[ClientToolResult] | None = None,
         tool_approval_status: List[ToolApprovalStatus] | None = None,
-        cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None = None,
+        bindings: ExecutionBindings | None = None,
     ) -> AsyncIterator[Union[StreamEvent, StepFinishEvent]]:
+        bindings = bindings or ExecutionBindings()
         # 发 step 开始事件
         yield StepStartEvent()
 
         token_usage = TokenUsage()
+        usage_observed = False
         is_resumed_tool_step = client_tool_results is not None or tool_approval_status is not None
         if is_resumed_tool_step:
             # 挂起前的 assistant 工具调用已在 messages 末尾，恢复时由它重建本轮工具阶段。
@@ -325,40 +378,40 @@ class QueryLoopRuntime:
             # 正常 step 由 Provider 事件解释器构造 assistant 和工具调用。
             # 创建本轮推理的事件解释器
             event_interpreter = _StepEventInterpreter()
+            request_id = f"request_{uuid.uuid4().hex}"
+
+            async def report_usage(provenance, tokens):
+                if bindings.record_usage is not None:
+                    await bindings.record_usage(
+                        request_id=request_id, model_info=model_info, provenance=provenance, token_usage=tokens,
+                    )
             # schema 已由 ToolScope 在构造期固化；仅在模型和 LLM Provider 均声明支持工具时传给 LLM
             tool_schemas = tool_scope.schemas() \
                 if model_info.support_tools and llm_provider.supports_tools() else []
             try:
                 # 调用模型流式接口，Provider 内部负责原生协议解析并产出 LLMStreamEvent 事件
-                async for llm_provider_event in llm_provider.stream_chat_completion(
-                    messages=messages,
-                    model_request=model_info,
-                    tools=tool_schemas or None,
-                ):
-                    # 请求取消检查点
-                    if cancel_requested is not None:
-                        signal = await cancel_requested()
-                        if signal is not None: raise TurnCancelledError(signal)
-                    if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
-                        token_usage.add(llm_provider_event.usage)
+                async with aclosing(self._model_events(llm_provider, messages, model_info, tool_schemas or None, bindings)) as stream:
+                    async for llm_provider_event in stream:
+                        if llm_provider_event.type == LLMEventType.USAGE and llm_provider_event.usage:
+                            usage_observed = True
+                            token_usage.add(llm_provider_event.usage)
+                        if (signal := await bindings.get_cancel_signal()) is not None:
+                            raise TurnCancelledError(signal)
 
-                    # 把 LLMStreamEvent 事件交给解释器，产出 StreamEvent
-                    for event in event_interpreter.consume(llm_provider_event):
-                        yield event
+                        for event in event_interpreter.consume(llm_provider_event):
+                            yield event
+                if bindings.review_model_output is not None and (signal := await bindings.get_cancel_signal()) is not None:
+                    raise TurnCancelledError(signal)
             except ServiceException:
+                await report_usage("observed" if usage_observed else "unknown", token_usage if usage_observed else None)
                 raise  # 已经是业务异常，直接向上传播
             except asyncio.CancelledError as exc: # 补全取消消息
-                signal = exc.signal if isinstance(exc, TurnCancelledError) else None
+                await report_usage("observed" if usage_observed else "unknown", token_usage if usage_observed else None)
+                signal = exc.signal if isinstance(exc, TurnCancelledError) else await bindings.get_cancel_signal()
                 for event in event_interpreter.close():
                     yield event
 
-                if signal is not None and signal.reason == TurnCancelReason.CONTENT_SAFETY:
-                    content_safety_meta = signal.meta or {}
-                    content= (event_interpreter.assistant_content or "") + (content_safety_meta.get("refusal") or "")
-                    metadata={"content_safety_blocked": True, **content_safety_meta}
-                else:
-                    content = event_interpreter.assistant_content or ""
-                    metadata = {"aborted_by_user": True}
+                content, metadata = _cancelled_reply(event_interpreter.assistant_content, signal)
                 assistant_msg = ChatMessage(
                     session_id=session_id,
                     role=Role.ASSISTANT,
@@ -406,6 +459,7 @@ class QueryLoopRuntime:
                 )
                 return
             except Exception as e:
+                await report_usage("observed" if usage_observed else "unknown", token_usage if usage_observed else None)
                 raise ServiceException(
                     ChatErrorCode.LLM_GENERATION_FAILED,
                     custom_msg=f"流式推理失败 (iter={iteration}): {e}",
@@ -425,18 +479,21 @@ class QueryLoopRuntime:
                 tool_calls=event_interpreter.tool_calls
             )
 
-            token_usage = await self._resolve_usage_with_fallback(
-                usage=token_usage,
-                messages=messages,
-                assistant_msg=assistant_msg,
-                model_info=model_info,
-                tools=tool_schemas or None,
-            )
+            if not (usage_observed and token_usage.total_tokens == 0 and bindings.record_usage is not None):
+                token_usage = await self._resolve_usage_with_fallback(
+                    usage=token_usage,
+                    messages=messages,
+                    assistant_msg=assistant_msg,
+                    model_info=model_info,
+                    tools=tool_schemas or None,
+                )
 
             assistant_msg.input_tokens = token_usage.input_tokens
             assistant_msg.cached_input_tokens = token_usage.cached_input_tokens
             assistant_msg.output_tokens = token_usage.output_tokens
             assistant_msg.usage_source = token_usage.usage_source
+            provenance = "observed" if token_usage.usage_source == TokenUsageSource.PROVIDER else "estimated"
+            await report_usage(provenance, token_usage)
 
             # 如果没有工具调用，则结束这一轮（也结束整个循环）
             if not event_interpreter.tool_calls:
@@ -463,7 +520,7 @@ class QueryLoopRuntime:
         try:
             if not is_resumed_tool_step:
                 # 请求取消检查点
-                if cancel_requested is not None and await cancel_requested():
+                if await bindings.is_cancel_requested():
                     raise asyncio.CancelledError
 
                 # 把tool_invocations 分组为 approval_required, server, client
@@ -514,9 +571,11 @@ class QueryLoopRuntime:
                     # 像等待后端工具一样等待前端结果
                     response = await self._frontend_tool_response_broker.receive(
                         response_wait,
-                        cancel_requested=cancel_requested,
+                        cancel_requested=bindings.is_cancel_requested,
                     )
                     if response is None:
+                        if bindings.close_children is not None:
+                            await bindings.close_children()
                         # 未能等待到结果，中断请求，挂起当前应用
                         yield StepFinishEvent(
                             is_finished=False,
@@ -536,7 +595,7 @@ class QueryLoopRuntime:
                     client_tool_results=resolved_client_results,
                     tool_approval_status=resolved_approval_status,
                     tool_scope=tool_scope,
-                    cancel_requested=cancel_requested,
+                    bindings=bindings,
                 ))
             else: # 当前有客户端工具的调用结果和工具批准状态
                 # 无需再为每个 parsed tool_call 产生两阶段 input 事件（历史上已经产生了）
@@ -547,7 +606,7 @@ class QueryLoopRuntime:
                     client_tool_results=client_tool_results,
                     tool_approval_status=tool_approval_status,
                     tool_scope=tool_scope,
-                    cancel_requested=cancel_requested,
+                    bindings=bindings,
                 ))
 
             for result in tool_outputs:
@@ -593,7 +652,7 @@ class QueryLoopRuntime:
         client_tool_results: list[ClientToolResult] | None,
         tool_approval_status: list[ToolApprovalStatus] | None,
         tool_scope: ToolScope,
-        cancel_requested: Callable[[], Awaitable[TurnCancelSignal | None]] | None,
+        bindings: ExecutionBindings,
     ) -> list[ToolExecutionResult]:
         """执行当前工具调用"""
         tool_outputs: list[ToolExecutionResult] = []
@@ -601,16 +660,16 @@ class QueryLoopRuntime:
         # 执行服务端工具
         if classified_tool_invocations.server_tools:
             # 请求取消检查点
-            if cancel_requested is not None and await cancel_requested():
+            if await bindings.is_cancel_requested():
                 raise asyncio.CancelledError
             # dispatch 并发执行并归约结果
-            output = await self._tool_dispatcher.dispatch(classified_tool_invocations.server_tools, tool_scope)
+            output = await self._tool_dispatcher.dispatch(classified_tool_invocations.server_tools, tool_scope, bindings=bindings)
             tool_outputs.extend(output)
 
         # 执行已审批的工具
         if classified_tool_invocations.approval_required_tools:
             # 请求取消检查点
-            if cancel_requested is not None and await cancel_requested():
+            if await bindings.is_cancel_requested():
                 raise asyncio.CancelledError
             # 检查审批状态
             if tool_approval_status is None: tool_approval_status = []
@@ -620,13 +679,13 @@ class QueryLoopRuntime:
                     False,
                 )
             # dispatch 并发执行并归约结果
-            output = await self._tool_dispatcher.dispatch(classified_tool_invocations.approval_required_tools, tool_scope)
+            output = await self._tool_dispatcher.dispatch(classified_tool_invocations.approval_required_tools, tool_scope, bindings=bindings)
             tool_outputs.extend(output)
 
         # 执行客户端工具（组装结果）
         if classified_tool_invocations.client_tools:
             # 请求取消检查点
-            if cancel_requested is not None and await cancel_requested():
+            if await bindings.is_cancel_requested():
                 raise asyncio.CancelledError
             if client_tool_results is None: client_tool_results = []
             # client_dispatch 并发执行并归约结果
@@ -697,6 +756,7 @@ class QueryLoopRuntime:
         messages: list[ChatMessage],
         model_info: ModelRequestInfo,
         llm_provider: LLMProvider,
+        bindings: ExecutionBindings,
     ) -> AsyncIterator[StreamEvent]:
         """Agent 循环超出最大迭代次数时优雅收尾
         不带工具地做最后一次推理，合成最终回答
@@ -716,23 +776,47 @@ class QueryLoopRuntime:
         assistant_content = ""
         token_usage = TokenUsage()
         provider_payload = None
+        request_id = f"request_{uuid.uuid4().hex}"
+        usage_observed = False
+        generation_failed = False
 
         yield StepStartEvent()
         yield TextStartEvent(text_id=text_id)
         try:
-            async for event in llm_provider.stream_chat_completion(
-                messages=force_messages,
-                model_request=model_info,
-                tools=None, # 强制不带工具
-            ):
-                if event.type == LLMEventType.USAGE and event.usage:
-                    token_usage.add(event.usage)
-                elif event.type == LLMEventType.STATE:
-                    provider_payload = event.provider_payload
-                elif event.type == LLMEventType.TEXT_DELTA and event.delta:
-                    assistant_content += event.delta
-                    yield TextDeltaEvent(text_id=text_id, delta=event.delta)
+            async with aclosing(self._model_events(llm_provider, force_messages, model_info, None, bindings)) as stream:
+                async for event in stream:
+                    if event.type == LLMEventType.USAGE and event.usage:
+                        usage_observed = True
+                        token_usage.add(event.usage)
+                    if (signal := await bindings.get_cancel_signal()) is not None:
+                        raise TurnCancelledError(signal)
+                    if event.type == LLMEventType.STATE:
+                        provider_payload = event.provider_payload
+                    elif event.type == LLMEventType.TEXT_DELTA and event.delta:
+                        assistant_content += event.delta
+                        yield TextDeltaEvent(text_id=text_id, delta=event.delta)
+            if bindings.review_model_output is not None and (signal := await bindings.get_cancel_signal()) is not None:
+                raise TurnCancelledError(signal)
+        except asyncio.CancelledError as exc:
+            if bindings.record_usage is not None:
+                await bindings.record_usage(
+                    request_id=request_id, model_info=model_info,
+                    provenance="observed" if usage_observed else "unknown",
+                    token_usage=token_usage if usage_observed else None,
+                )
+            yield TextEndEvent(text_id=text_id)
+            signal = exc.signal if isinstance(exc, TurnCancelledError) else await bindings.get_cancel_signal()
+            aborted_messages = []
+            if signal is not None and signal.reason == TurnCancelReason.CONTENT_SAFETY:
+                content, metadata = _cancelled_reply(assistant_content, signal)
+                aborted_messages.append(ChatMessage(
+                    session_id=session_id, role=Role.ASSISTANT, model_info=MessageModelInfo.from_model_request(model_info),
+                    content=content, metadata=metadata,
+                ))
+            yield StepFinishEvent(is_finished=False, intermediate_messages=aborted_messages, token_usage=token_usage, aborted=True)
+            return
         except Exception as exc:
+            generation_failed = True
             warn("chat force-finish stream failed.", session_id=session_id, exc=exc)
         yield TextEndEvent(text_id=text_id)
 
@@ -742,18 +826,29 @@ class QueryLoopRuntime:
             model_info=MessageModelInfo.from_model_request(model_info),
             content=assistant_content or "已达到本轮步数上限",
             provider_payload=provider_payload,
+            metadata={"incomplete": True},
         )
-        token_usage = await self._resolve_usage_with_fallback(
-            usage=token_usage,
-            messages=force_messages,
-            assistant_msg=final_message,
-            model_info=model_info,
-            tools=None,
-        )
+        reported_usage = token_usage if usage_observed else None
+        if not (usage_observed and token_usage.total_tokens == 0 and bindings.record_usage is not None):
+            token_usage = await self._resolve_usage_with_fallback(
+                usage=token_usage,
+                messages=force_messages,
+                assistant_msg=final_message,
+                model_info=model_info,
+                tools=None,
+            )
         final_message.input_tokens = token_usage.input_tokens
         final_message.cached_input_tokens = token_usage.cached_input_tokens
         final_message.output_tokens = token_usage.output_tokens
         final_message.usage_source = token_usage.usage_source
+        if bindings.record_usage is not None:
+            recorded_usage = reported_usage if generation_failed else token_usage
+            await bindings.record_usage(
+                request_id=request_id, model_info=model_info, token_usage=recorded_usage,
+                provenance=("unknown" if recorded_usage is None else "observed"
+                            if recorded_usage.usage_source == TokenUsageSource.PROVIDER else "estimated"),
+            )
+        messages.append(final_message)
 
         yield StepFinishEvent(
             is_finished=True,
