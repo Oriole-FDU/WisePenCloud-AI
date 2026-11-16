@@ -217,5 +217,4 @@ class UserClient:
             )
         return [UserTaskStatus.model_validate(item) for item in data]
 
-
 __all__ = ["UserClient"]

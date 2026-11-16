@@ -28,8 +28,8 @@ def get_tool_meta_names() -> set[str]:
 def assert_tool_meta_consistent(registered_tool_names: set[str]) -> None:
     """校验每个已声明的 meta 都能匹配到真实注册的工具
 
-    工具可以暂时没有 meta（即尚未暴露给 Chat 的新工具）；但一旦声明了 meta，
-    其 tool_name 必须命中一个真实注册的 FastMCP 工具，否则说明 name 漂移。
+    工具可以暂时没有 meta（即尚未暴露给 Chat 的新工具）；但一旦声明了 meta
+    其 tool_name 必须命中一个真实注册的 FastMCP 工具，否则说明 name 漂移
     """
     meta_names = get_tool_meta_names()
     missing_tool = sorted(meta_names - registered_tool_names)

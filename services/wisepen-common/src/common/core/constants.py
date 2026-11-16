@@ -5,6 +5,8 @@ class SecurityConstants:
     HEADER_USER_STATUS = "X-User-Status"
     HEADER_GROUP_ROLE_MAP = "X-Group-Role-Map"
     HEADER_FROM_SOURCE = "X-From-Source"
+    HEADER_MCP_AUDIENCE = "X-Mcp-Audience"
+    HEADER_MCP_CAPABILITIES = "X-Mcp-Capabilities"
 
 class CommonConstants:
     GRAY_METADATA_DEV_KEY = "developer"

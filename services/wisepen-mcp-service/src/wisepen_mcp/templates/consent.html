@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>WisePen MCP 授权</title>
+</head>
+<body>
+<h1>授权第三方 MCP 客户端</h1>
+<p>登录用户：{{ user_id }}</p>
+<p>请选择允许该客户端使用的能力（默认全部勾选）：</p>
+<form method="post" action="/oauth/authorize">
+<input type="hidden" name="client_id" value="{{ client_id }}">
+<input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
+<input type="hidden" name="code_challenge" value="{{ code_challenge }}">
+<input type="hidden" name="code_challenge_method" value="{{ code_challenge_method }}">
+<input type="hidden" name="state" value="{{ state }}">
+{% for cap in capabilities %}
+<label><input type="checkbox" name="capability" value="{{ cap.key }}" checked> {{ cap.label }}</label><br>
+{% endfor %}
+<p><button type="submit">授权</button></p>
+</form>
+</body>
+</html>

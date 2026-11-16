@@ -72,6 +72,27 @@ class SecurityContextHolder:
             return GroupRoleType.NOT_MEMBER
         return SecurityContextHolder.get_group_role_map().get(group_id, GroupRoleType.NOT_MEMBER)
 
+    @staticmethod
+    def set_mcp_audience(audience: str | None):
+        SecurityContextHolder._set("mcp_audience", audience)
+
+    @staticmethod
+    def get_mcp_audience() -> Optional[str]:
+        return SecurityContextHolder._get("mcp_audience")
+
+    @staticmethod
+    def set_mcp_capabilities(raw: str | None):
+        caps = {c.strip() for c in raw.split(",") if c and c.strip()} if raw else set()
+        SecurityContextHolder._set("mcp_capabilities", caps)
+
+    @staticmethod
+    def get_mcp_capabilities() -> set[str]:
+        return SecurityContextHolder._get("mcp_capabilities") or set()
+
+    @staticmethod
+    def is_external_mcp() -> bool:
+        return SecurityContextHolder.get_mcp_audience() == "external"
+
     # assert 系列：校验失败直接 raise PermissionException
 
     @staticmethod

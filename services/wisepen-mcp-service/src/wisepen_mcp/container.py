@@ -1,3 +1,4 @@
+import redis.asyncio as aioredis
 from dependency_injector import containers, providers
 from v2.nacos import NacosNamingService
 
@@ -53,6 +54,14 @@ class Container(containers.DeclarativeContainer):
         UserClient,
         rpc=rpc_client,
     )
+    redis = aioredis.Redis(
+        host=settings.redis.host,
+        port=settings.redis.port,
+        password=settings.redis.password or None,
+        db=settings.redis.db,
+        decode_responses=True,
+    )
+    redis_client = providers.Singleton(redis)
 
 
 container = Container()

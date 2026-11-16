@@ -36,6 +36,12 @@ class SecurityHeaderMiddleware(BaseHTTPMiddleware):
         if developer:
             GrayContextHolder.set_developer_tag(developer)
 
+        # 提取外部 MCP 上下文
+        mcp_audience = request.headers.get(SecurityConstants.HEADER_MCP_AUDIENCE)
+        if mcp_audience:
+            SecurityContextHolder.set_mcp_audience(mcp_audience)
+            SecurityContextHolder.set_mcp_capabilities(request.headers.get(SecurityConstants.HEADER_MCP_CAPABILITIES))
+
         try:
             response = await call_next(request)
         finally:

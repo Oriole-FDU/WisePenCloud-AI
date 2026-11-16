@@ -2,6 +2,7 @@ __all__ = []
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from wisepen_mcp.capabilities.agent_resource import register_agent_resource_tools
+from wisepen_mcp.capabilities.capability import apply_capability_guard, apply_list_tools_filter
 from wisepen_mcp.capabilities.resource import register_resource_tools
 from wisepen_mcp.capabilities.document_resource import register_document_resource_tools
 from wisepen_mcp.capabilities.group import register_group_tools
@@ -30,6 +31,7 @@ def build_mcp_server(
             enable_dns_rebinding_protection=False
         ),
     )
+    apply_capability_guard(mcp)
     register_skill_resource_tools(mcp, ai_asset_client)
     register_agent_resource_tools(mcp, ai_asset_client)
     register_note_resource_tools(mcp, note_collab_client, resource_client, note_client)
@@ -38,6 +40,7 @@ def build_mcp_server(
     register_group_tools(mcp, user_client)
     register_user_tools(mcp, user_client)
     register_web_search_tools(mcp)
+    apply_list_tools_filter(mcp)
     return mcp
 
 

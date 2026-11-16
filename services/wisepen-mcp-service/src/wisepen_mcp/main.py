@@ -21,9 +21,11 @@ from common.mcp import assert_tool_meta_consistent, build_tool_meta_router
 from common.web.exception_handlers import setup_global_exception_handlers
 from common.web.middleware import SecurityHeaderMiddleware
 from wisepen_mcp.capabilities import build_mcp_server
+from wisepen_mcp.capabilities.capability import assert_capability_consistent
 from wisepen_mcp.container import container
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.core.config.nacos import nacos_client_manager
+from wisepen_mcp.oauth import build_oauth_router
 
 no_proxy = ",".join(filter(None, [
     os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "",
@@ -50,6 +52,7 @@ async def lifespan(app: FastAPI):
     async with mcp_server.session_manager.run():
         tools = await mcp_server.list_tools()
         assert_tool_meta_consistent({tool.name for tool in tools})
+        assert_capability_consistent({tool.name for tool in tools})
         try:
             await nacos_client_manager.register_instance()
         except Exception as e:
@@ -63,6 +66,10 @@ async def lifespan(app: FastAPI):
             await container.rpc_client().aclose()
         except Exception as e:
             error("rpc client close failed.", exc=e)
+        try:
+            await container.redis_client().aclose()
+        except Exception as e:
+            error("redis client close failed.", exc=e)
         try:
             await container.service_discovery().close()
         except Exception as e:
@@ -85,6 +92,7 @@ async def health() -> dict[str, str]:
 
 
 app.include_router(build_tool_meta_router())
+app.include_router(build_oauth_router(container.redis_client()))
 
 
 app.mount("/mcp", mcp_app)

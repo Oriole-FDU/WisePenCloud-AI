@@ -59,6 +59,19 @@ class WebSearchSettings(ConfigModel):
     )
 
 
+class RedisSettings(ConfigModel):
+    host: str = Field(default="127.0.0.1", min_length=1)
+    port: int = Field(default=6379, gt=0)
+    password: str = ""
+    db: int = Field(default=0, ge=0)
+
+
+class McpOAuthSettings(ConfigModel):
+    code_ttl_seconds: int = Field(default=60, gt=0)
+    access_token_ttl_seconds: int = Field(default=3600, gt=0)
+    refresh_token_ttl_seconds: int = Field(default=2592000, gt=0)
+
+
 class McpServiceSettings(ConfigModel):
     security: InternalSecuritySettings
     rpc: RpcSettings = Field(default_factory=RpcSettings)
@@ -66,3 +79,5 @@ class McpServiceSettings(ConfigModel):
         default_factory=ServiceDiscoverySettings
     )
     web_search: WebSearchSettings
+    oauth: McpOAuthSettings
+    redis: RedisSettings = Field(default_factory=RedisSettings)
