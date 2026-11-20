@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from base64 import b64encode
 from collections.abc import Mapping
 from typing import Annotated
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ImageContent, TextContent
 from pydantic import Field, TypeAdapter
 
 from common.mcp import (
@@ -42,6 +44,7 @@ from sandbox.domain.interfaces import (
 )
 
 MAX_COMMAND_TIMEOUT_SECONDS = 600
+MAX_PYTHON_SOURCE_CHARS = 16_384
 MAX_PATH_LENGTH = 1024
 MAX_WRITE_CONTENT_CHARS = 1_000_000
 
@@ -182,6 +185,41 @@ def create_sandbox_mcp_server(
         )
         return _result(task)
 
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="run_python",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=620.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="运行沙箱 Python"),
+        output_cache_spec=_ITEMS_COMMAND_OUTPUT_CACHE,
+        failure_reason="Sandbox Python Execution Failed",
+    ))
+    @mcp.tool(
+        name="run_python",
+        description=("Run raw multiline Python in the current session workspace with no interactive input. "
+                     "Pass Python directly as source, without Markdown fences or shell quoting."),
+    )
+    async def run_python(
+        ctx: Context,
+        source: Annotated[str, Field(min_length=1, max_length=MAX_PYTHON_SOURCE_CHARS,
+                                     description="Raw Python source, without Markdown fences.")],
+        timeout_seconds: Annotated[int, Field(ge=1, le=MAX_COMMAND_TIMEOUT_SECONDS)] = 30,
+    ) -> dict[str, str | int | bool | None]:
+        # AIO 的命令接口只接收 Bash 文本，源码编码为受长度限制的 ASCII 数据。
+        # 解码后的源码经 stdin 交给 Python，Bash 不解析源码里的引号、换行或变量。
+        payload = b64encode(source.encode("utf-8")).decode("ascii")
+        task = await task_service.execute_command(
+            user_id=str(get_tool_context_value(ctx, "user_id")),
+            session_id=str(get_tool_context_value(ctx, "session_id")),
+            command=f"printf '%s' '{payload}' | base64 -d | python3 -X utf8 -u -",
+            timeout_seconds=timeout_seconds,
+        )
+        return _result(task)
+
     if file_service is None:
         return mcp
 
@@ -211,6 +249,40 @@ def create_sandbox_mcp_server(
             path=file,
             start_line=start_line, end_line=end_line,
         )
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="view_image",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="查看沙箱图片"),
+        failure_reason="Sandbox Image Read Failed",
+    ))
+    @mcp.tool(
+        name="view_image",
+        description=("View a PNG, JPEG, WebP, GIF, BMP, TIFF, ICO or AVIF in the current sandbox workspace. "
+                     "For animated or multi-page images, view the first frame."),
+        structured_output=False,
+    )
+    async def view_image(
+        ctx: Context,
+        path: Annotated[str, Field(min_length=1, max_length=MAX_PATH_LENGTH,
+                                   description="Workspace-relative image path.")],
+    ) -> list[TextContent | ImageContent]:
+        name, source_format, mime_type, data = await file_service.read_image(
+            user_id=str(get_tool_context_value(ctx, "user_id")),
+            session_id=str(get_tool_context_value(ctx, "session_id")),
+            path=path,
+        )
+        # 图片作为 MCP 内容块传给模型，文本回执只保留工作区路径。
+        return [
+            TextContent(type="text", text=f"Image: {name} ({source_format})"),
+            ImageContent(type="image", mimeType=mime_type, data=b64encode(data).decode("ascii")),
+        ]
 
     @wisepen_mcp_meta(ToolMeta(
         tool_name="write_file",

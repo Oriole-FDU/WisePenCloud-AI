@@ -9,7 +9,7 @@ from chat.domain.entities import Skill, SkillAssetMeta, SkillMeta
 
 
 BUILTIN_SKILL_ID_PREFIX = "builtin:"
-BUILTIN_SKILLS_DIR = Path(__file__).resolve().parents[4] / "builtin_skills"
+BUILTIN_SKILLS_DIR = Path(__file__).resolve().parents[2] / "builtin_skills"
 
 _BUILTIN_ASSET_KIND_BY_SUFFIX = {
     ".md": "MD",

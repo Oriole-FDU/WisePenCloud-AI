@@ -12,3 +12,4 @@ class SandboxErrorCode(IErrorCode):
     FILE_TOO_LARGE = (46007, "文件超过沙箱传输大小上限")
     ATTACHMENT_UNAVAILABLE = (46008, "附件不存在、已删除或不属于当前会话")
     FILE_TYPE_UNSUPPORTED = (46009, "文件类型不支持上传为云盘资源")
+    IMAGE_TYPE_UNSUPPORTED = (46010, "图片损坏或格式不支持，支持 PNG、JPEG、WebP、GIF、BMP、TIFF、ICO、AVIF")
