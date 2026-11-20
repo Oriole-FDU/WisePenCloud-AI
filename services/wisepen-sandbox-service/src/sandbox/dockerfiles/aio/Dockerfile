@@ -40,7 +40,11 @@ RUN apt-get update \
       pandoc \
       poppler-utils \
       ripgrep \
+      fontconfig \
       fonts-noto-cjk \
+      fonts-liberation \
+      fonts-crosextra-carlito \
+      fonts-crosextra-caladea \
       qpdf \
       tesseract-ocr \
       tesseract-ocr-chi-sim \
@@ -50,6 +54,26 @@ RUN apt-get update \
       mupdf-tools \
       default-jre-headless \
  && rm -rf /var/lib/apt/lists/*
+
+# 构建时编译最小样例，确认中文宏包、字体发现和 PDF 字体嵌入都已就绪。
+RUN <<'SH'
+set -eu
+apt-get update
+apt-get install -y --no-install-recommends texlive-xetex texlive-lang-chinese
+rm -rf /var/lib/apt/lists/*
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+cd "$scratch"
+printf '%s\n' \
+  '\documentclass[UTF8,fontset=none]{ctexart}' \
+  '\setCJKmainfont{Noto Serif CJK SC}' \
+  '\begin{document}中文 $E=mc^2$\end{document}' > smoke.tex
+if ! xelatex -no-shell-escape -interaction=nonstopmode -halt-on-error smoke.tex > xelatex.log; then
+    cat xelatex.log
+    exit 1
+fi
+pdffonts smoke.pdf | awk '$1 ~ /NotoSerifCJK/ && $(NF-4) == "yes" { found=1 } END { exit !found }'
+SH
 
 # ---- Python 库（pip） ----
 #   python-docx：读写 Microsoft Word（.docx）文档。
