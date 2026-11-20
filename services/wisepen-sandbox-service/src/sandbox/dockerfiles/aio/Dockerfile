@@ -39,6 +39,8 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       pandoc \
       poppler-utils \
+      ripgrep \
+      fonts-noto-cjk \
       qpdf \
       tesseract-ocr \
       tesseract-ocr-chi-sim \
@@ -86,7 +88,8 @@ RUN pip install \
       reportlab img2pdf pdfkit \
       markitdown \
       pytesseract pdf2image pillow opencv-python-headless \
-      lxml beautifulsoup4 markdownify defusedxml Jinja2 Markdown
+      lxml beautifulsoup4 markdownify defusedxml Jinja2 Markdown \
+      xlrd --only-binary=firecrawl-anydoc firecrawl-anydoc==0.2.5
 
 # 恢复基础镜像的运行时用户，保证派生镜像的进程身份与基础镜像一致。
 ARG SANDBOX_RUNTIME_USER=root

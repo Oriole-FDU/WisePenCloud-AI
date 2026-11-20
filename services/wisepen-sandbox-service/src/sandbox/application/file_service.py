@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import PurePosixPath
 import re
 from tempfile import SpooledTemporaryFile
@@ -12,6 +13,7 @@ from typing import BinaryIO, Literal
 from urllib.parse import quote
 
 import httpx
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from common.core.exceptions import ServiceException, RpcError
 from common.logger import info, warn
@@ -55,6 +57,37 @@ _DOCUMENT_RESOURCE_TYPES = {
     "xlsx": "XLSX",
 }
 _WEB_APP_EXTENSIONS = frozenset({"html", "htm"})
+_MAX_VIEW_IMAGE_BYTES = 5 * 1024 * 1024
+_MAX_VIEW_IMAGE_PIXELS = 32_000_000
+_VIEW_IMAGE_FORMATS = ("PNG", "JPEG", "WEBP", "GIF", "BMP", "TIFF", "ICO", "AVIF")
+
+
+def _image_for_model(data: bytes) -> tuple[str, str, bytes]:
+    """解码单帧后统一输出模型适配器通用的图片类型。"""
+    try:
+        with Image.open(BytesIO(data), formats=_VIEW_IMAGE_FORMATS) as image:
+            if image.width * image.height > _MAX_VIEW_IMAGE_PIXELS:
+                raise ServiceException(SandboxErrorCode.FILE_TOO_LARGE, "图片像素数超过查看上限")
+            source_format = image.format
+            description = source_format
+            if getattr(image, "is_animated", False):
+                description += ", first frame"
+            with ImageOps.exif_transpose(image) as oriented, BytesIO() as output:
+                # 保留透明度。缩放后以 PNG 传递文字或图表，以 JPEG 传递 JPEG 原图。
+                oriented.thumbnail((2048, 2048))
+                if source_format == "JPEG":
+                    fmt, mode, mime_type = "JPEG", "RGB", "image/jpeg"
+                else:
+                    fmt, mode, mime_type = "PNG", "RGBA", "image/png"
+                with oriented.convert(mode) as preview:
+                    preview.save(output, format=fmt)
+                if output.tell() > _MAX_VIEW_IMAGE_BYTES:
+                    raise ServiceException(SandboxErrorCode.FILE_TOO_LARGE, "图片预览超过传输上限，请先裁剪")
+                return description, mime_type, output.getvalue()
+    except Image.DecompressionBombError as exc:
+        raise ServiceException(SandboxErrorCode.FILE_TOO_LARGE, "图片像素数超过查看上限") from exc
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError) as exc:
+        raise ServiceException(SandboxErrorCode.IMAGE_TYPE_UNSUPPORTED) from exc
 
 
 class TemporaryAttachment(BaseModel):
@@ -142,6 +175,17 @@ class SandboxFileService:
         return result.model_copy(update={
             "path": self._relative_provider_path(workspace.workspace_path, result.path),
         })
+
+    async def read_image(self, *, user_id: str, session_id: str, path: str) -> tuple[str, str, str, bytes]:
+        """按会话读取一张图片，字节预算在 AIO 传输时生效。"""
+        async with self._open_workspace_file(
+            user_id=user_id, session_id=session_id, path=path, max_bytes=_MAX_VIEW_IMAGE_BYTES,
+        ) as image:
+            image_path = image.path
+            data = image.source.read()
+        # 解码线程只持有字节，MCP 请求取消时无需等待临时文件的使用者退出。
+        description, mime_type, preview = await asyncio.to_thread(_image_for_model, data)
+        return image_path, description, mime_type, preview
 
     async def write_file(
         self,
@@ -567,6 +611,7 @@ class SandboxFileService:
         user_id: str,
         session_id: str,
         path: str,
+        max_bytes: int | None = None,
     ) -> AsyncIterator[_WorkspaceFile]:
         async with self._workspace_lease(user_id, session_id) as (workspace, sandbox):
             absolute_path, relative_path = self._resolve_workspace_path(workspace.workspace_path, path)
@@ -586,7 +631,8 @@ class SandboxFileService:
                         sandbox.base_url,
                         absolute_path,
                         temporary_file,
-                        settings.file_transfer.max_bytes,
+                        min(max_bytes, settings.file_transfer.max_bytes)
+                        if max_bytes is not None else settings.file_transfer.max_bytes,
                         provider_metadata=sandbox.metadata or {},
                     )
                     yield _WorkspaceFile(
