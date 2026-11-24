@@ -151,6 +151,7 @@ class ToolCategoryRouter:
             self._client = AsyncTypeSafeClient(
                 api_key=config.api_key,
                 base_url=config.base_url,
+                model=config.model,
                 timeout=config.timeout_seconds,
             )
             self._decision = DecisionClient(client=self._client)

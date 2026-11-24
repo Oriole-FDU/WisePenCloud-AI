@@ -170,6 +170,7 @@ class DecisionModelClient(SafetyClassifier):
             self._client = AsyncTypeSafeClient(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
+                model=self.config.model,
                 timeout=self.config.timeout_seconds,
             )
             self._decision = DecisionClient(client=self._client)
