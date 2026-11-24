@@ -23,6 +23,7 @@ class ToolScope:
         context: dict[str, Any] | None,
         configs: dict[str, dict[str, Any]] | None = None,
         client_tool_capabilities: list[ClientToolCapability] | None = None,
+        candidate_tools: dict[str, Tool] | None = None,
     ) -> None:
         self._tools = dict(tools)
         self._context = dict(context or {})
@@ -37,6 +38,8 @@ class ToolScope:
             for client_tool_capability in (client_tool_capabilities or [])
             if client_tool_capability.name in self._tools
         ]
+        # 本轮可选但未加载的工具全集，供动态加载
+        self._candidate_tools = dict(candidate_tools) if candidate_tools is not None else {}
 
     def schemas(self) -> list[dict[str, Any]]:
         return [
@@ -50,6 +53,33 @@ class ToolScope:
             self._suppressed_schema_tool_names.update(tool_names)
         else:
             self._suppressed_schema_tool_names.difference_update(tool_names)
+
+    def expose_category(self, category: str) -> list[dict[str, str]]:
+        """供 list_more_tools 使用把指定类别的工具动态加入本轮作用域，返回新加入的工具名与描述"""
+        added: list[dict[str, str]] = []
+        for name, tool in self._candidate_tools.items():
+            if tool.definition.policy.category != category:
+                continue
+            if name in self._tools:
+                continue
+            # 加入工具调用
+            self._tools[name] = tool
+            self._schemas[name] = schema_renderer(tool.definition.llm_spec)
+            added.append({
+                "name": name,
+                "description": tool.definition.llm_spec.description,
+            })
+        return added
+
+    def available_categories(self) -> list[dict[str, Any]]:
+        """返回当前可选但未加载的类别及其工具数，供 list_more_tools 发现类别"""
+        counts: dict[str, int] = {}
+        for name, tool in self._candidate_tools.items():
+            if name in self._tools:
+                continue
+            category = tool.definition.policy.category
+            counts[category] = counts.get(category, 0) + 1
+        return [{"category": category, "tool_count": count} for category, count in sorted(counts.items())]
 
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
@@ -160,6 +190,7 @@ class ToolRegistry:
             tools[client_tool_capability.name] = client_tool_from_capability(client_tool_capability)
 
         filtered_tools: dict[str, Tool] = {}
+        candidate_tools: dict[str, Tool] = {}  # 可供 list_more_tools 动态加载的全集
         # 处理工具配置
         configured_tool_name_set, tool_configs = await self._resolve_tool_config(user_id, tools)
         for name, tool in tools.items():
@@ -191,12 +222,6 @@ class ToolRegistry:
             if policy.required_allowed_builtin_skill_ids and not skill_exposure_satisfaction: # 暴露的技能不满足工具要求
                 continue
 
-            # 工具类别路由
-            # 非 resident 类别的工具，仅当本轮命中该类别（或显式暴露）时加载
-            if routed_categories is not None and policy.category != "resident":
-                if policy.category not in routed_categories and not explicitly_exposed:
-                    continue
-
             # CONTEXTUAL 工具必须靠 explicitly_exposed 显式启用 或 加载了要求的 Skill
             if policy.selection_mode == ToolSelectionMode.CONTEXTUAL:
                 if explicitly_exposed or skill_exposure_satisfaction: filtered_tools[name] = tool
@@ -206,10 +231,21 @@ class ToolRegistry:
             if not policy.expose_by_default:
                 if explicitly_exposed or skill_exposure_satisfaction: filtered_tools[name] = tool
                 continue
+
+            # 通过过滤的工具进入候选全集
+            candidate_tools[name] = tool
+
+            # 工具类别路由
+            # 非 resident 类别的工具，仅当本轮命中该类别（或显式暴露）时加载
+            if routed_categories is not None and policy.category != "resident":
+                if policy.category not in routed_categories and not explicitly_exposed:
+                    continue
+
             filtered_tools[name] = tool
 
         return ToolScope(
             tools=filtered_tools,
+            candidate_tools=candidate_tools,
             context=context,
             configs=tool_configs,
             client_tool_capabilities=client_tool_capabilities,
