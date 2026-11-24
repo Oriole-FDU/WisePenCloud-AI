@@ -1,17 +1,39 @@
 from mcp.server.fastmcp import FastMCP
+from wisepen_mcp.capabilities.resource.add_inline_comment_item import register_add_inline_comment_item_tool
+from wisepen_mcp.capabilities.resource.change_group_resource_config import register_change_group_resource_config_tool
+from wisepen_mcp.capabilities.resource.change_inline_comment_resolve_status import register_change_inline_comment_resolve_status_tool
+from wisepen_mcp.capabilities.resource.change_resource_action_permission import register_change_resource_action_permission_tool
+from wisepen_mcp.capabilities.resource.change_resource_favorite_status import register_change_resource_favorite_status_tool
+from wisepen_mcp.capabilities.resource.create_comment import register_create_comment_tool
+from wisepen_mcp.capabilities.resource.create_comment_reply import register_create_comment_reply_tool
+from wisepen_mcp.capabilities.resource.create_favorite_collection import register_create_favorite_collection_tool
 from wisepen_mcp.capabilities.resource.create_folder import register_create_folder_tool
+from wisepen_mcp.capabilities.resource.delete_comment_item import register_delete_comment_item_tool
+from wisepen_mcp.capabilities.resource.delete_favorite_collection import register_delete_favorite_collection_tool
+from wisepen_mcp.capabilities.resource.delete_inline_comment_item import register_delete_inline_comment_item_tool
+from wisepen_mcp.capabilities.resource.get_group_resource_config import register_get_group_resource_config_tool
 from wisepen_mcp.capabilities.resource.get_resource_base_info import register_get_resource_base_info_tool
+from wisepen_mcp.capabilities.resource.get_resource_favorite_status import register_get_resource_favorite_status_tool
 from wisepen_mcp.capabilities.resource.get_resource_tag_tree import register_get_resource_tag_tree_tool
+from wisepen_mcp.capabilities.resource.get_resource_user_interaction_record import register_get_resource_user_interaction_record_tool
+from wisepen_mcp.capabilities.resource.list_comment_replies import register_list_comment_replies_tool
+from wisepen_mcp.capabilities.resource.list_comments import register_list_comments_tool
+from wisepen_mcp.capabilities.resource.list_favorite_collections import register_list_favorite_collections_tool
+from wisepen_mcp.capabilities.resource.list_favorited_resources import register_list_favorited_resources_tool
+from wisepen_mcp.capabilities.resource.list_inline_comments import register_list_inline_comments_tool
 from wisepen_mcp.capabilities.resource.list_resources import register_list_resources_tool
 from wisepen_mcp.capabilities.resource.mount_resources_to_group import register_mount_resources_to_group_tool
 from wisepen_mcp.capabilities.resource.move_folders import register_move_folders_tool
 from wisepen_mcp.capabilities.resource.move_resources_in_group import register_move_resources_in_group_tool
 from wisepen_mcp.capabilities.resource.move_resources_to_folder import register_move_resources_to_folder_tool
 from wisepen_mcp.capabilities.resource.move_resources_to_trash import register_move_resources_to_trash_tool
-from wisepen_mcp.capabilities.resource.rename_folder import register_rename_folder_tool
+from wisepen_mcp.capabilities.resource.remove_folders import register_remove_folders_tool
 from wisepen_mcp.capabilities.resource.rename_resource import register_rename_resource_tool
 from wisepen_mcp.capabilities.resource.search_resources import register_search_resources_tool
 from wisepen_mcp.capabilities.resource.unmount_resources_from_group import register_unmount_resources_from_group_tool
+from wisepen_mcp.capabilities.resource.update_favorite_collection_info import register_update_favorite_collection_info_tool
+from wisepen_mcp.capabilities.resource.update_folder import register_update_folder_tool
+from wisepen_mcp.capabilities.resource.update_inline_comment_item import register_update_inline_comment_item_tool
 from wisepen_mcp.service_client import ResourceClient
 
 
@@ -24,14 +46,36 @@ def register_resource_tools(
     register_list_resources_tool(mcp, resource_client)
     register_get_resource_base_info_tool(mcp, resource_client)
     register_create_folder_tool(mcp, resource_client)
-    register_rename_folder_tool(mcp, resource_client)
+    register_update_folder_tool(mcp, resource_client)
     register_move_folders_tool(mcp, resource_client)
+    register_remove_folders_tool(mcp, resource_client)
     register_rename_resource_tool(mcp, resource_client)
     register_move_resources_to_folder_tool(mcp, resource_client)
     register_mount_resources_to_group_tool(mcp, resource_client)
     register_move_resources_in_group_tool(mcp, resource_client)
     register_unmount_resources_from_group_tool(mcp, resource_client)
     register_move_resources_to_trash_tool(mcp, resource_client)
+    register_change_resource_action_permission_tool(mcp, resource_client)
+    register_get_group_resource_config_tool(mcp, resource_client)
+    register_change_group_resource_config_tool(mcp, resource_client)
+    register_create_comment_tool(mcp, resource_client)
+    register_create_comment_reply_tool(mcp, resource_client)
+    register_delete_comment_item_tool(mcp, resource_client)
+    register_list_comments_tool(mcp, resource_client)
+    register_list_comment_replies_tool(mcp, resource_client)
+    register_list_inline_comments_tool(mcp, resource_client)
+    register_add_inline_comment_item_tool(mcp, resource_client)
+    register_update_inline_comment_item_tool(mcp, resource_client)
+    register_delete_inline_comment_item_tool(mcp, resource_client)
+    register_change_inline_comment_resolve_status_tool(mcp, resource_client)
+    register_get_resource_user_interaction_record_tool(mcp, resource_client)
+    register_change_resource_favorite_status_tool(mcp, resource_client)
+    register_list_favorite_collections_tool(mcp, resource_client)
+    register_create_favorite_collection_tool(mcp, resource_client)
+    register_update_favorite_collection_info_tool(mcp, resource_client)
+    register_delete_favorite_collection_tool(mcp, resource_client)
+    register_get_resource_favorite_status_tool(mcp, resource_client)
+    register_list_favorited_resources_tool(mcp, resource_client)
 
 
 __all__ = ["register_resource_tools"]

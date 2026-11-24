@@ -16,10 +16,15 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
         "apply_current_note_edits", "create_note", "read_current_note_for_edit", "read_note_resource_text",
     }),
     "resource": frozenset({
-        "create_folder", "get_resource_base_info", "get_resource_tag_tree", "list_resources",
+        "add_inline_comment_item", "change_group_resource_config", "change_inline_comment_resolve_status",
+        "change_resource_action_permission", "change_resource_favorite_status", "create_comment", "create_comment_reply",
+        "create_favorite_collection", "create_folder", "delete_comment_item", "delete_favorite_collection",
+        "delete_inline_comment_item", "get_group_resource_config", "get_resource_base_info", "get_resource_favorite_status",
+        "get_resource_tag_tree", "get_resource_user_interaction_record", "list_comment_replies", "list_comments",
+        "list_favorite_collections", "list_favorited_resources", "list_inline_comments", "list_resources",
         "mount_resources_to_group", "move_folders", "move_resources_in_group", "move_resources_to_folder",
-        "move_resources_to_trash", "rename_folder", "rename_resource", "search_resources",
-        "unmount_resources_from_group",
+        "move_resources_to_trash", "remove_folders", "rename_resource", "search_resources",
+        "unmount_resources_from_group", "update_favorite_collection_info", "update_folder", "update_inline_comment_item",
     }),
     "document_resource": frozenset({"get_document_source_file", "read_document_resource_text"}),
     "group": frozenset({

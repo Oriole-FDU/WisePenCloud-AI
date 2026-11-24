@@ -7,7 +7,7 @@ from common.mcp import ToolMeta, ToolPolicyMeta, ToolRiskLevel, ToolUISpecMeta, 
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
-from wisepen_mcp.domain.entities import TagCreateRequest
+from wisepen_mcp.domain.entities import AccessControlScope, ResourceAction, TagCreateRequest
 from wisepen_mcp.domain.error_codes import McpErrorCode
 from wisepen_mcp.service_client import ResourceClient
 
@@ -16,7 +16,7 @@ def register_create_folder_tool(mcp: FastMCP, resource_client: ResourceClient) -
     @wisepen_mcp_meta(ToolMeta(
         tool_name="create_folder",
         policy=ToolPolicyMeta(expose_by_default=True, risk_level=ToolRiskLevel.MEDIUM, timeout_seconds=15.0, persist_output=True),
-        ui_spec=ToolUISpecMeta(display_name="创建文件夹", description="创建文件夹。"),
+        ui_spec=ToolUISpecMeta(display_name="创建文件夹/标签", description="创建文件夹/标签。"),
         failure_reason="Folder Create Failed",
     ))
     @mcp.tool(
@@ -24,7 +24,9 @@ def register_create_folder_tool(mcp: FastMCP, resource_client: ResourceClient) -
         description=(
             "Create a new folder/tag node under a parent node in a Wisepen resource space. The new node inherits the "
             "parent's type, so pass a folder (is_path=true) tag_id from get_resource_tag_tree as parent_id to create a "
-            "folder. Leave group_id empty for the personal space, or pass a group_id (requires OWNER/ADMIN) for a group space."
+            "folder. Leave group_id empty for the personal space, or pass a group_id (requires OWNER/ADMIN) for a group space. "
+            "For group spaces, the optional permission fields control the tag's resource ACL grant scope, mount permission "
+            "scope and default granted actions; personal-space tags ignore and clear these permission settings."
         ),
     )
     async def create_folder(
@@ -36,6 +38,26 @@ def register_create_folder_tool(mcp: FastMCP, resource_client: ResourceClient) -
         group_id: Annotated[
             str | None,
             Field(description="Group id from list_groups; omit or pass empty for the personal space."),
+        ] = None,
+        granted_actions: Annotated[
+            list[ResourceAction] | None,
+            Field(description="Optional default actions granted to members matching this tag (group space only)."),
+        ] = None,
+        tagged_resource_acl_grant_scope: Annotated[
+            AccessControlScope | None,
+            Field(description="Optional resource ACL grant scope for this tag (group space only): ALL, ONLY_ADMIN, WHITELIST, BLACKLIST."),
+        ] = None,
+        tagged_resource_acl_grant_specified_users: Annotated[
+            list[str] | None,
+            Field(description="Optional user ids for WHITELIST/BLACKLIST resource ACL grant scope (group space only)."),
+        ] = None,
+        tag_mount_permission_scope: Annotated[
+            AccessControlScope | None,
+            Field(description="Optional mount permission scope for this tag (group space only): ALL, ONLY_ADMIN, WHITELIST, BLACKLIST."),
+        ] = None,
+        tag_mount_specified_users: Annotated[
+            list[str] | None,
+            Field(description="Optional user ids for WHITELIST/BLACKLIST mount permission scope (group space only)."),
         ] = None,
     ) -> dict[str, Any]:
         if not SecurityContextHolder.get_user_id():
@@ -50,7 +72,16 @@ def register_create_folder_tool(mcp: FastMCP, resource_client: ResourceClient) -
         resolved_group_id = group_id.strip() if group_id and group_id.strip() else None
 
         tag_id = await resource_client.create_tag(
-            request=TagCreateRequest(group_id=resolved_group_id, parent_id=parent_id, tag_name=name),
+            request=TagCreateRequest(
+                group_id=resolved_group_id,
+                parent_id=parent_id,
+                tag_name=name,
+                tagged_resource_acl_grant_scope=tagged_resource_acl_grant_scope,
+                tagged_resource_acl_grant_specified_users=tagged_resource_acl_grant_specified_users,
+                granted_actions=granted_actions,
+                tag_mount_permission_scope=tag_mount_permission_scope,
+                tag_mount_specified_users=tag_mount_specified_users,
+            ),
         )
         return {
             "tag_id": tag_id,

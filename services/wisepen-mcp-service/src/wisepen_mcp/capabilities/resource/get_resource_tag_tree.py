@@ -37,7 +37,7 @@ def register_get_resource_tag_tree_tool(mcp: FastMCP, resource_client: ResourceC
         description=(
             "Get the full folder/tag tree of a Wisepen resource space. Leave group_id empty for the current user's "
             "personal space, or pass a group_id (from list_groups) for a group space. The returned tag_id values are "
-            "used by list_resources, create_folder, rename_folder, move_folders, and the resource placement tools. "
+            "used by list_resources, create_folder, update_folder, move_folders, and the resource placement tools. "
             "Folder nodes have is_path=true."
         ),
     )

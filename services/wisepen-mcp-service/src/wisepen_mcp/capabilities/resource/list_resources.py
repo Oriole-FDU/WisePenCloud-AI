@@ -94,6 +94,8 @@ def register_list_resources_tool(mcp: FastMCP, resource_client: ResourceClient) 
                 "size": item.size,
                 "create_time": item.create_time,
                 "current_actions": item.current_actions,
+                "override_granted_actions": item.override_granted_actions,
+                "specified_users_granted_actions": item.specified_users_granted_actions,
                 "tag_binds": item.tag_binds,
                 "my_interaction_record": item.my_interaction_record,
                 "owner_info": item.owner_info,

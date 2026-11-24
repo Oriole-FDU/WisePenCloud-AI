@@ -5,17 +5,38 @@ from typing import Any, Mapping
 from common.core.exceptions import RpcError
 from common.http.rpc_client import RpcClient
 from wisepen_mcp.domain.entities import (
+    CommentCreateRequest,
+    CommentDeleteRequest,
+    CommentReplyCreateRequest,
+    FavoriteCollectionCreateRequest,
+    FavoriteCollectionDeleteRequest,
+    FavoriteCollectionInfoUpdateRequest,
+    FavoriteCollectionResponse,
+    FavoriteItemResponse,
+    GroupResConfigResponse,
+    GroupResConfigUpdateRequest,
+    InlineCommentItemCreateRequest,
+    InlineCommentItemDeleteRequest,
+    InlineCommentItemUpdateRequest,
+    InlineCommentResolveRequest,
     MountResourcesToGroupRequest,
     MovePersonalResourcesToTrashRequest,
     MoveResourcesInGroupRequest,
     PageResult,
     ResourceBaseInfo,
+    ResourceCommentItemResponse,
+    ResourceFavoriteRequest,
+    ResourceFavoriteStatusResponse,
+    ResourceInlineCommentResponse,
     ResourceItem,
     ResourcePlacementResult,
     ResourceRenameRequest,
+    ResourceUpdateActionPermissionRequest,
+    ResourceUserInteractionRecordResponse,
     SearchHitItem,
     SetPersonalResourcesPathTagRequest,
     TagCreateRequest,
+    TagDeleteRequest,
     TagMoveRequest,
     TagTreeNode,
     TagUpdateRequest,
@@ -38,6 +59,28 @@ _MOUNT_RESOURCES_TO_GROUP_PATH = "/resource/placement/mountResourcesToGroup"
 _MOVE_RESOURCES_IN_GROUP_PATH = "/resource/placement/moveResourcesInGroup"
 _UNMOUNT_RESOURCES_TO_GROUP_PATH = "/resource/placement/unmountResourcesToGroup"
 _MOVE_PERSONAL_RESOURCES_TO_TRASH_PATH = "/resource/placement/movePersonalResourcesToTrash"
+_CHANGE_RESOURCE_ACTION_PERMISSION_PATH = "/resource/item/changeResourceActionPermission"
+_REMOVE_TAGS_PATH = "/resource/tag/removeTags"
+_GET_GROUP_CONFIG_PATH = "/resource/groupConfig/getConfig"
+_CHANGE_GROUP_CONFIG_PATH = "/resource/groupConfig/changeConfig"
+_CREATE_COMMENT_PATH = "/resource/comment/createComment"
+_CREATE_REPLY_PATH = "/resource/comment/createReply"
+_DELETE_COMMENT_ITEM_PATH = "/resource/comment/deleteCommentItem"
+_LIST_COMMENTS_PATH = "/resource/comment/listComments"
+_LIST_REPLIES_PATH = "/resource/comment/listReplies"
+_LIST_INLINE_COMMENTS_PATH = "/resource/inlineComment/listInlineComments"
+_ADD_INLINE_COMMENT_ITEM_PATH = "/resource/inlineComment/addInlineCommentItem"
+_UPDATE_INLINE_COMMENT_ITEM_PATH = "/resource/inlineComment/updateInlineCommentItem"
+_DELETE_INLINE_COMMENT_ITEM_PATH = "/resource/inlineComment/deleteInlineCommentItem"
+_CHANGE_INLINE_COMMENT_RESOLVE_STATUS_PATH = "/resource/inlineComment/changeInlineCommentResolveStatus"
+_GET_RESOURCE_USER_INTERACTION_RECORD_PATH = "/resource/interaction/getResourceUserInteractionRecord"
+_CHANGE_RESOURCE_FAVORITE_STATUS_PATH = "/resource/favorite/changeResourceFavoriteStatus"
+_LIST_COLLECTIONS_PATH = "/resource/favorite/listCollections"
+_CREATE_COLLECTION_PATH = "/resource/favorite/createCollection"
+_UPDATE_COLLECTION_INFO_PATH = "/resource/favorite/updateCollectionInfo"
+_DELETE_COLLECTION_PATH = "/resource/favorite/deleteCollection"
+_GET_RESOURCE_FAVORITE_STATUS_PATH = "/resource/favorite/getResourceFavoriteStatus"
+_LIST_FAVORITED_RESOURCES_PATH = "/resource/favorite/listFavoritedResources"
 
 
 class ResourceClient:
@@ -258,6 +301,277 @@ class ResourceClient:
                 msg=f"unexpected data payload: {data!r}",
             )
         return ResourcePlacementResult.model_validate(data)
+
+    async def update_resource_action_permission(
+        self,
+        *,
+        request: ResourceUpdateActionPermissionRequest,
+    ) -> None:
+        await self._rpc.post(
+            self._service_name,
+            _CHANGE_RESOURCE_ACTION_PERMISSION_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+
+    async def remove_tags(self, *, request: TagDeleteRequest) -> None:
+        await self._rpc.post(
+            self._service_name,
+            _REMOVE_TAGS_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+
+    async def get_group_res_config(self, *, group_id: str) -> GroupResConfigResponse:
+        data = await self._rpc.get(
+            self._service_name,
+            _GET_GROUP_CONFIG_PATH,
+            params={"groupId": group_id},
+        )
+        if not isinstance(data, dict):
+            raise RpcError(
+                service_name=self._service_name,
+                path=_GET_GROUP_CONFIG_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return GroupResConfigResponse.model_validate(data)
+
+    async def update_group_res_config(self, *, request: GroupResConfigUpdateRequest) -> None:
+        await self._rpc.post(
+            self._service_name,
+            _CHANGE_GROUP_CONFIG_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+
+    async def create_comment(self, *, request: CommentCreateRequest) -> str:
+        data = await self._rpc.post(
+            self._service_name,
+            _CREATE_COMMENT_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        if not isinstance(data, str) or not data.strip():
+            raise RpcError(
+                service_name=self._service_name,
+                path=_CREATE_COMMENT_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return data.strip()
+
+    async def create_comment_reply(self, *, request: CommentReplyCreateRequest) -> str:
+        data = await self._rpc.post(
+            self._service_name,
+            _CREATE_REPLY_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        if not isinstance(data, str) or not data.strip():
+            raise RpcError(
+                service_name=self._service_name,
+                path=_CREATE_REPLY_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return data.strip()
+
+    async def delete_comment_item(self, *, request: CommentDeleteRequest) -> None:
+        await self._rpc.post(
+            self._service_name,
+            _DELETE_COMMENT_ITEM_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+
+    async def list_comments(
+        self,
+        *,
+        resource_id: str,
+        sort_by: str,
+        page: int,
+        size: int,
+    ) -> PageResult[ResourceCommentItemResponse]:
+        data = await self._rpc.get(
+            self._service_name,
+            _LIST_COMMENTS_PATH,
+            params={"resourceId": resource_id, "sortBy": sort_by, "page": page, "size": size},
+        )
+        if not isinstance(data, dict):
+            raise RpcError(
+                service_name=self._service_name,
+                path=_LIST_COMMENTS_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return PageResult[ResourceCommentItemResponse].model_validate(data)
+
+    async def list_comment_replies(
+        self,
+        *,
+        root_comment_id: str,
+        page: int,
+        size: int,
+    ) -> PageResult[ResourceCommentItemResponse]:
+        data = await self._rpc.get(
+            self._service_name,
+            _LIST_REPLIES_PATH,
+            params={"rootCommentId": root_comment_id, "page": page, "size": size},
+        )
+        if not isinstance(data, dict):
+            raise RpcError(
+                service_name=self._service_name,
+                path=_LIST_REPLIES_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return PageResult[ResourceCommentItemResponse].model_validate(data)
+
+    async def list_inline_comments(
+        self,
+        *,
+        resource_id: str,
+        content_version: int | None,
+        resolved: bool | None,
+    ) -> list[ResourceInlineCommentResponse]:
+        params: dict[str, Any] = {"resourceId": resource_id}
+        if content_version is not None:
+            params["contentVersion"] = content_version
+        if resolved is not None:
+            params["resolved"] = resolved
+        data = await self._rpc.get(self._service_name, _LIST_INLINE_COMMENTS_PATH, params=params)
+        if not isinstance(data, list):
+            raise RpcError(
+                service_name=self._service_name,
+                path=_LIST_INLINE_COMMENTS_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return [ResourceInlineCommentResponse.model_validate(item) for item in data]
+
+    async def add_inline_comment_item(self, *, request: InlineCommentItemCreateRequest) -> str:
+        data = await self._rpc.post(
+            self._service_name,
+            _ADD_INLINE_COMMENT_ITEM_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        if not isinstance(data, str) or not data.strip():
+            raise RpcError(
+                service_name=self._service_name,
+                path=_ADD_INLINE_COMMENT_ITEM_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return data.strip()
+
+    async def update_inline_comment_item(self, *, request: InlineCommentItemUpdateRequest) -> None:
+        await self._rpc.post(
+            self._service_name,
+            _UPDATE_INLINE_COMMENT_ITEM_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+
+    async def delete_inline_comment_item(self, *, request: InlineCommentItemDeleteRequest) -> None:
+        await self._rpc.post(
+            self._service_name,
+            _DELETE_INLINE_COMMENT_ITEM_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+
+    async def change_inline_comment_resolve_status(self, *, request: InlineCommentResolveRequest) -> None:
+        await self._rpc.post(
+            self._service_name,
+            _CHANGE_INLINE_COMMENT_RESOLVE_STATUS_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+
+    async def get_resource_user_interaction_record(
+        self,
+        *,
+        resource_id: str,
+    ) -> ResourceUserInteractionRecordResponse:
+        data = await self._rpc.get(
+            self._service_name,
+            _GET_RESOURCE_USER_INTERACTION_RECORD_PATH,
+            params={"resourceId": resource_id},
+        )
+        if not isinstance(data, dict):
+            raise RpcError(
+                service_name=self._service_name,
+                path=_GET_RESOURCE_USER_INTERACTION_RECORD_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return ResourceUserInteractionRecordResponse.model_validate(data)
+
+    async def change_resource_favorite_status(self, *, request: ResourceFavoriteRequest) -> None:
+        await self._rpc.post(
+            self._service_name,
+            _CHANGE_RESOURCE_FAVORITE_STATUS_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+
+    async def list_favorite_collections(self) -> list[FavoriteCollectionResponse]:
+        data = await self._rpc.get(self._service_name, _LIST_COLLECTIONS_PATH)
+        if not isinstance(data, list):
+            raise RpcError(
+                service_name=self._service_name,
+                path=_LIST_COLLECTIONS_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return [FavoriteCollectionResponse.model_validate(item) for item in data]
+
+    async def create_favorite_collection(self, *, request: FavoriteCollectionCreateRequest) -> str:
+        data = await self._rpc.post(
+            self._service_name,
+            _CREATE_COLLECTION_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+        if not isinstance(data, str) or not data.strip():
+            raise RpcError(
+                service_name=self._service_name,
+                path=_CREATE_COLLECTION_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return data.strip()
+
+    async def update_favorite_collection_info(self, *, request: FavoriteCollectionInfoUpdateRequest) -> None:
+        await self._rpc.post(
+            self._service_name,
+            _UPDATE_COLLECTION_INFO_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+
+    async def delete_favorite_collection(self, *, request: FavoriteCollectionDeleteRequest) -> None:
+        await self._rpc.post(
+            self._service_name,
+            _DELETE_COLLECTION_PATH,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+        )
+
+    async def get_resource_favorite_status(
+        self,
+        *,
+        resource_id: str,
+    ) -> ResourceFavoriteStatusResponse:
+        data = await self._rpc.get(
+            self._service_name,
+            _GET_RESOURCE_FAVORITE_STATUS_PATH,
+            params={"resourceId": resource_id},
+        )
+        if not isinstance(data, dict):
+            raise RpcError(
+                service_name=self._service_name,
+                path=_GET_RESOURCE_FAVORITE_STATUS_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return ResourceFavoriteStatusResponse.model_validate(data)
+
+    async def list_favorited_resources(
+        self,
+        *,
+        collection_id: str | None,
+        page: int,
+        size: int,
+    ) -> PageResult[FavoriteItemResponse]:
+        params: dict[str, Any] = {"page": page, "size": size}
+        if collection_id:
+            params["collectionId"] = collection_id
+        data = await self._rpc.get(self._service_name, _LIST_FAVORITED_RESOURCES_PATH, params=params)
+        if not isinstance(data, dict):
+            raise RpcError(
+                service_name=self._service_name,
+                path=_LIST_FAVORITED_RESOURCES_PATH,
+                msg=f"unexpected data payload: {data!r}",
+            )
+        return PageResult[FavoriteItemResponse].model_validate(data)
 
 
 __all__ = ["ResourceClient"]
