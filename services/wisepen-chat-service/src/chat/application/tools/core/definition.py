@@ -162,6 +162,7 @@ class ToolConfigSpec:
 @dataclass(frozen=True)
 class ToolPolicy:
     """工具策略"""
+    category: str = "resident" # 工具类别；resident 不参与路由，其余类别由决策模型按轮路由
     expose_by_default: bool = False # 是否默认暴露给模型
     selection_mode: ToolSelectionMode = ToolSelectionMode.USER_SELECTABLE # 前端选择模式
 

@@ -15,16 +15,29 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
     "note_resource": frozenset({
         "apply_current_note_edits", "create_note", "read_current_note_for_edit", "read_note_resource_text",
     }),
-    "resource": frozenset({
-        "add_inline_comment_item", "change_group_resource_config", "change_inline_comment_resolve_status",
-        "change_resource_action_permission", "change_resource_favorite_status", "create_comment", "create_comment_reply",
-        "create_favorite_collection", "create_folder", "delete_comment_item", "delete_favorite_collection",
-        "delete_inline_comment_item", "get_group_resource_config", "get_resource_base_info", "get_resource_favorite_status",
-        "get_resource_tag_tree", "get_resource_user_interaction_record", "list_comment_replies", "list_comments",
-        "list_favorite_collections", "list_favorited_resources", "list_inline_comments", "list_resources",
-        "mount_resources_to_group", "move_folders", "move_resources_in_group", "move_resources_to_folder",
-        "move_resources_to_trash", "remove_folders", "rename_resource", "search_resources",
-        "unmount_resources_from_group", "update_favorite_collection_info", "update_folder", "update_inline_comment_item",
+    "resource_file": frozenset({
+        "create_folder", "get_resource_base_info", "get_resource_tag_tree", "list_resources",
+        "move_folders", "move_resources_in_group", "move_resources_to_folder", "move_resources_to_trash",
+        "remove_folders", "rename_resource", "search_resources", "update_folder",
+        "mount_resources_to_group", "unmount_resources_from_group"
+    }),
+    "resource_comment": frozenset({
+        "create_comment", "create_comment_reply", "delete_comment_item", "list_comment_replies", "list_comments",
+    }),
+    "resource_inline_comment": frozenset({
+        "add_inline_comment_item", "change_inline_comment_resolve_status", "delete_inline_comment_item",
+        "list_inline_comments", "update_inline_comment_item",
+    }),
+    "resource_favorite": frozenset({
+        "change_resource_favorite_status", "create_favorite_collection", "delete_favorite_collection",
+        "get_resource_favorite_status", "list_favorite_collections", "list_favorited_resources",
+        "update_favorite_collection_info",
+    }),
+    "resource_permission": frozenset({
+        "change_group_resource_config", "change_resource_action_permission", "get_group_resource_config",
+    }),
+    "resource_interaction": frozenset({
+        "get_resource_user_interaction_record"
     }),
     "document_resource": frozenset({"get_document_source_file", "read_document_resource_text"}),
     "group": frozenset({
@@ -43,7 +56,12 @@ CAPABILITY_LABELS: dict[str, str] = {
     "skill_resource": "技能",
     "agent_resource": "智能体",
     "note_resource": "笔记",
-    "resource": "资源（文件与文件夹）",
+    "resource_file": "资源文件",
+    "resource_comment": "资源评论",
+    "resource_inline_comment": "资源批注",
+    "resource_favorite": "资源收藏",
+    "resource_permission": "资源权限与组配置",
+    "resource_interaction": "资源互动",
     "document_resource": "文档",
     "group": "小组",
     "user": "个人资料、钱包与消息",
@@ -52,6 +70,11 @@ CAPABILITY_LABELS: dict[str, str] = {
 _TOOL_CAPABILITY: dict[str, str] = {
     tool: cap for cap, tools in CAPABILITY_TOOLS.items() for tool in tools
 }
+
+
+def tool_capability(tool_name: str) -> str | None:
+    """返回工具所属能力；该能力即工具在 Chat 侧路由用的类别"""
+    return _TOOL_CAPABILITY.get(tool_name)
 
 
 def assert_capability_consistent(registered_tool_names: set[str]) -> None:
@@ -111,4 +134,5 @@ __all__ = [
     "apply_capability_guard",
     "apply_list_tools_filter",
     "assert_capability_consistent",
+    "tool_capability",
 ]

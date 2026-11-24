@@ -31,6 +31,7 @@ T = TypeVar("T")
 
 def _to_tool_policy(meta: ToolMeta) -> ToolPolicy:
     return ToolPolicy(
+        category=meta.category,
         expose_by_default=meta.policy.expose_by_default,
         selection_mode=ToolSelectionMode(meta.policy.selection_mode.value),
         risk_level=ToolRiskLevel(meta.policy.risk_level.value),

@@ -60,6 +60,7 @@ class ToolMeta(BaseModel):
     """MCP 工具的 Chat 侧元数据"""
 
     tool_name: str
+    category: str = "general"
     policy: ToolPolicyMeta
     ui_spec: ToolUISpecMeta | None = None
     config_spec: ToolConfigSpecMeta | None = None
