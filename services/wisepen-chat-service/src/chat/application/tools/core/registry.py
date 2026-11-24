@@ -81,6 +81,14 @@ class ToolScope:
             counts[category] = counts.get(category, 0) + 1
         return [{"category": category, "tool_count": count} for category, count in sorted(counts.items())]
 
+    def loaded_category_tools(self, category: str) -> list[dict[str, str]]:
+        """返回指定类别当前已在作用域内的工具（含路由已命中与 list_more_tools 已加载的）"""
+        return [
+            {"name": name, "description": tool.definition.llm_spec.description}
+            for name, tool in self._tools.items()
+            if tool.definition.policy.category == category
+        ]
+
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
 

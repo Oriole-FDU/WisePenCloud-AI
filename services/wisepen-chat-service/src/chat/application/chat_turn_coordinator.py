@@ -336,6 +336,7 @@ class ChatTurnCoordinator:
             resource_attachments=resource_attachments, # 对话中的全部资源附件
             user_defined_attachment_ids=user_defined_attachment_ids, # 用户指定的附件
             support_vision=chat_turn_context.model_info.model.support_vision,
+            has_loadable_categories=bool(chat_turn_context.tool_scope.available_categories()),
         )
 
         # 构造并持久化用户消息

@@ -24,8 +24,10 @@ class ListMoreToolsTool:
                 description=(
                     "Load additional tools from a category that is not currently available this turn. "
                     "Use this when the task needs a tool that is missing from the current tool list. "
-                    "Pass the category name; call it without arguments to list the categories that can still be loaded. "
-                    "Returns the tools that become available after this call."
+                    "Call it without arguments to list the categories that can still be loaded, then call it "
+                    "with the category name to load that category. "
+                    "The result returns available_tools: every tool of that category available this turn "
+                    "after the call, including any that were already loaded."
                 ),
                 parameters_schema=ToolParametersSchema({
                     "type": "object",
@@ -61,5 +63,10 @@ class ListMoreToolsTool:
         category = str(kwargs.get("category") or "").strip()
         if not category:
             return {"categories": scope.available_categories()}
-        tools = scope.expose_category(category)
-        return {"category": category, "loaded": len(tools), "tools": tools}
+        already_loaded_tools = scope.loaded_category_tools(category)
+        already_loaded_tools.extend(scope.expose_category(category))
+        return {
+            "category": category,
+            "loaded": len(already_loaded_tools),
+            "available_tools": already_loaded_tools,
+        }
