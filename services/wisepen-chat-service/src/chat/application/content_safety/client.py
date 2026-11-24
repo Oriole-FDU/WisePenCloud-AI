@@ -7,13 +7,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
+from typesafe_sdk import AsyncTypeSafeClient, ChoiceAnswer
 
 from chat.core.config.app_settings import settings
 from chat.core.config.settings_models import ContentSafetySettings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces.llm import TextCompletionProvider
 from common.logger import info, warn
+from common.utils.ai_clients import DecisionClient
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
@@ -144,6 +145,16 @@ _DECISION_CATEGORIES: dict[str, str] = {
     "other": "其他违规：明显违反公序良俗或平台规范、但不属于上述类别的敏感内容",
 }
 
+_CATEGORY_INSTRUCTIONS = (
+    "判断待判定文本是否违规：违规时选最贴近的一类，无法归入具体类别时选 other；"
+    "正常内容选 none"
+)
+
+_DECISION_CHOICES: dict[str, str] = {
+    "none": "正常内容，不包含违规内容",
+    **_DECISION_CATEGORIES,
+}
+
 
 class DecisionModelClient(SafetyClassifier):
     """用基于 SystemOne 协议的决策模型做判定
@@ -153,65 +164,52 @@ class DecisionModelClient(SafetyClassifier):
     def __init__(self, config: ContentSafetySettings | None = None) -> None:
         self.config = config if config is not None else settings.content_safety
         self.enabled = bool(self.config and self.config.enabled)
-        timeout = self.config.timeout_seconds if self.config else 5.0
-        self._endpoint = f"{(self.config.base_url if self.config else '').rstrip('/')}/systemone"
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout))
+        self._client: AsyncTypeSafeClient | None = None
+        self._decision: DecisionClient | None = None
+        if self.enabled and self.config is not None:
+            self._client = AsyncTypeSafeClient(
+                api_key=self.config.api_key,
+                base_url=self.config.base_url,
+                timeout=self.config.timeout_seconds,
+            )
+            self._decision = DecisionClient(client=self._client)
 
     async def check(self, text: str, kind: str = "text") -> ContentSafetyVerdict | None:
-        if not self.enabled:
+        if not self.enabled or self._decision is None:
             return None
         text = (text or "").strip()
         if not text:
             return None
         try:
-            payload = await asyncio.wait_for(
-                self._request(text), timeout=self.config.timeout_seconds
+            answer = await asyncio.wait_for(
+                self._decision.choose(
+                    state=text,
+                    instructions=_CATEGORY_INSTRUCTIONS,
+                    choices=_DECISION_CHOICES,
+                ),
+                timeout=self.config.timeout_seconds,
             )
         except Exception as exc:  # noqa: BLE001
             warn("content safety check failed.", kind=kind, exc=exc)
             return None
-        return self._parse(payload)
+        return self._parse(answer)
 
     async def aclose(self) -> None:
-        await self._client.aclose()
+        if self._client is not None:
+            await self._client.aclose()
 
-    async def _request(self, text: str) -> Any:
-        response = await self._client.post(
-            self._endpoint,
-            headers={"Authorization": f"Bearer {self.config.api_key}"},
-            json={"model": self.config.model, "state": text, "questions": _decision_questions()},
-        )
-        response.raise_for_status()
-        return response.json()
-
-    def _parse(self, payload: Any) -> ContentSafetyVerdict | None:
-        """把 answers.category 的概率分布映射成判定
+    def _parse(self, answer: ChoiceAnswer) -> ContentSafetyVerdict | None:
+        """把类别概率分布映射成判定
         P(违规) = 1 - P(none)，达到 block_threshold 即判定违规，类别取最可能的违规类
         """
-        if not isinstance(payload, dict):
-            return None
-        answers = payload.get("answers")
-        if not isinstance(answers, dict):
-            return None
-        category_answer = answers.get("category")
-        if not isinstance(category_answer, dict):
-            return None
-
-        choice = category_answer.get("choice")
-        confidence = category_answer.get("confidence")
-        probabilities = category_answer.get("probabilities")
-        if not isinstance(probabilities, dict):
-            # 缺少概率分布无法做阈值判定，宁可放行并记录
-            warn("content safety category answer missing probabilities.", choice=choice, confidence=confidence)
-            return None
-
+        probabilities = answer.probabilities or {}
         try:
             p_none = float(probabilities.get("none", 0.0))
         except (TypeError, ValueError):
             p_none = 0.0
         p_violation = 1.0 - p_none
 
-        info("content safety category answer.", choice=choice, confidence=confidence, p_violation=p_violation, probabilities=probabilities,)
+        info("content safety category answer.", choice=answer.choice, confidence=answer.confidence, p_violation=p_violation, probabilities=probabilities)
 
         if p_violation < self.config.block_threshold:
             return ContentSafetyVerdict(blocked=False)
@@ -233,30 +231,14 @@ class DecisionModelClient(SafetyClassifier):
         reason_parts = [f"p_violation={p_violation:.2f}"]
         if category:
             reason_parts.append(f"category={category}")
-        if isinstance(confidence, (int, float)):
-            reason_parts.append(f"confidence={confidence:.2f}")
+        if isinstance(answer.confidence, (int, float)):
+            reason_parts.append(f"confidence={answer.confidence:.2f}")
         return ContentSafetyVerdict(
             blocked=True,
             category=category,
             reason=", ".join(reason_parts),
             severity=severity,
         )
-
-
-def _decision_questions() -> dict[str, Any]:
-    return {
-        "category": {
-            "type": "choice",
-            "instructions": (
-                "判断待判定文本是否违规：违规时选最贴近的一类，无法归入具体类别时选 other；"
-                "正常内容选 none"
-            ),
-            "criteria": {
-                "none": "正常内容，不包含违规内容",
-                **_DECISION_CATEGORIES,
-            },
-        },
-    }
 
 
 def create_content_safety_client(
