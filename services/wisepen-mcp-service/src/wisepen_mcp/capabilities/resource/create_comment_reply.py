@@ -39,6 +39,7 @@ def register_create_comment_reply_tool(mcp: FastMCP, resource_client: ResourceCl
                 reply_to=reply_to.strip(),
                 content=content,
                 image_urls=image_urls or [],
+                ai_authored=True,
             ),
         )
         return {"comment_id": comment_id, "created": True}

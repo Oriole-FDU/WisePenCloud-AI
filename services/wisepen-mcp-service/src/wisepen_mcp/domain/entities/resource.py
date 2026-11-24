@@ -198,6 +198,7 @@ class CommentCreateRequest(ApiModel):
     resource_id: str
     content: str
     image_urls: list[str] = Field(default_factory=list)
+    ai_authored: bool | None = None
 
 
 class CommentReplyCreateRequest(ApiModel):
@@ -205,6 +206,7 @@ class CommentReplyCreateRequest(ApiModel):
     reply_to: str
     content: str
     image_urls: list[str] = Field(default_factory=list)
+    ai_authored: bool | None = None
 
 
 class CommentDeleteRequest(ApiModel):
@@ -222,6 +224,7 @@ class ResourceCommentItemResponse(ApiModel):
     like_count: int | None = None
     reply_count: int | None = None
     comment_type: Any = None
+    ai_authored: bool | None = None
     author_info: dict[str, Any] | None = None
     reply_to_user_info: dict[str, Any] | None = None
     create_time: Any = None
@@ -235,6 +238,7 @@ class InlineCommentItemCreateRequest(ApiModel):
     content: str
     image_urls: list[str] = Field(default_factory=list)
     mention_user_ids: list[str] = Field(default_factory=list)
+    ai_authored: bool | None = None
 
 
 class InlineCommentItemUpdateRequest(ApiModel):

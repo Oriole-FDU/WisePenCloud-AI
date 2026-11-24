@@ -53,6 +53,7 @@ def register_list_comments_tool(mcp: FastMCP, resource_client: ResourceClient) -
                 "like_count": item.like_count,
                 "reply_count": item.reply_count,
                 "comment_type": item.comment_type,
+                "ai_authored": item.ai_authored,
                 "author_info": item.author_info,
                 "reply_to_user_info": item.reply_to_user_info,
                 "create_time": item.create_time,

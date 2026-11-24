@@ -43,6 +43,7 @@ def register_add_inline_comment_item_tool(mcp: FastMCP, resource_client: Resourc
                 content=content,
                 image_urls=image_urls or [],
                 mention_user_ids=mention_user_ids or [],
+                ai_authored=True,
             ),
         )
         return {"inline_comment_id": inline_comment_id.strip(), "item_id": item_id, "created": True}
