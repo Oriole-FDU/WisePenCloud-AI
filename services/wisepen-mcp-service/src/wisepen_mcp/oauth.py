@@ -19,10 +19,22 @@ from wisepen_mcp.core.config.app_settings import settings
 _CODE_KEY = "wisepen:mcp:oauth:code:"
 _TOKEN_KEY = "wisepen:mcp:oauth:token:"
 _REFRESH_KEY = "wisepen:mcp:oauth:refresh:"
+_CLIENT_KEY = "wisepen:mcp:oauth:client:"
 
 _templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+async def _redirect_uri_valid(redis_client, client_id: str, redirect_uri: str) -> bool:
+    """RFC 6749 redirect_uri 必须是 loopback（本机客户端）或该 client 在 DCR 时注册过的回跳"""
+    parsed = urlparse(redirect_uri)
+    if parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS:
+        return True
+    raw = await redis_client.get(_CLIENT_KEY + client_id)
+    if raw is None:
+        return False
+    return redirect_uri in json.loads(raw).get("redirect_uris", [])
 
 
 def build_oauth_router(redis_client) -> APIRouter:
@@ -40,15 +52,14 @@ def build_oauth_router(redis_client) -> APIRouter:
         state = request.query_params.get("state", "")
 
         # 校验
-        parsed = urlparse(redirect_uri)
-        loopback = parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS
         # client_id 非空即可（DCR 签发，public client 不参与安全判定）
         # method 必须是 S256
         # code_challenge 非空
-        # redirect 必须是 http + loopback host
+        # redirect_uri 必须是 loopback，或该 client 注册过的回跳
         # state 非空
         if (not client_id or code_challenge_method != "S256"
-                or not code_challenge or not loopback or not state):
+                or not code_challenge or not state
+                or not await _redirect_uri_valid(redis_client, client_id, redirect_uri)):
             return JSONResponse({"error": "invalid_request"}, status_code=400)
 
         # 校验登录态
@@ -80,12 +91,10 @@ def build_oauth_router(redis_client) -> APIRouter:
         # 与 EXTERNAL_CAPABILITIES 取交集，过滤掉非法值
         capabilities = [c for c in form.getlist("capability") if c in EXTERNAL_CAPABILITIES]
 
-        parsed = urlparse(redirect_uri)
-        loopback = parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS
-
         # capabilities 至少勾选一个能力才能授权
         if (not client_id or code_challenge_method != "S256"
-                or not code_challenge or not loopback or not capabilities):
+                or not code_challenge or not capabilities
+                or not await _redirect_uri_valid(redis_client, client_id, redirect_uri)):
             return JSONResponse({"error": "invalid_request"}, status_code=400)
 
         # 校验登录态
@@ -183,16 +192,28 @@ def build_oauth_router(redis_client) -> APIRouter:
         return JSONResponse({}, status_code=200)
 
     @router.post("/register")
-    async def register():
+    async def register(request: Request):
         """RFC 7591 动态客户端注册
-        签发 client_id，客户端无需用户交互即可开始授权
+        签发 client_id 并落库其 redirect_uris，客户端无需用户交互即可开始授权
 
-        public client，client_id 不参与安全判定，也不做按 client 差异化策略，因此只签发、不落库
-        authorize/token 仅要求 client_id 非空
+        client_id 不参与安全判定，仅作为查询注册信息的 key
+        authorize 时校验 redirect_uri 必须是 loopback 或该 client 注册过的回跳
         """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        redirect_uris = [u for u in body.get("redirect_uris", []) if isinstance(u, str)]
+        client_id = secrets.token_hex(16)
+        await redis_client.set(
+            _CLIENT_KEY + client_id,
+            json.dumps({"redirect_uris": redirect_uris}),
+            ex=settings.oauth.client_registration_ttl_seconds,
+        )
         return JSONResponse({
-            "client_id": secrets.token_hex(16),
+            "client_id": client_id,
             "client_id_issued_at": int(time.time()),
+            "redirect_uris": redirect_uris,
             "token_endpoint_auth_method": "none",
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],

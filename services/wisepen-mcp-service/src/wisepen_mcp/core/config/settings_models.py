@@ -67,6 +67,7 @@ class McpOAuthSettings(ConfigModel):
     code_ttl_seconds: int = Field(default=60, gt=0)
     access_token_ttl_seconds: int = Field(default=3600, gt=0)
     refresh_token_ttl_seconds: int = Field(default=2592000, gt=0)
+    client_registration_ttl_seconds: int = Field(default=7776000, gt=0)
 
 
 class McpServiceSettings(ConfigModel):
