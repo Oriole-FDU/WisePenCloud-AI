@@ -13,7 +13,7 @@ from chat.core.config.app_settings import settings
 from chat.core.config.settings_models import ContentSafetySettings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.interfaces.llm import TextCompletionProvider
-from common.logger import warn
+from common.logger import info, warn
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
@@ -142,7 +142,6 @@ _DECISION_CATEGORIES: dict[str, str] = {
     "hate": "仇恨歧视：针对种族、民族、地域、宗教、性别、性取向、残障等的侮辱、攻击、煽动仇恨",
     "minors": "未成年有害：涉及未成年人的色情、性暗示、诱导、欺凌、泄露未成年人信息",
     "other": "其他违规：明显违反公序良俗或平台规范、但不属于上述类别的敏感内容",
-    "none": "无违规内容",
 }
 
 
@@ -186,48 +185,76 @@ class DecisionModelClient(SafetyClassifier):
         return response.json()
 
     def _parse(self, payload: Any) -> ContentSafetyVerdict | None:
-        """把 answers.violation.noul 的概率按 block_threshold 映射成二值判定"""
+        """把 answers.category 的概率分布映射成判定
+        P(违规) = 1 - P(none)，达到 block_threshold 即判定违规，类别取最可能的违规类
+        """
         if not isinstance(payload, dict):
             return None
         answers = payload.get("answers")
         if not isinstance(answers, dict):
             return None
-        try:
-            probability = float((answers.get("violation") or {}).get("noul"))
-        except (TypeError, ValueError):
+        category_answer = answers.get("category")
+        if not isinstance(category_answer, dict):
             return None
-        if probability < self.config.block_threshold:
+
+        choice = category_answer.get("choice")
+        confidence = category_answer.get("confidence")
+        probabilities = category_answer.get("probabilities")
+        if not isinstance(probabilities, dict):
+            # 缺少概率分布无法做阈值判定，宁可放行并记录
+            warn("content safety category answer missing probabilities.", choice=choice, confidence=confidence)
+            return None
+
+        try:
+            p_none = float(probabilities.get("none", 0.0))
+        except (TypeError, ValueError):
+            p_none = 0.0
+        p_violation = 1.0 - p_none
+
+        info("content safety category answer.", choice=choice, confidence=confidence, p_violation=p_violation, probabilities=probabilities,)
+
+        if p_violation < self.config.block_threshold:
             return ContentSafetyVerdict(blocked=False)
-        category = str((answers.get("category") or {}).get("choice") or "other")
-        # 模型偶尔在判定违规的同时选 none，统一归到 other，避免污染命中统计
-        if category not in _DECISION_CATEGORIES or category == "none":
-            category = "other"
+
+        # 拦截时类别取最可能的违规类
+        # best_prob 从 0 起，若所有类别概率都是 0（退化分布），保持 unknown
+        category = "unknown"
+        best_prob = 0.0
+        for name in _DECISION_CATEGORIES:
+            try:
+                prob = float(probabilities.get(name, 0.0))
+            except (TypeError, ValueError):
+                prob = 0.0
+            if prob > best_prob:
+                best_prob = prob
+                category = name
+
         severity = "high" if category in _HIGH_SEVERITY_CATEGORIES else "medium"
+        reason_parts = [f"p_violation={p_violation:.2f}"]
+        if category:
+            reason_parts.append(f"category={category}")
+        if isinstance(confidence, (int, float)):
+            reason_parts.append(f"confidence={confidence:.2f}")
         return ContentSafetyVerdict(
             blocked=True,
             category=category,
-            reason=f"noul={probability:.2f}",
+            reason=", ".join(reason_parts),
             severity=severity,
         )
 
 
 def _decision_questions() -> dict[str, Any]:
-    """SystemOne 的 typed questions
-    一个是非判断定违规，一个多选定类别
-    """
     return {
-        "violation": {
-            "type": "noul",
-            "instructions": "判断待判定文本是否包含违规内容",
-            "criteria": {
-                "true": "包含违规内容：涉政敏感、违法犯罪、色情低俗、暴力血腥、恐怖极端、仇恨歧视、未成年有害等",
-                "false": "正常内容，不包含违规内容",
-            },
-        },
         "category": {
             "type": "choice",
-            "instructions": "若文本包含违规内容，最贴近哪一类？无违规内容时选 none",
-            "criteria": _DECISION_CATEGORIES,
+            "instructions": (
+                "判断待判定文本是否违规：违规时选最贴近的一类，无法归入具体类别时选 other；"
+                "正常内容选 none"
+            ),
+            "criteria": {
+                "none": "正常内容，不包含违规内容",
+                **_DECISION_CATEGORIES,
+            },
         },
     }
 
