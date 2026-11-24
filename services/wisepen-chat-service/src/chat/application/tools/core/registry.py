@@ -123,6 +123,15 @@ class ToolRegistry:
 
         return tools
 
+    async def routable_categories(self, user_id: str) -> list[str]:
+        """返回本轮可参与路由的工具类别，供工具路由决策"""
+        tools = await self.available_tools(user_id)
+        return sorted({
+            tool.definition.policy.category
+            for tool in tools.values()
+            if tool.definition.policy.category != "resident"
+        })
+
     # 推导当前工具
     async def derive(
         self,
@@ -133,6 +142,7 @@ class ToolRegistry:
         tool_selection_overrides: dict[str, bool] | None = None,
         client_tool_capabilities: list[ClientToolCapability] | None = None,
         user_id: str,
+        routed_categories: set[str] | None = None,
     ) -> ToolScope:
         context = dict(tool_context or {})
         expose_tool_name_set = expose_tool_name_set or set()
@@ -180,6 +190,12 @@ class ToolRegistry:
 
             if policy.required_allowed_builtin_skill_ids and not skill_exposure_satisfaction: # 暴露的技能不满足工具要求
                 continue
+
+            # 工具类别路由
+            # 非 resident 类别的工具，仅当本轮命中该类别（或显式暴露）时加载
+            if routed_categories is not None and policy.category != "resident":
+                if policy.category not in routed_categories and not explicitly_exposed:
+                    continue
 
             # CONTEXTUAL 工具必须靠 explicitly_exposed 显式启用 或 加载了要求的 Skill
             if policy.selection_mode == ToolSelectionMode.CONTEXTUAL:
