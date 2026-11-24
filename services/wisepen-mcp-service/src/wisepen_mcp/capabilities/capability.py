@@ -7,7 +7,7 @@ from common.security import PermissionErrorCode, PermissionException, SecurityCo
 
 # capability key -> 该能力下注册的工具名
 CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
-    "skill_resource": frozenset({"create_skill_info", "get_skill_info", "update_skill_info"}),
+    "skill_resource": frozenset({"create_skill_info", "get_skill_info", "update_skill_info", "upload_skill_draft_asset"}),
     "agent_resource": frozenset({
         "create_agent_info", "get_agent_info", "get_agent_version_bundle_info",
         "update_agent_info", "update_agent_spec",
