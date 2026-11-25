@@ -39,7 +39,7 @@ class SandboxBrowserService:
     async def get_info(self, *, user_id: str, session_id: str) -> BrowserInfoResult:
         async with self._workspace_lease(user_id, session_id) as (_, sandbox):
             provider = self._providers.get(sandbox.provider_id)
-            return await provider.get_browser_info(
+            return await provider.get_info(
                 sandbox.base_url, sandbox.metadata or {},
             )
 
@@ -67,7 +67,7 @@ class SandboxBrowserService:
     ) -> BrowserActionResult:
         async with self._workspace_lease(user_id, session_id) as (_, sandbox):
             provider = self._providers.get(sandbox.provider_id)
-            return await provider.execute_browser_action(
+            return await provider.execute_action(
                 sandbox.base_url, action, sandbox.metadata or {},
             )
 
