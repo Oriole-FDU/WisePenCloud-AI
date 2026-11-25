@@ -1,4 +1,3 @@
-from sandbox.domain.interfaces.sandbox_browser_action import BrowserAction
 from sandbox.domain.interfaces.sandbox_browser_provider import (
     BrowserActionResult,
     BrowserContentResult,
