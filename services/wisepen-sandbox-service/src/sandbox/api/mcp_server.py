@@ -7,7 +7,7 @@ from typing import Annotated, Literal, Union
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ImageContent, TextContent
-from pydantic import Field, TypeAdapter, BaseModel
+from pydantic import BaseModel, Field, TypeAdapter
 
 from common.mcp import (
     OutputCacheSpecMeta,
@@ -92,6 +92,155 @@ def _result(task: CommandTaskDocument) -> dict[str, str | int | bool | None]:
         "exit_code": task.exit_code,
         "error": task.error,
     }
+
+
+class MoveToAction(BaseModel):
+    """移动鼠标到屏幕绝对坐标。"""
+
+    action_type: Literal["MOVE_TO"] = "MOVE_TO"
+    x: float = Field(description="Target x-coordinate")
+    y: float = Field(description="Target y-coordinate")
+
+
+class MoveRelAction(BaseModel):
+    """相对当前鼠标位置移动。"""
+
+    action_type: Literal["MOVE_REL"] = "MOVE_REL"
+    x_offset: float = Field(description="Relative x-axis movement from current position")
+    y_offset: float = Field(description="Relative y-axis movement from current position")
+
+
+class ClickAction(BaseModel):
+    """点击；省略坐标则点击当前鼠标位置。"""
+
+    action_type: Literal["CLICK"] = "CLICK"
+    x: float | None = Field(default=None, description="Target x-coordinate")
+    y: float | None = Field(default=None, description="Target y-coordinate")
+    button: Literal["left", "right", "middle"] = "left"
+    num_clicks: Literal[1, 2, 3] = 1
+
+
+class MouseDownAction(BaseModel):
+    """按下鼠标按键。"""
+
+    action_type: Literal["MOUSE_DOWN"] = "MOUSE_DOWN"
+    button: Literal["left", "right", "middle"] = "left"
+
+
+class MouseUpAction(BaseModel):
+    """释放鼠标按键。"""
+
+    action_type: Literal["MOUSE_UP"] = "MOUSE_UP"
+    button: Literal["left", "right", "middle"] = "left"
+
+
+class RightClickAction(BaseModel):
+    """右键点击；省略坐标则点击当前鼠标位置。"""
+
+    action_type: Literal["RIGHT_CLICK"] = "RIGHT_CLICK"
+    x: float | None = Field(default=None, description="Target x-coordinate")
+    y: float | None = Field(default=None, description="Target y-coordinate")
+
+
+class DoubleClickAction(BaseModel):
+    """双击；省略坐标则双击当前鼠标位置。"""
+
+    action_type: Literal["DOUBLE_CLICK"] = "DOUBLE_CLICK"
+    x: float | None = Field(default=None, description="Target x-coordinate")
+    y: float | None = Field(default=None, description="Target y-coordinate")
+
+
+class DragToAction(BaseModel):
+    """拖拽到屏幕绝对坐标。"""
+
+    action_type: Literal["DRAG_TO"] = "DRAG_TO"
+    x: float = Field(description="Target x-coordinate for drag")
+    y: float = Field(description="Target y-coordinate for drag")
+
+
+class DragRelAction(BaseModel):
+    """相对当前鼠标位置拖拽。"""
+
+    action_type: Literal["DRAG_REL"] = "DRAG_REL"
+    x_offset: float = Field(description="Relative x-axis drag movement from current position")
+    y_offset: float = Field(description="Relative y-axis drag movement from current position")
+
+
+class ScrollAction(BaseModel):
+    """滚动屏幕（像素量）。"""
+
+    action_type: Literal["SCROLL"] = "SCROLL"
+    dx: int = Field(default=0, description="Horizontal scroll amount in pixels")
+    dy: int = Field(default=0, description="Vertical scroll amount in pixels")
+
+
+class TypingAction(BaseModel):
+    """输入文本。"""
+
+    action_type: Literal["TYPING"] = "TYPING"
+    text: str = Field(min_length=1, description="Text to type")
+    use_clipboard: bool | None = Field(
+        default=True,
+        description="Use clipboard for better character support",
+    )
+
+
+class PressAction(BaseModel):
+    """按下并释放单个按键。"""
+
+    action_type: Literal["PRESS"] = "PRESS"
+    key: str = Field(min_length=1, description="Key name")
+
+
+class KeyDownAction(BaseModel):
+    """按下单个按键（不释放）。"""
+
+    action_type: Literal["KEY_DOWN"] = "KEY_DOWN"
+    key: str = Field(min_length=1, description="Key name")
+
+
+class KeyUpAction(BaseModel):
+    """释放单个按键。"""
+
+    action_type: Literal["KEY_UP"] = "KEY_UP"
+    key: str = Field(min_length=1, description="Key name")
+
+
+class HotkeyAction(BaseModel):
+    """按下组合键。"""
+
+    action_type: Literal["HOTKEY"] = "HOTKEY"
+    keys: list[str] = Field(min_length=1, description="Ordered key names to press together")
+
+
+class WaitAction(BaseModel):
+    """等待指定秒数。"""
+
+    action_type: Literal["WAIT"] = "WAIT"
+    duration: float = Field(gt=0, description="Duration to wait in seconds")
+
+
+BrowserAction = Annotated[
+    Union[
+        MoveToAction,
+        MoveRelAction,
+        ClickAction,
+        MouseDownAction,
+        MouseUpAction,
+        RightClickAction,
+        DoubleClickAction,
+        DragToAction,
+        DragRelAction,
+        ScrollAction,
+        TypingAction,
+        PressAction,
+        KeyDownAction,
+        KeyUpAction,
+        HotkeyAction,
+        WaitAction,
+    ],
+    Field(discriminator="action_type"),
+]
 
 
 def create_sandbox_mcp_server(
@@ -924,138 +1073,6 @@ def create_sandbox_mcp_server(
     ) -> BrowserActionResult:
         user_id, session_id = _session_context(ctx)
         return await browser_service.evaluate(user_id=user_id, session_id=session_id, expression=expression)
-
-    class MoveToAction(BaseModel):
-        """移动鼠标到屏幕绝对坐标"""
-
-        action_type: Literal["MOVE_TO"] = "MOVE_TO"
-        x: float = Field(description="Target x-coordinate")
-        y: float = Field(description="Target y-coordinate")
-
-    class MoveRelAction(BaseModel):
-        """相对当前鼠标位置移动"""
-
-        action_type: Literal["MOVE_REL"] = "MOVE_REL"
-        x_offset: float = Field(description="Relative x-axis movement from current position")
-        y_offset: float = Field(description="Relative y-axis movement from current position")
-
-    class ClickAction(BaseModel):
-        """点击；省略坐标则点击当前鼠标位置"""
-
-        action_type: Literal["CLICK"] = "CLICK"
-        x: float | None = Field(default=None, description="Target x-coordinate")
-        y: float | None = Field(default=None, description="Target y-coordinate")
-        button: Literal["left", "right", "middle"] = "left"
-        num_clicks: Literal[1, 2, 3] = 1
-
-    class MouseDownAction(BaseModel):
-        """按下鼠标按键"""
-
-        action_type: Literal["MOUSE_DOWN"] = "MOUSE_DOWN"
-        button: Literal["left", "right", "middle"] = "left"
-
-    class MouseUpAction(BaseModel):
-        """释放鼠标按键"""
-
-        action_type: Literal["MOUSE_UP"] = "MOUSE_UP"
-        button: Literal["left", "right", "middle"] = "left"
-
-    class RightClickAction(BaseModel):
-        """右键点击；省略坐标则点击当前鼠标位置"""
-
-        action_type: Literal["RIGHT_CLICK"] = "RIGHT_CLICK"
-        x: float | None = Field(default=None, description="Target x-coordinate")
-        y: float | None = Field(default=None, description="Target y-coordinate")
-
-    class DoubleClickAction(BaseModel):
-        """双击；省略坐标则双击当前鼠标位置"""
-
-        action_type: Literal["DOUBLE_CLICK"] = "DOUBLE_CLICK"
-        x: float | None = Field(default=None, description="Target x-coordinate")
-        y: float | None = Field(default=None, description="Target y-coordinate")
-
-    class DragToAction(BaseModel):
-        """拖拽到屏幕绝对坐标"""
-
-        action_type: Literal["DRAG_TO"] = "DRAG_TO"
-        x: float = Field(description="Target x-coordinate for drag")
-        y: float = Field(description="Target y-coordinate for drag")
-
-    class DragRelAction(BaseModel):
-        """相对当前鼠标位置拖拽"""
-
-        action_type: Literal["DRAG_REL"] = "DRAG_REL"
-        x_offset: float = Field(description="Relative x-axis drag movement from current position")
-        y_offset: float = Field(description="Relative y-axis drag movement from current position")
-
-    class ScrollAction(BaseModel):
-        """滚动屏幕（像素量）"""
-
-        action_type: Literal["SCROLL"] = "SCROLL"
-        dx: int = Field(default=0, description="Horizontal scroll amount in pixels")
-        dy: int = Field(default=0, description="Vertical scroll amount in pixels")
-
-    class TypingAction(BaseModel):
-        """输入文本"""
-
-        action_type: Literal["TYPING"] = "TYPING"
-        text: str = Field(min_length=1, description="Text to type")
-        use_clipboard: bool | None = Field(
-            default=True,
-            description="Use clipboard for better character support",
-        )
-
-    class PressAction(BaseModel):
-        """按下并释放单个按键"""
-
-        action_type: Literal["PRESS"] = "PRESS"
-        key: str = Field(min_length=1, description="Key name")
-
-    class KeyDownAction(BaseModel):
-        """按下单个按键（不释放）"""
-
-        action_type: Literal["KEY_DOWN"] = "KEY_DOWN"
-        key: str = Field(min_length=1, description="Key name")
-
-    class KeyUpAction(BaseModel):
-        """释放单个按键"""
-
-        action_type: Literal["KEY_UP"] = "KEY_UP"
-        key: str = Field(min_length=1, description="Key name")
-
-    class HotkeyAction(BaseModel):
-        """按下组合键"""
-
-        action_type: Literal["HOTKEY"] = "HOTKEY"
-        keys: list[str] = Field(min_length=1, description="Ordered key names to press together")
-
-    class WaitAction(BaseModel):
-        """等待指定秒数"""
-
-        action_type: Literal["WAIT"] = "WAIT"
-        duration: float = Field(gt=0, description="Duration to wait in seconds")
-
-    BrowserAction = Annotated[
-        Union[
-            MoveToAction,
-            MoveRelAction,
-            ClickAction,
-            MouseDownAction,
-            MouseUpAction,
-            RightClickAction,
-            DoubleClickAction,
-            DragToAction,
-            DragRelAction,
-            ScrollAction,
-            TypingAction,
-            PressAction,
-            KeyDownAction,
-            KeyUpAction,
-            HotkeyAction,
-            WaitAction,
-        ],
-        Field(discriminator="action_type"),
-    ]
 
     @wisepen_mcp_meta(ToolMeta(
         tool_name="browser_execute_action",

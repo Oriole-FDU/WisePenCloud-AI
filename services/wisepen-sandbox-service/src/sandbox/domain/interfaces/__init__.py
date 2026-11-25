@@ -35,7 +35,6 @@ from sandbox.domain.interfaces.sandbox_provider import (
 )
 
 __all__ = [
-    "BrowserAction",
     "BrowserActionResult",
     "BrowserContentResult",
     "BrowserInfoResult",
