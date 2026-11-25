@@ -8,6 +8,7 @@ dependencies = [
     "dependency_injector",
     "httpx",
     "mcp>=1.27,<2",
+    "pillow>=11.3",
     "beanie",
     "pydantic",
     "pydantic-settings",

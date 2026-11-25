@@ -9,10 +9,20 @@ from chat.service_client import AIAssetClient
 from chat.application.skills.builtin_skills import get_builtin_skill_meta, is_builtin_skill_id
 
 
+SANDBOX_FILE_SKILL_IDS = {
+    "builtin:archive-reader",
+    "builtin:pdf",
+    "builtin:docx",
+    "builtin:pptx",
+    "builtin:read-markdown",
+    "builtin:xlsx",
+}
+
 ALWAYS_AVAILABLE_BUILTIN_SKILL_IDS = {
     "builtin:note-editor",
     "builtin:skill-creator",
     "builtin:wisepen-ui",
+    *SANDBOX_FILE_SKILL_IDS,
 }
 
 
@@ -51,7 +61,10 @@ class DefaultSkillMatcher(SkillMatcher):
         external_skill_ids = on_demand_skill_ids - builtin_skill_ids
 
         skill_meta_list: List[SkillMeta] = []
-        for skill_id in sorted(builtin_skill_ids): # 处理内置 Skill
+        # 把新增的文件处理 Skill 放在原有候选之后，保留低 top_k 的既有行为。
+        for skill_id in sorted(builtin_skill_ids, key=lambda value: (
+            value in SANDBOX_FILE_SKILL_IDS, value,
+        )):
             meta = get_builtin_skill_meta(skill_id)
             if meta is not None:
                 skill_meta_list.append(meta)
