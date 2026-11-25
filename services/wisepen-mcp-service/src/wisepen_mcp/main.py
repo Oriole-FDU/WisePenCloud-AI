@@ -16,6 +16,7 @@ setup_observability(
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from starlette.routing import Route
 
 from common.mcp import assert_tool_meta_consistent, build_tool_meta_router
 from common.web.exception_handlers import setup_global_exception_handlers
@@ -95,7 +96,29 @@ app.include_router(build_tool_meta_router())
 app.include_router(build_oauth_router(container.redis_client()))
 
 
+class _McpAsgiEndpoint:
+    """把 StreamableHTTP 的 handler 暴露成 ASGI endpoint，供 Starlette Route 直接挂载"""
+
+    def __init__(self, handler) -> None:
+        self._handler = handler
+
+    async def __call__(self, scope, receive, send) -> None:
+        await self._handler(scope, receive, send)
+
+
+# 外部 MCP 客户端（Delta 等）请求的是 `/mcp`（无尾斜杠）
+# app.mount 只覆盖 `/mcp/`，FastAPI 的 Router 会对 `/mcp` 做 307 重定向
+# 而 MCP 客户端可能不跟随重定向（Delta不跟随），导致工具发现一直失败
+# 这里把 streamable HTTP handler 直接注册到 `/mcp`，并保留 mount 以兼容内部调用方的 `/mcp/`
 app.mount("/mcp", mcp_app)
+app.router.routes.append(
+    Route(
+        "/mcp",
+        # 把进来的请求原样转给 MCP 的 handler
+        endpoint=_McpAsgiEndpoint(mcp_server.session_manager.handle_request),
+        methods=["GET", "POST", "DELETE"],
+    )
+)
 
 
 if __name__ == "__main__":
