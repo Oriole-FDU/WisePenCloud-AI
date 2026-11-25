@@ -1,3 +1,12 @@
+from sandbox.domain.interfaces.sandbox_browser_action import BrowserAction
+from sandbox.domain.interfaces.sandbox_browser_provider import (
+    BrowserActionResult,
+    BrowserContentResult,
+    BrowserInfoResult,
+    BrowserListResult,
+    BrowserViewport,
+    SandboxBrowserProvider,
+)
 from sandbox.domain.interfaces.sandbox_file_provider import (
     FileContentEncoding,
     FileDownloadResult,
@@ -27,6 +36,12 @@ from sandbox.domain.interfaces.sandbox_provider import (
 )
 
 __all__ = [
+    "BrowserAction",
+    "BrowserActionResult",
+    "BrowserContentResult",
+    "BrowserInfoResult",
+    "BrowserListResult",
+    "BrowserViewport",
     "FileContentEncoding",
     "FileDownloadResult",
     "FileEntry",
@@ -46,6 +61,7 @@ __all__ = [
     "FileWriteResult",
     "ProviderCommandHandle",
     "ProviderCommandSnapshot",
+    "SandboxBrowserProvider",
     "SandboxFileProvider",
     "SandboxProvision",
     "SandboxProvider",

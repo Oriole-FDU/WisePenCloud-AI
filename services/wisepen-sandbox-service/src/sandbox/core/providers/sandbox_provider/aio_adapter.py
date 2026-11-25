@@ -7,10 +7,15 @@ import string
 from typing import Any, BinaryIO, TypeVar
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from sandbox.domain.entities import CommandTaskStatus
 from sandbox.domain.interfaces import (
+    BrowserActionResult,
+    BrowserContentResult,
+    BrowserInfoResult,
+    BrowserListResult,
+    BrowserViewport,
     FileContentEncoding,
     FileDownloadResult,
     FileFindResult,
@@ -46,10 +51,12 @@ class AIOAdapter(SandboxProvider):
         image: str,
         request_timeout_seconds: float,
         file_transfer_timeout_seconds: float = 120.0,
+        browser_request_timeout_seconds: float = 60.0,
     ) -> None:
         self._image = image
         self._request_timeout_seconds = request_timeout_seconds
         self._file_transfer_timeout_seconds = file_transfer_timeout_seconds
+        self._browser_request_timeout_seconds = browser_request_timeout_seconds
 
     @classmethod
     def sandbox_provider_id(cls) -> SandboxProviderType:
@@ -61,6 +68,7 @@ class AIOAdapter(SandboxProvider):
             image=config.get("image"),
             request_timeout_seconds=config.get("request_timeout_seconds", 5.0),
             file_transfer_timeout_seconds=config.get("file_transfer_timeout_seconds", 120.0),
+            browser_request_timeout_seconds=config.get("browser_request_timeout_seconds", 60.0),
         )
 
     def create_provision(self) -> SandboxProvision:
@@ -78,6 +86,34 @@ class AIOAdapter(SandboxProvider):
         api_key = (provider_metadata or {}).get("api_key")
         return {"X-AIO-API-Key": str(api_key)} if api_key else {}
 
+    async def _request(
+        self,
+        method: str,
+        base_url: str,
+        endpoint: str,
+        *,
+        json: Mapping[str, object | None] | None = None,
+        params: Mapping[str, object | None] | None = None,
+        timeout: float | None = None,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> httpx.Response:
+        """统一的非流式请求入口：构造带认证头的客户端并返回响应，状态码与解析由调用方处理。"""
+        request_kwargs: dict[str, Any] = {}
+        if json is not None:
+            request_kwargs["json"] = {key: value for key, value in json.items() if value is not None}
+        if params is not None:
+            request_kwargs["params"] = {key: value for key, value in params.items() if value is not None}
+        async with httpx.AsyncClient(
+            timeout=timeout or self._request_timeout_seconds,
+            trust_env=False,
+            headers=self._headers(provider_metadata),
+        ) as client:
+            return await client.request(
+                method,
+                f"{base_url.rstrip('/')}{endpoint}",
+                **request_kwargs,
+            )
+
     async def check_ready(
         self,
         base_url: str | None,
@@ -87,18 +123,17 @@ class AIOAdapter(SandboxProvider):
         if base_url is None:
             return False
         try:
-            async with httpx.AsyncClient(
-                timeout=self._request_timeout_seconds,
-                trust_env=False,
-                headers=self._headers(provider_metadata),
-            ) as client:
-                response = await client.get(f"{base_url.rstrip('/')}/v1/sandbox")
+            response = await self._request("GET", base_url, "/v1/sandbox", provider_metadata=provider_metadata)
             if response.status_code != 200:
                 return False
             payload = response.json()
         except (httpx.HTTPError, httpx.InvalidURL, ValueError):
             return False
         return isinstance(payload, dict) and self._HEALTH_FIELDS.issubset(payload)
+
+    # ------------------------------------------------------------------
+    # Bash 能力（/v1/bash/*）
+    # ------------------------------------------------------------------
 
     async def start_command(
         self,
@@ -109,24 +144,19 @@ class AIOAdapter(SandboxProvider):
         provider_metadata: Mapping[str, Any] | None = None,
     ) -> ProviderCommandHandle:
         """通过 AIO Bash Pipe 启动命令并返回 Provider 句柄"""
-        async with httpx.AsyncClient(
-            timeout=self._request_timeout_seconds,
-            trust_env=False,
-            headers=self._headers(provider_metadata),
-        ) as client:
-            response = await client.post(
-                f"{base_url.rstrip('/')}/v1/bash/exec",
-                json={
-                    "command": command,
-                    "exec_dir": working_directory,
-                    "async_mode": True,
-                    "hard_timeout": timeout_seconds,
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-        data = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(data, dict) or not payload.get("success"):
+        response = await self._request(
+            "POST", base_url, "/v1/bash/exec",
+            json={
+                "command": command,
+                "exec_dir": working_directory,
+                "async_mode": True,
+                "hard_timeout": timeout_seconds,
+            },
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "bash")
+        data = payload.get("data")
+        if not isinstance(data, dict):
             raise RuntimeError("AIO Bash returned an invalid command handle")
         session_id = data.get("session_id")
         if not isinstance(session_id, str) or not session_id:
@@ -147,26 +177,22 @@ class AIOAdapter(SandboxProvider):
         provider_metadata: Mapping[str, Any] | None = None,
     ) -> ProviderCommandSnapshot:
         """读取 AIO 命令的增量输出和状态"""
-        async with httpx.AsyncClient(
+        response = await self._request(
+            "POST", base_url, "/v1/bash/output",
+            json={
+                "session_id": handle.provider_session_id,
+                "command_id": handle.provider_command_id,
+                "offset": stdout_offset,
+                "stderr_offset": stderr_offset,
+                "wait": True,
+                "wait_timeout": wait_timeout_seconds,
+            },
             timeout=max(self._request_timeout_seconds, wait_timeout_seconds + 2),
-            trust_env=False,
-            headers=self._headers(provider_metadata),
-        ) as client:
-            response = await client.post(
-                f"{base_url.rstrip('/')}/v1/bash/output",
-                json={
-                    "session_id": handle.provider_session_id,
-                    "command_id": handle.provider_command_id,
-                    "offset": stdout_offset,
-                    "stderr_offset": stderr_offset,
-                    "wait": True,
-                    "wait_timeout": wait_timeout_seconds,
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-        data = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(data, dict) or not payload.get("success"):
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "bash")
+        data = payload.get("data")
+        if not isinstance(data, dict):
             raise RuntimeError("AIO Bash returned an invalid command result")
         stdout = data.get("stdout") or ""
         stderr = data.get("stderr") or ""
@@ -187,19 +213,17 @@ class AIOAdapter(SandboxProvider):
         provider_metadata: Mapping[str, Any] | None = None,
     ) -> None:
         """主动终止 AIO 命令"""
-        async with httpx.AsyncClient(
-            timeout=self._request_timeout_seconds,
-            trust_env=False,
-            headers=self._headers(provider_metadata),
-        ) as client:
-            response = await client.post(
-                f"{base_url.rstrip('/')}/v1/bash/kill",
-                json={"session_id": handle.provider_session_id, "signal": "SIGKILL"},
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, dict) or payload.get("success") is not True:
-                raise RuntimeError("AIO Bash rejected command termination")
+        response = await self._request(
+            "POST", base_url, "/v1/bash/kill",
+            json={"session_id": handle.provider_session_id, "signal": "SIGKILL"},
+            provider_metadata=provider_metadata,
+        )
+        self._parse_envelope(response, "bash")
+
+
+    # ------------------------------------------------------------------
+    # File 能力（/v1/file/*）
+    # ------------------------------------------------------------------
 
     async def read_file(
         self,
@@ -429,7 +453,8 @@ class AIOAdapter(SandboxProvider):
                 data={"path": path},
                 files={"file": (filename, source, "application/octet-stream")},
             )
-        return self._parse_file_result(response, FileUploadResult)
+        payload = self._parse_envelope(response, "file")
+        return FileUploadResult.model_validate(payload.get("data"))
 
     async def download_file(
         self,
@@ -478,34 +503,475 @@ class AIOAdapter(SandboxProvider):
         result_type: type[FileResultT],
         provider_metadata: Mapping[str, object] | None,
     ) -> FileResultT:
-        async with httpx.AsyncClient(
-            timeout=self._request_timeout_seconds,
-            trust_env=False,
-            headers=self._headers(provider_metadata),
-        ) as client:
-            response = await client.post(
-                f"{base_url.rstrip('/')}{endpoint}",
-                json={key: value for key, value in request_data.items() if value is not None},
-            )
-        return self._parse_file_result(response, result_type)
+        response = await self._request(
+            "POST", base_url, endpoint, json=request_data, provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "file")
+        return result_type.model_validate(payload.get("data"))
 
     @staticmethod
-    def _parse_file_result(
-        response: httpx.Response,
-        result_type: type[FileResultT],
-    ) -> FileResultT:
+    def _parse_envelope(response: httpx.Response, scope: str) -> dict[str, Any]:
+        """校验统一响应信封 {success, message, data}，返回原始 payload dict。
+
+        scope 仅用于错误消息（"file"/"browser"/"bash"）。data 的形状因端点而异，
+        因此这里只校验到信封边界，data 的解析留给调用方。
+        """
         response.raise_for_status()
         try:
             payload = response.json()
         except ValueError as exc:
-            raise RuntimeError("AIO file API returned non-JSON data") from exc
-        data = payload.get("data") if isinstance(payload, dict) else None
-        if not isinstance(payload, dict) or payload.get("success") is not True:
-            message = payload.get("message") if isinstance(payload, dict) else None
-            raise RuntimeError(f"AIO file operation failed: {message or 'invalid response'}")
-        try:
-            return result_type.model_validate(data)
-        except ValidationError as exc:
+            raise RuntimeError(f"AIO {scope} API returned non-JSON data") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"AIO {scope} API returned an invalid response")
+        if payload.get("success") is not True:
             raise RuntimeError(
-                f"AIO file API returned invalid {result_type.__name__} data"
-            ) from exc
+                f"AIO {scope} operation failed: {payload.get('message') or 'invalid response'}"
+            )
+        return payload
+
+    # ------------------------------------------------------------------
+    # Browser 能力（/v1/browser/*）
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _browser_action_result(payload: Mapping[str, Any]) -> BrowserActionResult:
+        return BrowserActionResult.model_validate(payload)
+
+    @staticmethod
+    def _browser_content_result(payload: Mapping[str, Any]) -> BrowserContentResult:
+        data = payload.get("data")
+        if isinstance(data, str):
+            content = data
+        elif isinstance(data, dict) and data.get("markdown") is not None:
+            content = str(data["markdown"])
+        else:
+            content = str(data) if data is not None else ""
+        return BrowserContentResult(content=content, raw=data)
+
+    @staticmethod
+    def _browser_list_result(payload: Mapping[str, Any]) -> BrowserListResult:
+        data = payload.get("data")
+        return BrowserListResult(items=data if isinstance(data, list) else [], raw=data)
+
+    async def get_info(
+        self,
+        base_url: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserInfoResult:
+        response = await self._request(
+            "GET", base_url, "/v1/browser/info",
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        viewport = data.get("viewport") or {}
+        page_viewport = data.get("page_viewport")
+        return BrowserInfoResult(
+            user_agent=data.get("user_agent", ""),
+            cdp_url=data.get("cdp_url", ""),
+            vnc_url=data.get("vnc_url"),
+            cdp_ui_url=data.get("cdp_ui_url"),
+            viewport=BrowserViewport(
+                width=viewport.get("width", 0) if isinstance(viewport, dict) else 0,
+                height=viewport.get("height", 0) if isinstance(viewport, dict) else 0,
+            ),
+            page_viewport=BrowserViewport(
+                width=page_viewport.get("width", 0),
+                height=page_viewport.get("height", 0),
+            ) if isinstance(page_viewport, dict) else None,
+        )
+
+    async def screenshot(
+        self,
+        base_url: str,
+        destination: BinaryIO,
+        *,
+        format: str = "png",
+        quality: int | None = None,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> None:
+        params: dict[str, object] = {"format": format}
+        if quality is not None:
+            params["quality"] = quality
+        timeout = httpx.Timeout(self._browser_request_timeout_seconds)
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            trust_env=False,
+            headers=self._headers(provider_metadata),
+        ) as client:
+            async with client.stream(
+                "GET",
+                f"{base_url.rstrip('/')}/v1/browser/screenshot",
+                params=params,
+            ) as response:
+                response.raise_for_status()
+                async for chunk in response.aiter_bytes():
+                    destination.write(chunk)
+        destination.seek(0)
+
+    async def execute_action(
+        self,
+        base_url: str,
+        action: Mapping[str, Any],
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/actions",
+            json=dict(action),
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def navigate(
+        self,
+        base_url: str,
+        url: str,
+        *,
+        wait_until: str | None = None,
+        timeout: float | None = None,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/page/navigate",
+            json={"url": url, "wait_until": wait_until, "timeout": timeout},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def back(
+        self,
+        base_url: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/page/back",
+            json={},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def forward(
+        self,
+        base_url: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/page/forward",
+            json={},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def reload(
+        self,
+        base_url: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/page/reload",
+            json={},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def click(
+        self,
+        base_url: str,
+        *,
+        selector: str | None = None,
+        index: int | None = None,
+        x: float | None = None,
+        y: float | None = None,
+        button: str | None = None,
+        click_count: int | None = None,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/page/click",
+            json={"selector": selector, "index": index, "x": x, "y": y, "button": button, "click_count": click_count},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def fill(
+        self,
+        base_url: str,
+        text: str,
+        *,
+        selector: str | None = None,
+        index: int | None = None,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/page/fill",
+            json={"selector": selector, "index": index, "text": text},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def press_key(
+        self,
+        base_url: str,
+        key: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/page/press_key",
+            json={"key": key},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def hot_key(
+        self,
+        base_url: str,
+        keys: list[str],
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/page/hot_key",
+            json={"keys": keys},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def hover(
+        self,
+        base_url: str,
+        *,
+        selector: str | None = None,
+        x: float | None = None,
+        y: float | None = None,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/page/hover",
+            json={"selector": selector, "x": x, "y": y},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def scroll(
+        self,
+        base_url: str,
+        *,
+        direction: str | None = None,
+        amount: int | None = None,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/page/scroll",
+            json={"direction": direction, "amount": amount},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def evaluate(
+        self,
+        base_url: str,
+        expression: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/page/evaluate",
+            json={"expression": expression},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def get_markdown(
+        self,
+        base_url: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserContentResult:
+        response = await self._request(
+            "GET", base_url, "/v1/browser/page/markdown",
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_content_result(payload)
+
+    async def get_text(
+        self,
+        base_url: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserContentResult:
+        response = await self._request(
+            "GET", base_url, "/v1/browser/page/text",
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_content_result(payload)
+
+    async def get_elements(
+        self,
+        base_url: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserListResult:
+        response = await self._request(
+            "GET", base_url, "/v1/browser/page/elements",
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_list_result(payload)
+
+    async def list_tabs(
+        self,
+        base_url: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserListResult:
+        response = await self._request(
+            "GET", base_url, "/v1/browser/tabs",
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_list_result(payload)
+
+    async def create_tab(
+        self,
+        base_url: str,
+        url: str | None = None,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/tabs",
+            json={"url": url},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def close_tab(
+        self,
+        base_url: str,
+        index: int,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "DELETE", base_url, f"/v1/browser/tabs/{index}",
+            json={},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def activate_tab(
+        self,
+        base_url: str,
+        index: int,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "PUT", base_url, f"/v1/browser/tabs/{index}/activate",
+            json={},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def get_cookies(
+        self,
+        base_url: str,
+        *,
+        urls: str | None = None,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserListResult:
+        response = await self._request(
+            "GET", base_url, "/v1/browser/cookies",
+            params={"urls": urls},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_list_result(payload)
+
+    async def set_cookies(
+        self,
+        base_url: str,
+        cookies: list[Mapping[str, Any]],
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/cookies",
+            json={"cookies": cookies},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def clear_cookies(
+        self,
+        base_url: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "DELETE", base_url, "/v1/browser/cookies",
+            json={},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def save_state(
+        self,
+        base_url: str,
+        path: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/state/save",
+            json={"path": path},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)
+
+    async def load_state(
+        self,
+        base_url: str,
+        path: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> BrowserActionResult:
+        response = await self._request(
+            "POST", base_url, "/v1/browser/state/load",
+            json={"path": path},
+            timeout=self._browser_request_timeout_seconds,
+            provider_metadata=provider_metadata,
+        )
+        payload = self._parse_envelope(response, "browser")
+        return self._browser_action_result(payload)

@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 from common.core.exceptions import ServiceException
-from common.logger import error
+from common.logger import error, warn
 from pymongo.errors import DuplicateKeyError
 
 from sandbox.application.container_manager import ContainerManager
 from sandbox.core.config.app_settings import settings
+from sandbox.core.providers import SandboxProviderManager
 from sandbox.domain.entities import SandboxDocument, SandboxState, SessionWorkspaceDocument
 from sandbox.domain.error_codes import SandboxErrorCode
 from sandbox.domain.repositories import SandboxRepository, WorkspaceRepository
+
+_BROWSER_STATE_FILENAME = ".browser_state.json"
 
 
 class WorkspaceManager:
@@ -23,10 +26,12 @@ class WorkspaceManager:
         sandbox_repository: SandboxRepository,
         workspace_repository: WorkspaceRepository,
         container_manager: ContainerManager,
+        provider_manager: SandboxProviderManager,
     ) -> None:
         self._sandbox_repository = sandbox_repository
         self._workspace_repository = workspace_repository
         self._container_manager = container_manager
+        self._provider_manager = provider_manager
 
     async def allocate(self, user_id: str, session_id: str) -> SessionWorkspaceDocument:
         # 获取工作区记录和用户沙箱
@@ -57,12 +62,14 @@ class WorkspaceManager:
 
         # None 表示尚未获得可用的容器目录，后面据此决定是否创建空目录。
         workspace_path = None
+        cache_restored = False
         try:
             if cache.is_dir():
                 # 复制该 session 的 workspace 缓存到容器，以 workspace ID 作为目录名
                 workspace_path = await self._container_manager.copy_workspace_from_cache_to_container(
                     sandbox.container_id, workspace_id, str(cache),
                 )
+                cache_restored = True
         except Exception as exc:
             # 缓存允许丢失，记录恢复错误后尝试使用空目录
             error("session workspace restore failed; starting empty", exc=exc, session_id=session_id)
@@ -72,6 +79,10 @@ class WorkspaceManager:
             workspace_path = await self._container_manager.create_workspace_directory(
                 sandbox.container_id, workspace_id,
             )
+
+        # 浏览器状态随 workspace 缓存一起恢复
+        if cache_restored:
+            await self._load_browser_state(sandbox, workspace_path)
 
         # session 的 workspace 已经存在时只更新原记录的运行位置，首次创建新增记录
         if workspace is not None:
@@ -123,11 +134,12 @@ class WorkspaceManager:
         workspace: SessionWorkspaceDocument,
     ) -> None:
         final_cache = Path(settings.workspace.export_root) / workspace.id
-
         # 临时目录与正式目录同级，复制完成后在同一文件系统内改名发布
         staging_cache = final_cache.parent / f".{final_cache.name}.staging-{uuid4().hex}"
 
         try:
+            # 先把浏览器状态落进 workspace，让它随缓存一起导出
+            await self._save_browser_state(sandbox, workspace.workspace_path)
             # 复制 workspace 的内容至临时目录
             await self._container_manager.copy_workspace_from_container_to_cache(
                 sandbox.container_id, workspace.workspace_path, staging_cache,
@@ -140,3 +152,29 @@ class WorkspaceManager:
         finally:
             # 失败清理半成品；成功改名后临时目录已不存在，清理错误不覆盖原结果
             shutil.rmtree(staging_cache, ignore_errors=True)
+
+    async def _save_browser_state(self, sandbox: SandboxDocument, workspace_path: str) -> None:
+        # 浏览器状态作为 workspace 内隐藏文件落盘，随缓存导出
+        # 失败不阻塞回收
+        try:
+            provider = self._provider_manager.get(sandbox.provider_id)
+            await provider.save_state(
+                sandbox.base_url,
+                str(PurePosixPath(workspace_path) / _BROWSER_STATE_FILENAME),
+                sandbox.metadata or {},
+            )
+        except Exception as exc:
+            warn("browser state save failed; continuing reclaim", exc=exc, sandbox_id=sandbox.sandbox_id)
+
+    async def _load_browser_state(self, sandbox: SandboxDocument, workspace_path: str) -> None:
+        # 只在从缓存恢复 workspace 时尝试
+        # 状态文件缺失或加载失败都不阻塞分配
+        try:
+            provider = self._provider_manager.get(sandbox.provider_id)
+            await provider.load_state(
+                sandbox.base_url,
+                str(PurePosixPath(workspace_path) / _BROWSER_STATE_FILENAME),
+                sandbox.metadata or {},
+            )
+        except Exception as exc:
+            warn("browser state load failed; continuing with fresh state", exc=exc, sandbox_id=sandbox.sandbox_id)

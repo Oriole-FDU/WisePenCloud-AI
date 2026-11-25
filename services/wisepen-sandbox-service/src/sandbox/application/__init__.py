@@ -4,6 +4,7 @@ from sandbox.application.host_health_checker import HostHealthChecker, PressureS
 from sandbox.application.image_builder import ImageBuilder, ResolvedImage
 from sandbox.application.workspace_manager import WorkspaceManager
 from sandbox.application.file_service import SandboxFileService
+from sandbox.application.browser_service import SandboxBrowserService
 from sandbox.application.sandbox_watcher import Watcher
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "ResolvedImage",
     "WorkspaceManager",
     "SandboxFileService",
+    "SandboxBrowserService",
 ]

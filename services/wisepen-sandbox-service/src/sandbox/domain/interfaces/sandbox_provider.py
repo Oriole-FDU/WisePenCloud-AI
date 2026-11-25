@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from sandbox.domain.entities import CommandTaskStatus
+from sandbox.domain.interfaces.sandbox_browser_provider import SandboxBrowserProvider
 from sandbox.domain.interfaces.sandbox_file_provider import SandboxFileProvider
 
 
@@ -41,8 +42,8 @@ class SandboxProvision(BaseModel):
     provider_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class SandboxProvider(SandboxFileProvider, ABC):
-    """沙箱生命周期、命令和显式文件能力的统一 Provider 扩展点"""
+class SandboxProvider(SandboxFileProvider, SandboxBrowserProvider, ABC):
+    """沙箱生命周期、命令、文件与浏览器能力的统一 Provider 扩展点"""
 
     @classmethod
     @abstractmethod

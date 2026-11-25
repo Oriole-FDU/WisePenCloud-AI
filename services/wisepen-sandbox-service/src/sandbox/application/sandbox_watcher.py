@@ -94,8 +94,7 @@ class Watcher:
             for sandbox in sandboxes:
 
                 if sandbox.state == SandboxState.READY:
-                    sandbox_ready = await self._sandbox_provider_manager.check_ready(
-                        sandbox.provider_id,
+                    sandbox_ready = await self._sandbox_provider_manager.get(sandbox.provider_id).check_ready(
                         sandbox.base_url,
                         sandbox.metadata or {},
                     )
@@ -106,8 +105,7 @@ class Watcher:
 
                 elif sandbox.state == SandboxState.WARMING:
                     # 检查正在预热的容器的实际状态
-                    sandbox_ready = await self._sandbox_provider_manager.check_ready(
-                        sandbox.provider_id,
+                    sandbox_ready = await self._sandbox_provider_manager.get(sandbox.provider_id).check_ready(
                         sandbox.base_url,
                         sandbox.metadata or {},
                     )
@@ -163,7 +161,7 @@ class Watcher:
             )
 
         while created < plan_quantity and failures < settings.pool.warmup.max_retries:
-            sandbox_provision = self._sandbox_provider_manager.create_provision(provider_id)
+            sandbox_provision = self._sandbox_provider_manager.get(provider_id).create_provision()
             container_id: str | None = None
             try:
                 container_id = await self._container_manager.create(

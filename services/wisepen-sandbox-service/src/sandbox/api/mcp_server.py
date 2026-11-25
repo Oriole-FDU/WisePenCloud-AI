@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from base64 import b64encode
 from collections.abc import Mapping
-from typing import Annotated
+from typing import Annotated, Literal, Union
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ImageContent, TextContent
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, BaseModel
 
 from common.mcp import (
     OutputCacheSpecMeta,
@@ -21,6 +21,7 @@ from common.mcp import (
     wisepen_mcp_meta,
 )
 from sandbox.application.command_task_service import CommandTaskService
+from sandbox.application.browser_service import SandboxBrowserService
 from sandbox.application.file_service import (
     AttachmentImportResult,
     CloudResourceUploadResult,
@@ -30,6 +31,10 @@ from sandbox.application.file_service import (
 )
 from sandbox.domain.entities import CommandTaskDocument
 from sandbox.domain.interfaces import (
+    BrowserActionResult,
+    BrowserContentResult,
+    BrowserInfoResult,
+    BrowserListResult,
     FileContentEncoding,
     FileFindResult,
     FileGlobResult,
@@ -69,6 +74,14 @@ def get_tool_context_value(ctx: Context, key: str) -> object | None:
     return tool_context.get(key) if isinstance(tool_context, Mapping) else None
 
 
+def _session_context(ctx: Context) -> tuple[str, str]:
+    """从 MCP 请求上下文提取 user_id 与 session_id。"""
+    return (
+        str(get_tool_context_value(ctx, "user_id")),
+        str(get_tool_context_value(ctx, "session_id")),
+    )
+
+
 def _result(task: CommandTaskDocument) -> dict[str, str | int | bool | None]:
     return {
         "task_id": task.task_id,
@@ -84,6 +97,7 @@ def _result(task: CommandTaskDocument) -> dict[str, str | int | bool | None]:
 def create_sandbox_mcp_server(
     task_service: CommandTaskService,
     file_service: SandboxFileService | None = None,
+    browser_service: SandboxBrowserService | None = None,
 ) -> FastMCP:
     mcp = FastMCP(
         "wisepen-sandbox-service",
@@ -600,5 +614,607 @@ def create_sandbox_mcp_server(
             session_id=str(get_tool_context_value(ctx, "session_id")),
             path=path,
         )
+
+    if browser_service is None:
+        return mcp
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_get_info",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="获取浏览器信息"),
+        failure_reason="Sandbox Browser Info Read Failed",
+    ))
+    @mcp.tool(name="browser_get_info", description="Get browser information such as CDP URL and viewport size.")
+    async def browser_get_info(ctx: Context) -> BrowserInfoResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.get_info(user_id=user_id, session_id=session_id)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_navigate",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=120.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器导航"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Navigation Failed",
+    ))
+    @mcp.tool(name="browser_navigate", description="Navigate the current browser page to a URL.")
+    async def browser_navigate(
+        ctx: Context,
+        url: Annotated[str, Field(min_length=1, description="Target URL to open.")],
+        wait_until: str | None = None,
+        timeout: float | None = None,
+    ) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        result = await browser_service.navigate(
+            user_id=user_id, session_id=session_id, url=url, wait_until=wait_until, timeout=timeout,
+        )
+        return result
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_snapshot",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="读取浏览器页面内容"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Snapshot Failed",
+    ))
+    @mcp.tool(name="browser_snapshot", description="Get the current page content as Markdown.")
+    async def browser_snapshot(ctx: Context) -> BrowserContentResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.get_markdown(user_id=user_id, session_id=session_id)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_screenshot",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器截图"),
+        failure_reason="Sandbox Browser Screenshot Failed",
+    ))
+    @mcp.tool(
+        name="browser_screenshot",
+        description="Take a screenshot of the current browser display.",
+        structured_output=False,
+    )
+    async def browser_screenshot(
+        ctx: Context,
+        format: str = "png",
+        quality: int | None = None,
+    ) -> list[TextContent | ImageContent]:
+        user_id, session_id = _session_context(ctx)
+        mime_type, data = await browser_service.screenshot(
+            user_id=user_id, session_id=session_id, format=format, quality=quality,
+        )
+        return [
+            TextContent(type="text", text=f"Browser screenshot ({format})"),
+            ImageContent(type="image", mimeType=mime_type, data=b64encode(data).decode("ascii")),
+        ]
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_click",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器点击"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Click Failed",
+    ))
+    @mcp.tool(name="browser_click", description="Click an element by CSS selector, index, or coordinates.")
+    async def browser_click(
+        ctx: Context,
+        selector: str | None = None,
+        index: int | None = None,
+        x: float | None = None,
+        y: float | None = None,
+        button: str | None = None,
+        click_count: int | None = None,
+    ) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        result = await browser_service.click(
+            user_id=user_id, session_id=session_id,
+            selector=selector, index=index, x=x, y=y, button=button, click_count=click_count,
+        )
+        return result
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_fill",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器填表"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Fill Failed",
+    ))
+    @mcp.tool(name="browser_fill", description="Fill an input field by selector or index.")
+    async def browser_fill(
+        ctx: Context,
+        text: Annotated[str, Field(min_length=1, description="Text to enter.")],
+        selector: str | None = None,
+        index: int | None = None,
+    ) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        result = await browser_service.fill(
+            user_id=user_id, session_id=session_id, text=text, selector=selector, index=index,
+        )
+        return result
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_press_key",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器按键"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Key Press Failed",
+    ))
+    @mcp.tool(name="browser_press_key", description="Press a single key on the page.")
+    async def browser_press_key(ctx: Context, key: Annotated[str, Field(min_length=1)]) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.press_key(user_id=user_id, session_id=session_id, key=key)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_hotkey",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器组合键"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Hotkey Failed",
+    ))
+    @mcp.tool(name="browser_hotkey", description="Press a key combination, e.g. [\"ctrl\", \"c\"].")
+    async def browser_hotkey(
+        ctx: Context,
+        keys: Annotated[list[str], Field(min_length=1, description="Ordered key names.")],
+    ) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.hot_key(user_id=user_id, session_id=session_id, keys=keys)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_scroll",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器滚动"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Scroll Failed",
+    ))
+    @mcp.tool(name="browser_scroll", description="Scroll the page in a direction by an amount.")
+    async def browser_scroll(
+        ctx: Context,
+        direction: str | None = None,
+        amount: int | None = None,
+    ) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.scroll(user_id=user_id, session_id=session_id, direction=direction, amount=amount)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_hover",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器悬停"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Hover Failed",
+    ))
+    @mcp.tool(name="browser_hover", description="Hover over an element by selector or coordinates.")
+    async def browser_hover(
+        ctx: Context,
+        selector: str | None = None,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.hover(user_id=user_id, session_id=session_id, selector=selector, x=x, y=y)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_back",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器后退"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Back Failed",
+    ))
+    @mcp.tool(name="browser_back", description="Go back in browser history.")
+    async def browser_back(ctx: Context) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.back(user_id=user_id, session_id=session_id)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_forward",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器前进"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Forward Failed",
+    ))
+    @mcp.tool(name="browser_forward", description="Go forward in browser history.")
+    async def browser_forward(ctx: Context) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.forward(user_id=user_id, session_id=session_id)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_reload",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器刷新"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Reload Failed",
+    ))
+    @mcp.tool(name="browser_reload", description="Reload the current page.")
+    async def browser_reload(ctx: Context) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.reload(user_id=user_id, session_id=session_id)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_evaluate",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.HIGH,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器执行 JS"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Evaluate Failed",
+    ))
+    @mcp.tool(name="browser_evaluate", description="Execute JavaScript in the current page and return the result.")
+    async def browser_evaluate(
+        ctx: Context,
+        expression: Annotated[str, Field(min_length=1, description="JavaScript expression.")],
+    ) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.evaluate(user_id=user_id, session_id=session_id, expression=expression)
+
+    class MoveToAction(BaseModel):
+        """移动鼠标到屏幕绝对坐标"""
+
+        action_type: Literal["MOVE_TO"] = "MOVE_TO"
+        x: float = Field(description="Target x-coordinate")
+        y: float = Field(description="Target y-coordinate")
+
+    class MoveRelAction(BaseModel):
+        """相对当前鼠标位置移动"""
+
+        action_type: Literal["MOVE_REL"] = "MOVE_REL"
+        x_offset: float = Field(description="Relative x-axis movement from current position")
+        y_offset: float = Field(description="Relative y-axis movement from current position")
+
+    class ClickAction(BaseModel):
+        """点击；省略坐标则点击当前鼠标位置"""
+
+        action_type: Literal["CLICK"] = "CLICK"
+        x: float | None = Field(default=None, description="Target x-coordinate")
+        y: float | None = Field(default=None, description="Target y-coordinate")
+        button: Literal["left", "right", "middle"] = "left"
+        num_clicks: Literal[1, 2, 3] = 1
+
+    class MouseDownAction(BaseModel):
+        """按下鼠标按键"""
+
+        action_type: Literal["MOUSE_DOWN"] = "MOUSE_DOWN"
+        button: Literal["left", "right", "middle"] = "left"
+
+    class MouseUpAction(BaseModel):
+        """释放鼠标按键"""
+
+        action_type: Literal["MOUSE_UP"] = "MOUSE_UP"
+        button: Literal["left", "right", "middle"] = "left"
+
+    class RightClickAction(BaseModel):
+        """右键点击；省略坐标则点击当前鼠标位置"""
+
+        action_type: Literal["RIGHT_CLICK"] = "RIGHT_CLICK"
+        x: float | None = Field(default=None, description="Target x-coordinate")
+        y: float | None = Field(default=None, description="Target y-coordinate")
+
+    class DoubleClickAction(BaseModel):
+        """双击；省略坐标则双击当前鼠标位置"""
+
+        action_type: Literal["DOUBLE_CLICK"] = "DOUBLE_CLICK"
+        x: float | None = Field(default=None, description="Target x-coordinate")
+        y: float | None = Field(default=None, description="Target y-coordinate")
+
+    class DragToAction(BaseModel):
+        """拖拽到屏幕绝对坐标"""
+
+        action_type: Literal["DRAG_TO"] = "DRAG_TO"
+        x: float = Field(description="Target x-coordinate for drag")
+        y: float = Field(description="Target y-coordinate for drag")
+
+    class DragRelAction(BaseModel):
+        """相对当前鼠标位置拖拽"""
+
+        action_type: Literal["DRAG_REL"] = "DRAG_REL"
+        x_offset: float = Field(description="Relative x-axis drag movement from current position")
+        y_offset: float = Field(description="Relative y-axis drag movement from current position")
+
+    class ScrollAction(BaseModel):
+        """滚动屏幕（像素量）"""
+
+        action_type: Literal["SCROLL"] = "SCROLL"
+        dx: int = Field(default=0, description="Horizontal scroll amount in pixels")
+        dy: int = Field(default=0, description="Vertical scroll amount in pixels")
+
+    class TypingAction(BaseModel):
+        """输入文本"""
+
+        action_type: Literal["TYPING"] = "TYPING"
+        text: str = Field(min_length=1, description="Text to type")
+        use_clipboard: bool | None = Field(
+            default=True,
+            description="Use clipboard for better character support",
+        )
+
+    class PressAction(BaseModel):
+        """按下并释放单个按键"""
+
+        action_type: Literal["PRESS"] = "PRESS"
+        key: str = Field(min_length=1, description="Key name")
+
+    class KeyDownAction(BaseModel):
+        """按下单个按键（不释放）"""
+
+        action_type: Literal["KEY_DOWN"] = "KEY_DOWN"
+        key: str = Field(min_length=1, description="Key name")
+
+    class KeyUpAction(BaseModel):
+        """释放单个按键"""
+
+        action_type: Literal["KEY_UP"] = "KEY_UP"
+        key: str = Field(min_length=1, description="Key name")
+
+    class HotkeyAction(BaseModel):
+        """按下组合键"""
+
+        action_type: Literal["HOTKEY"] = "HOTKEY"
+        keys: list[str] = Field(min_length=1, description="Ordered key names to press together")
+
+    class WaitAction(BaseModel):
+        """等待指定秒数"""
+
+        action_type: Literal["WAIT"] = "WAIT"
+        duration: float = Field(gt=0, description="Duration to wait in seconds")
+
+    BrowserAction = Annotated[
+        Union[
+            MoveToAction,
+            MoveRelAction,
+            ClickAction,
+            MouseDownAction,
+            MouseUpAction,
+            RightClickAction,
+            DoubleClickAction,
+            DragToAction,
+            DragRelAction,
+            ScrollAction,
+            TypingAction,
+            PressAction,
+            KeyDownAction,
+            KeyUpAction,
+            HotkeyAction,
+            WaitAction,
+        ],
+        Field(discriminator="action_type"),
+    ]
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_execute_action",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="浏览器 GUI 动作"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Action Failed",
+    ))
+    @mcp.tool(
+        name="browser_execute_action",
+        description=(
+            "Execute a raw GUI action on the browser display. "
+            "action_type selects the action; required fields depend on action_type "
+            "(see the input schema). Supported action types: MOVE_TO, MOVE_REL, CLICK, "
+            "MOUSE_DOWN, MOUSE_UP, RIGHT_CLICK, DOUBLE_CLICK, DRAG_TO, DRAG_REL, SCROLL, "
+            "TYPING, PRESS, KEY_DOWN, KEY_UP, HOTKEY, WAIT."
+        ),
+    )
+    async def browser_execute_action(
+        ctx: Context,
+        action: BrowserAction,
+    ) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        payload = action if isinstance(action, dict) else action.model_dump(exclude_none=True)
+        return await browser_service.execute_action(user_id=user_id, session_id=session_id, action=payload)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_list_tabs",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="列出浏览器标签页"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Tab List Failed",
+    ))
+    @mcp.tool(name="browser_list_tabs", description="List all open browser tabs.")
+    async def browser_list_tabs(ctx: Context) -> BrowserListResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.list_tabs(user_id=user_id, session_id=session_id)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_new_tab",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=60.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="新建浏览器标签页"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Tab Create Failed",
+    ))
+    @mcp.tool(name="browser_new_tab", description="Create a new browser tab, optionally navigating to a URL.")
+    async def browser_new_tab(ctx: Context, url: str | None = None) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.create_tab(user_id=user_id, session_id=session_id, url=url)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_switch_tab",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="切换浏览器标签页"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Tab Switch Failed",
+    ))
+    @mcp.tool(name="browser_switch_tab", description="Activate a browser tab by index.")
+    async def browser_switch_tab(ctx: Context, index: Annotated[int, Field(ge=0)]) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.activate_tab(user_id=user_id, session_id=session_id, index=index)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_close_tab",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="关闭浏览器标签页"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Tab Close Failed",
+    ))
+    @mcp.tool(name="browser_close_tab", description="Close a browser tab by index.")
+    async def browser_close_tab(ctx: Context, index: Annotated[int, Field(ge=0)]) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.close_tab(user_id=user_id, session_id=session_id, index=index)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_get_cookies",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="读取浏览器 Cookie"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Cookie Read Failed",
+    ))
+    @mcp.tool(name="browser_get_cookies", description="Get browser cookies, optionally filtered by comma-separated URLs.")
+    async def browser_get_cookies(ctx: Context, urls: str | None = None) -> BrowserListResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.get_cookies(user_id=user_id, session_id=session_id, urls=urls)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_set_cookies",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="写入浏览器 Cookie"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Cookie Write Failed",
+    ))
+    @mcp.tool(name="browser_set_cookies", description="Set browser cookies from a list of cookie objects.")
+    async def browser_set_cookies(
+        ctx: Context,
+        cookies: Annotated[list[dict], Field(min_length=1, description="Cookie objects with name/value/domain/path.")],
+    ) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.set_cookies(user_id=user_id, session_id=session_id, cookies=cookies)
+
+    @wisepen_mcp_meta(ToolMeta(
+        tool_name="browser_clear_cookies",
+        policy=ToolPolicyMeta(
+            expose_by_default=True,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=30.0,
+            persist_output=True,
+            required_context_keys=("user_id", "session_id"),
+        ),
+        ui_spec=ToolUISpecMeta(display_name="清空浏览器 Cookie"),
+        output_cache_spec=_OPAQUE_OUTPUT_CACHE,
+        failure_reason="Sandbox Browser Cookie Clear Failed",
+    ))
+    @mcp.tool(name="browser_clear_cookies", description="Clear all browser cookies.")
+    async def browser_clear_cookies(ctx: Context) -> BrowserActionResult:
+        user_id, session_id = _session_context(ctx)
+        return await browser_service.clear_cookies(user_id=user_id, session_id=session_id)
 
     return mcp

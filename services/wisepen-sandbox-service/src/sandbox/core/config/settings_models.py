@@ -26,6 +26,7 @@ class AioProviderSettings(ConfigModel):
     image: str = Field(min_length=1)
     request_timeout_seconds: float = Field(default=5.0, gt=0)
     file_transfer_timeout_seconds: float = Field(default=120.0, gt=0)
+    browser_request_timeout_seconds: float = Field(default=60.0, gt=0)
     derive_image: bool = Field(
         default=True,
         description="预热前是否从基础镜像派生一层自定义镜像（false 时直接使用基础镜像）",

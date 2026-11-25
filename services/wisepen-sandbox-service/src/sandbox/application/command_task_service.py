@@ -83,8 +83,8 @@ class CommandTaskService:
             protection_registered = True
 
             # start_command
-            handle = await self._providers.start_command(
-                sandbox.provider_id, sandbox.base_url,
+            handle = await self._providers.get(sandbox.provider_id).start_command(
+                sandbox.base_url,
                 command, workspace.workspace_path,
                 timeout_seconds,
                 sandbox.metadata or {},
@@ -146,8 +146,8 @@ class CommandTaskService:
                 raise ServiceException(SandboxErrorCode.SANDBOX_UNAVAILABLE)
 
             # kill_command
-            await self._providers.kill_command(
-                task.provider_id, sandbox.base_url,
+            await self._providers.get(sandbox.provider_id).kill_command(
+                sandbox.base_url,
                 ProviderCommandHandle(
                     provider_session_id=task.provider_session_id,
                     provider_command_id=task.provider_command_id,
@@ -196,8 +196,8 @@ class CommandTaskService:
                 if task.status in _TERMINAL_STATUSES: return # 确认任务尚未是终态
 
                 # 读取 AIO 返回的状态
-                result = await self._providers.get_command_result(
-                    task.provider_id, sandbox.base_url,
+                result = await self._providers.get(sandbox.provider_id).get_command_result(
+                    sandbox.base_url,
                     ProviderCommandHandle(
                         provider_session_id=task.provider_session_id,
                         provider_command_id=task.provider_command_id,

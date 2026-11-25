@@ -151,6 +151,7 @@ async def lifespan(app: FastAPI):
 mcp_server = create_sandbox_mcp_server(
     container.command_task_service(),
     container.file_service(),
+    container.browser_service(),
 )
 mcp_app = mcp_server.streamable_http_app()
 

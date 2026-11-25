@@ -6,7 +6,15 @@ from v2.nacos import NacosNamingService
 from common.cloud.service_discovery import ServiceDiscovery
 from common.http.rpc_client import RpcClient
 
-from sandbox.application import CommandTaskService, ContainerManager, ImageBuilder, SandboxFileService, Watcher, WorkspaceManager
+from sandbox.application import (
+    CommandTaskService,
+    ContainerManager,
+    ImageBuilder,
+    SandboxBrowserService,
+    SandboxFileService,
+    Watcher,
+    WorkspaceManager,
+)
 from sandbox.core.config.app_settings import settings
 from sandbox.core.config.bootstrap_settings import bootstrap_settings
 from sandbox.core.config.nacos import nacos_client_manager
@@ -87,6 +95,7 @@ class Container(containers.DeclarativeContainer):
         sandbox_repository=sandbox_repository,
         workspace_repository=workspace_repository,
         container_manager=container_manager,
+        provider_manager=sandbox_provider_manager,
     )
     command_task_service = providers.Singleton(
         CommandTaskService,
@@ -104,6 +113,12 @@ class Container(containers.DeclarativeContainer):
         file_storage_client=file_storage_client,
         document_service_client=document_service_client,
         web_app_service_client=web_app_service_client,
+    )
+    browser_service = providers.Singleton(
+        SandboxBrowserService,
+        sandbox_repository=sandbox_repository,
+        workspace_manager=workspace_manager,
+        provider_manager=sandbox_provider_manager,
     )
     watcher = providers.Singleton(
         Watcher,

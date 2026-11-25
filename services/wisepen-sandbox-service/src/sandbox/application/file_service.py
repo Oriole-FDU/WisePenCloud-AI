@@ -163,8 +163,7 @@ class SandboxFileService:
         async with self._workspace_lease(user_id, session_id) as (workspace, sandbox):
             # 把 MCP 提供的 workspace 相对路径转换为 AIO 容器内的绝对路径
             absolute_path, _ = self._resolve_workspace_path(workspace.workspace_path, path)
-            result = await self._providers.read_file(
-                sandbox.provider_id,
+            result = await self._providers.get(sandbox.provider_id).read_file(
                 sandbox.base_url,
                 absolute_path,
                 start_line=start_line,
@@ -202,8 +201,7 @@ class SandboxFileService:
         async with self._workspace_lease(user_id, session_id) as (workspace, sandbox):
             # 把 MCP 提供的 workspace 相对路径转换为 AIO 容器内的绝对路径
             absolute_path, _ = self._resolve_workspace_path(workspace.workspace_path, path)
-            result = await self._providers.write_file(
-                sandbox.provider_id,
+            result = await self._providers.get(sandbox.provider_id).write_file(
                 sandbox.base_url,
                 absolute_path,
                 content,
@@ -230,8 +228,7 @@ class SandboxFileService:
         async with self._workspace_lease(user_id, session_id) as (workspace, sandbox):
             # 把 MCP 提供的 workspace 相对路径转换为 AIO 容器内的绝对路径
             absolute_path, relative_path = self._resolve_workspace_path(workspace.workspace_path, path)
-            result = await self._providers.replace_in_file(
-                sandbox.provider_id,
+            result = await self._providers.get(sandbox.provider_id).replace_in_file(
                 sandbox.base_url,
                 absolute_path,
                 old_str,
@@ -254,8 +251,7 @@ class SandboxFileService:
         async with self._workspace_lease(user_id, session_id) as (workspace, sandbox):
             # 把 MCP 提供的 workspace 相对路径转换为 AIO 容器内的绝对路径
             absolute_path, _ = self._resolve_workspace_path(workspace.workspace_path, path)
-            result = await self._providers.search_in_file(
-                sandbox.provider_id,
+            result = await self._providers.get(sandbox.provider_id).search_in_file(
                 sandbox.base_url,
                 absolute_path,
                 regex,
@@ -277,8 +273,7 @@ class SandboxFileService:
         async with self._workspace_lease(user_id, session_id) as (workspace, sandbox):
             # 把 MCP 提供的 workspace 相对路径转换为 AIO 容器内的绝对路径
             absolute_path, _ = self._resolve_workspace_path(workspace.workspace_path, path)
-            result = await self._providers.find_files(
-                sandbox.provider_id,
+            result = await self._providers.get(sandbox.provider_id).find_files(
                 sandbox.base_url,
                 absolute_path,
                 glob,
@@ -313,8 +308,7 @@ class SandboxFileService:
         async with self._workspace_lease(user_id, session_id) as (workspace, sandbox):
             # 把 MCP 提供的 workspace 相对路径转换为 AIO 容器内的绝对路径
             absolute_path, _ = self._resolve_workspace_path(workspace.workspace_path, path)
-            result = await self._providers.grep_files(
-                sandbox.provider_id,
+            result = await self._providers.get(sandbox.provider_id).grep_files(
                 sandbox.base_url,
                 absolute_path,
                 pattern,
@@ -362,8 +356,7 @@ class SandboxFileService:
         async with self._workspace_lease(user_id, session_id) as (workspace, sandbox):
             # 把 MCP 提供的 workspace 相对路径转换为 AIO 容器内的绝对路径
             absolute_path, _ = self._resolve_workspace_path(workspace.workspace_path, path)
-            result = await self._providers.glob_files(
-                sandbox.provider_id,
+            result = await self._providers.get(sandbox.provider_id).glob_files(
                 sandbox.base_url,
                 absolute_path,
                 pattern,
@@ -405,8 +398,7 @@ class SandboxFileService:
         async with self._workspace_lease(user_id, session_id) as (workspace, sandbox):
             # 把 MCP 提供的 workspace 相对路径转换为 AIO 容器内的绝对路径
             absolute_path, _ = self._resolve_workspace_path(workspace.workspace_path, path)
-            result = await self._providers.list_files(
-                sandbox.provider_id,
+            result = await self._providers.get(sandbox.provider_id).list_files(
                 sandbox.base_url,
                 absolute_path,
                 recursive=recursive,
@@ -464,8 +456,7 @@ class SandboxFileService:
                         max_bytes=settings.file_transfer.max_bytes,
                     )
                     # 把临时文件上传到 AIO
-                    await self._providers.upload_file(
-                        sandbox.provider_id,
+                    await self._providers.get(sandbox.provider_id).upload_file(
                         sandbox.base_url,
                         absolute_path,
                         temporary_file,
@@ -626,8 +617,7 @@ class SandboxFileService:
                     mode="w+b",
                 ) as temporary_file:
                     # 从 AIO workspace 下载文件
-                    file_info = await self._providers.download_file(
-                        sandbox.provider_id,
+                    file_info = await self._providers.get(sandbox.provider_id).download_file(
                         sandbox.base_url,
                         absolute_path,
                         temporary_file,
