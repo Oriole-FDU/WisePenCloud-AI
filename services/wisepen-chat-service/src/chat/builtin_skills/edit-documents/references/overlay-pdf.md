@@ -17,12 +17,12 @@
 
 ## 标框核对并填写
 
-先用 `preview-boxes` 把框画成红色方框，再用 `render_document.py` 渲染出来，看框和栏位是否对齐；对齐后再用 `fill-boxes` 真正填字
+先用 `preview-boxes` 把框画成红色方框，再用 `render_pages.py` 渲染出来，看框和栏位是否对齐；对齐后再用 `fill-boxes` 真正填字
 
 ```bash
-python3 /builtin_scripts/pdf_form.py '<输入.pdf>' preview-boxes '<boxes.json>' '<预览.pdf>'
-python3 /builtin_scripts/render_document.py '<预览.pdf>' '<输出目录>' --pages '<页码>'
-python3 /builtin_scripts/pdf_form.py '<输入.pdf>' fill-boxes '<boxes.json>' '<输出.pdf>'
+python3 /builtin_scripts/document/pdf.py '<输入.pdf>' preview-boxes '<boxes.json>' '<预览.pdf>'
+python3 /builtin_scripts/document/render_pages.py '<预览.pdf>' '<输出目录>' --pages '<页码>'
+python3 /builtin_scripts/document/pdf.py '<输入.pdf>' fill-boxes '<boxes.json>' '<输出.pdf>'
 ```
 
 新文字用离线字体画成图像叠加，原页面内容保留。填完后，把 `<输出.pdf>` 渲染出来查看，确认文字落在框内、没有超出方框或错位。

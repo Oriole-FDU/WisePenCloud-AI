@@ -7,8 +7,8 @@ Excel 用「列字母 + 行号」标识单元格，例如 `B13` 表示 B 列第 
 先列出所有工作表，再指定要读的工作表和区域：
 
 ```bash
-python3 /builtin_scripts/read_workbook.py '<工作簿>'
-python3 /builtin_scripts/read_workbook.py '<工作簿>' --sheet '<工作表>' --range '<左上角:右下角>'
+python3 /builtin_scripts/document/workbook.py read '<工作簿>'
+python3 /builtin_scripts/document/workbook.py read '<工作簿>' --sheet '<工作表>' --range '<左上角:右下角>'
 ```
 
 读某个区域前，先弄清各列的含义和数值单位；区域较大时按连续行分块读取。

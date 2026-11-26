@@ -5,7 +5,7 @@
 先检查有没有 AcroForm 字段：
 
 ```bash
-python3 /builtin_scripts/pdf_form.py '<输入.pdf>' inspect
+python3 /builtin_scripts/document/pdf.py '<输入.pdf>' inspect
 ```
 
 ## 填写字段
@@ -17,7 +17,7 @@ python3 /builtin_scripts/pdf_form.py '<输入.pdf>' inspect
 ```
 
 ```bash
-python3 /builtin_scripts/pdf_form.py '<输入.pdf>' fill '<values.json>' '<输出.pdf>'
+python3 /builtin_scripts/document/pdf.py '<输入.pdf>' fill '<values.json>' '<输出.pdf>'
 ```
 
 按回执里的 `pages` 渲染填写页核对。字段自带的字体会限制能显示的字符，中文尤其容易受影响。没有字段的静态表单走 `references/overlay-pdf.md`。

@@ -3,7 +3,7 @@
 把 PDF 转成 Markdown 时（`references/convert-and-read.md`），如果文件里有扫描页（图片页、没有文字层），回执会返回 `needs_ocr`，并用 `pages` 列出这些需要 OCR 的页号。问某页的公式或图表时，先按 `references/view-rendered-pages.md` 直接看该页图；需要引用扫描正文、文字密集或图上的字读不清时，再对相关页做 OCR。
 
 ```bash
-python3 /builtin_scripts/render_document.py '<输入.pdf>' '<输出目录>' --pages '<页号>' --dpi 240
+python3 /builtin_scripts/document/render_pages.py '<输入.pdf>' '<输出目录>' --pages '<页号>' --dpi 240
 ```
 
 再用 Tesseract 把这张页图识别成文字，这样就能读取和引用扫描页里原本没有文字层的正文：

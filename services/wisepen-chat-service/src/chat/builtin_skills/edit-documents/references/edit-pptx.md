@@ -2,10 +2,10 @@
 
 ## 定位对象
 
-先用 `inspect_slides.py` 定位对象 ID（幻灯片从 1 起；组内对象沿 `parent_id` 进入组）：
+先用 `pptx.py` 定位对象 ID（幻灯片从 1 起；组内对象沿 `parent_id` 进入组）：
 
 ```bash
-python3 /builtin_scripts/inspect_slides.py '<演示文稿.pptx>' --slide <页码>
+python3 /builtin_scripts/document/pptx.py '<演示文稿.pptx>' --slide <页码>
 ```
 
 ## 修改图表数据

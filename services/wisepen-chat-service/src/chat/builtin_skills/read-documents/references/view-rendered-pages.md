@@ -1,11 +1,11 @@
 # 渲染页图并查看
 
-PDF、DOC、DOCX、PPT、PPTX、XLS、XLSX 都可以用 `render_document.py` 选页渲染，再用 `sandbox_view_image` 查看。
+PDF、DOC、DOCX、PPT、PPTX、XLS、XLSX 都可以用 `render_pages.py` 选页渲染，再用 `sandbox_view_image` 查看。
 
 ## 渲染并查看
 
 ```bash
-python3 /builtin_scripts/render_document.py '<文件>' '<输出目录>' --pages '<页号>'
+python3 /builtin_scripts/document/render_pages.py '<文件>' '<输出目录>' --pages '<页号>'
 ```
 
 从回执的 `images[].path` 逐张调用 `sandbox_view_image`。一次最多渲染 20 页，文字小可以提高 `--dpi`（72–300）。
@@ -20,10 +20,10 @@ convert '<原图>' -crop '<宽>x<高>+<左>+<上>' +repage '<裁图输出>'
 
 ## 拼缩略图
 
-需要快速浏览多张时，用 `image_montage.py` 拼成一张缩略图再查看：
+需要快速浏览多张时，用 `montage_images.py` 拼成一张缩略图再查看：
 
 ```bash
-python3 /builtin_scripts/image_montage.py '<拼图输出.png>' \
+python3 /builtin_scripts/document/montage_images.py '<拼图输出.png>' \
   '<页图1>' '<页图2>' '<页图3>' --columns 3
 ```
 

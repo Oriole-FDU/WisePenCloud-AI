@@ -5,14 +5,14 @@
 ## 用脚本替换
 
 ```bash
-python3 /builtin_scripts/docx_document.py '<输入.docx>' replace '<输出.docx>' \
+python3 /builtin_scripts/document/docx.py '<输入.docx>' replace '<输出.docx>' \
   --at '<at坐标>' --text '<原文>' --with '<新文>'
 ```
 
 例如把正文第 12 个对象里的「项目初稿」改成「项目定稿」：
 
 ```bash
-python3 /builtin_scripts/docx_document.py 'input/report.docx' replace 'outputs/report.docx' \
+python3 /builtin_scripts/document/docx.py 'input/report.docx' replace 'outputs/report.docx' \
   --at '12' --text '项目初稿' --with '项目定稿'
 ```
 

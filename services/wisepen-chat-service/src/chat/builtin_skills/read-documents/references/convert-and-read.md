@@ -10,13 +10,13 @@
 2. 用 `sandbox_execute_command` 运行下面的命令。第一个参数是导入回执里的 `path`，第二个参数是新的 `.md` 文件路径；每份文档单独转换一次。
 
 ```bash
-python3 /builtin_scripts/convert_document.py '<源文件>' '<目标.md>'
+python3 /builtin_scripts/document/convert_to_markdown.py '<源文件>' '<目标.md>'
 ```
 
 例如：
 
 ```bash
-python3 /builtin_scripts/convert_document.py 'input/report.docx' 'reading/report.md'
+python3 /builtin_scripts/document/convert_to_markdown.py 'input/report.docx' 'reading/report.md'
 ```
 
 3. 从 stdout 的 JSON 里取 `path`（此时 `status` 为 `converted`）。如果 PDF 返回 `needs_ocr`，先读取有文字层的部分；需要补读的扫描页按 `references/ocr-pdf-pages.md` 处理。其他转换错误先看 stderr 判断原因；确需读原格式的细节时，改走本 Skill 对应格式的 `references/read-*.md`。

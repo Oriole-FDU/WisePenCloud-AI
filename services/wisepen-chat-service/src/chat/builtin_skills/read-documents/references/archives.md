@@ -7,7 +7,7 @@
 如果文件还没进工作区，先用 `sandbox_upload_file` 传 `attachment_id` 和 `destination_path`（例如 `input/archive.zip`），然后用回执里的 `path` 运行：
 
 ```bash
-python3 /builtin_scripts/archive.py inspect '<归档文件>'
+python3 /builtin_scripts/document/archive.py inspect '<归档文件>'
 ```
 
 在 stdout 里查看 `entries[].path`、`size` 和 `directory`。如果当前页没有目标成员而 `next_offset` 有值，就用 `inspect --offset <next_offset>` 继续翻页。用户只问包里有什么时，直接从成员清单回答，不需要解压。
@@ -18,14 +18,14 @@ python3 /builtin_scripts/archive.py inspect '<归档文件>'
 
 ```bash
 mkdir -p reading
-python3 /builtin_scripts/archive.py extract '<归档文件>' \
+python3 /builtin_scripts/document/archive.py extract '<归档文件>' \
   --output '<目标目录>' --member '<成员路径>'
 ```
 
 例如提取 `reports/summary.docx`：
 
 ```bash
-python3 /builtin_scripts/archive.py extract 'input/archive.zip' \
+python3 /builtin_scripts/document/archive.py extract 'input/archive.zip' \
   --output 'reading/extracted' --member 'reports/summary.docx'
 ```
 
