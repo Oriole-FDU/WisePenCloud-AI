@@ -595,7 +595,7 @@ class AIOAdapter(SandboxProvider):
         info = await self.get_info(base_url, provider_metadata)
         async with websockets.connect(
             info.cdp_url,
-            extra_headers=self._headers(provider_metadata),
+            additional_headers=self._headers(provider_metadata),
         ) as ws:
             yield ws
 
