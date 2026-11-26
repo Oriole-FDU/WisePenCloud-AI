@@ -33,8 +33,8 @@ from sandbox.domain.entities import CommandTaskDocument
 from sandbox.domain.interfaces import (
     BrowserActionResult,
     BrowserContentResult,
-    BrowserInfoResult,
     BrowserListResult,
+    BrowserViewport,
     FileContentEncoding,
     FileFindResult,
     FileGlobResult,
@@ -241,6 +241,14 @@ BrowserAction = Annotated[
     ],
     Field(discriminator="action_type"),
 ]
+
+
+class BrowserInfoView(BaseModel):
+    """browser_get_info 对外精简视图"""
+
+    user_agent: str
+    viewport: BrowserViewport
+    page_viewport: BrowserViewport | None = None
 
 
 def create_sandbox_mcp_server(
@@ -779,10 +787,15 @@ def create_sandbox_mcp_server(
         ui_spec=ToolUISpecMeta(display_name="获取浏览器信息"),
         failure_reason="Sandbox Browser Info Read Failed",
     ))
-    @mcp.tool(name="browser_get_info", description="Get browser information such as CDP URL and viewport size.")
-    async def browser_get_info(ctx: Context) -> BrowserInfoResult:
+    @mcp.tool(name="browser_get_info", description="Get the browser user agent and viewport size.")
+    async def browser_get_info(ctx: Context) -> BrowserInfoView:
         user_id, session_id = _session_context(ctx)
-        return await browser_service.get_info(user_id=user_id, session_id=session_id)
+        info = await browser_service.get_info(user_id=user_id, session_id=session_id)
+        return BrowserInfoView(
+            user_agent=info.user_agent,
+            viewport=info.viewport,
+            page_viewport=info.page_viewport,
+        )
 
     @wisepen_mcp_meta(ToolMeta(
         tool_name="browser_navigate",

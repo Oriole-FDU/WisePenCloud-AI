@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
-from typing import Any, BinaryIO
+from collections.abc import AsyncIterator, Mapping
+from contextlib import AbstractAsyncContextManager
+from typing import Any, BinaryIO, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -48,6 +49,14 @@ class BrowserListResult(BaseModel):
     raw: Any | None = None
 
 
+class BrowserChannel(Protocol):
+    """到沙箱浏览器 CDP 的双向字节/文本通道"""
+
+    async def send(self, message: str | bytes) -> None: ...
+
+    def __aiter__(self) -> AsyncIterator[str | bytes]: ...
+
+
 class SandboxBrowserProvider(ABC):
 
     @abstractmethod
@@ -56,6 +65,15 @@ class SandboxBrowserProvider(ABC):
         base_url: str,
         provider_metadata: Mapping[str, object] | None = None,
     ) -> BrowserInfoResult:
+        pass
+
+    @abstractmethod
+    def connect_cdp(
+        self,
+        base_url: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> AbstractAsyncContextManager[BrowserChannel]:
+        """建立到浏览器 CDP 的双向通道，退出时由实现负责关闭"""
         pass
 
     @abstractmethod

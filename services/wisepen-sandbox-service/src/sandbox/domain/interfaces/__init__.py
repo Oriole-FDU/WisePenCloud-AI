@@ -1,5 +1,6 @@
 from sandbox.domain.interfaces.sandbox_browser_provider import (
     BrowserActionResult,
+    BrowserChannel,
     BrowserContentResult,
     BrowserInfoResult,
     BrowserListResult,
@@ -36,6 +37,7 @@ from sandbox.domain.interfaces.sandbox_provider import (
 
 __all__ = [
     "BrowserActionResult",
+    "BrowserChannel",
     "BrowserContentResult",
     "BrowserInfoResult",
     "BrowserListResult",

@@ -164,7 +164,11 @@ async def app_lifespan(app: FastAPI):
             yield
 
 
-app = create_app(lifespan=app_lifespan, mcp_app=mcp_app)
+app = create_app(
+    lifespan=app_lifespan,
+    mcp_app=mcp_app,
+    browser_service=container.browser_service(),
+)
 instrument_fastapi_app(app)
 
 # 注册安全中间件：校验 X-From-Source，解析 X-User-Id 等网关透传 Headers。

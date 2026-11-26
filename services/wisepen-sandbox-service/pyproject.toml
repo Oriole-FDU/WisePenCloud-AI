@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml",
     "redis[asyncio]",
     "uvicorn[standard]",
+    "websockets",
     "wisepen-common",
 ]
 

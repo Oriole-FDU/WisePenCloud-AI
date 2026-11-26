@@ -14,6 +14,7 @@ from sandbox.domain.entities import SandboxDocument, SandboxState, SessionWorksp
 from sandbox.domain.error_codes import SandboxErrorCode
 from sandbox.domain.interfaces import (
     BrowserActionResult,
+    BrowserChannel,
     BrowserContentResult,
     BrowserInfoResult,
     BrowserListResult,
@@ -24,7 +25,7 @@ _SCREENSHOT_MIME_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "imag
 
 
 class SandboxBrowserService:
-    """将浏览器 MCP 工具调用映射到 AIO 浏览器能力；截图直接在内存中回流为图片。"""
+    """将浏览器 MCP 工具调用映射到沙箱浏览器能力"""
 
     def __init__(
         self,
@@ -42,6 +43,21 @@ class SandboxBrowserService:
             return await provider.get_info(
                 sandbox.base_url, sandbox.metadata or {},
             )
+
+    @asynccontextmanager
+    async def open_cdp_channel(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+    ) -> AsyncIterator[BrowserChannel]:
+        """为某会话打开到沙箱浏览器 CDP 的双向通道，连接期间持续持有沙箱租约"""
+        async with self._workspace_lease(user_id, session_id) as (_, sandbox):
+            provider = self._providers.get(sandbox.provider_id)
+            async with provider.connect_cdp(
+                sandbox.base_url, sandbox.metadata or {},
+            ) as channel:
+                yield channel
 
     async def screenshot(
         self,

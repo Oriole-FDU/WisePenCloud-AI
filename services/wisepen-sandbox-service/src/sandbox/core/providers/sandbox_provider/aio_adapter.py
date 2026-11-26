@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 import hashlib
 import secrets
 import string
 from typing import Any, BinaryIO, TypeVar
 
 import httpx
+import websockets
 from pydantic import BaseModel
 
 from sandbox.domain.entities import CommandTaskStatus
 from sandbox.domain.interfaces import (
     BrowserActionResult,
+    BrowserChannel,
     BrowserContentResult,
     BrowserInfoResult,
     BrowserListResult,
@@ -581,6 +584,20 @@ class AIOAdapter(SandboxProvider):
                 height=page_viewport.get("height", 0),
             ) if isinstance(page_viewport, dict) else None,
         )
+
+    @asynccontextmanager
+    async def connect_cdp(
+        self,
+        base_url: str,
+        provider_metadata: Mapping[str, object] | None = None,
+    ) -> AsyncIterator[BrowserChannel]:
+        """建立到浏览器 CDP 的双向通道：解析 cdp_url 并携带鉴权头连接上游。"""
+        info = await self.get_info(base_url, provider_metadata)
+        async with websockets.connect(
+            info.cdp_url,
+            extra_headers=self._headers(provider_metadata),
+        ) as ws:
+            yield ws
 
     async def screenshot(
         self,
