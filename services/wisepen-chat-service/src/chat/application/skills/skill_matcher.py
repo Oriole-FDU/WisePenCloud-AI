@@ -10,12 +10,8 @@ from chat.application.skills.builtin_skills import get_builtin_skill_meta, is_bu
 
 
 SANDBOX_FILE_SKILL_IDS = {
-    "builtin:archive-reader",
-    "builtin:pdf",
-    "builtin:docx",
-    "builtin:pptx",
-    "builtin:read-markdown",
-    "builtin:xlsx",
+    "builtin:read-documents",
+    "builtin:edit-documents",
 }
 
 ALWAYS_AVAILABLE_BUILTIN_SKILL_IDS = {
