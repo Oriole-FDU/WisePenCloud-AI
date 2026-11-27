@@ -34,6 +34,7 @@ class ToolCallMessage(BaseModel):
     call_id: str
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    display_name: Optional[str] = None
 
 
 class VisionImage(BaseModel):

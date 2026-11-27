@@ -134,6 +134,7 @@ def _build_assistant_ui_message(
                         "input": parsed_input,
                         "state": tool_state,
                         "output": tool_output,
+                        "displayName": tc.display_name,
                     })
 
             if msg.content:

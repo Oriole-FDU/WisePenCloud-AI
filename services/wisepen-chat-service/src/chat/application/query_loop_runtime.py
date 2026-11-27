@@ -50,6 +50,15 @@ _TOOL_OUTPUT_TOOL_NAMES = frozenset({
 })
 
 
+def _resolve_tool_display_name(tool_scope, tool_name: str) -> str | None:
+    """解析工具展示名"""
+    tool = tool_scope.get(tool_name) if tool_scope is not None else None
+    # 有 ui_spec 用 display_name，否则返回 None
+    if tool is not None and tool.definition.ui_spec is not None:
+        return tool.definition.ui_spec.display_name
+    return None
+
+
 class _StepEventInterpreter:
     """
     单个 Agent Step 内的事件解释器
@@ -59,7 +68,8 @@ class _StepEventInterpreter:
     - 向外产出 StreamEvent
     """
 
-    def __init__(self) -> None:
+    def __init__(self, tool_scope=None) -> None:
+        self._tool_scope = tool_scope
         self.text_id = f"txt_{uuid.uuid4().hex}"
         self.reasoning_id = f"rsn_{uuid.uuid4().hex}"
 
@@ -91,7 +101,9 @@ class _StepEventInterpreter:
         # 处理 LLMProvider 的工具调用列表
         # 在一整轮模型输出结束后才能进入工具执行阶段
         if item.type == LLMEventType.TOOL_CALLS:
-            self.tool_calls.extend(item.tool_calls or [])
+            for tc in item.tool_calls or []:
+                tc.display_name = _resolve_tool_display_name(self._tool_scope, tc.name)
+                self.tool_calls.append(tc)
             return
 
         # 处理工具调用参数的流式增量
@@ -100,7 +112,12 @@ class _StepEventInterpreter:
             # 首次看到某 call_id 先补 start，再逐段 delta
             if call_id and call_id not in self.started_tool_calls:
                 self.started_tool_calls.add(call_id)
-                yield ToolInputStartEvent(call_id=call_id, tool_name=item.tool_name or "")
+                tool_name = item.tool_name or ""
+                yield ToolInputStartEvent(
+                    call_id=call_id,
+                    tool_name=tool_name,
+                    display_name=_resolve_tool_display_name(self._tool_scope, tool_name),
+                )
             if item.delta:
                 yield ToolInputDeltaEvent(call_id=call_id, delta=item.delta)
             return
@@ -325,7 +342,7 @@ class QueryLoopRuntime:
         else:
             # 正常 step 由 Provider 事件解释器构造 assistant 和工具调用。
             # 创建本轮推理的事件解释器
-            event_interpreter = _StepEventInterpreter()
+            event_interpreter = _StepEventInterpreter(tool_scope)
             # schema 已由 ToolScope 在构造期固化；仅在模型和 LLM Provider 均声明支持工具时传给 LLM
             tool_schemas = tool_scope.schemas() \
                 if model_info.support_tools and llm_provider.supports_tools() else []
@@ -491,11 +508,13 @@ class QueryLoopRuntime:
                         yield ToolInputStartEvent(
                             call_id=invocation.tool_call_id,
                             tool_name=invocation.tool_name,
+                            display_name=_resolve_tool_display_name(tool_scope, invocation.tool_name),
                         )
                     yield ToolInputAvailableEvent(
                         call_id=invocation.tool_call_id,
                         tool_name=invocation.tool_name,
                         input=invocation.tool_call_arguments,
+                        display_name=_resolve_tool_display_name(tool_scope, invocation.tool_name),
                     )
 
                 resolved_client_results = None
@@ -509,6 +528,7 @@ class QueryLoopRuntime:
                             tool_name=invocation.tool_name,
                             input=invocation.tool_call_arguments,
                             tool_desc=tool.definition.llm_spec.description,
+                            display_name=_resolve_tool_display_name(tool_scope, invocation.tool_name),
                             reason=invocation.tool_call_arguments.get(HIGH_RISK_REASON_FIELD),
                         )
 

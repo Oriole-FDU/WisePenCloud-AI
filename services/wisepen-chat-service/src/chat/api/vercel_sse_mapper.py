@@ -44,10 +44,10 @@ def to_vercel_sse(event: StreamEvent) -> str:
     if isinstance(event, ReasoningEndEvent):
         return reasoning_end(id=event.reasoning_id)
     if isinstance(event, ToolInputStartEvent):
-        return tool_input_start(tool_call_id=event.call_id, tool_name=event.tool_name)
+        return tool_input_start(tool_call_id=event.call_id, tool_name=event.tool_name, display_name=event.display_name)
     if isinstance(event, ToolInputAvailableEvent):
         return tool_input_available(
-            tool_call_id=event.call_id, tool_name=event.tool_name, input=event.input
+            tool_call_id=event.call_id, tool_name=event.tool_name, input=event.input, display_name=event.display_name
         )
     if isinstance(event, ToolInputDeltaEvent):
         return tool_input_delta(tool_call_id=event.call_id, input_text_delta=event.delta)
@@ -64,6 +64,7 @@ def to_vercel_sse(event: StreamEvent) -> str:
             tool_name=event.tool_name,
             tool_desc=event.tool_desc,
             input=event.input,
+            display_name=event.display_name,
             reason=event.reason,
         )
     raise TypeError(f"Unknown StreamEvent subclass: {type(event).__name__}")

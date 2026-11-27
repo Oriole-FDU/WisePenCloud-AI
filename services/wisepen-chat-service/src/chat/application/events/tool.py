@@ -9,6 +9,7 @@ class ToolInputStartEvent(StreamEvent):
     """工具调用输入阶段开始。"""
     call_id: str
     tool_name: str
+    display_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class ToolInputAvailableEvent(StreamEvent):
     call_id: str
     tool_name: str
     input: dict[str, Any]
+    display_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -53,4 +55,5 @@ class ToolApprovalRequiredEvent(StreamEvent):
     tool_name: str
     input: dict[str, Any]
     tool_desc: str
+    display_name: str | None = None
     reason: str | None = None

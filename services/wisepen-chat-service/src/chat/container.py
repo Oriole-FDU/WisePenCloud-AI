@@ -46,7 +46,6 @@ from chat.application.content_safety import ContentSafetyChecker, create_content
 from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
 from chat.application.session_status_resolver import SessionStatusResolver
 from chat.application.title_generator import TitleGenerator
-from chat.application.chat_turn_tool_policy import ToolCategoryRouter
 from chat.mq import FrontendToolResponseConsumer
 from chat.application.agents import (
     DefaultAgentResolver,
