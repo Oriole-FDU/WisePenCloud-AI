@@ -37,6 +37,7 @@ class CreateMyModelTool:
                 }),
             ),
             policy=ToolPolicy(
+                category="model_management",
                 expose_by_default=True,
                 risk_level=ToolRiskLevel.MEDIUM,
                 persist_output=True,

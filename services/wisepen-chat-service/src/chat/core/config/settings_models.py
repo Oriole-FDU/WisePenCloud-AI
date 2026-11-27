@@ -201,23 +201,6 @@ class ContentSafetySettings(ConfigModel):
         return bool(self.model and self.base_url and self.api_key)
 
 
-class ToolRoutingSettings(ConfigModel):
-    """工具类别路由配置
-    model / base-url / api-key 任一为空即整体禁用。
-    """
-
-    model: str = Field(default="")
-    base_url: str = Field(default="")
-    api_key: str = Field(default="")
-    timeout_seconds: float = Field(default=0.8, gt=0)
-    # 类别概率达到该值即加载该类别
-    threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self.model and self.base_url and self.api_key)
-
-
 class ChatSettings(ConfigModel):
     security: InternalSecuritySettings
     persistence: PersistenceSettings
@@ -225,7 +208,6 @@ class ChatSettings(ConfigModel):
     models: ModelSettings
     integrations: IntegrationSettings
     content_safety: ContentSafetySettings | None = None
-    tool_routing: ToolRoutingSettings | None = None
     billing: BillingSettings = Field(default_factory=BillingSettings)
     context: ContextSettings = Field(default_factory=ContextSettings)
     vision: VisionSettings = Field(default_factory=VisionSettings)

@@ -307,7 +307,6 @@ class ChatTurnCoordinator:
             tool_selection_default_enabled=tool_selection_default_enabled,
             tool_selection_overrides=tool_selection_overrides,
             user_defined_on_demand_skill_ids=user_defined_on_demand_skill_ids | agent_on_demand_skill_ids,
-            routable_categories=await self._tool_registry.routable_categories(user_id),
         )
         available_skills = tool_policy.available_skills
 
@@ -318,7 +317,6 @@ class ChatTurnCoordinator:
             tool_selection_overrides=tool_policy.tool_selection_overrides,
             user_id=user_id,
             client_tool_capabilities=client_tool_capabilities,
-            routed_categories=tool_policy.routed_categories,
         )
 
         # 提示词组装
@@ -336,7 +334,6 @@ class ChatTurnCoordinator:
             resource_attachments=resource_attachments, # 对话中的全部资源附件
             user_defined_attachment_ids=user_defined_attachment_ids, # 用户指定的附件
             support_vision=chat_turn_context.model_info.model.support_vision,
-            has_loadable_categories=bool(chat_turn_context.tool_scope.available_categories()),
         )
 
         # 构造并持久化用户消息

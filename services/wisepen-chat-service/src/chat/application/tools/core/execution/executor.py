@@ -124,34 +124,18 @@ class ToolExecutor:
             if tool.definition.policy.risk_level == ToolRiskLevel.HIGH:
                 tool_arguments.pop(HIGH_RISK_REASON_FIELD, None)
 
-            # list_more_tools 是特殊工具，单独执行
-            if hasattr(tool, "list_more_tools"):
-                output = await self._run(
-                    tool.list_more_tools(
-                        scope=self._tool_scope,
-                        context={
-                            **self._tool_scope.context,
-                            **preflight_metadata,
-                        },
-                        config=tool_config,
-                        **tool_arguments,
-                    ),
-                    timeout_seconds=tool.definition.policy.timeout_seconds,
-                    tool_name=invocation.tool_name,
-                )
-            else:
-                output = await self._run(
-                    tool.execute(
-                        context={
-                            **self._tool_scope.context,
-                            **preflight_metadata,
-                        },
-                        config=tool_config,
-                        **tool_arguments,
-                    ),
-                    timeout_seconds=tool.definition.policy.timeout_seconds,
-                    tool_name=invocation.tool_name,
-                )
+            output = await self._run(
+                tool.execute(
+                    context={
+                        **self._tool_scope.context,
+                        **preflight_metadata,
+                    },
+                    config=tool_config,
+                    **tool_arguments,
+                ),
+                timeout_seconds=tool.definition.policy.timeout_seconds,
+                tool_name=invocation.tool_name,
+            )
 
             output = self._coerce_tool_output(output)
 

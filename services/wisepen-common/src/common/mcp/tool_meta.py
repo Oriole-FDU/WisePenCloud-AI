@@ -56,11 +56,19 @@ class OutputCacheSpecMeta(BaseModel):
     cache_paths: tuple[str, ...] = ()
 
 
+class ToolCategoryMeta(BaseModel):
+    """一组可延迟加载工具的模型可见元数据。"""
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]{1,62}$")
+    display_name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+
+
 class ToolMeta(BaseModel):
     """MCP 工具的 Chat 侧元数据"""
 
     tool_name: str
-    category: str = "general"
+    category: str = "resident"
     policy: ToolPolicyMeta
     ui_spec: ToolUISpecMeta | None = None
     config_spec: ToolConfigSpecMeta | None = None
@@ -68,9 +76,16 @@ class ToolMeta(BaseModel):
     failure_reason: str
 
 
+class ToolCatalogMeta(BaseModel):
+    categories: list[ToolCategoryMeta]
+    tools: list[ToolMeta]
+
+
 __all__ = [
     "OutputCacheSpecMeta",
     "OutputCacheStrategy",
+    "ToolCatalogMeta",
+    "ToolCategoryMeta",
     "ToolConfigSpecMeta",
     "ToolMeta",
     "ToolPolicyMeta",

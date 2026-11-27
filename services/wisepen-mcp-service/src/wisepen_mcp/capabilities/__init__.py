@@ -1,9 +1,9 @@
 __all__ = []
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from common.mcp import get_tool_metas
 from wisepen_mcp.capabilities.agent_resource import register_agent_resource_tools
-from wisepen_mcp.capabilities.capability import apply_capability_guard, apply_list_tools_filter, tool_capability
+from wisepen_mcp.capabilities.capability import apply_capability_guard, apply_list_tools_filter
+from wisepen_mcp.capabilities.tool_category import apply_tool_categories
 from wisepen_mcp.capabilities.resource import register_resource_tools
 from wisepen_mcp.capabilities.document_resource import register_document_resource_tools
 from wisepen_mcp.capabilities.group import register_group_tools
@@ -41,8 +41,7 @@ def build_mcp_server(
     register_group_tools(mcp, user_client)
     register_user_tools(mcp, user_client)
     register_web_search_tools(mcp)
-    for meta in get_tool_metas():
-        meta.category = tool_capability(meta.tool_name) or "general"
+    apply_tool_categories()
     apply_list_tools_filter(mcp)
     return mcp
 

@@ -29,6 +29,7 @@ class ListSessionsTool:
                 }),
             ),
             policy=ToolPolicy(
+                category="session_management",
                 expose_by_default=True,
                 risk_level=ToolRiskLevel.LOW,
                 persist_output=True,

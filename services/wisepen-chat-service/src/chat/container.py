@@ -43,7 +43,6 @@ from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
 from chat.application.content_safety import ContentSafetyChecker, create_content_safety_client
 from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
-from chat.application.chat_turn_tool_policy import ToolCategoryRouter
 from chat.mq import FrontendToolResponseConsumer
 from chat.application.agents import (
     DefaultAgentResolver,
@@ -53,7 +52,7 @@ from chat.application.agents import (
 from chat.application.skills.skill_matcher import DefaultSkillMatcher
 from chat.application.builtin_tools.skill_tools import LoadSkillAssetTool
 from chat.application.builtin_tools.skill_tools import LoadSkillTool
-from chat.application.builtin_tools.list_more_tools import ListMoreToolsTool
+from chat.application.builtin_tools.categories import CHAT_TOOL_CATEGORIES
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
@@ -113,6 +112,7 @@ def _build_registry(
         tool_config_repo=tool_config_repo,
         mcp_tool_catalog=mcp_tool_catalog,
         system_mcp_tool_catalog=system_mcp_tool_catalog,
+        builtin_tool_categories=CHAT_TOOL_CATEGORIES,
     )
     for provider in tool_providers:
         registry.register(provider)
@@ -265,14 +265,9 @@ class Container(containers.DeclarativeContainer):
         DefaultSkillMatcher,
         ai_asset_client=ai_asset_client,
     )
-    tool_category_router = providers.Singleton(
-        ToolCategoryRouter,
-        config=settings.tool_routing,
-    )
     chat_turn_tool_policy_builder = providers.Singleton(
         ChatTurnToolPolicyBuilder,
         skill_matcher=skill_matcher,
-        tool_router=tool_category_router,
     )
     kafka_producer = providers.Singleton(
         KafkaProducerClient,
@@ -375,9 +370,7 @@ class Container(containers.DeclarativeContainer):
     list_memories_tool = providers.Singleton(ListMemoriesTool, memory=memory_provider)
     delete_memory_tool = providers.Singleton(DeleteMemoryTool, memory=memory_provider)
     delete_all_memories_tool = providers.Singleton(DeleteAllMemoriesTool, memory=memory_provider)
-    list_more_tools_tool = providers.Singleton(ListMoreToolsTool)
     tool_providers = providers.List(
-        list_more_tools_tool,
         search_history_tool,
         load_image_attachment_tool,
         load_skill_tool,

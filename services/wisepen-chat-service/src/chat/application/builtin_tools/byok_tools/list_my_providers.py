@@ -27,6 +27,7 @@ class ListMyProvidersTool:
                 parameters_schema=ToolParametersSchema({"type": "object", "properties": {}}),
             ),
             policy=ToolPolicy(
+                category="model_management",
                 expose_by_default=True,
                 risk_level=ToolRiskLevel.LOW,
                 persist_output=True,

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, FastAPI, Query, WebSocket, WebSocketDisconnect
 from starlette.types import ASGIApp
 
-from common.mcp import build_tool_meta_router
+from common.mcp import build_tool_catalog_router
 from sandbox.api.endpoints import health
 
 if TYPE_CHECKING:
@@ -74,7 +74,7 @@ def create_app(
     )
 
     app.include_router(health.router)
-    app.include_router(build_tool_meta_router())
+    app.include_router(build_tool_catalog_router())
     if mcp_app is not None:
         app.mount("/mcp", mcp_app)
     if browser_service is not None:

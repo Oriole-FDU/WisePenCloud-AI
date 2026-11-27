@@ -22,7 +22,7 @@ from chat.core.config.app_settings import settings
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.service_client import McpServiceClient
 from common.logger import error
-from common.mcp import ToolMeta
+from common.mcp import ToolCatalogMeta, ToolCategoryMeta, ToolMeta
 
 ToolSource = Literal["system", "sandbox"]
 
@@ -81,58 +81,87 @@ class SystemMcpToolCatalog:
         self._mcp_service_client = mcp_service_client
         self._sandbox_mcp_service_client = sandbox_mcp_service_client
         self._tool_cache: dict[ToolSource, tuple[float, list[McpToolDescriptor]]] = {}
-        self._meta_cache: dict[ToolSource, tuple[float, list[ToolMeta]]] = {}
+        self._catalog_cache: dict[ToolSource, tuple[float, ToolCatalogMeta]] = {}
 
     async def _load(
         self,
         source: ToolSource,
-        cache: dict[ToolSource, tuple[float, list[T]]],
-        fetch: Callable[[], Awaitable[list[T]]],
+        cache: dict[ToolSource, tuple[float, T]],
+        fetch: Callable[[], Awaitable[T]],
         *,
         label: str,
-    ) -> list[T]:
+        default: T,
+    ) -> T:
         ttl = max(0.0, settings.mcp.system_list_tools_cache_ttl_seconds)
         now = time.monotonic()
         cached = cache.get(source)
 
         # 缓存未过期时直接返回
         if cached is not None:
-            cached_at, values = cached
+            cached_at, value = cached
             if cached_at + ttl > now:
-                return list(values)
+                return value
 
         try:
-            values = await fetch()
+            value = await fetch()
         except Exception as exc:
             error(f"load internal mcp {label} failed.", source=source, exc=exc)
             # 当前请求失败时继续使用该来源上一次成功的结果
-            return list(cached[1]) if cached is not None else []
+            return cached[1] if cached is not None else default
 
         # 只有成功拉取后才刷新时间，避免网络请求耗时消耗缓存 TTL
-        cache[source] = (time.monotonic(), list(values))
-        return list(values)
+        cache[source] = (time.monotonic(), value)
+        return value
+
+    async def _load_catalogs(self) -> tuple[ToolCatalogMeta, ToolCatalogMeta]:
+        return await asyncio.gather(
+            self._load(
+                "system", self._catalog_cache, self._mcp_service_client.get_tool_catalog,
+                label="catalog", default=ToolCatalogMeta(categories=[], tools=[]),
+            ),
+            self._load(
+                "sandbox", self._catalog_cache, self._sandbox_mcp_service_client.get_tool_catalog,
+                label="catalog", default=ToolCatalogMeta(categories=[], tools=[]),
+            ),
+        )
 
     async def load_system_tools(self) -> dict[str, McpRemoteTool]:
-        system_descriptors, sandbox_descriptors, system_metas, sandbox_metas = await asyncio.gather(
-            self._load("system", self._tool_cache, self._mcp_service_client.list_tools, label="tools"),
-            self._load("sandbox", self._tool_cache, self._sandbox_mcp_service_client.list_tools, label="tools"),
-            self._load("system", self._meta_cache, self._mcp_service_client.list_tool_metas, label="tool metas"),
-            self._load("sandbox", self._meta_cache, self._sandbox_mcp_service_client.list_tool_metas, label="tool metas"),
+        system_descriptors, sandbox_descriptors, catalogs = await asyncio.gather(
+            self._load(
+                "system", self._tool_cache, self._mcp_service_client.list_tools,
+                label="tools", default=[],
+            ),
+            self._load(
+                "sandbox", self._tool_cache, self._sandbox_mcp_service_client.list_tools,
+                label="tools", default=[],
+            ),
+            self._load_catalogs(),
         )
+        system_catalog, sandbox_catalog = catalogs
         tools: dict[str, McpRemoteTool] = {}
         tools.update(self._build_remote_tools(
             system_descriptors,
             self._mcp_service_client,
-            system_metas,
+            system_catalog.tools,
             prefix="system_",
         ))
         tools.update(self._build_remote_tools(
             sandbox_descriptors,
             self._sandbox_mcp_service_client,
-            sandbox_metas,
+            sandbox_catalog.tools,
             prefix="sandbox_",
         ))
         return tools
+
+    async def load_category_metadata(self) -> dict[str, ToolCategoryMeta]:
+        system_catalog, sandbox_catalog = await self._load_catalogs()
+        categories: dict[str, ToolCategoryMeta] = {}
+        for category in [*system_catalog.categories, *sandbox_catalog.categories]:
+            existing = categories.get(category.name)
+            if existing is not None and existing != category:
+                raise RuntimeError(f"conflicting internal tool category: {category.name}")
+            categories[category.name] = category
+        return categories
 
     def _build_remote_tools(
         self,

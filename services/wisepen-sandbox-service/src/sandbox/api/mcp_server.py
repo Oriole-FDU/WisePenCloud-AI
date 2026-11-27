@@ -20,6 +20,7 @@ from common.mcp import (
     ToolUISpecMeta,
     wisepen_mcp_meta,
 )
+from sandbox.api.tool_category import apply_sandbox_tool_categories
 from sandbox.application.command_task_service import CommandTaskService
 from sandbox.application.browser_service import SandboxBrowserService
 from sandbox.application.file_service import (
@@ -392,6 +393,7 @@ def create_sandbox_mcp_server(
         return _result(task)
 
     if file_service is None:
+        apply_sandbox_tool_categories()
         return mcp
 
     @wisepen_mcp_meta(ToolMeta(
@@ -773,6 +775,7 @@ def create_sandbox_mcp_server(
         )
 
     if browser_service is None:
+        apply_sandbox_tool_categories()
         return mcp
 
     @wisepen_mcp_meta(ToolMeta(
@@ -1247,4 +1250,5 @@ def create_sandbox_mcp_server(
         user_id, session_id = _session_context(ctx)
         return await browser_service.clear_cookies(user_id=user_id, session_id=session_id)
 
+    apply_sandbox_tool_categories()
     return mcp

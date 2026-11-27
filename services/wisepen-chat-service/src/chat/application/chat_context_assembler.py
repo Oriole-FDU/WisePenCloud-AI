@@ -38,16 +38,6 @@ _CURRENT_NOTE_CITATION_PROMPT = (
     "`read_current_note_for_edit`, and omit the link if no exact block ID is available."
 )
 
-_TOOL_LOADING_PROMPT = (
-    "Tool availability: to keep the context focused, some tools are not loaded at the start of a turn. "
-    "If the task needs a tool that is missing from the current tool list, call `list_more_tools` without "
-    "arguments to discover loadable categories, then call `list_more_tools` with the relevant `category`. "
-    "The result's `available_tools` lists every tool of that category available this turn; if it is empty, "
-    "the category does not exist or has no tools to load. "
-    "Before telling the user a task cannot be done, call `list_more_tools` to check whether the needed tool "
-    "is available but not loaded."
-)
-
 
 class ChatContextAssembler:
     """负责短期上下文的全生命周期管理：Redis 热缓存读取与降级回填、上下文裁剪、Prompt 组装"""
@@ -284,7 +274,6 @@ class ChatContextAssembler:
         resource_attachments: Optional[List[ResourceAttachmentRef]] = None,
         user_defined_attachment_ids: Optional[List[str]] = None,
         support_vision: bool = False,
-        has_loadable_categories: bool = False,
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表"""
         temp_attachments = temp_attachments or []
@@ -305,10 +294,6 @@ class ChatContextAssembler:
         # 当前笔记的引用协议是应用级规则，对默认和自定义 Agent 统一生效。
         if find_opened_note_resource(frontend_states) is not None:
             system_prompt = f"{system_prompt.rstrip()}\n\n{_CURRENT_NOTE_CITATION_PROMPT}"
-
-        # 工具按需加载说明：对默认和自定义 Agent 统一生效，仅当本轮确实存在可加载类别时注入
-        if has_loadable_categories:
-            system_prompt = f"{system_prompt.rstrip()}\n\n{_TOOL_LOADING_PROMPT}"
 
         # Message 列表初始化并加入 System Prompt
         messages: List[ChatMessage] = [

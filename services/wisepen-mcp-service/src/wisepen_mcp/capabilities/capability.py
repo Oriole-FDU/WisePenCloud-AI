@@ -4,83 +4,28 @@ import functools
 from typing import Any
 
 from common.security import PermissionErrorCode, PermissionException, SecurityContextHolder
+from wisepen_mcp.capabilities.tool_category import CATEGORY_TOOLS, tool_category
 
-# capability key -> 该能力下注册的工具名
-CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
-    "skill_resource": frozenset({"create_skill_info", "get_skill_info", "update_skill_info", "upload_skill_draft_asset"}),
-    "agent_resource": frozenset({
-        "create_agent_info", "get_agent_info", "get_agent_version_bundle_info",
-        "update_agent_info", "update_agent_spec",
-    }),
-    "note_resource": frozenset({
-        "apply_current_note_edits", "create_note", "read_current_note_for_edit", "read_note_resource_text",
-    }),
-    "resource_file": frozenset({
-        "create_folder", "get_resource_base_info", "get_resource_tag_tree", "list_resources",
-        "move_folders", "move_resources_in_group", "move_resources_to_folder", "move_resources_to_trash",
-        "remove_folders", "rename_resource", "search_resources", "update_folder",
-        "mount_resources_to_group", "unmount_resources_from_group"
-    }),
-    "resource_comment": frozenset({
-        "create_comment", "create_comment_reply", "delete_comment_item", "list_comment_replies", "list_comments",
-    }),
-    "resource_inline_comment": frozenset({
-        "add_inline_comment_item", "change_inline_comment_resolve_status", "delete_inline_comment_item",
-        "list_inline_comments", "update_inline_comment_item",
-    }),
-    "resource_favorite": frozenset({
-        "change_resource_favorite_status", "create_favorite_collection", "delete_favorite_collection",
-        "get_resource_favorite_status", "list_favorite_collections", "list_favorited_resources",
-        "update_favorite_collection_info",
-    }),
-    "resource_permission": frozenset({
-        "change_group_resource_config", "change_resource_action_permission", "get_group_resource_config",
-    }),
-    "resource_interaction": frozenset({
-        "get_resource_user_interaction_record"
-    }),
-    "document_resource": frozenset({"get_document_source_file", "read_document_resource_text"}),
-    "group": frozenset({
-        "create_group", "get_group_base_info", "join_group", "list_group_members",
-        "list_group_resource_daily_metrics", "list_groups",
-    }),
-    "user": frozenset({
-        "get_my_user_info", "get_my_wallet_info", "get_unread_message_count", "list_my_messages",
-        "list_my_task_status", "list_my_wallet_transactions",
-    }),
-}
-
-EXTERNAL_CAPABILITIES: frozenset[str] = frozenset(CAPABILITY_TOOLS)
 
 CAPABILITY_LABELS: dict[str, str] = {
     "skill_resource": "技能",
     "agent_resource": "智能体",
     "note_resource": "笔记",
     "resource_file": "资源文件",
-    "resource_comment": "资源评论",
-    "resource_inline_comment": "资源批注",
+    "resource_comment": "资源评论与批注",
     "resource_favorite": "资源收藏",
     "resource_permission": "资源权限与组配置",
-    "resource_interaction": "资源互动",
     "document_resource": "文档",
     "group": "小组",
     "user": "个人资料、钱包与消息",
 }
 
-_TOOL_CAPABILITY: dict[str, str] = {
-    tool: cap for cap, tools in CAPABILITY_TOOLS.items() for tool in tools
-}
-
+EXTERNAL_CAPABILITIES: frozenset[str] = frozenset(CAPABILITY_LABELS)
 
 def tool_capability(tool_name: str) -> str | None:
-    """返回工具所属能力；该能力即工具在 Chat 侧路由用的类别"""
-    return _TOOL_CAPABILITY.get(tool_name)
-
-
-def assert_capability_consistent(registered_tool_names: set[str]) -> None:
-    """确保能力映射里声明的工具名真实注册过"""
-    missing = sorted(_TOOL_CAPABILITY.keys() - registered_tool_names)
-    if missing: raise RuntimeError(f"capability references unknown tools: {missing}")
+    """返回外部 MCP 调用所需的授权能力"""
+    category = tool_category(tool_name)
+    return category if category in EXTERNAL_CAPABILITIES else None
 
 
 def apply_capability_guard(mcp) -> None:
@@ -91,7 +36,7 @@ def apply_capability_guard(mcp) -> None:
         base_decorator = original_tool(name=name, **kwargs)
 
         def decorator(fn):
-            capability = _TOOL_CAPABILITY.get(name) if name else None
+            capability = tool_capability(name) if name else None
 
             @functools.wraps(fn)
             async def guarded(*args: Any, **fn_kwargs: Any):
@@ -111,7 +56,7 @@ def apply_capability_guard(mcp) -> None:
 
 
 def apply_list_tools_filter(mcp) -> None:
-    """内部流量原样返回全部工具，外部流量只保留已授权的工具"""
+    """内部流量返回全部工具，外部流量只返回已授权工具"""
     tool_manager = getattr(mcp, "_tool_manager", None)
     if tool_manager is None:
         return
@@ -122,17 +67,15 @@ def apply_list_tools_filter(mcp) -> None:
         if not SecurityContextHolder.is_external_mcp():
             return tools
         granted = SecurityContextHolder.get_mcp_capabilities()
-        return [t for t in tools if _TOOL_CAPABILITY.get(getattr(t, "name", "")) in granted]
+        return [tool for tool in tools if tool_capability(getattr(tool, "name", "")) in granted]
 
     tool_manager.list_tools = filtered
 
 
 __all__ = [
     "CAPABILITY_LABELS",
-    "CAPABILITY_TOOLS",
     "EXTERNAL_CAPABILITIES",
     "apply_capability_guard",
     "apply_list_tools_filter",
-    "assert_capability_consistent",
     "tool_capability",
 ]

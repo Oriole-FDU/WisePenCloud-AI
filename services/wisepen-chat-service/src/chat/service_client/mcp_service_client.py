@@ -13,7 +13,7 @@ from common.cloud.service_discovery import LoadBalancingStrategy, ServiceDiscove
 from common.core.constants import CommonConstants, SecurityConstants
 from common.core.exceptions import RpcError
 from common.gray.context import GrayContextHolder
-from common.mcp import TOOL_CONFIG_META_KEY, TOOL_CONTEXT_META_KEY, ToolMeta
+from common.mcp import TOOL_CONFIG_META_KEY, TOOL_CONTEXT_META_KEY, ToolCatalogMeta
 from common.security.context import SecurityContextHolder
 
 
@@ -65,29 +65,29 @@ class McpServiceClient:
             descriptors.append(McpToolDescriptor(name=name, description=description, input_schema=input_schema))
         return descriptors
 
-    async def list_tool_metas(self) -> list[ToolMeta]:
+    async def get_tool_catalog(self) -> ToolCatalogMeta:
         async with AsyncClient(
             headers=self._build_headers(),
             timeout=self._timeout,
         ) as http_client:
-            response = await http_client.get(f"{await self._resolve_base_url()}/internal/tools/meta")
+            response = await http_client.get(f"{await self._resolve_base_url()}{path}")
 
         body = response.json()
         if not isinstance(body, dict) or int(body.get("code")) != 200:
             raise RpcError(
                 service_name=self._service_name,
-                path="/internal/tools/meta",
+                path="/internal/tools/catalog",
                 status=response.status_code,
-                msg=f"unexpected meta payload: {body!r}",
+                msg=f"unexpected catalog payload: {body!r}",
             )
         data = body.get("data")
-        if not isinstance(data, list):
+        if not isinstance(data, dict):
             raise RpcError(
                 service_name=self._service_name,
-                path="/internal/tools/meta",
-                msg=f"unexpected meta data: {data!r}",
+                path="/internal/tools/catalog",
+                msg=f"unexpected catalog data: {data!r}",
             )
-        return [ToolMeta.model_validate(item) for item in data]
+        return ToolCatalogMeta.model_validate(data)
 
     async def call_tool(
         self,

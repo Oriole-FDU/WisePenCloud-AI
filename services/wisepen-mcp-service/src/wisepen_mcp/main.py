@@ -18,11 +18,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from starlette.routing import Route
 
-from common.mcp import assert_tool_meta_consistent, build_tool_meta_router
+from common.mcp import assert_tool_catalog_consistent, build_tool_catalog_router
 from common.web.exception_handlers import setup_global_exception_handlers
 from common.web.middleware import SecurityHeaderMiddleware
 from wisepen_mcp.capabilities import build_mcp_server
-from wisepen_mcp.capabilities.capability import assert_capability_consistent
 from wisepen_mcp.container import container
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.core.config.nacos import nacos_client_manager
@@ -52,8 +51,7 @@ async def lifespan(app: FastAPI):
     info("service starting.", service=bootstrap_settings.SERVICE_NAME)
     async with mcp_server.session_manager.run():
         tools = await mcp_server.list_tools()
-        assert_tool_meta_consistent({tool.name for tool in tools})
-        assert_capability_consistent({tool.name for tool in tools})
+        assert_tool_catalog_consistent({tool.name for tool in tools})
         try:
             await nacos_client_manager.register_instance()
         except Exception as e:
@@ -92,7 +90,7 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "service": bootstrap_settings.SERVICE_NAME}
 
 
-app.include_router(build_tool_meta_router())
+app.include_router(build_tool_catalog_router())
 app.include_router(build_oauth_router(container.redis_client()))
 
 

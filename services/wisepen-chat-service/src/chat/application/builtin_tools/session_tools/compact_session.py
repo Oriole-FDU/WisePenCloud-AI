@@ -39,6 +39,7 @@ class CompactSessionTool:
                 parameters_schema=ToolParametersSchema({"type": "object", "properties": {}}),
             ),
             policy=ToolPolicy(
+                category="session_management",
                 expose_by_default=True,
                 risk_level=ToolRiskLevel.MEDIUM,
                 persist_output=True,

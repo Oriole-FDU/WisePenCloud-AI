@@ -1,17 +1,12 @@
 from __future__ import annotations
-import asyncio
-from typesafe_sdk import AsyncTypeSafeClient, Noul
 
 from dataclasses import dataclass, field
 from typing import Any, Optional, Set
 
-from chat.core.config.settings_models import ToolRoutingSettings
 from chat.application.agents.models import AgentToolAndSkillPolicy
 from chat.application.skills import SkillMatcher
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.skill import SkillMeta
-from common.logger import warn
-from common.utils.ai_clients import DecisionClient
 
 # Skill / Session / 附件工具默认不暴露，只在本轮上下文确实需要时解禁
 _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
@@ -33,13 +28,11 @@ class ChatTurnToolPolicyResult:
     expose_tool_name_set: set[str] = field(default_factory=set)
     tool_selection_default_enabled: bool = True
     tool_selection_overrides: dict[str, bool] = field(default_factory=dict)
-    routed_categories: set[str] | None = None
 
 
 class ChatTurnToolPolicyBuilder:
-    def __init__(self, skill_matcher: SkillMatcher, tool_router: ToolCategoryRouter | None = None) -> None:
+    def __init__(self, skill_matcher: SkillMatcher) -> None:
         self._skill_matcher = skill_matcher
-        self._tool_router = tool_router
 
     async def build(
         self,
@@ -55,7 +48,6 @@ class ChatTurnToolPolicyBuilder:
         tool_selection_default_enabled: Optional[bool],
         tool_selection_overrides: Optional[dict[str, bool]],
         user_defined_on_demand_skill_ids: Optional[Set[str]],
-        routable_categories: list[str] | None = None,
     ) -> ChatTurnToolPolicyResult:
         # 构建 Skill 视图：返回本轮可展示给 LLM 的 Skill metadata，由 LLM 判断是否加载
         available_skills: list[SkillMeta] = []
@@ -99,17 +91,6 @@ class ChatTurnToolPolicyBuilder:
             # 只要开启了工具，工具输出缓存系列工具就始终加载
             expose_tool_name_set.update(_CACHED_TOOL_OUTPUT_TOOL_NAMES)
 
-        # 工具类别路由
-        # 用决策模型判断本轮需要加载哪些类别
-        routed_categories: set[str] | None = None
-        if (tool_and_skill_policy.enable_use_tool
-                and self._tool_router is not None and self._tool_router.enabled
-                and routable_categories
-        ):
-            probabilities = await self._tool_router.route(user_query, routable_categories)
-            threshold = self._tool_router.config.threshold
-            routed_categories = {c for c, p in probabilities.items() if p >= threshold}
-
         return ChatTurnToolPolicyResult(
             available_skills=available_skills,
             tool_context=tool_context,
@@ -124,7 +105,6 @@ class ChatTurnToolPolicyBuilder:
                 if tool_selection_overrides is not None
                 else dict(tool_and_skill_policy.tool_selection_overrides)
             ),
-            routed_categories=routed_categories,
         )
 
 
@@ -133,52 +113,3 @@ def has_history_image_record(chat_history_record_messages: list[ChatMessage]) ->
         msg.role == Role.USER and any(attachment.is_image for attachment in msg.attachments)
         for msg in chat_history_record_messages
     )
-
-
-class ToolCategoryRouter:
-    """用 SystemOne 决策模型判断本轮需要加载哪些工具类别
-
-    每个类别一个 Noul（多标签），返回各类别「需要加载」的概率
-    任何异常返回空 dict（等价于不路由，走默认暴露逻辑）
-    """
-
-    def __init__(self, config: ToolRoutingSettings | None) -> None:
-        self.config = config
-        self.enabled = bool(config and config.enabled)
-        self._client: AsyncTypeSafeClient | None = None
-        self._decision: DecisionClient | None = None
-        if self.enabled and config is not None:
-            self._client = AsyncTypeSafeClient(
-                api_key=config.api_key,
-                base_url=config.base_url,
-                model=config.model,
-                timeout=config.timeout_seconds,
-            )
-            self._decision = DecisionClient(client=self._client)
-
-    async def route(self, user_query: str, categories: list[str]) -> dict[str, float]:
-        if not self.enabled or not categories or self._decision is None:
-            return {}
-        try:
-            response = await asyncio.wait_for(
-                self._decision.decide(
-                    state={"query": (user_query or "").strip()},
-                    questions={
-                        category: Noul(instructions=f"本轮是否需要加载 {category} 类工具？")
-                        for category in categories
-                    },
-                ),
-                timeout=self.config.timeout_seconds,
-            )
-        except Exception as exc:  # noqa: BLE001
-            warn("tool routing decision failed.", exc=exc)
-            return {}
-        return {
-            category: response.nouls[category].noul
-            for category in categories
-            if category in response.nouls
-        }
-
-    async def aclose(self) -> None:
-        if self._client is not None:
-            await self._client.aclose()

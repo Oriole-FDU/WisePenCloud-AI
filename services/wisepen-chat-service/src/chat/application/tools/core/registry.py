@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from chat.application.tools.core.category_loader import CategoryLoaderTool
 from chat.application.tools.core.definition import Tool, ToolSelectionMode
 from chat.application.tools.core.llm.renderer import schema_renderer
 from chat.application.tools.client_tools import ClientToolCapability, client_tool_from_capability
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.repositories import ToolConfigRepository
 from common.core.exceptions import ServiceException
+from common.mcp import ToolCategoryMeta
 
 if TYPE_CHECKING:
     from chat.application.tools.core.mcp import McpToolCatalog, SystemMcpToolCatalog
@@ -24,10 +26,16 @@ class ToolScope:
         configs: dict[str, dict[str, Any]] | None = None,
         client_tool_capabilities: list[ClientToolCapability] | None = None,
         candidate_tools: dict[str, Tool] | None = None,
+        candidate_tool_category_metadata: dict[str, ToolCategoryMeta],
     ) -> None:
         self._tools = dict(tools)
+        self._candidate_tools = dict(candidate_tools or {})
         self._context = dict(context or {})
-        self._configs = { name: dict(config) for name, config in (configs or {}).items() if name in self._tools}
+        self._configs = {
+            name: dict(config)
+            for name, config in (configs or {}).items()
+            if name in (set(self._tools) | set(self._candidate_tools))
+        }
         self._schemas: dict[str, dict[str, Any]] = {
             name: schema_renderer(tool.definition.llm_spec)
             for name, tool in self._tools.items()
@@ -36,10 +44,28 @@ class ToolScope:
         self._client_tool_capabilities = [
             client_tool_capability
             for client_tool_capability in (client_tool_capabilities or [])
-            if client_tool_capability.name in self._tools
+            if client_tool_capability.name in (set(self._tools) | set(self._candidate_tools))
         ]
-        # 本轮可选但未加载的工具全集，供动态加载
-        self._candidate_tools = dict(candidate_tools) if candidate_tools is not None else {}
+
+        # 构建动态加载工具
+        category_names = sorted({
+            tool.definition.policy.category
+            for tool in self._candidate_tools.values()
+        })
+        for category_name in category_names:
+            category = candidate_tool_category_metadata.get(category_name)
+            loader = CategoryLoaderTool(
+                category=category,
+                tools=[
+                    tool
+                    for tool in self._candidate_tools.values()
+                    if tool.definition.policy.category == category_name
+                ],
+                load_category=self.load_category,
+            )
+            loader_name = loader.definition.llm_spec.name
+            self._tools[loader_name] = loader
+            self._schemas[loader_name] = schema_renderer(loader.definition.llm_spec)
 
     def schemas(self) -> list[dict[str, Any]]:
         return [
@@ -54,40 +80,19 @@ class ToolScope:
         else:
             self._suppressed_schema_tool_names.difference_update(tool_names)
 
-    def expose_category(self, category: str) -> list[dict[str, str]]:
-        """供 list_more_tools 使用把指定类别的工具动态加入本轮作用域，返回新加入的工具名与描述"""
-        added: list[dict[str, str]] = []
+    def load_category(self, category: str) -> dict[str, Any]:
+        loaded_names: list[str] = []
         for name, tool in self._candidate_tools.items():
-            if tool.definition.policy.category != category:
+            if tool.definition.policy.category != category or name in self._tools:
                 continue
-            if name in self._tools:
-                continue
-            # 加入工具调用
             self._tools[name] = tool
             self._schemas[name] = schema_renderer(tool.definition.llm_spec)
-            added.append({
-                "name": name,
-                "description": tool.definition.llm_spec.description,
-            })
-        return added
+            loaded_names.append(name)
 
-    def available_categories(self) -> list[dict[str, Any]]:
-        """返回当前可选但未加载的类别及其工具数，供 list_more_tools 发现类别"""
-        counts: dict[str, int] = {}
-        for name, tool in self._candidate_tools.items():
-            if name in self._tools:
-                continue
-            category = tool.definition.policy.category
-            counts[category] = counts.get(category, 0) + 1
-        return [{"category": category, "tool_count": count} for category, count in sorted(counts.items())]
-
-    def loaded_category_tools(self, category: str) -> list[dict[str, str]]:
-        """返回指定类别当前已在作用域内的工具（含路由已命中与 list_more_tools 已加载的）"""
-        return [
-            {"name": name, "description": tool.definition.llm_spec.description}
-            for name, tool in self._tools.items()
-            if tool.definition.policy.category == category
-        ]
+        return {
+            "category": category,
+            "loaded_tools": sorted(loaded_names),
+        }
 
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
@@ -105,11 +110,16 @@ class ToolScope:
 
     def to_suspension_data(self) -> dict[str, Any]:
         return {
-            "tool_names": list(self._tools),
+            "tool_names": [
+                name for name, tool in self._tools.items()
+                if not isinstance(tool, CategoryLoaderTool)
+            ],
+            "candidate_tool_names": list(self._candidate_tools),
             "context": dict(self._context),
             "configs": {name: dict(config) for name, config in self._configs.items()},
             "client_tool_capabilities": list(self._client_tool_capabilities),
         }
+
 
 class ToolRegistry:
     """全局工具注册表，负责派生请求级工具视图"""
@@ -119,17 +129,19 @@ class ToolRegistry:
         tool_config_repo: ToolConfigRepository,
         mcp_tool_catalog: McpToolCatalog | None = None,
         system_mcp_tool_catalog: SystemMcpToolCatalog | None = None,
+        builtin_tool_categories: tuple[ToolCategoryMeta, ...] | list[ToolCategoryMeta] = (),
     ) -> None:
         self._tool_config_repo = tool_config_repo
         self._mcp_tool_catalog = mcp_tool_catalog
         self._system_mcp_tool_catalog = system_mcp_tool_catalog
-        self._tools: dict[str, Tool] = {}
+        self._builtin_tools: dict[str, Tool] = {}
+        self._builtin_tool_categories = {category.name: category for category in builtin_tool_categories}
 
     def register(self, tool: Tool) -> None:
-        self._tools[tool.definition.llm_spec.name] = tool
+        self._builtin_tools[tool.definition.llm_spec.name] = tool
 
     def get(self, name: str) -> Tool | None:
-        return self._tools.get(name)
+        return self._builtin_tools.get(name)
 
     def schemas(self) -> list[dict[str, Any]]:
         """返回全局已注册工具的 schema。
@@ -137,18 +149,17 @@ class ToolRegistry:
         该方法仅用于诊断和测试。运行期 LLM 调用必须使用 ToolScope.schemas()，
         确保已应用当前请求的上下文和工具选择过滤。
         """
-        return [schema_renderer(tool.definition.llm_spec) for tool in self._tools.values()]
+        return [schema_renderer(tool.definition.llm_spec) for tool in self._builtin_tools.values()]
 
     async def system_tools(self) -> dict[str, Tool]:
-        system_tools = dict(self._tools)
+        system_tools = dict(self._builtin_tools)
         if self._system_mcp_tool_catalog is None:
             return system_tools
 
         # 收集系统内部 MCP 工具
         system_mcp_tools = await self._system_mcp_tool_catalog.load_system_tools()
         for name, tool in system_mcp_tools.items():
-            if name not in system_tools:
-                system_tools[name] = tool
+            system_tools.setdefault(name, tool)
         return system_tools
 
     async def available_tools(self, user_id: str) -> dict[str, Tool]:
@@ -161,14 +172,21 @@ class ToolRegistry:
 
         return tools
 
-    async def routable_categories(self, user_id: str) -> list[str]:
-        """返回本轮可参与路由的工具类别，供工具路由决策"""
-        tools = await self.available_tools(user_id)
-        return sorted({
-            tool.definition.policy.category
-            for tool in tools.values()
-            if tool.definition.policy.category != "resident"
-        })
+    async def _category_metadata(self, required_categories: set[str]) -> dict[str, ToolCategoryMeta]:
+        """加载本轮 Category Loader 实际需要的描述元数据"""
+        if not required_categories: return {}
+
+        categories = {
+            name: category
+            for name, category in self._builtin_tool_categories.items()
+            if name in required_categories
+        }
+
+        if self._system_mcp_tool_catalog is not None:
+            internal_categories = await self._system_mcp_tool_catalog.load_category_metadata()
+            for name in required_categories - categories.keys():
+                categories[name] = internal_categories.get(name)
+        return categories
 
     # 推导当前工具
     async def derive(
@@ -180,7 +198,6 @@ class ToolRegistry:
         tool_selection_overrides: dict[str, bool] | None = None,
         client_tool_capabilities: list[ClientToolCapability] | None = None,
         user_id: str,
-        routed_categories: set[str] | None = None,
     ) -> ToolScope:
         context = dict(tool_context or {})
         expose_tool_name_set = expose_tool_name_set or set()
@@ -198,7 +215,7 @@ class ToolRegistry:
             tools[client_tool_capability.name] = client_tool_from_capability(client_tool_capability)
 
         filtered_tools: dict[str, Tool] = {}
-        candidate_tools: dict[str, Tool] = {}  # 可供 list_more_tools 动态加载的全集
+        candidate_tools: dict[str, Tool] = {}  # 本轮可通过 Category Loader 加载的工具
         # 处理工具配置
         configured_tool_name_set, tool_configs = await self._resolve_tool_config(user_id, tools)
         for name, tool in tools.items():
@@ -240,20 +257,22 @@ class ToolRegistry:
                 if explicitly_exposed or skill_exposure_satisfaction: filtered_tools[name] = tool
                 continue
 
+            if policy.category == "resident" or explicitly_exposed:
+                filtered_tools[name] = tool
+                continue
+
             # 通过过滤的工具进入候选全集
             candidate_tools[name] = tool
 
-            # 工具类别路由
-            # 非 resident 类别的工具，仅当本轮命中该类别（或显式暴露）时加载
-            if routed_categories is not None and policy.category != "resident":
-                if policy.category not in routed_categories and not explicitly_exposed:
-                    continue
-
-            filtered_tools[name] = tool
-
+        # 收集候选工具的 category_metadata
+        candidate_tool_category_metadata = await self._category_metadata({
+            tool.definition.policy.category
+            for tool in candidate_tools.values()
+        })
         return ToolScope(
             tools=filtered_tools,
             candidate_tools=candidate_tools,
+            candidate_tool_category_metadata=candidate_tool_category_metadata,
             context=context,
             configs=tool_configs,
             client_tool_capabilities=client_tool_capabilities,
@@ -261,14 +280,10 @@ class ToolRegistry:
 
     # 恢复当前工具推导（从暂停的任务缓存中）
     async def recover_derived(self, staging_data: dict[str, Any], user_id: str) -> ToolScope:
-        tool_names = list(staging_data.get("tool_names") or [])
+        tool_names = list(staging_data["tool_names"])
+        candidate_tool_names = list(staging_data["candidate_tool_names"])
         client_tool_capabilities = list(staging_data.get("client_tool_capabilities") or [])
-        tools = await self.system_tools()
-
-        # 收集用户配置的 MCP 工具
-        if self._mcp_tool_catalog is not None:
-            for name, tool in (await self._mcp_tool_catalog.load_user_mcp_tools(user_id)).items():
-                tools.setdefault(name, tool) # 用户 MCP 工具不覆盖已有工具
+        tools = await self.available_tools(user_id)
 
         # 构建前端工具
         for client_tool_capability in client_tool_capabilities:
@@ -278,25 +293,30 @@ class ToolRegistry:
                 )
             tools[client_tool_capability.name] = client_tool_from_capability(client_tool_capability)
 
-        # 如果有此前存在的 Tool 现在未找到，则报错
-        missing_names = [name for name in tool_names if name not in tools]
+        required_names = set(tool_names) | set(candidate_tool_names)
+        missing_names = sorted(required_names - set(tools))
         if missing_names:
             raise ServiceException(
                 ChatErrorCode.TOOL_NOT_FOUND,
                 custom_msg=f"恢复对话所需工具不可用: {', '.join(missing_names)}",
             )
 
-        selected_tools = {name: tools[name] for name in tool_names}
-
+        candidate_tools = {name: tools[name] for name in candidate_tool_names}
+        candidate_tool_category_metadata = await self._category_metadata({
+            tool.definition.policy.category
+            for tool in candidate_tools.values()
+        })
         return ToolScope(
-            tools=selected_tools,
+            tools={name: tools[name] for name in tool_names},
+            candidate_tools=candidate_tools,
+            candidate_tool_category_metadata=candidate_tool_category_metadata,
             context=dict(staging_data.get("context") or {}),
             configs=dict(staging_data.get("configs") or {}),
             client_tool_capabilities=client_tool_capabilities,
         )
 
     def __len__(self) -> int:
-        return len(self._tools)
+        return len(self._builtin_tools)
 
     async def _resolve_tool_config(self, user_id: str, tools: dict[str, Tool]) -> tuple[set[str], dict[str, dict[str, Any]]]:
         # 获取用户所有 Tool 配置

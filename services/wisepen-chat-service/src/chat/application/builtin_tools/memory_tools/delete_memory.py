@@ -28,6 +28,7 @@ class DeleteMemoryTool:
                 }),
             ),
             policy=ToolPolicy(
+                category="memory_management",
                 expose_by_default=True,
                 risk_level=ToolRiskLevel.MEDIUM,
                 persist_output=True,
