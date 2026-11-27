@@ -70,7 +70,7 @@ class McpServiceClient:
             headers=self._build_headers(),
             timeout=self._timeout,
         ) as http_client:
-            response = await http_client.get(f"{await self._resolve_base_url()}{path}")
+            response = await http_client.get(f"{await self._resolve_base_url()}/internal/tools/catalog")
 
         body = response.json()
         if not isinstance(body, dict) or int(body.get("code")) != 200:
