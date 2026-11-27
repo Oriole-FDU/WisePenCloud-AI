@@ -39,6 +39,15 @@ class MessageRepository(ABC):
         pass
 
     @abstractmethod
+    async def get_assistant_message_for_session(
+        self,
+        session_id: str,
+        message_id: str,
+    ) -> ChatMessage:
+        """返回会话内指定 assistant 消息；目标无效或不存在时抛 CHAT_MESSAGE_NOT_FOUND。"""
+        pass
+
+    @abstractmethod
     async def delete_messages_after_target_user_message(self, session_id: str, user_message_id: str) -> ChatMessage:
         """
         删除指定 user 消息及其之后的所有消息，返回被删除的 user 消息

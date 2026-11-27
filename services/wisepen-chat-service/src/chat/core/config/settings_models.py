@@ -126,6 +126,7 @@ class AgentSettings(ConfigModel):
 
 
 class ChatTurnSettings(ConfigModel):
+    interrupted_message_content: str = Field(default="This round of chat has been interrupted, and a complete response could not be generated.")
     active_ttl_seconds: int = Field(default=30 * 60, ge=1)
     stream_ttl_seconds: int = Field(default=60 * 60, ge=1)
     frontend_response_timeout_seconds: int = Field(default=10 * 60, ge=1)

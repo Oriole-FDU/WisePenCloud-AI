@@ -28,6 +28,8 @@ class SuspendedTurnContext:
     billing_resource_id: Optional[str]
     preferred_billing_group_id: Optional[str]
     turn_suspension: TurnSuspension
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
 
 
 # 运行时用 Any，避免 Pydantic 解析 SuspendedTurnContext 内的 TYPE_CHECKING 前向引用。

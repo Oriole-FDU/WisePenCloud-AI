@@ -6,9 +6,11 @@ from fastapi import BackgroundTasks
 
 from chat.api.vercel_formats import message_finish, message_start, stream_done, error as sse_error
 from chat.application.content_safety import ContentSafetyChecker
+from chat.core.config.app_settings import settings
 from chat.core.persistence.redis.chat_turn_stream import RedisChatTurnStream
-from chat.domain.entities import TurnCancelReason, TurnCancelSignal
+from chat.domain.entities import TurnCancelReason, TurnCancelSignal, ChatMessage, Role, EndReason, SessionStatus
 from chat.domain.error_codes import ChatErrorCode
+from chat.domain.repositories import SessionRepository, MessageRepository
 from common.core.exceptions import ServiceException
 from common.logger import error, info
 
@@ -21,9 +23,13 @@ class ChatTurnStreamManager:
         *,
         stream_repo: RedisChatTurnStream,
         content_safety: ContentSafetyChecker | None = None,
+        session_repo: SessionRepository | None = None,
+        message_repo: MessageRepository | None = None,
     ) -> None:
         self._stream_repo = stream_repo
         self._content_safety = content_safety
+        self._session_repo = session_repo
+        self._message_repo = message_repo
         self._tasks: dict[str, asyncio.Task] = {}
 
     async def start_turn(
@@ -89,6 +95,26 @@ class ChatTurnStreamManager:
             info("chat turn stream subscriber cancelled.", turn_id=turn_id)
             return
 
+    async def _mark_lease_lost(self, session_id: str, user_id: str) -> None:
+        """租约失效（被动取消）写会话状态，并补一条空 assistant 消息承载 end_reason"""
+        try:
+            if self._session_repo is not None:
+                await self._session_repo.update_session_status(
+                    session_id, user_id, SessionStatus.COMPLETED_UNREAD, None,
+                )
+            if self._message_repo is not None:
+                await self._message_repo.save_messages([
+                    ChatMessage(
+                        session_id=session_id,
+                        role=Role.ASSISTANT,
+                        content=settings.chat_turn.interrupted_message_content,
+                        end_reason=EndReason.CANCELLED_BY_SYSTEM,
+                        end_reason_detail="Current chat has timed out.",
+                    )
+                ])
+        except Exception as exc:
+            error("chat turn lease lost finalize failed.", session_id=session_id, exc=exc)
+
     async def _run_turn(
         self,
         *,
@@ -117,7 +143,8 @@ class ChatTurnStreamManager:
                 # 业务输出帧写入前检查租约，避免旧 runner 在会话所有权失效后继续写内容
                 renewed = await self._stream_repo.renew_active_turn(user_id, session_id, turn_id) # 续期
                 if not renewed: # 无法续期，中止任务
-                    await self._stream_repo.append_frame(turn_id, sse_error(error_text="当前对话运行租约已失效"))
+                    await self._mark_lease_lost(session_id, user_id)
+                    await self._stream_repo.append_frame(turn_id, sse_error(error_text="Current chat has timed out."))
                     await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
                     return
                 await self._stream_repo.append_frame(turn_id, frame)
@@ -129,7 +156,7 @@ class ChatTurnStreamManager:
             await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
         except asyncio.CancelledError:
             await self._stream_repo.release_active_turn(user_id, session_id, turn_id)
-            await self._stream_repo.append_frame(turn_id, sse_error(error_text="本轮对话已被取消或运行租约已失效"))
+            await self._stream_repo.append_frame(turn_id, sse_error(error_text="Current chat has been canceled."))
             await self._stream_repo.append_frame(turn_id, message_finish())
             await self._stream_repo.append_frame(turn_id, stream_done(), terminal=True)
         except Exception as exc:

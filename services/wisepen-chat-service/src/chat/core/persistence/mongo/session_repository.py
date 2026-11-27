@@ -5,7 +5,7 @@ from beanie import PydanticObjectId
 
 from common.core.exceptions import ServiceException
 from chat.domain.repositories import SessionRepository
-from chat.domain.entities import ChatSession, ResourceAttachmentRef, TemporaryAttachmentRef
+from chat.domain.entities import ChatSession, ResourceAttachmentRef, TemporaryAttachmentRef, SessionStatus
 from chat.domain.error_codes import ChatErrorCode
 
 
@@ -112,6 +112,23 @@ class MongoSessionRepository(SessionRepository):
         session.updated_at = datetime.now(timezone.utc)
         await session.save()
         return session
+
+    async def update_session_status(
+        self,
+        session_id: str,
+        user_id: str,
+        status: SessionStatus,
+        last_turn_error: str | None = None,
+    ) -> ChatSession:
+        session = await self._safe_get_session(session_id, user_id)
+        session.status = status
+        session.last_turn_error = last_turn_error
+        session.updated_at = datetime.now(timezone.utc)
+        await session.save()
+        return session
+
+    async def mark_session_read(self, session_id: str, user_id: str) -> ChatSession:
+        return await self.update_session_status(session_id, user_id, SessionStatus.NORMAL, None)
 
     async def _safe_get_session(self, session_id: str, user_id: str) -> ChatSession:
         """安全获取会话，查不到（不存在或不属于该用户）统一抛 SESSION_NOT_FOUND，防止枚举他人 session_id。"""

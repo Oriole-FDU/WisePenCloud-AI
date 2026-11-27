@@ -24,6 +24,7 @@ from chat.application.token_counter import TokenCounter
 from chat.core.persistence import (
     MongoSessionRepository,
     MongoMessageRepository,
+    MongoMessageFeedbackRepository,
     MongoModelRepository,
     MongoMcpServerConfigRepository,
     MongoProviderRepository,
@@ -43,6 +44,9 @@ from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
 from chat.application.content_safety import ContentSafetyChecker, create_content_safety_client
 from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
+from chat.application.session_status_resolver import SessionStatusResolver
+from chat.application.title_generator import TitleGenerator
+from chat.application.chat_turn_tool_policy import ToolCategoryRouter
 from chat.mq import FrontendToolResponseConsumer
 from chat.application.agents import (
     DefaultAgentResolver,
@@ -149,6 +153,7 @@ class Container(containers.DeclarativeContainer):
 
     session_repo = providers.Singleton(MongoSessionRepository)
     message_repo = providers.Singleton(MongoMessageRepository)
+    message_feedback_repo = providers.Singleton(MongoMessageFeedbackRepository)
     model_repo = providers.Singleton(MongoModelRepository)
     provider_repo = providers.Singleton(MongoProviderRepository)
     tool_config_repo = providers.Singleton(MongoToolConfigRepository)
@@ -293,6 +298,19 @@ class Container(containers.DeclarativeContainer):
         ChatTurnStreamManager,
         stream_repo=chat_turn_stream_repo,
         content_safety=content_safety,
+        session_repo=session_repo,
+        message_repo=message_repo,
+    )
+
+    title_generator = providers.Singleton(
+        TitleGenerator,
+        text_llm=litellm_adapter,
+    )
+    session_status_resolver = providers.Singleton(
+        SessionStatusResolver,
+        stream_repo=chat_turn_stream_repo,
+        frontend_response_repo=frontend_tool_response_repo,
+        suspended_chat_repo=suspended_chat_repo,
     )
 
     # 工具层：各 Tool 和 ToolRegistry 均为 Singleton，由容器统一管理生命周期
@@ -426,7 +444,7 @@ class Container(containers.DeclarativeContainer):
     chat_turn_coordinator = providers.Factory(
         ChatTurnCoordinator,
         llm_provider_resolver=llm_provider_resolver,
-        text_llm=litellm_adapter,
+        title_generator=title_generator,
         token_counter=token_counter,
         memory=memory_provider,
         model_repo=model_repo,

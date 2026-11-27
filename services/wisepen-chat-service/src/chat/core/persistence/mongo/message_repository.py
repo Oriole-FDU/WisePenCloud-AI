@@ -91,6 +91,22 @@ class MongoMessageRepository(MessageRepository):
     async def has_session_messages(self, session_id: str) -> bool:
         return await ChatMessage.find_one(ChatMessage.session_id == session_id) is not None
 
+    async def get_assistant_message_for_session(
+        self,
+        session_id: str,
+        message_id: str,
+    ) -> ChatMessage:
+        if not PydanticObjectId.is_valid(message_id):
+            raise ServiceException(ChatErrorCode.CHAT_MESSAGE_NOT_FOUND)
+        message = await ChatMessage.find_one(
+            ChatMessage.id == PydanticObjectId(message_id),
+            ChatMessage.session_id == session_id,
+            ChatMessage.role == Role.ASSISTANT,
+        )
+        if message is None:
+            raise ServiceException(ChatErrorCode.CHAT_MESSAGE_NOT_FOUND)
+        return message
+
     async def delete_messages_after_target_user_message(self, session_id: str, user_message_id: str) -> ChatMessage:
         anchor = await ChatMessage.find_one(
             ChatMessage.id == PydanticObjectId(user_message_id),

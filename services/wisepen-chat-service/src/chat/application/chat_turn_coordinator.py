@@ -14,11 +14,11 @@ from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.logger import error
 
 from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role, TurnCancelSignal
+from chat.domain.entities import ChatMessage, Role, TurnCancelSignal, TurnCancelReason, EndReason, MessageAgentInfo, MessageModelInfo
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
 from chat.domain.interfaces.context_compact import ContextCompactor
-from chat.domain.interfaces.llm import TextCompletionProvider, TokenUsage
+from chat.domain.interfaces.llm import TokenUsage
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, \
     ProviderRepository, SuspendedChatRepository, RedirectQueueRepository
@@ -33,6 +33,7 @@ from chat.application.agents import (
 from chat.application.events import ErrorEvent, StepFinishEvent
 from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
+from chat.application.title_generator import TitleGenerator
 from chat.application.frontend_tool_response_broker import FrontendToolResponseBroker
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
@@ -56,6 +57,10 @@ class ChatTurnContext:
     identity_type: Optional[IdentityType] = None
     user_message: ChatMessage | None = None
     final_assistant_message: ChatMessage | None = None
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    end_reason: Optional[EndReason] = None
+    end_reason_detail: Optional[str] = None
 
 class ChatTurnCoordinator:
     """
@@ -66,7 +71,7 @@ class ChatTurnCoordinator:
     def __init__(
             self,
             llm_provider_resolver: LLMProviderResolver,
-            text_llm: TextCompletionProvider,
+            title_generator: TitleGenerator,
             token_counter: TokenCounter,
             memory: MemoryProvider,
             model_repo: ModelRepository,
@@ -98,7 +103,7 @@ class ChatTurnCoordinator:
             frontend_tool_response_broker=frontend_tool_response_broker,
         )
         self._turn_finalizer = ChatTurnFinalizer(
-            text_llm=text_llm,
+            title_generator=title_generator,
             token_counter=token_counter,
             memory=memory,
             message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo,
@@ -112,6 +117,39 @@ class ChatTurnCoordinator:
 
         self._suspended_chat_repo = suspended_chat_repo
         self._redirect_queue = redirect_queue
+
+    @staticmethod
+    def _stamp_agent_info(messages: list[ChatMessage], ctx: ChatTurnContext) -> None:
+        """给 assistant 消息写入生成时的 Agent 快照（agent 可切换，历史消息保留当时 agent）"""
+        if ctx.agent_id is None:
+            return
+        for msg in messages:
+            if msg.role == Role.ASSISTANT and msg.agent_info is None:
+                msg.agent_info = MessageAgentInfo(agent_id=ctx.agent_id, agent_name=ctx.agent_name or "")
+
+    def _attach_end_reason(
+        self,
+        messages: list[ChatMessage],
+        ctx: ChatTurnContext
+    ) -> None:
+        """找到 messages 中最后一条 assistant 消息并写入 end_reason，没有则合成一条空 assistant"""
+        assistant = None
+        for msg in reversed(messages):
+            if msg.role == Role.ASSISTANT:
+                assistant = msg
+                break
+        if assistant is None:
+            assistant = ChatMessage(
+                session_id=ctx.session_id,
+                role=Role.ASSISTANT,
+                content=settings.chat_turn.interrupted_message_content,
+                model_info=MessageModelInfo.from_model_request(ctx.model_info) if ctx.model_info is not None else None,
+            )
+            messages.append(assistant)
+        assistant.end_reason = ctx.end_reason
+        assistant.end_reason_detail = ctx.end_reason_detail
+        if assistant.agent_info is None and ctx.agent_id is not None:
+            assistant.agent_info = MessageAgentInfo(agent_id=ctx.agent_id, agent_name=ctx.agent_name or "")
 
     async def handle_suspended_chat_recover(
             self,
@@ -134,6 +172,8 @@ class ChatTurnCoordinator:
             session_id=session_id,
             model_info=suspended_chat.context.model_info,
             agent_spec=suspended_chat.context.agent_spec,
+            agent_id=getattr(suspended_chat.context, "agent_id", None),
+            agent_name=getattr(suspended_chat.context, "agent_name", None),
             session_summary=suspended_chat.context.session_summary,
             tool_scope=tool_scope,
             # messages_for_llm 已包含挂起前的 assistant 工具调用，恢复时直接续接该上下文
@@ -202,6 +242,8 @@ class ChatTurnCoordinator:
             raise ServiceException(ChatErrorCode.AGENT_NOT_FOUND)
 
         chat_turn_context.agent_spec = agent.spec
+        chat_turn_context.agent_id = agent.agent_id
+        chat_turn_context.agent_name = agent.name
         if (
             user_defined_on_demand_skill_ids is not None
             or tool_selection_default_enabled is not None
@@ -429,14 +471,30 @@ class ChatTurnCoordinator:
                         schedule(self._turn_finalizer.update_context_tokens(chat_turn_context.session_id, event.token_usage.input_tokens))
                     if not event.is_finished:
                         # 中间消息（Tool Calls）逐步落盘
+                        # 添加 Agent 快照
+                        self._stamp_agent_info(event.intermediate_messages, chat_turn_context)
+                        if event.aborted:
+                            # 用户主动取消 end_reason 标记 CANCELLED_BY_USER
+                            if event.cancel_reason == TurnCancelReason.USER:
+                                chat_turn_context.end_reason = EndReason.CANCELLED_BY_USER
+                                chat_turn_context.end_reason_detail = None
+                                cancel_error_text = "Current chat has been anceled by the user."
+                            else: # 其他原因取消 end_reason 标记 CANCELLED_BY_SYSTEM
+                                chat_turn_context.end_reason = EndReason.CANCELLED_BY_SYSTEM
+                                chat_turn_context.end_reason_detail = event.cancel_reason.value if event.cancel_reason is not None else None
+                                cancel_error_text = "Current chat has been terminated by the system."
+                            self._attach_end_reason(event.intermediate_messages, chat_turn_context)
+
+                        # 所有消息元数据补齐后只持久化一次
                         schedule(self._turn_finalizer.persist_message_delta(
                             session_id=chat_turn_context.session_id,
-                            delta_messages=event.intermediate_messages,
+                            delta_messages=list(event.intermediate_messages),
                             memory_policy=chat_turn_context.agent_spec.memory_policy,
                         ))
+
                         if event.aborted:
                             yield to_vercel_sse(event)
-                            yield to_vercel_sse(ErrorEvent(error_text="本轮对话已被用户取消"))
+                            yield to_vercel_sse(ErrorEvent(error_text=cancel_error_text))
                             return
                         # 只有等待前端工具结果超时才会挂起
                         if event.suspension is not None:
@@ -444,6 +502,8 @@ class ChatTurnCoordinator:
                             suspended_turn_context = SuspendedTurnContext(
                                 model_info=chat_turn_context.model_info,
                                 agent_spec=chat_turn_context.agent_spec,
+                                agent_id=chat_turn_context.agent_id,
+                                agent_name=chat_turn_context.agent_name,
                                 session_summary=chat_turn_context.session_summary,
                                 tool_scope_data=chat_turn_context.tool_scope.to_suspension_data(),
                                 messages_for_llm=chat_turn_context.messages_for_llm,
@@ -461,6 +521,11 @@ class ChatTurnCoordinator:
                         # 记录最终回复并落盘
                         chat_turn_context.final_assistant_message = event.final_assistant_message
                         if event.final_assistant_message is not None:
+                            # 添加 Agent 快照
+                            self._stamp_agent_info([event.final_assistant_message], chat_turn_context)
+                            # 正常结束 end_reason 标记 FINISHED
+                            event.final_assistant_message.end_reason = EndReason.FINISHED
+                            chat_turn_context.end_reason = EndReason.FINISHED
                             schedule(self._turn_finalizer.persist_message_delta(
                                 session_id=chat_turn_context.session_id,
                                 delta_messages=[event.final_assistant_message],
@@ -473,6 +538,16 @@ class ChatTurnCoordinator:
                     return
         except ServiceException as e:
             error("chat stream generation failed.", session_id=chat_turn_context.session_id, exc=e)
+            # 生成失败合成一条空 assistant 消息承载 end_reason 标记 ERROR，落库供历史回放
+            chat_turn_context.end_reason = EndReason.ERROR
+            chat_turn_context.end_reason_detail = str(e)
+            delta_messages = []
+            self._attach_end_reason(delta_messages, chat_turn_context)
+            schedule(self._turn_finalizer.persist_message_delta(
+                session_id=chat_turn_context.session_id,
+                delta_messages=delta_messages,
+                memory_policy=chat_turn_context.agent_spec.memory_policy,
+            ))
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
         finally:
@@ -513,6 +588,16 @@ class ChatTurnCoordinator:
                 user_id=chat_turn_context.user_id,
                 user_query=str(chat_turn_context.user_message.content)
             )
+        # 会话状态收尾
+        if chat_turn_context.end_reason is not None:
+            # 根据 end_reason 写持久状态（挂起时 end_reason 为 None，跳过）
+            background_tasks.add_task(
+                self._turn_finalizer.finalize_turn_status,
+                session_id=chat_turn_context.session_id,
+                user_id=chat_turn_context.user_id,
+                end_reason=chat_turn_context.end_reason,
+                end_reason_detail=chat_turn_context.end_reason_detail,
+            )
 
     async def close_unfinished_before_start(
         self,
@@ -552,7 +637,13 @@ class ChatTurnCoordinator:
         closing_messages.append(
             ChatMessage(
                 session_id=session_id, role=Role.ASSISTANT,
-                content="本轮对话已中断，未能生成完整回复",
+                content=settings.chat_turn.interrupted_message_content,
+                agent_info=MessageAgentInfo(
+                    agent_id=getattr(unfinished_chat.context, "agent_id", None),
+                    agent_name=getattr(unfinished_chat.context, "agent_name", None) or "",
+                ) if getattr(unfinished_chat.context, "agent_id", None) else None,
+                end_reason=EndReason.CANCELLED_BY_SYSTEM,
+                end_reason_detail="Suspended chat was voluntarily abandoned.",
             )
         )
 

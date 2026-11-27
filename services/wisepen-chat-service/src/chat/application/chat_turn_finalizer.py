@@ -4,6 +4,7 @@ from decimal import Decimal
 import uuid
 
 from chat.application.agents import AgentMemoryPolicy
+from chat.application.title_generator import TitleGenerator
 from chat.application.token_counter import TokenCounter
 from common.logger import error
 from common.core.domain import IdentityType
@@ -12,8 +13,8 @@ from chat.domain.error_codes import ChatErrorCode
 
 from chat.core.config.app_settings import settings
 from chat.core.constants import KAFKA_TOKEN_CONSUMPTION_TOPIC
-from chat.domain.entities import ChatMessage, Role
-from chat.domain.interfaces.llm import TextCompletionProvider, TokenUsage
+from chat.domain.entities import ChatMessage, Role, EndReason, SessionStatus
+from chat.domain.interfaces.llm import TokenUsage
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository, ProviderRepository
 from chat.domain.repositories.model_repo import ModelRequestInfo
@@ -27,7 +28,7 @@ class ChatTurnFinalizer:
 
     def __init__(
         self,
-        text_llm: TextCompletionProvider,
+        title_generator: TitleGenerator,
         token_counter: TokenCounter,
         memory: MemoryProvider,
         message_repo: MessageRepository,
@@ -36,7 +37,7 @@ class ChatTurnFinalizer:
         provider_repo: ProviderRepository,
         kafka_producer: KafkaProducerClient,
     ):
-        self.text_llm = text_llm
+        self.title_generator = title_generator
         self.token_counter = token_counter
         self.memory = memory
         self.session_repo = session_repo
@@ -200,34 +201,41 @@ class ChatTurnFinalizer:
             if session.title != "New Chat":
                 return
 
-            prompt = [
-                ChatMessage(
-                    session_id=session_id,
-                    role=Role.SYSTEM,
-                    content="You are a conversation title generator. Generate a concise conversation title based on the user's query."
-                    "Requirements: Maximum 20 words, no punctuation, no quotation marks, and output the title text directly."
-                ),
-                ChatMessage(
-                    session_id=session_id,
-                    role=Role.USER,
-                    content=user_query,
-                )
-            ]
-
-            response = await self.text_llm.chat_completion(
-                model_name=settings.models.summary.model,
-                messages=prompt,
-                temperature=0.5,
-                api_base=settings.integrations.common_llm_provider.base_url,
-                api_key=settings.integrations.common_llm_provider.api_key,
+            title = await self.title_generator.generate_from_messages(
+                session_id,
+                [ChatMessage(session_id=session_id, role=Role.USER, content=user_query)],
             )
-            new_title = (response.content or "").strip().strip('"\'""''')
-            if not new_title:
+            if not title:
                 return
 
-            await self.session_repo.rename_session(session_id, user_id, new_title)
+            await self.session_repo.rename_session(session_id, user_id, title)
         except Exception as e:
             error("chat title generation failed.", session_id=session_id, exc=e)
+
+    async def finalize_turn_status(
+        self,
+        session_id: str,
+        user_id: str,
+        end_reason: EndReason,
+        end_reason_detail: str | None = None,
+    ) -> None:
+        """根据 turn 结束原因写会话持久状态"""
+        if end_reason == EndReason.FINISHED:
+            status = SessionStatus.COMPLETED_UNREAD
+            last_error = None
+        elif end_reason == EndReason.ERROR:
+            status = SessionStatus.ERROR_UNREAD
+            last_error = end_reason_detail or "模型生成异常"
+        elif end_reason == EndReason.CANCELLED_BY_USER:
+            status = SessionStatus.NORMAL
+            last_error = None
+        else:  # CANCELLED_BY_SYSTEM
+            status = SessionStatus.COMPLETED_UNREAD
+            last_error = None
+        try:
+            await self.session_repo.update_session_status(session_id, user_id, status, last_error)
+        except Exception as exc:
+            error("chat session status finalize failed.", session_id=session_id, exc=exc)
 
     async def _fill_content_token_count(self, messages: List[ChatMessage], force: bool = False) -> None:
         for msg in messages:

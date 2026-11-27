@@ -1,4 +1,5 @@
 from .mongo.message_repository import MongoMessageRepository
+from .mongo.message_feedback_repository import MongoMessageFeedbackRepository
 from .mongo.suspended_chat_repository import MongoSuspendedChatRepository
 from .mongo.session_repository import MongoSessionRepository
 from .mongo.model_repository import MongoModelRepository
@@ -14,6 +15,7 @@ from .redis.tool_content_repository import RedisToolContentRepository
 
 __all__ = [
     "MongoMessageRepository",
+    "MongoMessageFeedbackRepository",
     "MongoSuspendedChatRepository",
     "MongoSessionRepository",
     "MongoModelRepository",

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from enum import Enum
 from typing import List, Optional
 from beanie import Document
 from pydantic import BaseModel, Field
@@ -25,6 +26,16 @@ class ResourceAttachmentRef(AttachmentRef):
     resource_type: str
 
 
+class SessionStatus(str, Enum):
+    """会话当前状态（面向会话列表/详情展示）"""
+    GENERATING = "generating"                             # 正在生成
+    AWAITING_USER_RESPONSE = "awaiting_user_response"     # 等待用户响应（等审批/客户端工具，超时前）
+    SUSPENDED = "suspended"                               # 会话挂起（等前端响应超时后）
+    COMPLETED_UNREAD = "completed_unread"                 # 生成完成（用户未读）
+    ERROR_UNREAD = "error_unread"                         # 生成异常（用户未读）
+    NORMAL = "normal"                                     # 正常
+
+
 class ChatSession(Document):
     """会话实体（Beanie Document，映射到 chat_sessions 集合）"""
     user_id: str
@@ -43,6 +54,10 @@ class ChatSession(Document):
     last_tool_selection_default_enabled: Optional[bool] = None
     last_tool_selection_overrides: dict[str, bool] = Field(default_factory=dict)
     context_tokens: int = 0  # 最近一次 LLM 调用的输入 token 数，作为当前上下文占用指示
+    # 持久化的会话状态（仅 NORMAL / COMPLETED_UNREAD / ERROR_UNREAD 落库；
+    # GENERATING / AWAITING_USER_RESPONSE / SUSPENDED 由运行时派生，不落库）
+    status: SessionStatus = SessionStatus.NORMAL
+    last_turn_error: Optional[str] = None  # 最近一次生成异常的简述，供列表/详情展示
 
     class Settings:
         name = "wisepen_chat_session"  # MongoDB 集合名

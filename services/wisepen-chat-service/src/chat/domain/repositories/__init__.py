@@ -9,6 +9,7 @@ from .mcp_server_config_repo import McpServerConfigRepository
 from .mcp_tool_discovery_cache_repo import McpToolDiscoveryCacheRepository
 from .tool_content_repo import ToolContentRepository
 from .redirect_queue_repo import RedirectQueueRepository
+from .message_feedback_repo import MessageFeedbackRepository
 
 __all__ = [
     "SessionRepository",
@@ -22,4 +23,5 @@ __all__ = [
     "McpToolDiscoveryCacheRepository",
     "ToolContentRepository",
     "RedirectQueueRepository",
+    "MessageFeedbackRepository",
 ]

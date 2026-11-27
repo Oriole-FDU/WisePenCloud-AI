@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from enum import Enum
@@ -34,3 +35,10 @@ class TurnCancelSignal:
             return cls(reason=reason, meta=meta)
         except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
             return cls(reason=TurnCancelReason.UNKNOWN)
+
+class TurnCancelledError(asyncio.CancelledError):
+    """携带取消信号的内部控制流异常，由 turn 取消检查点抛出。"""
+
+    def __init__(self, signal: TurnCancelSignal) -> None:
+        super().__init__()
+        self.signal = signal

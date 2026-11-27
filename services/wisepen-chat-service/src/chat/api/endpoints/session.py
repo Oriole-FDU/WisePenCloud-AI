@@ -9,11 +9,14 @@ from chat.api.schemas.session import (
 from chat.api.converters import convert_to_ui_messages
 from chat.api.tool_response_converter import build_tool_response
 from chat.application.agents import AgentResolver
+from chat.application.session_status_resolver import SessionStatusResolver
+from chat.application.title_generator import TitleGenerator
 from chat.application.tools.core import ToolRegistry
-from chat.domain.entities import ChatSession, ChatMessage
+from chat.domain.entities import ChatSession, ChatMessage, Role
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.repositories import (
     MessageRepository,
+    MessageFeedbackRepository,
     SessionRepository,
     SuspendedChatRepository,
     ToolConfigRepository,
@@ -48,6 +51,7 @@ async def get_session(
         agent_resolver: AgentResolver = Depends(Provide[Container.agent_resolver]),
         tool_registry: ToolRegistry = Depends(Provide[Container.tool_registry]),
         tool_config_repo: ToolConfigRepository = Depends(Provide[Container.tool_config_repo]),
+        status_resolver: SessionStatusResolver = Depends(Provide[Container.session_status_resolver]),
 ):
     # 会话存在性、归属校验
     session = await session_repo.get_session_for_user(session_id, user_id)
@@ -79,6 +83,8 @@ async def get_session(
                 last_tool_selection_overrides[tool_name] = enabled
 
     response.last_tool_selection_overrides = last_tool_selection_overrides
+    derived = await status_resolver.resolve(user_id, session)
+    response.status = derived.value
     return R.success(data=response)
 
 
@@ -133,10 +139,18 @@ async def list_sessions(
         size: int = Query(default=20, ge=1, le=100, description="每页条数"),
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+        status_resolver: SessionStatusResolver = Depends(Provide[Container.session_status_resolver]),
 ):
     sessions, total = await session_repo.list_sessions_for_user(user_id, page=page, size=size)
+    statuses = await status_resolver.resolve_batch(user_id, sessions)
+    responses: list[SessionResponse] = []
+    for session in sessions:
+        response = SessionResponse.from_entity(session)
+        if statuses.get(str(session.id)) is not None:
+            response.status = statuses.get(str(session.id)).value
+        responses.append(response)
     return R.success(data=PageResult.of(
-        items=[SessionResponse.from_entity(s) for s in sessions],
+        items=responses,
         total=total, page=page, size=size,
     ))
 
@@ -235,7 +249,8 @@ async def get_session_messages(
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
         message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
-        suspended_chat_repo: SuspendedChatRepository = Depends(Provide[Container.suspended_chat_repo])
+        suspended_chat_repo: SuspendedChatRepository = Depends(Provide[Container.suspended_chat_repo]),
+        feedback_repo: MessageFeedbackRepository = Depends(Provide[Container.message_feedback_repo]),
 ):
     await session_repo.get_session_for_user(session_id, user_id)
 
@@ -253,7 +268,14 @@ async def get_session_messages(
             for item in pending.context.turn_suspension.classified_tool_invocation_plan.client_tools:
                 tool_states[item.tool_call_id] = "input-available"
 
-    ui_messages = convert_to_ui_messages(messages_for_ui, tool_states=tool_states)
+    ui_messages = convert_to_ui_messages(
+        messages_for_ui,
+        tool_states=tool_states,
+        message_feedbacks=await feedback_repo.list_for_user_messages(
+            user_id,
+            [str(message.id) for message in page_messages if message.role == Role.ASSISTANT and message.id],
+        ),
+    )
 
     return R.success(data=PageResult.of(
         items=ui_messages,
@@ -354,4 +376,67 @@ async def set_session_agent(
         agent.agent_id,
         agent.version
     )
+    return R.success(data=SessionResponse.from_entity(session))
+
+@router.post(
+    "/markRead",
+    response_model=R[SessionResponse],
+    status_code=200,
+    summary="标记会话已读",
+    description="""
+- 用途：用户已查看会话最新消息后回调，把「生成完成（未读）/ 生成异常（未读）」回归「正常」。
+- 请求：session_id 指定目标会话。
+- 约束：当前用户必须已登录；目标会话必须属于当前用户。
+- 处理：把持久状态置为正常；不修改消息内容。
+- 响应：返回更新后的会话信息。
+""",
+)
+@inject
+async def mark_session_read(
+        session_id: str,
+        user_id: str = Depends(require_login),
+        session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    await session_repo.get_session_for_user(session_id, user_id)
+    session = await session_repo.mark_session_read(session_id, user_id)
+    return R.success(data=SessionResponse.from_entity(session))
+
+
+@router.post(
+    "/generateTitle",
+    response_model=R[SessionResponse],
+    status_code=200,
+    summary="根据近期对话生成会话标题",
+    description="""
+- 用途：根据会话近期对话内容生成标题并直接写回，区别于首轮自动生成。
+- 请求：session_id 指定目标会话。
+- 约束：当前用户必须已登录；目标会话必须属于当前用户。
+- 处理：读取最近 3 个回合的 user/assistant 消息，调用标题模型生成并写回会话标题。
+- 失败：未登录 -> NOT_LOGIN；会话不存在或不属于当前用户 -> SESSION_NOT_FOUND；生成失败 -> CHAT_TITLE_GENERATION_FAILED。
+- 响应：返回更新后的会话信息。
+""",
+)
+@inject
+async def generate_session_title(
+        session_id: str,
+        user_id: str = Depends(require_login),
+        session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+        message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
+        title_generator: TitleGenerator = Depends(Provide[Container.title_generator]),
+):
+    await session_repo.get_session_for_user(session_id, user_id)
+
+    # 取最近 3 个对话回合（以 user 消息为锚点，含其后的 assistant 消息）
+    messages = await message_repo.list_session_messages_all(session_id)
+    anchors = [i for i, m in enumerate(messages) if m.role == Role.USER]
+    if not anchors:
+        recent = []
+    else:
+        start = anchors[-3] if len(anchors) >= 3 else 0
+        recent = [m for m in messages[start:] if m.role in (Role.USER, Role.ASSISTANT)]
+
+    title = await title_generator.generate_from_messages(session_id, recent)
+    if not title:
+        raise ServiceException(ChatErrorCode.CHAT_TITLE_GENERATION_FAILED)
+    session = await session_repo.rename_session(session_id, user_id, title)
     return R.success(data=SessionResponse.from_entity(session))

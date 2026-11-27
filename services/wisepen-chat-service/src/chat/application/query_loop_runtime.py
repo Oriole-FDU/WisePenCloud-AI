@@ -32,7 +32,7 @@ from chat.application.tools.core.execution.result import ToolExecutionResult
 from chat.application.tools.core.llm.invocation import ToolInvocation, classify_tools
 from chat.application.tools.core.llm.renderer import tool_result_renderer
 from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role, TurnCancelReason, TurnCancelSignal
+from chat.domain.entities import ChatMessage, Role, TurnCancelReason, TurnCancelSignal, TurnCancelledError
 from chat.domain.entities.message import MessageModelInfo, ToolCallMessage
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
@@ -48,14 +48,6 @@ _TOOL_OUTPUT_TOOL_NAMES = frozenset({
     "search_tool_output_regex",
     "search_tool_output_bm25",
 })
-
-
-class TurnCancelledError(asyncio.CancelledError):
-    """携带取消信号的内部控制流异常，仅由单步流式推理的取消检查点抛出"""
-
-    def __init__(self, signal: TurnCancelSignal) -> None:
-        super().__init__()
-        self.signal = signal
 
 
 class _StepEventInterpreter:
@@ -166,6 +158,13 @@ def _merge_runtime_options(defaults: dict, overrides: dict) -> dict:
     return result
 
 
+async def _raise_if_cancelled(cancel_requested) -> None:
+    """取消检查点：若已请求取消则抛 TurnCancelledError(signal)，否则直接返回"""
+    if cancel_requested is None: return
+    signal = await cancel_requested()
+    if signal is not None: raise TurnCancelledError(signal)
+
+
 class QueryLoopRuntime:
     """
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
@@ -222,9 +221,11 @@ class QueryLoopRuntime:
         iteration = start_iteration
         while True:
             # 请求取消检查点
-            if cancel_requested is not None and await cancel_requested():
-                yield StepFinishEvent(is_finished=False, token_usage=TokenUsage(), aborted=True)
-                return
+            if cancel_requested is not None:
+                signal = await cancel_requested()
+                if signal is not None:
+                    yield StepFinishEvent(is_finished=False, token_usage=TokenUsage(), aborted=True, cancel_reason=signal.reason)
+                    return
 
             tool_scope.suppress_schemas(
                 _TOOL_OUTPUT_TOOL_NAMES,
@@ -403,6 +404,7 @@ class QueryLoopRuntime:
                     intermediate_messages=aborted_messages,
                     token_usage=token_usage,
                     aborted=True,
+                    cancel_reason=signal.reason if signal is not None else None,
                 )
                 return
             except Exception as e:
@@ -463,8 +465,7 @@ class QueryLoopRuntime:
         try:
             if not is_resumed_tool_step:
                 # 请求取消检查点
-                if cancel_requested is not None and await cancel_requested():
-                    raise asyncio.CancelledError
+                await _raise_if_cancelled(cancel_requested)
 
                 # 把tool_invocations 分组为 approval_required, server, client
                 classified_tool_invocations = classify_tools(invocations, tool_scope)
@@ -572,7 +573,8 @@ class QueryLoopRuntime:
 
             # 结束本轮并继续下一轮模型推理（因为调用工具）
             yield StepFinishEvent(is_finished=False, intermediate_messages=new_messages, token_usage=token_usage)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
+            signal = exc.signal if isinstance(exc, TurnCancelledError) else None
             aborted_messages = list(new_messages)
             if invocations:
                 aborted_messages.extend(
@@ -583,6 +585,7 @@ class QueryLoopRuntime:
                 intermediate_messages=aborted_messages,
                 token_usage=token_usage,
                 aborted=True,
+                cancel_reason=signal.reason if signal is not None else None,
             )
             return
 
@@ -601,8 +604,7 @@ class QueryLoopRuntime:
         # 执行服务端工具
         if classified_tool_invocations.server_tools:
             # 请求取消检查点
-            if cancel_requested is not None and await cancel_requested():
-                raise asyncio.CancelledError
+            await _raise_if_cancelled(cancel_requested)
             # dispatch 并发执行并归约结果
             output = await self._tool_dispatcher.dispatch(classified_tool_invocations.server_tools, tool_scope)
             tool_outputs.extend(output)
@@ -610,8 +612,7 @@ class QueryLoopRuntime:
         # 执行已审批的工具
         if classified_tool_invocations.approval_required_tools:
             # 请求取消检查点
-            if cancel_requested is not None and await cancel_requested():
-                raise asyncio.CancelledError
+            await _raise_if_cancelled(cancel_requested)
             # 检查审批状态
             if tool_approval_status is None: tool_approval_status = []
             for invocation in classified_tool_invocations.approval_required_tools:
@@ -626,8 +627,7 @@ class QueryLoopRuntime:
         # 执行客户端工具（组装结果）
         if classified_tool_invocations.client_tools:
             # 请求取消检查点
-            if cancel_requested is not None and await cancel_requested():
-                raise asyncio.CancelledError
+            await _raise_if_cancelled(cancel_requested)
             if client_tool_results is None: client_tool_results = []
             # client_dispatch 并发执行并归约结果
             output = await self._tool_dispatcher.client_dispatch(classified_tool_invocations.client_tools, client_tool_results, tool_scope)

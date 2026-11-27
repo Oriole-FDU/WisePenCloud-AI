@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from chat.application.events.base import StreamEvent
 from chat.application.tools.core import ClassifiedToolInvocationPlan
-from chat.domain.entities import ChatMessage
+from chat.domain.entities import ChatMessage, TurnCancelReason
 from chat.domain.interfaces.llm import TokenUsage
 
 
@@ -32,3 +32,4 @@ class StepFinishEvent(StreamEvent):
     token_usage: TokenUsage = field(default_factory=TokenUsage)
     suspension: Optional[TurnSuspension] = None
     aborted: bool = False
+    cancel_reason: Optional[TurnCancelReason] = None

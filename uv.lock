@@ -4366,6 +4366,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "redis" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
     { name = "wisepen-common" },
 ]
 
@@ -4393,6 +4394,7 @@ requires-dist = [
     { name = "pyyaml" },
     { name = "redis", extras = ["asyncio"] },
     { name = "uvicorn", extras = ["standard"] },
+    { name = "websockets" },
     { name = "wisepen-common", editable = "services/wisepen-common" },
 ]
 provides-extras = ["test"]

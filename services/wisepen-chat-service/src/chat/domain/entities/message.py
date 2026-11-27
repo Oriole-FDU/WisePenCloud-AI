@@ -22,6 +22,14 @@ class Role(str, Enum):
     TOOL = "tool"
 
 
+class EndReason(str, Enum):
+    """turn 结束原因（仅收尾 assistant 消息可见）"""
+    FINISHED = "finished"                          # 正常结束
+    ERROR = "error"                                # 错误
+    CANCELLED_BY_USER = "cancelled_by_user"        # 主动取消
+    CANCELLED_BY_SYSTEM = "cancelled_by_system"    # 被动取消
+
+
 class ToolCallMessage(BaseModel):
     call_id: str
     name: str
@@ -54,6 +62,7 @@ class MessageModelInfo(BaseModel):
     provider_type: ProviderType
     model_family: ModelFamily
     model_name: str
+    display_name: Optional[str] = None
     model_scope: ModelScope
     support_tools: bool
     context_window_tokens: Optional[int] = None
@@ -69,12 +78,19 @@ class MessageModelInfo(BaseModel):
             provider_type=model_request.provider_type,
             model_family=model_request.model.model_family,
             model_name=model_request.model_name,
+            display_name=model_request.model.display_name,
             model_scope=model_request.model_scope,
             support_tools=model_request.support_tools,
             context_window_tokens=model_request.context_window_tokens,
             max_output_tokens=model_request.max_output_tokens,
             runtime_options=model_request.runtime_options or {},
         )
+
+
+class MessageAgentInfo(BaseModel):
+    """消息持久化用的 Agent 快照（agent 可切换，历史消息保留生成时的 agent）"""
+    agent_id: str
+    agent_name: str
 
 
 class ChatMessage(Document):
@@ -116,6 +132,11 @@ class ChatMessage(Document):
 
     # 元信息
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # 结束原因（仅 turn 收尾的 assistant 消息必填）
+    end_reason: Optional[EndReason] = None
+    end_reason_detail: Optional[str] = None
+    # 生成该消息所用的 Agent 快照，仅 assistant 消息必填
+    agent_info: Optional[MessageAgentInfo] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Settings:

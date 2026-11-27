@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
 from chat.core.constants import KAFKA_CHAT_TURN_RESPONSE_TOPIC
-from chat.domain.entities import TurnCancelSignal
+from chat.domain.entities import TurnCancelSignal, TurnCancelledError
 from chat.domain.error_codes import ChatErrorCode
 from common.core.exceptions import ServiceException
 from common.kafka.producer import KafkaProducerClient
@@ -90,8 +90,9 @@ class FrontendToolResponseBroker:
         delivery_deadline: float | None = None
         try:
             while True:
-                if cancel_requested is not None and await cancel_requested():
-                    raise asyncio.CancelledError
+                if cancel_requested is not None:
+                    signal = await cancel_requested()
+                    if signal is not None: raise TurnCancelledError(signal)
 
                 # 检查剩余时间并等待
                 remaining = deadline - asyncio.get_running_loop().time()

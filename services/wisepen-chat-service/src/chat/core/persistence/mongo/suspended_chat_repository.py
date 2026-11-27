@@ -1,3 +1,5 @@
+from typing import List
+
 from beanie import PydanticObjectId
 
 from chat.domain.entities import SuspendedChat
@@ -19,6 +21,14 @@ class MongoSuspendedChatRepository(SuspendedChatRepository):
         ).sort("-updated_at").first_or_none()
 
         return suspended_chat
+
+    async def find_suspended_by_sessions(self, session_ids: List[str], user_id: str) -> dict[str, SuspendedChat]:
+        if not session_ids:
+            return {}
+        suspended_chats = await SuspendedChat.find(
+            {"session_id": {"$in": session_ids}, "user_id": user_id},
+        ).to_list()
+        return {sc.session_id: sc for sc in suspended_chats}
 
     async def delete_by_id(self, suspended_chat_id: str) -> None:
         await SuspendedChat.get_pymongo_collection().delete_one({

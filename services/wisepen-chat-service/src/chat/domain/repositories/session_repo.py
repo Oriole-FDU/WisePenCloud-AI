@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional, List, Tuple
 from datetime import datetime
-from chat.domain.entities import ChatSession, ResourceAttachmentRef, TemporaryAttachmentRef
+from chat.domain.entities import ChatSession, ResourceAttachmentRef, TemporaryAttachmentRef, SessionStatus
 
 
 class SessionRepository(ABC):
@@ -56,4 +56,18 @@ class SessionRepository(ABC):
         last_tool_selection_default_enabled: bool | None,
         last_tool_selection_overrides: dict[str, bool] | None,
     ) -> ChatSession:
+        pass
+
+    @abstractmethod
+    async def update_session_status(
+        self,
+        session_id: str,
+        user_id: str,
+        status: SessionStatus,
+        last_turn_error: str | None = None,
+    ) -> ChatSession:
+        pass
+
+    @abstractmethod
+    async def mark_session_read(self, session_id: str, user_id: str) -> ChatSession:
         pass

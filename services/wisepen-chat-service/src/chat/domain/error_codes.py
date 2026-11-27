@@ -52,6 +52,7 @@ class ChatErrorCode(IErrorCode):
     CHAT_MESSAGE_NOT_FOUND = (40054, "目标消息不存在")
     CHAT_REWRITE_TARGET_INVALID = (40055, "重写目标必须是用户消息")
     CHAT_REDIRECT_NO_ACTIVE_TURN = (40056, "当前没有正在运行的对话，无法重新引导")
+    CHAT_TITLE_GENERATION_FAILED = (40063, "标题生成失败")
 
     # --- 记忆相关 ---
     MEMORY_NOT_FOUND = (40061, "目标记忆不存在")

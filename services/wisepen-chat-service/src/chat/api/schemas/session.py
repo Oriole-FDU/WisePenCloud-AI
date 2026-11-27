@@ -69,6 +69,8 @@ class SessionResponse(BaseModel):
     title: str
     created_at: str
     updated_at: str
+    status: str = "normal"
+    last_turn_error: Optional[str] = None
     temporary_attachment_refs: List[TemporaryAttachmentRefResponse] = Field(default_factory=list)
     resource_attachment_refs: List[ResourceAttachmentRefResponse] = Field(default_factory=list)
     agent_id: Optional[str] = None
@@ -87,6 +89,8 @@ class SessionResponse(BaseModel):
             title=session.title,
             created_at=session.created_at.isoformat(),
             updated_at=session.updated_at.isoformat(),
+            status=session.status.value,
+            last_turn_error=session.last_turn_error,
             temporary_attachment_refs=[
                 TemporaryAttachmentRefResponse.from_entity(a)
                 for a in session.temporary_attachment_refs

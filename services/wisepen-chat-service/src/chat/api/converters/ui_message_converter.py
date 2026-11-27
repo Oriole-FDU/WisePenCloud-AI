@@ -11,6 +11,7 @@ from chat.domain.entities import ChatMessage, Role
 def convert_to_ui_messages(
     messages: List[ChatMessage],
     tool_states: dict[str, str] | None = None,
+    message_feedbacks: dict[str, str] | None = None,
 ) -> List[Dict[str, Any]]:
     """
     将按 created_at 排序的 ChatMessage[] 分组并转换为 UIMessage[]。
@@ -24,6 +25,7 @@ def convert_to_ui_messages(
         return []
     
     tool_states = tool_states or {}
+    message_feedbacks = message_feedbacks or {}
     groups: List[List[ChatMessage]] = []
     current_group: List[ChatMessage] = []
 
@@ -45,7 +47,7 @@ def convert_to_ui_messages(
         if first.role == Role.USER:
             result.append(_build_user_ui_message(first))
         else:
-            ui_msg = _build_assistant_ui_message(group, tool_states)
+            ui_msg = _build_assistant_ui_message(group, tool_states, message_feedbacks)
             if ui_msg:
                 result.append(ui_msg)
 
@@ -81,6 +83,7 @@ def _build_user_ui_message(msg: ChatMessage) -> Dict[str, Any]:
 def _build_assistant_ui_message(
     group: List[ChatMessage],
     tool_states: dict[str, str],
+    message_feedbacks: dict[str, str] | None = None,
 ) -> Optional[Dict[str, Any]]:
     """
     将一组连续的 assistant + tool 消息合并为单个 assistant UIMessage。
@@ -91,6 +94,8 @@ def _build_assistant_ui_message(
     if not group:
         return None
 
+    message_feedbacks = message_feedbacks or {}
+
     # 预构建 tool 结果查找表: tool_call_id → content
     tool_results: Dict[str, str] = {}
     for msg in group:
@@ -98,7 +103,7 @@ def _build_assistant_ui_message(
             tool_results[msg.tool_call_id] = msg.content or ""
 
     parts: List[Dict[str, Any]] = []
-    last_id = ""
+    last_assistant: Optional[ChatMessage] = None
 
     for msg in group:
         if msg.role == Role.TOOL:
@@ -138,15 +143,49 @@ def _build_assistant_ui_message(
                     "state": "done",
                 })
 
-            last_id = str(msg.id) if msg.id else last_id
+            last_assistant = msg
 
+    # 没有 assistant（没 parts 等同于没 assistant）
     if not parts:
         return None
 
     # 使用最后一条 assistant 消息的 id 作为 UIMessage id
-    return {
-        "id": last_id,
+    result: Dict[str, Any] = {
+        "id": str(last_assistant.id),
         "role": "assistant",
         "parts": parts,
         "createdAt": group[0].created_at.isoformat(),
     }
+
+    metadata: Dict[str, Any] = {}
+
+    if last_assistant is not None:
+        # 如果最后一条消息有模型信息，那么带入 meta 中
+        if last_assistant.model_info is not None:
+            metadata["model"] = {
+                "id": last_assistant.model_info.model_id,
+                "name": last_assistant.model_info.display_name or last_assistant.model_info.model_name,
+                "modelName": last_assistant.model_info.model_name,
+            }
+
+        # 如果最后一条消息有 agent 信息，那么带入 meta 中
+        if last_assistant.agent_info is not None:
+            metadata["agent"] = {
+                "id": last_assistant.agent_info.agent_id,
+                "name": last_assistant.agent_info.agent_name,
+            }
+
+        # 如果最后一条消息有结束原因，那么带入 meta 中
+        if last_assistant.end_reason is not None:
+            metadata["endReason"] = last_assistant.end_reason.value
+            if last_assistant.end_reason_detail:
+                metadata["endReasonDetail"] = last_assistant.end_reason_detail
+
+        # 消息的 feedback 落在最后一条消息上
+        message_feedback = message_feedbacks.get(str(last_assistant.id))
+        if message_feedback:
+            metadata["feedback"] = message_feedback
+
+    if metadata:
+        result["metadata"] = metadata
+    return result

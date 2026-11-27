@@ -51,8 +51,16 @@ class RedisChatTurnStream(RedisRepository):
         ))
 
     async def get_active_turn(self, user_id: str, session_id: str) -> str | None:
-        # 获取当前对话的 turn
+        # 获取活跃的 turn
         return await self._redis.get(self._active_turn_key(user_id, session_id))
+
+    async def get_active_turns_batch(self, user_id: str, session_ids: list[str]) -> dict[str, str | None]:
+        # 批量获取活跃的 turn
+        if not session_ids:
+            return {}
+        keys = [self._active_turn_key(user_id, sid) for sid in session_ids]
+        values = await self._redis.mget(*keys)
+        return {sid: values[i] for i, sid in enumerate(session_ids)}
 
     async def renew_active_turn(self, user_id: str, session_id: str, turn_id: str) -> bool:
         # 续期当前对话的 turn

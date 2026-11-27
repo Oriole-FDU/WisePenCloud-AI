@@ -36,6 +36,17 @@ class RedisFrontendToolResponseRepository(RedisRepository):
         raw = await self._redis.get(self._key(session_id))
         return json.loads(raw) if raw else None
 
+    async def get_waits(self, session_ids: list[str]) -> dict[str, dict | None]:
+        """批量读取等待标记内容"""
+        if not session_ids: return {}
+        keys = [self._key(sid) for sid in session_ids]
+        values = await self._redis.mget(*keys)
+        result: dict[str, dict | None] = {}
+        for i, sid in enumerate(session_ids):
+            raw = values[i]
+            result[sid] = json.loads(raw) if raw else None
+        return result
+
     async def claim(self, session_id: str) -> bool:
         """原子认领，True 表示这次调用拿走了等待权，False 表示已经被别人拿走了"""
         return bool(await self._redis.delete(self._key(session_id)))
