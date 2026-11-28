@@ -12,6 +12,7 @@ class ToolExecutionError(Exception):
     detail_reason: str | None = None
     retryable: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    denied: bool = False
 
     def __post_init__(self) -> None:
         super().__init__(self.detail_reason or self.reason)

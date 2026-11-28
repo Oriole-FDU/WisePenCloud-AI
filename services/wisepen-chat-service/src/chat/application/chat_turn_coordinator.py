@@ -14,7 +14,16 @@ from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.logger import error
 
 from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role, TurnCancelSignal, TurnCancelReason, EndReason, MessageAgentInfo, MessageModelInfo
+from chat.domain.entities import (
+    ChatMessage,
+    EndReason,
+    MessageAgentInfo,
+    MessageModelInfo,
+    Role,
+    ToolResultStatus,
+    TurnCancelReason,
+    TurnCancelSignal,
+)
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
 from chat.domain.interfaces.context_compact import ContextCompactor
@@ -611,15 +620,15 @@ class ChatTurnCoordinator:
 
         pending_messages = []
         pending_messages.extend(
-            (invocation, "[Tool Approval Interrupted] User did not complete high-risk tool approval before the turn was interrupted.",)
+            (invocation, "User did not complete high-risk tool approval before the turn was interrupted.",)
             for invocation in unfinished_chat.context.turn_suspension.classified_tool_invocation_plan.approval_required_tools
         )
         pending_messages.extend(
-            (invocation, "[Client Tool Error] Client tool execution was interrupted before it started.",)
+            (invocation, "Client tool execution was interrupted before it started.",)
             for invocation in unfinished_chat.context.turn_suspension.classified_tool_invocation_plan.client_tools
         )
         pending_messages.extend(
-            (invocation, "[Tool Execution Error] Tool execution was interrupted before it started.",)
+            (invocation, "Tool execution was interrupted before it started.",)
             for invocation in unfinished_chat.context.turn_suspension.classified_tool_invocation_plan.server_tools
         )
 
@@ -630,6 +639,8 @@ class ChatTurnCoordinator:
                 ChatMessage(
                     session_id=session_id, role=Role.TOOL,
                     tool_call_id=invocation.tool_call_id, tool_name=invocation.tool_name,
+                    tool_result_status=ToolResultStatus.ERROR,
+                    tool_error_text=message,
                     content=message,
                 )
             )

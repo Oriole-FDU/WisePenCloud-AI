@@ -65,11 +65,11 @@ def reasoning_end(id: str) -> str:
 # =============================================================================
 
 def tool_input_start(tool_call_id: str, tool_name: str, display_name: str | None) -> str:
-    return _sse({"type": "tool-input-start", "toolCallId": tool_call_id, "toolName": tool_name, "displayName": display_name})
+    return _sse({"title": display_name or tool_name, "type": "tool-input-start", "toolCallId": tool_call_id, "toolName": tool_name})
 
 
 def tool_input_available(tool_call_id: str, tool_name: str, input: Dict, display_name: str | None) -> str:
-    return _sse({"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": input, "displayName": display_name})
+    return _sse({"title": display_name or tool_name, "type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": input})
 
 
 def tool_input_delta(tool_call_id: str, input_text_delta: str) -> str:
@@ -79,25 +79,26 @@ def tool_input_delta(tool_call_id: str, input_text_delta: str) -> str:
 def tool_output_available(tool_call_id: str, output: str) -> str:
     return _sse({"type": "tool-output-available", "toolCallId": tool_call_id, "output": output})
 
-# 自定义事件 data-tool-execution-error
 def tool_error(tool_call_id: str, error_text: str) -> str:
-    return _sse({"type": "data-tool-execution-error", "toolCallId": tool_call_id, "errorText": error_text})
+    return _sse({"type": "tool-output-error", "toolCallId": tool_call_id, "errorText": error_text})
 
-# 自定义事件 data-tool-execution-denied
+
 def tool_denied(tool_call_id: str) -> str:
-    return _sse({"type": "data-tool-execution-denied", "toolCallId": tool_call_id})
+    return _sse({"type": "tool-output-denied", "toolCallId": tool_call_id})
 
-# 自定义事件 data-tool-approval-request
 def tool_approval_request(approval_id: str, tool_call_id: str, tool_name: str, tool_desc: str, input: Dict, display_name: str | None, reason: str | None = None) -> str:
     return _sse({
-        "type": "data-tool-approval-request",
+        "type": "tool-approval-request",
         "approvalId": approval_id,
         "toolCallId": tool_call_id,
-        "toolName": tool_name,
-        "toolDesc": tool_desc,
-        "displayName": display_name,
-        "input": input,
-        "reason": reason,
+        "approvalDescriptor": {
+            "title": display_name or tool_name,
+            "toolName": tool_name,
+            "toolDesc": tool_desc,
+            "input": input,
+            "reason": reason
+        },
+        "reason": reason
     })
 
 

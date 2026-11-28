@@ -80,6 +80,7 @@ class ToolExecutor:
                     reason="Tool Execution Denied",
                     detail_reason=f"Tool '{invocation.tool_name}' was not approved by the user.",
                     retryable=False,
+                    denied=True,
                 )
 
             tool_config = self._tool_scope.config_for(invocation.tool_name)

@@ -30,6 +30,13 @@ class EndReason(str, Enum):
     CANCELLED_BY_SYSTEM = "cancelled_by_system"    # 被动取消
 
 
+class ToolResultStatus(str, Enum):
+    """持久化的工具执行结果，供实时 SSE 与历史回放统一映射。"""
+    SUCCESS = "success"
+    ERROR = "error"
+    DENIED = "denied"
+
+
 class ToolCallMessage(BaseModel):
     call_id: str
     name: str
@@ -108,6 +115,8 @@ class ChatMessage(Document):
     # 生成该消息所用的工具 tool_name 和 请求的 tool_call_id
     tool_call_id: Optional[str] = None
     tool_name: Optional[str] = None
+    tool_result_status: Optional[ToolResultStatus] = None
+    tool_error_text: Optional[str] = None
     # 工具消息的持久化占位器
     persisted_output_placeholder: str | None = Field(default=None, exclude=True)
 

@@ -19,6 +19,8 @@ from chat.application.events import (
     ToolInputDeltaEvent,
     ToolInputStartEvent,
     ToolOutputAvailableEvent,
+    ToolErrorEvent,
+    ToolDeniedEvent,
     ToolApprovalRequiredEvent,
     TurnSuspension,
 )
@@ -32,7 +34,14 @@ from chat.application.tools.core.execution.result import ToolExecutionResult
 from chat.application.tools.core.llm.invocation import ToolInvocation, classify_tools
 from chat.application.tools.core.llm.renderer import tool_result_renderer
 from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role, TurnCancelReason, TurnCancelSignal, TurnCancelledError
+from chat.domain.entities import (
+    ChatMessage,
+    Role,
+    ToolResultStatus,
+    TurnCancelReason,
+    TurnCancelSignal,
+    TurnCancelledError,
+)
 from chat.domain.entities.message import MessageModelInfo, ToolCallMessage
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
@@ -575,16 +584,27 @@ class QueryLoopRuntime:
                 tool = tool_scope.get(result.tool_invocation.tool_name)
                 result = tool_result_renderer(result, tool.definition if tool else None)
 
-                yield ToolOutputAvailableEvent(
-                    call_id=result.tool_call_id,
-                    output=result.tool_output,
-                )
+                if result.tool_execution_error is None:
+                    result_status = ToolResultStatus.SUCCESS
+                    error_text = None
+                    yield ToolOutputAvailableEvent(call_id=result.tool_call_id, output=result.tool_output)
+                elif result.tool_execution_error.denied:
+                    result_status = ToolResultStatus.DENIED
+                    error_text = result.tool_execution_error.detail_reason or result.tool_execution_error.reason
+                    yield ToolDeniedEvent(call_id=result.tool_call_id)
+                else:
+                    result_status = ToolResultStatus.ERROR
+                    error_text = result.tool_execution_error.detail_reason or result.tool_execution_error.reason
+                    yield ToolErrorEvent(call_id=result.tool_call_id, error_text=error_text)
+
                 new_messages.append(
                     ChatMessage(
                         session_id=session_id,
                         role=Role.TOOL,
                         tool_call_id=result.tool_call_id,
                         tool_name=result.tool_name,
+                        tool_result_status=result_status,
+                        tool_error_text=error_text,
                         content=result.tool_output,
                         imgs=result.images,
                         persisted_output_placeholder=result.persisted_output_placeholder,
@@ -669,7 +689,9 @@ class QueryLoopRuntime:
                     role=Role.TOOL,
                     tool_call_id=invocation.tool_call_id,
                     tool_name=invocation.tool_name,
-                    content="[Tool Execution Interrupted] User cancelled the turn before the tool execution completed.",
+                    tool_result_status=ToolResultStatus.ERROR,
+                    tool_error_text="User cancelled the turn before the tool execution completed.",
+                    content="User cancelled the turn before the tool execution completed.",
                 )
             )
         return messages

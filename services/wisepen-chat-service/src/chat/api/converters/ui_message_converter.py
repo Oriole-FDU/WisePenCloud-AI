@@ -5,12 +5,11 @@ Vercel AI SDK 6.x UIMessage 格式（带 parts 数组），供前端 useChat 的
 import json
 from typing import Any, Dict, List, Optional
 
-from chat.domain.entities import ChatMessage, Role
-
+from chat.domain.entities import ChatMessage, Role, ToolResultStatus, SuspendedChat
 
 def convert_to_ui_messages(
     messages: List[ChatMessage],
-    tool_states: dict[str, str] | None = None,
+    suspended_chat: SuspendedChat | None = None,
     message_feedbacks: dict[str, str] | None = None,
 ) -> List[Dict[str, Any]]:
     """
@@ -23,8 +22,7 @@ def convert_to_ui_messages(
     """
     if not messages:
         return []
-    
-    tool_states = tool_states or {}
+
     message_feedbacks = message_feedbacks or {}
     groups: List[List[ChatMessage]] = []
     current_group: List[ChatMessage] = []
@@ -47,7 +45,7 @@ def convert_to_ui_messages(
         if first.role == Role.USER:
             result.append(_build_user_ui_message(first))
         else:
-            ui_msg = _build_assistant_ui_message(group, tool_states, message_feedbacks)
+            ui_msg = _build_assistant_ui_message(group, suspended_chat, message_feedbacks)
             if ui_msg:
                 result.append(ui_msg)
 
@@ -82,7 +80,7 @@ def _build_user_ui_message(msg: ChatMessage) -> Dict[str, Any]:
 
 def _build_assistant_ui_message(
     group: List[ChatMessage],
-    tool_states: dict[str, str],
+    suspended_chat: SuspendedChat | None = None,
     message_feedbacks: dict[str, str] | None = None,
 ) -> Optional[Dict[str, Any]]:
     """
@@ -96,11 +94,19 @@ def _build_assistant_ui_message(
 
     message_feedbacks = message_feedbacks or {}
 
-    # 预构建 tool 结果查找表: tool_call_id → content
-    tool_results: Dict[str, str] = {}
+    suspended_chat_tool_states = {}
+    if suspended_chat is not None:
+        # 如果当前对话已经挂起，前端无法从 stream 获取消息，需要额外补工具待处理状态
+        for item in suspended_chat.context.turn_suspension.classified_tool_invocation_plan.approval_required_tools:
+            suspended_chat_tool_states[item.tool_call_id] = "approval-requested"
+        for item in suspended_chat.context.turn_suspension.classified_tool_invocation_plan.client_tools:
+            suspended_chat_tool_states[item.tool_call_id] = "input-available"
+
+    # 预构建 tool 结果查找表: tool_call_id → tool message
+    tool_results: Dict[str, ChatMessage] = {}
     for msg in group:
         if msg.role == Role.TOOL and msg.tool_call_id:
-            tool_results[msg.tool_call_id] = msg.content or ""
+            tool_results[msg.tool_call_id] = msg
 
     parts: List[Dict[str, Any]] = []
     last_assistant: Optional[ChatMessage] = None
@@ -126,16 +132,41 @@ def _build_assistant_ui_message(
                     except (json.JSONDecodeError, TypeError):
                         parsed_input = {}
 
-                    tool_output = tool_results.get(tc.call_id, "")
-                    tool_state = tool_states.get(tc.call_id, "output-available")
-                    parts.append({
+                    tool_result: ChatMessage | None = tool_results.get(tc.call_id)
+                    tool_part: Dict[str, Any] = {
+                        "title": tc.display_name or tc.name,
                         "type": f"tool-{tc.name}",
                         "toolCallId": tc.call_id,
                         "input": parsed_input,
-                        "state": tool_state,
-                        "output": tool_output,
-                        "displayName": tc.display_name,
-                    })
+                    }
+                    # 工具未返回结果，tool_state 即 input-available
+                    if tool_result is None:
+                        tool_part["state"] = "input-available"
+                    # 工具结果状态为 ERROR，tool_state 即 output-error，追加 errorText 字段
+                    elif tool_result.tool_result_status == ToolResultStatus.ERROR:
+                        tool_part["state"] = "output-error"
+                        tool_part["errorText"] = tool_result.tool_error_text or "Tool execution failed."
+                    # 工具结果状态为 DENIED，tool_state 即 output-denied，追加 approval 字段
+                    elif tool_result.tool_result_status == ToolResultStatus.DENIED:
+                        tool_part["state"] = "output-denied"
+                        tool_part["approval"] = {"id": tc.call_id, "approved": False}
+                    # 工具结果状态为 SUCCESS，tool_state 即 output-available，追加 output 字段
+                    elif tool_result.tool_result_status == ToolResultStatus.SUCCESS:
+                        tool_part["state"] = "output-available"
+                        tool_part["output"] = tool_result.content
+                    else: # 旧版数据兜底
+                        tool_part["state"] = "output-available"
+                        tool_part["output"] = tool_result.content
+
+                    # 已挂起时额外补偿状态
+                    suspended_chat_tool_state = suspended_chat_tool_states.get(tc.call_id)
+                    if suspended_chat_tool_state is not None:
+                        tool_part["state"] = suspended_chat_tool_state
+                        # approval-requested 追加 approval 字段
+                        if suspended_chat_tool_state == "approval-requested":
+                            tool_part["approval"] = {"id": tc.call_id}
+
+                    parts.append(tool_part)
 
             if msg.content:
                 parts.append({

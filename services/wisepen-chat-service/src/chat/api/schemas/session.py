@@ -116,8 +116,11 @@ class UIMessagePartResponse(BaseModel):
     text: Optional[str] = None
     state: Optional[str] = None
     toolCallId: Optional[str] = None
+    title: Optional[str] = None
     input: Optional[Any] = None
     output: Optional[Any] = None
+    errorText: Optional[str] = None
+    approval: Optional[dict[str, Any]] = None
 
 
 class UIMessageResponse(BaseModel):

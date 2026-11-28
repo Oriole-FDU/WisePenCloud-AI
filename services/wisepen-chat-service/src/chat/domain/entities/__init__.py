@@ -1,7 +1,7 @@
 # src/chat/domain/entities/__init__.py
 from .message import (
     ChatMessage, VisionImage, MessageAttachmentRef, MessageModelInfo, Role, ToolCallMessage,
-    EndReason, MessageAgentInfo,
+    EndReason, MessageAgentInfo, ToolResultStatus,
 )
 from .session import AttachmentRef, ChatSession, ResourceAttachmentRef, TemporaryAttachmentRef, SessionStatus
 from .file_storage import StorageRecord, UploadInitResponse
@@ -17,7 +17,7 @@ from .message_feedback import ChatMessageFeedback, MessageFeedback
 
 __all__ = [
     "ChatMessage", "VisionImage", "MessageAttachmentRef", "MessageModelInfo", "Role", "ToolCallMessage",
-    "EndReason", "MessageAgentInfo",
+    "EndReason", "MessageAgentInfo", "ToolResultStatus",
     "AttachmentRef", "ChatSession", "ResourceAttachmentRef", "TemporaryAttachmentRef", "SessionStatus",
     "StorageRecord", "UploadInitResponse",
     "ModelFamily", "ModelScope", "Model", "ModelProviderMapping",

@@ -231,6 +231,7 @@ async def fork_session(
 @router.get(
     "/listHistoryMessages",
     response_model=R[PageResult[UIMessageResponse]],
+    response_model_exclude_none=True,
     summary="分页查询历史消息",
     description="""
 - 用途：分页查询会话历史消息并转换为前端 AI SDK UIMessage 格式。
@@ -258,19 +259,13 @@ async def get_session_messages(
     messages_for_ui = list(page_messages)
 
     # 仅在最新回合补上挂起回合的工具待处理状态
-    tool_states = {}
+    suspended_chat = None
     if page == 1:
-        pending = await suspended_chat_repo.find_suspended_by_session(session_id, user_id)
-        if pending is not None:
-            # 挂起回合的消息已逐步落盘，分页里已包含；这里只补工具待处理状态
-            for item in pending.context.turn_suspension.classified_tool_invocation_plan.approval_required_tools:
-                tool_states[item.tool_call_id] = "approval-requested"
-            for item in pending.context.turn_suspension.classified_tool_invocation_plan.client_tools:
-                tool_states[item.tool_call_id] = "input-available"
+        suspended_chat = await suspended_chat_repo.find_suspended_by_session(session_id, user_id)
 
     ui_messages = convert_to_ui_messages(
         messages_for_ui,
-        tool_states=tool_states,
+        suspended_chat=suspended_chat, # 挂起回合的消息已逐步落盘，分页里已包含；这里只补工具待处理状态
         message_feedbacks=await feedback_repo.list_for_user_messages(
             user_id,
             [str(message.id) for message in page_messages if message.role == Role.ASSISTANT and message.id],

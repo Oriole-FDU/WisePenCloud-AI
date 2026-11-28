@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any
 
 from chat.application.tools.core.definition import ToolLLMSpec, ToolDefinition, OutputCacheStrategy
-from chat.application.tools.core.execution.result import ToolExecutionResult
+from chat.application.tools.core.execution.result import ToolExecutionError, ToolExecutionResult
 from chat.domain.entities import VisionImage
 
 from pydantic import BaseModel
@@ -30,6 +30,7 @@ class RenderToolResult:
     persisted_output_placeholder: str | None
     tool_output: str
     images: list[VisionImage]
+    tool_execution_error: ToolExecutionError | None
 
 def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: ToolDefinition | None) -> RenderToolResult:
     max_output_chars = tool_definition.policy.max_output_chars if tool_definition is not None else None
@@ -87,6 +88,7 @@ def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: Tool
         persisted_output_placeholder=persisted_output_placeholder,
         tool_output=output,
         images=images,
+        tool_execution_error=tool_result.tool_execution_error,
     )
 
 
